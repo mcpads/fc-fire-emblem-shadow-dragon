@@ -558,6 +558,13 @@ struct ReportSummary {
     main_linear_segment_protected_original_alphanumeric_literal_byte_count: usize,
     main_linear_segment_boundary_control_counts: Vec<ControlUsageReport>,
     main_linear_segment_transition_count: usize,
+    main_record_count: usize,
+    main_record_consumed_storage_byte_count: usize,
+    main_record_unique_storage_byte_count: usize,
+    main_record_shared_storage_byte_count: usize,
+    main_record_overlapping_pair_count: usize,
+    max_main_record_overlap_depth: usize,
+    max_main_record_storage_byte_count: usize,
     alias_group_count: usize,
     aliased_entry_count: usize,
 }
@@ -585,6 +592,7 @@ struct DialogueTableReport {
     main_record_prefix_summary: Option<MainRecordPrefixSummary>,
     main_first_line_summary: Option<MainFirstLineSummary>,
     main_linear_segment_summary: Option<MainLinearSegmentSummary>,
+    main_record_storage_summary: Option<MainRecordStorageSummary>,
     data_file_start: usize,
     data_file_start_hex: String,
     directory_binding: Option<DirectoryBindingReport>,
@@ -654,6 +662,7 @@ struct DialogueEntryReport {
     main_record_prefix: Option<MainRecordPrefixReport>,
     main_first_line: Option<MainLineReport>,
     main_linear_segment: Option<MainLinearSegmentReport>,
+    main_record_storage: Option<MainRecordStorageReport>,
 }
 
 #[derive(Debug, Serialize)]
@@ -860,6 +869,38 @@ struct MainLinearSegmentSummary {
 }
 
 #[derive(Debug, Serialize)]
+struct MainRecordStorageSummary {
+    unique_record_count: usize,
+    consumed_storage_byte_count: usize,
+    unique_storage_byte_count: usize,
+    shared_storage_byte_count: usize,
+    overlapping_record_pair_count: usize,
+    max_overlap_depth: usize,
+    max_storage_byte_count: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MainRecordStorageRange {
+    start: usize,
+    end_exclusive: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct MainRecordStorageReport {
+    file_offset: usize,
+    file_offset_hex: String,
+    end_file_offset_exclusive: usize,
+    end_file_offset_exclusive_hex: String,
+    storage_byte_count: usize,
+    storage_sha1: String,
+    prefix_byte_count: usize,
+    linear_segment_storage_byte_count: usize,
+    boundary_control: u8,
+    boundary_control_hex: String,
+    boundary_kind: &'static str,
+}
+
+#[derive(Debug, Serialize)]
 struct MainDialogueGraphReport {
     node_count: usize,
     transition_edge_count: usize,
@@ -1012,6 +1053,26 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
         .filter_map(|table| table.main_linear_segment_summary.as_ref())
         .map(|summary| summary.transition_count)
         .sum();
+    let main_record_ranges = tables
+        .iter()
+        .filter(|table| table.directory_binding.is_some())
+        .flat_map(|table| &table.entries)
+        .filter(|entry| {
+            entry.target_kind == "script_entry_start" && is_canonical_dialogue_entry(entry)
+        })
+        .map(|entry| {
+            let storage = entry
+                .main_record_storage
+                .as_ref()
+                .context("canonical main dialogue entry has no record-storage range")?;
+            Ok(MainRecordStorageRange {
+                start: storage.file_offset,
+                end_exclusive: storage.end_file_offset_exclusive,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let main_record_storage_summary = summarize_main_record_storage(&main_record_ranges)?;
+    let main_record_count = main_record_storage_summary.unique_record_count;
     let main_unique_script_entry_count: usize = tables
         .iter()
         .filter(|table| table.directory_binding.is_some())
@@ -1024,6 +1085,10 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
     ensure!(
         main_linear_segment_count == main_unique_script_entry_count,
         "main linear-segment coverage does not match the directory-bound script entries"
+    );
+    ensure!(
+        main_record_count == main_unique_script_entry_count,
+        "main record-storage coverage does not match the directory-bound script entries"
     );
     let summary = ReportSummary {
         table_count: tables.len(),
@@ -1067,24 +1132,35 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
         main_linear_segment_protected_original_alphanumeric_literal_byte_count,
         main_linear_segment_boundary_control_counts,
         main_linear_segment_transition_count,
+        main_record_count,
+        main_record_consumed_storage_byte_count: main_record_storage_summary
+            .consumed_storage_byte_count,
+        main_record_unique_storage_byte_count: main_record_storage_summary
+            .unique_storage_byte_count,
+        main_record_shared_storage_byte_count: main_record_storage_summary
+            .shared_storage_byte_count,
+        main_record_overlapping_pair_count: main_record_storage_summary
+            .overlapping_record_pair_count,
+        max_main_record_overlap_depth: main_record_storage_summary.max_overlap_depth,
+        max_main_record_storage_byte_count: main_record_storage_summary.max_storage_byte_count,
         alias_group_count: tables.iter().map(|table| table.alias_group_count).sum(),
         aliased_entry_count: tables.iter().map(|table| table.aliased_entry_count).sum(),
     };
 
     Ok(DialogueStructureReport {
-        schema_version: 8,
+        schema_version: 9,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             translation_direction: "ja_to_ko",
             preserve_existing_english: true,
-            proof_boundary: "exact pointer-table ranges, switchable-bank target mapping, aliases, all nine consumer roots, the selector-41 epilogue-routing use, the main dialogue record-prefix state path, every main entry's initial linear segment, all explicit E4/E6 graph edges, the E7 caller-handoff contract, and eleven confirmed direct outer dispatch bindings; no dialogue bytes or translations are emitted",
+            proof_boundary: "exact pointer-table ranges, switchable-bank target mapping, aliases, all nine consumer roots, the selector-41 epilogue-routing use, the main dialogue record-prefix state path, every main entry's bounded consumed storage range and measured shared storage, all explicit E4/E6 graph edges, the E7 caller-handoff contract, and eleven confirmed direct outer dispatch bindings; no dialogue bytes or translations are emitted",
         },
         summary,
         main_dialogue_state_machine,
         main_dialogue_graph,
         tables,
         unknowns: vec![
-            "Script targets are entry starts, not proven script byte ranges; declared code handlers are kept separate.",
+            "All directory-bound script entries have bounded consumed storage ranges through their first EF, E7, E4, or E6 boundary, but some ranges share source bytes and cannot be treated as independent rewrite units; the separate battle-dialogue format still has no proven record ranges.",
             "The E5, fixed four-byte, and E8 record prefix, each initial linear segment, all E4/E6 graph edges, and the E7 caller handoff are confirmed, but caller-specific outcomes after the handoff remain unresolved.",
             "Eleven direct outer dispatch bindings reuse four observer handlers across twenty-two state slots; indirect bindings are not excluded, and bank 04:A20F has no confirmed direct dispatch binding.",
             "Ten of the eighteen main dialogue state handlers remain structurally named but semantically unresolved.",
@@ -1528,6 +1604,7 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
                 main_record_prefix: None,
                 main_first_line: None,
                 main_linear_segment: None,
+                main_record_storage: None,
             });
             continue;
         }
@@ -1564,6 +1641,22 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
         let main_first_line = main_linear_segment
             .as_ref()
             .and_then(|segment| segment.lines.first().cloned());
+        let main_record_storage = match (&main_record_prefix, &main_linear_segment) {
+            (Some(prefix), Some(segment)) => Some(build_main_record_storage(
+                source,
+                file_offset,
+                bank_end,
+                prefix,
+                segment,
+                spec.id,
+                index,
+            )?),
+            (None, None) => None,
+            _ => anyhow::bail!(
+                "{} entry {index} has incomplete main record storage evidence",
+                spec.id
+            ),
+        };
         entries.push(DialogueEntryReport {
             index,
             pointer_cpu_address: pointer,
@@ -1576,6 +1669,7 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
             main_record_prefix,
             main_first_line,
             main_linear_segment,
+            main_record_storage,
         });
     }
     ensure!(
@@ -1714,6 +1808,33 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
     } else {
         None
     };
+    let main_record_storage_summary = if spec.directory_group.is_some() {
+        let unique_records = entries
+            .iter()
+            .filter(|entry| indices_by_pointer[&entry.pointer_cpu_address][0] == entry.index)
+            .filter_map(|entry| {
+                entry
+                    .main_record_storage
+                    .as_ref()
+                    .map(|record| (entry.index, record))
+            })
+            .collect::<Vec<_>>();
+        ensure!(
+            unique_records.len() == unique_script_entry_count,
+            "{} record-storage coverage does not match its unique script entries",
+            spec.id
+        );
+        let ranges = unique_records
+            .iter()
+            .map(|(_, record)| MainRecordStorageRange {
+                start: record.file_offset,
+                end_exclusive: record.end_file_offset_exclusive,
+            })
+            .collect::<Vec<_>>();
+        Some(summarize_main_record_storage(&ranges)?)
+    } else {
+        None
+    };
 
     Ok(DialogueTableReport {
         id: spec.id,
@@ -1737,6 +1858,7 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
         main_record_prefix_summary,
         main_first_line_summary,
         main_linear_segment_summary,
+        main_record_storage_summary,
         data_file_start: spec.data_file_start,
         data_file_start_hex: format!("0x{:05X}", spec.data_file_start),
         directory_binding,
@@ -1997,6 +2119,131 @@ fn scan_main_linear_segment(
     anyhow::bail!(
         "{table_id} entry {entry_index} exceeds {MAX_MAIN_LINEAR_SEGMENT_LINES} linear lines without a terminal, caller-handoff, or transition boundary"
     )
+}
+
+fn build_main_record_storage(
+    source: &[u8],
+    record_file_offset: usize,
+    bank_end: usize,
+    prefix: &MainRecordPrefixReport,
+    segment: &MainLinearSegmentReport,
+    table_id: &str,
+    entry_index: usize,
+) -> Result<MainRecordStorageReport> {
+    ensure!(
+        prefix.first_line_file_offset == segment.start_file_offset,
+        "{table_id} entry {entry_index} record prefix and linear segment are disconnected"
+    );
+    ensure!(
+        prefix.first_line_file_offset
+            == record_file_offset
+                .checked_add(prefix.total_prefix_byte_count)
+                .context("main record prefix end overflow")?,
+        "{table_id} entry {entry_index} record prefix length is inconsistent"
+    );
+    let end_file_offset_exclusive = segment
+        .start_file_offset
+        .checked_add(segment.storage_byte_count)
+        .context("main record storage end overflow")?;
+    ensure!(
+        end_file_offset_exclusive <= bank_end,
+        "{table_id} entry {entry_index} record storage crosses its source bank"
+    );
+    ensure!(
+        record_file_offset < end_file_offset_exclusive,
+        "{table_id} entry {entry_index} record storage is empty"
+    );
+    let storage = source
+        .get(record_file_offset..end_file_offset_exclusive)
+        .context("main record storage is outside the source")?;
+    ensure!(
+        storage.len() == prefix.total_prefix_byte_count + segment.storage_byte_count,
+        "{table_id} entry {entry_index} record storage length is inconsistent"
+    );
+
+    Ok(MainRecordStorageReport {
+        file_offset: record_file_offset,
+        file_offset_hex: format!("0x{record_file_offset:05X}"),
+        end_file_offset_exclusive,
+        end_file_offset_exclusive_hex: format!("0x{end_file_offset_exclusive:05X}"),
+        storage_byte_count: storage.len(),
+        storage_sha1: sha1_hex(storage),
+        prefix_byte_count: prefix.total_prefix_byte_count,
+        linear_segment_storage_byte_count: segment.storage_byte_count,
+        boundary_control: segment.boundary_control,
+        boundary_control_hex: format!("{:02X}", segment.boundary_control),
+        boundary_kind: segment.boundary_kind,
+    })
+}
+
+fn summarize_main_record_storage(
+    ranges: &[MainRecordStorageRange],
+) -> Result<MainRecordStorageSummary> {
+    let mut events = BTreeMap::<usize, isize>::new();
+    let mut consumed_storage_byte_count = 0;
+    let mut max_storage_byte_count = 0;
+    for range in ranges {
+        ensure!(
+            range.start < range.end_exclusive,
+            "main dialogue record-storage range is empty or reversed"
+        );
+        let storage_byte_count = range.end_exclusive - range.start;
+        consumed_storage_byte_count += storage_byte_count;
+        max_storage_byte_count = max_storage_byte_count.max(storage_byte_count);
+        *events.entry(range.start).or_insert(0) += 1;
+        *events.entry(range.end_exclusive).or_insert(0) -= 1;
+    }
+
+    let overlapping_record_pair_count = ranges
+        .iter()
+        .enumerate()
+        .map(|(index, range)| {
+            ranges[index + 1..]
+                .iter()
+                .filter(|other| {
+                    range.start < other.end_exclusive && other.start < range.end_exclusive
+                })
+                .count()
+        })
+        .sum();
+
+    let mut unique_storage_byte_count = 0;
+    let mut shared_storage_byte_count = 0;
+    let mut max_overlap_depth = 0;
+    let mut active_range_count = 0_isize;
+    let mut previous_offset = None;
+    for (offset, delta) in events {
+        if let Some(previous_offset) = previous_offset {
+            let span_byte_count = offset - previous_offset;
+            if active_range_count > 0 {
+                unique_storage_byte_count += span_byte_count;
+            }
+            if active_range_count > 1 {
+                shared_storage_byte_count += span_byte_count;
+            }
+        }
+        active_range_count += delta;
+        ensure!(
+            active_range_count >= 0,
+            "main dialogue record-storage coverage became negative"
+        );
+        max_overlap_depth = max_overlap_depth.max(active_range_count as usize);
+        previous_offset = Some(offset);
+    }
+    ensure!(
+        active_range_count == 0,
+        "main dialogue record-storage coverage did not close"
+    );
+
+    Ok(MainRecordStorageSummary {
+        unique_record_count: ranges.len(),
+        consumed_storage_byte_count,
+        unique_storage_byte_count,
+        shared_storage_byte_count,
+        overlapping_record_pair_count,
+        max_overlap_depth,
+        max_storage_byte_count,
+    })
 }
 
 fn build_main_dialogue_graph(tables: &[DialogueTableReport]) -> Result<MainDialogueGraphReport> {
@@ -2781,6 +3028,81 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![0xED, 0xEE, 0xEF]
         );
+    }
+
+    #[test]
+    fn bounds_a_main_record_from_prefix_through_transition_target_bytes() {
+        let mut source = synthetic_source();
+        let record_file_offset = SYNTHETIC_DATA_START;
+        source[record_file_offset..record_file_offset + 8]
+            .copy_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x60, 0xE4, 0x71, 0x02]);
+        let bank_end = switchable_bank_file_start(SYNTHETIC_BANK) + PRG_BANK_SIZE;
+        let prefix = inspect_main_record_prefix(
+            &source,
+            record_file_offset,
+            bank_end,
+            "synthetic-dialogue",
+            0,
+        )
+        .unwrap();
+        let segment = scan_main_linear_segment(
+            &source,
+            prefix.first_line_file_offset,
+            bank_end,
+            "synthetic-dialogue",
+            0,
+        )
+        .unwrap();
+
+        let storage = build_main_record_storage(
+            &source,
+            record_file_offset,
+            bank_end,
+            &prefix,
+            &segment,
+            "synthetic-dialogue",
+            0,
+        )
+        .unwrap();
+
+        assert_eq!(storage.file_offset, record_file_offset);
+        assert_eq!(storage.end_file_offset_exclusive, record_file_offset + 8);
+        assert_eq!(storage.storage_byte_count, 8);
+        assert_eq!(storage.prefix_byte_count, 4);
+        assert_eq!(storage.linear_segment_storage_byte_count, 4);
+        assert_eq!(storage.boundary_control, 0xE4);
+    }
+
+    #[test]
+    fn distinguishes_consumed_unique_and_shared_record_storage() {
+        let ranges = [
+            MainRecordStorageRange {
+                start: 0,
+                end_exclusive: 10,
+            },
+            MainRecordStorageRange {
+                start: 5,
+                end_exclusive: 15,
+            },
+            MainRecordStorageRange {
+                start: 12,
+                end_exclusive: 20,
+            },
+            MainRecordStorageRange {
+                start: 30,
+                end_exclusive: 35,
+            },
+        ];
+
+        let summary = summarize_main_record_storage(&ranges).unwrap();
+
+        assert_eq!(summary.unique_record_count, 4);
+        assert_eq!(summary.consumed_storage_byte_count, 33);
+        assert_eq!(summary.unique_storage_byte_count, 25);
+        assert_eq!(summary.shared_storage_byte_count, 8);
+        assert_eq!(summary.overlapping_record_pair_count, 2);
+        assert_eq!(summary.max_overlap_depth, 2);
+        assert_eq!(summary.max_storage_byte_count, 10);
     }
 
     #[test]
