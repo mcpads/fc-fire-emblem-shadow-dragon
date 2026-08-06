@@ -181,11 +181,12 @@ struct Mmc4ChrWriterReport {
     hardware_register_hex: String,
     latch_domain: &'static str,
     routine_bytes_hex: String,
-    direct_jsr_candidates: Vec<DirectJsrCandidate>,
+    direct_jsr_candidates: Vec<AbsoluteTransferCandidate>,
+    direct_jmp_candidates: Vec<AbsoluteTransferCandidate>,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
-struct DirectJsrCandidate {
+struct AbsoluteTransferCandidate {
     prg_bank: usize,
     prg_bank_hex: String,
     prg_offset: usize,
@@ -335,7 +336,7 @@ fn build_report(rom: &Rom) -> Result<FontSupplyReport> {
     let blank_pattern_count = pages.iter().map(|page| page.blank_pattern_count).sum();
 
     Ok(FontSupplyReport {
-        schema_version: 2,
+        schema_version: 3,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             chr_sha1: EXPECTED_CHR_SHA1,
@@ -384,7 +385,7 @@ fn build_report(rom: &Rom) -> Result<FontSupplyReport> {
         unknowns: vec![
             "No font slot is classified as available until every consumer and runtime state is excluded.",
             "References list only confirmed tables; it is not the complete text or tile reference population.",
-            "Direct JSR candidates are byte-pattern matches; instruction boundaries and render-path semantics remain unconfirmed.",
+            "Direct JSR and JMP candidates are byte-pattern matches; instruction boundaries and render-path semantics remain unconfirmed.",
             "Active Hangul slot capacity remains unknown until every target render path is measured.",
         ],
     })
@@ -418,7 +419,16 @@ fn describe_mmc4_chr_writers(prg: &[u8]) -> Result<Vec<Mmc4ChrWriterReport>> {
                 hardware_register_hex: format!("0x{:04X}", writer.hardware_register),
                 latch_domain: writer.latch_domain,
                 routine_bytes_hex: hex_bytes(&writer.expected),
-                direct_jsr_candidates: find_direct_jsr_candidates(prg, writer.cpu_address),
+                direct_jsr_candidates: find_absolute_transfer_candidates(
+                    prg,
+                    writer.cpu_address,
+                    0x20,
+                ),
+                direct_jmp_candidates: find_absolute_transfer_candidates(
+                    prg,
+                    writer.cpu_address,
+                    0x4C,
+                ),
             })
         })
         .collect()
@@ -432,11 +442,15 @@ fn fixed_bank_prg_offset(cpu_address: u16) -> Result<usize> {
     Ok(PRG_SIZE - PRG_BANK_SIZE + usize::from(cpu_address - 0xC000))
 }
 
-fn find_direct_jsr_candidates(prg: &[u8], target: u16) -> Vec<DirectJsrCandidate> {
+fn find_absolute_transfer_candidates(
+    prg: &[u8],
+    target: u16,
+    opcode: u8,
+) -> Vec<AbsoluteTransferCandidate> {
     let [target_low, target_high] = target.to_le_bytes();
     prg.windows(3)
         .enumerate()
-        .filter(|(_, bytes)| bytes == &[0x20, target_low, target_high])
+        .filter(|(_, bytes)| bytes == &[opcode, target_low, target_high])
         .map(|(prg_offset, _)| {
             let prg_bank = prg_offset / PRG_BANK_SIZE;
             let offset_in_bank = prg_offset % PRG_BANK_SIZE;
@@ -447,7 +461,7 @@ fn find_direct_jsr_candidates(prg: &[u8], target: u16) -> Vec<DirectJsrCandidate
             };
             let cpu_address = cpu_base + offset_in_bank as u16;
             let file_offset = HEADER_SIZE + prg_offset;
-            DirectJsrCandidate {
+            AbsoluteTransferCandidate {
                 prg_bank,
                 prg_bank_hex: format!("0x{prg_bank:02X}"),
                 prg_offset,
@@ -897,7 +911,7 @@ mod tests {
         let fixed_call = PRG_SIZE - PRG_BANK_SIZE + 0x0234;
         prg[fixed_call..fixed_call + 3].copy_from_slice(&[0x20, 0xBE, 0xC9]);
 
-        let candidates = find_direct_jsr_candidates(&prg, 0xC9BE);
+        let candidates = find_absolute_transfer_candidates(&prg, 0xC9BE, 0x20);
 
         assert_eq!(candidates.len(), 2);
         assert_eq!(candidates[0].prg_bank, 0);
@@ -906,6 +920,21 @@ mod tests {
         assert_eq!(candidates[1].prg_bank, 15);
         assert_eq!(candidates[1].file_offset, HEADER_SIZE + fixed_call);
         assert_eq!(candidates[1].cpu_address, 0xC234);
+    }
+
+    #[test]
+    fn absolute_jump_candidates_are_separate_from_jsr_candidates() {
+        let mut prg = vec![0_u8; PRG_SIZE];
+        prg[0x0123..0x0126].copy_from_slice(&[0x20, 0xC6, 0xC9]);
+        prg[0x0456..0x0459].copy_from_slice(&[0x4C, 0xC6, 0xC9]);
+
+        let jsr = find_absolute_transfer_candidates(&prg, 0xC9C6, 0x20);
+        let jmp = find_absolute_transfer_candidates(&prg, 0xC9C6, 0x4C);
+
+        assert_eq!(jsr.len(), 1);
+        assert_eq!(jsr[0].cpu_address, 0x8123);
+        assert_eq!(jmp.len(), 1);
+        assert_eq!(jmp[0].cpu_address, 0x8456);
     }
 
     #[test]
