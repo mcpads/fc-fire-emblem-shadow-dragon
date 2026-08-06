@@ -29,6 +29,7 @@ const SOURCE_STATUS_LABELS: [u8; 32] = [
 const ENTRY_SEPARATOR: u8 = 0xED;
 const TABLE_TERMINATOR: u8 = 0xEF;
 const MMC4_LATCH_CODES: [u8; 2] = [0xFD, 0xFE];
+const PROVISIONAL_LAYOUT_RESERVED_CODES: [u8; 3] = [0x0F, 0x1F, 0xFF];
 const PRG_BANK_SIZE: usize = 16 * 1024;
 
 struct Mmc4ChrWriter {
@@ -138,6 +139,7 @@ struct FontSupplyReport {
     known_references: Vec<ReferenceReport>,
     pages: Vec<PageReport>,
     font_page: FontPageReport,
+    active_slot_ceiling: ActiveSlotCeiling,
     unknowns: Vec<&'static str>,
 }
 
@@ -168,6 +170,17 @@ struct ReportSummary {
     protected_font_code_count: usize,
     unresolved_font_code_count: usize,
     available_font_code_count: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct ActiveSlotCeiling {
+    total_font_code_count: usize,
+    confirmed_protected_code_count: usize,
+    provisional_layout_reserved_codes: Vec<u8>,
+    provisional_layout_reserved_codes_hex: Vec<String>,
+    current_reserved_code_count: usize,
+    current_hangul_slot_ceiling: usize,
+    proof_boundary: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -323,9 +336,10 @@ fn build_report(rom: &Rom) -> Result<FontSupplyReport> {
     let unresolved_font_code_count = slots.len() - protected_font_code_count;
     let nonblank_tile_count = pages.iter().map(|page| page.nonblank_tile_count).sum();
     let blank_pattern_count = pages.iter().map(|page| page.blank_pattern_count).sum();
+    let active_slot_ceiling = calculate_active_slot_ceiling(&slots)?;
 
     Ok(FontSupplyReport {
-        schema_version: 3,
+        schema_version: 4,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             chr_sha1: EXPECTED_CHR_SHA1,
@@ -371,12 +385,45 @@ fn build_report(rom: &Rom) -> Result<FontSupplyReport> {
             chr_offset_hex: "0x00000".to_owned(),
             slots,
         },
+        active_slot_ceiling,
         unknowns: vec![
             "No font slot is classified as available until every consumer and runtime state is excluded.",
             "References list only confirmed tables; it is not the complete text or tile reference population.",
             "Direct JSR and JMP candidates are byte-pattern matches; instruction boundaries and render-path semantics remain unconfirmed.",
-            "Active Hangul slot capacity remains unknown until every target render path is measured.",
+            "The current Hangul slot ceiling is not a final per-screen budget; unresolved consumers may reserve more codes.",
         ],
+    })
+}
+
+fn calculate_active_slot_ceiling(slots: &[SlotReport]) -> Result<ActiveSlotCeiling> {
+    ensure!(
+        slots.len() == TILES_PER_PAGE,
+        "active slot ceiling requires one complete font page"
+    );
+    let confirmed_protected_code_count = slots
+        .iter()
+        .filter(|slot| slot.code_assignment == Decision::Protected)
+        .count();
+    ensure!(
+        PROVISIONAL_LAYOUT_RESERVED_CODES
+            .iter()
+            .all(|code| slots[usize::from(*code)].code_assignment == Decision::Unresolved),
+        "provisional layout reservation overlaps a protected code"
+    );
+    let current_reserved_code_count =
+        confirmed_protected_code_count + PROVISIONAL_LAYOUT_RESERVED_CODES.len();
+
+    Ok(ActiveSlotCeiling {
+        total_font_code_count: TILES_PER_PAGE,
+        confirmed_protected_code_count,
+        provisional_layout_reserved_codes: PROVISIONAL_LAYOUT_RESERVED_CODES.to_vec(),
+        provisional_layout_reserved_codes_hex: PROVISIONAL_LAYOUT_RESERVED_CODES
+            .iter()
+            .map(|code| format!("{code:02X}"))
+            .collect(),
+        current_reserved_code_count,
+        current_hangul_slot_ceiling: TILES_PER_PAGE - current_reserved_code_count,
+        proof_boundary: "ceiling_after_confirmed_original_and_composite_layout_reservations_not_a_final_per_screen_budget",
     })
 }
 
@@ -822,6 +869,21 @@ mod tests {
             slot.tile_reuse_reasons
                 .contains(&"blank pattern is not free-space proof")
         );
+    }
+
+    #[test]
+    fn reserves_confirmed_composite_layout_codes_from_the_hangul_slot_ceiling() {
+        let slots = describe_font_page(&vec![0_u8; CHR_PAGE_SIZE]);
+        let ceiling = calculate_active_slot_ceiling(&slots).unwrap();
+
+        assert_eq!(ceiling.total_font_code_count, 256);
+        assert_eq!(ceiling.confirmed_protected_code_count, 42);
+        assert_eq!(
+            ceiling.provisional_layout_reserved_codes,
+            [0x0F, 0x1F, 0xFF]
+        );
+        assert_eq!(ceiling.current_reserved_code_count, 45);
+        assert_eq!(ceiling.current_hangul_slot_ceiling, 211);
     }
 
     #[test]
