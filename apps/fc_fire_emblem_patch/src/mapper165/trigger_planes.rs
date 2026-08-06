@@ -16,18 +16,26 @@ const CHR_PAGE_SIZE: usize = 0x1000;
 const FD_TILE_HIGH_PLANE_OFFSET: usize = 0x0FD8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum PatternWindow {
+pub(super) enum PatternWindow {
     Left,
     Right,
 }
 
 impl PatternWindow {
-    fn label(self) -> &'static str {
+    pub(super) fn label(self) -> &'static str {
         match self {
             Self::Left => "ppu_0000",
             Self::Right => "ppu_1000",
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ObservedVariantPair {
+    pub(super) pattern_window: PatternWindow,
+    pub(super) fd_source_page: u8,
+    pub(super) fe_source_page: u8,
+    pub(super) required_high_plane: [u8; 8],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -160,6 +168,55 @@ pub fn analyze_mapper165_trigger_planes(
         required_variant_page_count: report.required_variant_page_count,
         pair_aware_selector_required: report.pair_aware_selector_required,
     })
+}
+
+pub(super) fn observed_variant_pairs(chr: &[u8]) -> Result<Vec<ObservedVariantPair>> {
+    ensure!(
+        chr.len().is_multiple_of(CHR_PAGE_SIZE),
+        "CHR length is not a whole number of 4 KiB pages"
+    );
+    let chr_page_count = chr.len() / CHR_PAGE_SIZE;
+    let unique_pairs = OBSERVED_CHR_PAIRS
+        .iter()
+        .map(|pair| {
+            (
+                pair.pattern_window,
+                pair.fd_source_page,
+                pair.fe_source_page,
+            )
+        })
+        .collect::<BTreeSet<_>>();
+
+    unique_pairs
+        .into_iter()
+        .filter_map(|(pattern_window, fd_source_page, fe_source_page)| {
+            let result = (|| {
+                ensure!(
+                    (fd_source_page as usize) < chr_page_count,
+                    "FD source page {fd_source_page:02X} is outside CHR"
+                );
+                ensure!(
+                    (fe_source_page as usize) < chr_page_count,
+                    "FE source page {fe_source_page:02X} is outside CHR"
+                );
+                let fd_high_plane = fd_tile_high_plane(chr, fd_source_page)?;
+                let required_high_plane = fd_tile_high_plane(chr, fe_source_page)?;
+                Ok(
+                    (fd_high_plane != required_high_plane).then_some(ObservedVariantPair {
+                        pattern_window,
+                        fd_source_page,
+                        fe_source_page,
+                        required_high_plane,
+                    }),
+                )
+            })();
+            match result {
+                Ok(Some(pair)) => Some(Ok(pair)),
+                Ok(None) => None,
+                Err(error) => Some(Err(error)),
+            }
+        })
+        .collect()
 }
 
 fn analyze_observations(
@@ -305,7 +362,7 @@ mod tests {
     use super::*;
 
     fn chr_with_page_planes(planes: &[(u8, [u8; 8])]) -> Vec<u8> {
-        let mut chr = vec![0; 4 * CHR_PAGE_SIZE];
+        let mut chr = vec![0; 32 * CHR_PAGE_SIZE];
         for (page, plane) in planes {
             let start = *page as usize * CHR_PAGE_SIZE + FD_TILE_HIGH_PLANE_OFFSET;
             chr[start..start + 8].copy_from_slice(plane);
@@ -387,5 +444,22 @@ mod tests {
             report.pair_compatibility[0].screen_roles,
             vec!["first", "second"]
         );
+    }
+
+    #[test]
+    fn runtime_variant_pairs_use_the_same_trigger_plane_rule() {
+        let chr = chr_with_page_planes(&[
+            (0, [0x20; 8]),
+            (0x14, [0; 8]),
+            (0x18, [0x20; 8]),
+            (0x19, [0x20; 8]),
+        ]);
+        let pairs = observed_variant_pairs(&chr).unwrap();
+
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pairs[0].pattern_window, PatternWindow::Right);
+        assert_eq!(pairs[0].fd_source_page, 0);
+        assert_eq!(pairs[0].fe_source_page, 0x14);
+        assert_eq!(pairs[0].required_high_plane, [0; 8]);
     }
 }

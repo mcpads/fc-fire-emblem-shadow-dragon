@@ -1,6 +1,7 @@
 use super::{
-    SELECT_LEFT_FD_CHR_BANK_ADDRESS, SELECT_LEFT_FE_CHR_BANK_ADDRESS, SELECT_PRG_BANK_ADDRESS,
-    SELECT_RIGHT_FD_CHR_BANK_ADDRESS, SELECT_RIGHT_FE_CHR_BANK_ADDRESS,
+    SELECT_CENTRAL_RIGHT_FE_CHR_BANK_ADDRESS, SELECT_LEFT_FD_CHR_BANK_ADDRESS,
+    SELECT_LEFT_FE_CHR_BANK_ADDRESS, SELECT_PRG_BANK_ADDRESS, SELECT_RIGHT_FD_CHR_BANK_ADDRESS,
+    SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS, SELECT_RIGHT_FE_CHR_BANK_ADDRESS,
 };
 
 pub(super) const SOURCE_PRG_BANK_WRITERS: &[DirectWriter] = &[
@@ -92,14 +93,14 @@ pub(super) const CENTRAL_CHR_WRITERS: &[CentralChrWriter] = &[
         source_address: 0xC9BE,
         shadow_address: 0x5B,
         source_register: 0xD000,
-        target_routine: SELECT_RIGHT_FD_CHR_BANK_ADDRESS,
+        target_routine: SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
     },
     CentralChrWriter {
         role: "PPU $1000 FE source",
         source_address: 0xC9C6,
         shadow_address: 0x5C,
         source_register: 0xE000,
-        target_routine: SELECT_RIGHT_FE_CHR_BANK_ADDRESS,
+        target_routine: SELECT_CENTRAL_RIGHT_FE_CHR_BANK_ADDRESS,
     },
 ];
 

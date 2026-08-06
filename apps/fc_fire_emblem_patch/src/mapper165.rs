@@ -14,11 +14,16 @@ use crate::{
 };
 mod runtime;
 pub(crate) mod trigger_planes;
+mod trigger_variants;
 mod writer_sites;
 
 use runtime::{
     build_routines, replace_central_chr_writer, replace_central_prg_writer, replace_direct_writer,
     replace_mirroring_writer, validate_routine_placements,
+};
+
+use trigger_variants::{
+    TriggerVariantPlan, install_observed_trigger_variants, verify_installed_trigger_variants,
 };
 
 use writer_sites::{CENTRAL_CHR_WRITERS, DIRECT_CHR_WRITERS, SOURCE_PRG_BANK_WRITERS};
@@ -32,8 +37,10 @@ const SELECT_LEFT_FD_CHR_BANK_ADDRESS: u16 = 0xFA40;
 const SELECT_LEFT_FE_CHR_BANK_ADDRESS: u16 = 0xFA60;
 const SELECT_RIGHT_FD_CHR_BANK_ADDRESS: u16 = 0xFA80;
 const SELECT_RIGHT_FE_CHR_BANK_ADDRESS: u16 = 0xFAA0;
+const SELECT_CENTRAL_RIGHT_FE_CHR_BANK_ADDRESS: u16 = 0xFAB8;
+const SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS: u16 = 0xFAC0;
 const CODE_CAVE_START_ADDRESS: u16 = RESET_INITIALIZER_ADDRESS;
-const CODE_CAVE_LEN: usize = 0xC0;
+const CODE_CAVE_LEN: usize = 0x110;
 
 const SOURCE_SELECT_PRG_BANK_AND_SAVE_ADDRESS: u16 = 0xC9A6;
 const SOURCE_SELECT_HORIZONTAL_MIRRORING_ADDRESS: u16 = 0xC9CE;
@@ -53,6 +60,7 @@ struct Mapper165ParityReport {
     output_chr_sha1: String,
     battery_flag_preserved: bool,
     chr_layout: ChrLayoutEvidence,
+    trigger_plane_correction: TriggerPlaneCorrectionEvidence,
     code_cave: CodeCaveEvidence,
     direct_code_cave_transfer_count: usize,
     routines: Vec<RoutinePlacement>,
@@ -71,6 +79,32 @@ struct ChrLayoutEvidence {
     source_4k_page_bias: u8,
     maximum_4k_chr_rom_pages: usize,
     remaining_4k_pages_at_maximum_size: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct TriggerPlaneCorrectionEvidence {
+    installed_variants: Vec<InstalledTriggerVariantEvidence>,
+    selector_entries: Vec<PairSelectorEvidence>,
+    central_right_writers_pair_aware: bool,
+    direct_writers_pair_aware: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct InstalledTriggerVariantEvidence {
+    physical_4k_page: u8,
+    mapper_register_value: u8,
+    fd_source_page: u8,
+    required_high_plane_sha1: String,
+    compatible_fe_source_pages: Vec<u8>,
+    pattern_windows: Vec<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
+struct PairSelectorEvidence {
+    pattern_window: &'static str,
+    fd_source_page: u8,
+    fe_source_page: u8,
+    mapper_register_value: u8,
 }
 
 #[derive(Debug, Serialize)]
@@ -110,7 +144,7 @@ pub fn build_mapper165_parity_probe(
     source_rom.verify_supported_japanese()?;
     verify_complete_prg_writer_inventory(&source_rom)?;
 
-    let base = create_chr_relocated_image(&source_rom)?;
+    let (base, trigger_variant_plan) = create_chr_relocated_image(&source_rom)?;
     let cave_file_start = fixed_bank_file_offset(CODE_CAVE_START_ADDRESS)?;
     let cave_file_end = cave_file_start
         .checked_add(CODE_CAVE_LEN)
@@ -131,7 +165,7 @@ pub fn build_mapper165_parity_probe(
         "mapper 165 code cave has {direct_code_cave_transfer_count} direct JSR or JMP references"
     );
 
-    let routines = build_routines()?;
+    let routines = build_routines(&trigger_variant_plan.selector_entries)?;
     validate_routine_placements(&routines)?;
     let mut image = TrackedImage::new(base.clone());
     image.write_expected("iNES mapper low nibble 10 to 165", 6, &[0xA2], &[0x52])?;
@@ -193,13 +227,13 @@ pub fn build_mapper165_parity_probe(
         .collect::<Vec<_>>();
     let output = image.into_data();
     let output_rom = Rom::parse(output.clone()).context("parse mapper 165 parity probe")?;
-    verify_output(&source_rom, &output_rom, &output)?;
+    verify_output(&source_rom, &output_rom, &output, &trigger_variant_plan)?;
 
     let output_sha1 = sha1_hex(&output);
     let relocated_source_chr_sha1 = sha1_hex(&output_rom.chr()[OUTPUT_CHR_PADDING_SIZE..]);
     let output_chr_sha1 = sha1_hex(output_rom.chr());
     let report = Mapper165ParityReport {
-        schema: 1,
+        schema: 2,
         source_sha1: EXPECTED_SOURCE_SHA1,
         output_sha1: output_sha1.clone(),
         source_mapper: source_rom.mapper(),
@@ -216,6 +250,36 @@ pub fn build_mapper165_parity_probe(
             source_4k_page_bias: 2,
             maximum_4k_chr_rom_pages: 64,
             remaining_4k_pages_at_maximum_size: 30,
+        },
+        trigger_plane_correction: TriggerPlaneCorrectionEvidence {
+            installed_variants: trigger_variant_plan
+                .installed_variants
+                .iter()
+                .map(|variant| InstalledTriggerVariantEvidence {
+                    physical_4k_page: variant.physical_page,
+                    mapper_register_value: variant.mapper_register_value,
+                    fd_source_page: variant.fd_source_page,
+                    required_high_plane_sha1: sha1_hex(&variant.required_high_plane),
+                    compatible_fe_source_pages: variant.compatible_fe_source_pages.clone(),
+                    pattern_windows: variant
+                        .pattern_windows
+                        .iter()
+                        .map(|window| window.label())
+                        .collect(),
+                })
+                .collect(),
+            selector_entries: trigger_variant_plan
+                .selector_entries
+                .iter()
+                .map(|entry| PairSelectorEvidence {
+                    pattern_window: entry.pattern_window.label(),
+                    fd_source_page: entry.fd_source_page,
+                    fe_source_page: entry.fe_source_page,
+                    mapper_register_value: entry.mapper_register_value,
+                })
+                .collect(),
+            central_right_writers_pair_aware: true,
+            direct_writers_pair_aware: false,
         },
         code_cave: CodeCaveEvidence {
             cpu_start: format!("0x{CODE_CAVE_START_ADDRESS:04X}"),
@@ -237,8 +301,9 @@ pub fn build_mapper165_parity_probe(
         direct_chr_writer_count: DIRECT_CHR_WRITERS.len(),
         tracked_writes,
         unresolved_boundaries: vec![
-            "Mapper 165 changes the FD latch trigger timing from MMC4; visible parity must be measured on trigger-bearing screens.",
+            "Observed central PPU $1000 pairs use generated trigger-plane variants; unobserved pairs still require visible parity measurement.",
             "Direct CHR writers are limited to instruction-boundary sites proven by fixed-bank disassembly, adjacent register groups, or prior runtime traces; isolated byte-pattern candidates remain unclassified.",
+            "Direct CHR writers keep source-page mapping without pair-aware FD correction until their paired runtime values are classified.",
             "The probe preserves and relocates the source CHR but does not add Korean glyphs or translation assets.",
             "Save RAM is enabled statically, but save/load persistence and adverse gameplay paths still require runtime verification.",
         ],
@@ -258,7 +323,7 @@ pub fn build_mapper165_parity_probe(
     })
 }
 
-fn create_chr_relocated_image(source_rom: &Rom) -> Result<Vec<u8>> {
+fn create_chr_relocated_image(source_rom: &Rom) -> Result<(Vec<u8>, TriggerVariantPlan)> {
     let output_len = source_rom
         .data()
         .len()
@@ -272,7 +337,11 @@ fn create_chr_relocated_image(source_rom: &Rom) -> Result<Vec<u8>> {
         output.len() == output_len,
         "mapper 165 CHR relocation size mismatch"
     );
-    Ok(output)
+    let trigger_variant_plan = install_observed_trigger_variants(
+        source_rom.chr(),
+        &mut output[CHR_FILE_OFFSET..CHR_FILE_OFFSET + OUTPUT_CHR_PADDING_SIZE],
+    )?;
+    Ok((output, trigger_variant_plan))
 }
 
 fn verify_complete_prg_writer_inventory(source_rom: &Rom) -> Result<()> {
@@ -302,7 +371,12 @@ fn verify_complete_prg_writer_inventory(source_rom: &Rom) -> Result<()> {
     Ok(())
 }
 
-fn verify_output(source_rom: &Rom, output_rom: &Rom, output: &[u8]) -> Result<()> {
+fn verify_output(
+    source_rom: &Rom,
+    output_rom: &Rom,
+    output: &[u8],
+    trigger_variant_plan: &TriggerVariantPlan,
+) -> Result<()> {
     ensure!(
         output_rom.mapper() == OUTPUT_MAPPER,
         "output mapper is not 165"
@@ -315,12 +389,11 @@ fn verify_output(source_rom: &Rom, output_rom: &Rom, output: &[u8]) -> Result<()
         output_rom.chr().len() == source_rom.chr().len() + OUTPUT_CHR_PADDING_SIZE,
         "mapper 165 output CHR size is incorrect"
     );
-    ensure!(
-        output_rom.chr()[..OUTPUT_CHR_PADDING_SIZE]
-            .iter()
-            .all(|byte| *byte == 0),
-        "mapper 165 reserved CHR prefix is not blank"
-    );
+    verify_installed_trigger_variants(
+        source_rom.chr(),
+        &output_rom.chr()[..OUTPUT_CHR_PADDING_SIZE],
+        trigger_variant_plan,
+    )?;
     ensure!(
         output_rom.chr()[OUTPUT_CHR_PADDING_SIZE..] == *source_rom.chr(),
         "mapper 165 relocated source CHR changed"
@@ -346,18 +419,15 @@ mod tests {
 
     #[test]
     fn routines_fit_disjoint_ranges_inside_the_proven_cave() {
-        let routines = build_routines().unwrap();
+        let routines = build_routines(&[]).unwrap();
         validate_routine_placements(&routines).unwrap();
 
-        assert_eq!(routines.len(), 6);
-        for routine in &routines {
-            assert!(routine.bytes.len() <= 0x20);
-        }
+        assert_eq!(routines.len(), 8);
     }
 
     #[test]
     fn prg_selector_maps_one_mmc4_bank_to_two_consecutive_mmc3_banks() {
-        let bytes = &build_routines().unwrap()[1].bytes;
+        let bytes = &build_routines(&[]).unwrap()[1].bytes;
         assert!(bytes.windows(3).any(|window| window == [0x8D, 0x00, 0x80]));
         assert!(bytes.windows(3).any(|window| window == [0x8D, 0x01, 0x80]));
         assert!(bytes.windows(2).any(|window| window == [0x29, 0x0F]));
@@ -366,7 +436,7 @@ mod tests {
 
     #[test]
     fn chr_selectors_bias_source_pages_away_from_chr_ram() {
-        for routine in build_routines().unwrap().iter().skip(2) {
+        for routine in build_routines(&[]).unwrap().iter().skip(2).take(4) {
             assert!(
                 routine
                     .bytes
@@ -451,6 +521,74 @@ mod tests {
             assert_eq!(source.len(), 3);
             assert_eq!(replacement.len(), source.len());
         }
+    }
+
+    #[test]
+    fn pair_aware_right_selector_preserves_a_and_flags_and_selects_the_variant() {
+        let entry = trigger_variants::PairSelectorEntry {
+            pattern_window: trigger_planes::PatternWindow::Right,
+            fd_source_page: 0,
+            fe_source_page: 0x14,
+            mapper_register_value: 4,
+        };
+        let routines = build_routines(&[entry]).unwrap();
+        let selector = routines
+            .iter()
+            .find(|routine| routine.cpu_address == SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS)
+            .unwrap();
+
+        assert_eq!(&selector.bytes[..2], &[0x08, 0x48]);
+        assert_eq!(
+            &selector.bytes[selector.bytes.len() - 3..],
+            &[0x68, 0x28, 0x60]
+        );
+        assert!(
+            selector
+                .bytes
+                .windows(8)
+                .any(|bytes| bytes == [0xA5, 0x5B, 0x05, 0x52, 0x29, 0x1F, 0xC9, 0x00])
+        );
+        assert!(
+            selector
+                .bytes
+                .windows(8)
+                .any(|bytes| bytes == [0xA5, 0x5C, 0x05, 0x52, 0x29, 0x1F, 0xC9, 0x14])
+        );
+        assert!(selector.bytes.windows(2).any(|bytes| bytes == [0xA9, 0x04]));
+    }
+
+    #[test]
+    fn central_fe_refreshes_pair_selection_while_direct_writers_stay_stateless() {
+        let central_right_fe = CENTRAL_CHR_WRITERS
+            .iter()
+            .find(|writer| writer.source_register == 0xE000)
+            .unwrap();
+        assert_eq!(
+            central_right_fe.target_routine,
+            SELECT_CENTRAL_RIGHT_FE_CHR_BANK_ADDRESS
+        );
+        assert!(
+            DIRECT_CHR_WRITERS
+                .iter()
+                .filter(|writer| writer.source_register == 0xE000)
+                .all(|writer| writer.target_routine == SELECT_RIGHT_FE_CHR_BANK_ADDRESS)
+        );
+
+        let wrapper = build_routines(&[])
+            .unwrap()
+            .into_iter()
+            .find(|routine| routine.cpu_address == SELECT_CENTRAL_RIGHT_FE_CHR_BANK_ADDRESS)
+            .unwrap();
+        let expected = assemble_at(
+            SELECT_CENTRAL_RIGHT_FE_CHR_BANK_ADDRESS,
+            &[
+                Instruction::JsrAbsolute(SELECT_RIGHT_FE_CHR_BANK_ADDRESS),
+                Instruction::JsrAbsolute(SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS),
+                Instruction::Rts,
+            ],
+        )
+        .unwrap();
+        assert_eq!(wrapper.bytes, expected);
     }
 
     fn map_source_chr_page(source_page: u8) -> u8 {

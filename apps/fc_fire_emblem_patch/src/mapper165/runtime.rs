@@ -9,9 +9,12 @@ use crate::{
 
 use super::{
     CODE_CAVE_LEN, CODE_CAVE_START_ADDRESS, RESET_INITIALIZER_ADDRESS,
-    SELECT_LEFT_FD_CHR_BANK_ADDRESS, SELECT_LEFT_FE_CHR_BANK_ADDRESS, SELECT_PRG_BANK_ADDRESS,
-    SELECT_RIGHT_FD_CHR_BANK_ADDRESS, SELECT_RIGHT_FE_CHR_BANK_ADDRESS, SOURCE_RESET_ADDRESS,
-    SOURCE_SELECT_PRG_BANK_AND_SAVE_ADDRESS,
+    SELECT_CENTRAL_RIGHT_FE_CHR_BANK_ADDRESS, SELECT_LEFT_FD_CHR_BANK_ADDRESS,
+    SELECT_LEFT_FE_CHR_BANK_ADDRESS, SELECT_PRG_BANK_ADDRESS, SELECT_RIGHT_FD_CHR_BANK_ADDRESS,
+    SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS, SELECT_RIGHT_FE_CHR_BANK_ADDRESS,
+    SOURCE_RESET_ADDRESS, SOURCE_SELECT_PRG_BANK_AND_SAVE_ADDRESS,
+    trigger_planes::PatternWindow,
+    trigger_variants::PairSelectorEntry,
     writer_sites::{CentralChrWriter, DirectWriter, WriterLocation},
 };
 
@@ -22,7 +25,15 @@ pub(super) struct AssembledRoutine {
     pub(super) bytes: Vec<u8>,
 }
 
-pub(super) fn build_routines() -> Result<Vec<AssembledRoutine>> {
+pub(super) fn build_routines(
+    pair_selector_entries: &[PairSelectorEntry],
+) -> Result<Vec<AssembledRoutine>> {
+    ensure!(
+        pair_selector_entries
+            .iter()
+            .all(|entry| entry.pattern_window == PatternWindow::Right),
+        "the current mapper 165 runtime has no left-window trigger variant selector"
+    );
     Ok(vec![
         assemble_routine(
             "reset initialization",
@@ -85,7 +96,82 @@ pub(super) fn build_routines() -> Result<Vec<AssembledRoutine>> {
             SELECT_RIGHT_FE_CHR_BANK_ADDRESS,
             4,
         )?,
+        assemble_routine(
+            "central PPU $1000 FE selection and FD refresh",
+            SELECT_CENTRAL_RIGHT_FE_CHR_BANK_ADDRESS,
+            &[
+                Instruction::JsrAbsolute(SELECT_RIGHT_FE_CHR_BANK_ADDRESS),
+                Instruction::JsrAbsolute(SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS),
+                Instruction::Rts,
+            ],
+        )?,
+        build_pair_aware_right_fd_routine(pair_selector_entries)?,
     ])
+}
+
+fn build_pair_aware_right_fd_routine(
+    pair_selector_entries: &[PairSelectorEntry],
+) -> Result<AssembledRoutine> {
+    const ENTRY_LEN: u16 = 25;
+    const NATURAL_SELECTION_LEN: u16 = 11;
+
+    let entry_bytes = u16::try_from(pair_selector_entries.len())?
+        .checked_mul(ENTRY_LEN)
+        .ok_or_else(|| anyhow::anyhow!("mapper 165 pair selector entry size overflow"))?;
+    let natural_selection_address = SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS
+        .checked_add(2)
+        .and_then(|address| address.checked_add(entry_bytes))
+        .ok_or_else(|| anyhow::anyhow!("mapper 165 pair selector address overflow"))?;
+    let write_mapper_address = natural_selection_address
+        .checked_add(NATURAL_SELECTION_LEN)
+        .ok_or_else(|| anyhow::anyhow!("mapper 165 pair selector write address overflow"))?;
+
+    let mut instructions = vec![Instruction::Php, Instruction::Pha];
+    for (index, entry) in pair_selector_entries.iter().enumerate() {
+        ensure!(
+            entry.mapper_register_value != 0,
+            "mapper 165 trigger variant cannot select CHR RAM register value 0"
+        );
+        let next_entry_address = SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS
+            .checked_add(2 + (u16::try_from(index)? + 1) * ENTRY_LEN)
+            .ok_or_else(|| anyhow::anyhow!("mapper 165 pair selector branch overflow"))?;
+        instructions.extend([
+            Instruction::LdaZeroPage(0x5B),
+            Instruction::OraZeroPage(0x52),
+            Instruction::AndImmediate(0x1F),
+            Instruction::CmpImmediate(entry.fd_source_page),
+            Instruction::BneAbsolute(next_entry_address),
+            Instruction::LdaZeroPage(0x5C),
+            Instruction::OraZeroPage(0x52),
+            Instruction::AndImmediate(0x1F),
+            Instruction::CmpImmediate(entry.fe_source_page),
+            Instruction::BneAbsolute(next_entry_address),
+            Instruction::LdaImmediate(entry.mapper_register_value),
+            Instruction::JmpAbsolute(write_mapper_address),
+        ]);
+    }
+    instructions.extend([
+        Instruction::LdaZeroPage(0x5B),
+        Instruction::OraZeroPage(0x52),
+        Instruction::AndImmediate(0x1F),
+        Instruction::AslAccumulator,
+        Instruction::AslAccumulator,
+        Instruction::Clc,
+        Instruction::AdcImmediate(8),
+        Instruction::Pha,
+        Instruction::LdaImmediate(2),
+        Instruction::StaAbsolute(0x8000),
+        Instruction::Pla,
+        Instruction::StaAbsolute(0x8001),
+        Instruction::Pla,
+        Instruction::Plp,
+        Instruction::Rts,
+    ]);
+    assemble_routine(
+        "pair-aware PPU $1000 FD CHR bank selection",
+        SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
+        &instructions,
+    )
 }
 
 fn build_chr_routine(
