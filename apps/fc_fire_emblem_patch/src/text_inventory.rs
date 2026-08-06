@@ -20,6 +20,9 @@ const PRG_FILE_END: usize = HEADER_SIZE + PRG_SIZE;
 const CHR_TILE_BYTES: usize = 16;
 const FIRST_FONT_PAGE_BYTES: usize = 4 * 1024;
 const MAX_ENTRY_BYTES: usize = 256;
+const COMPOSITE_SEGMENT_SEPARATOR_CODE: u8 = 0xED;
+const COMPOSITE_END_CODE: u8 = 0xEF;
+const COMPOSITE_OVERLAY_BLANK_CODE: u8 = 0xFF;
 
 struct TextTableSpec {
     id: &'static str,
@@ -442,6 +445,17 @@ struct LayoutControlEvidence {
     scope: &'static str,
     entry_cpu_address: u16,
     entry_cpu_address_hex: String,
+    source_buffer: &'static str,
+    output_buffer: &'static str,
+    segment_separator_code: u8,
+    segment_separator_code_hex: String,
+    end_code: u8,
+    end_code_hex: String,
+    overlay_blank_code: u8,
+    overlay_blank_code_hex: String,
+    first_pass_behavior: &'static str,
+    second_pass_behavior: &'static str,
+    segment_output_order: &'static str,
     codes: Vec<u8>,
     codes_hex: Vec<String>,
     observed_behavior: &'static str,
@@ -561,12 +575,12 @@ fn build_report(source: &[u8]) -> Result<TextInventoryReport> {
     let layout_controls = build_layout_control_evidence(source, &source_code_usage)?;
 
     Ok(TextInventoryReport {
-        schema_version: 5,
+        schema_version: 6,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             translation_direction: "ja_to_ko",
             preserve_existing_english: true,
-            proof_boundary: "confirmed pointer tables, transfer code, first-page CHR tile storage, and bank 0B composite-parser layout controls; other downstream render semantics remain unresolved",
+            proof_boundary: "confirmed pointer tables, transfer code, first-page CHR tile storage, and bank 0B composite-parser two-pass layout controls; other downstream render semantics remain unresolved",
         },
         summary: ReportSummary {
             table_count: tables.len(),
@@ -962,6 +976,17 @@ fn build_layout_control_evidence(
         scope: "bank_0B_composite_text_parser",
         entry_cpu_address: 0x8F39,
         entry_cpu_address_hex: "0x8F39".to_owned(),
+        source_buffer: "0x0451",
+        output_buffer: "0x0311",
+        segment_separator_code: COMPOSITE_SEGMENT_SEPARATOR_CODE,
+        segment_separator_code_hex: format!("{COMPOSITE_SEGMENT_SEPARATOR_CODE:02X}"),
+        end_code: COMPOSITE_END_CODE,
+        end_code_hex: format!("{COMPOSITE_END_CODE:02X}"),
+        overlay_blank_code: COMPOSITE_OVERLAY_BLANK_CODE,
+        overlay_blank_code_hex: format!("{COMPOSITE_OVERLAY_BLANK_CODE:02X}"),
+        first_pass_behavior: "emit_blank_cells_and_replace_the_previous_blank_with_a_zero_cell_combining_code",
+        second_pass_behavior: "emit_base_codes_while_skipping_combining_codes",
+        segment_output_order: "combining_overlay_then_base_codes",
         codes: COMPOSITE_TEXT_LAYOUT_CODES.to_vec(),
         codes_hex: COMPOSITE_TEXT_LAYOUT_CODES
             .iter()
@@ -1331,6 +1356,50 @@ mod tests {
         assert!(error.contains(
             "layout control code first_pass_decrement_before_append changed for bank_0B_composite_text_parser"
         ));
+    }
+
+    #[test]
+    fn declares_composite_overlay_and_base_passes_separately() {
+        let mut source = vec![0_u8; PRG_FILE_END + FIRST_FONT_PAGE_BYTES];
+        for region in &COMPOSITE_TEXT_LAYOUT_CODE_REGIONS {
+            source[region.file_offset..region.file_offset + region.bytes.len()]
+                .copy_from_slice(region.bytes);
+        }
+        let source_code_usage = COMPOSITE_TEXT_LAYOUT_CODES.map(|code| SourceCodeUsage {
+            code,
+            code_hex: format!("{code:02X}"),
+            font_tile_sha1: String::new(),
+            font_tile_all_zero: false,
+            referenced_byte_count: 1,
+            unique_storage_byte_count: 1,
+            referenced_protected_original_byte_count: 0,
+            unique_protected_original_byte_count: 0,
+            referenced_unresolved_nonblank_font_tile_byte_count: 1,
+            unique_unresolved_nonblank_font_tile_byte_count: 1,
+            referenced_unresolved_blank_font_tile_byte_count: 0,
+            unique_unresolved_blank_font_tile_byte_count: 0,
+        });
+
+        let evidence = build_layout_control_evidence(&source, &source_code_usage).unwrap();
+        let composite = &evidence[0];
+
+        assert_eq!(composite.source_buffer, "0x0451");
+        assert_eq!(composite.output_buffer, "0x0311");
+        assert_eq!(composite.segment_separator_code, 0xED);
+        assert_eq!(composite.end_code, 0xEF);
+        assert_eq!(composite.overlay_blank_code, 0xFF);
+        assert_eq!(
+            composite.first_pass_behavior,
+            "emit_blank_cells_and_replace_the_previous_blank_with_a_zero_cell_combining_code"
+        );
+        assert_eq!(
+            composite.second_pass_behavior,
+            "emit_base_codes_while_skipping_combining_codes"
+        );
+        assert_eq!(
+            composite.segment_output_order,
+            "combining_overlay_then_base_codes"
+        );
     }
 
     #[test]
