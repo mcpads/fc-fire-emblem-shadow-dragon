@@ -13,6 +13,7 @@ use crate::{
     tracked::TrackedImage,
 };
 mod runtime;
+pub(crate) mod trigger_planes;
 mod writer_sites;
 
 use runtime::{

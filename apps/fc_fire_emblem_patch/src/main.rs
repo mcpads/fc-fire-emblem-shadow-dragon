@@ -112,6 +112,12 @@ enum Command {
         #[arg(long, default_value = "out/mapper165-parity-probe.json")]
         report: PathBuf,
     },
+    /// Compare MMC4 and mapper 165 FD-trigger tile planes for observed CHR pairs.
+    AnalyzeMapper165TriggerPlanes {
+        source: PathBuf,
+        #[arg(long, default_value = "out/mapper165-trigger-planes.json")]
+        report: PathBuf,
+    },
     /// Build the static MMC5 PRG and SRAM conversion probe without translation assets.
     BuildMmc5PrgProbe {
         source: PathBuf,
@@ -359,6 +365,22 @@ fn main() -> Result<()> {
             println!("wrote {}", report.display());
             println!("report SHA-1: {}", summary.report_sha1);
             println!("tracked ROM writes: {}", summary.tracked_write_count);
+        }
+        Command::AnalyzeMapper165TriggerPlanes { source, report } => {
+            let summary =
+                mapper165::trigger_planes::analyze_mapper165_trigger_planes(&source, &report)?;
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!("observed screens: {}", summary.observed_screen_count);
+            println!("unique FD/FE pairs: {}", summary.unique_pair_count);
+            println!(
+                "required CHR variant pages: {}",
+                summary.required_variant_page_count
+            );
+            println!(
+                "pair-aware selector required: {}",
+                summary.pair_aware_selector_required
+            );
         }
         Command::BuildMmc5PrgProbe {
             source,

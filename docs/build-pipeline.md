@@ -29,6 +29,15 @@ PRG writer 12곳과 명령 경계가 확인된 CHR writer를 같은 길이의 �
 
 이 프로브는 번역이나 한글 자산을 넣지 않는다. 현재 타이틀·자동 능력치·1장 인트로 대화는 원본 화면과 일치하지만, FD 전환 시점이 다른 페이지 쌍과 저장·전체 진행 검증이 남아 있어 `release_eligible`은 거짓이다.
 
+`analyze-mapper165-trigger-planes`는 화면 실측으로 확인한 FD/FE 쌍에서 타일 `FD`의 상위 비트플레인 8바이트를 비교한다. MMC4는 `$xFD8`, mapper 165는 `$xFD0`에서 FD 전환을 시작하므로, mapper 165의 FD 페이지 상위 비트플레인이 직전에 선택된 FE 페이지와 같아야 트리거 타일이 보존된다.
+
+```sh
+cargo run -p fc-fire-emblem-patch -- analyze-mapper165-trigger-planes \
+  "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
+```
+
+현재 9개 화면의 고유 쌍 11개 가운데 오른쪽 `00/14` 한 쌍만 별도 변형 페이지가 필요하다. 그러나 같은 FD `00`은 `00/00`, `00/18`, `00/19`에서 원본 비트플레인을 요구하므로 페이지 00을 전역 수정할 수 없다. 보고서는 물리 변형 페이지 1개와 쌍 인식 선택기가 필요하다고 판정하며, 아직 관측하지 않은 화면을 명시적으로 미해결로 남긴다.
+
 ## MMC5 PRG 정적 프로브
 
 `build-mmc5-prg-probe`는 번역·한글 자산 없이 지원 일본판을 mapper 5 헤더로 바꾸고, 원본 마지막 16 KiB PRG 뱅크의 확인된 `FF` 구간 `$FA00`~`$FA7F`에 최소 초기화·뱅크·미러링 루틴을 배치한다. 새 실행 코드는 허용된 RP2A03 명령과 주소 지정 형식만 받는 checked assembler로 생성한다. 이 구간을 대상으로 하는 직접 `JSR`·`JMP` 3바이트 패턴이 PRG 전체에서 하나라도 나오면 쓰지 않는다.
