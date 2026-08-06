@@ -51,7 +51,7 @@ const MAIN_DIALOGUE_HANDLER_ROLES: [&str; 18] = [
     "unresolved_handler_14",
     "unresolved_handler_15",
     "unresolved_handler_16",
-    "unresolved_handler_17",
+    "resolve_selected_entry_after_caller_handoff",
 ];
 
 struct CodeRegionSpec {
@@ -60,7 +60,7 @@ struct CodeRegionSpec {
     bytes: &'static [u8],
 }
 
-const MAIN_DIALOGUE_PREFIX_CODE_REGIONS: [CodeRegionSpec; 5] = [
+const MAIN_DIALOGUE_STATE_CODE_REGIONS: [CodeRegionSpec; 8] = [
     CodeRegionSpec {
         role: "inspect_and_consume_optional_E5_prefix",
         cpu_address: 0x80A2,
@@ -107,6 +107,66 @@ const MAIN_DIALOGUE_PREFIX_CODE_REGIONS: [CodeRegionSpec; 5] = [
         bytes: &[
             0xAE, 0xF0, 0x77, 0xBD, 0x12, 0x78, 0x85, 0x76, 0xBD, 0x14, 0x78, 0x85, 0x77, 0x60,
         ],
+    },
+    CodeRegionSpec {
+        role: "route_caller_handoff_from_line_advance",
+        cpu_address: 0x84B2,
+        bytes: &[0xAD, 0x08, 0x78, 0xF0, 0x03, 0x4C, 0x5B, 0x85],
+    },
+    CodeRegionSpec {
+        role: "raise_caller_handoff_flag_and_select_state_17",
+        cpu_address: 0x8556,
+        bytes: &[
+            0xAD, 0x08, 0x78, 0xF0, 0x0C, 0xA9, 0x01, 0x8D, 0x31, 0x78, 0xEE, 0x09, 0x78, 0xA9,
+            0x11, 0xD0, 0x18,
+        ],
+    },
+    CodeRegionSpec {
+        role: "resolve_selected_entry_and_clear_caller_handoff",
+        cpu_address: 0x8719,
+        bytes: &[
+            0x20, 0x68, 0x86, 0x20, 0xB2, 0xE6, 0xA9, 0x00, 0x8D, 0x08, 0x78, 0x8D, 0x09, 0x78,
+            0x8D, 0x31, 0x78, 0xA9, 0x09, 0x8D, 0xF7, 0x77, 0x60,
+        ],
+    },
+];
+
+const MAIN_DIALOGUE_POINTER_RESOLVER_CPU_ADDRESS: u16 = 0xE6B2;
+const MAIN_DIALOGUE_POINTER_RESOLVER_CODE: &[u8] = &[
+    0xAD, 0xF2, 0x77, 0xF0, 0x06, 0xAD, 0xF2, 0x77, 0x8D, 0x00, 0xA0, 0xAD, 0xF4, 0x77, 0x29, 0x0F,
+    0x0A, 0xA8, 0xB9, 0xE0, 0xBF, 0x85, 0x04, 0xB9, 0xE1, 0xBF, 0x85, 0x05, 0xAD, 0xF1, 0x77, 0x0A,
+    0x90, 0x02, 0xE6, 0x05, 0x18, 0x65, 0x04, 0x85, 0x04, 0x90, 0x02, 0xE6, 0x05, 0xA0, 0x00, 0xB1,
+    0x04, 0xAE, 0xF0, 0x77, 0x9D, 0x12, 0x78, 0xC8, 0xB1, 0x04, 0x9D, 0x14, 0x78, 0xA9, 0x0A, 0x8D,
+    0x00, 0xA0, 0x60,
+];
+const CALLER_HANDOFF_FLAG_LOAD: [u8; 3] = [0xAD, 0x09, 0x78];
+
+#[derive(Clone, Copy)]
+struct CallerHandoffObserverSpec {
+    prg_bank: u8,
+    cpu_address: u16,
+}
+
+const CALLER_HANDOFF_OBSERVER_SPECS: [CallerHandoffObserverSpec; 5] = [
+    CallerHandoffObserverSpec {
+        prg_bank: 0x02,
+        cpu_address: 0xA978,
+    },
+    CallerHandoffObserverSpec {
+        prg_bank: 0x04,
+        cpu_address: 0xA223,
+    },
+    CallerHandoffObserverSpec {
+        prg_bank: 0x04,
+        cpu_address: 0xA242,
+    },
+    CallerHandoffObserverSpec {
+        prg_bank: 0x06,
+        cpu_address: 0xA141,
+    },
+    CallerHandoffObserverSpec {
+        prg_bank: 0x0B,
+        cpu_address: 0x9B1D,
     },
 ];
 
@@ -414,6 +474,7 @@ struct MainDialogueStateMachineReport {
     handler_count: usize,
     handlers: Vec<DialogueStateHandlerReport>,
     record_prefix_contract: MainRecordPrefixContract,
+    caller_handoff_contract: CallerHandoffContract,
     code_regions: Vec<CodeRegionReport>,
 }
 
@@ -437,6 +498,36 @@ struct MainRecordPrefixContract {
     optional_e8_prefix_code: u8,
     optional_e8_prefix_code_hex: String,
     optional_e8_prefix_byte_count: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct CallerHandoffContract {
+    control_code: u8,
+    control_code_hex: String,
+    decoder_flag_address: u16,
+    decoder_flag_address_hex: String,
+    caller_flag_address: u16,
+    caller_flag_address_hex: String,
+    handoff_state: u8,
+    resume_state: u8,
+    pointer_resolver_cpu_address: u16,
+    pointer_resolver_cpu_address_hex: String,
+    pointer_resolver_file_offset: usize,
+    pointer_resolver_file_offset_hex: String,
+    pointer_resolver_code_sha1: String,
+    caller_flag_load_candidate_count: usize,
+    caller_flag_load_candidates: Vec<CallerHandoffObserverReport>,
+}
+
+#[derive(Debug, Serialize)]
+struct CallerHandoffObserverReport {
+    prg_bank: u8,
+    prg_bank_hex: String,
+    cpu_address: u16,
+    cpu_address_hex: String,
+    file_offset: usize,
+    file_offset_hex: String,
+    instruction: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -544,7 +635,7 @@ struct MainDialogueGraphReport {
     node_count: usize,
     transition_edge_count: usize,
     terminal_reachable_node_count: usize,
-    interactive_boundary_reachable_node_count: usize,
+    caller_handoff_boundary_reachable_node_count: usize,
     max_transition_edge_count_to_boundary: usize,
     cycle_count: usize,
     unresolved_node_count: usize,
@@ -586,7 +677,7 @@ struct MainDialogueGraphNodeState {
 #[derive(Debug, PartialEq)]
 struct MainDialogueGraphClosure {
     terminal_reachable_node_count: usize,
-    interactive_boundary_reachable_node_count: usize,
+    caller_handoff_boundary_reachable_node_count: usize,
     max_transition_edge_count_to_boundary: usize,
 }
 
@@ -752,12 +843,12 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
     };
 
     Ok(DialogueStructureReport {
-        schema_version: 5,
+        schema_version: 6,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             translation_direction: "ja_to_ko",
             preserve_existing_english: true,
-            proof_boundary: "exact pointer-table ranges, switchable-bank target mapping, aliases, all eight consumer roots, the main dialogue record-prefix state path, every main entry's initial linear segment, and all explicit E4/E6 graph edges through an EF or E7 boundary; no dialogue bytes or translations are emitted",
+            proof_boundary: "exact pointer-table ranges, switchable-bank target mapping, aliases, all eight consumer roots, the main dialogue record-prefix state path, every main entry's initial linear segment, all explicit E4/E6 graph edges, and the E7 caller-handoff contract; no dialogue bytes or translations are emitted",
         },
         summary,
         main_dialogue_state_machine,
@@ -765,8 +856,8 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
         tables,
         unknowns: vec![
             "Script targets are entry starts, not proven script byte ranges; declared code handlers are kept separate.",
-            "The E5, fixed four-byte, and E8 record prefix, each initial linear segment, and all E4/E6 graph edges are confirmed, but behavior after E7 interactive boundaries remains unresolved.",
-            "Eleven of the eighteen main dialogue state handlers remain structurally named but semantically unresolved.",
+            "The E5, fixed four-byte, and E8 record prefix, each initial linear segment, all E4/E6 graph edges, and the E7 caller handoff are confirmed, but caller-specific outcomes after the handoff remain unresolved.",
+            "Ten of the eighteen main dialogue state handlers remain structurally named but semantically unresolved.",
             "Role labels began as external map candidates and do not prove every entry's gameplay context.",
             "Existing English and numeric content remains protected and is not a translation target.",
         ],
@@ -837,17 +928,17 @@ fn build_main_dialogue_state_machine(source: &[u8]) -> Result<MainDialogueStateM
         "main dialogue no-op state handler changed"
     );
 
-    let code_regions = MAIN_DIALOGUE_PREFIX_CODE_REGIONS
+    let code_regions = MAIN_DIALOGUE_STATE_CODE_REGIONS
         .iter()
         .map(|region| {
             let file_offset =
                 switchable_cpu_to_file_offset(MAIN_DIALOGUE_PRG_BANK, region.cpu_address)?;
             let end = file_offset
                 .checked_add(region.bytes.len())
-                .context("main dialogue prefix code range overflow")?;
+                .context("main dialogue state code range overflow")?;
             ensure!(
                 source.get(file_offset..end) == Some(region.bytes),
-                "main dialogue prefix code {} changed",
+                "main dialogue state code {} changed",
                 region.role
             );
             Ok(CodeRegionReport {
@@ -861,6 +952,56 @@ fn build_main_dialogue_state_machine(source: &[u8]) -> Result<MainDialogueStateM
             })
         })
         .collect::<Result<Vec<_>>>()?;
+    let pointer_resolver_file_offset =
+        fixed_cpu_to_file_offset(MAIN_DIALOGUE_POINTER_RESOLVER_CPU_ADDRESS)?;
+    let pointer_resolver_end = pointer_resolver_file_offset
+        .checked_add(MAIN_DIALOGUE_POINTER_RESOLVER_CODE.len())
+        .context("main dialogue pointer resolver range overflow")?;
+    ensure!(
+        source.get(pointer_resolver_file_offset..pointer_resolver_end)
+            == Some(MAIN_DIALOGUE_POINTER_RESOLVER_CODE),
+        "main dialogue pointer resolver changed"
+    );
+    let caller_flag_load_candidates = CALLER_HANDOFF_OBSERVER_SPECS
+        .iter()
+        .map(|observer| {
+            let file_offset =
+                switchable_cpu_to_file_offset(observer.prg_bank, observer.cpu_address)?;
+            let end = file_offset
+                .checked_add(CALLER_HANDOFF_FLAG_LOAD.len())
+                .context("caller handoff flag load range overflow")?;
+            ensure!(
+                source.get(file_offset..end) == Some(&CALLER_HANDOFF_FLAG_LOAD),
+                "caller handoff flag load changed at bank {:02X}:{:04X}",
+                observer.prg_bank,
+                observer.cpu_address
+            );
+            Ok(CallerHandoffObserverReport {
+                prg_bank: observer.prg_bank,
+                prg_bank_hex: format!("0x{:02X}", observer.prg_bank),
+                cpu_address: observer.cpu_address,
+                cpu_address_hex: format!("0x{:04X}", observer.cpu_address),
+                file_offset,
+                file_offset_hex: format!("0x{file_offset:05X}"),
+                instruction: "LDA $7809",
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let actual_caller_flag_load_offsets = source[HEADER_SIZE..HEADER_SIZE + PRG_SIZE]
+        .windows(CALLER_HANDOFF_FLAG_LOAD.len())
+        .enumerate()
+        .filter_map(|(relative_offset, bytes)| {
+            (bytes == CALLER_HANDOFF_FLAG_LOAD).then_some(HEADER_SIZE + relative_offset)
+        })
+        .collect::<Vec<_>>();
+    let expected_caller_flag_load_offsets = caller_flag_load_candidates
+        .iter()
+        .map(|candidate| candidate.file_offset)
+        .collect::<Vec<_>>();
+    ensure!(
+        actual_caller_flag_load_offsets == expected_caller_flag_load_offsets,
+        "caller handoff flag load candidate set changed"
+    );
 
     Ok(MainDialogueStateMachineReport {
         prg_bank: MAIN_DIALOGUE_PRG_BANK,
@@ -889,6 +1030,25 @@ fn build_main_dialogue_state_machine(source: &[u8]) -> Result<MainDialogueStateM
             optional_e8_prefix_code: OPTIONAL_E8_PREFIX_CODE,
             optional_e8_prefix_code_hex: format!("{OPTIONAL_E8_PREFIX_CODE:02X}"),
             optional_e8_prefix_byte_count: OPTIONAL_PREFIX_BYTE_COUNT,
+        },
+        caller_handoff_contract: CallerHandoffContract {
+            control_code: 0xE7,
+            control_code_hex: "E7".to_owned(),
+            decoder_flag_address: 0x7808,
+            decoder_flag_address_hex: "0x7808".to_owned(),
+            caller_flag_address: 0x7809,
+            caller_flag_address_hex: "0x7809".to_owned(),
+            handoff_state: 17,
+            resume_state: 9,
+            pointer_resolver_cpu_address: MAIN_DIALOGUE_POINTER_RESOLVER_CPU_ADDRESS,
+            pointer_resolver_cpu_address_hex: format!(
+                "0x{MAIN_DIALOGUE_POINTER_RESOLVER_CPU_ADDRESS:04X}"
+            ),
+            pointer_resolver_file_offset,
+            pointer_resolver_file_offset_hex: format!("0x{pointer_resolver_file_offset:05X}"),
+            pointer_resolver_code_sha1: sha1_hex(MAIN_DIALOGUE_POINTER_RESOLVER_CODE),
+            caller_flag_load_candidate_count: caller_flag_load_candidates.len(),
+            caller_flag_load_candidates,
         },
         code_regions,
     })
@@ -1442,7 +1602,7 @@ fn scan_main_linear_segment(
                 boundary_control_hex: format!("{boundary_control:02X}"),
                 boundary_kind: match boundary_control {
                     0xEF => "terminal",
-                    0xE7 => "interactive_branch",
+                    0xE7 => "caller_handoff",
                     0xE4 | 0xE6 => "transition_target",
                     _ => unreachable!("declared boundary code is not classified"),
                 },
@@ -1463,7 +1623,7 @@ fn scan_main_linear_segment(
     }
 
     anyhow::bail!(
-        "{table_id} entry {entry_index} exceeds {MAX_MAIN_LINEAR_SEGMENT_LINES} linear lines without a terminal, interactive, or transition boundary"
+        "{table_id} entry {entry_index} exceeds {MAX_MAIN_LINEAR_SEGMENT_LINES} linear lines without a terminal, caller-handoff, or transition boundary"
     )
 }
 
@@ -1620,8 +1780,8 @@ fn build_main_dialogue_graph(tables: &[DialogueTableReport]) -> Result<MainDialo
         node_count: states.len(),
         transition_edge_count: transition_edges.len(),
         terminal_reachable_node_count: closure.terminal_reachable_node_count,
-        interactive_boundary_reachable_node_count: closure
-            .interactive_boundary_reachable_node_count,
+        caller_handoff_boundary_reachable_node_count: closure
+            .caller_handoff_boundary_reachable_node_count,
         max_transition_edge_count_to_boundary: closure.max_transition_edge_count_to_boundary,
         cycle_count: 0,
         unresolved_node_count: 0,
@@ -1633,7 +1793,7 @@ fn classify_main_dialogue_graph(
     states: &BTreeMap<MainDialogueGraphNodeKey, MainDialogueGraphNodeState>,
 ) -> Result<MainDialogueGraphClosure> {
     let mut terminal_reachable_node_count = 0;
-    let mut interactive_boundary_reachable_node_count = 0;
+    let mut caller_handoff_boundary_reachable_node_count = 0;
     let mut max_transition_edge_count_to_boundary = 0;
 
     for start in states.keys().copied() {
@@ -1665,9 +1825,9 @@ fn classify_main_dialogue_graph(
                 0xE7 => {
                     ensure!(
                         state.transition_target.is_none(),
-                        "interactive graph node has a transition target"
+                        "caller-handoff graph node has a transition target"
                     );
-                    interactive_boundary_reachable_node_count += 1;
+                    caller_handoff_boundary_reachable_node_count += 1;
                     break;
                 }
                 0xE4 | 0xE6 => {
@@ -1684,12 +1844,13 @@ fn classify_main_dialogue_graph(
     }
 
     ensure!(
-        terminal_reachable_node_count + interactive_boundary_reachable_node_count == states.len(),
+        terminal_reachable_node_count + caller_handoff_boundary_reachable_node_count
+            == states.len(),
         "main dialogue graph closure does not cover every node"
     );
     Ok(MainDialogueGraphClosure {
         terminal_reachable_node_count,
-        interactive_boundary_reachable_node_count,
+        caller_handoff_boundary_reachable_node_count,
         max_transition_edge_count_to_boundary,
     })
 }
@@ -1946,10 +2107,21 @@ mod tests {
             let offset = handler_table_file_offset + state * 2;
             source[offset..offset + 2].copy_from_slice(&handler.to_le_bytes());
         }
-        for region in &MAIN_DIALOGUE_PREFIX_CODE_REGIONS {
+        for region in &MAIN_DIALOGUE_STATE_CODE_REGIONS {
             let file_offset =
                 switchable_cpu_to_file_offset(MAIN_DIALOGUE_PRG_BANK, region.cpu_address).unwrap();
             source[file_offset..file_offset + region.bytes.len()].copy_from_slice(region.bytes);
+        }
+        let pointer_resolver_file_offset =
+            fixed_cpu_to_file_offset(MAIN_DIALOGUE_POINTER_RESOLVER_CPU_ADDRESS).unwrap();
+        source[pointer_resolver_file_offset
+            ..pointer_resolver_file_offset + MAIN_DIALOGUE_POINTER_RESOLVER_CODE.len()]
+            .copy_from_slice(MAIN_DIALOGUE_POINTER_RESOLVER_CODE);
+        for observer in CALLER_HANDOFF_OBSERVER_SPECS {
+            let file_offset =
+                switchable_cpu_to_file_offset(observer.prg_bank, observer.cpu_address).unwrap();
+            source[file_offset..file_offset + CALLER_HANDOFF_FLAG_LOAD.len()]
+                .copy_from_slice(&CALLER_HANDOFF_FLAG_LOAD);
         }
         let no_op_file_offset = fixed_cpu_to_file_offset(MAIN_DIALOGUE_STATE_HANDLERS[0]).unwrap();
         source[no_op_file_offset] = 0x60;
@@ -1975,7 +2147,7 @@ mod tests {
     }
 
     #[test]
-    fn validates_the_main_dialogue_state_dispatch_and_prefix_code() {
+    fn validates_main_dialogue_state_dispatch_prefix_and_handoff() {
         let mut source = synthetic_source();
         write_main_dialogue_state_machine(&mut source);
 
@@ -1996,13 +2168,38 @@ mod tests {
             report.record_prefix_contract.optional_e8_prefix_byte_count,
             6
         );
+        assert_eq!(report.caller_handoff_contract.control_code, 0xE7);
+        assert_eq!(report.caller_handoff_contract.handoff_state, 17);
+        assert_eq!(report.caller_handoff_contract.resume_state, 9);
+        assert_eq!(
+            report
+                .caller_handoff_contract
+                .caller_flag_load_candidate_count,
+            5
+        );
 
         let e5_file_offset = switchable_cpu_to_file_offset(MAIN_DIALOGUE_PRG_BANK, 0x80A2).unwrap();
         source[e5_file_offset + 9] ^= 0x01;
         let error = build_main_dialogue_state_machine(&source)
             .unwrap_err()
             .to_string();
-        assert!(error.contains("prefix code inspect_and_consume_optional_E5_prefix changed"));
+        assert!(error.contains("state code inspect_and_consume_optional_E5_prefix changed"));
+    }
+
+    #[test]
+    fn rejects_a_changed_caller_handoff_observer_set() {
+        let mut source = synthetic_source();
+        write_main_dialogue_state_machine(&mut source);
+        let observer = CALLER_HANDOFF_OBSERVER_SPECS[0];
+        let observer_file_offset =
+            switchable_cpu_to_file_offset(observer.prg_bank, observer.cpu_address).unwrap();
+        source[observer_file_offset] = 0xEA;
+
+        let error = build_main_dialogue_state_machine(&source)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("caller handoff flag load changed"));
     }
 
     #[test]
@@ -2136,7 +2333,7 @@ mod tests {
     }
 
     #[test]
-    fn closes_transition_chains_at_terminal_and_interactive_boundaries() {
+    fn closes_transition_chains_at_terminal_and_caller_handoff_boundaries() {
         let first = MainDialogueGraphNodeKey {
             table_index: 0,
             pointer_cpu_address: 0x8200,
@@ -2149,7 +2346,7 @@ mod tests {
             table_index: 1,
             pointer_cpu_address: 0x8400,
         };
-        let interactive = MainDialogueGraphNodeKey {
+        let caller_handoff = MainDialogueGraphNodeKey {
             table_index: 1,
             pointer_cpu_address: 0x8500,
         };
@@ -2176,7 +2373,7 @@ mod tests {
                 },
             ),
             (
-                interactive,
+                caller_handoff,
                 MainDialogueGraphNodeState {
                     boundary_control: 0xE7,
                     transition_target: None,
@@ -2187,7 +2384,7 @@ mod tests {
         let closure = classify_main_dialogue_graph(&states).unwrap();
 
         assert_eq!(closure.terminal_reachable_node_count, 3);
-        assert_eq!(closure.interactive_boundary_reachable_node_count, 1);
+        assert_eq!(closure.caller_handoff_boundary_reachable_node_count, 1);
         assert_eq!(closure.max_transition_edge_count_to_boundary, 2);
     }
 
