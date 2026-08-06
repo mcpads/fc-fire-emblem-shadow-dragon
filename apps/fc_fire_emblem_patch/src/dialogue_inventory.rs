@@ -145,28 +145,170 @@ const CALLER_HANDOFF_FLAG_LOAD: [u8; 3] = [0xAD, 0x09, 0x78];
 struct CallerHandoffObserverSpec {
     prg_bank: u8,
     cpu_address: u16,
+    handler_cpu_address: u16,
 }
 
 const CALLER_HANDOFF_OBSERVER_SPECS: [CallerHandoffObserverSpec; 5] = [
     CallerHandoffObserverSpec {
         prg_bank: 0x02,
         cpu_address: 0xA978,
+        handler_cpu_address: 0xA975,
     },
     CallerHandoffObserverSpec {
         prg_bank: 0x04,
         cpu_address: 0xA223,
+        handler_cpu_address: 0xA20F,
     },
     CallerHandoffObserverSpec {
         prg_bank: 0x04,
         cpu_address: 0xA242,
+        handler_cpu_address: 0xA233,
     },
     CallerHandoffObserverSpec {
         prg_bank: 0x06,
         cpu_address: 0xA141,
+        handler_cpu_address: 0xA13E,
     },
     CallerHandoffObserverSpec {
         prg_bank: 0x0B,
         cpu_address: 0x9B1D,
+        handler_cpu_address: 0x9B14,
+    },
+];
+
+#[derive(Clone, Copy)]
+struct CallerHandoffDispatchSpec {
+    prg_bank: u8,
+    state_address: u16,
+    dispatcher_cpu_address: u16,
+    handler_table_cpu_address: u16,
+    handler_cpu_address: u16,
+    handlers: &'static [u16],
+    handler_state_indices: &'static [usize],
+}
+
+const CALLER_HANDOFF_DISPATCH_SPECS: [CallerHandoffDispatchSpec; 11] = [
+    CallerHandoffDispatchSpec {
+        prg_bank: 0x02,
+        state_address: 0x05DB,
+        dispatcher_cpu_address: 0xA780,
+        handler_table_cpu_address: 0xA786,
+        handler_cpu_address: 0xA975,
+        handlers: &[0xA792, 0xA975, 0xA98C, 0xA7B9, 0xA7C9, 0xA961],
+        handler_state_indices: &[1],
+    },
+    CallerHandoffDispatchSpec {
+        prg_bank: 0x04,
+        state_address: 0x7731,
+        dispatcher_cpu_address: 0x9F15,
+        handler_table_cpu_address: 0x9F1B,
+        handler_cpu_address: 0xA233,
+        handlers: &[
+            0xA3A5, 0xA3E0, 0x9FED, 0xA054, 0xA0E9, 0x9FFA, 0xA011, 0xA02D, 0xA054, 0xA071, 0x9F64,
+            0x9F83, 0xA054, 0x9F57, 0xA123, 0xA165, 0xA233, 0xA252, 0xA25D, 0xA269, 0xA27E, 0xA294,
+            0xA384, 0x9FCA, 0xA02D, 0xA054, 0xA0D3, 0xA508, 0xA535, 0xC73D,
+        ],
+        handler_state_indices: &[16],
+    },
+    CallerHandoffDispatchSpec {
+        prg_bank: 0x06,
+        state_address: 0x05DB,
+        dispatcher_cpu_address: 0x9595,
+        handler_table_cpu_address: 0x959B,
+        handler_cpu_address: 0xA13E,
+        handlers: &[0xA122, 0xA13E, 0x95A9, 0xA122, 0x9D3C, 0x9D5E, 0x98AC],
+        handler_state_indices: &[1],
+    },
+    CallerHandoffDispatchSpec {
+        prg_bank: 0x06,
+        state_address: 0x05DB,
+        dispatcher_cpu_address: 0x99AC,
+        handler_table_cpu_address: 0x99B2,
+        handler_cpu_address: 0xA13E,
+        handlers: &[
+            0x99CC, 0xA13E, 0x99F1, 0x99FB, 0x9A0E, 0xA13E, 0x9B7A, 0x9B86, 0xA122, 0x9C02, 0xA13E,
+            0x9B7A, 0x9C1A,
+        ],
+        handler_state_indices: &[1, 5, 10],
+    },
+    CallerHandoffDispatchSpec {
+        prg_bank: 0x06,
+        state_address: 0x05DB,
+        dispatcher_cpu_address: 0x9C63,
+        handler_table_cpu_address: 0x9C69,
+        handler_cpu_address: 0xA13E,
+        handlers: &[
+            0x99CC, 0xA13E, 0x9B7A, 0x9C8B, 0x9CC5, 0xA13E, 0x9B7A, 0x9CD4, 0xA13E, 0x9D25, 0x9D2E,
+            0x9D3C, 0x9D5E, 0x9D6A, 0xA13E, 0x9D8E, 0xA122,
+        ],
+        handler_state_indices: &[1, 5, 8, 14],
+    },
+    CallerHandoffDispatchSpec {
+        prg_bank: 0x06,
+        state_address: 0x05DB,
+        dispatcher_cpu_address: 0x9DBE,
+        handler_table_cpu_address: 0x9DC4,
+        handler_cpu_address: 0xA13E,
+        handlers: &[
+            0x99CC, 0xA13E, 0x99F1, 0x9E07, 0x9E15, 0xA13E, 0x9EAC, 0x9EC1, 0xA13E, 0x9DE6, 0x9F16,
+            0x9F99, 0x9C02, 0xA13E, 0x9B7A, 0xA07D, 0xA122,
+        ],
+        handler_state_indices: &[1, 5, 8, 13],
+    },
+    CallerHandoffDispatchSpec {
+        prg_bank: 0x06,
+        state_address: 0x05DB,
+        dispatcher_cpu_address: 0xB10D,
+        handler_table_cpu_address: 0xB113,
+        handler_cpu_address: 0xA13E,
+        handlers: &[
+            0xB125, 0xA13E, 0xB17A, 0xB182, 0xB19C, 0xA13E, 0xB1F7, 0xB210, 0xA122,
+        ],
+        handler_state_indices: &[1, 5],
+    },
+    CallerHandoffDispatchSpec {
+        prg_bank: 0x06,
+        state_address: 0x05DB,
+        dispatcher_cpu_address: 0xB7F1,
+        handler_table_cpu_address: 0xB7F7,
+        handler_cpu_address: 0xA13E,
+        handlers: &[0xB7FD, 0xA13E, 0xB858],
+        handler_state_indices: &[1],
+    },
+    CallerHandoffDispatchSpec {
+        prg_bank: 0x0B,
+        state_address: 0x05EE,
+        dispatcher_cpu_address: 0x995F,
+        handler_table_cpu_address: 0x9965,
+        handler_cpu_address: 0x9B14,
+        handlers: &[
+            0xC73D, 0x9985, 0x9A33, 0x9A99, 0x9AFC, 0x9B14, 0x9B2B, 0x9B35, 0x9B8A, 0x9B14, 0x9BA0,
+            0x9BCF, 0x9C17, 0x9C09, 0x9CF0, 0x9D0C,
+        ],
+        handler_state_indices: &[5, 9],
+    },
+    CallerHandoffDispatchSpec {
+        prg_bank: 0x0B,
+        state_address: 0x05EE,
+        dispatcher_cpu_address: 0xA01C,
+        handler_table_cpu_address: 0xA022,
+        handler_cpu_address: 0x9B14,
+        handlers: &[
+            0xC73D, 0xA09F, 0x9B14, 0x9B2B, 0x9B35, 0xA03E, 0xA067, 0xA073, 0xC075, 0xA088, 0xA03E,
+            0xA06A, 0xA076, 0xC075,
+        ],
+        handler_state_indices: &[2],
+    },
+    CallerHandoffDispatchSpec {
+        prg_bank: 0x0B,
+        state_address: 0x05EE,
+        dispatcher_cpu_address: 0xB369,
+        handler_table_cpu_address: 0xB36F,
+        handler_cpu_address: 0x9B14,
+        handlers: &[
+            0xC73D, 0xB383, 0x9B14, 0x9B2B, 0xB3C0, 0xB3DC, 0xB3F8, 0x9B14, 0xB421, 0xC075,
+        ],
+        handler_state_indices: &[2, 7],
     },
 ];
 
@@ -577,6 +719,10 @@ struct CallerHandoffContract {
     pointer_resolver_file_offset_hex: String,
     pointer_resolver_code_sha1: String,
     caller_flag_load_candidate_count: usize,
+    direct_dispatch_bound_observer_count: usize,
+    direct_dispatch_unbound_observer_count: usize,
+    confirmed_direct_dispatch_binding_count: usize,
+    confirmed_direct_handler_slot_count: usize,
     caller_flag_load_candidates: Vec<CallerHandoffObserverReport>,
 }
 
@@ -589,6 +735,28 @@ struct CallerHandoffObserverReport {
     file_offset: usize,
     file_offset_hex: String,
     instruction: &'static str,
+    handler_cpu_address: u16,
+    handler_cpu_address_hex: String,
+    direct_dispatch_bindings: Vec<CallerHandoffDispatchBindingReport>,
+}
+
+#[derive(Debug, Serialize)]
+struct CallerHandoffDispatchBindingReport {
+    state_address: u16,
+    state_address_hex: String,
+    dispatcher_cpu_address: u16,
+    dispatcher_cpu_address_hex: String,
+    dispatcher_file_offset: usize,
+    dispatcher_file_offset_hex: String,
+    handler_table_cpu_address: u16,
+    handler_table_cpu_address_hex: String,
+    handler_table_file_offset: usize,
+    handler_table_file_offset_hex: String,
+    handler_table_sha1: String,
+    handler_count: usize,
+    handler_cpu_address: u16,
+    handler_cpu_address_hex: String,
+    handler_state_indices: Vec<usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -904,12 +1072,12 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
     };
 
     Ok(DialogueStructureReport {
-        schema_version: 7,
+        schema_version: 8,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             translation_direction: "ja_to_ko",
             preserve_existing_english: true,
-            proof_boundary: "exact pointer-table ranges, switchable-bank target mapping, aliases, all nine consumer roots, the selector-41 epilogue-routing use, the main dialogue record-prefix state path, every main entry's initial linear segment, all explicit E4/E6 graph edges, and the E7 caller-handoff contract; no dialogue bytes or translations are emitted",
+            proof_boundary: "exact pointer-table ranges, switchable-bank target mapping, aliases, all nine consumer roots, the selector-41 epilogue-routing use, the main dialogue record-prefix state path, every main entry's initial linear segment, all explicit E4/E6 graph edges, the E7 caller-handoff contract, and eleven confirmed direct outer dispatch bindings; no dialogue bytes or translations are emitted",
         },
         summary,
         main_dialogue_state_machine,
@@ -918,6 +1086,7 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
         unknowns: vec![
             "Script targets are entry starts, not proven script byte ranges; declared code handlers are kept separate.",
             "The E5, fixed four-byte, and E8 record prefix, each initial linear segment, all E4/E6 graph edges, and the E7 caller handoff are confirmed, but caller-specific outcomes after the handoff remain unresolved.",
+            "Eleven direct outer dispatch bindings reuse four observer handlers across twenty-two state slots; indirect bindings are not excluded, and bank 04:A20F has no confirmed direct dispatch binding.",
             "Ten of the eighteen main dialogue state handlers remain structurally named but semantically unresolved.",
             "Role labels began as external map candidates and do not prove every entry's gameplay context.",
             "Existing English and numeric content remains protected and is not a translation target.",
@@ -1037,6 +1206,8 @@ fn build_main_dialogue_state_machine(source: &[u8]) -> Result<MainDialogueStateM
                 observer.prg_bank,
                 observer.cpu_address
             );
+            let direct_dispatch_bindings =
+                build_caller_handoff_dispatch_bindings(source, *observer)?;
             Ok(CallerHandoffObserverReport {
                 prg_bank: observer.prg_bank,
                 prg_bank_hex: format!("0x{:02X}", observer.prg_bank),
@@ -1045,6 +1216,9 @@ fn build_main_dialogue_state_machine(source: &[u8]) -> Result<MainDialogueStateM
                 file_offset,
                 file_offset_hex: format!("0x{file_offset:05X}"),
                 instruction: "LDA $7809",
+                handler_cpu_address: observer.handler_cpu_address,
+                handler_cpu_address_hex: format!("0x{:04X}", observer.handler_cpu_address),
+                direct_dispatch_bindings,
             })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -1062,6 +1236,25 @@ fn build_main_dialogue_state_machine(source: &[u8]) -> Result<MainDialogueStateM
     ensure!(
         actual_caller_flag_load_offsets == expected_caller_flag_load_offsets,
         "caller handoff flag load candidate set changed"
+    );
+    let direct_dispatch_bound_observer_count = caller_flag_load_candidates
+        .iter()
+        .filter(|candidate| !candidate.direct_dispatch_bindings.is_empty())
+        .count();
+    let direct_dispatch_unbound_observer_count =
+        caller_flag_load_candidates.len() - direct_dispatch_bound_observer_count;
+    let confirmed_direct_dispatch_binding_count = caller_flag_load_candidates
+        .iter()
+        .map(|candidate| candidate.direct_dispatch_bindings.len())
+        .sum();
+    let confirmed_direct_handler_slot_count = caller_flag_load_candidates
+        .iter()
+        .flat_map(|candidate| &candidate.direct_dispatch_bindings)
+        .map(|binding| binding.handler_state_indices.len())
+        .sum();
+    ensure!(
+        confirmed_direct_dispatch_binding_count == CALLER_HANDOFF_DISPATCH_SPECS.len(),
+        "caller handoff dispatch specification is not bound to exactly one observer"
     );
 
     Ok(MainDialogueStateMachineReport {
@@ -1109,10 +1302,122 @@ fn build_main_dialogue_state_machine(source: &[u8]) -> Result<MainDialogueStateM
             pointer_resolver_file_offset_hex: format!("0x{pointer_resolver_file_offset:05X}"),
             pointer_resolver_code_sha1: sha1_hex(MAIN_DIALOGUE_POINTER_RESOLVER_CODE),
             caller_flag_load_candidate_count: caller_flag_load_candidates.len(),
+            direct_dispatch_bound_observer_count,
+            direct_dispatch_unbound_observer_count,
+            confirmed_direct_dispatch_binding_count,
+            confirmed_direct_handler_slot_count,
             caller_flag_load_candidates,
         },
         code_regions,
     })
+}
+
+fn build_caller_handoff_dispatch_bindings(
+    source: &[u8],
+    observer: CallerHandoffObserverSpec,
+) -> Result<Vec<CallerHandoffDispatchBindingReport>> {
+    ensure!(
+        observer.cpu_address >= observer.handler_cpu_address,
+        "caller handoff observer precedes its declared handler"
+    );
+
+    CALLER_HANDOFF_DISPATCH_SPECS
+        .iter()
+        .filter(|spec| {
+            spec.prg_bank == observer.prg_bank
+                && spec.handler_cpu_address == observer.handler_cpu_address
+        })
+        .map(|spec| {
+            ensure!(
+                !spec.handlers.is_empty(),
+                "caller handoff dispatcher declares no handlers"
+            );
+            ensure!(
+                !spec.handler_state_indices.is_empty(),
+                "caller handoff dispatcher declares no observer handler states"
+            );
+            ensure!(
+                spec.handler_table_cpu_address
+                    == spec
+                        .dispatcher_cpu_address
+                        .checked_add(6)
+                        .context("caller handoff dispatcher address overflow")?,
+                "caller handoff handler table does not immediately follow its dispatcher"
+            );
+            let [state_low, state_high] = spec.state_address.to_le_bytes();
+            let dispatcher_code = [0xAD, state_low, state_high, 0x20, 0x4C, 0xC3];
+            let dispatcher_file_offset =
+                switchable_cpu_to_file_offset(spec.prg_bank, spec.dispatcher_cpu_address)?;
+            let dispatcher_end = dispatcher_file_offset
+                .checked_add(dispatcher_code.len())
+                .context("caller handoff dispatcher range overflow")?;
+            ensure!(
+                source.get(dispatcher_file_offset..dispatcher_end) == Some(&dispatcher_code),
+                "caller handoff dispatcher changed at bank {:02X}:{:04X}",
+                spec.prg_bank,
+                spec.dispatcher_cpu_address
+            );
+
+            let handler_table_file_offset =
+                switchable_cpu_to_file_offset(spec.prg_bank, spec.handler_table_cpu_address)?;
+            let handler_table_byte_count = spec
+                .handlers
+                .len()
+                .checked_mul(2)
+                .context("caller handoff handler table length overflow")?;
+            let handler_table_end = handler_table_file_offset
+                .checked_add(handler_table_byte_count)
+                .context("caller handoff handler table range overflow")?;
+            ensure!(
+                handler_table_end <= switchable_bank_file_start(spec.prg_bank) + PRG_BANK_SIZE,
+                "caller handoff handler table crosses its switchable bank"
+            );
+            let handler_table_bytes = source
+                .get(handler_table_file_offset..handler_table_end)
+                .context("caller handoff handler table is outside the source")?;
+            let actual_handlers = handler_table_bytes
+                .chunks_exact(2)
+                .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
+                .collect::<Vec<_>>();
+            ensure!(
+                actual_handlers == spec.handlers,
+                "caller handoff handler table changed at bank {:02X}:{:04X}",
+                spec.prg_bank,
+                spec.handler_table_cpu_address
+            );
+            let actual_handler_state_indices = actual_handlers
+                .iter()
+                .enumerate()
+                .filter_map(|(state, handler)| {
+                    (*handler == spec.handler_cpu_address).then_some(state)
+                })
+                .collect::<Vec<_>>();
+            ensure!(
+                actual_handler_state_indices == spec.handler_state_indices,
+                "caller handoff handler-state binding changed at bank {:02X}:{:04X}",
+                spec.prg_bank,
+                spec.handler_table_cpu_address
+            );
+
+            Ok(CallerHandoffDispatchBindingReport {
+                state_address: spec.state_address,
+                state_address_hex: format!("0x{:04X}", spec.state_address),
+                dispatcher_cpu_address: spec.dispatcher_cpu_address,
+                dispatcher_cpu_address_hex: format!("0x{:04X}", spec.dispatcher_cpu_address),
+                dispatcher_file_offset,
+                dispatcher_file_offset_hex: format!("0x{dispatcher_file_offset:05X}"),
+                handler_table_cpu_address: spec.handler_table_cpu_address,
+                handler_table_cpu_address_hex: format!("0x{:04X}", spec.handler_table_cpu_address),
+                handler_table_file_offset,
+                handler_table_file_offset_hex: format!("0x{handler_table_file_offset:05X}"),
+                handler_table_sha1: sha1_hex(handler_table_bytes),
+                handler_count: actual_handlers.len(),
+                handler_cpu_address: spec.handler_cpu_address,
+                handler_cpu_address_hex: format!("0x{:04X}", spec.handler_cpu_address),
+                handler_state_indices: actual_handler_state_indices,
+            })
+        })
+        .collect()
 }
 
 fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<DialogueTableReport> {
@@ -2229,6 +2534,23 @@ mod tests {
             source[file_offset..file_offset + CALLER_HANDOFF_FLAG_LOAD.len()]
                 .copy_from_slice(&CALLER_HANDOFF_FLAG_LOAD);
         }
+        for dispatch in CALLER_HANDOFF_DISPATCH_SPECS {
+            let dispatcher_file_offset =
+                switchable_cpu_to_file_offset(dispatch.prg_bank, dispatch.dispatcher_cpu_address)
+                    .unwrap();
+            let [state_low, state_high] = dispatch.state_address.to_le_bytes();
+            source[dispatcher_file_offset..dispatcher_file_offset + 6]
+                .copy_from_slice(&[0xAD, state_low, state_high, 0x20, 0x4C, 0xC3]);
+            let handler_table_file_offset = switchable_cpu_to_file_offset(
+                dispatch.prg_bank,
+                dispatch.handler_table_cpu_address,
+            )
+            .unwrap();
+            for (state, handler) in dispatch.handlers.iter().enumerate() {
+                let offset = handler_table_file_offset + state * 2;
+                source[offset..offset + 2].copy_from_slice(&handler.to_le_bytes());
+            }
+        }
         let no_op_file_offset = fixed_cpu_to_file_offset(MAIN_DIALOGUE_STATE_HANDLERS[0]).unwrap();
         source[no_op_file_offset] = 0x60;
     }
@@ -2283,6 +2605,35 @@ mod tests {
                 .caller_flag_load_candidate_count,
             5
         );
+        assert_eq!(
+            report
+                .caller_handoff_contract
+                .direct_dispatch_bound_observer_count,
+            4
+        );
+        assert_eq!(
+            report
+                .caller_handoff_contract
+                .direct_dispatch_unbound_observer_count,
+            1
+        );
+        assert_eq!(
+            report
+                .caller_handoff_contract
+                .confirmed_direct_dispatch_binding_count,
+            11
+        );
+        assert_eq!(
+            report
+                .caller_handoff_contract
+                .confirmed_direct_handler_slot_count,
+            22
+        );
+        assert!(
+            report.caller_handoff_contract.caller_flag_load_candidates[1]
+                .direct_dispatch_bindings
+                .is_empty()
+        );
 
         let e5_file_offset = switchable_cpu_to_file_offset(MAIN_DIALOGUE_PRG_BANK, 0x80A2).unwrap();
         source[e5_file_offset + 9] ^= 0x01;
@@ -2306,6 +2657,23 @@ mod tests {
             .to_string();
 
         assert!(error.contains("caller handoff flag load changed"));
+    }
+
+    #[test]
+    fn rejects_a_changed_caller_handoff_dispatch_table() {
+        let mut source = synthetic_source();
+        write_main_dialogue_state_machine(&mut source);
+        let dispatch = CALLER_HANDOFF_DISPATCH_SPECS[0];
+        let handler_table_file_offset =
+            switchable_cpu_to_file_offset(dispatch.prg_bank, dispatch.handler_table_cpu_address)
+                .unwrap();
+        source[handler_table_file_offset] ^= 0x01;
+
+        let error = build_main_dialogue_state_machine(&source)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("caller handoff handler table changed"));
     }
 
     #[test]
