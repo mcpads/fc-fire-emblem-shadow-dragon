@@ -113,7 +113,7 @@ struct DialogueTableSpec {
     data_file_start: usize,
     directory_group: Option<u8>,
     separate_consumer: Option<SeparateConsumerSpec>,
-    allowed_fixed_handlers: &'static [FixedHandlerSpec],
+    allowed_handler_targets: &'static [HandlerTargetSpec],
 }
 
 #[derive(Clone, Copy)]
@@ -128,13 +128,22 @@ struct SeparateConsumerSpec {
     destination_pointer: &'static str,
 }
 
-struct FixedHandlerSpec {
+struct HandlerTargetSpec {
     cpu_address: u16,
     role: &'static str,
     expected_code: &'static [u8],
 }
 
-const NO_FIXED_HANDLERS: &[FixedHandlerSpec] = &[];
+const NO_HANDLER_TARGETS: &[HandlerTargetSpec] = &[];
+const RECRUITMENT_HANDLER_TARGETS: &[HandlerTargetSpec] = &[HandlerTargetSpec {
+    cpu_address: 0xAA2B,
+    role: "recruitment_non_dialogue_handler",
+    expected_code: &[
+        0xA9, 0x00, 0x85, 0xD0, 0x20, 0x4A, 0xAA, 0x20, 0x36, 0xC3, 0xE6, 0x30, 0xA9, 0x00, 0x85,
+        0x20, 0x85, 0xD0, 0xA5, 0x20, 0xD0, 0x03, 0x4C, 0x3D, 0xAA, 0x20, 0x4E, 0xC0, 0x4C, 0x2B,
+        0xAA,
+    ],
+}];
 
 const BATTLE_DIALOGUE_CONSUMER: SeparateConsumerSpec = SeparateConsumerSpec {
     prg_bank: 0x04,
@@ -164,7 +173,7 @@ const DIALOGUE_TABLE_SPECS: [DialogueTableSpec; 8] = [
         data_file_start: 0x21FA1,
         directory_group: Some(0),
         separate_consumer: None,
-        allowed_fixed_handlers: NO_FIXED_HANDLERS,
+        allowed_handler_targets: NO_HANDLER_TARGETS,
     },
     DialogueTableSpec {
         id: "village-and-outro-dialogue",
@@ -175,7 +184,7 @@ const DIALOGUE_TABLE_SPECS: [DialogueTableSpec; 8] = [
         data_file_start: 0x300CC,
         directory_group: Some(0),
         separate_consumer: None,
-        allowed_fixed_handlers: NO_FIXED_HANDLERS,
+        allowed_handler_targets: NO_HANDLER_TARGETS,
     },
     DialogueTableSpec {
         id: "recruitment-dialogue",
@@ -186,7 +195,7 @@ const DIALOGUE_TABLE_SPECS: [DialogueTableSpec; 8] = [
         data_file_start: 0x1C93D,
         directory_group: Some(1),
         separate_consumer: None,
-        allowed_fixed_handlers: NO_FIXED_HANDLERS,
+        allowed_handler_targets: RECRUITMENT_HANDLER_TARGETS,
     },
     DialogueTableSpec {
         id: "victory-and-defeat-dialogue",
@@ -197,7 +206,7 @@ const DIALOGUE_TABLE_SPECS: [DialogueTableSpec; 8] = [
         data_file_start: 0x2DDAB,
         directory_group: Some(0),
         separate_consumer: None,
-        allowed_fixed_handlers: NO_FIXED_HANDLERS,
+        allowed_handler_targets: NO_HANDLER_TARGETS,
     },
     DialogueTableSpec {
         id: "shop-and-item-dialogue",
@@ -208,7 +217,7 @@ const DIALOGUE_TABLE_SPECS: [DialogueTableSpec; 8] = [
         data_file_start: 0x2E826,
         directory_group: Some(1),
         separate_consumer: None,
-        allowed_fixed_handlers: NO_FIXED_HANDLERS,
+        allowed_handler_targets: NO_HANDLER_TARGETS,
     },
     DialogueTableSpec {
         id: "house-dialogue",
@@ -219,7 +228,7 @@ const DIALOGUE_TABLE_SPECS: [DialogueTableSpec; 8] = [
         data_file_start: 0x0E4DB,
         directory_group: Some(0),
         separate_consumer: None,
-        allowed_fixed_handlers: NO_FIXED_HANDLERS,
+        allowed_handler_targets: NO_HANDLER_TARGETS,
     },
     DialogueTableSpec {
         id: "battle-dialogue",
@@ -230,7 +239,7 @@ const DIALOGUE_TABLE_SPECS: [DialogueTableSpec; 8] = [
         data_file_start: 0x104ED,
         directory_group: None,
         separate_consumer: Some(BATTLE_DIALOGUE_CONSUMER),
-        allowed_fixed_handlers: NO_FIXED_HANDLERS,
+        allowed_handler_targets: NO_HANDLER_TARGETS,
     },
     DialogueTableSpec {
         id: "epilogue-dialogue",
@@ -241,7 +250,7 @@ const DIALOGUE_TABLE_SPECS: [DialogueTableSpec; 8] = [
         data_file_start: 0x12E81,
         directory_group: Some(0),
         separate_consumer: None,
-        allowed_fixed_handlers: NO_FIXED_HANDLERS,
+        allowed_handler_targets: NO_HANDLER_TARGETS,
     },
 ];
 
@@ -281,6 +290,8 @@ struct ReportSummary {
     unresolved_consumer_table_count: usize,
     pointer_count: usize,
     unique_target_count: usize,
+    unique_script_entry_count: usize,
+    handler_target_entry_count: usize,
     alias_group_count: usize,
     aliased_entry_count: usize,
 }
@@ -301,6 +312,8 @@ struct DialogueTableReport {
     pointer_table_sha1: String,
     pointer_count: usize,
     unique_target_count: usize,
+    unique_script_entry_count: usize,
+    handler_target_entry_count: usize,
     alias_group_count: usize,
     aliased_entry_count: usize,
     main_record_prefix_summary: Option<MainRecordPrefixSummary>,
@@ -496,6 +509,14 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
             .count(),
         pointer_count: tables.iter().map(|table| table.pointer_count).sum(),
         unique_target_count: tables.iter().map(|table| table.unique_target_count).sum(),
+        unique_script_entry_count: tables
+            .iter()
+            .map(|table| table.unique_script_entry_count)
+            .sum(),
+        handler_target_entry_count: tables
+            .iter()
+            .map(|table| table.handler_target_entry_count)
+            .sum(),
         alias_group_count: tables.iter().map(|table| table.alias_group_count).sum(),
         aliased_entry_count: tables.iter().map(|table| table.aliased_entry_count).sum(),
     };
@@ -512,7 +533,7 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
         main_dialogue_state_machine,
         tables,
         unknowns: vec![
-            "Pointer targets are entry starts, not proven script byte ranges.",
+            "Script targets are entry starts, not proven script byte ranges; declared code handlers are kept separate.",
             "The E5, fixed four-byte, and E8 record prefix is confirmed, but complete entry termination rules remain unresolved.",
             "Eleven of the eighteen main dialogue state handlers remain structurally named but semantically unresolved.",
             "Role labels began as external map candidates and do not prove every entry's gameplay context.",
@@ -726,16 +747,17 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
             .filter(|other| *other != index)
             .collect();
         if let Some(handler) = spec
-            .allowed_fixed_handlers
+            .allowed_handler_targets
             .iter()
             .find(|handler| handler.cpu_address == pointer)
         {
-            let file_offset = validate_fixed_handler(source, handler, spec.id, index)?;
+            let file_offset =
+                validate_handler_target(source, spec.source_prg_bank, handler, spec.id, index)?;
             entries.push(DialogueEntryReport {
                 index,
                 pointer_cpu_address: pointer,
                 pointer_cpu_address_hex: format!("0x{pointer:04X}"),
-                target_kind: "fixed_handler",
+                target_kind: "code_handler",
                 file_offset,
                 file_offset_hex: format!("0x{file_offset:05X}"),
                 handler_role: Some(handler.role),
@@ -786,6 +808,17 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
         .collect::<Vec<_>>();
     let alias_group_count = alias_groups.len();
     let aliased_entry_count = alias_groups.iter().map(|indices| indices.len()).sum();
+    let handler_target_entry_count = entries
+        .iter()
+        .filter(|entry| entry.target_kind == "code_handler")
+        .count();
+    let unique_script_entry_count = entries
+        .iter()
+        .filter(|entry| {
+            entry.target_kind == "script_entry_start"
+                && indices_by_pointer[&entry.pointer_cpu_address][0] == entry.index
+        })
+        .count();
     let main_record_prefix_summary = if spec.directory_group.is_some() {
         let unique_prefixes = entries
             .iter()
@@ -793,7 +826,7 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
             .filter_map(|entry| entry.main_record_prefix.as_ref())
             .collect::<Vec<_>>();
         ensure!(
-            unique_prefixes.len() == indices_by_pointer.len(),
+            unique_prefixes.len() == unique_script_entry_count,
             "{} main record prefix coverage does not match its unique targets",
             spec.id
         );
@@ -835,6 +868,8 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
         pointer_table_sha1: sha1_hex(pointer_table_bytes),
         pointer_count: pointers.len(),
         unique_target_count: indices_by_pointer.len(),
+        unique_script_entry_count,
+        handler_target_entry_count,
         alias_group_count,
         aliased_entry_count,
         main_record_prefix_summary,
@@ -1006,9 +1041,10 @@ fn validate_directory_binding(
     })
 }
 
-fn validate_fixed_handler(
+fn validate_handler_target(
     source: &[u8],
-    handler: &FixedHandlerSpec,
+    source_prg_bank: u8,
+    handler: &HandlerTargetSpec,
     table_id: &str,
     entry_index: usize,
 ) -> Result<usize> {
@@ -1016,14 +1052,18 @@ fn validate_fixed_handler(
         !handler.expected_code.is_empty(),
         "{table_id} entry {entry_index} declares an empty fixed-handler signature"
     );
-    let file_offset = fixed_cpu_to_file_offset(handler.cpu_address)
-        .with_context(|| format!("{table_id} entry {entry_index}"))?;
+    let file_offset = if handler.cpu_address >= FIXED_CPU_START {
+        fixed_cpu_to_file_offset(handler.cpu_address)
+    } else {
+        switchable_cpu_to_file_offset(source_prg_bank, handler.cpu_address)
+    }
+    .with_context(|| format!("{table_id} entry {entry_index}"))?;
     let end = file_offset
         .checked_add(handler.expected_code.len())
         .context("fixed-handler signature range overflow")?;
     ensure!(
         source.get(file_offset..end) == Some(handler.expected_code),
-        "{table_id} entry {entry_index} fixed handler {} changed",
+        "{table_id} entry {entry_index} code handler {} changed",
         handler.role
     );
     Ok(file_offset)
@@ -1068,7 +1108,7 @@ mod tests {
     const SYNTHETIC_BANK: u8 = 0x02;
     const SYNTHETIC_TABLE_OFFSET: usize = HEADER_SIZE + 2 * PRG_BANK_SIZE + 0x0100;
     const SYNTHETIC_DATA_START: usize = HEADER_SIZE + 2 * PRG_BANK_SIZE + 0x0200;
-    const TEST_FIXED_HANDLER: FixedHandlerSpec = FixedHandlerSpec {
+    const TEST_FIXED_HANDLER: HandlerTargetSpec = HandlerTargetSpec {
         cpu_address: 0xC73D,
         role: "empty_dialogue_handler",
         expected_code: &[0x60],
@@ -1088,7 +1128,7 @@ mod tests {
             data_file_start: SYNTHETIC_DATA_START,
             directory_group: None,
             separate_consumer: None,
-            allowed_fixed_handlers: NO_FIXED_HANDLERS,
+            allowed_handler_targets: NO_HANDLER_TARGETS,
         }
     }
 
@@ -1225,17 +1265,17 @@ mod tests {
     }
 
     #[test]
-    fn admits_only_an_exact_declared_fixed_handler() {
+    fn admits_only_an_exact_declared_code_handler() {
         let mut source = synthetic_source();
         let mut spec = synthetic_spec(2);
-        spec.allowed_fixed_handlers = &[TEST_FIXED_HANDLER];
+        spec.allowed_handler_targets = &[TEST_FIXED_HANDLER];
         write_pointer(&mut source, 0, 0x8200);
         write_pointer(&mut source, 1, TEST_FIXED_HANDLER.cpu_address);
         let handler_file_offset = fixed_cpu_to_file_offset(TEST_FIXED_HANDLER.cpu_address).unwrap();
         source[handler_file_offset] = 0x60;
 
         let report = extract_dialogue_table(&source, &spec).unwrap();
-        assert_eq!(report.entries[1].target_kind, "fixed_handler");
+        assert_eq!(report.entries[1].target_kind, "code_handler");
         assert_eq!(
             report.entries[1].handler_role,
             Some("empty_dialogue_handler")
@@ -1245,7 +1285,7 @@ mod tests {
         let error = extract_dialogue_table(&source, &spec)
             .unwrap_err()
             .to_string();
-        assert!(error.contains("fixed handler empty_dialogue_handler changed"));
+        assert!(error.contains("code handler empty_dialogue_handler changed"));
     }
 
     #[test]
