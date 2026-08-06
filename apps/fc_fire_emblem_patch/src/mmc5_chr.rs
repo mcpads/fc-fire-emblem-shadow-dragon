@@ -8,7 +8,7 @@ use crate::{
         RESET_INITIALIZER_ADDRESS, SOURCE_RESET_ADDRESS, create_mmc5_prg_probe_image,
         fixed_bank_file_offset,
     },
-    rom::{EXPECTED_CHR_SHA1, EXPECTED_SOURCE_SHA1, PRG_SIZE, Rom},
+    rom::{EXPECTED_CHR_SHA1, EXPECTED_SOURCE_SHA1, HEADER_SIZE, PRG_SIZE, Rom},
     rp2a03::{Instruction, assemble_at},
     sha1_hex,
     tracked::TrackedImage,
@@ -16,6 +16,7 @@ use crate::{
 
 const RESET_INITIALIZER_TAIL_ADDRESS: u16 = RESET_INITIALIZER_ADDRESS + 0x19;
 const CHR_MODE_INITIALIZER_ADDRESS: u16 = 0xFA60;
+const SWITCHABLE_PRG_BANK_SIZE: usize = 0x4000;
 
 const CHR_WRITERS: &[ChrWriter] = &[
     ChrWriter {
@@ -48,11 +49,51 @@ const CHR_WRITERS: &[ChrWriter] = &[
     },
 ];
 
+const DIRECT_CHR_WRITERS: &[DirectChrWriter] = &[
+    DirectChrWriter {
+        role: "automatic status PPU $1000 FD source",
+        source_prg_bank: 0x0D,
+        source_address: 0x8036,
+        source_register: 0xD000,
+        target_register: 0x5127,
+    },
+    DirectChrWriter {
+        role: "automatic status PPU $1000 FE source",
+        source_prg_bank: 0x0D,
+        source_address: 0x8039,
+        source_register: 0xE000,
+        target_register: 0x5127,
+    },
+    DirectChrWriter {
+        role: "automatic status PPU $0000 FD source",
+        source_prg_bank: 0x0D,
+        source_address: 0x83AB,
+        source_register: 0xB000,
+        target_register: 0x5123,
+    },
+    DirectChrWriter {
+        role: "automatic status PPU $0000 FE source",
+        source_prg_bank: 0x0D,
+        source_address: 0x83AE,
+        source_register: 0xC000,
+        target_register: 0x5123,
+    },
+];
+
 #[derive(Debug, Clone, Copy)]
 struct ChrWriter {
     role: &'static str,
     source_address: u16,
     shadow_address: u8,
+    source_register: u16,
+    target_register: u16,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DirectChrWriter {
+    role: &'static str,
+    source_prg_bank: u8,
+    source_address: u16,
     source_register: u16,
     target_register: u16,
 }
@@ -71,6 +112,7 @@ struct Mmc5ChrWriterProbeReport {
     projection: &'static str,
     fd_fe_latch_equivalent: bool,
     writer_mappings: Vec<ChrWriterMapping>,
+    direct_writer_mappings: Vec<DirectChrWriterMapping>,
     tracked_delta_writes: Vec<TrackedWrite>,
     unresolved_boundaries: Vec<&'static str>,
     release_eligible: bool,
@@ -81,6 +123,15 @@ struct ChrWriterMapping {
     role: &'static str,
     source_cpu_address: String,
     shadow_address: String,
+    source_register: String,
+    target_register: String,
+}
+
+#[derive(Debug, Serialize)]
+struct DirectChrWriterMapping {
+    role: &'static str,
+    source_prg_bank: String,
+    source_cpu_address: String,
     source_register: String,
     target_register: String,
 }
@@ -140,6 +191,9 @@ pub fn build_mmc5_chr_writer_probe(
     for writer in CHR_WRITERS {
         replace_chr_writer(&mut image, *writer)?;
     }
+    for writer in DIRECT_CHR_WRITERS {
+        replace_direct_chr_writer(&mut image, *writer)?;
+    }
 
     image.verify_all_changes_tracked(&base)?;
     let tracked_delta_writes = image
@@ -169,7 +223,7 @@ pub fn build_mmc5_chr_writer_probe(
 
     let output_sha1 = sha1_hex(&output);
     let report = Mmc5ChrWriterProbeReport {
-        schema: 1,
+        schema: 2,
         source_sha1: EXPECTED_SOURCE_SHA1,
         base_prg_probe_sha1,
         output_sha1: output_sha1.clone(),
@@ -190,12 +244,22 @@ pub fn build_mmc5_chr_writer_probe(
                 target_register: format!("0x{:04X}", writer.target_register),
             })
             .collect(),
+        direct_writer_mappings: DIRECT_CHR_WRITERS
+            .iter()
+            .map(|writer| DirectChrWriterMapping {
+                role: writer.role,
+                source_prg_bank: format!("0x{:02X}", writer.source_prg_bank),
+                source_cpu_address: format!("0x{:04X}", writer.source_address),
+                source_register: format!("0x{:04X}", writer.source_register),
+                target_register: format!("0x{:04X}", writer.target_register),
+            })
+            .collect(),
         tracked_delta_writes,
         unresolved_boundaries: vec![
             "MMC4 FD and FE latch banks collapse to one last-writer bank per 4 KiB PPU window.",
             "Screens whose paired shadows differ cannot be declared visually equivalent.",
             "The projection relies on the original 8x8 sprite mode selecting MMC5 CHR register set A.",
-            "Unclassified direct writes outside the four central MMC4 CHR routines remain unconverted.",
+            "Only the four direct writers proven on the automatic status path are converted; other byte-pattern candidates remain unclassified.",
             "No runtime graphics, progression, or save/load equivalence is claimed by this static probe.",
         ],
         release_eligible: false,
@@ -238,6 +302,40 @@ fn replace_chr_writer(image: &mut TrackedImage, writer: ChrWriter) -> Result<()>
         &expected,
         &replacement,
     )
+}
+
+fn replace_direct_chr_writer(image: &mut TrackedImage, writer: DirectChrWriter) -> Result<()> {
+    image.write_expected(
+        format!("project {} to MMC5", writer.role),
+        switchable_bank_file_offset(writer.source_prg_bank, writer.source_address)?,
+        &assemble_at(
+            writer.source_address,
+            &[Instruction::StaAbsolute(writer.source_register)],
+        )?,
+        &assemble_at(
+            writer.source_address,
+            &[Instruction::StaAbsolute(writer.target_register)],
+        )?,
+    )
+}
+
+fn switchable_bank_file_offset(prg_bank: u8, cpu_address: u16) -> Result<usize> {
+    ensure!(
+        cpu_address < 0xC000,
+        "CPU address {cpu_address:04X} is outside the switchable PRG window"
+    );
+    ensure!(
+        cpu_address >= 0x8000,
+        "CPU address {cpu_address:04X} is below the switchable PRG window"
+    );
+    let bank_offset = (prg_bank as usize)
+        .checked_mul(SWITCHABLE_PRG_BANK_SIZE)
+        .ok_or_else(|| anyhow::anyhow!("switchable PRG bank offset overflow"))?;
+    ensure!(
+        bank_offset < PRG_SIZE,
+        "PRG bank {prg_bank:02X} is outside the source image"
+    );
+    Ok(HEADER_SIZE + bank_offset + (cpu_address as usize - 0x8000))
 }
 
 fn write_file(path: &Path, data: &[u8]) -> Result<()> {
@@ -298,5 +396,34 @@ mod tests {
             assert_eq!(source.len(), 8);
             assert_eq!(target.len(), source.len());
         }
+    }
+
+    #[test]
+    fn automatic_status_direct_writers_keep_instruction_size_and_prg_location() {
+        assert_eq!(DIRECT_CHR_WRITERS.len(), 4);
+        assert_eq!(switchable_bank_file_offset(0x0D, 0x8036).unwrap(), 0x34046);
+        assert_eq!(switchable_bank_file_offset(0x0D, 0x83AB).unwrap(), 0x343BB);
+
+        for writer in DIRECT_CHR_WRITERS {
+            let source = assemble_at(
+                writer.source_address,
+                &[Instruction::StaAbsolute(writer.source_register)],
+            )
+            .unwrap();
+            let target = assemble_at(
+                writer.source_address,
+                &[Instruction::StaAbsolute(writer.target_register)],
+            )
+            .unwrap();
+            assert_eq!(source.len(), 3);
+            assert_eq!(target.len(), source.len());
+        }
+    }
+
+    #[test]
+    fn switchable_prg_offset_rejects_non_window_addresses_and_missing_banks() {
+        assert!(switchable_bank_file_offset(0, 0x7FFF).is_err());
+        assert!(switchable_bank_file_offset(0, 0xC000).is_err());
+        assert!(switchable_bank_file_offset(0x10, 0x8000).is_err());
     }
 }

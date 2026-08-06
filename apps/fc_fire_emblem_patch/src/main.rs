@@ -105,7 +105,7 @@ enum Command {
         #[arg(long, default_value = "out/mmc5-prg-probe.json")]
         report: PathBuf,
     },
-    /// Project the four central MMC4 CHR writers onto MMC5 4 KiB banks.
+    /// Project runtime-proven MMC4 CHR writers onto MMC5 4 KiB banks.
     BuildMmc5ChrWriterProbe {
         source: PathBuf,
         #[arg(long, default_value = "out/fire-emblem-fe1-mmc5-chr-writer-probe.nes")]
