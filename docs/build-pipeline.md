@@ -16,6 +16,19 @@
 
 추출·재삽입 로직과 구조 메타데이터, 설정처럼 작은 메뉴·UI 번역은 추적할 수 있다. 대사 중심의 대규모 원문 추출본, 대사 번역본과 번역 작업용 중간 자산은 Git에 넣지 않는다. 그런 자료는 `private/dialogue/`, `out/` 또는 `evidence/private/` 아래에서만 생성한다. 공개 문서에는 원문 덤프 대신 범위·개수·해시·주소와 소비 경로를 기록한다.
 
+## mapper 165 무번역 패리티 프로브
+
+`build-mapper165-parity-probe`는 지원 일본판을 MMC2식 CHR 래치와 MMC3식 PRG·SRAM을 함께 쓰는 mapper 165로 변환한다. 원본 CHR 앞에 빈 8 KiB를 두고 원본 32개 4 KiB 페이지를 +2 이동하므로, mapper 165의 CHR-RAM 선택값 0과 원본 CHR page 0이 충돌하지 않는다. 재배치한 원본 CHR SHA-1, PRG 크기와 배터리 플래그가 바뀌면 빌드가 실패한다.
+
+```sh
+cargo run -p fc-fire-emblem-patch -- build-mapper165-parity-probe \
+  "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
+```
+
+PRG writer 12곳과 명령 경계가 확인된 CHR writer를 같은 길이의 호출로 바꾼다. 새 루틴은 공유 RP2A03 ISA로 조립·역검산하고, 원본이 `FF`이며 직접 `JSR`·`JMP` 대상이 아닌 고정 뱅크 범위에만 배치한다. 출력 보고서는 CHR 재배치, 코드 배치, writer 수, 모든 추적 쓰기와 남은 실행 경계를 기록한다.
+
+이 프로브는 번역이나 한글 자산을 넣지 않는다. 현재 타이틀·자동 능력치·1장 인트로 대화는 원본 화면과 일치하지만, FD 전환 시점이 다른 페이지 쌍과 저장·전체 진행 검증이 남아 있어 `release_eligible`은 거짓이다.
+
 ## MMC5 PRG 정적 프로브
 
 `build-mmc5-prg-probe`는 번역·한글 자산 없이 지원 일본판을 mapper 5 헤더로 바꾸고, 원본 마지막 16 KiB PRG 뱅크의 확인된 `FF` 구간 `$FA00`~`$FA7F`에 최소 초기화·뱅크·미러링 루틴을 배치한다. 새 실행 코드는 허용된 RP2A03 명령과 주소 지정 형식만 받는 checked assembler로 생성한다. 이 구간을 대상으로 하는 직접 `JSR`·`JMP` 3바이트 패턴이 PRG 전체에서 하나라도 나오면 쓰지 않는다.

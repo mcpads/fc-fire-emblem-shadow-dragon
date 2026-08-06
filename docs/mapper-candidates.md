@@ -10,13 +10,25 @@
 | --- | --- | --- | --- |
 | MMC3, mapper 4 | 더 큰 PRG·CHR, 선택적 PRG RAM | MMC4의 타일별 FD/FE 래치가 없고 PRG 창도 8 KiB 중심 | 직접 변환 후보 아님 |
 | UNROM512, mapper 30 | 512 KiB PRG, 최대 32 KiB 뱅크 CHR-RAM | 원본과 같은 배터리 PRG RAM이 없고 래치도 없음 | 제외 |
-| MMC5, mapper 5 | 최대 1 MiB PRG·CHR, PRG RAM, 16 KiB 가변+16 KiB 고정 모드, 배경 타일별 4 KiB CHR 선택 | ExRAM과 네임테이블 갱신 결속, 스크롤·스프라이트·저장·실행 환경 검증 필요 | 우선 실험 후보 |
+| MMC5, mapper 5 | 최대 1 MiB PRG·CHR, PRG RAM, 배경 타일별 4 KiB CHR 선택 | 모든 네임테이블·스크롤 상태를 새 소유자가 유지해야 하며 VBlank 시간 예산을 넘김 | 주 경로에서 제외 |
+| J.Y. ASIC, mapper 209 | 16 KiB PRG 모드, 큰 CHR, MMC4식 래치 | Mesen 구현에서 16 KiB 모드 설정 뒤 `$6000` 배터리 RAM을 유지할 수 없음 | 제외 |
+| MMC3+MMC2 hybrid, mapper 165 | MMC3식 PRG·SRAM과 MMC2식 FD/FE 래치, 최대 256 KiB CHR-ROM, 4 KiB CHR-RAM | MMC4와 FD 트리거 시점이 달라 일부 페이지 쌍의 트리거 비트플레인 보정 필요 | 우선 후보 |
 
-근거 사양은 [MMC4](https://www.nesdev.org/wiki/MMC4), [MMC5](https://www.nesdev.org/wiki/MMC5), [UNROM512](https://www.nesdev.org/wiki/INES_Mapper_030), [Nintendo 매퍼 비교](https://www.nesdev.org/wiki/Comparison_of_Nintendo_mappers)를 따른다.
+근거 사양은 [MMC4](https://www.nesdev.org/wiki/MMC4), [MMC5](https://www.nesdev.org/wiki/MMC5), [mapper 165](https://www.nesdev.org/wiki/INES_Mapper_165), [J.Y. Company ASIC](https://www.nesdev.org/wiki/J.Y._Company_ASIC), [UNROM512](https://www.nesdev.org/wiki/INES_Mapper_030), [Nintendo 매퍼 비교](https://www.nesdev.org/wiki/Comparison_of_Nintendo_mappers)를 따른다.
 
-MMC5의 확장 속성 모드는 네임테이블의 각 배경 타일에 4 KiB CHR 뱅크를 붙일 수 있다. 이는 MMC4 래치를 그대로 흉내 내기보다 기존 화면의 글꼴·그래픽 페이지 선택을 타일 단위로 명시하는 경로를 제공한다. 전체 한글 글리프도 확장 CHR-ROM에 여러 페이지로 저장할 수 있다. 다만 이를 실제 전략으로 채택하려면 맵 스크롤과 모든 네임테이블 쓰기 경로에서 같은 뱅크 정보가 유지되는지 먼저 증명해야 한다.
+mapper 165는 실제 비공식 Fire Emblem에도 쓰인 MMC2+MMC3 하이브리드다. CHR 레지스터 0은 CHR-RAM을 가리키므로 무번역 프로브는 원본 CHR 앞에 8 KiB를 예약하고 32개 원본 4 KiB 페이지를 +2 이동한다. 이 배치에서 원본 CHR SHA-1을 그대로 유지하면서 256 KiB 한계까지 30개 4 KiB 페이지를 추가로 쓸 수 있다.
 
-## 첫 실험 전 통과 조건
+MMC5 확장 속성 실험은 한 화면의 래치 결과를 표현할 수 있음을 보였지만, 일반화하려면 모든 네임테이블 쓰기와 스크롤을 새 런타임이 소유해야 했다. 바이트 훅과 큐 소비자 훅은 실제 VBlank 시간 예산을 넘겼고, 게시 경계만으로는 직접 전송을 닫지 못했다. 이 때문에 MMC5는 비교·재현 자료로 남기고 주 경로에서는 제외한다.
+
+## mapper 165 현재 증거
+
+무번역 프로브는 원본 PRG 256 KiB, 배터리 플래그, 재배치한 원본 CHR SHA-1을 유지한다. Mesen은 이 출력에 8 KiB Save RAM과 4 KiB CHR-RAM을 제공했다. 타이틀 프레임 1206, 자동 능력치 프레임 1928, 1장 인트로 대화 화면은 기존 원본 표본과 SHA-256이 정확히 같았다.
+
+프레임 800의 오른쪽 FD/FE 쌍 `00/14`에서는 트리거 타일 두 칸의 한 비트플레인만 달라 16픽셀 차이가 났다. mapper 165는 FD 페이지를 `$xFD0`에서, MMC4는 `$xFD8`에서 전환하기 때문이다. 같은 FD `00`과 FE `18`을 쓰는 인트로 대화는 원본과 정확히 같아, 해결 대상은 네임테이블 전체가 아니라 FD/FE 페이지 쌍에 따른 트리거 타일 비트플레인이다.
+
+현재 남은 G2 관문은 서로 다른 FE 페이지와 결합하는 같은 FD 페이지를 함께 보존하는 공급 규칙, 실제 SRAM 저장·불러오기, 전투·장 전환·패배 경로의 writer 전수성이다.
+
+## MMC5 실험 당시 통과 조건
 
 1. `$A000`~`$F000` 직접 쓰기 후보를 실행 코드·데이터로 나누고 실제 실행 지점을 렌더 경로에 결속한다.
 2. PRG 뱅크, SRAM, 미러링과 CHR 선택의 원본 상태 전이를 재현 가능한 보고서로 만든다.
