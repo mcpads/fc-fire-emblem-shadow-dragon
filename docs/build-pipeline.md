@@ -49,6 +49,16 @@ cargo run -p fc-fire-emblem-patch -- project-mmc4-latch-nametable \
 
 입력 크기·페이지 인덱스·6비트 뱅크 범위가 맞지 않으면 산출물을 만들지 않는다. 보고서는 원본 바이트 대신 입력·출력 해시, 트리거 개수와 초기·종료 래치만 기록하며 `release_eligible`은 항상 거짓이다. 이 도구는 미세 스크롤, PPU의 선행 타일 fetch, 네임테이블 경계, MMC5 ExRAM의 한 화면 미러링과 스프라이트 CHR을 모델링하지 않는다. 따라서 결과는 런타임 소유·갱신 구현의 입력을 검증하는 개발용 프로브일 뿐 ROM 삽입 자산이 아니다.
 
+`build-mmc5-dialogue-exram-probe`는 위에서 생성한 정확히 1 KiB 입력 가운데 확인된 오른쪽 FD/FE 뱅크 `00/18`만 허용한다. CHR writer 프로브 위에서 오른쪽 FD·FE 공급 루틴을 같은 길이의 공통 검사 호출로 바꾸고, 두 그림자가 `00/18`이 되는 순간 고정 PRG의 `$FB00`~`$FEFF`에서 MMC5 ExRAM `$5C00`~`$5FFF`로 복사한다. 복사 동안 `$5104=2`, 표시 전에는 `$5104=1`을 쓰며 A·X·상태 플래그를 복원한다. 새 상대 분기는 절대 목표 주소를 받아 signed 8비트 도달 범위를 checked assembler에서 검산한다.
+
+```sh
+cargo run -p fc-fire-emblem-patch -- build-mmc5-dialogue-exram-probe \
+  "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes" \
+  out/mmc5-exram-attributes.bin
+```
+
+새 코드 두 구간은 원본의 직접 `JSR`·`JMP` 패턴이 0건이고 기대 바이트가 모두 `FF`일 때만 쓴다. 데이터 구간을 가리키는 PRG 전체의 3바이트 패턴 후보는 보고하되 명령 경계로 오인하지 않는다. 이 ROM은 목표 대화 화면의 외부 메모리 주입을 제거하는 전용 프로브다. 정적 1 KiB를 조건 일치 때 다시 적재할 뿐 후속 네임테이블 쓰기, 다른 래치 쌍, 스크롤과 경계 fetch를 갱신하지 않으므로 `release_eligible`은 거짓이다.
+
 ## 글꼴 공급 조사
 
 `analyze-font-supply`는 지원 일본판만 입력으로 받아 4 KiB CHR 페이지별 통계, 첫 글꼴 페이지의 256개 코드별 타일 특성, 보호 판정과 확인된 참조를 JSON으로 쓴다. 스키마 3부터 고정 PRG 뱅크의 MMC4 CHR 공급 루틴 4개를 원본 바이트로 검사하고, 각 루틴을 가리키는 직접 `JSR`·`JMP` 바이트 패턴 후보를 PRG 뱅크·PRG 오프셋·파일 오프셋·CPU 주소로 함께 기록한다. 후보는 명령 경계와 실행 적중을 별도로 확인하기 전에는 호출자로 간주하지 않는다. 스키마 4는 확인된 보호 코드 42개와 합성 레이아웃 예약 코드 `0F`, `1F`, `FF`를 제외한 현재 한글 활성 슬롯 상한 211개를 기록한다. 이는 미확정 소비자를 모두 닫은 화면별 최종 예산이 아니다. 같은 입력에서 각 코드가 표시된 PNG 타일 시트도 만든다. 두 산출물은 무시된 `out/` 아래에 생성하며 원본 CHR 바이트는 JSON에 복제하지 않는다.

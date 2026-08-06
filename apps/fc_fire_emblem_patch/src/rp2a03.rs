@@ -3,9 +3,17 @@ use anyhow::{Result, ensure};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Instruction {
     LdaImmediate(u8),
+    LdaZeroPage(u8),
+    LdaAbsoluteX(u16),
+    LdxImmediate(u8),
     StaZeroPage(u8),
     StaAbsolute(u16),
+    StaAbsoluteX(u16),
     AslAccumulator,
+    CmpImmediate(u8),
+    Inx,
+    Tax,
+    Txa,
     OraImmediate(u8),
     OraZeroPage(u8),
     Pha,
@@ -14,6 +22,7 @@ pub enum Instruction {
     Plp,
     JmpAbsolute(u16),
     JsrAbsolute(u16),
+    BneAbsolute(u16),
     Rts,
     Nop,
 }
@@ -26,25 +35,50 @@ impl Instruction {
             | Self::Php
             | Self::Pla
             | Self::Plp
+            | Self::Inx
+            | Self::Tax
+            | Self::Txa
             | Self::Rts
             | Self::Nop => 1,
             Self::LdaImmediate(_)
+            | Self::LdaZeroPage(_)
+            | Self::LdxImmediate(_)
             | Self::StaZeroPage(_)
+            | Self::CmpImmediate(_)
             | Self::OraImmediate(_)
-            | Self::OraZeroPage(_) => 2,
-            Self::StaAbsolute(_) | Self::JmpAbsolute(_) | Self::JsrAbsolute(_) => 3,
+            | Self::OraZeroPage(_)
+            | Self::BneAbsolute(_) => 2,
+            Self::LdaAbsoluteX(_)
+            | Self::StaAbsolute(_)
+            | Self::StaAbsoluteX(_)
+            | Self::JmpAbsolute(_)
+            | Self::JsrAbsolute(_) => 3,
         }
     }
 
-    fn encode_into(self, output: &mut Vec<u8>) {
+    fn encode_into(self, pc: u16, output: &mut Vec<u8>) -> Result<()> {
         match self {
             Self::LdaImmediate(value) => output.extend_from_slice(&[0xA9, value]),
+            Self::LdaZeroPage(address) => output.extend_from_slice(&[0xA5, address]),
+            Self::LdaAbsoluteX(address) => {
+                output.push(0xBD);
+                output.extend_from_slice(&address.to_le_bytes());
+            }
+            Self::LdxImmediate(value) => output.extend_from_slice(&[0xA2, value]),
             Self::StaZeroPage(address) => output.extend_from_slice(&[0x85, address]),
             Self::StaAbsolute(address) => {
                 output.push(0x8D);
                 output.extend_from_slice(&address.to_le_bytes());
             }
+            Self::StaAbsoluteX(address) => {
+                output.push(0x9D);
+                output.extend_from_slice(&address.to_le_bytes());
+            }
             Self::AslAccumulator => output.push(0x0A),
+            Self::CmpImmediate(value) => output.extend_from_slice(&[0xC9, value]),
+            Self::Inx => output.push(0xE8),
+            Self::Tax => output.push(0xAA),
+            Self::Txa => output.push(0x8A),
             Self::OraImmediate(value) => output.extend_from_slice(&[0x09, value]),
             Self::OraZeroPage(address) => output.extend_from_slice(&[0x05, address]),
             Self::Pha => output.push(0x48),
@@ -59,9 +93,18 @@ impl Instruction {
                 output.push(0x20);
                 output.extend_from_slice(&address.to_le_bytes());
             }
+            Self::BneAbsolute(target) => {
+                let relative = i32::from(target) - (i32::from(pc) + 2);
+                ensure!(
+                    (-128..=127).contains(&relative),
+                    "BNE at {pc:04X} cannot reach {target:04X}"
+                );
+                output.extend_from_slice(&[0xD0, relative as i8 as u8]);
+            }
             Self::Rts => output.push(0x60),
             Self::Nop => output.push(0xEA),
         }
+        Ok(())
     }
 }
 
@@ -80,7 +123,8 @@ pub fn assemble_at(origin: u16, instructions: &[Instruction]) -> Result<Vec<u8>>
 
     let mut output = Vec::with_capacity(encoded_len);
     for instruction in instructions {
-        instruction.encode_into(&mut output);
+        let pc = (origin as usize + output.len()) as u16;
+        instruction.encode_into(pc, &mut output)?;
     }
     ensure!(
         output.len() == encoded_len,
@@ -99,9 +143,17 @@ mod tests {
             0x8000,
             &[
                 Instruction::LdaImmediate(0x9F),
+                Instruction::LdaZeroPage(0x5B),
+                Instruction::LdaAbsoluteX(0xFB00),
+                Instruction::LdxImmediate(0),
                 Instruction::StaZeroPage(0x29),
                 Instruction::StaAbsolute(0x5117),
+                Instruction::StaAbsoluteX(0x5C00),
                 Instruction::AslAccumulator,
+                Instruction::CmpImmediate(0x18),
+                Instruction::Inx,
+                Instruction::Tax,
+                Instruction::Txa,
                 Instruction::OraImmediate(0x80),
                 Instruction::OraZeroPage(0x52),
                 Instruction::Pha,
@@ -109,6 +161,7 @@ mod tests {
                 Instruction::Pla,
                 Instruction::Plp,
                 Instruction::JsrAbsolute(0xFB30),
+                Instruction::BneAbsolute(0x8000),
                 Instruction::JmpAbsolute(0xC075),
                 Instruction::Rts,
                 Instruction::Nop,
@@ -119,10 +172,20 @@ mod tests {
         assert_eq!(
             bytes,
             [
-                0xA9, 0x9F, 0x85, 0x29, 0x8D, 0x17, 0x51, 0x0A, 0x09, 0x80, 0x05, 0x52, 0x48, 0x08,
-                0x68, 0x28, 0x20, 0x30, 0xFB, 0x4C, 0x75, 0xC0, 0x60, 0xEA,
+                0xA9, 0x9F, 0xA5, 0x5B, 0xBD, 0x00, 0xFB, 0xA2, 0x00, 0x85, 0x29, 0x8D, 0x17, 0x51,
+                0x9D, 0x00, 0x5C, 0x0A, 0xC9, 0x18, 0xE8, 0xAA, 0x8A, 0x09, 0x80, 0x05, 0x52, 0x48,
+                0x08, 0x68, 0x28, 0x20, 0x30, 0xFB, 0xD0, 0xDC, 0x4C, 0x75, 0xC0, 0x60, 0xEA,
             ]
         );
+    }
+
+    #[test]
+    fn rejects_a_relative_branch_target_outside_signed_byte_range() {
+        let error = assemble_at(0x8000, &[Instruction::BneAbsolute(0x8100)])
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("cannot reach"));
     }
 
     #[test]

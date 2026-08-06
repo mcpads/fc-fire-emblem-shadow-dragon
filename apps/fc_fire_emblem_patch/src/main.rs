@@ -7,6 +7,7 @@ mod localization;
 mod mmc4_latch;
 mod mmc5_chr;
 mod mmc5_expanded_chr;
+mod mmc5_exram_probe;
 mod mmc5_prg;
 mod options;
 mod rom;
@@ -126,6 +127,18 @@ enum Command {
         )]
         output: PathBuf,
         #[arg(long, default_value = "out/mmc5-expanded-chr-options-probe.json")]
+        report: PathBuf,
+    },
+    /// Embed one proven dialogue-screen latch projection and load it through MMC5 ExRAM.
+    BuildMmc5DialogueExramProbe {
+        source: PathBuf,
+        attributes: PathBuf,
+        #[arg(
+            long,
+            default_value = "out/fire-emblem-fe1-mmc5-dialogue-exram-probe.nes"
+        )]
+        output: PathBuf,
+        #[arg(long, default_value = "out/mmc5-dialogue-exram-probe.json")]
         report: PathBuf,
     },
     /// Project one zero-scroll MMC4 nametable into MMC5 extended attributes.
@@ -337,6 +350,27 @@ fn main() -> Result<()> {
             println!("wrote {}", report.display());
             println!("report SHA-1: {}", summary.report_sha1);
             println!("tracked ROM writes: {}", summary.tracked_write_count);
+        }
+        Command::BuildMmc5DialogueExramProbe {
+            source,
+            attributes,
+            output,
+            report,
+        } => {
+            let summary = mmc5_exram_probe::build_mmc5_dialogue_exram_probe(
+                &source,
+                &attributes,
+                &output,
+                &report,
+            )?;
+            println!("wrote {}", output.display());
+            println!("output SHA-1: {}", summary.output_sha1);
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "tracked writes after CHR writer probe: {}",
+                summary.tracked_write_count
+            );
         }
         Command::ProjectMmc4LatchNametable {
             input,

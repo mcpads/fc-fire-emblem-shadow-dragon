@@ -469,7 +469,7 @@ fn cave_end_address() -> u16 {
     CODE_CAVE_START_ADDRESS + CODE_CAVE_LEN as u16
 }
 
-fn count_direct_transfers_to_range(prg: &[u8], start: u16, end: u16) -> Result<usize> {
+pub(crate) fn count_direct_transfers_to_range(prg: &[u8], start: u16, end: u16) -> Result<usize> {
     ensure!(start < end, "direct transfer target range is empty");
     Ok(prg
         .windows(3)
