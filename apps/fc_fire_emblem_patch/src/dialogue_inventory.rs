@@ -275,6 +275,7 @@ struct DialogueStructureReport {
     scope: ReportScope,
     summary: ReportSummary,
     main_dialogue_state_machine: MainDialogueStateMachineReport,
+    main_dialogue_graph: MainDialogueGraphReport,
     tables: Vec<DialogueTableReport>,
     unknowns: Vec<&'static str>,
 }
@@ -538,6 +539,57 @@ struct MainLinearSegmentSummary {
     transition_count: usize,
 }
 
+#[derive(Debug, Serialize)]
+struct MainDialogueGraphReport {
+    node_count: usize,
+    transition_edge_count: usize,
+    terminal_reachable_node_count: usize,
+    interactive_boundary_reachable_node_count: usize,
+    max_transition_edge_count_to_boundary: usize,
+    cycle_count: usize,
+    unresolved_node_count: usize,
+    transition_edges: Vec<MainDialogueTransitionEdgeReport>,
+}
+
+#[derive(Debug, Serialize)]
+struct MainDialogueTransitionEdgeReport {
+    source_table_id: &'static str,
+    source_canonical_entry_index: usize,
+    source_entry_indices: Vec<usize>,
+    source_pointer_cpu_address: u16,
+    source_pointer_cpu_address_hex: String,
+    source_file_offset: usize,
+    source_file_offset_hex: String,
+    control: u8,
+    control_hex: String,
+    target_table_id: &'static str,
+    target_entry_index: usize,
+    target_canonical_entry_index: usize,
+    target_pointer_cpu_address: u16,
+    target_pointer_cpu_address_hex: String,
+    target_file_offset: usize,
+    target_file_offset_hex: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct MainDialogueGraphNodeKey {
+    table_index: usize,
+    pointer_cpu_address: u16,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct MainDialogueGraphNodeState {
+    boundary_control: u8,
+    transition_target: Option<MainDialogueGraphNodeKey>,
+}
+
+#[derive(Debug, PartialEq)]
+struct MainDialogueGraphClosure {
+    terminal_reachable_node_count: usize,
+    interactive_boundary_reachable_node_count: usize,
+    max_transition_edge_count_to_boundary: usize,
+}
+
 pub fn analyze_dialogue_structure(
     source_path: &Path,
     report_path: &Path,
@@ -571,6 +623,7 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
         .iter()
         .map(|spec| extract_dialogue_table(source, spec))
         .collect::<Result<Vec<_>>>()?;
+    let main_dialogue_graph = build_main_dialogue_graph(&tables)?;
     let main_first_line_count = tables
         .iter()
         .filter_map(|table| table.main_first_line_summary.as_ref())
@@ -699,19 +752,20 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
     };
 
     Ok(DialogueStructureReport {
-        schema_version: 4,
+        schema_version: 5,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             translation_direction: "ja_to_ko",
             preserve_existing_english: true,
-            proof_boundary: "exact pointer-table ranges, switchable-bank target mapping, aliases, all eight consumer roots, the main dialogue record-prefix state path, and every main entry's linear lines through the first terminal, interactive, or explicit-transition boundary; no dialogue bytes or translations are emitted",
+            proof_boundary: "exact pointer-table ranges, switchable-bank target mapping, aliases, all eight consumer roots, the main dialogue record-prefix state path, every main entry's initial linear segment, and all explicit E4/E6 graph edges through an EF or E7 boundary; no dialogue bytes or translations are emitted",
         },
         summary,
         main_dialogue_state_machine,
+        main_dialogue_graph,
         tables,
         unknowns: vec![
             "Script targets are entry starts, not proven script byte ranges; declared code handlers are kept separate.",
-            "The E5, fixed four-byte, and E8 record prefix plus each main entry's initial linear segment are confirmed, but control-flow reachability beyond E7, E4, and E6 boundaries remains unresolved.",
+            "The E5, fixed four-byte, and E8 record prefix, each initial linear segment, and all E4/E6 graph edges are confirmed, but behavior after E7 interactive boundaries remains unresolved.",
             "Eleven of the eighteen main dialogue state handlers remain structurally named but semantically unresolved.",
             "Role labels began as external map candidates and do not prove every entry's gameplay context.",
             "Existing English and numeric content remains protected and is not a translation target.",
@@ -1413,6 +1467,257 @@ fn scan_main_linear_segment(
     )
 }
 
+fn build_main_dialogue_graph(tables: &[DialogueTableReport]) -> Result<MainDialogueGraphReport> {
+    let mut table_index_by_id = BTreeMap::new();
+    for (table_index, table) in tables.iter().enumerate() {
+        if table.directory_binding.is_some() {
+            ensure!(
+                table_index_by_id.insert(table.id, table_index).is_none(),
+                "duplicate main dialogue table id {}",
+                table.id
+            );
+        }
+    }
+
+    let mut nodes = BTreeMap::new();
+    for (table_index, table) in tables.iter().enumerate() {
+        if table.directory_binding.is_none() {
+            continue;
+        }
+        for entry in table.entries.iter().filter(|entry| {
+            entry.target_kind == "script_entry_start" && is_canonical_dialogue_entry(entry)
+        }) {
+            let key = MainDialogueGraphNodeKey {
+                table_index,
+                pointer_cpu_address: entry.pointer_cpu_address,
+            };
+            ensure!(
+                nodes.insert(key, (table, entry)).is_none(),
+                "{} canonical entry {} duplicates a graph node",
+                table.id,
+                entry.index
+            );
+        }
+    }
+
+    let mut states = BTreeMap::new();
+    let mut transition_edges = Vec::new();
+    for (source_key, (source_table, source_entry)) in &nodes {
+        let segment = source_entry.main_linear_segment.as_ref().with_context(|| {
+            format!(
+                "{} canonical entry {} has no main linear segment",
+                source_table.id, source_entry.index
+            )
+        })?;
+        let transition_target = if matches!(segment.boundary_control, 0xE4 | 0xE6) {
+            let transition = segment.transition_target.as_ref().with_context(|| {
+                format!(
+                    "{} canonical entry {} has a transition boundary without a target",
+                    source_table.id, source_entry.index
+                )
+            })?;
+            let target_table_index = *table_index_by_id
+                .get(transition.target_table_id)
+                .with_context(|| {
+                    format!(
+                        "{} canonical entry {} targets undeclared table {}",
+                        source_table.id, source_entry.index, transition.target_table_id
+                    )
+                })?;
+            let target_table = &tables[target_table_index];
+            let target_entry = target_table
+                .entries
+                .get(transition.target_entry_index)
+                .with_context(|| {
+                    format!(
+                        "{} canonical entry {} targets missing entry {}:{}",
+                        source_table.id,
+                        source_entry.index,
+                        transition.target_table_id,
+                        transition.target_entry_index
+                    )
+                })?;
+            ensure!(
+                target_entry.target_kind == "script_entry_start",
+                "{} canonical entry {} transition targets non-dialogue handler {}:{}",
+                source_table.id,
+                source_entry.index,
+                transition.target_table_id,
+                transition.target_entry_index
+            );
+            let target_key = MainDialogueGraphNodeKey {
+                table_index: target_table_index,
+                pointer_cpu_address: target_entry.pointer_cpu_address,
+            };
+            ensure!(
+                nodes.contains_key(&target_key),
+                "{} canonical entry {} transition target has no canonical graph node",
+                source_table.id,
+                source_entry.index
+            );
+            transition_edges.push(MainDialogueTransitionEdgeReport {
+                source_table_id: source_table.id,
+                source_canonical_entry_index: source_entry.index,
+                source_entry_indices: dialogue_entry_indices(source_entry),
+                source_pointer_cpu_address: source_entry.pointer_cpu_address,
+                source_pointer_cpu_address_hex: format!(
+                    "0x{:04X}",
+                    source_entry.pointer_cpu_address
+                ),
+                source_file_offset: source_entry.file_offset,
+                source_file_offset_hex: format!("0x{:05X}", source_entry.file_offset),
+                control: segment.boundary_control,
+                control_hex: format!("{:02X}", segment.boundary_control),
+                target_table_id: target_table.id,
+                target_entry_index: target_entry.index,
+                target_canonical_entry_index: canonical_dialogue_entry_index(target_entry),
+                target_pointer_cpu_address: target_entry.pointer_cpu_address,
+                target_pointer_cpu_address_hex: format!(
+                    "0x{:04X}",
+                    target_entry.pointer_cpu_address
+                ),
+                target_file_offset: target_entry.file_offset,
+                target_file_offset_hex: format!("0x{:05X}", target_entry.file_offset),
+            });
+            Some(target_key)
+        } else {
+            ensure!(
+                matches!(segment.boundary_control, 0xEF | 0xE7),
+                "{} canonical entry {} has unsupported graph boundary {:02X}",
+                source_table.id,
+                source_entry.index,
+                segment.boundary_control
+            );
+            ensure!(
+                segment.transition_target.is_none(),
+                "{} canonical entry {} has a target on non-transition boundary {:02X}",
+                source_table.id,
+                source_entry.index,
+                segment.boundary_control
+            );
+            None
+        };
+        states.insert(
+            *source_key,
+            MainDialogueGraphNodeState {
+                boundary_control: segment.boundary_control,
+                transition_target,
+            },
+        );
+    }
+
+    let closure = classify_main_dialogue_graph(&states)?;
+    ensure!(
+        transition_edges.len()
+            == states
+                .values()
+                .filter(|state| state.transition_target.is_some())
+                .count(),
+        "main dialogue graph edge report coverage mismatch"
+    );
+
+    Ok(MainDialogueGraphReport {
+        node_count: states.len(),
+        transition_edge_count: transition_edges.len(),
+        terminal_reachable_node_count: closure.terminal_reachable_node_count,
+        interactive_boundary_reachable_node_count: closure
+            .interactive_boundary_reachable_node_count,
+        max_transition_edge_count_to_boundary: closure.max_transition_edge_count_to_boundary,
+        cycle_count: 0,
+        unresolved_node_count: 0,
+        transition_edges,
+    })
+}
+
+fn classify_main_dialogue_graph(
+    states: &BTreeMap<MainDialogueGraphNodeKey, MainDialogueGraphNodeState>,
+) -> Result<MainDialogueGraphClosure> {
+    let mut terminal_reachable_node_count = 0;
+    let mut interactive_boundary_reachable_node_count = 0;
+    let mut max_transition_edge_count_to_boundary = 0;
+
+    for start in states.keys().copied() {
+        let mut current = start;
+        let mut transition_edge_count = 0;
+        let mut visited = BTreeMap::new();
+        loop {
+            ensure!(
+                visited.insert(current, transition_edge_count).is_none(),
+                "main dialogue graph cycle reached from table {} pointer {:04X}",
+                start.table_index,
+                start.pointer_cpu_address
+            );
+            let state = states.get(&current).with_context(|| {
+                format!(
+                    "main dialogue graph node is missing for table {} pointer {:04X}",
+                    current.table_index, current.pointer_cpu_address
+                )
+            })?;
+            match state.boundary_control {
+                0xEF => {
+                    ensure!(
+                        state.transition_target.is_none(),
+                        "terminal graph node has a transition target"
+                    );
+                    terminal_reachable_node_count += 1;
+                    break;
+                }
+                0xE7 => {
+                    ensure!(
+                        state.transition_target.is_none(),
+                        "interactive graph node has a transition target"
+                    );
+                    interactive_boundary_reachable_node_count += 1;
+                    break;
+                }
+                0xE4 | 0xE6 => {
+                    current = state
+                        .transition_target
+                        .context("transition graph node has no target")?;
+                    transition_edge_count += 1;
+                    max_transition_edge_count_to_boundary =
+                        max_transition_edge_count_to_boundary.max(transition_edge_count);
+                }
+                code => anyhow::bail!("unsupported main dialogue graph boundary {code:02X}"),
+            }
+        }
+    }
+
+    ensure!(
+        terminal_reachable_node_count + interactive_boundary_reachable_node_count == states.len(),
+        "main dialogue graph closure does not cover every node"
+    );
+    Ok(MainDialogueGraphClosure {
+        terminal_reachable_node_count,
+        interactive_boundary_reachable_node_count,
+        max_transition_edge_count_to_boundary,
+    })
+}
+
+fn is_canonical_dialogue_entry(entry: &DialogueEntryReport) -> bool {
+    entry
+        .alias_entry_indices
+        .iter()
+        .all(|alias_index| entry.index < *alias_index)
+}
+
+fn canonical_dialogue_entry_index(entry: &DialogueEntryReport) -> usize {
+    entry
+        .alias_entry_indices
+        .iter()
+        .copied()
+        .chain(std::iter::once(entry.index))
+        .min()
+        .expect("dialogue entry index set cannot be empty")
+}
+
+fn dialogue_entry_indices(entry: &DialogueEntryReport) -> Vec<usize> {
+    let mut indices = entry.alias_entry_indices.clone();
+    indices.push(entry.index);
+    indices.sort_unstable();
+    indices
+}
+
 fn control_usage_reports(
     counts: BTreeMap<u8, usize>,
     declared_order: &[u8],
@@ -1828,6 +2133,96 @@ mod tests {
         .to_string();
 
         assert!(error.contains("exceeds 64 linear lines"));
+    }
+
+    #[test]
+    fn closes_transition_chains_at_terminal_and_interactive_boundaries() {
+        let first = MainDialogueGraphNodeKey {
+            table_index: 0,
+            pointer_cpu_address: 0x8200,
+        };
+        let second = MainDialogueGraphNodeKey {
+            table_index: 0,
+            pointer_cpu_address: 0x8300,
+        };
+        let terminal = MainDialogueGraphNodeKey {
+            table_index: 1,
+            pointer_cpu_address: 0x8400,
+        };
+        let interactive = MainDialogueGraphNodeKey {
+            table_index: 1,
+            pointer_cpu_address: 0x8500,
+        };
+        let states = BTreeMap::from([
+            (
+                first,
+                MainDialogueGraphNodeState {
+                    boundary_control: 0xE4,
+                    transition_target: Some(second),
+                },
+            ),
+            (
+                second,
+                MainDialogueGraphNodeState {
+                    boundary_control: 0xE6,
+                    transition_target: Some(terminal),
+                },
+            ),
+            (
+                terminal,
+                MainDialogueGraphNodeState {
+                    boundary_control: 0xEF,
+                    transition_target: None,
+                },
+            ),
+            (
+                interactive,
+                MainDialogueGraphNodeState {
+                    boundary_control: 0xE7,
+                    transition_target: None,
+                },
+            ),
+        ]);
+
+        let closure = classify_main_dialogue_graph(&states).unwrap();
+
+        assert_eq!(closure.terminal_reachable_node_count, 3);
+        assert_eq!(closure.interactive_boundary_reachable_node_count, 1);
+        assert_eq!(closure.max_transition_edge_count_to_boundary, 2);
+    }
+
+    #[test]
+    fn rejects_a_cycle_in_the_explicit_transition_graph() {
+        let first = MainDialogueGraphNodeKey {
+            table_index: 0,
+            pointer_cpu_address: 0x8200,
+        };
+        let second = MainDialogueGraphNodeKey {
+            table_index: 0,
+            pointer_cpu_address: 0x8300,
+        };
+        let states = BTreeMap::from([
+            (
+                first,
+                MainDialogueGraphNodeState {
+                    boundary_control: 0xE4,
+                    transition_target: Some(second),
+                },
+            ),
+            (
+                second,
+                MainDialogueGraphNodeState {
+                    boundary_control: 0xE6,
+                    transition_target: Some(first),
+                },
+            ),
+        ]);
+
+        let error = classify_main_dialogue_graph(&states)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("graph cycle"));
     }
 
     #[test]
