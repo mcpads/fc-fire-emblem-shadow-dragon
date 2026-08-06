@@ -7,7 +7,10 @@ use crate::{
     options::{OPTIONS_TABLE_OFFSET, SOURCE_OPTIONS_TABLE},
     rom::{EXPECTED_CHR_SHA1, EXPECTED_SOURCE_SHA1, PRG_SIZE, Rom},
     sha1_hex,
-    static_analysis::{AbsoluteTransferCandidate, find_absolute_transfer_candidates},
+    static_analysis::{
+        AbsoluteTransferCandidate, AbsoluteWriteCandidate, find_absolute_transfer_candidates,
+        find_absolute_write_candidates,
+    },
 };
 
 const CHR_PAGE_SIZE: usize = 4 * 1024;
@@ -31,6 +34,39 @@ const TABLE_TERMINATOR: u8 = 0xEF;
 const MMC4_LATCH_CODES: [u8; 2] = [0xFD, 0xFE];
 const PROVISIONAL_LAYOUT_RESERVED_CODES: [u8; 3] = [0x0F, 0x1F, 0xFF];
 const PRG_BANK_SIZE: usize = 16 * 1024;
+
+struct Mmc4ControlRoutine {
+    role: &'static str,
+    cpu_address: u16,
+    expected: &'static [u8],
+}
+
+const MMC4_CONTROL_ROUTINES: [Mmc4ControlRoutine; 3] = [
+    Mmc4ControlRoutine {
+        role: "select_prg_bank_and_update_shadows",
+        cpu_address: 0xC9A6,
+        expected: &[0x85, 0x29, 0x85, 0x51, 0x8D, 0x00, 0xA0, 0x60],
+    },
+    Mmc4ControlRoutine {
+        role: "set_mirroring_bit_1",
+        cpu_address: 0xC9CE,
+        expected: &[0xA9, 0x01, 0x85, 0xC8, 0x8D, 0x00, 0xF0, 0x60],
+    },
+    Mmc4ControlRoutine {
+        role: "set_mirroring_bit_0",
+        cpu_address: 0xC9D6,
+        expected: &[0xA9, 0x00, 0x85, 0xC8, 0x8D, 0x00, 0xF0, 0x60],
+    },
+];
+
+const MMC4_REGISTER_SPECS: [(u16, &str); 6] = [
+    (0xA000, "select_16k_prg_bank"),
+    (0xB000, "select_ppu_0000_fd_chr_bank"),
+    (0xC000, "select_ppu_0000_fe_chr_bank"),
+    (0xD000, "select_ppu_1000_fd_chr_bank"),
+    (0xE000, "select_ppu_1000_fe_chr_bank"),
+    (0xF000, "select_nametable_mirroring"),
+];
 
 struct Mmc4ChrWriter {
     cpu_address: u16,
@@ -135,7 +171,9 @@ struct FontSupplyReport {
     scope: ReportScope,
     tile_format: TileFormat,
     summary: ReportSummary,
+    mmc4_control_routines: Vec<Mmc4ControlRoutineReport>,
     mmc4_chr_bank_writers: Vec<Mmc4ChrWriterReport>,
+    mmc4_register_write_candidates: Vec<Mmc4RegisterWriteInventory>,
     known_references: Vec<ReferenceReport>,
     pages: Vec<PageReport>,
     font_page: FontPageReport,
@@ -197,6 +235,22 @@ struct Mmc4ChrWriterReport {
     routine_bytes_hex: String,
     direct_jsr_candidates: Vec<AbsoluteTransferCandidate>,
     direct_jmp_candidates: Vec<AbsoluteTransferCandidate>,
+}
+
+#[derive(Debug, Serialize)]
+struct Mmc4ControlRoutineReport {
+    role: &'static str,
+    cpu_address: u16,
+    cpu_address_hex: String,
+    routine_bytes_hex: String,
+}
+
+#[derive(Debug, Serialize)]
+struct Mmc4RegisterWriteInventory {
+    register_address: u16,
+    register_address_hex: String,
+    role: &'static str,
+    candidates: Vec<AbsoluteWriteCandidate>,
 }
 
 #[derive(Debug, Serialize)]
@@ -316,7 +370,17 @@ pub fn analyze_font_supply(
 
 fn build_report(rom: &Rom) -> Result<FontSupplyReport> {
     validate_known_references(rom.data())?;
+    let mmc4_control_routines = describe_mmc4_control_routines(rom.prg())?;
     let mmc4_chr_bank_writers = describe_mmc4_chr_writers(rom.prg())?;
+    let mmc4_register_write_candidates = MMC4_REGISTER_SPECS
+        .iter()
+        .map(|(register_address, role)| Mmc4RegisterWriteInventory {
+            register_address: *register_address,
+            register_address_hex: format!("0x{register_address:04X}"),
+            role,
+            candidates: find_absolute_write_candidates(rom.prg(), *register_address),
+        })
+        .collect();
     ensure!(
         rom.chr().len().is_multiple_of(CHR_PAGE_SIZE),
         "CHR size is not aligned to 4 KiB pages"
@@ -339,7 +403,7 @@ fn build_report(rom: &Rom) -> Result<FontSupplyReport> {
     let active_slot_ceiling = calculate_active_slot_ceiling(&slots)?;
 
     Ok(FontSupplyReport {
-        schema_version: 4,
+        schema_version: 5,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             chr_sha1: EXPECTED_CHR_SHA1,
@@ -363,7 +427,9 @@ fn build_report(rom: &Rom) -> Result<FontSupplyReport> {
             unresolved_font_code_count,
             available_font_code_count: 0,
         },
+        mmc4_control_routines,
         mmc4_chr_bank_writers,
+        mmc4_register_write_candidates,
         known_references: KNOWN_REFERENCES
             .iter()
             .map(|reference| ReferenceReport {
@@ -390,9 +456,36 @@ fn build_report(rom: &Rom) -> Result<FontSupplyReport> {
             "No font slot is classified as available until every consumer and runtime state is excluded.",
             "References list only confirmed tables; it is not the complete text or tile reference population.",
             "Direct JSR and JMP candidates are byte-pattern matches; instruction boundaries and render-path semantics remain unconfirmed.",
+            "Direct absolute mapper-register write candidates may include data; runtime execution or disassembly is required before patching them.",
             "The current Hangul slot ceiling is not a final per-screen budget; unresolved consumers may reserve more codes.",
         ],
     })
+}
+
+fn describe_mmc4_control_routines(prg: &[u8]) -> Result<Vec<Mmc4ControlRoutineReport>> {
+    ensure!(
+        prg.len() == PRG_SIZE,
+        "unexpected PRG size for MMC4 control inventory"
+    );
+    MMC4_CONTROL_ROUTINES
+        .iter()
+        .map(|routine| {
+            let prg_offset = fixed_bank_prg_offset(routine.cpu_address)?;
+            let end = prg_offset + routine.expected.len();
+            ensure!(
+                prg[prg_offset..end] == *routine.expected,
+                "MMC4 control routine {} at ${:04X} changed",
+                routine.role,
+                routine.cpu_address
+            );
+            Ok(Mmc4ControlRoutineReport {
+                role: routine.role,
+                cpu_address: routine.cpu_address,
+                cpu_address_hex: format!("0x{:04X}", routine.cpu_address),
+                routine_bytes_hex: hex_bytes(routine.expected),
+            })
+        })
+        .collect()
 }
 
 fn calculate_active_slot_ceiling(slots: &[SlotReport]) -> Result<ActiveSlotCeiling> {
@@ -957,6 +1050,24 @@ mod tests {
     }
 
     #[test]
+    fn absolute_mapper_write_candidates_preserve_opcode_and_bank_coordinates() {
+        let mut prg = vec![0_u8; PRG_SIZE];
+        prg[0x0123..0x0126].copy_from_slice(&[0x8D, 0x00, 0xA0]);
+        let fixed_write = PRG_SIZE - PRG_BANK_SIZE + 0x0234;
+        prg[fixed_write..fixed_write + 3].copy_from_slice(&[0x8C, 0x00, 0xA0]);
+
+        let candidates = find_absolute_write_candidates(&prg, 0xA000);
+
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].mnemonic, "sta");
+        assert_eq!(candidates[0].prg_bank, 0);
+        assert_eq!(candidates[0].cpu_address, 0x8123);
+        assert_eq!(candidates[1].mnemonic, "sty");
+        assert_eq!(candidates[1].prg_bank, 15);
+        assert_eq!(candidates[1].cpu_address, 0xC234);
+    }
+
+    #[test]
     fn writer_inventory_rejects_a_changed_fixed_bank_routine() {
         let mut prg = vec![0_u8; PRG_SIZE];
         for writer in &MMC4_CHR_WRITERS {
@@ -970,5 +1081,23 @@ mod tests {
         let error = describe_mmc4_chr_writers(&prg).unwrap_err().to_string();
 
         assert!(error.contains("MMC4 CHR writer at $C9BE changed"));
+    }
+
+    #[test]
+    fn control_inventory_rejects_a_changed_prg_bank_routine() {
+        let mut prg = vec![0_u8; PRG_SIZE];
+        for routine in &MMC4_CONTROL_ROUTINES {
+            let offset = fixed_bank_prg_offset(routine.cpu_address).unwrap();
+            prg[offset..offset + routine.expected.len()].copy_from_slice(routine.expected);
+        }
+        describe_mmc4_control_routines(&prg).unwrap();
+
+        let offset = fixed_bank_prg_offset(0xC9A6).unwrap();
+        prg[offset + 4] ^= 0x01;
+        let error = describe_mmc4_control_routines(&prg)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("MMC4 control routine select_prg_bank_and_update_shadows"));
     }
 }
