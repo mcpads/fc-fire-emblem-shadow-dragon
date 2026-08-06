@@ -66,7 +66,171 @@ struct ProtectedPosition {
     glyph: &'static str,
 }
 
+struct DialogueControlSpec {
+    code: u8,
+    source_advance_bytes: usize,
+    consumed_operand_bytes: usize,
+    lookahead_byte_count: usize,
+    line_effect: &'static str,
+    output_effect: &'static str,
+    state_effect: &'static str,
+    operand_contract: &'static str,
+}
+
 const COMPOSITE_TEXT_LAYOUT_CODES: [u8; 2] = [0x0F, 0x1F];
+
+const DIALOGUE_CONTROL_SPECS: [DialogueControlSpec; 15] = [
+    DialogueControlSpec {
+        code: 0xEA,
+        source_advance_bytes: 1,
+        consumed_operand_bytes: 0,
+        lookahead_byte_count: 0,
+        line_effect: "continue_current_line",
+        output_effect: "replace_two_reserved_prefix_cells_with_9E_AB",
+        state_effect: "none",
+        operand_contract: "none",
+    },
+    DialogueControlSpec {
+        code: 0xE0,
+        source_advance_bytes: 1,
+        consumed_operand_bytes: 0,
+        lookahead_byte_count: 0,
+        line_effect: "continue_current_line",
+        output_effect: "none",
+        state_effect: "increment_0x7811",
+        operand_contract: "none",
+    },
+    DialogueControlSpec {
+        code: 0xE9,
+        source_advance_bytes: 2,
+        consumed_operand_bytes: 1,
+        lookahead_byte_count: 0,
+        line_effect: "continue_current_line",
+        output_effect: "none",
+        state_effect: "store_operand_in_0x77FF",
+        operand_contract: "any_byte",
+    },
+    DialogueControlSpec {
+        code: 0xE3,
+        source_advance_bytes: 1,
+        consumed_operand_bytes: 0,
+        lookahead_byte_count: 0,
+        line_effect: "continue_current_line",
+        output_effect: "none",
+        state_effect: "increment_0x780E",
+        operand_contract: "none",
+    },
+    DialogueControlSpec {
+        code: 0xE2,
+        source_advance_bytes: 1,
+        consumed_operand_bytes: 0,
+        lookahead_byte_count: 0,
+        line_effect: "continue_current_line",
+        output_effect: "none",
+        state_effect: "increment_0x780F",
+        operand_contract: "none",
+    },
+    DialogueControlSpec {
+        code: 0xE1,
+        source_advance_bytes: 2,
+        consumed_operand_bytes: 1,
+        lookahead_byte_count: 0,
+        line_effect: "continue_current_line",
+        output_effect: "none",
+        state_effect: "store_operand_in_0x7810",
+        operand_contract: "any_byte",
+    },
+    DialogueControlSpec {
+        code: 0xDF,
+        source_advance_bytes: 2,
+        consumed_operand_bytes: 1,
+        lookahead_byte_count: 0,
+        line_effect: "continue_current_line",
+        output_effect: "none",
+        state_effect: "select_0x06F0_slot_and_bit_from_operand_nibbles_when_0x767A_is_zero",
+        operand_contract: "high_nibble_selects_slot; low_nibble_indexes_8_byte_bit_table",
+    },
+    DialogueControlSpec {
+        code: 0xEF,
+        source_advance_bytes: 1,
+        consumed_operand_bytes: 0,
+        lookahead_byte_count: 0,
+        line_effect: "finish_current_line_with_0xED",
+        output_effect: "none",
+        state_effect: "increment_0x7802",
+        operand_contract: "none",
+    },
+    DialogueControlSpec {
+        code: 0xE7,
+        source_advance_bytes: 1,
+        consumed_operand_bytes: 0,
+        lookahead_byte_count: 0,
+        line_effect: "finish_current_line_with_0xED",
+        output_effect: "none",
+        state_effect: "increment_0x7808",
+        operand_contract: "none",
+    },
+    DialogueControlSpec {
+        code: 0xE4,
+        source_advance_bytes: 1,
+        consumed_operand_bytes: 0,
+        lookahead_byte_count: 2,
+        line_effect: "finish_current_line_with_0xED",
+        output_effect: "none",
+        state_effect: "increment_0x780B_and_0x7806; copy_two_lookahead_bytes_to_0x780D_and_0x780C",
+        operand_contract: "next_two_bytes_are_observed_without_advancing_past_them",
+    },
+    DialogueControlSpec {
+        code: 0xE6,
+        source_advance_bytes: 1,
+        consumed_operand_bytes: 0,
+        lookahead_byte_count: 2,
+        line_effect: "finish_current_line_with_0xED",
+        output_effect: "none",
+        state_effect: "increment_0x780A_and_0x7804; copy_two_lookahead_bytes_to_0x780D_and_0x780C",
+        operand_contract: "next_two_bytes_are_observed_without_advancing_past_them",
+    },
+    DialogueControlSpec {
+        code: 0xEE,
+        source_advance_bytes: 1,
+        consumed_operand_bytes: 0,
+        lookahead_byte_count: 0,
+        line_effect: "finish_current_line_with_0xED",
+        output_effect: "none",
+        state_effect: "increment_0x7804",
+        operand_contract: "none",
+    },
+    DialogueControlSpec {
+        code: 0xEB,
+        source_advance_bytes: 1,
+        consumed_operand_bytes: 0,
+        lookahead_byte_count: 0,
+        line_effect: "finish_current_line_with_0xED",
+        output_effect: "none",
+        state_effect: "increment_0x7805_and_0x7806",
+        operand_contract: "none",
+    },
+    DialogueControlSpec {
+        code: 0xED,
+        source_advance_bytes: 1,
+        consumed_operand_bytes: 0,
+        lookahead_byte_count: 0,
+        line_effect: "finish_current_line_with_0xED",
+        output_effect: "none",
+        state_effect: "increment_0x7806",
+        operand_contract: "none",
+    },
+    DialogueControlSpec {
+        code: 0xEC,
+        source_advance_bytes: 2,
+        consumed_operand_bytes: 1,
+        lookahead_byte_count: 0,
+        line_effect: "continue_current_line",
+        output_effect: "append_selected_sram_string_excluding_0xEF",
+        state_effect: "none",
+        operand_contract: "operand_0_through_3_selects_one_of_four_sram_strings",
+    },
+];
 
 const COMPOSITE_TEXT_LAYOUT_CODE_REGIONS: [TransferCodeSpec; 3] = [
     TransferCodeSpec {
@@ -203,7 +367,7 @@ const COMPOSITE_PLANE_PACKING_CODE_REGIONS: [TransferCodeSpec; 4] = [
     },
 ];
 
-const DIALOGUE_SCRIPT_CODE_REGIONS: [TransferCodeSpec; 5] = [
+const DIALOGUE_SCRIPT_CODE_REGIONS: [TransferCodeSpec; 10] = [
     TransferCodeSpec {
         role: "initialize_sram_line_buffer",
         file_offset: 0x281FA,
@@ -238,6 +402,17 @@ const DIALOGUE_SCRIPT_CODE_REGIONS: [TransferCodeSpec; 5] = [
         ],
     },
     TransferCodeSpec {
+        role: "finish_line_controls_and_two_byte_lookahead",
+        file_offset: 0x282B4,
+        bytes: &[
+            0xEE, 0x02, 0x78, 0xD0, 0x35, 0xEE, 0x08, 0x78, 0xD0, 0x30, 0xEE, 0x0B, 0x78, 0xC8,
+            0x20, 0x9C, 0xE6, 0x8D, 0x0D, 0x78, 0xC8, 0x20, 0x9C, 0xE6, 0x8D, 0x0C, 0x78, 0x4C,
+            0xDB, 0x82, 0xEE, 0x0A, 0x78, 0xC8, 0x20, 0x9C, 0xE6, 0x8D, 0x0D, 0x78, 0xC8, 0x20,
+            0x9C, 0xE6, 0x8D, 0x0C, 0x78, 0xEE, 0x04, 0x78, 0xD0, 0x06, 0xEE, 0x05, 0x78, 0xEE,
+            0x06, 0x78,
+        ],
+    },
+    TransferCodeSpec {
         role: "finish_line_with_terminator",
         file_offset: 0x282EE,
         bytes: &[
@@ -255,7 +430,51 @@ const DIALOGUE_SCRIPT_CODE_REGIONS: [TransferCodeSpec; 5] = [
             0x0A, 0x8D, 0x00, 0xA0, 0xAD, 0x34, 0x79, 0x60,
         ],
     },
+    TransferCodeSpec {
+        role: "apply_packed_state_bit_operand",
+        file_offset: 0x2832F,
+        bytes: &[
+            0xC8, 0x20, 0x9C, 0xE6, 0x85, 0x02, 0xC8, 0x8C, 0xFA, 0x77, 0xA5, 0x02, 0x4C, 0x9F,
+            0xF1,
+        ],
+    },
+    TransferCodeSpec {
+        role: "store_progress_delay_operand",
+        file_offset: 0x2833E,
+        bytes: &[
+            0xC8, 0x20, 0x9C, 0xE6, 0x8D, 0xFF, 0x77, 0xC8, 0x8C, 0xFA, 0x77, 0x60,
+        ],
+    },
+    TransferCodeSpec {
+        role: "bind_sram_line_buffer_by_slot",
+        file_offset: 0x28358,
+        bytes: &[
+            0xAD, 0xF8, 0x77, 0x0A, 0xA8, 0xB9, 0x58, 0x83, 0x85, 0x06, 0xB9, 0x59, 0x83, 0x85,
+            0x07, 0x60, 0x32, 0x78, 0x52, 0x78, 0x72, 0x78, 0x92, 0x78, 0xB2, 0x78, 0xD2, 0x78,
+        ],
+    },
+    TransferCodeSpec {
+        role: "append_selected_sram_string",
+        file_offset: 0x28374,
+        bytes: &[
+            0xC8, 0x20, 0x9C, 0xE6, 0xC8, 0x8C, 0xFA, 0x77, 0x0A, 0xA8, 0xB9, 0x97, 0x83, 0x85,
+            0x08, 0xC8, 0xB9, 0x97, 0x83, 0x85, 0x09, 0xA0, 0x00, 0x8C, 0xFE, 0x77, 0xAC, 0xFE,
+            0x77, 0xB1, 0x08, 0xC9, 0xEF, 0xF0, 0x0D, 0xAC, 0xFB, 0x77, 0x91, 0x06, 0xEE, 0xFB,
+            0x77, 0xEE, 0xFE, 0x77, 0xD0, 0xEA, 0x4C, 0x08, 0x82, 0xF2, 0x78, 0x02, 0x79, 0x12,
+            0x79, 0x22, 0x79,
+        ],
+    },
 ];
+
+const DIALOGUE_PACKED_STATE_BIT_CODE_REGIONS: [TransferCodeSpec; 1] = [TransferCodeSpec {
+    role: "select_sram_state_slot_and_bit",
+    file_offset: 0x3F1AF,
+    bytes: &[
+        0xAE, 0x7A, 0x76, 0xD0, 0x12, 0x48, 0x29, 0x0F, 0xAA, 0x68, 0x29, 0xF0, 0x4A, 0x4A, 0x4A,
+        0x4A, 0xA8, 0xBD, 0xB7, 0xF1, 0x99, 0xF0, 0x06, 0x60, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20,
+        0x40, 0x80,
+    ],
+}];
 
 const DIALOGUE_RENDERER_CODE_REGIONS: [TransferCodeSpec; 4] = [
     TransferCodeSpec {
@@ -756,11 +975,26 @@ struct DialogueScriptEvidence {
     line_end_code_hex: String,
     recognized_control_codes: Vec<u8>,
     recognized_control_codes_hex: Vec<String>,
+    controls: Vec<DialogueControlEvidence>,
     synthesized_pair_control_code: u8,
     synthesized_pair_control_code_hex: String,
     synthesized_pair_codes: Vec<u8>,
     synthesized_pair_codes_hex: Vec<String>,
     code_regions: Vec<TransferCodeEvidence>,
+    packed_state_bit_code_regions: Vec<TransferCodeEvidence>,
+}
+
+#[derive(Debug, Serialize)]
+struct DialogueControlEvidence {
+    code: u8,
+    code_hex: String,
+    source_advance_bytes: usize,
+    consumed_operand_bytes: usize,
+    lookahead_byte_count: usize,
+    line_effect: &'static str,
+    output_effect: &'static str,
+    state_effect: &'static str,
+    operand_contract: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -932,7 +1166,7 @@ fn build_report(source: &[u8]) -> Result<TextInventoryReport> {
     let dialogue_text_path = build_dialogue_text_path_evidence(source)?;
 
     Ok(TextInventoryReport {
-        schema_version: 10,
+        schema_version: 11,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             translation_direction: "ja_to_ko",
@@ -965,7 +1199,7 @@ fn build_report(source: &[u8]) -> Result<TextInventoryReport> {
             "This is not the complete game text population.",
             "Non-Latin bytes remain unresolved Japanese, layout, icon, or control codes until decoder semantics are proven.",
             "Direct composite-parser JSR and JMP candidates are byte-pattern matches; instruction boundaries and caller roles remain unconfirmed.",
-            "The dialogue dispatcher recognizes its declared control-code set, but the operand length and behavior of every control are not yet proven.",
+            "Dialogue control source consumption and structural effects are confirmed, but their complete gameplay meaning and valid operands across the full script population remain unresolved.",
             "The runtime observation identifies one chapter 1 script location and line buffer, not the complete dialogue script population.",
             "No entry is translation-ready until control tokens, layout, and relocation policy are declared.",
         ],
@@ -1435,6 +1669,33 @@ fn build_layout_control_evidence(
 
 fn build_dialogue_text_path_evidence(source: &[u8]) -> Result<DialogueTextPathEvidence> {
     let recognized_control_codes = DIALOGUE_SCRIPT_CONTROL_CODES.to_vec();
+    let controls = DIALOGUE_CONTROL_SPECS
+        .iter()
+        .map(|control| DialogueControlEvidence {
+            code: control.code,
+            code_hex: format!("{:02X}", control.code),
+            source_advance_bytes: control.source_advance_bytes,
+            consumed_operand_bytes: control.consumed_operand_bytes,
+            lookahead_byte_count: control.lookahead_byte_count,
+            line_effect: control.line_effect,
+            output_effect: control.output_effect,
+            state_effect: control.state_effect,
+            operand_contract: control.operand_contract,
+        })
+        .collect::<Vec<_>>();
+    ensure!(
+        controls
+            .iter()
+            .map(|control| control.code)
+            .eq(DIALOGUE_SCRIPT_CONTROL_CODES),
+        "dialogue control declarations do not match the dispatcher order"
+    );
+    ensure!(
+        controls
+            .iter()
+            .all(|control| control.source_advance_bytes == control.consumed_operand_bytes + 1),
+        "dialogue control source advance does not match its consumed operands"
+    );
     let synthesized_pair_codes = vec![0x9E, 0xAB];
     let combining_codes = COMPOSITE_TEXT_LAYOUT_CODES.to_vec();
 
@@ -1463,6 +1724,7 @@ fn build_dialogue_text_path_evidence(source: &[u8]) -> Result<DialogueTextPathEv
                 .iter()
                 .map(|code| format!("{code:02X}"))
                 .collect(),
+            controls,
             synthesized_pair_control_code: 0xEA,
             synthesized_pair_control_code_hex: "EA".to_owned(),
             synthesized_pair_codes: synthesized_pair_codes.clone(),
@@ -1475,6 +1737,12 @@ fn build_dialogue_text_path_evidence(source: &[u8]) -> Result<DialogueTextPathEv
                 &DIALOGUE_SCRIPT_CODE_REGIONS,
                 "dialogue script",
                 "bank_0A_dialogue_script_loader",
+            )?,
+            packed_state_bit_code_regions: build_code_region_evidence(
+                source,
+                &DIALOGUE_PACKED_STATE_BIT_CODE_REGIONS,
+                "dialogue state bit",
+                "packed_dialogue_state_operand",
             )?,
         },
         renderer: DialogueRendererEvidence {
@@ -2079,6 +2347,7 @@ mod tests {
     fn declares_dialogue_script_and_progressive_two_plane_renderer() {
         let mut source = vec![0_u8; PRG_FILE_END + FIRST_FONT_PAGE_BYTES];
         write_code_regions(&mut source, &DIALOGUE_SCRIPT_CODE_REGIONS);
+        write_code_regions(&mut source, &DIALOGUE_PACKED_STATE_BIT_CODE_REGIONS);
         write_code_regions(&mut source, &DIALOGUE_RENDERER_CODE_REGIONS);
 
         let evidence = build_dialogue_text_path_evidence(&source).unwrap();
@@ -2096,6 +2365,31 @@ mod tests {
         assert_eq!(
             evidence.script.recognized_control_codes,
             DIALOGUE_SCRIPT_CONTROL_CODES
+        );
+        let finish_with_lookahead = evidence
+            .script
+            .controls
+            .iter()
+            .find(|control| control.code == 0xE4)
+            .unwrap();
+        assert_eq!(finish_with_lookahead.source_advance_bytes, 1);
+        assert_eq!(finish_with_lookahead.consumed_operand_bytes, 0);
+        assert_eq!(finish_with_lookahead.lookahead_byte_count, 2);
+        assert_eq!(
+            finish_with_lookahead.line_effect,
+            "finish_current_line_with_0xED"
+        );
+        let insert_sram_string = evidence
+            .script
+            .controls
+            .iter()
+            .find(|control| control.code == 0xEC)
+            .unwrap();
+        assert_eq!(insert_sram_string.source_advance_bytes, 2);
+        assert_eq!(insert_sram_string.consumed_operand_bytes, 1);
+        assert_eq!(
+            insert_sram_string.output_effect,
+            "append_selected_sram_string_excluding_0xEF"
         );
         assert_eq!(evidence.script.synthesized_pair_control_code, 0xEA);
         assert_eq!(evidence.script.synthesized_pair_codes, vec![0x9E, 0xAB]);
@@ -2126,6 +2420,7 @@ mod tests {
     fn rejects_changed_dialogue_script_or_renderer_code() {
         let mut source = vec![0_u8; PRG_FILE_END + FIRST_FONT_PAGE_BYTES];
         write_code_regions(&mut source, &DIALOGUE_SCRIPT_CODE_REGIONS);
+        write_code_regions(&mut source, &DIALOGUE_PACKED_STATE_BIT_CODE_REGIONS);
         write_code_regions(&mut source, &DIALOGUE_RENDERER_CODE_REGIONS);
         source[DIALOGUE_SCRIPT_CODE_REGIONS[2].file_offset + 9] ^= 0x01;
 
@@ -2146,6 +2441,23 @@ mod tests {
 
         assert!(error.contains(
             "dialogue renderer code serialize_two_plane_line_to_ppu_queue changed for bank_0A_progressive_dialogue_renderer"
+        ));
+    }
+
+    #[test]
+    fn rejects_changed_dialogue_packed_state_bit_routine() {
+        let mut source = vec![0_u8; PRG_FILE_END + FIRST_FONT_PAGE_BYTES];
+        write_code_regions(&mut source, &DIALOGUE_SCRIPT_CODE_REGIONS);
+        write_code_regions(&mut source, &DIALOGUE_PACKED_STATE_BIT_CODE_REGIONS);
+        write_code_regions(&mut source, &DIALOGUE_RENDERER_CODE_REGIONS);
+        source[DIALOGUE_PACKED_STATE_BIT_CODE_REGIONS[0].file_offset + 18] ^= 0x01;
+
+        let error = build_dialogue_text_path_evidence(&source)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains(
+            "dialogue state bit code select_sram_state_slot_and_bit changed for packed_dialogue_state_operand"
         ));
     }
 
