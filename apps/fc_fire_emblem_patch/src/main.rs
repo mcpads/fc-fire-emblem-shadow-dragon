@@ -5,6 +5,7 @@ mod font;
 mod japanese_encoding;
 mod localization;
 mod mmc5_chr;
+mod mmc5_expanded_chr;
 mod mmc5_prg;
 mod options;
 mod rom;
@@ -111,6 +112,19 @@ enum Command {
         #[arg(long, default_value = "out/fire-emblem-fe1-mmc5-chr-writer-probe.nes")]
         output: PathBuf,
         #[arg(long, default_value = "out/mmc5-chr-writer-probe.json")]
+        report: PathBuf,
+    },
+    /// Build a 256 KiB CHR copy and serve the Korean options proof from its upper half.
+    BuildMmc5ExpandedChrOptionsProbe {
+        source: PathBuf,
+        #[arg(long, default_value = "assets/translation/options.ko.json")]
+        localization: PathBuf,
+        #[arg(
+            long,
+            default_value = "out/fire-emblem-fe1-mmc5-expanded-chr-options-probe.nes"
+        )]
+        output: PathBuf,
+        #[arg(long, default_value = "out/mmc5-expanded-chr-options-probe.json")]
         report: PathBuf,
     },
 }
@@ -288,6 +302,24 @@ fn main() -> Result<()> {
                 "tracked writes after PRG probe: {}",
                 summary.tracked_delta_write_count
             );
+        }
+        Command::BuildMmc5ExpandedChrOptionsProbe {
+            source,
+            localization,
+            output,
+            report,
+        } => {
+            let summary = mmc5_expanded_chr::build_mmc5_expanded_chr_options_probe(
+                &source,
+                &localization,
+                &output,
+                &report,
+            )?;
+            println!("wrote {}", output.display());
+            println!("output SHA-1: {}", summary.output_sha1);
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!("tracked ROM writes: {}", summary.tracked_write_count);
         }
     }
     Ok(())

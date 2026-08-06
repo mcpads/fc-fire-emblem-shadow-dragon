@@ -149,14 +149,21 @@ pub struct BuildSummary {
     pub tracked_delta_write_count: usize,
 }
 
-pub fn build_mmc5_chr_writer_probe(
-    source_path: &Path,
-    output_path: &Path,
-    report_path: &Path,
-) -> Result<BuildSummary> {
-    let source_rom = Rom::from_path(source_path)?;
+pub(crate) struct ChrWriterProbeImage {
+    data: Vec<u8>,
+    base_prg_probe_sha1: String,
+    tracked_delta_writes: Vec<TrackedWrite>,
+}
+
+impl ChrWriterProbeImage {
+    pub(crate) fn data(&self) -> &[u8] {
+        &self.data
+    }
+}
+
+pub(crate) fn create_mmc5_chr_writer_probe_image(source_rom: &Rom) -> Result<ChrWriterProbeImage> {
     source_rom.verify_supported_japanese()?;
-    let prg_probe = create_mmc5_prg_probe_image(&source_rom)?;
+    let prg_probe = create_mmc5_prg_probe_image(source_rom)?;
     let base = prg_probe.data().to_vec();
     let base_prg_probe_sha1 = sha1_hex(&base);
     let mut image = TrackedImage::new(base.clone());
@@ -205,7 +212,6 @@ pub fn build_mmc5_chr_writer_probe(
             len: write.len,
         })
         .collect::<Vec<_>>();
-    let tracked_delta_write_count = tracked_delta_writes.len();
     let output = image.into_data();
     let output_rom = Rom::parse(output.clone()).context("parse MMC5 CHR writer probe")?;
     ensure!(
@@ -221,11 +227,28 @@ pub fn build_mmc5_chr_writer_probe(
         "MMC5 CHR writer probe changed source CHR"
     );
 
-    let output_sha1 = sha1_hex(&output);
+    Ok(ChrWriterProbeImage {
+        data: output,
+        base_prg_probe_sha1,
+        tracked_delta_writes,
+    })
+}
+
+pub fn build_mmc5_chr_writer_probe(
+    source_path: &Path,
+    output_path: &Path,
+    report_path: &Path,
+) -> Result<BuildSummary> {
+    let source_rom = Rom::from_path(source_path)?;
+    let probe = create_mmc5_chr_writer_probe_image(&source_rom)?;
+    let output_rom = Rom::parse(probe.data.clone()).context("parse MMC5 CHR writer probe")?;
+    let tracked_delta_write_count = probe.tracked_delta_writes.len();
+
+    let output_sha1 = sha1_hex(&probe.data);
     let report = Mmc5ChrWriterProbeReport {
         schema: 2,
         source_sha1: EXPECTED_SOURCE_SHA1,
-        base_prg_probe_sha1,
+        base_prg_probe_sha1: probe.base_prg_probe_sha1,
         output_sha1: output_sha1.clone(),
         output_mapper: output_rom.mapper(),
         prg_size: output_rom.prg().len(),
@@ -254,7 +277,7 @@ pub fn build_mmc5_chr_writer_probe(
                 target_register: format!("0x{:04X}", writer.target_register),
             })
             .collect(),
-        tracked_delta_writes,
+        tracked_delta_writes: probe.tracked_delta_writes,
         unresolved_boundaries: vec![
             "MMC4 FD and FE latch banks collapse to one last-writer bank per 4 KiB PPU window.",
             "Screens whose paired shadows differ cannot be declared visually equivalent.",
@@ -268,7 +291,7 @@ pub fn build_mmc5_chr_writer_probe(
         serde_json::to_vec_pretty(&report).context("serialize MMC5 CHR writer report")?;
     let report_sha1 = sha1_hex(&report_bytes);
 
-    write_file(output_path, &output)?;
+    write_file(output_path, &probe.data)?;
     write_file(report_path, &report_bytes)?;
     Ok(BuildSummary {
         output_sha1,
@@ -319,7 +342,7 @@ fn replace_direct_chr_writer(image: &mut TrackedImage, writer: DirectChrWriter) 
     )
 }
 
-fn switchable_bank_file_offset(prg_bank: u8, cpu_address: u16) -> Result<usize> {
+pub(crate) fn switchable_bank_file_offset(prg_bank: u8, cpu_address: u16) -> Result<usize> {
     ensure!(
         cpu_address < 0xC000,
         "CPU address {cpu_address:04X} is outside the switchable PRG window"
