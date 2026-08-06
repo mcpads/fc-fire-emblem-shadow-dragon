@@ -66,6 +66,14 @@ enum Command {
         #[arg(long, default_value = "private/dialogue/main-workspace.json")]
         workspace: PathBuf,
     },
+    /// Plan variable-length main-dialogue storage without encoding or writing a ROM.
+    PlanMainDialogueReinsertion {
+        source: PathBuf,
+        #[arg(long, default_value = "private/dialogue/main-workspace.json")]
+        workspace: PathBuf,
+        #[arg(long, default_value = "out/main-dialogue-layout.json")]
+        report: PathBuf,
+    },
     /// Verify that a private main-dialogue source asset rebuilds the source exactly.
     VerifyMainDialogueSourceRoundtrip {
         source: PathBuf,
@@ -174,6 +182,27 @@ fn main() -> Result<()> {
                 summary.filled_line_count,
                 summary.complete_line_count,
                 summary.target_glyph_count
+            );
+        }
+        Command::PlanMainDialogueReinsertion {
+            source,
+            workspace,
+            report,
+        } => {
+            let summary =
+                dialogue_assets::plan_main_dialogue_reinsertion(&source, &workspace, &report)?;
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "main dialogue layout: {} regions, {} records, {} pointer writes, {} planned bytes, {} remaining bytes, {} changed records, translation input complete: {}, release eligible: {}",
+                summary.region_count,
+                summary.record_count,
+                summary.pointer_write_count,
+                summary.planned_storage_byte_count,
+                summary.remaining_storage_byte_count,
+                summary.changed_record_count,
+                summary.translation_input_complete,
+                summary.release_eligible
             );
         }
         Command::VerifyMainDialogueSourceRoundtrip {

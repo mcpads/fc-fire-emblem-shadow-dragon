@@ -529,6 +529,7 @@ pub(crate) struct MainDialogueStorageRecord {
     pub source_prg_bank: u8,
     pub canonical_entry_index: usize,
     pub entry_indices: Vec<usize>,
+    pub pointer_file_offsets: Vec<usize>,
     pub pointer_cpu_address: u16,
     pub file_offset: usize,
     pub end_file_offset_exclusive: usize,
@@ -1095,6 +1096,10 @@ pub(crate) fn inspect_main_dialogue_storage(
                 source_prg_bank: table.source_prg_bank,
                 canonical_entry_index: canonical_dialogue_entry_index(entry),
                 entry_indices: dialogue_entry_indices(entry),
+                pointer_file_offsets: dialogue_entry_indices(entry)
+                    .iter()
+                    .map(|index| table.pointer_table_file_offset + index * 2)
+                    .collect(),
                 pointer_cpu_address: entry.pointer_cpu_address,
                 file_offset: storage.file_offset,
                 end_file_offset_exclusive: storage.end_file_offset_exclusive,
@@ -2973,7 +2978,7 @@ fn switchable_bank_file_start(bank: u8) -> usize {
     HEADER_SIZE + usize::from(bank) * PRG_BANK_SIZE
 }
 
-fn switchable_file_to_cpu(bank: u8, file_offset: usize) -> Result<u16> {
+pub(crate) fn switchable_file_to_cpu(bank: u8, file_offset: usize) -> Result<u16> {
     let bank_start = switchable_bank_file_start(bank);
     let relative = file_offset
         .checked_sub(bank_start)

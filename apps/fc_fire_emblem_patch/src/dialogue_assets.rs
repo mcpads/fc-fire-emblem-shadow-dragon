@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     dialogue_inventory::{
         MainDialogueStorageLine, MainDialogueStorageRecord, inspect_main_dialogue_storage,
+        switchable_file_to_cpu,
     },
     japanese_encoding::{is_japanese_text_code, japanese_text_glyph},
     rom::{EXPECTED_SOURCE_SHA1, Rom},
@@ -14,7 +15,7 @@ use crate::{
     tracked::TrackedImage,
 };
 
-const SOURCE_ASSET_FORMAT_VERSION: u8 = 1;
+const SOURCE_ASSET_FORMAT_VERSION: u8 = 2;
 const WORKSPACE_FORMAT_VERSION: u8 = 2;
 
 #[derive(Debug)]
@@ -49,6 +50,19 @@ pub struct DialogueWorkspaceValidationSummary {
     pub filled_line_count: usize,
     pub complete_line_count: usize,
     pub target_glyph_count: usize,
+}
+
+#[derive(Debug)]
+pub struct DialogueLayoutPlanSummary {
+    pub report_sha1: String,
+    pub region_count: usize,
+    pub record_count: usize,
+    pub pointer_write_count: usize,
+    pub planned_storage_byte_count: usize,
+    pub remaining_storage_byte_count: usize,
+    pub changed_record_count: usize,
+    pub translation_input_complete: bool,
+    pub release_eligible: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,6 +115,101 @@ enum TranslationStatus {
     Complete,
 }
 
+#[derive(Debug, Serialize)]
+struct MainDialogueLayoutReport {
+    schema_version: u8,
+    scope: LayoutReportScope,
+    summary: LayoutReportSummary,
+    regions: Vec<LayoutRegionReport>,
+    records: Vec<LayoutRecordReport>,
+    unknowns: Vec<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
+struct LayoutReportScope {
+    source_sha1: &'static str,
+    workspace_sha1: String,
+    translation_direction: &'static str,
+    preserve_existing_english: bool,
+    layout_mode: &'static str,
+    output_boundary: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct LayoutReportSummary {
+    storage_region_count: usize,
+    record_count: usize,
+    pointer_write_count: usize,
+    source_owned_storage_byte_count: usize,
+    planned_storage_byte_count: usize,
+    remaining_storage_byte_count: usize,
+    changed_record_count: usize,
+    filled_line_count: usize,
+    complete_line_count: usize,
+    translation_input_complete: bool,
+    release_eligible: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct LayoutRegionReport {
+    index: usize,
+    source_prg_bank: u8,
+    source_prg_bank_hex: String,
+    file_offset: usize,
+    file_offset_hex: String,
+    end_file_offset_exclusive: usize,
+    end_file_offset_exclusive_hex: String,
+    capacity_byte_count: usize,
+    planned_storage_byte_count: usize,
+    remaining_storage_byte_count: usize,
+    record_count: usize,
+    source_equivalent_layout: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct LayoutRecordReport {
+    id: String,
+    source_prg_bank: u8,
+    source_prg_bank_hex: String,
+    source_pointer_cpu_address: u16,
+    source_pointer_cpu_address_hex: String,
+    planned_pointer_cpu_address: u16,
+    planned_pointer_cpu_address_hex: String,
+    pointer_file_offsets: Vec<usize>,
+    pointer_file_offsets_hex: Vec<String>,
+    source_storage_byte_count: usize,
+    planned_storage_byte_count: usize,
+    translated_line_count: usize,
+    changed: bool,
+    storage_region_index: usize,
+    region_relative_offset: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum LogicalDialogueByte {
+    Encoded(u8),
+    TargetGlyph(char),
+}
+
+#[derive(Debug)]
+struct LogicalDialogueRecord {
+    id: String,
+    source_prg_bank: u8,
+    source_pointer_cpu_address: u16,
+    pointer_file_offsets: Vec<usize>,
+    source_file_offset: usize,
+    source_storage_byte_count: usize,
+    translated_line_count: usize,
+    bytes: Vec<LogicalDialogueByte>,
+}
+
+#[derive(Debug)]
+struct WorkspaceTranslationCounts {
+    filled_line_count: usize,
+    complete_line_count: usize,
+    target_glyph_count: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct MainDialogueSourceAsset {
     format_version: u8,
@@ -132,6 +241,8 @@ struct SourceRecordReference {
     source_prg_bank: u8,
     canonical_entry_index: usize,
     entry_indices: Vec<usize>,
+    pointer_file_offsets: Vec<usize>,
+    pointer_file_offsets_hex: Vec<String>,
     pointer_cpu_address: u16,
     pointer_cpu_address_hex: String,
     storage_region_index: usize,
@@ -218,10 +329,241 @@ pub fn validate_main_dialogue_workspace(
         .with_context(|| format!("parse main dialogue workspace {}", workspace_path.display()))?;
     let expected = build_workspace(rom.data())?;
     validate_workspace_binding(&workspace, &expected)?;
+    let counts = validate_workspace_translations(&workspace)?;
 
-    let mut filled_line_count = 0;
-    let mut complete_line_count = 0;
-    let mut target_glyph_count = 0;
+    Ok(DialogueWorkspaceValidationSummary {
+        workspace_sha1: sha1_hex(&workspace_bytes),
+        record_count: workspace.records.len(),
+        line_count: workspace
+            .records
+            .iter()
+            .map(|record| record.lines.len())
+            .sum(),
+        filled_line_count: counts.filled_line_count,
+        complete_line_count: counts.complete_line_count,
+        target_glyph_count: counts.target_glyph_count,
+    })
+}
+
+pub fn plan_main_dialogue_reinsertion(
+    source_path: &Path,
+    workspace_path: &Path,
+    report_path: &Path,
+) -> Result<DialogueLayoutPlanSummary> {
+    let rom = Rom::from_path(source_path)?;
+    rom.verify_supported_japanese()?;
+    let workspace_bytes = fs::read(workspace_path)
+        .with_context(|| format!("read main dialogue workspace {}", workspace_path.display()))?;
+    let workspace: MainDialogueWorkspace = serde_json::from_slice(&workspace_bytes)
+        .with_context(|| format!("parse main dialogue workspace {}", workspace_path.display()))?;
+    let expected_workspace = build_workspace(rom.data())?;
+    validate_workspace_binding(&workspace, &expected_workspace)?;
+    let translation_counts = validate_workspace_translations(&workspace)?;
+
+    let source_records = inspect_main_dialogue_storage(rom.data())?;
+    ensure!(
+        source_records.len() == workspace.records.len(),
+        "main dialogue layout lost workspace records"
+    );
+    let owned_ranges = normalize_storage_ranges(&source_records)?;
+    let logical_records = source_records
+        .iter()
+        .zip(&workspace.records)
+        .map(|(source_record, workspace_record)| {
+            build_logical_dialogue_record(rom.data(), source_record, workspace_record)
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let mut region_reports = Vec::new();
+    let mut record_reports = Vec::new();
+    for (region_index, region) in owned_ranges.iter().copied().enumerate() {
+        let mut region_records = logical_records
+            .iter()
+            .filter(|record| {
+                record.source_prg_bank == region.source_prg_bank
+                    && region.start <= record.source_file_offset
+                    && record.source_file_offset + record.source_storage_byte_count
+                        <= region.end_exclusive
+            })
+            .collect::<Vec<_>>();
+        region_records.sort_unstable_by_key(|record| record.source_file_offset);
+        ensure!(
+            !region_records.is_empty(),
+            "main dialogue owned region {region_index} has no records"
+        );
+        let changed = region_records
+            .iter()
+            .any(|record| record.translated_line_count != 0);
+        let (planned_storage, placements) = if changed {
+            pack_logical_records(&region_records)
+        } else {
+            let source_storage = rom
+                .data()
+                .get(region.start..region.end_exclusive)
+                .context("main dialogue owned region is outside the source")?
+                .iter()
+                .copied()
+                .map(LogicalDialogueByte::Encoded)
+                .collect::<Vec<_>>();
+            let placements = region_records
+                .iter()
+                .map(|record| record.source_file_offset - region.start)
+                .collect();
+            (source_storage, placements)
+        };
+        let capacity = region.end_exclusive - region.start;
+        ensure!(
+            planned_storage.len() <= capacity,
+            "main dialogue region {region_index} in PRG bank {:02X} needs {} bytes but owns only {capacity}",
+            region.source_prg_bank,
+            planned_storage.len()
+        );
+        let source_equivalent_layout = planned_storage
+            == rom.data()[region.start..region.end_exclusive]
+                .iter()
+                .copied()
+                .map(LogicalDialogueByte::Encoded)
+                .collect::<Vec<_>>();
+        region_reports.push(LayoutRegionReport {
+            index: region_index,
+            source_prg_bank: region.source_prg_bank,
+            source_prg_bank_hex: format!("0x{:02X}", region.source_prg_bank),
+            file_offset: region.start,
+            file_offset_hex: format!("0x{:05X}", region.start),
+            end_file_offset_exclusive: region.end_exclusive,
+            end_file_offset_exclusive_hex: format!("0x{:05X}", region.end_exclusive),
+            capacity_byte_count: capacity,
+            planned_storage_byte_count: planned_storage.len(),
+            remaining_storage_byte_count: capacity - planned_storage.len(),
+            record_count: region_records.len(),
+            source_equivalent_layout,
+        });
+
+        for (record, region_relative_offset) in region_records.iter().zip(placements) {
+            let planned_file_offset = region
+                .start
+                .checked_add(region_relative_offset)
+                .context("main dialogue planned record offset overflow")?;
+            let planned_pointer_cpu_address =
+                switchable_file_to_cpu(region.source_prg_bank, planned_file_offset)?;
+            record_reports.push(LayoutRecordReport {
+                id: record.id.clone(),
+                source_prg_bank: record.source_prg_bank,
+                source_prg_bank_hex: format!("0x{:02X}", record.source_prg_bank),
+                source_pointer_cpu_address: record.source_pointer_cpu_address,
+                source_pointer_cpu_address_hex: format!(
+                    "0x{:04X}",
+                    record.source_pointer_cpu_address
+                ),
+                planned_pointer_cpu_address,
+                planned_pointer_cpu_address_hex: format!("0x{planned_pointer_cpu_address:04X}"),
+                pointer_file_offsets: record.pointer_file_offsets.clone(),
+                pointer_file_offsets_hex: record
+                    .pointer_file_offsets
+                    .iter()
+                    .map(|offset| format!("0x{offset:05X}"))
+                    .collect(),
+                source_storage_byte_count: record.source_storage_byte_count,
+                planned_storage_byte_count: record.bytes.len(),
+                translated_line_count: record.translated_line_count,
+                changed: record.translated_line_count != 0,
+                storage_region_index: region_index,
+                region_relative_offset,
+            });
+        }
+    }
+    record_reports.sort_unstable_by(|left, right| left.id.cmp(&right.id));
+    ensure!(
+        record_reports.len() == 504,
+        "main dialogue layout plan must contain exactly 504 records"
+    );
+    let pointer_write_count = record_reports
+        .iter()
+        .map(|record| record.pointer_file_offsets.len())
+        .sum::<usize>();
+    ensure!(
+        pointer_write_count == 517,
+        "main dialogue layout plan pointer coverage changed"
+    );
+    let source_owned_storage_byte_count = region_reports
+        .iter()
+        .map(|region| region.capacity_byte_count)
+        .sum::<usize>();
+    let planned_storage_byte_count = region_reports
+        .iter()
+        .map(|region| region.planned_storage_byte_count)
+        .sum::<usize>();
+    let remaining_storage_byte_count = region_reports
+        .iter()
+        .map(|region| region.remaining_storage_byte_count)
+        .sum::<usize>();
+    let changed_record_count = record_reports
+        .iter()
+        .filter(|record| record.changed)
+        .count();
+    let line_count = workspace
+        .records
+        .iter()
+        .map(|record| record.lines.len())
+        .sum::<usize>();
+    let translation_input_complete = translation_counts.complete_line_count == line_count;
+    let release_eligible = false;
+    let report = MainDialogueLayoutReport {
+        schema_version: 1,
+        scope: LayoutReportScope {
+            source_sha1: EXPECTED_SOURCE_SHA1,
+            workspace_sha1: sha1_hex(&workspace_bytes),
+            translation_direction: "ja-to-ko-only",
+            preserve_existing_english: true,
+            layout_mode: "logical-one-byte-target-glyphs-within-proven-source-owned-regions",
+            output_boundary: "layout-and-pointer-write-plan-only; no encoded bytes or ROM output",
+        },
+        summary: LayoutReportSummary {
+            storage_region_count: region_reports.len(),
+            record_count: record_reports.len(),
+            pointer_write_count,
+            source_owned_storage_byte_count,
+            planned_storage_byte_count,
+            remaining_storage_byte_count,
+            changed_record_count,
+            filled_line_count: translation_counts.filled_line_count,
+            complete_line_count: translation_counts.complete_line_count,
+            translation_input_complete,
+            release_eligible,
+        },
+        regions: region_reports,
+        records: record_reports,
+        unknowns: vec![
+            "Target glyphs have logical one-byte width but no Hangul code assignment until the dynamic font contract is implemented.",
+            "A successful plan does not prove screen line width, glyph working-set capacity, runtime display, or mapper conversion equivalence.",
+        ],
+    };
+    let mut report_bytes =
+        serde_json::to_vec_pretty(&report).context("serialize main dialogue layout plan")?;
+    report_bytes.push(b'\n');
+    write_file(report_path, &report_bytes)?;
+
+    Ok(DialogueLayoutPlanSummary {
+        report_sha1: sha1_hex(&report_bytes),
+        region_count: report.summary.storage_region_count,
+        record_count: report.summary.record_count,
+        pointer_write_count,
+        planned_storage_byte_count,
+        remaining_storage_byte_count,
+        changed_record_count,
+        translation_input_complete,
+        release_eligible,
+    })
+}
+
+fn validate_workspace_translations(
+    workspace: &MainDialogueWorkspace,
+) -> Result<WorkspaceTranslationCounts> {
+    let mut counts = WorkspaceTranslationCounts {
+        filled_line_count: 0,
+        complete_line_count: 0,
+        target_glyph_count: 0,
+    };
     for record in &workspace.records {
         for line in &record.lines {
             match line.status {
@@ -236,28 +578,16 @@ pub fn validate_main_dialogue_workspace(
                         "{} has status other than untranslated but its korean field is empty",
                         line.id
                     );
-                    filled_line_count += 1;
+                    counts.filled_line_count += 1;
                     if line.status == TranslationStatus::Complete {
-                        complete_line_count += 1;
+                        counts.complete_line_count += 1;
                     }
-                    target_glyph_count += validate_translation_markup(line)?;
+                    counts.target_glyph_count += validate_translation_markup(line)?;
                 }
             }
         }
     }
-
-    Ok(DialogueWorkspaceValidationSummary {
-        workspace_sha1: sha1_hex(&workspace_bytes),
-        record_count: workspace.records.len(),
-        line_count: workspace
-            .records
-            .iter()
-            .map(|record| record.lines.len())
-            .sum(),
-        filled_line_count,
-        complete_line_count,
-        target_glyph_count,
-    })
+    Ok(counts)
 }
 
 fn build_workspace(source: &[u8]) -> Result<MainDialogueWorkspace> {
@@ -602,6 +932,214 @@ fn is_korean_target_character(character: char) -> bool {
         )
 }
 
+fn build_logical_dialogue_record(
+    source: &[u8],
+    source_record: &MainDialogueStorageRecord,
+    workspace_record: &WorkspaceRecord,
+) -> Result<LogicalDialogueRecord> {
+    ensure!(
+        workspace_record.id
+            == format!(
+                "{}:{:03}",
+                source_record.table_id, source_record.canonical_entry_index
+            ),
+        "main dialogue logical record binding changed"
+    );
+    ensure!(
+        source_record.lines.len() == workspace_record.lines.len(),
+        "{} logical line coverage changed",
+        workspace_record.id
+    );
+    ensure!(
+        source_record.pointer_file_offsets.len() == source_record.entry_indices.len(),
+        "{} pointer write coverage changed",
+        workspace_record.id
+    );
+    for pointer_file_offset in &source_record.pointer_file_offsets {
+        ensure!(
+            source.get(*pointer_file_offset..*pointer_file_offset + 2)
+                == Some(&source_record.pointer_cpu_address.to_le_bytes()),
+            "{} pointer table source bytes changed at 0x{pointer_file_offset:05X}",
+            workspace_record.id
+        );
+    }
+
+    let prefix_end = source_record
+        .file_offset
+        .checked_add(source_record.prefix_byte_count)
+        .context("main dialogue record prefix range overflow")?;
+    let mut bytes = source
+        .get(source_record.file_offset..prefix_end)
+        .with_context(|| format!("{} prefix is outside the source", workspace_record.id))?
+        .iter()
+        .copied()
+        .map(LogicalDialogueByte::Encoded)
+        .collect::<Vec<_>>();
+    let mut source_cursor = prefix_end;
+    let mut translated_line_count = 0;
+    for (source_line, workspace_line) in source_record.lines.iter().zip(&workspace_record.lines) {
+        ensure!(
+            source_line.file_offset == source_cursor,
+            "{} source lines are not contiguous",
+            workspace_record.id
+        );
+        let source_line_end = source_line
+            .file_offset
+            .checked_add(source_line.storage_byte_count)
+            .context("main dialogue source line range overflow")?;
+        if workspace_line.status == TranslationStatus::Untranslated {
+            bytes.extend(
+                source
+                    .get(source_line.file_offset..source_line_end)
+                    .with_context(|| {
+                        format!("{} source storage is outside the ROM", workspace_line.id)
+                    })?
+                    .iter()
+                    .copied()
+                    .map(LogicalDialogueByte::Encoded),
+            );
+        } else {
+            translated_line_count += 1;
+            bytes.extend(
+                encode_korean_markup(&workspace_line.korean)
+                    .with_context(|| format!("encode logical markup at {}", workspace_line.id))?,
+            );
+        }
+        source_cursor = source_line_end;
+    }
+    ensure!(
+        source_cursor == source_record.end_file_offset_exclusive,
+        "{} logical record did not consume its exact source range",
+        workspace_record.id
+    );
+
+    Ok(LogicalDialogueRecord {
+        id: workspace_record.id.clone(),
+        source_prg_bank: source_record.source_prg_bank,
+        source_pointer_cpu_address: source_record.pointer_cpu_address,
+        pointer_file_offsets: source_record.pointer_file_offsets.clone(),
+        source_file_offset: source_record.file_offset,
+        source_storage_byte_count: source_record.storage_byte_count,
+        translated_line_count,
+        bytes,
+    })
+}
+
+fn encode_korean_markup(markup: &str) -> Result<Vec<LogicalDialogueByte>> {
+    let mut encoded = Vec::new();
+    let mut chars = markup.char_indices().peekable();
+    while let Some((start, character)) = chars.next() {
+        if character == '{' {
+            let end = chars
+                .by_ref()
+                .find_map(|(index, candidate)| (candidate == '}').then_some(index))
+                .context("markup token has no closing brace")?;
+            encoded.extend(
+                decode_protected_token(&markup[start..=end])?
+                    .into_iter()
+                    .map(LogicalDialogueByte::Encoded),
+            );
+            continue;
+        }
+        ensure!(character != '}', "markup has an unmatched closing brace");
+        if let Some(code) = encode_protected_literal(character) {
+            encoded.push(LogicalDialogueByte::Encoded(code));
+        } else {
+            ensure!(
+                is_korean_target_character(character),
+                "unsupported korean target character {character:?}"
+            );
+            encoded.push(LogicalDialogueByte::TargetGlyph(character));
+        }
+    }
+    Ok(encoded)
+}
+
+fn encode_protected_literal(character: char) -> Option<u8> {
+    match character {
+        '0'..='9' => Some(0x60 + (character as u8 - b'0')),
+        'A'..='Z' => Some(0x6A + (character as u8 - b'A')),
+        ':' => Some(0x8D),
+        '.' => Some(0x9B),
+        _ => None,
+    }
+}
+
+fn decode_protected_token(token: &str) -> Result<Vec<u8>> {
+    ensure!(
+        token.starts_with('{') && token.ends_with('}'),
+        "protected token is missing braces"
+    );
+    let body = &token[1..token.len() - 1];
+    if body == "SP" {
+        return Ok(vec![0xFF]);
+    }
+    if let Some(literal) = body.strip_prefix("LIT:") {
+        return Ok(vec![decode_hex_byte(literal)?]);
+    }
+    let bytes = body
+        .split(':')
+        .map(decode_hex_byte)
+        .collect::<Result<Vec<_>>>()?;
+    let (control_code, operands) = bytes
+        .split_first()
+        .context("protected control token is empty")?;
+    let control = DIALOGUE_CONTROL_SPECS
+        .iter()
+        .find(|control| control.code == *control_code)
+        .with_context(|| format!("unknown dialogue control {control_code:02X}"))?;
+    let expected_operand_count =
+        control.inline_operand_byte_count + control.transition_target_byte_count;
+    ensure!(
+        operands.len() == expected_operand_count,
+        "dialogue control {control_code:02X} requires {expected_operand_count} stored operands, found {}",
+        operands.len()
+    );
+    Ok(bytes)
+}
+
+fn decode_hex_byte(encoded: &str) -> Result<u8> {
+    ensure!(
+        encoded.len() == 2 && encoded.is_ascii(),
+        "hex byte must contain exactly two ASCII digits"
+    );
+    let digits = encoded.as_bytes();
+    Ok((decode_hex_digit(digits[0])? << 4) | decode_hex_digit(digits[1])?)
+}
+
+fn pack_logical_records(
+    records: &[&LogicalDialogueRecord],
+) -> (Vec<LogicalDialogueByte>, Vec<usize>) {
+    let mut storage = Vec::new();
+    let mut placements = Vec::with_capacity(records.len());
+    for record in records {
+        if let Some(existing_offset) = find_subsequence(&storage, &record.bytes) {
+            placements.push(existing_offset);
+            continue;
+        }
+        let overlap = (1..=storage.len().min(record.bytes.len()))
+            .rev()
+            .find(|overlap| storage[storage.len() - overlap..] == record.bytes[..*overlap])
+            .unwrap_or(0);
+        placements.push(storage.len() - overlap);
+        storage.extend_from_slice(&record.bytes[overlap..]);
+    }
+    (storage, placements)
+}
+
+fn find_subsequence(
+    storage: &[LogicalDialogueByte],
+    record: &[LogicalDialogueByte],
+) -> Option<usize> {
+    (!record.is_empty())
+        .then(|| {
+            storage
+                .windows(record.len())
+                .position(|window| window == record)
+        })
+        .flatten()
+}
+
 fn decode_line_markup(source: &[u8], line: &MainDialogueStorageLine) -> Result<String> {
     let end = line
         .file_offset
@@ -791,6 +1329,12 @@ fn build_record_reference(
         source_prg_bank: record.source_prg_bank,
         canonical_entry_index: record.canonical_entry_index,
         entry_indices: record.entry_indices.clone(),
+        pointer_file_offsets: record.pointer_file_offsets.clone(),
+        pointer_file_offsets_hex: record
+            .pointer_file_offsets
+            .iter()
+            .map(|offset| format!("0x{offset:05X}"))
+            .collect(),
         pointer_cpu_address: record.pointer_cpu_address,
         pointer_cpu_address_hex: format!("0x{:04X}", record.pointer_cpu_address),
         storage_region_index,
@@ -854,6 +1398,7 @@ mod tests {
             source_prg_bank,
             canonical_entry_index: 0,
             entry_indices: vec![0],
+            pointer_file_offsets: vec![0],
             pointer_cpu_address: 0x8000,
             file_offset,
             end_file_offset_exclusive,
@@ -879,6 +1424,23 @@ mod tests {
             safe_japanese_source_byte_count: 3,
             requires_relocation: false,
             conflicting_file_offsets_hex: Vec::new(),
+        }
+    }
+
+    fn logical_record(id: &str, bytes: &[u8]) -> LogicalDialogueRecord {
+        LogicalDialogueRecord {
+            id: id.to_owned(),
+            source_prg_bank: 2,
+            source_pointer_cpu_address: 0x8000,
+            pointer_file_offsets: vec![0],
+            source_file_offset: 0,
+            source_storage_byte_count: bytes.len(),
+            translated_line_count: 0,
+            bytes: bytes
+                .iter()
+                .copied()
+                .map(LogicalDialogueByte::Encoded)
+                .collect(),
         }
     }
 
@@ -1007,5 +1569,52 @@ mod tests {
 
         let error = validate_translation_markup(&line).unwrap_err().to_string();
         assert!(error.contains("inspect korean markup"));
+    }
+
+    #[test]
+    fn encodes_target_glyphs_as_logical_bytes_and_preserves_source_codes() {
+        assert_eq!(
+            encode_korean_markup("한STR{SP}{E9:03}{EF}").unwrap(),
+            vec![
+                LogicalDialogueByte::TargetGlyph('한'),
+                LogicalDialogueByte::Encoded(0x7C),
+                LogicalDialogueByte::Encoded(0x7D),
+                LogicalDialogueByte::Encoded(0x7B),
+                LogicalDialogueByte::Encoded(0xFF),
+                LogicalDialogueByte::Encoded(0xE9),
+                LogicalDialogueByte::Encoded(0x03),
+                LogicalDialogueByte::Encoded(0xEF),
+            ]
+        );
+        assert!(decode_protected_token("{E9}").is_err());
+        assert!(decode_protected_token("{E9:03:04}").is_err());
+    }
+
+    #[test]
+    fn packs_shared_suffixes_once_and_splits_changed_records() {
+        let whole = logical_record("whole", &[0x10, 0x20, 0x30]);
+        let shared_tail = logical_record("tail", &[0x20, 0x30]);
+        let (storage, placements) = pack_logical_records(&[&whole, &shared_tail]);
+        assert_eq!(
+            storage,
+            vec![
+                LogicalDialogueByte::Encoded(0x10),
+                LogicalDialogueByte::Encoded(0x20),
+                LogicalDialogueByte::Encoded(0x30),
+            ]
+        );
+        assert_eq!(placements, vec![0, 1]);
+
+        let changed_tail = LogicalDialogueRecord {
+            bytes: vec![
+                LogicalDialogueByte::TargetGlyph('한'),
+                LogicalDialogueByte::Encoded(0x30),
+            ],
+            translated_line_count: 1,
+            ..logical_record("changed-tail", &[0x20, 0x30])
+        };
+        let (storage, placements) = pack_logical_records(&[&whole, &changed_tail]);
+        assert_eq!(storage.len(), 5);
+        assert_eq!(placements, vec![0, 3]);
     }
 }
