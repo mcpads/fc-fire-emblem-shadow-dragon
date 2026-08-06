@@ -1,0 +1,44 @@
+{
+  "format_version": 1,
+  "translate_from": "ja",
+  "translate_to": "ko",
+  "preserve_existing_english": true,
+  "status": "technical_poc",
+  "entries": [
+    {
+      "id": "sound",
+      "source_japanese": "サウンド",
+      "korean": "사운드",
+      "source_codes": [58, 50, 95, 68, 15],
+      "korean_codes": [48, 49, 50]
+    },
+    {
+      "id": "animation",
+      "source_japanese": "アニメーション",
+      "korean": "애니메이션",
+      "source_codes": [48, 70, 83, 63, 59, 139, 95],
+      "korean_codes": [51, 58, 59, 63, 64]
+    },
+    {
+      "id": "wait_timer",
+      "source_japanese": "ウエイトタイマー",
+      "korean": "대기시간",
+      "source_codes": [50, 51, 49, 68, 64, 49, 80, 63],
+      "korean_codes": [68, 70, 80, 83]
+    }
+  ],
+  "glyphs": [
+    { "code": 48, "character": "사" },
+    { "code": 49, "character": "운" },
+    { "code": 50, "character": "드" },
+    { "code": 51, "character": "애" },
+    { "code": 58, "character": "니" },
+    { "code": 59, "character": "메" },
+    { "code": 63, "character": "이" },
+    { "code": 64, "character": "션" },
+    { "code": 68, "character": "대" },
+    { "code": 70, "character": "기" },
+    { "code": 80, "character": "시" },
+    { "code": 83, "character": "간" }
+  ]
+}

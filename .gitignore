@@ -1,0 +1,6 @@
+.DS_Store
+roms/
+out/
+target/
+.emucap/
+evidence/private/
