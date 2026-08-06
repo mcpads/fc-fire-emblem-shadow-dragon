@@ -923,8 +923,22 @@ struct PpuTransferEvidence {
     serializer_cpu_address_hex: String,
     flush_cpu_address: u16,
     flush_cpu_address_hex: String,
+    queue_consumer_cpu_address: u16,
+    queue_consumer_cpu_address_hex: String,
+    command_pointer: &'static str,
+    command_terminator: u8,
+    command_address_byte_order: &'static str,
+    descriptor_byte_offset: usize,
+    descriptor_length_mask: u8,
+    descriptor_length_mask_hex: String,
+    descriptor_vertical_increment_mask: u8,
+    descriptor_vertical_increment_mask_hex: String,
+    descriptor_bit_6_behavior: &'static str,
+    data_byte_offset: usize,
     ppu_address_register: &'static str,
     ppu_data_register: &'static str,
+    ppu_data_write_cpu_address: u16,
+    ppu_data_write_cpu_address_hex: String,
     observed_behavior: &'static str,
     code_regions: Vec<TransferCodeEvidence>,
 }
@@ -1167,7 +1181,7 @@ fn build_report(source: &[u8]) -> Result<TextInventoryReport> {
     let dialogue_text_path = build_dialogue_text_path_evidence(source)?;
 
     Ok(TextInventoryReport {
-        schema_version: 12,
+        schema_version: 13,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             translation_direction: "ja_to_ko",
@@ -1621,8 +1635,22 @@ fn build_layout_control_evidence(
                 serializer_cpu_address_hex: "0xC84E".to_owned(),
                 flush_cpu_address: 0xC3A5,
                 flush_cpu_address_hex: "0xC3A5".to_owned(),
+                queue_consumer_cpu_address: 0xC3E7,
+                queue_consumer_cpu_address_hex: "0xC3E7".to_owned(),
+                command_pointer: "0x00/0x01",
+                command_terminator: 0,
+                command_address_byte_order: "PPU address high byte, then low byte",
+                descriptor_byte_offset: 2,
+                descriptor_length_mask: 0x3F,
+                descriptor_length_mask_hex: "0x3F".to_owned(),
+                descriptor_vertical_increment_mask: 0x80,
+                descriptor_vertical_increment_mask_hex: "0x80".to_owned(),
+                descriptor_bit_6_behavior: "both control branches advance exactly once to the first data byte; higher-level meaning remains unresolved",
+                data_byte_offset: 3,
                 ppu_address_register: "0x2006",
                 ppu_data_register: "0x2007",
+                ppu_data_write_cpu_address: 0xC3DD,
+                ppu_data_write_cpu_address_hex: "0xC3DD".to_owned(),
                 observed_behavior: "serialize_stage_codes_into_a_command_queue_then_flush_them_to_ppu",
                 code_regions: build_code_region_evidence(
                     source,
@@ -2264,6 +2292,34 @@ mod tests {
         assert_eq!(
             composite.downstream_consumer.ppu_transfer.ppu_data_register,
             "0x2007"
+        );
+        assert_eq!(
+            composite
+                .downstream_consumer
+                .ppu_transfer
+                .queue_consumer_cpu_address,
+            0xC3E7
+        );
+        assert_eq!(
+            composite
+                .downstream_consumer
+                .ppu_transfer
+                .descriptor_length_mask,
+            0x3F
+        );
+        assert_eq!(
+            composite
+                .downstream_consumer
+                .ppu_transfer
+                .descriptor_vertical_increment_mask,
+            0x80
+        );
+        assert_eq!(
+            composite
+                .downstream_consumer
+                .ppu_transfer
+                .ppu_data_write_cpu_address,
+            0xC3DD
         );
         assert_eq!(composite.plane_packing.entry_cpu_address, 0x8163);
         assert_eq!(
