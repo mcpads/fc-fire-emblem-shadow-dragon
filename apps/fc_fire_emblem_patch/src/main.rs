@@ -60,6 +60,12 @@ enum Command {
         #[arg(long, default_value = "private/dialogue/main-workspace.json")]
         output: PathBuf,
     },
+    /// Validate private translations without encoding or writing a ROM.
+    ValidateMainDialogueWorkspace {
+        source: PathBuf,
+        #[arg(long, default_value = "private/dialogue/main-workspace.json")]
+        workspace: PathBuf,
+    },
     /// Verify that a private main-dialogue source asset rebuilds the source exactly.
     VerifyMainDialogueSourceRoundtrip {
         source: PathBuf,
@@ -155,6 +161,19 @@ fn main() -> Result<()> {
                 summary.line_count,
                 summary.safe_japanese_source_byte_count,
                 summary.blocked_line_count
+            );
+        }
+        Command::ValidateMainDialogueWorkspace { source, workspace } => {
+            let summary = dialogue_assets::validate_main_dialogue_workspace(&source, &workspace)?;
+            println!("validated {}", workspace.display());
+            println!("workspace SHA-1: {}", summary.workspace_sha1);
+            println!(
+                "main dialogue translations: {} records, {} lines, {} filled, {} complete, {} target glyphs",
+                summary.record_count,
+                summary.line_count,
+                summary.filled_line_count,
+                summary.complete_line_count,
+                summary.target_glyph_count
             );
         }
         Command::VerifyMainDialogueSourceRoundtrip {

@@ -15,7 +15,7 @@ use crate::{
 };
 
 const SOURCE_ASSET_FORMAT_VERSION: u8 = 1;
-const WORKSPACE_FORMAT_VERSION: u8 = 1;
+const WORKSPACE_FORMAT_VERSION: u8 = 2;
 
 #[derive(Debug)]
 pub struct DialogueSourceAssetSummary {
@@ -41,21 +41,32 @@ pub struct DialogueWorkspaceSummary {
     pub blocked_line_count: usize,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug)]
+pub struct DialogueWorkspaceValidationSummary {
+    pub workspace_sha1: String,
+    pub record_count: usize,
+    pub line_count: usize,
+    pub filled_line_count: usize,
+    pub complete_line_count: usize,
+    pub target_glyph_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct MainDialogueWorkspace {
     format_version: u8,
     source_sha1: String,
-    translate_from: &'static str,
-    translate_to: &'static str,
+    translate_from: String,
+    translate_to: String,
     preserve_existing_english: bool,
-    purpose: &'static str,
+    purpose: String,
     safe_japanese_source_byte_count: usize,
     records: Vec<WorkspaceRecord>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct WorkspaceRecord {
-    table_id: &'static str,
+    id: String,
+    table_id: String,
     source_prg_bank: u8,
     canonical_entry_index: usize,
     entry_indices: Vec<usize>,
@@ -65,17 +76,29 @@ struct WorkspaceRecord {
     lines: Vec<WorkspaceLine>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct WorkspaceLine {
+    id: String,
     index: usize,
     file_offset_hex: String,
     source_storage_sha1: String,
     source_markup: String,
     korean: String,
+    status: TranslationStatus,
     japanese_source_byte_count: usize,
     safe_japanese_source_byte_count: usize,
     requires_relocation: bool,
     conflicting_file_offsets_hex: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum TranslationStatus {
+    Untranslated,
+    InProgress,
+    NeedsReview,
+    NeedsHumanReview,
+    Complete,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -157,28 +180,104 @@ pub fn extract_main_dialogue_workspace(
 ) -> Result<DialogueWorkspaceSummary> {
     let rom = Rom::from_path(source_path)?;
     rom.verify_supported_japanese()?;
-    let records = inspect_main_dialogue_storage(rom.data())?;
-    let safe_japanese_offsets = safe_japanese_literal_offsets(rom.data(), &records)?;
-    let workspace_records = records
-        .iter()
-        .map(|record| build_workspace_record(rom.data(), record, &safe_japanese_offsets))
-        .collect::<Result<Vec<_>>>()?;
-    let line_count = workspace_records
+    let workspace = build_workspace(rom.data())?;
+    let line_count = workspace
+        .records
         .iter()
         .map(|record| record.lines.len())
         .sum();
-    let blocked_line_count = workspace_records
+    let blocked_line_count = workspace
+        .records
         .iter()
         .flat_map(|record| &record.lines)
         .filter(|line| line.requires_relocation)
         .count();
+    let mut workspace_bytes =
+        serde_json::to_vec_pretty(&workspace).context("serialize main dialogue workspace")?;
+    workspace_bytes.push(b'\n');
+    write_file(workspace_path, &workspace_bytes)?;
+
+    Ok(DialogueWorkspaceSummary {
+        workspace_sha1: sha1_hex(&workspace_bytes),
+        record_count: workspace.records.len(),
+        line_count,
+        safe_japanese_source_byte_count: workspace.safe_japanese_source_byte_count,
+        blocked_line_count,
+    })
+}
+
+pub fn validate_main_dialogue_workspace(
+    source_path: &Path,
+    workspace_path: &Path,
+) -> Result<DialogueWorkspaceValidationSummary> {
+    let rom = Rom::from_path(source_path)?;
+    rom.verify_supported_japanese()?;
+    let workspace_bytes = fs::read(workspace_path)
+        .with_context(|| format!("read main dialogue workspace {}", workspace_path.display()))?;
+    let workspace: MainDialogueWorkspace = serde_json::from_slice(&workspace_bytes)
+        .with_context(|| format!("parse main dialogue workspace {}", workspace_path.display()))?;
+    let expected = build_workspace(rom.data())?;
+    validate_workspace_binding(&workspace, &expected)?;
+
+    let mut filled_line_count = 0;
+    let mut complete_line_count = 0;
+    let mut target_glyph_count = 0;
+    for record in &workspace.records {
+        for line in &record.lines {
+            match line.status {
+                TranslationStatus::Untranslated => ensure!(
+                    line.korean.is_empty(),
+                    "{} is untranslated but its korean field is not empty",
+                    line.id
+                ),
+                _ => {
+                    ensure!(
+                        !line.korean.is_empty(),
+                        "{} has status other than untranslated but its korean field is empty",
+                        line.id
+                    );
+                    filled_line_count += 1;
+                    if line.status == TranslationStatus::Complete {
+                        complete_line_count += 1;
+                    }
+                    target_glyph_count += validate_translation_markup(line)?;
+                }
+            }
+        }
+    }
+
+    Ok(DialogueWorkspaceValidationSummary {
+        workspace_sha1: sha1_hex(&workspace_bytes),
+        record_count: workspace.records.len(),
+        line_count: workspace
+            .records
+            .iter()
+            .map(|record| record.lines.len())
+            .sum(),
+        filled_line_count,
+        complete_line_count,
+        target_glyph_count,
+    })
+}
+
+fn build_workspace(source: &[u8]) -> Result<MainDialogueWorkspace> {
+    let records = inspect_main_dialogue_storage(source)?;
+    let safe_japanese_offsets = safe_japanese_literal_offsets(source, &records)?;
+    let workspace_records = records
+        .iter()
+        .map(|record| build_workspace_record(source, record, &safe_japanese_offsets))
+        .collect::<Result<Vec<_>>>()?;
+    let line_count = workspace_records
+        .iter()
+        .map(|record| record.lines.len())
+        .sum::<usize>();
     let workspace = MainDialogueWorkspace {
         format_version: WORKSPACE_FORMAT_VERSION,
         source_sha1: EXPECTED_SOURCE_SHA1.to_owned(),
-        translate_from: "ja",
-        translate_to: "ko",
+        translate_from: "ja".to_owned(),
+        translate_to: "ko".to_owned(),
         preserve_existing_english: true,
-        purpose: "private_translation_workspace",
+        purpose: "private_translation_workspace".to_owned(),
         safe_japanese_source_byte_count: safe_japanese_offsets.len(),
         records: workspace_records,
     };
@@ -194,18 +293,7 @@ pub fn extract_main_dialogue_workspace(
         safe_japanese_offsets.len() == 27_900,
         "main dialogue workspace Japanese source boundary changed"
     );
-    let mut workspace_bytes =
-        serde_json::to_vec_pretty(&workspace).context("serialize main dialogue workspace")?;
-    workspace_bytes.push(b'\n');
-    write_file(workspace_path, &workspace_bytes)?;
-
-    Ok(DialogueWorkspaceSummary {
-        workspace_sha1: sha1_hex(&workspace_bytes),
-        record_count: workspace.records.len(),
-        line_count,
-        safe_japanese_source_byte_count: safe_japanese_offsets.len(),
-        blocked_line_count,
-    })
+    Ok(workspace)
 }
 
 pub fn verify_main_dialogue_source_roundtrip(
@@ -312,6 +400,7 @@ fn build_workspace_record(
     record: &MainDialogueStorageRecord,
     safe_japanese_offsets: &BTreeSet<usize>,
 ) -> Result<WorkspaceRecord> {
+    let record_id = format!("{}:{:03}", record.table_id, record.canonical_entry_index);
     let lines = record
         .lines
         .iter()
@@ -334,11 +423,13 @@ fn build_workspace_record(
                 .filter(|offset| !safe_japanese_offsets.contains(offset))
                 .collect::<Vec<_>>();
             Ok(WorkspaceLine {
+                id: format!("{record_id}:line:{index:02}"),
                 index,
                 file_offset_hex: format!("0x{:05X}", line.file_offset),
                 source_storage_sha1: line.storage_sha1.clone(),
                 source_markup: decode_line_markup(source, line)?,
                 korean: String::new(),
+                status: TranslationStatus::Untranslated,
                 japanese_source_byte_count: japanese_offsets.len(),
                 safe_japanese_source_byte_count: japanese_offsets.len() - conflicting_offsets.len(),
                 requires_relocation: !conflicting_offsets.is_empty(),
@@ -350,7 +441,8 @@ fn build_workspace_record(
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(WorkspaceRecord {
-        table_id: record.table_id,
+        id: record_id,
+        table_id: record.table_id.to_owned(),
         source_prg_bank: record.source_prg_bank,
         canonical_entry_index: record.canonical_entry_index,
         entry_indices: record.entry_indices.clone(),
@@ -359,6 +451,155 @@ fn build_workspace_record(
         boundary_control_hex: format!("{:02X}", record.boundary_control),
         lines,
     })
+}
+
+fn validate_workspace_binding(
+    workspace: &MainDialogueWorkspace,
+    expected: &MainDialogueWorkspace,
+) -> Result<()> {
+    let mut actual_header = workspace.clone();
+    actual_header.records.clear();
+    let mut expected_header = expected.clone();
+    expected_header.records.clear();
+    ensure!(
+        actual_header == expected_header,
+        "main dialogue workspace header does not match the supported Japanese source"
+    );
+    ensure!(
+        workspace.records.len() == expected.records.len(),
+        "main dialogue workspace record count changed"
+    );
+
+    for (actual_record, expected_record) in workspace.records.iter().zip(&expected.records) {
+        let mut actual_record_binding = actual_record.clone();
+        actual_record_binding.lines.clear();
+        let mut expected_record_binding = expected_record.clone();
+        expected_record_binding.lines.clear();
+        ensure!(
+            actual_record_binding == expected_record_binding,
+            "main dialogue workspace record binding changed at {}",
+            expected_record.id
+        );
+        ensure!(
+            actual_record.lines.len() == expected_record.lines.len(),
+            "main dialogue workspace line count changed at {}",
+            expected_record.id
+        );
+        for (actual_line, expected_line) in actual_record.lines.iter().zip(&expected_record.lines) {
+            let mut actual_line_binding = actual_line.clone();
+            actual_line_binding.korean.clear();
+            actual_line_binding.status = TranslationStatus::Untranslated;
+            ensure!(
+                actual_line_binding == *expected_line,
+                "main dialogue workspace protected source fields changed at {}",
+                expected_line.id
+            );
+        }
+    }
+    Ok(())
+}
+
+fn validate_translation_markup(line: &WorkspaceLine) -> Result<usize> {
+    let source = inspect_markup(&line.source_markup, MarkupRole::Source)
+        .with_context(|| format!("inspect protected source markup at {}", line.id))?;
+    let target = inspect_markup(&line.korean, MarkupRole::KoreanTarget)
+        .with_context(|| format!("inspect korean markup at {}", line.id))?;
+    ensure!(
+        target.protected_items == source.protected_items,
+        "{} changed, removed, or added a protected control token or existing English character",
+        line.id
+    );
+    let final_control = source
+        .protected_items
+        .last()
+        .filter(|item| item.starts_with('{'))
+        .context("source line does not end in a protected control token")?;
+    ensure!(
+        line.korean.ends_with(final_control),
+        "{} must keep its line-end control token at the end",
+        line.id
+    );
+    Ok(target.editable_glyph_count)
+}
+
+#[derive(Debug, Clone, Copy)]
+enum MarkupRole {
+    Source,
+    KoreanTarget,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct MarkupInspection {
+    protected_items: Vec<String>,
+    editable_glyph_count: usize,
+}
+
+fn inspect_markup(markup: &str, role: MarkupRole) -> Result<MarkupInspection> {
+    let mut protected_items = Vec::new();
+    let mut editable_glyph_count = 0;
+    let mut chars = markup.char_indices().peekable();
+    while let Some((start, character)) = chars.next() {
+        if character == '{' {
+            let end = chars
+                .by_ref()
+                .find_map(|(index, candidate)| (candidate == '}').then_some(index))
+                .context("markup token has no closing brace")?;
+            let token = &markup[start..=end];
+            ensure!(
+                !token[1..token.len() - 1].contains(['{', '}']),
+                "markup token contains a nested brace"
+            );
+            protected_items.push(token.to_owned());
+            continue;
+        }
+        ensure!(
+            character != '}',
+            "markup contains a closing brace without an opening brace"
+        );
+
+        if character.is_ascii_uppercase()
+            || character.is_ascii_digit()
+            || matches!(character, ':' | '.')
+        {
+            protected_items.push(character.to_string());
+            continue;
+        }
+
+        match role {
+            MarkupRole::Source => ensure!(
+                is_japanese_markup_character(character),
+                "source markup contains an unclassified character {character:?}"
+            ),
+            MarkupRole::KoreanTarget => {
+                ensure!(
+                    !is_japanese_markup_character(character),
+                    "korean markup still contains Japanese character {character:?}"
+                );
+                ensure!(
+                    is_korean_target_character(character),
+                    "korean markup contains unsupported character {character:?}"
+                );
+                editable_glyph_count += 1;
+            }
+        }
+    }
+    Ok(MarkupInspection {
+        protected_items,
+        editable_glyph_count,
+    })
+}
+
+fn is_japanese_markup_character(character: char) -> bool {
+    (0..=u8::MAX)
+        .any(|code| japanese_text_glyph(code).is_some_and(|glyph| glyph.starts_with(character)))
+}
+
+fn is_korean_target_character(character: char) -> bool {
+    matches!(character, '\u{AC00}'..='\u{D7A3}')
+        || matches!(
+            character,
+            ',' | '!' | '?' | '…' | '·' | '~' | '-' | '\'' | '“' | '”' | '‘' | '’' | '(' | ')'
+        )
 }
 
 fn decode_line_markup(source: &[u8], line: &MainDialogueStorageLine) -> Result<String> {
@@ -625,6 +866,22 @@ mod tests {
         }
     }
 
+    fn workspace_line(source_markup: &str, korean: &str) -> WorkspaceLine {
+        WorkspaceLine {
+            id: "synthetic-dialogue:000:line:00".to_owned(),
+            index: 0,
+            file_offset_hex: "0x00000".to_owned(),
+            source_storage_sha1: "source-line".to_owned(),
+            source_markup: source_markup.to_owned(),
+            korean: korean.to_owned(),
+            status: TranslationStatus::Complete,
+            japanese_source_byte_count: 3,
+            safe_japanese_source_byte_count: 3,
+            requires_relocation: false,
+            conflicting_file_offsets_hex: Vec::new(),
+        }
+    }
+
     #[test]
     fn normalizes_shared_and_adjacent_records_into_disjoint_owned_regions() {
         let records = [
@@ -708,5 +965,47 @@ mod tests {
         let safe = safe_japanese_literal_offsets(&source, &[first, second]).unwrap();
 
         assert_eq!(safe, BTreeSet::from([0]));
+    }
+
+    #[test]
+    fn accepts_hangul_while_preserving_existing_english_and_control_tokens() {
+        let line = workspace_line("マルスSTR{SP}{E9:03}{EF}", "마르스STR{SP}{E9:03}{EF}");
+
+        assert_eq!(validate_translation_markup(&line).unwrap(), 3);
+    }
+
+    #[test]
+    fn rejects_changed_existing_english_in_a_korean_target() {
+        let line = workspace_line("マルスSTR{SP}{E9:03}{EF}", "마르스SKI{SP}{E9:03}{EF}");
+
+        let error = validate_translation_markup(&line).unwrap_err().to_string();
+        assert!(error.contains("existing English"));
+    }
+
+    #[test]
+    fn rejects_changed_or_moved_control_tokens() {
+        let changed = workspace_line("マルス{E9:03}{EF}", "마르스{E9:04}{EF}");
+        assert!(
+            validate_translation_markup(&changed)
+                .unwrap_err()
+                .to_string()
+                .contains("protected control token")
+        );
+
+        let moved = workspace_line("マルス{EF}", "마르스{EF}님");
+        assert!(
+            validate_translation_markup(&moved)
+                .unwrap_err()
+                .to_string()
+                .contains("line-end control token")
+        );
+    }
+
+    #[test]
+    fn rejects_japanese_remaining_in_a_korean_target() {
+        let line = workspace_line("マルス{EF}", "마르ス{EF}");
+
+        let error = validate_translation_markup(&line).unwrap_err().to_string();
+        assert!(error.contains("inspect korean markup"));
     }
 }
