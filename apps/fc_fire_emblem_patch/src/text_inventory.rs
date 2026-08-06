@@ -26,7 +26,24 @@ struct TextTableSpec {
     terminator: u8,
     consumer_file_offset: usize,
     consumer_bytes: [u8; 10],
+    transfer: TextTransferSpec,
     protected_positions: &'static [ProtectedPosition],
+}
+
+struct TextTransferSpec {
+    source_pointer: &'static str,
+    destination: &'static str,
+    recognized_stop_codes: &'static [u8],
+    destination_end_code: u8,
+    destination_end_origin: &'static str,
+    explicit_copy_byte_limit: Option<usize>,
+    code_regions: &'static [TransferCodeSpec],
+}
+
+struct TransferCodeSpec {
+    role: &'static str,
+    file_offset: usize,
+    bytes: &'static [u8],
 }
 
 struct ProtectedPosition {
@@ -45,6 +62,21 @@ const TEXT_TABLE_SPECS: [TextTableSpec; 7] = [
         terminator: 0xEF,
         consumer_file_offset: 0x14D63,
         consumer_bytes: [0xBD, 0x1F, 0xDA, 0x85, 0x00, 0xBD, 0x20, 0xDA, 0x85, 0x01],
+        transfer: TextTransferSpec {
+            source_pointer: "0x00/0x01",
+            destination: "0x7A2B,Y",
+            recognized_stop_codes: &[0xEF],
+            destination_end_code: 0xEF,
+            destination_end_origin: "copied_source_terminator",
+            explicit_copy_byte_limit: None,
+            code_regions: &[TransferCodeSpec {
+                role: "copy_loop",
+                file_offset: 0x14D6D,
+                bytes: &[
+                    0xA0, 0x00, 0xB1, 0x00, 0x99, 0x2B, 0x7A, 0xC8, 0xC9, 0xEF, 0xD0, 0xF6,
+                ],
+            }],
+        },
         protected_positions: &[],
     },
     TextTableSpec {
@@ -55,6 +87,22 @@ const TEXT_TABLE_SPECS: [TextTableSpec; 7] = [
         terminator: 0xEF,
         consumer_file_offset: 0x0DC63,
         consumer_bytes: [0xB9, 0xD5, 0xDA, 0x85, 0x00, 0xB9, 0xD6, 0xDA, 0x85, 0x01],
+        transfer: TextTransferSpec {
+            source_pointer: "0x00/0x01",
+            destination: "0x78F2,Y",
+            recognized_stop_codes: &[0xEF],
+            destination_end_code: 0xEF,
+            destination_end_origin: "copied_source_terminator",
+            explicit_copy_byte_limit: Some(16),
+            code_regions: &[TransferCodeSpec {
+                role: "bounded_copy_loop",
+                file_offset: 0x0DC6D,
+                bytes: &[
+                    0xA0, 0x00, 0xB1, 0x00, 0x99, 0xF2, 0x78, 0xC9, 0xEF, 0xF0, 0x05, 0xC8, 0xC0,
+                    0x10, 0xD0, 0xF2, 0x60,
+                ],
+            }],
+        },
         protected_positions: &[ProtectedPosition {
             entry_index: 60,
             byte_offset: 1,
@@ -70,6 +118,21 @@ const TEXT_TABLE_SPECS: [TextTableSpec; 7] = [
         terminator: 0xEF,
         consumer_file_offset: 0x19B48,
         consumer_bytes: [0xB9, 0x2B, 0xDE, 0x85, 0x00, 0xB9, 0x2C, 0xDE, 0x85, 0x01],
+        transfer: TextTransferSpec {
+            source_pointer: "0x00/0x01",
+            destination: "(0x02/0x03),Y",
+            recognized_stop_codes: &[0xEF],
+            destination_end_code: 0xEF,
+            destination_end_origin: "copied_source_terminator",
+            explicit_copy_byte_limit: None,
+            code_regions: &[TransferCodeSpec {
+                role: "copy_loop",
+                file_offset: 0x19B52,
+                bytes: &[
+                    0xA0, 0x00, 0xB1, 0x00, 0x91, 0x02, 0xC8, 0xC9, 0xEF, 0xD0, 0xF7, 0x60,
+                ],
+            }],
+        },
         protected_positions: &[],
     },
     TextTableSpec {
@@ -80,6 +143,29 @@ const TEXT_TABLE_SPECS: [TextTableSpec; 7] = [
         terminator: 0xEF,
         consumer_file_offset: 0x2CEAA,
         consumer_bytes: [0xB9, 0xA4, 0xDF, 0x85, 0x00, 0xB9, 0xA5, 0xDF, 0x85, 0x01],
+        transfer: TextTransferSpec {
+            source_pointer: "0x00/0x01",
+            destination: "0x0451,X",
+            recognized_stop_codes: &[0xED, 0xEF],
+            destination_end_code: 0xED,
+            destination_end_origin: "synthesized_segment_separator",
+            explicit_copy_byte_limit: None,
+            code_regions: &[
+                TransferCodeSpec {
+                    role: "call_shared_copy_and_append_separator",
+                    file_offset: 0x2CEC0,
+                    bytes: &[0x20, 0xFA, 0x8E, 0xA9, 0xED, 0x9D, 0x51, 0x04, 0xE8, 0x60],
+                },
+                TransferCodeSpec {
+                    role: "shared_copy_loop",
+                    file_offset: 0x2CF0A,
+                    bytes: &[
+                        0xA0, 0x00, 0xB1, 0x00, 0xC9, 0xEF, 0xF0, 0x0B, 0x9D, 0x51, 0x04, 0xE8,
+                        0xC9, 0xED, 0xF0, 0x03, 0xC8, 0xD0, 0xEF, 0x60,
+                    ],
+                },
+            ],
+        },
         protected_positions: &[],
     },
     TextTableSpec {
@@ -90,6 +176,22 @@ const TEXT_TABLE_SPECS: [TextTableSpec; 7] = [
         terminator: 0xEF,
         consumer_file_offset: 0x1C497,
         consumer_bytes: [0xB9, 0xF1, 0xE5, 0x85, 0x08, 0xB9, 0xF2, 0xE5, 0x85, 0x09],
+        transfer: TextTransferSpec {
+            source_pointer: "0x08/0x09",
+            destination: "0x7953,X",
+            recognized_stop_codes: &[0xEF],
+            destination_end_code: 0xEF,
+            destination_end_origin: "copied_source_terminator",
+            explicit_copy_byte_limit: None,
+            code_regions: &[TransferCodeSpec {
+                role: "copy_loop",
+                file_offset: 0x1C2DC,
+                bytes: &[
+                    0xA0, 0x00, 0xB1, 0x08, 0x9D, 0x53, 0x79, 0xC9, 0xEF, 0xF0, 0x04, 0xE8, 0xC8,
+                    0xD0, 0xF3, 0x60,
+                ],
+            }],
+        },
         protected_positions: &[],
     },
     TextTableSpec {
@@ -100,6 +202,22 @@ const TEXT_TABLE_SPECS: [TextTableSpec; 7] = [
         terminator: 0xED,
         consumer_file_offset: 0x121D0,
         consumer_bytes: [0xB9, 0xB7, 0xEF, 0x85, 0x04, 0xB9, 0xB8, 0xEF, 0x85, 0x05],
+        transfer: TextTransferSpec {
+            source_pointer: "0x04/0x05",
+            destination: "0x7902,Y",
+            recognized_stop_codes: &[0xED],
+            destination_end_code: 0xEF,
+            destination_end_origin: "synthesized_buffer_terminator",
+            explicit_copy_byte_limit: None,
+            code_regions: &[TransferCodeSpec {
+                role: "copy_and_normalize_terminator",
+                file_offset: 0x121DA,
+                bytes: &[
+                    0xA0, 0x00, 0xB1, 0x04, 0xC9, 0xED, 0xF0, 0x06, 0x99, 0x02, 0x79, 0xC8, 0xD0,
+                    0xF4, 0xA9, 0xEF, 0x99, 0x02, 0x79, 0x60,
+                ],
+            }],
+        },
         protected_positions: &[],
     },
     TextTableSpec {
@@ -110,6 +228,29 @@ const TEXT_TABLE_SPECS: [TextTableSpec; 7] = [
         terminator: 0xED,
         consumer_file_offset: 0x2CEF2,
         consumer_bytes: [0xB9, 0x08, 0xEE, 0x85, 0x00, 0xB9, 0x09, 0xEE, 0x85, 0x01],
+        transfer: TextTransferSpec {
+            source_pointer: "0x00/0x01",
+            destination: "0x0451,X",
+            recognized_stop_codes: &[0xED, 0xEF],
+            destination_end_code: 0xED,
+            destination_end_origin: "copied_source_terminator",
+            explicit_copy_byte_limit: None,
+            code_regions: &[
+                TransferCodeSpec {
+                    role: "branch_to_shared_copy_loop",
+                    file_offset: 0x2CEFC,
+                    bytes: &[0xD0, 0x0C],
+                },
+                TransferCodeSpec {
+                    role: "shared_copy_loop",
+                    file_offset: 0x2CF0A,
+                    bytes: &[
+                        0xA0, 0x00, 0xB1, 0x00, 0xC9, 0xEF, 0xF0, 0x0B, 0x9D, 0x51, 0x04, 0xE8,
+                        0xC9, 0xED, 0xF0, 0x03, 0xC8, 0xD0, 0xEF, 0x60,
+                    ],
+                },
+            ],
+        },
         protected_positions: &[],
     },
 ];
@@ -167,6 +308,7 @@ struct TextTableReport {
     terminator: u8,
     terminator_hex: String,
     consumer: ConsumerEvidence,
+    transfer: TextTransferEvidence,
     data_file_start: usize,
     data_file_start_hex: String,
     data_file_end_exclusive: usize,
@@ -191,6 +333,33 @@ struct ConsumerEvidence {
     instruction_bytes_hex: String,
     pointer_load_mode: &'static str,
     destination_pointer: String,
+}
+
+#[derive(Debug, Serialize)]
+struct TextTransferEvidence {
+    source_pointer: &'static str,
+    destination: &'static str,
+    recognized_stop_codes: Vec<u8>,
+    recognized_stop_codes_hex: Vec<String>,
+    declared_source_terminator: u8,
+    declared_source_terminator_hex: String,
+    destination_end_code: u8,
+    destination_end_code_hex: String,
+    destination_end_origin: &'static str,
+    explicit_copy_byte_limit: Option<usize>,
+    code_regions: Vec<TransferCodeEvidence>,
+}
+
+#[derive(Debug, Serialize)]
+struct TransferCodeEvidence {
+    role: &'static str,
+    file_offset: usize,
+    file_offset_hex: String,
+    prg_bank: usize,
+    prg_bank_hex: String,
+    cpu_address: u16,
+    cpu_address_hex: String,
+    instruction_bytes_hex: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -274,7 +443,7 @@ fn build_report(source: &[u8]) -> Result<TextInventoryReport> {
         .sum();
 
     Ok(TextInventoryReport {
-        schema_version: 1,
+        schema_version: 2,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             translation_direction: "ja_to_ko",
@@ -307,6 +476,7 @@ fn extract_table(source: &[u8], spec: &TextTableSpec) -> Result<TextTableReport>
         "source is shorter than the PRG region"
     );
     validate_consumer(source, spec)?;
+    let transfer = build_transfer_evidence(source, spec)?;
 
     let table_byte_length = spec
         .pointer_count
@@ -357,6 +527,14 @@ fn extract_table(source: &[u8], spec: &TextTableSpec) -> Result<TextTableReport>
                 )
             })?;
         let raw = &source[file_offset..terminator_offset];
+        if let Some(limit) = spec.transfer.explicit_copy_byte_limit {
+            ensure!(
+                raw.len() < limit,
+                "{} entry {index} needs {} bytes including its terminator, beyond the consumer limit {limit}",
+                spec.id,
+                raw.len() + 1
+            );
+        }
         for position in spec
             .protected_positions
             .iter()
@@ -488,6 +666,7 @@ fn extract_table(source: &[u8], spec: &TextTableSpec) -> Result<TextTableReport>
             },
             destination_pointer,
         },
+        transfer,
         data_file_start,
         data_file_start_hex: format!("0x{data_file_start:05X}"),
         data_file_end_exclusive,
@@ -538,6 +717,76 @@ fn validate_consumer(source: &[u8], spec: &TextTableSpec) -> Result<()> {
         spec.id
     );
     Ok(())
+}
+
+fn build_transfer_evidence(source: &[u8], spec: &TextTableSpec) -> Result<TextTransferEvidence> {
+    ensure!(
+        spec.transfer
+            .recognized_stop_codes
+            .contains(&spec.terminator),
+        "transfer for {} does not recognize its declared terminator",
+        spec.id
+    );
+    ensure!(
+        !spec.transfer.code_regions.is_empty(),
+        "transfer for {} has no code evidence",
+        spec.id
+    );
+
+    let code_regions = spec
+        .transfer
+        .code_regions
+        .iter()
+        .map(|region| {
+            let end = region
+                .file_offset
+                .checked_add(region.bytes.len())
+                .context("transfer code range overflow")?;
+            ensure!(
+                end <= PRG_FILE_END,
+                "transfer code {} for {} is outside PRG",
+                region.role,
+                spec.id
+            );
+            ensure!(
+                source[region.file_offset..end] == *region.bytes,
+                "transfer code {} changed for {} at {:#X}",
+                region.role,
+                spec.id,
+                region.file_offset
+            );
+            let (prg_bank, cpu_address) = prg_file_location(region.file_offset)?;
+            Ok(TransferCodeEvidence {
+                role: region.role,
+                file_offset: region.file_offset,
+                file_offset_hex: format!("0x{:05X}", region.file_offset),
+                prg_bank,
+                prg_bank_hex: format!("0x{prg_bank:02X}"),
+                cpu_address,
+                cpu_address_hex: format!("0x{cpu_address:04X}"),
+                instruction_bytes_hex: hex_bytes(region.bytes),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(TextTransferEvidence {
+        source_pointer: spec.transfer.source_pointer,
+        destination: spec.transfer.destination,
+        recognized_stop_codes: spec.transfer.recognized_stop_codes.to_vec(),
+        recognized_stop_codes_hex: spec
+            .transfer
+            .recognized_stop_codes
+            .iter()
+            .map(|code| format!("{code:02X}"))
+            .collect(),
+        declared_source_terminator: spec.terminator,
+        declared_source_terminator_hex: format!("{:02X}", spec.terminator),
+        destination_end_code: spec.transfer.destination_end_code,
+        destination_end_code_hex: format!("{:02X}", spec.transfer.destination_end_code),
+        destination_end_origin: spec.transfer.destination_end_origin,
+        explicit_copy_byte_limit: spec.transfer.explicit_copy_byte_limit,
+        code_regions,
+    })
 }
 
 fn validate_unique_ranges(id: &str, ranges: &[(usize, usize)]) -> Result<()> {
@@ -623,7 +872,29 @@ mod tests {
             consumer_bytes: [
                 0xB9, low, high, 0x85, 0x00, 0xB9, next_low, next_high, 0x85, 0x01,
             ],
+            transfer: TextTransferSpec {
+                source_pointer: "0x00/0x01",
+                destination: "synthetic-buffer",
+                recognized_stop_codes: &[0xEF],
+                destination_end_code: 0xEF,
+                destination_end_origin: "copied_source_terminator",
+                explicit_copy_byte_limit: None,
+                code_regions: &[TransferCodeSpec {
+                    role: "copy_loop",
+                    file_offset: HEADER_SIZE + 0x0300,
+                    bytes: &[0xA0, 0x00, 0xB1, 0x00, 0xC9, 0xEF, 0x60],
+                }],
+            },
             protected_positions: &[],
+        }
+    }
+
+    fn write_declared_code(source: &mut [u8], spec: &TextTableSpec) {
+        source[spec.consumer_file_offset..spec.consumer_file_offset + spec.consumer_bytes.len()]
+            .copy_from_slice(&spec.consumer_bytes);
+        for region in spec.transfer.code_regions {
+            source[region.file_offset..region.file_offset + region.bytes.len()]
+                .copy_from_slice(region.bytes);
         }
     }
 
@@ -633,8 +904,7 @@ mod tests {
         let consumer_file_offset = HEADER_SIZE + 0x0200;
         let spec = synthetic_spec(table_file_offset, consumer_file_offset);
         let mut source = vec![0_u8; PRG_FILE_END];
-        source[consumer_file_offset..consumer_file_offset + 10]
-            .copy_from_slice(&spec.consumer_bytes);
+        write_declared_code(&mut source, &spec);
         let text_cpu_address = FIXED_BANK_CPU_BASE + 0x0200;
         let pointer = text_cpu_address.to_le_bytes();
         source[table_file_offset..table_file_offset + 2].copy_from_slice(&pointer);
@@ -666,8 +936,7 @@ mod tests {
             glyph: ".",
         }];
         let mut source = vec![0_u8; PRG_FILE_END];
-        source[consumer_file_offset..consumer_file_offset + 10]
-            .copy_from_slice(&spec.consumer_bytes);
+        write_declared_code(&mut source, &spec);
         for (index, text_offset) in [0x0200_u16, 0x0210].iter().enumerate() {
             let pointer = (FIXED_BANK_CPU_BASE + *text_offset).to_le_bytes();
             let pointer_offset = table_file_offset + index * 2;
@@ -699,5 +968,42 @@ mod tests {
         let error = validate_consumer(&source, &spec).unwrap_err().to_string();
 
         assert!(error.contains("consumer bytes changed for synthetic-names"));
+    }
+
+    #[test]
+    fn rejects_transfer_code_that_no_longer_implements_the_declared_path() {
+        let table_file_offset = FIXED_BANK_FILE_OFFSET + 0x0100;
+        let consumer_file_offset = HEADER_SIZE + 0x0200;
+        let spec = synthetic_spec(table_file_offset, consumer_file_offset);
+        let mut source = vec![0_u8; PRG_FILE_END];
+        write_declared_code(&mut source, &spec);
+        source[HEADER_SIZE + 0x0300] ^= 0x01;
+
+        let error = build_transfer_evidence(&source, &spec)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("transfer code copy_loop changed for synthetic-names"));
+    }
+
+    #[test]
+    fn rejects_text_that_exceeds_the_consumers_explicit_copy_limit() {
+        let table_file_offset = FIXED_BANK_FILE_OFFSET + 0x0100;
+        let consumer_file_offset = HEADER_SIZE + 0x0200;
+        let mut spec = synthetic_spec(table_file_offset, consumer_file_offset);
+        spec.transfer.explicit_copy_byte_limit = Some(3);
+        let mut source = vec![0_u8; PRG_FILE_END];
+        write_declared_code(&mut source, &spec);
+        let text_cpu_address = FIXED_BANK_CPU_BASE + 0x0200;
+        let pointer = text_cpu_address.to_le_bytes();
+        source[table_file_offset..table_file_offset + 2].copy_from_slice(&pointer);
+        source[table_file_offset + 2..table_file_offset + 4].copy_from_slice(&pointer);
+        let text_file_offset = FIXED_BANK_FILE_OFFSET + 0x0200;
+        source[text_file_offset..text_file_offset + 4].copy_from_slice(&[0x30, 0x31, 0x32, 0xEF]);
+
+        let error = extract_table(&source, &spec).unwrap_err().to_string();
+
+        assert!(error.contains("needs 4 bytes including its terminator"));
+        assert!(error.contains("consumer limit 3"));
     }
 }
