@@ -68,9 +68,9 @@ struct ProtectedPosition {
 
 struct DialogueControlSpec {
     code: u8,
-    source_advance_bytes: usize,
-    consumed_operand_bytes: usize,
-    lookahead_byte_count: usize,
+    current_pointer_advance_bytes: usize,
+    inline_operand_byte_count: usize,
+    transition_target_byte_count: usize,
     line_effect: &'static str,
     output_effect: &'static str,
     state_effect: &'static str,
@@ -82,9 +82,9 @@ const COMPOSITE_TEXT_LAYOUT_CODES: [u8; 2] = [0x0F, 0x1F];
 const DIALOGUE_CONTROL_SPECS: [DialogueControlSpec; 15] = [
     DialogueControlSpec {
         code: 0xEA,
-        source_advance_bytes: 1,
-        consumed_operand_bytes: 0,
-        lookahead_byte_count: 0,
+        current_pointer_advance_bytes: 1,
+        inline_operand_byte_count: 0,
+        transition_target_byte_count: 0,
         line_effect: "continue_current_line",
         output_effect: "replace_two_reserved_prefix_cells_with_9E_AB",
         state_effect: "none",
@@ -92,9 +92,9 @@ const DIALOGUE_CONTROL_SPECS: [DialogueControlSpec; 15] = [
     },
     DialogueControlSpec {
         code: 0xE0,
-        source_advance_bytes: 1,
-        consumed_operand_bytes: 0,
-        lookahead_byte_count: 0,
+        current_pointer_advance_bytes: 1,
+        inline_operand_byte_count: 0,
+        transition_target_byte_count: 0,
         line_effect: "continue_current_line",
         output_effect: "none",
         state_effect: "increment_0x7811",
@@ -102,9 +102,9 @@ const DIALOGUE_CONTROL_SPECS: [DialogueControlSpec; 15] = [
     },
     DialogueControlSpec {
         code: 0xE9,
-        source_advance_bytes: 2,
-        consumed_operand_bytes: 1,
-        lookahead_byte_count: 0,
+        current_pointer_advance_bytes: 2,
+        inline_operand_byte_count: 1,
+        transition_target_byte_count: 0,
         line_effect: "continue_current_line",
         output_effect: "none",
         state_effect: "store_operand_in_0x77FF",
@@ -112,9 +112,9 @@ const DIALOGUE_CONTROL_SPECS: [DialogueControlSpec; 15] = [
     },
     DialogueControlSpec {
         code: 0xE3,
-        source_advance_bytes: 1,
-        consumed_operand_bytes: 0,
-        lookahead_byte_count: 0,
+        current_pointer_advance_bytes: 1,
+        inline_operand_byte_count: 0,
+        transition_target_byte_count: 0,
         line_effect: "continue_current_line",
         output_effect: "none",
         state_effect: "increment_0x780E",
@@ -122,9 +122,9 @@ const DIALOGUE_CONTROL_SPECS: [DialogueControlSpec; 15] = [
     },
     DialogueControlSpec {
         code: 0xE2,
-        source_advance_bytes: 1,
-        consumed_operand_bytes: 0,
-        lookahead_byte_count: 0,
+        current_pointer_advance_bytes: 1,
+        inline_operand_byte_count: 0,
+        transition_target_byte_count: 0,
         line_effect: "continue_current_line",
         output_effect: "none",
         state_effect: "increment_0x780F",
@@ -132,9 +132,9 @@ const DIALOGUE_CONTROL_SPECS: [DialogueControlSpec; 15] = [
     },
     DialogueControlSpec {
         code: 0xE1,
-        source_advance_bytes: 2,
-        consumed_operand_bytes: 1,
-        lookahead_byte_count: 0,
+        current_pointer_advance_bytes: 2,
+        inline_operand_byte_count: 1,
+        transition_target_byte_count: 0,
         line_effect: "continue_current_line",
         output_effect: "none",
         state_effect: "store_operand_in_0x7810",
@@ -142,9 +142,9 @@ const DIALOGUE_CONTROL_SPECS: [DialogueControlSpec; 15] = [
     },
     DialogueControlSpec {
         code: 0xDF,
-        source_advance_bytes: 2,
-        consumed_operand_bytes: 1,
-        lookahead_byte_count: 0,
+        current_pointer_advance_bytes: 2,
+        inline_operand_byte_count: 1,
+        transition_target_byte_count: 0,
         line_effect: "continue_current_line",
         output_effect: "none",
         state_effect: "select_0x06F0_slot_and_bit_from_operand_nibbles_when_0x767A_is_zero",
@@ -152,9 +152,9 @@ const DIALOGUE_CONTROL_SPECS: [DialogueControlSpec; 15] = [
     },
     DialogueControlSpec {
         code: 0xEF,
-        source_advance_bytes: 1,
-        consumed_operand_bytes: 0,
-        lookahead_byte_count: 0,
+        current_pointer_advance_bytes: 1,
+        inline_operand_byte_count: 0,
+        transition_target_byte_count: 0,
         line_effect: "finish_current_line_with_0xED",
         output_effect: "none",
         state_effect: "increment_0x7802",
@@ -162,9 +162,9 @@ const DIALOGUE_CONTROL_SPECS: [DialogueControlSpec; 15] = [
     },
     DialogueControlSpec {
         code: 0xE7,
-        source_advance_bytes: 1,
-        consumed_operand_bytes: 0,
-        lookahead_byte_count: 0,
+        current_pointer_advance_bytes: 1,
+        inline_operand_byte_count: 0,
+        transition_target_byte_count: 0,
         line_effect: "finish_current_line_with_0xED",
         output_effect: "none",
         state_effect: "increment_0x7808",
@@ -172,29 +172,29 @@ const DIALOGUE_CONTROL_SPECS: [DialogueControlSpec; 15] = [
     },
     DialogueControlSpec {
         code: 0xE4,
-        source_advance_bytes: 1,
-        consumed_operand_bytes: 0,
-        lookahead_byte_count: 2,
+        current_pointer_advance_bytes: 1,
+        inline_operand_byte_count: 0,
+        transition_target_byte_count: 2,
         line_effect: "finish_current_line_with_0xED",
         output_effect: "none",
-        state_effect: "increment_0x780B_and_0x7806; copy_two_lookahead_bytes_to_0x780D_and_0x780C",
-        operand_contract: "next_two_bytes_are_observed_without_advancing_past_them",
+        state_effect: "increment_0x780B_and_0x7806; copy_two_transition_target_bytes_to_0x780D_and_0x780C",
+        operand_contract: "two_transition_target_bytes_are_read_without_current_pointer_advance",
     },
     DialogueControlSpec {
         code: 0xE6,
-        source_advance_bytes: 1,
-        consumed_operand_bytes: 0,
-        lookahead_byte_count: 2,
+        current_pointer_advance_bytes: 1,
+        inline_operand_byte_count: 0,
+        transition_target_byte_count: 2,
         line_effect: "finish_current_line_with_0xED",
         output_effect: "none",
-        state_effect: "increment_0x780A_and_0x7804; copy_two_lookahead_bytes_to_0x780D_and_0x780C",
-        operand_contract: "next_two_bytes_are_observed_without_advancing_past_them",
+        state_effect: "increment_0x780A_and_0x7804; copy_two_transition_target_bytes_to_0x780D_and_0x780C",
+        operand_contract: "two_transition_target_bytes_are_read_without_current_pointer_advance",
     },
     DialogueControlSpec {
         code: 0xEE,
-        source_advance_bytes: 1,
-        consumed_operand_bytes: 0,
-        lookahead_byte_count: 0,
+        current_pointer_advance_bytes: 1,
+        inline_operand_byte_count: 0,
+        transition_target_byte_count: 0,
         line_effect: "finish_current_line_with_0xED",
         output_effect: "none",
         state_effect: "increment_0x7804",
@@ -202,9 +202,9 @@ const DIALOGUE_CONTROL_SPECS: [DialogueControlSpec; 15] = [
     },
     DialogueControlSpec {
         code: 0xEB,
-        source_advance_bytes: 1,
-        consumed_operand_bytes: 0,
-        lookahead_byte_count: 0,
+        current_pointer_advance_bytes: 1,
+        inline_operand_byte_count: 0,
+        transition_target_byte_count: 0,
         line_effect: "finish_current_line_with_0xED",
         output_effect: "none",
         state_effect: "increment_0x7805_and_0x7806",
@@ -212,9 +212,9 @@ const DIALOGUE_CONTROL_SPECS: [DialogueControlSpec; 15] = [
     },
     DialogueControlSpec {
         code: 0xED,
-        source_advance_bytes: 1,
-        consumed_operand_bytes: 0,
-        lookahead_byte_count: 0,
+        current_pointer_advance_bytes: 1,
+        inline_operand_byte_count: 0,
+        transition_target_byte_count: 0,
         line_effect: "finish_current_line_with_0xED",
         output_effect: "none",
         state_effect: "increment_0x7806",
@@ -222,9 +222,9 @@ const DIALOGUE_CONTROL_SPECS: [DialogueControlSpec; 15] = [
     },
     DialogueControlSpec {
         code: 0xEC,
-        source_advance_bytes: 2,
-        consumed_operand_bytes: 1,
-        lookahead_byte_count: 0,
+        current_pointer_advance_bytes: 2,
+        inline_operand_byte_count: 1,
+        transition_target_byte_count: 0,
         line_effect: "continue_current_line",
         output_effect: "append_selected_sram_string_excluding_0xEF",
         state_effect: "none",
@@ -402,7 +402,7 @@ const DIALOGUE_SCRIPT_CODE_REGIONS: [TransferCodeSpec; 10] = [
         ],
     },
     TransferCodeSpec {
-        role: "finish_line_controls_and_two_byte_lookahead",
+        role: "finish_line_controls_and_two_byte_transition_target",
         file_offset: 0x282B4,
         bytes: &[
             0xEE, 0x02, 0x78, 0xD0, 0x35, 0xEE, 0x08, 0x78, 0xD0, 0x30, 0xEE, 0x0B, 0x78, 0xC8,
@@ -988,9 +988,10 @@ struct DialogueScriptEvidence {
 struct DialogueControlEvidence {
     code: u8,
     code_hex: String,
-    source_advance_bytes: usize,
-    consumed_operand_bytes: usize,
-    lookahead_byte_count: usize,
+    stream_storage_byte_count: usize,
+    current_pointer_advance_bytes: usize,
+    inline_operand_byte_count: usize,
+    transition_target_byte_count: usize,
     line_effect: &'static str,
     output_effect: &'static str,
     state_effect: &'static str,
@@ -1166,7 +1167,7 @@ fn build_report(source: &[u8]) -> Result<TextInventoryReport> {
     let dialogue_text_path = build_dialogue_text_path_evidence(source)?;
 
     Ok(TextInventoryReport {
-        schema_version: 11,
+        schema_version: 12,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             translation_direction: "ja_to_ko",
@@ -1199,7 +1200,7 @@ fn build_report(source: &[u8]) -> Result<TextInventoryReport> {
             "This is not the complete game text population.",
             "Non-Latin bytes remain unresolved Japanese, layout, icon, or control codes until decoder semantics are proven.",
             "Direct composite-parser JSR and JMP candidates are byte-pattern matches; instruction boundaries and caller roles remain unconfirmed.",
-            "Dialogue control source consumption and structural effects are confirmed, but their complete gameplay meaning and valid operands across the full script population remain unresolved.",
+            "Dialogue control pointer progression, storage spans, and structural effects are confirmed, but their complete gameplay meaning and valid arguments across the full script population remain unresolved.",
             "The runtime observation identifies one chapter 1 script location and line buffer, not the complete dialogue script population.",
             "No entry is translation-ready until control tokens, layout, and relocation policy are declared.",
         ],
@@ -1674,9 +1675,12 @@ fn build_dialogue_text_path_evidence(source: &[u8]) -> Result<DialogueTextPathEv
         .map(|control| DialogueControlEvidence {
             code: control.code,
             code_hex: format!("{:02X}", control.code),
-            source_advance_bytes: control.source_advance_bytes,
-            consumed_operand_bytes: control.consumed_operand_bytes,
-            lookahead_byte_count: control.lookahead_byte_count,
+            stream_storage_byte_count: 1
+                + control.inline_operand_byte_count
+                + control.transition_target_byte_count,
+            current_pointer_advance_bytes: control.current_pointer_advance_bytes,
+            inline_operand_byte_count: control.inline_operand_byte_count,
+            transition_target_byte_count: control.transition_target_byte_count,
             line_effect: control.line_effect,
             output_effect: control.output_effect,
             state_effect: control.state_effect,
@@ -1693,8 +1697,16 @@ fn build_dialogue_text_path_evidence(source: &[u8]) -> Result<DialogueTextPathEv
     ensure!(
         controls
             .iter()
-            .all(|control| control.source_advance_bytes == control.consumed_operand_bytes + 1),
+            .all(|control| control.current_pointer_advance_bytes
+                == control.inline_operand_byte_count + 1),
         "dialogue control source advance does not match its consumed operands"
+    );
+    ensure!(
+        controls
+            .iter()
+            .all(|control| control.stream_storage_byte_count
+                == control.inline_operand_byte_count + control.transition_target_byte_count + 1),
+        "dialogue control storage length does not cover its inline and transition bytes"
     );
     let synthesized_pair_codes = vec![0x9E, 0xAB];
     let combining_codes = COMPOSITE_TEXT_LAYOUT_CODES.to_vec();
@@ -2366,17 +2378,18 @@ mod tests {
             evidence.script.recognized_control_codes,
             DIALOGUE_SCRIPT_CONTROL_CODES
         );
-        let finish_with_lookahead = evidence
+        let finish_with_transition = evidence
             .script
             .controls
             .iter()
             .find(|control| control.code == 0xE4)
             .unwrap();
-        assert_eq!(finish_with_lookahead.source_advance_bytes, 1);
-        assert_eq!(finish_with_lookahead.consumed_operand_bytes, 0);
-        assert_eq!(finish_with_lookahead.lookahead_byte_count, 2);
+        assert_eq!(finish_with_transition.stream_storage_byte_count, 3);
+        assert_eq!(finish_with_transition.current_pointer_advance_bytes, 1);
+        assert_eq!(finish_with_transition.inline_operand_byte_count, 0);
+        assert_eq!(finish_with_transition.transition_target_byte_count, 2);
         assert_eq!(
-            finish_with_lookahead.line_effect,
+            finish_with_transition.line_effect,
             "finish_current_line_with_0xED"
         );
         let insert_sram_string = evidence
@@ -2385,8 +2398,9 @@ mod tests {
             .iter()
             .find(|control| control.code == 0xEC)
             .unwrap();
-        assert_eq!(insert_sram_string.source_advance_bytes, 2);
-        assert_eq!(insert_sram_string.consumed_operand_bytes, 1);
+        assert_eq!(insert_sram_string.current_pointer_advance_bytes, 2);
+        assert_eq!(insert_sram_string.stream_storage_byte_count, 2);
+        assert_eq!(insert_sram_string.inline_operand_byte_count, 1);
         assert_eq!(
             insert_sram_string.output_effect,
             "append_selected_sram_string_excluding_0xEF"
