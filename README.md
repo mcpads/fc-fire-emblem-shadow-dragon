@@ -17,4 +17,4 @@ cargo run -p fc-fire-emblem-patch -- verify-source "roms/Fire Emblem - Ankoku Ry
 cargo run -p fc-fire-emblem-patch -- build-options-poc "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 ```
 
-ROM과 빌드 결과는 저장소에 포함하지 않는다. 조사 근거와 다음 작업은 `docs/initial-survey.md`와 `docs/status.md`에 정리한다.
+ROM과 빌드 결과는 저장소에 포함하지 않는다. 조사 근거와 현재 상태는 `docs/initial-survey.md`와 `docs/status.md`, 전체 한글화의 단계별 통과 조건은 `docs/roadmap.md`에 정리한다.
