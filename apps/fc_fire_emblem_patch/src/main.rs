@@ -118,6 +118,12 @@ enum Command {
         #[arg(long, default_value = "out/mapper165-trigger-planes.json")]
         report: PathBuf,
     },
+    /// Classify direct CHR writers by their accumulator-value pairing contract.
+    AnalyzeMapper165DirectChrPairs {
+        source: PathBuf,
+        #[arg(long, default_value = "out/mapper165-direct-chr-pairs.json")]
+        report: PathBuf,
+    },
     /// Build the static MMC5 PRG and SRAM conversion probe without translation assets.
     BuildMmc5PrgProbe {
         source: PathBuf,
@@ -380,6 +386,20 @@ fn main() -> Result<()> {
             println!(
                 "pair-aware selector required: {}",
                 summary.pair_aware_selector_required
+            );
+        }
+        Command::AnalyzeMapper165DirectChrPairs { source, report } => {
+            let summary = mapper165::direct_chr_pairs::analyze_direct_chr_pairs(&source, &report)?;
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!("direct CHR writers: {}", summary.direct_writer_count);
+            println!(
+                "same-value paired writers: {}",
+                summary.same_value_writer_count
+            );
+            println!(
+                "runtime-value or singleton writers: {}",
+                summary.runtime_observation_writer_count
             );
         }
         Command::BuildMmc5PrgProbe {

@@ -10,6 +10,7 @@ use crate::{
     static_analysis::find_absolute_write_candidates,
     tracked::TrackedImage,
 };
+pub(crate) mod direct_chr_pairs;
 mod runtime;
 #[cfg(test)]
 mod tests;

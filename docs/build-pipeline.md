@@ -38,6 +38,13 @@ cargo run -p fc-fire-emblem-patch -- analyze-mapper165-trigger-planes \
 
 현재 9개 화면의 고유 쌍 11개 가운데 오른쪽 `00/14` 한 쌍만 별도 변형 페이지가 필요하다. 그러나 같은 FD `00`은 `00/00`, `00/18`, `00/19`에서 원본 비트플레인을 요구하므로 페이지 00을 전역 수정할 수 없다. 빌더는 예약 CHR의 물리 4 KiB 페이지 1에 변형을 합성하고, 중앙 오른쪽 FD/FE 공급자가 그림자 쌍에 따라 자연 페이지와 변형 페이지를 고르게 한다. 직접 writer는 상태를 추측하지 않고 기존 단순 매핑을 유지하며, 실행 쌍을 추가로 분류한다.
 
+`analyze-mapper165-direct-chr-pairs`는 직접 CHR writer 31곳의 명령 경계와 값 공급 방식을 원본 바이트로 검사한다. 연속 `STA`가 같은 A를 소비하는 26곳은 FD=FE 또는 같은 값의 전체 창 초기화로 닫는다. `$5E/$5F`를 따로 읽는 두 쌍 4곳과 왼쪽 FD 단독 1곳은 실행값과 반대 래치 상태가 필요하므로 미해결로 남긴다.
+
+```sh
+cargo run -p fc-fire-emblem-patch -- analyze-mapper165-direct-chr-pairs \
+  "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
+```
+
 ## MMC5 PRG 정적 프로브
 
 `build-mmc5-prg-probe`는 번역·한글 자산 없이 지원 일본판을 mapper 5 헤더로 바꾸고, 원본 마지막 16 KiB PRG 뱅크의 확인된 `FF` 구간 `$FA00`~`$FA7F`에 최소 초기화·뱅크·미러링 루틴을 배치한다. 새 실행 코드는 허용된 RP2A03 명령과 주소 지정 형식만 받는 checked assembler로 생성한다. 이 구간을 대상으로 하는 직접 `JSR`·`JMP` 3바이트 패턴이 PRG 전체에서 하나라도 나오면 쓰지 않는다.
