@@ -2,6 +2,7 @@ mod chr_inventory;
 mod dialogue_assets;
 mod dialogue_inventory;
 mod font;
+mod japanese_encoding;
 mod localization;
 mod options;
 mod rom;

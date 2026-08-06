@@ -347,6 +347,7 @@ mod tests {
             storage_sha1: String::new(),
             prefix_byte_count: 4,
             boundary_control: 0xEF,
+            literal_file_offsets: Vec::new(),
         }
     }
 

@@ -1,9 +1,14 @@
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::Path,
+};
 
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
+    japanese_encoding::is_japanese_text_code,
     rom::{EXPECTED_SOURCE_SHA1, HEADER_SIZE, PRG_SIZE, Rom},
     sha1_hex,
     text_inventory::{DIALOGUE_CONTROL_SPECS, DIALOGUE_SCRIPT_CONTROL_CODES},
@@ -531,6 +536,7 @@ pub(crate) struct MainDialogueStorageRecord {
     pub storage_sha1: String,
     pub prefix_byte_count: usize,
     pub boundary_control: u8,
+    pub literal_file_offsets: Vec<usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -565,12 +571,21 @@ struct ReportSummary {
     handler_target_entry_count: usize,
     main_first_line_count: usize,
     max_main_first_line_storage_byte_count: usize,
+    main_first_line_japanese_literal_byte_count: usize,
+    main_first_line_non_japanese_literal_byte_count: usize,
     main_first_line_protected_original_alphanumeric_literal_byte_count: usize,
     main_first_line_end_control_counts: Vec<ControlUsageReport>,
     main_linear_segment_count: usize,
     main_linear_line_count: usize,
     max_main_linear_segment_line_count: usize,
+    main_linear_segment_japanese_literal_byte_count: usize,
+    main_linear_segment_non_japanese_literal_byte_count: usize,
     main_linear_segment_protected_original_alphanumeric_literal_byte_count: usize,
+    main_unique_japanese_literal_storage_byte_count: usize,
+    main_unique_non_japanese_literal_storage_byte_count: usize,
+    main_literal_kind_conflict_storage_byte_count: usize,
+    main_literal_structural_conflict_storage_byte_count: usize,
+    main_safe_japanese_translation_source_byte_count: usize,
     main_linear_segment_boundary_control_counts: Vec<ControlUsageReport>,
     main_linear_segment_transition_count: usize,
     main_record_count: usize,
@@ -825,6 +840,10 @@ struct MainLineReport {
     storage_sha1: String,
     current_pointer_advance_bytes: usize,
     literal_byte_count: usize,
+    japanese_literal_byte_count: usize,
+    non_japanese_literal_byte_count: usize,
+    #[serde(skip)]
+    literal_file_offsets: Vec<usize>,
     protected_original_alphanumeric_literal_byte_count: usize,
     control_token_count: usize,
     inline_operand_byte_count: usize,
@@ -842,6 +861,8 @@ struct MainLinearSegmentReport {
     line_count: usize,
     storage_byte_count: usize,
     storage_sha1: String,
+    japanese_literal_byte_count: usize,
+    non_japanese_literal_byte_count: usize,
     protected_original_alphanumeric_literal_byte_count: usize,
     boundary_control: u8,
     boundary_control_hex: String,
@@ -869,6 +890,8 @@ struct ControlUsageReport {
 struct MainFirstLineSummary {
     unique_line_count: usize,
     max_storage_byte_count: usize,
+    japanese_literal_byte_count: usize,
+    non_japanese_literal_byte_count: usize,
     protected_original_alphanumeric_literal_byte_count: usize,
     line_end_control_counts: Vec<ControlUsageReport>,
 }
@@ -878,6 +901,8 @@ struct MainLinearSegmentSummary {
     unique_segment_count: usize,
     total_line_count: usize,
     max_line_count: usize,
+    japanese_literal_byte_count: usize,
+    non_japanese_literal_byte_count: usize,
     protected_original_alphanumeric_literal_byte_count: usize,
     boundary_control_counts: Vec<ControlUsageReport>,
     transition_count: usize,
@@ -898,6 +923,22 @@ struct MainRecordStorageSummary {
 struct MainRecordStorageRange {
     start: usize,
     end_exclusive: usize,
+}
+
+#[derive(Debug, Default)]
+struct MainLiteralStorageFlags {
+    japanese_literal: bool,
+    non_japanese_literal: bool,
+    structural: bool,
+}
+
+#[derive(Debug)]
+struct MainLiteralStorageSummary {
+    unique_japanese_literal_storage_byte_count: usize,
+    unique_non_japanese_literal_storage_byte_count: usize,
+    literal_kind_conflict_storage_byte_count: usize,
+    literal_structural_conflict_storage_byte_count: usize,
+    safe_japanese_translation_source_byte_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1017,6 +1058,14 @@ pub(crate) fn inspect_main_dialogue_storage(
                     table.id, entry.index
                 )
             })?;
+            let literal_file_offsets = entry
+                .main_linear_segment
+                .as_ref()
+                .context("canonical main dialogue entry has no linear segment")?
+                .lines
+                .iter()
+                .flat_map(|line| line.literal_file_offsets.iter().copied())
+                .collect();
             Ok(MainDialogueStorageRecord {
                 table_id: table.id,
                 source_prg_bank: table.source_prg_bank,
@@ -1029,6 +1078,7 @@ pub(crate) fn inspect_main_dialogue_storage(
                 storage_sha1: storage.storage_sha1.clone(),
                 prefix_byte_count: storage.prefix_byte_count,
                 boundary_control: storage.boundary_control,
+                literal_file_offsets,
             })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -1046,6 +1096,7 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
         .map(|spec| extract_dialogue_table(source, spec))
         .collect::<Result<Vec<_>>>()?;
     let main_dialogue_graph = build_main_dialogue_graph(&tables)?;
+    let main_literal_storage_summary = summarize_main_literal_storage(source, &tables)?;
     let main_first_line_count = tables
         .iter()
         .filter_map(|table| table.main_first_line_summary.as_ref())
@@ -1057,6 +1108,16 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
         .map(|summary| summary.max_storage_byte_count)
         .max()
         .unwrap_or(0);
+    let main_first_line_japanese_literal_byte_count = tables
+        .iter()
+        .filter_map(|table| table.main_first_line_summary.as_ref())
+        .map(|summary| summary.japanese_literal_byte_count)
+        .sum();
+    let main_first_line_non_japanese_literal_byte_count = tables
+        .iter()
+        .filter_map(|table| table.main_first_line_summary.as_ref())
+        .map(|summary| summary.non_japanese_literal_byte_count)
+        .sum();
     let main_first_line_protected_original_alphanumeric_literal_byte_count = tables
         .iter()
         .filter_map(|table| table.main_first_line_summary.as_ref())
@@ -1090,6 +1151,16 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
         .map(|summary| summary.max_line_count)
         .max()
         .unwrap_or(0);
+    let main_linear_segment_japanese_literal_byte_count = tables
+        .iter()
+        .filter_map(|table| table.main_linear_segment_summary.as_ref())
+        .map(|summary| summary.japanese_literal_byte_count)
+        .sum();
+    let main_linear_segment_non_japanese_literal_byte_count = tables
+        .iter()
+        .filter_map(|table| table.main_linear_segment_summary.as_ref())
+        .map(|summary| summary.non_japanese_literal_byte_count)
+        .sum();
     let main_linear_segment_protected_original_alphanumeric_literal_byte_count = tables
         .iter()
         .filter_map(|table| table.main_linear_segment_summary.as_ref())
@@ -1185,12 +1256,26 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
             .sum(),
         main_first_line_count,
         max_main_first_line_storage_byte_count,
+        main_first_line_japanese_literal_byte_count,
+        main_first_line_non_japanese_literal_byte_count,
         main_first_line_protected_original_alphanumeric_literal_byte_count,
         main_first_line_end_control_counts,
         main_linear_segment_count,
         main_linear_line_count,
         max_main_linear_segment_line_count,
+        main_linear_segment_japanese_literal_byte_count,
+        main_linear_segment_non_japanese_literal_byte_count,
         main_linear_segment_protected_original_alphanumeric_literal_byte_count,
+        main_unique_japanese_literal_storage_byte_count: main_literal_storage_summary
+            .unique_japanese_literal_storage_byte_count,
+        main_unique_non_japanese_literal_storage_byte_count: main_literal_storage_summary
+            .unique_non_japanese_literal_storage_byte_count,
+        main_literal_kind_conflict_storage_byte_count: main_literal_storage_summary
+            .literal_kind_conflict_storage_byte_count,
+        main_literal_structural_conflict_storage_byte_count: main_literal_storage_summary
+            .literal_structural_conflict_storage_byte_count,
+        main_safe_japanese_translation_source_byte_count: main_literal_storage_summary
+            .safe_japanese_translation_source_byte_count,
         main_linear_segment_boundary_control_counts,
         main_linear_segment_transition_count,
         main_record_count,
@@ -1209,12 +1294,12 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
     };
 
     Ok(DialogueStructureReport {
-        schema_version: 9,
+        schema_version: 10,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             translation_direction: "ja_to_ko",
             preserve_existing_english: true,
-            proof_boundary: "exact pointer-table ranges, switchable-bank target mapping, aliases, all nine consumer roots, the selector-41 epilogue-routing use, the main dialogue record-prefix state path, every main entry's bounded consumed storage range and measured shared storage, all explicit E4/E6 graph edges, the E7 caller-handoff contract, and eleven confirmed direct outer dispatch bindings; no dialogue bytes or translations are emitted",
+            proof_boundary: "exact pointer-table ranges, switchable-bank target mapping, aliases, all nine consumer roots, the selector-41 epilogue-routing use, the main dialogue record-prefix state path, every main entry's bounded consumed storage range and measured shared storage, Japanese 00-5F and 84-8B literal classification with 60-83 Latin preservation, all explicit E4/E6 graph edges, the E7 caller-handoff contract, and eleven confirmed direct outer dispatch bindings; no dialogue bytes or translations are emitted",
         },
         summary,
         main_dialogue_state_machine,
@@ -1813,6 +1898,14 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
                 .map(|line| line.storage_byte_count)
                 .max()
                 .unwrap_or(0),
+            japanese_literal_byte_count: unique_lines
+                .iter()
+                .map(|line| line.japanese_literal_byte_count)
+                .sum(),
+            non_japanese_literal_byte_count: unique_lines
+                .iter()
+                .map(|line| line.non_japanese_literal_byte_count)
+                .sum(),
             protected_original_alphanumeric_literal_byte_count: unique_lines
                 .iter()
                 .map(|line| line.protected_original_alphanumeric_literal_byte_count)
@@ -1853,6 +1946,14 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
                 .map(|segment| segment.line_count)
                 .max()
                 .unwrap_or(0),
+            japanese_literal_byte_count: unique_segments
+                .iter()
+                .map(|segment| segment.japanese_literal_byte_count)
+                .sum(),
+            non_japanese_literal_byte_count: unique_segments
+                .iter()
+                .map(|segment| segment.non_japanese_literal_byte_count)
+                .sum(),
             protected_original_alphanumeric_literal_byte_count: unique_segments
                 .iter()
                 .map(|segment| segment.protected_original_alphanumeric_literal_byte_count)
@@ -1999,6 +2100,9 @@ fn scan_main_line(
 ) -> Result<MainLineReport> {
     let mut cursor = line_file_offset;
     let mut literal_byte_count = 0;
+    let mut japanese_literal_byte_count = 0;
+    let mut non_japanese_literal_byte_count = 0;
+    let mut literal_file_offsets = Vec::new();
     let mut protected_original_alphanumeric_literal_byte_count = 0;
     let mut control_token_count = 0;
     let mut inline_operand_byte_count = 0;
@@ -2011,6 +2115,12 @@ fn scan_main_line(
             .find(|control| control.code == code)
         else {
             literal_byte_count += 1;
+            literal_file_offsets.push(cursor);
+            if is_japanese_text_code(code) {
+                japanese_literal_byte_count += 1;
+            } else {
+                non_japanese_literal_byte_count += 1;
+            }
             protected_original_alphanumeric_literal_byte_count +=
                 usize::from((0x60..=0x83).contains(&code));
             cursor += 1;
@@ -2086,6 +2196,9 @@ fn scan_main_line(
                 current_pointer_advance_bytes: cursor - line_file_offset
                     + control.current_pointer_advance_bytes,
                 literal_byte_count,
+                japanese_literal_byte_count,
+                non_japanese_literal_byte_count,
+                literal_file_offsets,
                 protected_original_alphanumeric_literal_byte_count,
                 control_token_count,
                 inline_operand_byte_count,
@@ -2149,6 +2262,14 @@ fn scan_main_linear_segment(
                 line_count: lines.len(),
                 storage_byte_count: storage.len(),
                 storage_sha1: sha1_hex(storage),
+                japanese_literal_byte_count: lines
+                    .iter()
+                    .map(|line| line.japanese_literal_byte_count)
+                    .sum(),
+                non_japanese_literal_byte_count: lines
+                    .iter()
+                    .map(|line| line.non_japanese_literal_byte_count)
+                    .sum(),
                 protected_original_alphanumeric_literal_byte_count: lines
                     .iter()
                     .map(|line| line.protected_original_alphanumeric_literal_byte_count)
@@ -2304,6 +2425,90 @@ fn summarize_main_record_storage(
         overlapping_record_pair_count,
         max_overlap_depth,
         max_storage_byte_count,
+    })
+}
+
+fn summarize_main_literal_storage(
+    source: &[u8],
+    tables: &[DialogueTableReport],
+) -> Result<MainLiteralStorageSummary> {
+    let mut flags_by_offset = BTreeMap::<usize, MainLiteralStorageFlags>::new();
+    for table in tables
+        .iter()
+        .filter(|table| table.directory_binding.is_some())
+    {
+        for entry in table.entries.iter().filter(|entry| {
+            entry.target_kind == "script_entry_start" && is_canonical_dialogue_entry(entry)
+        }) {
+            let storage = entry.main_record_storage.as_ref().with_context(|| {
+                format!(
+                    "{} canonical entry {} has no record-storage range",
+                    table.id, entry.index
+                )
+            })?;
+            let segment = entry.main_linear_segment.as_ref().with_context(|| {
+                format!(
+                    "{} canonical entry {} has no linear segment",
+                    table.id, entry.index
+                )
+            })?;
+            let literal_offsets = segment
+                .lines
+                .iter()
+                .flat_map(|line| line.literal_file_offsets.iter().copied())
+                .collect::<BTreeSet<_>>();
+            ensure!(
+                literal_offsets.iter().all(|offset| {
+                    (storage.file_offset..storage.end_file_offset_exclusive).contains(offset)
+                }),
+                "{} canonical entry {} has a literal outside its record storage",
+                table.id,
+                entry.index
+            );
+
+            for offset in storage.file_offset..storage.end_file_offset_exclusive {
+                let flags = flags_by_offset.entry(offset).or_default();
+                if literal_offsets.contains(&offset) {
+                    let code = *source
+                        .get(offset)
+                        .context("main dialogue literal offset is outside the source")?;
+                    if is_japanese_text_code(code) {
+                        flags.japanese_literal = true;
+                    } else {
+                        flags.non_japanese_literal = true;
+                    }
+                } else {
+                    flags.structural = true;
+                }
+            }
+        }
+    }
+
+    Ok(MainLiteralStorageSummary {
+        unique_japanese_literal_storage_byte_count: flags_by_offset
+            .values()
+            .filter(|flags| flags.japanese_literal)
+            .count(),
+        unique_non_japanese_literal_storage_byte_count: flags_by_offset
+            .values()
+            .filter(|flags| flags.non_japanese_literal)
+            .count(),
+        literal_kind_conflict_storage_byte_count: flags_by_offset
+            .values()
+            .filter(|flags| flags.japanese_literal && flags.non_japanese_literal)
+            .count(),
+        literal_structural_conflict_storage_byte_count: flags_by_offset
+            .values()
+            .filter(|flags| {
+                (flags.japanese_literal || flags.non_japanese_literal) && flags.structural
+            })
+            .count(),
+        safe_japanese_translation_source_byte_count: flags_by_offset
+            .values()
+            .filter(|flags| {
+                flags.japanese_literal && !flags.non_japanese_literal && !flags.structural
+            })
+            .count(),
     })
 }
 
@@ -3035,6 +3240,9 @@ mod tests {
         assert_eq!(line.storage_byte_count, 6);
         assert_eq!(line.current_pointer_advance_bytes, 4);
         assert_eq!(line.literal_byte_count, 1);
+        assert_eq!(line.japanese_literal_byte_count, 0);
+        assert_eq!(line.non_japanese_literal_byte_count, 1);
+        assert_eq!(line.literal_file_offsets, vec![line_file_offset]);
         assert_eq!(line.protected_original_alphanumeric_literal_byte_count, 1);
         assert_eq!(line.control_token_count, 2);
         assert_eq!(line.inline_operand_byte_count, 1);
@@ -3078,6 +3286,20 @@ mod tests {
 
         assert_eq!(segment.line_count, 3);
         assert_eq!(segment.storage_byte_count, 6);
+        assert_eq!(segment.japanese_literal_byte_count, 3);
+        assert_eq!(segment.non_japanese_literal_byte_count, 0);
+        assert_eq!(
+            segment
+                .lines
+                .iter()
+                .flat_map(|line| line.literal_file_offsets.iter().copied())
+                .collect::<Vec<_>>(),
+            vec![
+                first_line_file_offset,
+                first_line_file_offset + 2,
+                first_line_file_offset + 4,
+            ]
+        );
         assert_eq!(segment.boundary_control, 0xEF);
         assert_eq!(segment.boundary_kind, "terminal");
         assert!(segment.transition_target.is_none());
