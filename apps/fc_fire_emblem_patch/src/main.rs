@@ -4,6 +4,7 @@ mod dialogue_inventory;
 mod font;
 mod japanese_encoding;
 mod localization;
+mod mmc4_latch;
 mod mmc5_chr;
 mod mmc5_expanded_chr;
 mod mmc5_prg;
@@ -125,6 +126,22 @@ enum Command {
         )]
         output: PathBuf,
         #[arg(long, default_value = "out/mmc5-expanded-chr-options-probe.json")]
+        report: PathBuf,
+    },
+    /// Project one zero-scroll MMC4 nametable into MMC5 extended attributes.
+    ProjectMmc4LatchNametable {
+        input: PathBuf,
+        #[arg(long, default_value_t = 0)]
+        nametable_index: usize,
+        #[arg(long)]
+        fd_bank: u8,
+        #[arg(long)]
+        fe_bank: u8,
+        #[arg(long, value_enum)]
+        initial_latch: mmc4_latch::Mmc4Latch,
+        #[arg(long, default_value = "out/mmc5-exram-attributes.bin")]
+        output: PathBuf,
+        #[arg(long, default_value = "out/mmc4-latch-nametable.json")]
         report: PathBuf,
     },
 }
@@ -320,6 +337,33 @@ fn main() -> Result<()> {
             println!("wrote {}", report.display());
             println!("report SHA-1: {}", summary.report_sha1);
             println!("tracked ROM writes: {}", summary.tracked_write_count);
+        }
+        Command::ProjectMmc4LatchNametable {
+            input,
+            nametable_index,
+            fd_bank,
+            fe_bank,
+            initial_latch,
+            output,
+            report,
+        } => {
+            let summary = mmc4_latch::project_mmc4_latch_nametable(
+                &input,
+                nametable_index,
+                fd_bank,
+                fe_bank,
+                initial_latch,
+                &output,
+                &report,
+            )?;
+            println!("wrote {}", output.display());
+            println!("output SHA-1: {}", summary.output_sha1);
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "MMC4 latch triggers: FD {}, FE {}, ending latch {}",
+                summary.fd_trigger_count, summary.fe_trigger_count, summary.ending_latch
+            );
         }
     }
     Ok(())
