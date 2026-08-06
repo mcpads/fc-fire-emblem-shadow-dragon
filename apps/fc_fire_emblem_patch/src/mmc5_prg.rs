@@ -22,6 +22,8 @@ const SOURCE_SELECT_HORIZONTAL_MIRRORING_ADDRESS: u16 = 0xC9CE;
 const SOURCE_SELECT_VERTICAL_MIRRORING_ADDRESS: u16 = 0xC9D6;
 const SOURCE_BOOT_SELECT_TEMPORARY_BANK_ADDRESS: u16 = 0xC1FD;
 const SOURCE_BOOT_RESTORE_BANK_ADDRESS: u16 = 0xC205;
+const SOURCE_INDEXED_POINTER_TABLE_SELECT_BANK_ADDRESS: u16 = 0xE6BA;
+const SOURCE_INDEXED_POINTER_TABLE_RESTORE_BANK_ADDRESS: u16 = 0xE6F1;
 
 const CODE_CAVE_START_ADDRESS: u16 = 0xFA00;
 const CODE_CAVE_LEN: usize = 0x80;
@@ -174,6 +176,16 @@ pub(crate) fn create_mmc5_prg_probe_image(source_rom: &Rom) -> Result<PrgProbeIm
         "boot PRG bank restoration",
         SOURCE_BOOT_RESTORE_BANK_ADDRESS,
     )?;
+    replace_absolute_store_with_subroutine_call(
+        &mut image,
+        "indexed pointer table PRG bank selection",
+        SOURCE_INDEXED_POINTER_TABLE_SELECT_BANK_ADDRESS,
+    )?;
+    replace_absolute_store_with_subroutine_call(
+        &mut image,
+        "indexed pointer table PRG bank restoration",
+        SOURCE_INDEXED_POINTER_TABLE_RESTORE_BANK_ADDRESS,
+    )?;
     image.write_expected(
         "reset vector to MMC5 initializer",
         fixed_bank_file_offset(0xFFFC)?,
@@ -259,7 +271,7 @@ pub fn build_mmc5_prg_probe(
         tracked_writes: probe.tracked_writes,
         unresolved_boundaries: vec![
             "MMC4 CHR latch behavior has not been converted to MMC5.",
-            "Only the two direct $A000 stores proven on the observed boot path are redirected; other byte-pattern candidates remain unclassified.",
+            "Only the four direct $A000 stores proven on the observed boot and indexed-pointer-table paths are redirected; other byte-pattern candidates remain unclassified.",
             "The all-FF cave has no direct JSR or JMP reference, but indirect and data references are not fully disproven.",
             "No runtime boot, graphics, save/load, or progression equivalence is claimed by this static probe.",
         ],
@@ -512,20 +524,25 @@ mod tests {
 
         assert_eq!(central.len(), 8);
         assert_eq!(mirror.len(), 8);
-        assert_eq!(
-            assemble_at(
-                SOURCE_BOOT_SELECT_TEMPORARY_BANK_ADDRESS,
-                &[Instruction::StaAbsolute(0xA000)]
+    }
+
+    #[test]
+    fn direct_prg_bank_redirects_keep_the_original_instruction_size() {
+        for source_address in [
+            SOURCE_BOOT_SELECT_TEMPORARY_BANK_ADDRESS,
+            SOURCE_BOOT_RESTORE_BANK_ADDRESS,
+            SOURCE_INDEXED_POINTER_TABLE_SELECT_BANK_ADDRESS,
+            SOURCE_INDEXED_POINTER_TABLE_RESTORE_BANK_ADDRESS,
+        ] {
+            let source = assemble_at(source_address, &[Instruction::StaAbsolute(0xA000)]).unwrap();
+            let replacement = assemble_at(
+                source_address,
+                &[Instruction::JsrAbsolute(SELECT_PRG_BANK_ADDRESS)],
             )
-            .unwrap()
-            .len(),
-            assemble_at(
-                SOURCE_BOOT_SELECT_TEMPORARY_BANK_ADDRESS,
-                &[Instruction::JsrAbsolute(SELECT_PRG_BANK_ADDRESS)]
-            )
-            .unwrap()
-            .len()
-        );
+            .unwrap();
+            assert_eq!(source.len(), 3);
+            assert_eq!(replacement.len(), source.len());
+        }
     }
 
     #[test]
