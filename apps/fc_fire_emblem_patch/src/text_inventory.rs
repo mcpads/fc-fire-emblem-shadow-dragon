@@ -16,6 +16,8 @@ const PRG_BANK_SIZE: usize = 16 * 1024;
 const FIXED_BANK_CPU_BASE: u16 = 0xC000;
 const FIXED_BANK_FILE_OFFSET: usize = HEADER_SIZE + PRG_SIZE - PRG_BANK_SIZE;
 const PRG_FILE_END: usize = HEADER_SIZE + PRG_SIZE;
+const CHR_TILE_BYTES: usize = 16;
+const FIRST_FONT_PAGE_BYTES: usize = 4 * 1024;
 const MAX_ENTRY_BYTES: usize = 256;
 
 struct TextTableSpec {
@@ -269,6 +271,7 @@ struct TextInventoryReport {
     schema_version: u8,
     scope: ReportScope,
     summary: ReportSummary,
+    source_code_usage: Vec<SourceCodeUsage>,
     tables: Vec<TextTableReport>,
     unknowns: Vec<&'static str>,
 }
@@ -292,6 +295,13 @@ struct ReportSummary {
     unique_protected_original_byte_count: usize,
     referenced_unresolved_byte_count: usize,
     unique_unresolved_byte_count: usize,
+    referenced_unresolved_nonblank_font_tile_byte_count: usize,
+    unique_unresolved_nonblank_font_tile_byte_count: usize,
+    referenced_unresolved_blank_font_tile_byte_count: usize,
+    unique_unresolved_blank_font_tile_byte_count: usize,
+    distinct_source_code_count: usize,
+    distinct_unresolved_nonblank_font_code_count: usize,
+    distinct_unresolved_blank_font_code_count: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -319,7 +329,40 @@ struct TextTableReport {
     unique_protected_original_byte_count: usize,
     referenced_unresolved_byte_count: usize,
     unique_unresolved_byte_count: usize,
+    referenced_unresolved_nonblank_font_tile_byte_count: usize,
+    unique_unresolved_nonblank_font_tile_byte_count: usize,
+    referenced_unresolved_blank_font_tile_byte_count: usize,
+    unique_unresolved_blank_font_tile_byte_count: usize,
+    source_code_usage: Vec<SourceCodeUsage>,
     entries: Vec<TextEntryReport>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct SourceCodeUsage {
+    code: u8,
+    code_hex: String,
+    font_tile_sha1: String,
+    font_tile_all_zero: bool,
+    referenced_byte_count: usize,
+    unique_storage_byte_count: usize,
+    referenced_protected_original_byte_count: usize,
+    unique_protected_original_byte_count: usize,
+    referenced_unresolved_nonblank_font_tile_byte_count: usize,
+    unique_unresolved_nonblank_font_tile_byte_count: usize,
+    referenced_unresolved_blank_font_tile_byte_count: usize,
+    unique_unresolved_blank_font_tile_byte_count: usize,
+}
+
+#[derive(Default)]
+struct CodeUsageCounts {
+    referenced_byte_count: usize,
+    unique_storage_byte_count: usize,
+    referenced_protected_original_byte_count: usize,
+    unique_protected_original_byte_count: usize,
+    referenced_unresolved_nonblank_font_tile_byte_count: usize,
+    unique_unresolved_nonblank_font_tile_byte_count: usize,
+    referenced_unresolved_blank_font_tile_byte_count: usize,
+    unique_unresolved_blank_font_tile_byte_count: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -441,14 +484,40 @@ fn build_report(source: &[u8]) -> Result<TextInventoryReport> {
         .iter()
         .map(|table| table.unique_unresolved_byte_count)
         .sum();
+    let referenced_unresolved_nonblank_font_tile_byte_count = tables
+        .iter()
+        .map(|table| table.referenced_unresolved_nonblank_font_tile_byte_count)
+        .sum();
+    let unique_unresolved_nonblank_font_tile_byte_count = tables
+        .iter()
+        .map(|table| table.unique_unresolved_nonblank_font_tile_byte_count)
+        .sum();
+    let referenced_unresolved_blank_font_tile_byte_count = tables
+        .iter()
+        .map(|table| table.referenced_unresolved_blank_font_tile_byte_count)
+        .sum();
+    let unique_unresolved_blank_font_tile_byte_count = tables
+        .iter()
+        .map(|table| table.unique_unresolved_blank_font_tile_byte_count)
+        .sum();
+    let source_code_usage = aggregate_source_code_usage(source, &tables)?;
+    let distinct_source_code_count = source_code_usage.len();
+    let distinct_unresolved_nonblank_font_code_count = source_code_usage
+        .iter()
+        .filter(|usage| usage.referenced_unresolved_nonblank_font_tile_byte_count != 0)
+        .count();
+    let distinct_unresolved_blank_font_code_count = source_code_usage
+        .iter()
+        .filter(|usage| usage.referenced_unresolved_blank_font_tile_byte_count != 0)
+        .count();
 
     Ok(TextInventoryReport {
-        schema_version: 2,
+        schema_version: 3,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             translation_direction: "ja_to_ko",
             preserve_existing_english: true,
-            proof_boundary: "confirmed pointer tables and one exact static consumer per table",
+            proof_boundary: "confirmed pointer tables, transfer code, and first-page CHR tile storage; downstream render semantics remain unresolved",
         },
         summary: ReportSummary {
             table_count: tables.len(),
@@ -460,7 +529,15 @@ fn build_report(source: &[u8]) -> Result<TextInventoryReport> {
             unique_protected_original_byte_count,
             referenced_unresolved_byte_count,
             unique_unresolved_byte_count,
+            referenced_unresolved_nonblank_font_tile_byte_count,
+            unique_unresolved_nonblank_font_tile_byte_count,
+            referenced_unresolved_blank_font_tile_byte_count,
+            unique_unresolved_blank_font_tile_byte_count,
+            distinct_source_code_count,
+            distinct_unresolved_nonblank_font_code_count,
+            distinct_unresolved_blank_font_code_count,
         },
+        source_code_usage,
         tables,
         unknowns: vec![
             "This is not the complete game text population.",
@@ -472,8 +549,8 @@ fn build_report(source: &[u8]) -> Result<TextInventoryReport> {
 
 fn extract_table(source: &[u8], spec: &TextTableSpec) -> Result<TextTableReport> {
     ensure!(
-        source.len() >= PRG_FILE_END,
-        "source is shorter than the PRG region"
+        source.len() >= PRG_FILE_END + FIRST_FONT_PAGE_BYTES,
+        "source is shorter than the PRG region and first CHR font page"
     );
     validate_consumer(source, spec)?;
     let transfer = build_transfer_evidence(source, spec)?;
@@ -504,6 +581,7 @@ fn extract_table(source: &[u8], spec: &TextTableSpec) -> Result<TextTableReport>
 
     let mut ranges = Vec::new();
     let mut entries = Vec::with_capacity(pointers.len());
+    let mut code_usage_counts: BTreeMap<u8, CodeUsageCounts> = BTreeMap::new();
     for (index, pointer) in pointers.iter().enumerate() {
         let file_offset = fixed_cpu_to_file_offset(*pointer)
             .with_context(|| format!("{} entry {index}", spec.id))?;
@@ -577,6 +655,28 @@ fn extract_table(source: &[u8], spec: &TextTableSpec) -> Result<TextTableReport>
             }
         }
         let unresolved_byte_count = raw.len() - protected_original.len();
+        let protected_offsets: BTreeSet<usize> = protected_original
+            .iter()
+            .map(|protected| protected.byte_offset)
+            .collect();
+        let is_unique_storage = pointer_indices[pointer][0] == index;
+        for (byte_offset, code) in raw.iter().enumerate() {
+            let counts = code_usage_counts.entry(*code).or_default();
+            counts.referenced_byte_count += 1;
+            counts.unique_storage_byte_count += usize::from(is_unique_storage);
+            if protected_offsets.contains(&byte_offset) {
+                counts.referenced_protected_original_byte_count += 1;
+                counts.unique_protected_original_byte_count += usize::from(is_unique_storage);
+            } else if font_tile(source, *code)?.iter().all(|byte| *byte == 0) {
+                counts.referenced_unresolved_blank_font_tile_byte_count += 1;
+                counts.unique_unresolved_blank_font_tile_byte_count +=
+                    usize::from(is_unique_storage);
+            } else {
+                counts.referenced_unresolved_nonblank_font_tile_byte_count += 1;
+                counts.unique_unresolved_nonblank_font_tile_byte_count +=
+                    usize::from(is_unique_storage);
+            }
+        }
 
         ranges.push((file_offset, terminator_offset + 1));
         entries.push(TextEntryReport {
@@ -632,6 +732,37 @@ fn extract_table(source: &[u8], spec: &TextTableSpec) -> Result<TextTableReport>
         .iter()
         .map(|entry| entry.unresolved_byte_count)
         .sum();
+    let source_code_usage = source_code_usage(source, code_usage_counts)?;
+    let referenced_unresolved_nonblank_font_tile_byte_count = source_code_usage
+        .iter()
+        .map(|usage| usage.referenced_unresolved_nonblank_font_tile_byte_count)
+        .sum();
+    let unique_unresolved_nonblank_font_tile_byte_count = source_code_usage
+        .iter()
+        .map(|usage| usage.unique_unresolved_nonblank_font_tile_byte_count)
+        .sum();
+    let referenced_unresolved_blank_font_tile_byte_count = source_code_usage
+        .iter()
+        .map(|usage| usage.referenced_unresolved_blank_font_tile_byte_count)
+        .sum();
+    let unique_unresolved_blank_font_tile_byte_count = source_code_usage
+        .iter()
+        .map(|usage| usage.unique_unresolved_blank_font_tile_byte_count)
+        .sum();
+    ensure!(
+        referenced_unresolved_byte_count
+            == referenced_unresolved_nonblank_font_tile_byte_count
+                + referenced_unresolved_blank_font_tile_byte_count,
+        "font-tile classification does not cover referenced unresolved bytes for {}",
+        spec.id
+    );
+    ensure!(
+        unique_unresolved_byte_count
+            == unique_unresolved_nonblank_font_tile_byte_count
+                + unique_unresolved_blank_font_tile_byte_count,
+        "font-tile classification does not cover unique unresolved bytes for {}",
+        spec.id
+    );
     let table_cpu_address = fixed_file_to_cpu_address(spec.table_file_offset)?;
     let (consumer_prg_bank, consumer_cpu_address) = prg_file_location(spec.consumer_file_offset)?;
     let destination_pointer = format!(
@@ -677,6 +808,11 @@ fn extract_table(source: &[u8], spec: &TextTableSpec) -> Result<TextTableReport>
         unique_protected_original_byte_count,
         referenced_unresolved_byte_count,
         unique_unresolved_byte_count,
+        referenced_unresolved_nonblank_font_tile_byte_count,
+        unique_unresolved_nonblank_font_tile_byte_count,
+        referenced_unresolved_blank_font_tile_byte_count,
+        unique_unresolved_blank_font_tile_byte_count,
+        source_code_usage,
         entries,
     })
 }
@@ -787,6 +923,72 @@ fn build_transfer_evidence(source: &[u8], spec: &TextTableSpec) -> Result<TextTr
         explicit_copy_byte_limit: spec.transfer.explicit_copy_byte_limit,
         code_regions,
     })
+}
+
+fn aggregate_source_code_usage(
+    source: &[u8],
+    tables: &[TextTableReport],
+) -> Result<Vec<SourceCodeUsage>> {
+    let mut aggregate: BTreeMap<u8, CodeUsageCounts> = BTreeMap::new();
+    for usage in tables
+        .iter()
+        .flat_map(|table| table.source_code_usage.iter())
+    {
+        let counts = aggregate.entry(usage.code).or_default();
+        counts.referenced_byte_count += usage.referenced_byte_count;
+        counts.unique_storage_byte_count += usage.unique_storage_byte_count;
+        counts.referenced_protected_original_byte_count +=
+            usage.referenced_protected_original_byte_count;
+        counts.unique_protected_original_byte_count += usage.unique_protected_original_byte_count;
+        counts.referenced_unresolved_nonblank_font_tile_byte_count +=
+            usage.referenced_unresolved_nonblank_font_tile_byte_count;
+        counts.unique_unresolved_nonblank_font_tile_byte_count +=
+            usage.unique_unresolved_nonblank_font_tile_byte_count;
+        counts.referenced_unresolved_blank_font_tile_byte_count +=
+            usage.referenced_unresolved_blank_font_tile_byte_count;
+        counts.unique_unresolved_blank_font_tile_byte_count +=
+            usage.unique_unresolved_blank_font_tile_byte_count;
+    }
+    source_code_usage(source, aggregate)
+}
+
+fn source_code_usage(
+    source: &[u8],
+    counts_by_code: BTreeMap<u8, CodeUsageCounts>,
+) -> Result<Vec<SourceCodeUsage>> {
+    counts_by_code
+        .into_iter()
+        .map(|(code, counts)| {
+            let tile = font_tile(source, code)?;
+            Ok(SourceCodeUsage {
+                code,
+                code_hex: format!("{code:02X}"),
+                font_tile_sha1: sha1_hex(tile),
+                font_tile_all_zero: tile.iter().all(|byte| *byte == 0),
+                referenced_byte_count: counts.referenced_byte_count,
+                unique_storage_byte_count: counts.unique_storage_byte_count,
+                referenced_protected_original_byte_count: counts
+                    .referenced_protected_original_byte_count,
+                unique_protected_original_byte_count: counts.unique_protected_original_byte_count,
+                referenced_unresolved_nonblank_font_tile_byte_count: counts
+                    .referenced_unresolved_nonblank_font_tile_byte_count,
+                unique_unresolved_nonblank_font_tile_byte_count: counts
+                    .unique_unresolved_nonblank_font_tile_byte_count,
+                referenced_unresolved_blank_font_tile_byte_count: counts
+                    .referenced_unresolved_blank_font_tile_byte_count,
+                unique_unresolved_blank_font_tile_byte_count: counts
+                    .unique_unresolved_blank_font_tile_byte_count,
+            })
+        })
+        .collect()
+}
+
+fn font_tile(source: &[u8], code: u8) -> Result<&[u8]> {
+    let start = PRG_FILE_END + usize::from(code) * CHR_TILE_BYTES;
+    let end = start + CHR_TILE_BYTES;
+    source
+        .get(start..end)
+        .with_context(|| format!("font tile {code:02X} is outside the source image"))
 }
 
 fn validate_unique_ranges(id: &str, ranges: &[(usize, usize)]) -> Result<()> {
@@ -903,7 +1105,7 @@ mod tests {
         let table_file_offset = FIXED_BANK_FILE_OFFSET + 0x0100;
         let consumer_file_offset = HEADER_SIZE + 0x0200;
         let spec = synthetic_spec(table_file_offset, consumer_file_offset);
-        let mut source = vec![0_u8; PRG_FILE_END];
+        let mut source = vec![0_u8; PRG_FILE_END + FIRST_FONT_PAGE_BYTES];
         write_declared_code(&mut source, &spec);
         let text_cpu_address = FIXED_BANK_CPU_BASE + 0x0200;
         let pointer = text_cpu_address.to_le_bytes();
@@ -911,6 +1113,7 @@ mod tests {
         source[table_file_offset + 2..table_file_offset + 4].copy_from_slice(&pointer);
         let text_file_offset = FIXED_BANK_FILE_OFFSET + 0x0200;
         source[text_file_offset..text_file_offset + 4].copy_from_slice(&[0x6A, 0x30, 0x60, 0xEF]);
+        source[PRG_FILE_END + 0x30 * CHR_TILE_BYTES] = 0x80;
 
         let report = extract_table(&source, &spec).unwrap();
 
@@ -922,6 +1125,19 @@ mod tests {
         assert_eq!(report.entries[0].protected_original[0].glyph, "A");
         assert_eq!(report.entries[0].protected_original[1].glyph, "0");
         assert_eq!(report.entries[0].unresolved_byte_count, 1);
+        assert_eq!(
+            report.referenced_unresolved_nonblank_font_tile_byte_count,
+            2
+        );
+        assert_eq!(report.unique_unresolved_nonblank_font_tile_byte_count, 1);
+        let usage = report
+            .source_code_usage
+            .iter()
+            .find(|usage| usage.code == 0x30)
+            .unwrap();
+        assert!(!usage.font_tile_all_zero);
+        assert_eq!(usage.referenced_byte_count, 2);
+        assert_eq!(usage.unique_storage_byte_count, 1);
     }
 
     #[test]
@@ -935,7 +1151,7 @@ mod tests {
             code: 0x9B,
             glyph: ".",
         }];
-        let mut source = vec![0_u8; PRG_FILE_END];
+        let mut source = vec![0_u8; PRG_FILE_END + FIRST_FONT_PAGE_BYTES];
         write_declared_code(&mut source, &spec);
         for (index, text_offset) in [0x0200_u16, 0x0210].iter().enumerate() {
             let pointer = (FIXED_BANK_CPU_BASE + *text_offset).to_le_bytes();
@@ -953,6 +1169,11 @@ mod tests {
         assert_eq!(report.entries[0].protected_original[1].glyph, ".");
         assert_eq!(report.entries[1].protected_original.len(), 1);
         assert_eq!(report.entries[1].unresolved_byte_count, 2);
+        assert_eq!(report.referenced_unresolved_blank_font_tile_byte_count, 3);
+        assert_eq!(
+            report.referenced_unresolved_nonblank_font_tile_byte_count,
+            0
+        );
     }
 
     #[test]
@@ -960,7 +1181,7 @@ mod tests {
         let table_file_offset = FIXED_BANK_FILE_OFFSET + 0x0100;
         let consumer_file_offset = HEADER_SIZE + 0x0200;
         let spec = synthetic_spec(table_file_offset, consumer_file_offset);
-        let mut source = vec![0_u8; PRG_FILE_END];
+        let mut source = vec![0_u8; PRG_FILE_END + FIRST_FONT_PAGE_BYTES];
         source[consumer_file_offset..consumer_file_offset + 10]
             .copy_from_slice(&spec.consumer_bytes);
         source[consumer_file_offset + 1] ^= 0x01;
@@ -975,7 +1196,7 @@ mod tests {
         let table_file_offset = FIXED_BANK_FILE_OFFSET + 0x0100;
         let consumer_file_offset = HEADER_SIZE + 0x0200;
         let spec = synthetic_spec(table_file_offset, consumer_file_offset);
-        let mut source = vec![0_u8; PRG_FILE_END];
+        let mut source = vec![0_u8; PRG_FILE_END + FIRST_FONT_PAGE_BYTES];
         write_declared_code(&mut source, &spec);
         source[HEADER_SIZE + 0x0300] ^= 0x01;
 
@@ -992,7 +1213,7 @@ mod tests {
         let consumer_file_offset = HEADER_SIZE + 0x0200;
         let mut spec = synthetic_spec(table_file_offset, consumer_file_offset);
         spec.transfer.explicit_copy_byte_limit = Some(3);
-        let mut source = vec![0_u8; PRG_FILE_END];
+        let mut source = vec![0_u8; PRG_FILE_END + FIRST_FONT_PAGE_BYTES];
         write_declared_code(&mut source, &spec);
         let text_cpu_address = FIXED_BANK_CPU_BASE + 0x0200;
         let pointer = text_cpu_address.to_le_bytes();
