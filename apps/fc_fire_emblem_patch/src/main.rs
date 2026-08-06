@@ -157,6 +157,14 @@ enum Command {
         #[arg(long, default_value = "out/mmc4-latch-nametable.json")]
         report: PathBuf,
     },
+    /// Replay captured PPU transfers into mirrored nametables and project one viewport.
+    ReplayMmc4LatchPpuTransfers {
+        input: PathBuf,
+        #[arg(long, default_value = "out/mmc5-exram-transfer-replay.bin")]
+        output: PathBuf,
+        #[arg(long, default_value = "out/mmc4-latch-transfer-replay.json")]
+        report: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -397,6 +405,21 @@ fn main() -> Result<()> {
             println!(
                 "MMC4 latch triggers: FD {}, FE {}, ending latch {}",
                 summary.fd_trigger_count, summary.fe_trigger_count, summary.ending_latch
+            );
+        }
+        Command::ReplayMmc4LatchPpuTransfers {
+            input,
+            output,
+            report,
+        } => {
+            let summary = mmc4_latch::replay_mmc4_latch_ppu_transfers(&input, &output, &report)?;
+            println!("wrote {}", output.display());
+            println!("output SHA-1: {}", summary.output_sha1);
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "applied nametable writes: {}",
+                summary.nametable_write_count
             );
         }
     }

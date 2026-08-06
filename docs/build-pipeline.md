@@ -49,6 +49,17 @@ cargo run -p fc-fire-emblem-patch -- project-mmc4-latch-nametable \
 
 입력 크기·페이지 인덱스·6비트 뱅크 범위가 맞지 않으면 산출물을 만들지 않는다. 보고서는 원본 바이트 대신 입력·출력 해시, 트리거 개수와 초기·종료 래치만 기록하며 `release_eligible`은 항상 거짓이다. 이 도구는 미세 스크롤, PPU의 선행 타일 fetch, 네임테이블 경계, MMC5 ExRAM의 한 화면 미러링과 스프라이트 CHR을 모델링하지 않는다. 따라서 결과는 런타임 소유·갱신 구현의 입력을 검증하는 개발용 프로브일 뿐 ROM 삽입 자산이 아니다.
 
+`replay-mmc4-latch-ppu-transfers`는 로컬 JSON에 기록한 PPU 전송을 두 물리 네임테이블에 순서대로 적용한다. 입력은 스키마 1, 초기 채움 바이트, 수평·수직 미러링, 선택할 논리 네임테이블, FD/FE 뱅크와 초기 래치, 그리고 각 전송의 14비트 시작 주소·`across`/`down` 증가 방향·16진 데이터로 구성한다. `$3000`~`$3EFF` 미러는 대응 네임테이블로 보내고 패턴·팔레트 주소 쓰기는 투영 입력에서 제외한다.
+
+```sh
+cargo run -p fc-fire-emblem-patch -- replay-mmc4-latch-ppu-transfers \
+  path/to/ppu-transfers.json \
+  --output out/mmc5-exram-transfer-replay.bin \
+  --report out/mmc4-latch-transfer-replay.json
+```
+
+보고서는 원문 전송 바이트를 복제하지 않고 입력 SHA-1, 전송·데이터·네임테이블 적용 수와 출력 SHA-1만 기록한다. 이 명령은 ROM 갱신 코드와 비교할 호스트 측 의미 기준이며, 제로 스크롤 선택 화면만 투영하므로 자체로 런타임 소유나 스크롤 동등성을 증명하지 않는다.
+
 `build-mmc5-dialogue-exram-probe`는 위에서 생성한 정확히 1 KiB 입력 가운데 확인된 오른쪽 FD/FE 뱅크 `00/18`만 허용한다. CHR writer 프로브 위에서 오른쪽 FD·FE 공급 루틴을 같은 길이의 공통 검사 호출로 바꾸고, 두 그림자가 `00/18`이 되는 순간 고정 PRG의 `$FB00`~`$FEFF`에서 MMC5 ExRAM `$5C00`~`$5FFF`로 복사한다. 복사 동안 `$5104=2`, 표시 전에는 `$5104=1`을 쓰며 A·X·상태 플래그를 복원한다. 새 상대 분기는 절대 목표 주소를 받아 signed 8비트 도달 범위를 checked assembler에서 검산한다.
 
 ```sh
