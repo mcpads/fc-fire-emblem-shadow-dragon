@@ -23,6 +23,13 @@ const MAX_ENTRY_BYTES: usize = 256;
 const COMPOSITE_SEGMENT_SEPARATOR_CODE: u8 = 0xED;
 const COMPOSITE_END_CODE: u8 = 0xEF;
 const COMPOSITE_OVERLAY_BLANK_CODE: u8 = 0xFF;
+const DIALOGUE_LINE_END_CODE: u8 = 0xED;
+const DIALOGUE_STAGE_WIDTH_MASK: u8 = 0x1F;
+const DIALOGUE_TWO_PLANE_HEADER_FLAG: u8 = 0x40;
+const DIALOGUE_LINE_BUFFER_ADDRESSES: [u16; 6] = [0x7832, 0x7852, 0x7872, 0x7892, 0x78B2, 0x78D2];
+const DIALOGUE_SCRIPT_CONTROL_CODES: [u8; 15] = [
+    0xEA, 0xE0, 0xE9, 0xE3, 0xE2, 0xE1, 0xDF, 0xEF, 0xE7, 0xE4, 0xE6, 0xEE, 0xEB, 0xED, 0xEC,
+];
 
 struct TextTableSpec {
     id: &'static str,
@@ -192,6 +199,102 @@ const COMPOSITE_PLANE_PACKING_CODE_REGIONS: [TransferCodeSpec; 4] = [
         bytes: &[
             0xA0, 0x00, 0xA6, 0x04, 0xF0, 0x02, 0xE6, 0x05, 0xB1, 0x00, 0x91, 0x02, 0xC8, 0xD0,
             0x04, 0xE6, 0x01, 0xE6, 0x03, 0xC6, 0x04, 0xD0, 0xF1, 0xC6, 0x05, 0xD0, 0xED, 0x60,
+        ],
+    },
+];
+
+const DIALOGUE_SCRIPT_CODE_REGIONS: [TransferCodeSpec; 5] = [
+    TransferCodeSpec {
+        role: "initialize_sram_line_buffer",
+        file_offset: 0x281FA,
+        bytes: &[
+            0x20, 0x68, 0x86, 0xA9, 0x00, 0x8D, 0xFA, 0x77, 0x8D, 0x07, 0x78, 0x20, 0x3A, 0x83,
+            0x20, 0x48, 0x83, 0xA0, 0x00, 0xA9, 0xFF, 0x91, 0x06, 0xC8, 0x91, 0x06, 0xC8, 0x8C,
+            0xFB, 0x77,
+        ],
+    },
+    TransferCodeSpec {
+        role: "dispatch_script_controls",
+        file_offset: 0x28218,
+        bytes: &[
+            0xAC, 0xFA, 0x77, 0x20, 0x9C, 0xE6, 0xAD, 0x34, 0x79, 0xC9, 0xEA, 0xD0, 0x10, 0xA0,
+            0x00, 0xA9, 0x9E, 0x91, 0x06, 0xC8, 0xA9, 0xAB, 0x91, 0x06, 0xEE, 0xFA, 0x77, 0xD0,
+            0xE3, 0xC9, 0xE0, 0xD0, 0x08, 0xEE, 0x11, 0x78, 0xEE, 0xFA, 0x77, 0xD0, 0xD7, 0xC9,
+            0xE9, 0xD0, 0x05, 0x20, 0x2E, 0x83, 0xD0, 0xCE, 0xC9, 0xE3, 0xD0, 0x08, 0xEE, 0x0E,
+            0x78, 0xEE, 0xFA, 0x77, 0xD0, 0xC2, 0xC9, 0xE2, 0xD0, 0x08, 0xEE, 0x0F, 0x78, 0xEE,
+            0xFA, 0x77, 0xD0, 0xB6, 0xC9, 0xE1, 0xD0, 0x0D, 0xC8, 0x20, 0x9C, 0xE6, 0x8D, 0x10,
+            0x78, 0xC8, 0x8C, 0xFA, 0x77, 0xD0, 0xA5, 0xC9, 0xDF, 0xD0, 0x06, 0x20, 0x1F, 0x83,
+            0x4C, 0x08, 0x82, 0xC9, 0xEF, 0xF0, 0x33, 0xC9, 0xE7, 0xF0, 0x34, 0xC9, 0xE4, 0xF0,
+            0x35, 0xC9, 0xE6, 0xF0, 0x45, 0xC9, 0xEE, 0xF0, 0x52, 0xC9, 0xEB, 0xF0, 0x53, 0xC9,
+            0xED, 0xF0, 0x52, 0xC9, 0xEC, 0xD0, 0x03, 0x4C, 0x64, 0x83,
+        ],
+    },
+    TransferCodeSpec {
+        role: "copy_literal_script_byte_to_line",
+        file_offset: 0x282A0,
+        bytes: &[
+            0xAC, 0xFA, 0x77, 0x20, 0x9C, 0xE6, 0xAC, 0xFB, 0x77, 0x91, 0x06, 0xEE, 0xFA, 0x77,
+            0xEE, 0xFB, 0x77, 0x4C, 0x08, 0x82,
+        ],
+    },
+    TransferCodeSpec {
+        role: "finish_line_with_terminator",
+        file_offset: 0x282EE,
+        bytes: &[
+            0xEE, 0xFA, 0x77, 0xA9, 0xED, 0xAC, 0xFB, 0x77, 0x91, 0x06, 0xAE, 0xF0, 0x77, 0xAD,
+            0xFA, 0x77, 0x18, 0x7D, 0x12, 0x78, 0x9D, 0x12, 0x78, 0x90, 0x03, 0xFE, 0x14, 0x78,
+            0xA9, 0x00, 0x85, 0x2C, 0xA9, 0x01, 0x8D, 0xFC, 0x77, 0xAD, 0xFF, 0x77, 0x85, 0x2D,
+            0xEE, 0xF7, 0x77, 0x60,
+        ],
+    },
+    TransferCodeSpec {
+        role: "read_banked_script_byte_and_restore_dialogue_bank",
+        file_offset: 0x3E6AC,
+        bytes: &[
+            0xAD, 0xF2, 0x77, 0xF0, 0x03, 0x8D, 0x00, 0xA0, 0xB1, 0x76, 0x8D, 0x34, 0x79, 0xA9,
+            0x0A, 0x8D, 0x00, 0xA0, 0xAD, 0x34, 0x79, 0x60,
+        ],
+    },
+];
+
+const DIALOGUE_RENDERER_CODE_REGIONS: [TransferCodeSpec; 4] = [
+    TransferCodeSpec {
+        role: "initialize_progressive_two_plane_line",
+        file_offset: 0x283CA,
+        bytes: &[
+            0x20, 0x48, 0x83, 0xA2, 0x00, 0xA0, 0x00, 0x8C, 0xFD, 0x77, 0x8C, 0x07, 0x78,
+        ],
+    },
+    TransferCodeSpec {
+        role: "emit_combining_overlay_plane",
+        file_offset: 0x283D7,
+        bytes: &[
+            0xB1, 0x06, 0xC9, 0x0F, 0xF0, 0x0F, 0xC9, 0x1F, 0xF0, 0x0B, 0xC9, 0xED, 0xF0, 0x17,
+            0xA9, 0xFF, 0xEE, 0xFD, 0x77, 0xD0, 0x01, 0xCA, 0x9D, 0x11, 0x03, 0xE8, 0xC8, 0xAD,
+            0xFD, 0x77, 0xCD, 0xFC, 0x77, 0x90, 0xDD, 0xF0, 0xDB, 0xAD, 0x1A, 0x78, 0x38, 0xED,
+            0xFD, 0x77, 0xF0, 0x0C, 0x90, 0x0A, 0xA8, 0xA9, 0xFF, 0x9D, 0x11, 0x03, 0xE8, 0x88,
+            0xD0, 0xF9,
+        ],
+    },
+    TransferCodeSpec {
+        role: "emit_base_plane",
+        file_offset: 0x28411,
+        bytes: &[
+            0xA0, 0x00, 0x8C, 0xFD, 0x77, 0xB1, 0x06, 0xC9, 0x0F, 0xF0, 0x0D, 0xC9, 0x1F, 0xF0,
+            0x09, 0xC9, 0xED, 0xD0, 0x08, 0xEE, 0x07, 0x78, 0xD0, 0x13, 0xC8, 0xD0, 0xEA, 0xEE,
+            0xFD, 0x77, 0x9D, 0x11, 0x03, 0xE8, 0xC8, 0xAD, 0xFD, 0x77, 0xCD, 0xFC, 0x77, 0xD0,
+            0xDA, 0xAD, 0x1A, 0x78, 0x38, 0xED, 0xFD, 0x77, 0xF0, 0x0E, 0x90, 0x0C, 0xA8, 0xA9,
+            0xFF, 0x9D, 0x11, 0x03, 0xE8, 0x88, 0xD0, 0xF9, 0xF0, 0x03, 0xEE, 0x07, 0x78,
+        ],
+    },
+    TransferCodeSpec {
+        role: "serialize_two_plane_line_to_ppu_queue",
+        file_offset: 0x28456,
+        bytes: &[
+            0xAD, 0x16, 0x78, 0x85, 0x00, 0xAD, 0x17, 0x78, 0x85, 0x01, 0xAE, 0xF8, 0x77, 0xF0,
+            0x09, 0x20, 0x1C, 0xC8, 0x20, 0x1C, 0xC8, 0xCA, 0xD0, 0xF7, 0xA6, 0x00, 0xA4, 0x01,
+            0xAD, 0x1A, 0x78, 0x29, 0x1F, 0x09, 0x40, 0x8D, 0x10, 0x03, 0x20, 0x42, 0xC8, 0xAD,
+            0x07, 0x78, 0xF0, 0x03, 0xEE, 0xF7, 0x77, 0xEE, 0xFC, 0x77, 0x60,
         ],
     },
 ];
@@ -414,6 +517,7 @@ struct TextInventoryReport {
     summary: ReportSummary,
     source_code_usage: Vec<SourceCodeUsage>,
     layout_controls: Vec<LayoutControlEvidence>,
+    dialogue_text_path: DialogueTextPathEvidence,
     tables: Vec<TextTableReport>,
     unknowns: Vec<&'static str>,
 }
@@ -627,6 +731,98 @@ struct CompositePlanePackingEvidence {
 }
 
 #[derive(Debug, Serialize)]
+struct DialogueTextPathEvidence {
+    script: DialogueScriptEvidence,
+    renderer: DialogueRendererEvidence,
+    runtime_observation: DialogueRuntimeObservation,
+}
+
+#[derive(Debug, Serialize)]
+struct DialogueScriptEvidence {
+    reader_entry_cpu_address: u16,
+    reader_entry_cpu_address_hex: String,
+    source_bank_state: &'static str,
+    source_pointer: &'static str,
+    source_index: &'static str,
+    readback_byte: &'static str,
+    restored_dialogue_prg_bank: u8,
+    restored_dialogue_prg_bank_hex: String,
+    line_destination_pointer: &'static str,
+    destination_index: &'static str,
+    line_buffer_addresses: Vec<u16>,
+    line_buffer_addresses_hex: Vec<String>,
+    line_buffer_stride_bytes: usize,
+    line_end_code: u8,
+    line_end_code_hex: String,
+    recognized_control_codes: Vec<u8>,
+    recognized_control_codes_hex: Vec<String>,
+    synthesized_pair_control_code: u8,
+    synthesized_pair_control_code_hex: String,
+    synthesized_pair_codes: Vec<u8>,
+    synthesized_pair_codes_hex: Vec<String>,
+    code_regions: Vec<TransferCodeEvidence>,
+}
+
+#[derive(Debug, Serialize)]
+struct DialogueRendererEvidence {
+    entry_cpu_address: u16,
+    entry_cpu_address_hex: String,
+    source_pointer: &'static str,
+    line_end_code: u8,
+    line_end_code_hex: String,
+    combining_codes: Vec<u8>,
+    combining_codes_hex: Vec<String>,
+    overlay_blank_code: u8,
+    overlay_blank_code_hex: String,
+    line_width_state: &'static str,
+    line_width_mask: u8,
+    line_width_mask_hex: String,
+    visible_code_count: &'static str,
+    processed_code_count: &'static str,
+    stage_descriptor_buffer: &'static str,
+    stage_payload_buffer: &'static str,
+    two_plane_header_flag: u8,
+    two_plane_header_flag_hex: String,
+    encoded_stage_count: usize,
+    stage_serializer_entry_cpu_address: u16,
+    stage_serializer_entry_cpu_address_hex: String,
+    queued_command_buffer: &'static str,
+    output_layout: &'static str,
+    code_regions: Vec<TransferCodeEvidence>,
+}
+
+#[derive(Debug, Serialize)]
+struct DialogueRuntimeObservation {
+    screen: &'static str,
+    source_prg_bank: u8,
+    source_prg_bank_hex: String,
+    source_cpu_address: u16,
+    source_cpu_address_hex: String,
+    source_file_offset: usize,
+    source_file_offset_hex: String,
+    destination_line_buffer_address: u16,
+    destination_line_buffer_address_hex: String,
+    observed_control_code: u8,
+    observed_control_code_hex: String,
+    observed_written_code: u8,
+    observed_written_code_hex: String,
+    source_write_instruction_cpu_address: u16,
+    source_write_instruction_cpu_address_hex: String,
+    source_write_event_pc: u16,
+    source_write_event_pc_hex: String,
+    source_write_dropped_event_count: usize,
+    observed_stage_descriptor: u8,
+    observed_stage_descriptor_hex: String,
+    observed_line_width: usize,
+    observed_stage_count: usize,
+    stage_descriptor_write_instruction_cpu_address: u16,
+    stage_descriptor_write_instruction_cpu_address_hex: String,
+    stage_descriptor_write_event_pc: u16,
+    stage_descriptor_write_event_pc_hex: String,
+    stage_descriptor_write_dropped_event_count: usize,
+}
+
+#[derive(Debug, Serialize)]
 struct TextEntryReport {
     index: usize,
     pointer_cpu_address: u16,
@@ -733,14 +929,15 @@ fn build_report(source: &[u8]) -> Result<TextInventoryReport> {
         .count();
 
     let layout_controls = build_layout_control_evidence(source, &source_code_usage)?;
+    let dialogue_text_path = build_dialogue_text_path_evidence(source)?;
 
     Ok(TextInventoryReport {
-        schema_version: 9,
+        schema_version: 10,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             translation_direction: "ja_to_ko",
             preserve_existing_english: true,
-            proof_boundary: "confirmed pointer tables, transfer code, first-page CHR tile storage, and bank 0B composite-parser path through the PPU command queue; other render consumers remain unresolved",
+            proof_boundary: "confirmed pointer tables, transfer code, first-page CHR tile storage, the bank 0B menu and title composite path, and the bank 0A dialogue ROM-to-SRAM-to-PPU path; the complete text population remains unresolved",
         },
         summary: ReportSummary {
             table_count: tables.len(),
@@ -762,11 +959,14 @@ fn build_report(source: &[u8]) -> Result<TextInventoryReport> {
         },
         source_code_usage,
         layout_controls,
+        dialogue_text_path,
         tables,
         unknowns: vec![
             "This is not the complete game text population.",
             "Non-Latin bytes remain unresolved Japanese, layout, icon, or control codes until decoder semantics are proven.",
             "Direct composite-parser JSR and JMP candidates are byte-pattern matches; instruction boundaries and caller roles remain unconfirmed.",
+            "The dialogue dispatcher recognizes its declared control-code set, but the operand length and behavior of every control are not yet proven.",
+            "The runtime observation identifies one chapter 1 script location and line buffer, not the complete dialogue script population.",
             "No entry is translation-ready until control tokens, layout, and relocation policy are declared.",
         ],
     })
@@ -1233,6 +1433,116 @@ fn build_layout_control_evidence(
     }])
 }
 
+fn build_dialogue_text_path_evidence(source: &[u8]) -> Result<DialogueTextPathEvidence> {
+    let recognized_control_codes = DIALOGUE_SCRIPT_CONTROL_CODES.to_vec();
+    let synthesized_pair_codes = vec![0x9E, 0xAB];
+    let combining_codes = COMPOSITE_TEXT_LAYOUT_CODES.to_vec();
+
+    Ok(DialogueTextPathEvidence {
+        script: DialogueScriptEvidence {
+            reader_entry_cpu_address: 0xE69C,
+            reader_entry_cpu_address_hex: "0xE69C".to_owned(),
+            source_bank_state: "0x77F2",
+            source_pointer: "0x76/0x77",
+            source_index: "0x77FA",
+            readback_byte: "0x7934",
+            restored_dialogue_prg_bank: 0x0A,
+            restored_dialogue_prg_bank_hex: "0x0A".to_owned(),
+            line_destination_pointer: "0x06/0x07",
+            destination_index: "0x77FB",
+            line_buffer_addresses: DIALOGUE_LINE_BUFFER_ADDRESSES.to_vec(),
+            line_buffer_addresses_hex: DIALOGUE_LINE_BUFFER_ADDRESSES
+                .iter()
+                .map(|address| format!("0x{address:04X}"))
+                .collect(),
+            line_buffer_stride_bytes: 0x20,
+            line_end_code: DIALOGUE_LINE_END_CODE,
+            line_end_code_hex: format!("{DIALOGUE_LINE_END_CODE:02X}"),
+            recognized_control_codes,
+            recognized_control_codes_hex: DIALOGUE_SCRIPT_CONTROL_CODES
+                .iter()
+                .map(|code| format!("{code:02X}"))
+                .collect(),
+            synthesized_pair_control_code: 0xEA,
+            synthesized_pair_control_code_hex: "EA".to_owned(),
+            synthesized_pair_codes: synthesized_pair_codes.clone(),
+            synthesized_pair_codes_hex: synthesized_pair_codes
+                .iter()
+                .map(|code| format!("{code:02X}"))
+                .collect(),
+            code_regions: build_code_region_evidence(
+                source,
+                &DIALOGUE_SCRIPT_CODE_REGIONS,
+                "dialogue script",
+                "bank_0A_dialogue_script_loader",
+            )?,
+        },
+        renderer: DialogueRendererEvidence {
+            entry_cpu_address: 0x83BA,
+            entry_cpu_address_hex: "0x83BA".to_owned(),
+            source_pointer: "0x06/0x07",
+            line_end_code: DIALOGUE_LINE_END_CODE,
+            line_end_code_hex: format!("{DIALOGUE_LINE_END_CODE:02X}"),
+            combining_codes: combining_codes.clone(),
+            combining_codes_hex: combining_codes
+                .iter()
+                .map(|code| format!("{code:02X}"))
+                .collect(),
+            overlay_blank_code: COMPOSITE_OVERLAY_BLANK_CODE,
+            overlay_blank_code_hex: format!("{COMPOSITE_OVERLAY_BLANK_CODE:02X}"),
+            line_width_state: "0x781A",
+            line_width_mask: DIALOGUE_STAGE_WIDTH_MASK,
+            line_width_mask_hex: format!("{DIALOGUE_STAGE_WIDTH_MASK:02X}"),
+            visible_code_count: "0x77FC",
+            processed_code_count: "0x77FD",
+            stage_descriptor_buffer: "0x0310",
+            stage_payload_buffer: "0x0311",
+            two_plane_header_flag: DIALOGUE_TWO_PLANE_HEADER_FLAG,
+            two_plane_header_flag_hex: format!("{DIALOGUE_TWO_PLANE_HEADER_FLAG:02X}"),
+            encoded_stage_count: usize::from(DIALOGUE_TWO_PLANE_HEADER_FLAG >> 5),
+            stage_serializer_entry_cpu_address: 0xC842,
+            stage_serializer_entry_cpu_address_hex: "0xC842".to_owned(),
+            queued_command_buffer: "0x0781",
+            output_layout: "combining_overlay_then_base_codes_with_equal_masked_width",
+            code_regions: build_code_region_evidence(
+                source,
+                &DIALOGUE_RENDERER_CODE_REGIONS,
+                "dialogue renderer",
+                "bank_0A_progressive_dialogue_renderer",
+            )?,
+        },
+        runtime_observation: DialogueRuntimeObservation {
+            screen: "chapter_1_intro_dialogue",
+            source_prg_bank: 0x08,
+            source_prg_bank_hex: "0x08".to_owned(),
+            source_cpu_address: 0x9FCE,
+            source_cpu_address_hex: "0x9FCE".to_owned(),
+            source_file_offset: 0x21FDE,
+            source_file_offset_hex: "0x21FDE".to_owned(),
+            destination_line_buffer_address: 0x78B2,
+            destination_line_buffer_address_hex: "0x78B2".to_owned(),
+            observed_control_code: 0xEA,
+            observed_control_code_hex: "EA".to_owned(),
+            observed_written_code: 0x9E,
+            observed_written_code_hex: "9E".to_owned(),
+            source_write_instruction_cpu_address: 0x8219,
+            source_write_instruction_cpu_address_hex: "0x8219".to_owned(),
+            source_write_event_pc: 0x821B,
+            source_write_event_pc_hex: "0x821B".to_owned(),
+            source_write_dropped_event_count: 0,
+            observed_stage_descriptor: 0x52,
+            observed_stage_descriptor_hex: "52".to_owned(),
+            observed_line_width: usize::from(0x52 & DIALOGUE_STAGE_WIDTH_MASK),
+            observed_stage_count: usize::from(0x52_u8 >> 5),
+            stage_descriptor_write_instruction_cpu_address: 0x8469,
+            stage_descriptor_write_instruction_cpu_address_hex: "0x8469".to_owned(),
+            stage_descriptor_write_event_pc: 0x846C,
+            stage_descriptor_write_event_pc_hex: "0x846C".to_owned(),
+            stage_descriptor_write_dropped_event_count: 0,
+        },
+    })
+}
+
 fn build_code_region_evidence(
     source: &[u8],
     regions: &[TransferCodeSpec],
@@ -1442,6 +1752,13 @@ mod tests {
         source[spec.consumer_file_offset..spec.consumer_file_offset + spec.consumer_bytes.len()]
             .copy_from_slice(&spec.consumer_bytes);
         for region in spec.transfer.code_regions {
+            source[region.file_offset..region.file_offset + region.bytes.len()]
+                .copy_from_slice(region.bytes);
+        }
+    }
+
+    fn write_code_regions(source: &mut [u8], regions: &[TransferCodeSpec]) {
+        for region in regions {
             source[region.file_offset..region.file_offset + region.bytes.len()]
                 .copy_from_slice(region.bytes);
         }
@@ -1755,6 +2072,80 @@ mod tests {
 
         assert!(error.contains(
             "plane packing code find_separator_and_prepare_overlapping_copy changed for bank_0B_composite_text_parser"
+        ));
+    }
+
+    #[test]
+    fn declares_dialogue_script_and_progressive_two_plane_renderer() {
+        let mut source = vec![0_u8; PRG_FILE_END + FIRST_FONT_PAGE_BYTES];
+        write_code_regions(&mut source, &DIALOGUE_SCRIPT_CODE_REGIONS);
+        write_code_regions(&mut source, &DIALOGUE_RENDERER_CODE_REGIONS);
+
+        let evidence = build_dialogue_text_path_evidence(&source).unwrap();
+
+        assert_eq!(evidence.script.reader_entry_cpu_address, 0xE69C);
+        assert_eq!(evidence.script.source_bank_state, "0x77F2");
+        assert_eq!(evidence.script.source_pointer, "0x76/0x77");
+        assert_eq!(evidence.script.line_destination_pointer, "0x06/0x07");
+        assert_eq!(
+            evidence.script.line_buffer_addresses,
+            DIALOGUE_LINE_BUFFER_ADDRESSES
+        );
+        assert_eq!(evidence.script.line_buffer_stride_bytes, 0x20);
+        assert_eq!(evidence.script.line_end_code, 0xED);
+        assert_eq!(
+            evidence.script.recognized_control_codes,
+            DIALOGUE_SCRIPT_CONTROL_CODES
+        );
+        assert_eq!(evidence.script.synthesized_pair_control_code, 0xEA);
+        assert_eq!(evidence.script.synthesized_pair_codes, vec![0x9E, 0xAB]);
+        assert_eq!(evidence.renderer.entry_cpu_address, 0x83BA);
+        assert_eq!(evidence.renderer.combining_codes, vec![0x0F, 0x1F]);
+        assert_eq!(evidence.renderer.line_width_mask, 0x1F);
+        assert_eq!(evidence.renderer.two_plane_header_flag, 0x40);
+        assert_eq!(evidence.renderer.encoded_stage_count, 2);
+        assert_eq!(evidence.renderer.stage_serializer_entry_cpu_address, 0xC842);
+        assert_eq!(evidence.runtime_observation.source_prg_bank, 0x08);
+        assert_eq!(evidence.runtime_observation.source_cpu_address, 0x9FCE);
+        assert_eq!(evidence.runtime_observation.source_file_offset, 0x21FDE);
+        assert_eq!(
+            evidence.runtime_observation.destination_line_buffer_address,
+            0x78B2
+        );
+        assert_eq!(evidence.runtime_observation.source_write_event_pc, 0x821B);
+        assert_eq!(evidence.runtime_observation.observed_stage_descriptor, 0x52);
+        assert_eq!(evidence.runtime_observation.observed_line_width, 18);
+        assert_eq!(evidence.runtime_observation.observed_stage_count, 2);
+        assert_eq!(
+            evidence.runtime_observation.stage_descriptor_write_event_pc,
+            0x846C
+        );
+    }
+
+    #[test]
+    fn rejects_changed_dialogue_script_or_renderer_code() {
+        let mut source = vec![0_u8; PRG_FILE_END + FIRST_FONT_PAGE_BYTES];
+        write_code_regions(&mut source, &DIALOGUE_SCRIPT_CODE_REGIONS);
+        write_code_regions(&mut source, &DIALOGUE_RENDERER_CODE_REGIONS);
+        source[DIALOGUE_SCRIPT_CODE_REGIONS[2].file_offset + 9] ^= 0x01;
+
+        let error = build_dialogue_text_path_evidence(&source)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains(
+            "dialogue script code copy_literal_script_byte_to_line changed for bank_0A_dialogue_script_loader"
+        ));
+
+        write_code_regions(&mut source, &DIALOGUE_SCRIPT_CODE_REGIONS);
+        source[DIALOGUE_RENDERER_CODE_REGIONS[3].file_offset + 31] ^= 0x01;
+
+        let error = build_dialogue_text_path_evidence(&source)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains(
+            "dialogue renderer code serialize_two_plane_line_to_ppu_queue changed for bank_0A_progressive_dialogue_renderer"
         ));
     }
 
