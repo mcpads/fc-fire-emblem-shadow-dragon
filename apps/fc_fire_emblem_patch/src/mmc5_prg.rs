@@ -10,13 +10,13 @@ use crate::{
     tracked::TrackedImage,
 };
 
-const RESET_INITIALIZER_ADDRESS: u16 = 0xFA00;
+pub(crate) const RESET_INITIALIZER_ADDRESS: u16 = 0xFA00;
 const SELECT_PRG_BANK_AND_SAVE_ADDRESS: u16 = 0xFA20;
 const SELECT_PRG_BANK_ADDRESS: u16 = 0xFA30;
 const SELECT_HORIZONTAL_MIRRORING_ADDRESS: u16 = 0xFA40;
 const SELECT_VERTICAL_MIRRORING_ADDRESS: u16 = 0xFA50;
 
-const SOURCE_RESET_ADDRESS: u16 = 0xC075;
+pub(crate) const SOURCE_RESET_ADDRESS: u16 = 0xC075;
 const SOURCE_SELECT_PRG_BANK_AND_SAVE_ADDRESS: u16 = 0xC9A6;
 const SOURCE_SELECT_HORIZONTAL_MIRRORING_ADDRESS: u16 = 0xC9CE;
 const SOURCE_SELECT_VERTICAL_MIRRORING_ADDRESS: u16 = 0xC9D6;
@@ -75,12 +75,21 @@ pub struct BuildSummary {
     pub tracked_write_count: usize,
 }
 
-pub fn build_mmc5_prg_probe(
-    source_path: &Path,
-    output_path: &Path,
-    report_path: &Path,
-) -> Result<BuildSummary> {
-    let source_rom = Rom::from_path(source_path)?;
+pub(crate) struct PrgProbeImage {
+    data: Vec<u8>,
+    cave_file_start: usize,
+    direct_code_cave_transfer_count: usize,
+    routines: Vec<AssembledRoutine>,
+    tracked_writes: Vec<TrackedWrite>,
+}
+
+impl PrgProbeImage {
+    pub(crate) fn data(&self) -> &[u8] {
+        &self.data
+    }
+}
+
+pub(crate) fn create_mmc5_prg_probe_image(source_rom: &Rom) -> Result<PrgProbeImage> {
     source_rom.verify_supported_japanese()?;
     let source = source_rom.data().to_vec();
     let cave_file_start = fixed_bank_file_offset(CODE_CAVE_START_ADDRESS)?;
@@ -182,7 +191,6 @@ pub fn build_mmc5_prg_probe(
             len: write.len,
         })
         .collect::<Vec<_>>();
-    let tracked_write_count = tracked_writes.len();
     let output = image.into_data();
     let output_rom = Rom::parse(output.clone()).context("parse MMC5 PRG probe output")?;
     ensure!(
@@ -202,7 +210,24 @@ pub fn build_mmc5_prg_probe(
         "MMC5 probe changed the iNES battery flag"
     );
 
-    let output_sha1 = sha1_hex(&output);
+    Ok(PrgProbeImage {
+        data: output,
+        cave_file_start,
+        direct_code_cave_transfer_count,
+        routines,
+        tracked_writes,
+    })
+}
+
+pub fn build_mmc5_prg_probe(
+    source_path: &Path,
+    output_path: &Path,
+    report_path: &Path,
+) -> Result<BuildSummary> {
+    let source_rom = Rom::from_path(source_path)?;
+    let probe = create_mmc5_prg_probe_image(&source_rom)?;
+    let output_rom = Rom::parse(probe.data.clone()).context("parse MMC5 PRG probe output")?;
+    let output_sha1 = sha1_hex(&probe.data);
     let report = Mmc5PrgProbeReport {
         schema: 1,
         source_sha1: EXPECTED_SOURCE_SHA1,
@@ -217,12 +242,13 @@ pub fn build_mmc5_prg_probe(
         prg_ram_bank: 0,
         code_cave: CodeCaveEvidence {
             cpu_start: format!("0x{CODE_CAVE_START_ADDRESS:04X}"),
-            file_start: format!("0x{cave_file_start:06X}"),
+            file_start: format!("0x{:06X}", probe.cave_file_start),
             len: CODE_CAVE_LEN,
             expected_fill: "0xFF".to_owned(),
         },
-        direct_code_cave_transfer_count,
-        routines: routines
+        direct_code_cave_transfer_count: probe.direct_code_cave_transfer_count,
+        routines: probe
+            .routines
             .iter()
             .map(|routine| RoutinePlacement {
                 role: routine.role,
@@ -230,7 +256,7 @@ pub fn build_mmc5_prg_probe(
                 len: routine.bytes.len(),
             })
             .collect(),
-        tracked_writes,
+        tracked_writes: probe.tracked_writes,
         unresolved_boundaries: vec![
             "MMC4 CHR latch behavior has not been converted to MMC5.",
             "Only the two direct $A000 stores proven on the observed boot path are redirected; other byte-pattern candidates remain unclassified.",
@@ -242,7 +268,8 @@ pub fn build_mmc5_prg_probe(
     let report_bytes = serde_json::to_vec_pretty(&report).context("serialize MMC5 PRG report")?;
     let report_sha1 = sha1_hex(&report_bytes);
 
-    write_file(output_path, &output)?;
+    let tracked_write_count = report.tracked_writes.len();
+    write_file(output_path, &probe.data)?;
     write_file(report_path, &report_bytes)?;
     Ok(BuildSummary {
         output_sha1,
@@ -406,7 +433,7 @@ fn replace_absolute_store_with_subroutine_call(
     )
 }
 
-fn fixed_bank_file_offset(cpu_address: u16) -> Result<usize> {
+pub(crate) fn fixed_bank_file_offset(cpu_address: u16) -> Result<usize> {
     ensure!(
         cpu_address >= 0xC000,
         "CPU address {cpu_address:04X} is outside the fixed PRG bank"

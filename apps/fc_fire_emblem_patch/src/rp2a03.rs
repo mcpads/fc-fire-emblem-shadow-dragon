@@ -7,6 +7,7 @@ pub enum Instruction {
     StaAbsolute(u16),
     AslAccumulator,
     OraImmediate(u8),
+    OraZeroPage(u8),
     Pha,
     Php,
     Pla,
@@ -27,7 +28,10 @@ impl Instruction {
             | Self::Plp
             | Self::Rts
             | Self::Nop => 1,
-            Self::LdaImmediate(_) | Self::StaZeroPage(_) | Self::OraImmediate(_) => 2,
+            Self::LdaImmediate(_)
+            | Self::StaZeroPage(_)
+            | Self::OraImmediate(_)
+            | Self::OraZeroPage(_) => 2,
             Self::StaAbsolute(_) | Self::JmpAbsolute(_) | Self::JsrAbsolute(_) => 3,
         }
     }
@@ -42,6 +46,7 @@ impl Instruction {
             }
             Self::AslAccumulator => output.push(0x0A),
             Self::OraImmediate(value) => output.extend_from_slice(&[0x09, value]),
+            Self::OraZeroPage(address) => output.extend_from_slice(&[0x05, address]),
             Self::Pha => output.push(0x48),
             Self::Php => output.push(0x08),
             Self::Pla => output.push(0x68),
@@ -98,6 +103,7 @@ mod tests {
                 Instruction::StaAbsolute(0x5117),
                 Instruction::AslAccumulator,
                 Instruction::OraImmediate(0x80),
+                Instruction::OraZeroPage(0x52),
                 Instruction::Pha,
                 Instruction::Php,
                 Instruction::Pla,
@@ -113,8 +119,8 @@ mod tests {
         assert_eq!(
             bytes,
             [
-                0xA9, 0x9F, 0x85, 0x29, 0x8D, 0x17, 0x51, 0x0A, 0x09, 0x80, 0x48, 0x08, 0x68, 0x28,
-                0x20, 0x30, 0xFB, 0x4C, 0x75, 0xC0, 0x60, 0xEA,
+                0xA9, 0x9F, 0x85, 0x29, 0x8D, 0x17, 0x51, 0x0A, 0x09, 0x80, 0x05, 0x52, 0x48, 0x08,
+                0x68, 0x28, 0x20, 0x30, 0xFB, 0x4C, 0x75, 0xC0, 0x60, 0xEA,
             ]
         );
     }

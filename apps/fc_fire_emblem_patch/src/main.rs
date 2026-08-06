@@ -4,6 +4,7 @@ mod dialogue_inventory;
 mod font;
 mod japanese_encoding;
 mod localization;
+mod mmc5_chr;
 mod mmc5_prg;
 mod options;
 mod rom;
@@ -102,6 +103,14 @@ enum Command {
         #[arg(long, default_value = "out/fire-emblem-fe1-mmc5-prg-probe.nes")]
         output: PathBuf,
         #[arg(long, default_value = "out/mmc5-prg-probe.json")]
+        report: PathBuf,
+    },
+    /// Project the four central MMC4 CHR writers onto MMC5 4 KiB banks.
+    BuildMmc5ChrWriterProbe {
+        source: PathBuf,
+        #[arg(long, default_value = "out/fire-emblem-fe1-mmc5-chr-writer-probe.nes")]
+        output: PathBuf,
+        #[arg(long, default_value = "out/mmc5-chr-writer-probe.json")]
         report: PathBuf,
     },
 }
@@ -264,6 +273,21 @@ fn main() -> Result<()> {
             println!("wrote {}", report.display());
             println!("report SHA-1: {}", summary.report_sha1);
             println!("tracked ROM writes: {}", summary.tracked_write_count);
+        }
+        Command::BuildMmc5ChrWriterProbe {
+            source,
+            output,
+            report,
+        } => {
+            let summary = mmc5_chr::build_mmc5_chr_writer_probe(&source, &output, &report)?;
+            println!("wrote {}", output.display());
+            println!("output SHA-1: {}", summary.output_sha1);
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "tracked writes after PRG probe: {}",
+                summary.tracked_delta_write_count
+            );
         }
     }
     Ok(())
