@@ -3,6 +3,7 @@ mod font;
 mod localization;
 mod options;
 mod rom;
+mod text_inventory;
 mod tracked;
 
 use std::path::PathBuf;
@@ -30,6 +31,12 @@ enum Command {
         sheet: PathBuf,
         #[arg(long, default_value_t = 4)]
         scale: u32,
+    },
+    /// Inventory confirmed Japanese-source name pointer tables without translating English codes.
+    AnalyzeTextTables {
+        source: PathBuf,
+        #[arg(long, default_value = "out/text-tables.json")]
+        report: PathBuf,
     },
     /// Build the Japanese-options Hangul visibility proof.
     BuildOptionsPoc {
@@ -71,6 +78,18 @@ fn main() -> Result<()> {
             println!(
                 "CHR pages: {}, protected font codes: {}, unresolved font codes: {}",
                 summary.page_count, summary.protected_code_count, summary.unresolved_code_count
+            );
+        }
+        Command::AnalyzeTextTables { source, report } => {
+            let summary = text_inventory::analyze_text_tables(&source, &report)?;
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "text tables: {}, pointers: {}, unique strings: {}, protected original bytes: {}",
+                summary.table_count,
+                summary.pointer_count,
+                summary.unique_string_count,
+                summary.referenced_protected_original_byte_count
             );
         }
         Command::BuildOptionsPoc {
