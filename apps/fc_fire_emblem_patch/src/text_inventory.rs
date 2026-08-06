@@ -166,6 +166,36 @@ const COMPOSITE_TEXT_PPU_CODE_REGIONS: [TransferCodeSpec; 6] = [
     },
 ];
 
+const COMPOSITE_PLANE_PACKING_CODE_REGIONS: [TransferCodeSpec; 4] = [
+    TransferCodeSpec {
+        role: "first_parser_call_then_pack",
+        file_offset: 0x2C147,
+        bytes: &[0x20, 0x39, 0x8F, 0x4C, 0x63, 0x81],
+    },
+    TransferCodeSpec {
+        role: "find_separator_and_prepare_overlapping_copy",
+        file_offset: 0x2C173,
+        bytes: &[
+            0xA2, 0x00, 0xE8, 0xBD, 0x11, 0x03, 0xC9, 0xED, 0xD0, 0xF8, 0x86, 0x04, 0x8A, 0x38,
+            0x69, 0x11, 0x85, 0x00, 0x85, 0x02, 0xC6, 0x02, 0xA9, 0x03, 0x85, 0x01, 0x85, 0x03,
+            0xA9, 0x00, 0x85, 0x05, 0x20, 0x09, 0xC2, 0x60,
+        ],
+    },
+    TransferCodeSpec {
+        role: "second_parser_call_then_pack",
+        file_offset: 0x2CB8A,
+        bytes: &[0x20, 0x39, 0x8F, 0x4C, 0x63, 0x81],
+    },
+    TransferCodeSpec {
+        role: "copy_base_plane_over_separator",
+        file_offset: 0x3C219,
+        bytes: &[
+            0xA0, 0x00, 0xA6, 0x04, 0xF0, 0x02, 0xE6, 0x05, 0xB1, 0x00, 0x91, 0x02, 0xC8, 0xD0,
+            0x04, 0xE6, 0x01, 0xE6, 0x03, 0xC6, 0x04, 0xD0, 0xF1, 0xC6, 0x05, 0xD0, 0xED, 0x60,
+        ],
+    },
+];
+
 const TEXT_TABLE_SPECS: [TextTableSpec; 7] = [
     TextTableSpec {
         id: "class-names",
@@ -540,6 +570,7 @@ struct LayoutControlEvidence {
     inventory_unique_storage_byte_count: usize,
     code_regions: Vec<TransferCodeEvidence>,
     downstream_consumer: CompositeTextConsumerEvidence,
+    plane_packing: CompositePlanePackingEvidence,
     direct_jsr_candidates: Vec<AbsoluteTransferCandidate>,
     direct_jmp_candidates: Vec<AbsoluteTransferCandidate>,
 }
@@ -571,6 +602,26 @@ struct PpuTransferEvidence {
     flush_cpu_address_hex: String,
     ppu_address_register: &'static str,
     ppu_data_register: &'static str,
+    observed_behavior: &'static str,
+    code_regions: Vec<TransferCodeEvidence>,
+}
+
+#[derive(Debug, Serialize)]
+struct CompositePlanePackingEvidence {
+    entry_cpu_address: u16,
+    entry_cpu_address_hex: String,
+    caller_cpu_addresses: Vec<u16>,
+    caller_cpu_addresses_hex: Vec<String>,
+    input_buffer: &'static str,
+    separator_scan_start_index: usize,
+    separator_code: u8,
+    separator_code_hex: String,
+    copy_source: &'static str,
+    copy_destination: &'static str,
+    copy_byte_count: &'static str,
+    copy_routine_cpu_address: u16,
+    copy_routine_cpu_address_hex: String,
+    output_layout: &'static str,
     observed_behavior: &'static str,
     code_regions: Vec<TransferCodeEvidence>,
 }
@@ -684,7 +735,7 @@ fn build_report(source: &[u8]) -> Result<TextInventoryReport> {
     let layout_controls = build_layout_control_evidence(source, &source_code_usage)?;
 
     Ok(TextInventoryReport {
-        schema_version: 8,
+        schema_version: 9,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             translation_direction: "ja_to_ko",
@@ -1146,6 +1197,29 @@ fn build_layout_control_evidence(
                 )?,
             },
         },
+        plane_packing: CompositePlanePackingEvidence {
+            entry_cpu_address: 0x8163,
+            entry_cpu_address_hex: "0x8163".to_owned(),
+            caller_cpu_addresses: vec![0x8137, 0x8B7A],
+            caller_cpu_addresses_hex: vec!["0x8137".to_owned(), "0x8B7A".to_owned()],
+            input_buffer: "0x0311",
+            separator_scan_start_index: 1,
+            separator_code: COMPOSITE_SEGMENT_SEPARATOR_CODE,
+            separator_code_hex: format!("{COMPOSITE_SEGMENT_SEPARATOR_CODE:02X}"),
+            copy_source: "byte_after_first_0xED",
+            copy_destination: "first_0xED",
+            copy_byte_count: "first_0xED_index",
+            copy_routine_cpu_address: 0xC209,
+            copy_routine_cpu_address_hex: "0xC209".to_owned(),
+            output_layout: "combining_overlay_then_base_codes_without_interplane_separator",
+            observed_behavior: "shift_base_plane_left_over_first_separator_by_overlay_plane_width",
+            code_regions: build_code_region_evidence(
+                source,
+                &COMPOSITE_PLANE_PACKING_CODE_REGIONS,
+                "plane packing",
+                "bank_0B_composite_text_parser",
+            )?,
+        },
         direct_jsr_candidates: find_absolute_transfer_candidates(
             &source[HEADER_SIZE..PRG_FILE_END],
             0x8F39,
@@ -1518,6 +1592,10 @@ mod tests {
             source[region.file_offset..region.file_offset + region.bytes.len()]
                 .copy_from_slice(region.bytes);
         }
+        for region in &COMPOSITE_PLANE_PACKING_CODE_REGIONS {
+            source[region.file_offset..region.file_offset + region.bytes.len()]
+                .copy_from_slice(region.bytes);
+        }
         let source_code_usage = COMPOSITE_TEXT_LAYOUT_CODES.map(|code| SourceCodeUsage {
             code,
             code_hex: format!("{code:02X}"),
@@ -1590,6 +1668,25 @@ mod tests {
             composite.downstream_consumer.ppu_transfer.ppu_data_register,
             "0x2007"
         );
+        assert_eq!(composite.plane_packing.entry_cpu_address, 0x8163);
+        assert_eq!(
+            composite.plane_packing.caller_cpu_addresses,
+            vec![0x8137, 0x8B7A]
+        );
+        assert_eq!(composite.plane_packing.copy_source, "byte_after_first_0xED");
+        assert_eq!(composite.plane_packing.copy_destination, "first_0xED");
+        assert_eq!(
+            composite.plane_packing.output_layout,
+            "combining_overlay_then_base_codes_without_interplane_separator"
+        );
+        assert_eq!(
+            composite
+                .direct_jsr_candidates
+                .iter()
+                .map(|candidate| candidate.cpu_address)
+                .collect::<Vec<_>>(),
+            composite.plane_packing.caller_cpu_addresses
+        );
     }
 
     #[test]
@@ -1635,6 +1732,29 @@ mod tests {
 
         assert!(error.contains(
             "PPU transfer code write_queued_codes_to_ppu changed for bank_0B_composite_text_parser"
+        ));
+    }
+
+    #[test]
+    fn rejects_changed_composite_plane_packing_code() {
+        let mut source = vec![0_u8; PRG_FILE_END + FIRST_FONT_PAGE_BYTES];
+        for region in &COMPOSITE_PLANE_PACKING_CODE_REGIONS {
+            source[region.file_offset..region.file_offset + region.bytes.len()]
+                .copy_from_slice(region.bytes);
+        }
+        source[COMPOSITE_PLANE_PACKING_CODE_REGIONS[1].file_offset + 19] ^= 0x01;
+
+        let error = build_code_region_evidence(
+            &source,
+            &COMPOSITE_PLANE_PACKING_CODE_REGIONS,
+            "plane packing",
+            "bank_0B_composite_text_parser",
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains(
+            "plane packing code find_separator_and_prepare_overlapping_copy changed for bank_0B_composite_text_parser"
         ));
     }
 
