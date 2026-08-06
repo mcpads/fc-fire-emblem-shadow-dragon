@@ -4,6 +4,7 @@ mod dialogue_inventory;
 mod font;
 mod japanese_encoding;
 mod localization;
+mod mapper165;
 mod mmc4_latch;
 mod mmc5_chr;
 mod mmc5_expanded_chr;
@@ -102,6 +103,14 @@ enum Command {
         preview: PathBuf,
         #[arg(long, default_value_t = 8)]
         preview_scale: u32,
+    },
+    /// Convert FE1 to the MMC2+MMC3 hybrid mapper 165 without translation assets.
+    BuildMapper165ParityProbe {
+        source: PathBuf,
+        #[arg(long, default_value = "out/fire-emblem-fe1-mapper165-parity-probe.nes")]
+        output: PathBuf,
+        #[arg(long, default_value = "out/mapper165-parity-probe.json")]
+        report: PathBuf,
     },
     /// Build the static MMC5 PRG and SRAM conversion probe without translation assets.
     BuildMmc5PrgProbe {
@@ -338,6 +347,18 @@ fn main() -> Result<()> {
                     write.label, write.offset, write.len
                 );
             }
+        }
+        Command::BuildMapper165ParityProbe {
+            source,
+            output,
+            report,
+        } => {
+            let summary = mapper165::build_mapper165_parity_probe(&source, &output, &report)?;
+            println!("wrote {}", output.display());
+            println!("output SHA-1: {}", summary.output_sha1);
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!("tracked ROM writes: {}", summary.tracked_write_count);
         }
         Command::BuildMmc5PrgProbe {
             source,
