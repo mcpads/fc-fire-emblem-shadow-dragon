@@ -174,6 +174,7 @@ struct FontSupplyReport {
     mmc4_control_routines: Vec<Mmc4ControlRoutineReport>,
     mmc4_chr_bank_writers: Vec<Mmc4ChrWriterReport>,
     mmc4_register_write_candidates: Vec<Mmc4RegisterWriteInventory>,
+    mmc4_adjacent_chr_write_candidate_groups: Vec<Mmc4ChrWriteCandidateGroup>,
     known_references: Vec<ReferenceReport>,
     pages: Vec<PageReport>,
     font_page: FontPageReport,
@@ -251,6 +252,33 @@ struct Mmc4RegisterWriteInventory {
     register_address_hex: String,
     role: &'static str,
     candidates: Vec<AbsoluteWriteCandidate>,
+}
+
+#[derive(Debug, Serialize)]
+struct Mmc4ChrWriteCandidateGroup {
+    prg_bank: usize,
+    prg_bank_hex: String,
+    start_cpu_address: u16,
+    start_cpu_address_hex: String,
+    last_cpu_address: u16,
+    last_cpu_address_hex: String,
+    instruction_count: usize,
+    largest_gap_byte_count: usize,
+    evidence: &'static str,
+    disposition: &'static str,
+    writes: Vec<Mmc4ChrWriteCandidateSite>,
+}
+
+#[derive(Debug, Serialize)]
+struct Mmc4ChrWriteCandidateSite {
+    cpu_address: u16,
+    cpu_address_hex: String,
+    prg_offset: usize,
+    prg_offset_hex: String,
+    opcode_hex: String,
+    mnemonic: &'static str,
+    register_address: u16,
+    register_address_hex: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -381,6 +409,8 @@ fn build_report(rom: &Rom) -> Result<FontSupplyReport> {
             candidates: find_absolute_write_candidates(rom.prg(), *register_address),
         })
         .collect();
+    let mmc4_adjacent_chr_write_candidate_groups =
+        find_adjacent_chr_write_candidate_groups(rom.prg());
     ensure!(
         rom.chr().len().is_multiple_of(CHR_PAGE_SIZE),
         "CHR size is not aligned to 4 KiB pages"
@@ -403,7 +433,7 @@ fn build_report(rom: &Rom) -> Result<FontSupplyReport> {
     let active_slot_ceiling = calculate_active_slot_ceiling(&slots)?;
 
     Ok(FontSupplyReport {
-        schema_version: 5,
+        schema_version: 6,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             chr_sha1: EXPECTED_CHR_SHA1,
@@ -430,6 +460,7 @@ fn build_report(rom: &Rom) -> Result<FontSupplyReport> {
         mmc4_control_routines,
         mmc4_chr_bank_writers,
         mmc4_register_write_candidates,
+        mmc4_adjacent_chr_write_candidate_groups,
         known_references: KNOWN_REFERENCES
             .iter()
             .map(|reference| ReferenceReport {
@@ -457,9 +488,77 @@ fn build_report(rom: &Rom) -> Result<FontSupplyReport> {
             "References list only confirmed tables; it is not the complete text or tile reference population.",
             "Direct JSR and JMP candidates are byte-pattern matches; instruction boundaries and render-path semantics remain unconfirmed.",
             "Direct absolute mapper-register write candidates may include data; runtime execution or disassembly is required before patching them.",
+            "Adjacent CHR-write groups are prioritization hints, not proof that any member is executable code.",
             "The current Hangul slot ceiling is not a final per-screen budget; unresolved consumers may reserve more codes.",
         ],
     })
+}
+
+fn find_adjacent_chr_write_candidate_groups(prg: &[u8]) -> Vec<Mmc4ChrWriteCandidateGroup> {
+    let mut candidates = MMC4_REGISTER_SPECS[1..5]
+        .iter()
+        .flat_map(|(register_address, _)| {
+            find_absolute_write_candidates(prg, *register_address)
+                .into_iter()
+                .map(|candidate| (*register_address, candidate))
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by_key(|(_, candidate)| candidate.prg_offset);
+
+    let mut candidate_runs = Vec::<Vec<(u16, AbsoluteWriteCandidate)>>::new();
+    for candidate in candidates {
+        let continues_run = candidate_runs
+            .last()
+            .and_then(|run| run.last())
+            .is_some_and(|(_, previous)| {
+                previous.prg_bank == candidate.1.prg_bank
+                    && (3..=8).contains(&candidate.1.prg_offset.saturating_sub(previous.prg_offset))
+            });
+        if continues_run {
+            candidate_runs.last_mut().unwrap().push(candidate);
+        } else {
+            candidate_runs.push(vec![candidate]);
+        }
+    }
+
+    candidate_runs
+        .into_iter()
+        .filter(|run| run.len() >= 2)
+        .map(|run| {
+            let first = &run[0].1;
+            let last = &run[run.len() - 1].1;
+            let largest_gap_byte_count = run
+                .windows(2)
+                .map(|pair| pair[1].1.prg_offset - pair[0].1.prg_offset - 3)
+                .max()
+                .unwrap_or(0);
+            Mmc4ChrWriteCandidateGroup {
+                prg_bank: first.prg_bank,
+                prg_bank_hex: first.prg_bank_hex.clone(),
+                start_cpu_address: first.cpu_address,
+                start_cpu_address_hex: first.cpu_address_hex.clone(),
+                last_cpu_address: last.cpu_address,
+                last_cpu_address_hex: last.cpu_address_hex.clone(),
+                instruction_count: run.len(),
+                largest_gap_byte_count,
+                evidence: "same-bank absolute CHR-register writes separated by at most five bytes",
+                disposition: "candidate_only_runtime_execution_or_disassembly_required",
+                writes: run
+                    .into_iter()
+                    .map(|(register_address, candidate)| Mmc4ChrWriteCandidateSite {
+                        cpu_address: candidate.cpu_address,
+                        cpu_address_hex: candidate.cpu_address_hex,
+                        prg_offset: candidate.prg_offset,
+                        prg_offset_hex: candidate.prg_offset_hex,
+                        opcode_hex: candidate.opcode_hex,
+                        mnemonic: candidate.mnemonic,
+                        register_address,
+                        register_address_hex: format!("0x{register_address:04X}"),
+                    })
+                    .collect(),
+            }
+        })
+        .collect()
 }
 
 fn describe_mmc4_control_routines(prg: &[u8]) -> Result<Vec<Mmc4ControlRoutineReport>> {
@@ -1065,6 +1164,34 @@ mod tests {
         assert_eq!(candidates[1].mnemonic, "sty");
         assert_eq!(candidates[1].prg_bank, 15);
         assert_eq!(candidates[1].cpu_address, 0xC234);
+    }
+
+    #[test]
+    fn adjacent_chr_write_groups_keep_short_runs_and_exclude_singletons() {
+        let mut prg = vec![0_u8; PRG_SIZE];
+        prg[0x0123..0x0126].copy_from_slice(&[0x8D, 0x00, 0xB0]);
+        prg[0x0128..0x012B].copy_from_slice(&[0x8E, 0x00, 0xC0]);
+        prg[0x0140..0x0143].copy_from_slice(&[0x8C, 0x00, 0xD0]);
+
+        let groups = find_adjacent_chr_write_candidate_groups(&prg);
+
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].start_cpu_address, 0x8123);
+        assert_eq!(groups[0].last_cpu_address, 0x8128);
+        assert_eq!(groups[0].instruction_count, 2);
+        assert_eq!(groups[0].largest_gap_byte_count, 2);
+        assert_eq!(groups[0].writes[0].register_address, 0xB000);
+        assert_eq!(groups[0].writes[1].register_address, 0xC000);
+    }
+
+    #[test]
+    fn adjacent_chr_write_groups_do_not_cross_prg_banks() {
+        let mut prg = vec![0_u8; PRG_SIZE];
+        let bank_end = PRG_BANK_SIZE - 3;
+        prg[bank_end..bank_end + 3].copy_from_slice(&[0x8D, 0x00, 0xB0]);
+        prg[PRG_BANK_SIZE..PRG_BANK_SIZE + 3].copy_from_slice(&[0x8D, 0x00, 0xC0]);
+
+        assert!(find_adjacent_chr_write_candidate_groups(&prg).is_empty());
     }
 
     #[test]
