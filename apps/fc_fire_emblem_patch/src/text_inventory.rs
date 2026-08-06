@@ -113,6 +113,59 @@ const COMPOSITE_TEXT_CONSUMER_CODE_REGIONS: [TransferCodeSpec; 3] = [
     },
 ];
 
+const COMPOSITE_TEXT_PPU_CODE_REGIONS: [TransferCodeSpec; 6] = [
+    TransferCodeSpec {
+        role: "bind_stage_buffer_and_invoke_serializer",
+        file_offset: 0x2D6A9,
+        bytes: &[
+            0xA9, 0x00, 0x85, 0x02, 0xA9, 0x07, 0x85, 0x03, 0xAD, 0xCF, 0x05, 0x09, 0x20, 0x8D,
+            0x00, 0x07, 0x20, 0x4E, 0xC8, 0xA9, 0x00, 0x85, 0x21, 0x60,
+        ],
+    },
+    TransferCodeSpec {
+        role: "read_stage_descriptor",
+        file_offset: 0x3C85E,
+        bytes: &[
+            0xA0, 0x00, 0xB1, 0x02, 0x29, 0x1F, 0x85, 0x05, 0xB1, 0x02, 0x20, 0x99, 0xC3, 0x85,
+            0x04, 0xAE, 0x80, 0x07,
+        ],
+    },
+    TransferCodeSpec {
+        role: "serialize_stage_payload",
+        file_offset: 0x3C88F,
+        bytes: &[
+            0xA5, 0x01, 0x20, 0xA2, 0xC4, 0xA5, 0x00, 0x20, 0xA2, 0xC4, 0xA5, 0x06, 0x20, 0xA2,
+            0xC4, 0xC8, 0xB1, 0x02, 0x20, 0xA2, 0xC4, 0xC6, 0x06, 0xD0, 0xF6,
+        ],
+    },
+    TransferCodeSpec {
+        role: "append_ppu_command_byte",
+        file_offset: 0x3C4B2,
+        bytes: &[
+            0x9D, 0x81, 0x07, 0xE8, 0xE0, 0x5F, 0x90, 0x0A, 0xAE, 0x80, 0x07, 0xA9, 0x00, 0x9D,
+            0x81, 0x07, 0x68, 0x68, 0x60,
+        ],
+    },
+    TransferCodeSpec {
+        role: "flush_ready_ppu_command_queue",
+        file_offset: 0x3C3B5,
+        bytes: &[
+            0xA5, 0x21, 0xF0, 0x15, 0xA9, 0x81, 0x85, 0x00, 0xA9, 0x07, 0x85, 0x01, 0x20, 0xE7,
+            0xC3, 0xA9, 0x00, 0x8D, 0x80, 0x07, 0x8D, 0x81, 0x07, 0x85, 0x21, 0x60,
+        ],
+    },
+    TransferCodeSpec {
+        role: "write_queued_codes_to_ppu",
+        file_offset: 0x3C3CF,
+        bytes: &[
+            0x8D, 0x06, 0x20, 0xC8, 0xB1, 0x00, 0x8D, 0x06, 0x20, 0xC8, 0xB1, 0x00, 0x0A, 0x20,
+            0xF3, 0xC3, 0x0A, 0xB1, 0x00, 0x29, 0x3F, 0xAA, 0x90, 0x01, 0xC8, 0xB0, 0x01, 0xC8,
+            0xB1, 0x00, 0x8D, 0x07, 0x20, 0xCA, 0xD0, 0xF5, 0xC8, 0x20, 0x78, 0xC3, 0xAE, 0x02,
+            0x20, 0xA0, 0x00, 0xB1, 0x00, 0xD0, 0xCF, 0x4C, 0x6A, 0xC3,
+        ],
+    },
+];
+
 const TEXT_TABLE_SPECS: [TextTableSpec; 7] = [
     TextTableSpec {
         id: "class-names",
@@ -503,6 +556,23 @@ struct CompositeTextConsumerEvidence {
     segment_separator_replacement_code_hex: String,
     observed_behavior: &'static str,
     code_regions: Vec<TransferCodeEvidence>,
+    ppu_transfer: PpuTransferEvidence,
+}
+
+#[derive(Debug, Serialize)]
+struct PpuTransferEvidence {
+    stage_descriptor_buffer: &'static str,
+    queued_command_buffer: &'static str,
+    queued_command_length: &'static str,
+    ready_flag: &'static str,
+    serializer_cpu_address: u16,
+    serializer_cpu_address_hex: String,
+    flush_cpu_address: u16,
+    flush_cpu_address_hex: String,
+    ppu_address_register: &'static str,
+    ppu_data_register: &'static str,
+    observed_behavior: &'static str,
+    code_regions: Vec<TransferCodeEvidence>,
 }
 
 #[derive(Debug, Serialize)]
@@ -614,12 +684,12 @@ fn build_report(source: &[u8]) -> Result<TextInventoryReport> {
     let layout_controls = build_layout_control_evidence(source, &source_code_usage)?;
 
     Ok(TextInventoryReport {
-        schema_version: 7,
+        schema_version: 8,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             translation_direction: "ja_to_ko",
             preserve_existing_english: true,
-            proof_boundary: "confirmed pointer tables, transfer code, first-page CHR tile storage, and bank 0B composite-parser two-pass layout controls; other downstream render semantics remain unresolved",
+            proof_boundary: "confirmed pointer tables, transfer code, first-page CHR tile storage, and bank 0B composite-parser path through the PPU command queue; other render consumers remain unresolved",
         },
         summary: ReportSummary {
             table_count: tables.len(),
@@ -1056,6 +1126,25 @@ fn build_layout_control_evidence(
                 "downstream consumer",
                 "bank_0B_composite_text_parser",
             )?,
+            ppu_transfer: PpuTransferEvidence {
+                stage_descriptor_buffer: "0x0700",
+                queued_command_buffer: "0x0781",
+                queued_command_length: "0x0780",
+                ready_flag: "0x21",
+                serializer_cpu_address: 0xC84E,
+                serializer_cpu_address_hex: "0xC84E".to_owned(),
+                flush_cpu_address: 0xC3A5,
+                flush_cpu_address_hex: "0xC3A5".to_owned(),
+                ppu_address_register: "0x2006",
+                ppu_data_register: "0x2007",
+                observed_behavior: "serialize_stage_codes_into_a_command_queue_then_flush_them_to_ppu",
+                code_regions: build_code_region_evidence(
+                    source,
+                    &COMPOSITE_TEXT_PPU_CODE_REGIONS,
+                    "PPU transfer",
+                    "bank_0B_composite_text_parser",
+                )?,
+            },
         },
         direct_jsr_candidates: find_absolute_transfer_candidates(
             &source[HEADER_SIZE..PRG_FILE_END],
@@ -1425,6 +1514,10 @@ mod tests {
             source[region.file_offset..region.file_offset + region.bytes.len()]
                 .copy_from_slice(region.bytes);
         }
+        for region in &COMPOSITE_TEXT_PPU_CODE_REGIONS {
+            source[region.file_offset..region.file_offset + region.bytes.len()]
+                .copy_from_slice(region.bytes);
+        }
         let source_code_usage = COMPOSITE_TEXT_LAYOUT_CODES.map(|code| SourceCodeUsage {
             code,
             code_hex: format!("{code:02X}"),
@@ -1472,6 +1565,31 @@ mod tests {
                 .segment_separator_replacement_code,
             0xFF
         );
+        assert_eq!(
+            composite
+                .downstream_consumer
+                .ppu_transfer
+                .stage_descriptor_buffer,
+            "0x0700"
+        );
+        assert_eq!(
+            composite
+                .downstream_consumer
+                .ppu_transfer
+                .queued_command_buffer,
+            "0x0781"
+        );
+        assert_eq!(
+            composite
+                .downstream_consumer
+                .ppu_transfer
+                .ppu_address_register,
+            "0x2006"
+        );
+        assert_eq!(
+            composite.downstream_consumer.ppu_transfer.ppu_data_register,
+            "0x2007"
+        );
     }
 
     #[test]
@@ -1494,6 +1612,29 @@ mod tests {
 
         assert!(error.contains(
             "downstream consumer code bind_composite_output_pointer changed for bank_0B_composite_text_parser"
+        ));
+    }
+
+    #[test]
+    fn rejects_changed_composite_ppu_transfer_code() {
+        let mut source = vec![0_u8; PRG_FILE_END + FIRST_FONT_PAGE_BYTES];
+        for region in &COMPOSITE_TEXT_PPU_CODE_REGIONS {
+            source[region.file_offset..region.file_offset + region.bytes.len()]
+                .copy_from_slice(region.bytes);
+        }
+        source[COMPOSITE_TEXT_PPU_CODE_REGIONS[5].file_offset + 31] ^= 0x01;
+
+        let error = build_code_region_evidence(
+            &source,
+            &COMPOSITE_TEXT_PPU_CODE_REGIONS,
+            "PPU transfer",
+            "bank_0B_composite_text_parser",
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains(
+            "PPU transfer code write_queued_codes_to_ppu changed for bank_0B_composite_text_parser"
         ));
     }
 
