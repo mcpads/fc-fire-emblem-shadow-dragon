@@ -23,7 +23,10 @@ const OPTIONAL_E8_PREFIX_CODE: u8 = 0xE8;
 const OPTIONAL_PREFIX_BYTE_COUNT: usize = 6;
 const FIXED_RECORD_HEADER_BYTE_COUNT: usize = 4;
 const MAX_MAIN_LINE_SCAN_BYTES: usize = 256;
+const MAX_MAIN_LINEAR_SEGMENT_LINES: usize = 64;
 const MAIN_LINE_END_CODES: [u8; 7] = [0xEF, 0xE7, 0xE4, 0xE6, 0xEE, 0xEB, 0xED];
+const MAIN_LINEAR_SEGMENT_BOUNDARY_CODES: [u8; 4] = [0xEF, 0xE7, 0xE4, 0xE6];
+const MAIN_LINEAR_CONTINUATION_CODES: [u8; 3] = [0xEE, 0xEB, 0xED];
 
 const MAIN_DIALOGUE_DISPATCHER_CODE: &[u8] = &[0xAD, 0xF7, 0x77, 0x20, 0x4C, 0xC3];
 const MAIN_DIALOGUE_STATE_HANDLERS: [u16; 18] = [
@@ -299,6 +302,12 @@ struct ReportSummary {
     max_main_first_line_storage_byte_count: usize,
     main_first_line_protected_original_alphanumeric_literal_byte_count: usize,
     main_first_line_end_control_counts: Vec<ControlUsageReport>,
+    main_linear_segment_count: usize,
+    main_linear_line_count: usize,
+    max_main_linear_segment_line_count: usize,
+    main_linear_segment_protected_original_alphanumeric_literal_byte_count: usize,
+    main_linear_segment_boundary_control_counts: Vec<ControlUsageReport>,
+    main_linear_segment_transition_count: usize,
     alias_group_count: usize,
     aliased_entry_count: usize,
 }
@@ -325,6 +334,7 @@ struct DialogueTableReport {
     aliased_entry_count: usize,
     main_record_prefix_summary: Option<MainRecordPrefixSummary>,
     main_first_line_summary: Option<MainFirstLineSummary>,
+    main_linear_segment_summary: Option<MainLinearSegmentSummary>,
     data_file_start: usize,
     data_file_start_hex: String,
     directory_binding: Option<DirectoryBindingReport>,
@@ -378,7 +388,8 @@ struct DialogueEntryReport {
     handler_role: Option<&'static str>,
     alias_entry_indices: Vec<usize>,
     main_record_prefix: Option<MainRecordPrefixReport>,
-    main_first_line: Option<MainFirstLineReport>,
+    main_first_line: Option<MainLineReport>,
+    main_linear_segment: Option<MainLinearSegmentReport>,
 }
 
 #[derive(Debug, Serialize)]
@@ -462,7 +473,7 @@ struct MainRecordPrefixReport {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct MainFirstLineReport {
+struct MainLineReport {
     file_offset: usize,
     file_offset_hex: String,
     storage_byte_count: usize,
@@ -477,6 +488,21 @@ struct MainFirstLineReport {
     line_end_control: u8,
     line_end_control_hex: String,
     transition_target: Option<TransitionTargetReport>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct MainLinearSegmentReport {
+    start_file_offset: usize,
+    start_file_offset_hex: String,
+    line_count: usize,
+    storage_byte_count: usize,
+    storage_sha1: String,
+    protected_original_alphanumeric_literal_byte_count: usize,
+    boundary_control: u8,
+    boundary_control_hex: String,
+    boundary_kind: &'static str,
+    transition_target: Option<TransitionTargetReport>,
+    lines: Vec<MainLineReport>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -500,6 +526,16 @@ struct MainFirstLineSummary {
     max_storage_byte_count: usize,
     protected_original_alphanumeric_literal_byte_count: usize,
     line_end_control_counts: Vec<ControlUsageReport>,
+}
+
+#[derive(Debug, Serialize)]
+struct MainLinearSegmentSummary {
+    unique_segment_count: usize,
+    total_line_count: usize,
+    max_line_count: usize,
+    protected_original_alphanumeric_literal_byte_count: usize,
+    boundary_control_counts: Vec<ControlUsageReport>,
+    transition_count: usize,
 }
 
 pub fn analyze_dialogue_structure(
@@ -563,6 +599,46 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
     }
     let main_first_line_end_control_counts =
         control_usage_reports(main_first_line_end_control_count_map, &MAIN_LINE_END_CODES);
+    let main_linear_segment_count = tables
+        .iter()
+        .filter_map(|table| table.main_linear_segment_summary.as_ref())
+        .map(|summary| summary.unique_segment_count)
+        .sum();
+    let main_linear_line_count = tables
+        .iter()
+        .filter_map(|table| table.main_linear_segment_summary.as_ref())
+        .map(|summary| summary.total_line_count)
+        .sum();
+    let max_main_linear_segment_line_count = tables
+        .iter()
+        .filter_map(|table| table.main_linear_segment_summary.as_ref())
+        .map(|summary| summary.max_line_count)
+        .max()
+        .unwrap_or(0);
+    let main_linear_segment_protected_original_alphanumeric_literal_byte_count = tables
+        .iter()
+        .filter_map(|table| table.main_linear_segment_summary.as_ref())
+        .map(|summary| summary.protected_original_alphanumeric_literal_byte_count)
+        .sum();
+    let mut main_linear_segment_boundary_control_count_map = BTreeMap::new();
+    for usage in tables
+        .iter()
+        .filter_map(|table| table.main_linear_segment_summary.as_ref())
+        .flat_map(|summary| &summary.boundary_control_counts)
+    {
+        *main_linear_segment_boundary_control_count_map
+            .entry(usage.code)
+            .or_insert(0) += usage.count;
+    }
+    let main_linear_segment_boundary_control_counts = control_usage_reports(
+        main_linear_segment_boundary_control_count_map,
+        &MAIN_LINEAR_SEGMENT_BOUNDARY_CODES,
+    );
+    let main_linear_segment_transition_count = tables
+        .iter()
+        .filter_map(|table| table.main_linear_segment_summary.as_ref())
+        .map(|summary| summary.transition_count)
+        .sum();
     let main_unique_script_entry_count: usize = tables
         .iter()
         .filter(|table| table.directory_binding.is_some())
@@ -571,6 +647,10 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
     ensure!(
         main_first_line_count == main_unique_script_entry_count,
         "main first-line coverage does not match the directory-bound script entries"
+    );
+    ensure!(
+        main_linear_segment_count == main_unique_script_entry_count,
+        "main linear-segment coverage does not match the directory-bound script entries"
     );
     let summary = ReportSummary {
         table_count: tables.len(),
@@ -608,24 +688,30 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
         max_main_first_line_storage_byte_count,
         main_first_line_protected_original_alphanumeric_literal_byte_count,
         main_first_line_end_control_counts,
+        main_linear_segment_count,
+        main_linear_line_count,
+        max_main_linear_segment_line_count,
+        main_linear_segment_protected_original_alphanumeric_literal_byte_count,
+        main_linear_segment_boundary_control_counts,
+        main_linear_segment_transition_count,
         alias_group_count: tables.iter().map(|table| table.alias_group_count).sum(),
         aliased_entry_count: tables.iter().map(|table| table.aliased_entry_count).sum(),
     };
 
     Ok(DialogueStructureReport {
-        schema_version: 3,
+        schema_version: 4,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             translation_direction: "ja_to_ko",
             preserve_existing_english: true,
-            proof_boundary: "exact pointer-table ranges, switchable-bank target mapping, aliases, all eight consumer roots, the main dialogue record-prefix state path, and every main entry's first line; no dialogue bytes or translations are emitted",
+            proof_boundary: "exact pointer-table ranges, switchable-bank target mapping, aliases, all eight consumer roots, the main dialogue record-prefix state path, and every main entry's linear lines through the first terminal, interactive, or explicit-transition boundary; no dialogue bytes or translations are emitted",
         },
         summary,
         main_dialogue_state_machine,
         tables,
         unknowns: vec![
             "Script targets are entry starts, not proven script byte ranges; declared code handlers are kept separate.",
-            "The E5, fixed four-byte, and E8 record prefix plus every main entry's first line are confirmed, but later lines and complete entry termination rules remain unresolved.",
+            "The E5, fixed four-byte, and E8 record prefix plus each main entry's initial linear segment are confirmed, but control-flow reachability beyond E7, E4, and E6 boundaries remains unresolved.",
             "Eleven of the eighteen main dialogue state handlers remain structurally named but semantically unresolved.",
             "Role labels began as external map candidates and do not prove every entry's gameplay context.",
             "Existing English and numeric content remains protected and is not a translation target.",
@@ -855,6 +941,7 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
                 alias_entry_indices,
                 main_record_prefix: None,
                 main_first_line: None,
+                main_linear_segment: None,
             });
             continue;
         }
@@ -876,10 +963,10 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
             .directory_group
             .map(|_| inspect_main_record_prefix(source, file_offset, bank_end, spec.id, index))
             .transpose()?;
-        let main_first_line = main_record_prefix
+        let main_linear_segment = main_record_prefix
             .as_ref()
             .map(|prefix| {
-                scan_main_first_line(
+                scan_main_linear_segment(
                     source,
                     prefix.first_line_file_offset,
                     bank_end,
@@ -888,6 +975,9 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
                 )
             })
             .transpose()?;
+        let main_first_line = main_linear_segment
+            .as_ref()
+            .and_then(|segment| segment.lines.first().cloned());
         entries.push(DialogueEntryReport {
             index,
             pointer_cpu_address: pointer,
@@ -899,6 +989,7 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
             alias_entry_indices,
             main_record_prefix,
             main_first_line,
+            main_linear_segment,
         });
     }
     ensure!(
@@ -993,6 +1084,50 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
     } else {
         None
     };
+    let main_linear_segment_summary = if spec.directory_group.is_some() {
+        let unique_segments = entries
+            .iter()
+            .filter(|entry| indices_by_pointer[&entry.pointer_cpu_address][0] == entry.index)
+            .filter_map(|entry| entry.main_linear_segment.as_ref())
+            .collect::<Vec<_>>();
+        ensure!(
+            unique_segments.len() == unique_script_entry_count,
+            "{} linear-segment coverage does not match its unique script entries",
+            spec.id
+        );
+        let mut boundary_control_count_map = BTreeMap::new();
+        for segment in &unique_segments {
+            *boundary_control_count_map
+                .entry(segment.boundary_control)
+                .or_insert(0) += 1;
+        }
+        Some(MainLinearSegmentSummary {
+            unique_segment_count: unique_segments.len(),
+            total_line_count: unique_segments
+                .iter()
+                .map(|segment| segment.line_count)
+                .sum(),
+            max_line_count: unique_segments
+                .iter()
+                .map(|segment| segment.line_count)
+                .max()
+                .unwrap_or(0),
+            protected_original_alphanumeric_literal_byte_count: unique_segments
+                .iter()
+                .map(|segment| segment.protected_original_alphanumeric_literal_byte_count)
+                .sum(),
+            boundary_control_counts: control_usage_reports(
+                boundary_control_count_map,
+                &MAIN_LINEAR_SEGMENT_BOUNDARY_CODES,
+            ),
+            transition_count: unique_segments
+                .iter()
+                .filter(|segment| segment.transition_target.is_some())
+                .count(),
+        })
+    } else {
+        None
+    };
 
     Ok(DialogueTableReport {
         id: spec.id,
@@ -1015,6 +1150,7 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
         aliased_entry_count,
         main_record_prefix_summary,
         main_first_line_summary,
+        main_linear_segment_summary,
         data_file_start: spec.data_file_start,
         data_file_start_hex: format!("0x{:05X}", spec.data_file_start),
         directory_binding,
@@ -1085,13 +1221,13 @@ fn inspect_main_record_prefix(
     })
 }
 
-fn scan_main_first_line(
+fn scan_main_line(
     source: &[u8],
     line_file_offset: usize,
     bank_end: usize,
     table_id: &str,
     entry_index: usize,
-) -> Result<MainFirstLineReport> {
+) -> Result<MainLineReport> {
     let mut cursor = line_file_offset;
     let mut literal_byte_count = 0;
     let mut protected_original_alphanumeric_literal_byte_count = 0;
@@ -1119,21 +1255,21 @@ fn scan_main_first_line(
             1 + control.inline_operand_byte_count + control.transition_target_byte_count;
         let storage_end = cursor
             .checked_add(storage_byte_count)
-            .context("main first-line control storage range overflow")?;
+            .context("main line control storage range overflow")?;
         ensure!(
             storage_end <= bank_end,
-            "{table_id} entry {entry_index} first-line control {code:02X} crosses its source bank"
+            "{table_id} entry {entry_index} line control {code:02X} crosses its source bank"
         );
         if code == 0xEC {
             ensure!(
                 source[cursor + 1] <= 3,
-                "{table_id} entry {entry_index} first-line EC operand is outside 0..3"
+                "{table_id} entry {entry_index} line EC operand is outside 0..3"
             );
         }
         if code == 0xDF {
             ensure!(
                 source[cursor + 1] & 0x0F < 8,
-                "{table_id} entry {entry_index} first-line DF low nibble is outside 0..7"
+                "{table_id} entry {entry_index} line DF low nibble is outside 0..7"
             );
         }
 
@@ -1151,12 +1287,12 @@ fn scan_main_first_line(
                     })
                     .with_context(|| {
                         format!(
-                            "{table_id} entry {entry_index} first-line transition selector {selector:02X} is not a declared main dialogue table"
+                            "{table_id} entry {entry_index} line transition selector {selector:02X} is not a declared main dialogue table"
                         )
                     })?;
                 ensure!(
                     target_entry_index < target_table.pointer_count,
-                    "{table_id} entry {entry_index} first-line transition target {selector:02X}:{target_entry_index:02X} is outside {}",
+                    "{table_id} entry {entry_index} line transition target {selector:02X}:{target_entry_index:02X} is outside {}",
                     target_table.id
                 );
                 Some(TransitionTargetReport {
@@ -1168,12 +1304,12 @@ fn scan_main_first_line(
             } else {
                 ensure!(
                     control.transition_target_byte_count == 0,
-                    "{table_id} entry {entry_index} first-line control {code:02X} has an unsupported transition width"
+                    "{table_id} entry {entry_index} line control {code:02X} has an unsupported transition width"
                 );
                 None
             };
             let storage = &source[line_file_offset..storage_end];
-            return Ok(MainFirstLineReport {
+            return Ok(MainLineReport {
                 file_offset: line_file_offset,
                 file_offset_hex: format!("0x{line_file_offset:05X}"),
                 storage_byte_count: storage.len(),
@@ -1197,15 +1333,83 @@ fn scan_main_first_line(
 
         ensure!(
             control.transition_target_byte_count == 0,
-            "{table_id} entry {entry_index} non-ending control {code:02X} has transition bytes"
+            "{table_id} entry {entry_index} non-ending line control {code:02X} has transition bytes"
         );
         cursor = cursor
             .checked_add(control.current_pointer_advance_bytes)
-            .context("main first-line current pointer overflow")?;
+            .context("main line current pointer overflow")?;
     }
 
     anyhow::bail!(
-        "{table_id} entry {entry_index} has no recognized first-line end within {MAX_MAIN_LINE_SCAN_BYTES} bytes"
+        "{table_id} entry {entry_index} has no recognized line end within {MAX_MAIN_LINE_SCAN_BYTES} bytes"
+    )
+}
+
+fn scan_main_linear_segment(
+    source: &[u8],
+    first_line_file_offset: usize,
+    bank_end: usize,
+    table_id: &str,
+    entry_index: usize,
+) -> Result<MainLinearSegmentReport> {
+    let mut line_file_offset = first_line_file_offset;
+    let mut lines = Vec::new();
+
+    for _ in 0..MAX_MAIN_LINEAR_SEGMENT_LINES {
+        let line = scan_main_line(source, line_file_offset, bank_end, table_id, entry_index)?;
+        let boundary_control = line.line_end_control;
+        let next_line_file_offset = line_file_offset
+            .checked_add(line.current_pointer_advance_bytes)
+            .context("main linear segment current pointer overflow")?;
+        lines.push(line);
+
+        if MAIN_LINEAR_SEGMENT_BOUNDARY_CODES.contains(&boundary_control) {
+            let final_line = lines.last().context("main linear segment has no lines")?;
+            let storage_end = final_line
+                .file_offset
+                .checked_add(final_line.storage_byte_count)
+                .context("main linear segment storage range overflow")?;
+            ensure!(
+                storage_end <= bank_end,
+                "{table_id} entry {entry_index} linear segment crosses its source bank"
+            );
+            let storage = &source[first_line_file_offset..storage_end];
+            return Ok(MainLinearSegmentReport {
+                start_file_offset: first_line_file_offset,
+                start_file_offset_hex: format!("0x{first_line_file_offset:05X}"),
+                line_count: lines.len(),
+                storage_byte_count: storage.len(),
+                storage_sha1: sha1_hex(storage),
+                protected_original_alphanumeric_literal_byte_count: lines
+                    .iter()
+                    .map(|line| line.protected_original_alphanumeric_literal_byte_count)
+                    .sum(),
+                boundary_control,
+                boundary_control_hex: format!("{boundary_control:02X}"),
+                boundary_kind: match boundary_control {
+                    0xEF => "terminal",
+                    0xE7 => "interactive_branch",
+                    0xE4 | 0xE6 => "transition_target",
+                    _ => unreachable!("declared boundary code is not classified"),
+                },
+                transition_target: final_line.transition_target.clone(),
+                lines,
+            });
+        }
+
+        ensure!(
+            MAIN_LINEAR_CONTINUATION_CODES.contains(&boundary_control),
+            "{table_id} entry {entry_index} line ends with unclassified control {boundary_control:02X}"
+        );
+        ensure!(
+            next_line_file_offset < bank_end,
+            "{table_id} entry {entry_index} next linear line begins outside its source bank"
+        );
+        line_file_offset = next_line_file_offset;
+    }
+
+    anyhow::bail!(
+        "{table_id} entry {entry_index} exceeds {MAX_MAIN_LINEAR_SEGMENT_LINES} linear lines without a terminal, interactive, or transition boundary"
     )
 }
 
@@ -1542,8 +1746,7 @@ mod tests {
         let bank_end = switchable_bank_file_start(SYNTHETIC_BANK) + PRG_BANK_SIZE;
 
         let line =
-            scan_main_first_line(&source, line_file_offset, bank_end, "synthetic-dialogue", 0)
-                .unwrap();
+            scan_main_line(&source, line_file_offset, bank_end, "synthetic-dialogue", 0).unwrap();
 
         assert_eq!(line.storage_byte_count, 6);
         assert_eq!(line.current_pointer_advance_bytes, 4);
@@ -1565,12 +1768,66 @@ mod tests {
         source[line_file_offset..line_file_offset + 3].copy_from_slice(&[0xEC, 0x04, 0xED]);
         let bank_end = switchable_bank_file_start(SYNTHETIC_BANK) + PRG_BANK_SIZE;
 
-        let error =
-            scan_main_first_line(&source, line_file_offset, bank_end, "synthetic-dialogue", 0)
-                .unwrap_err()
-                .to_string();
+        let error = scan_main_line(&source, line_file_offset, bank_end, "synthetic-dialogue", 0)
+            .unwrap_err()
+            .to_string();
 
         assert!(error.contains("EC operand is outside 0..3"));
+    }
+
+    #[test]
+    fn scans_linear_lines_until_the_first_non_linear_boundary() {
+        let mut source = synthetic_source();
+        let first_line_file_offset = SYNTHETIC_DATA_START;
+        source[first_line_file_offset..first_line_file_offset + 6]
+            .copy_from_slice(&[0x20, 0xED, 0x21, 0xEE, 0x22, 0xEF]);
+        let bank_end = switchable_bank_file_start(SYNTHETIC_BANK) + PRG_BANK_SIZE;
+
+        let segment = scan_main_linear_segment(
+            &source,
+            first_line_file_offset,
+            bank_end,
+            "synthetic-dialogue",
+            0,
+        )
+        .unwrap();
+
+        assert_eq!(segment.line_count, 3);
+        assert_eq!(segment.storage_byte_count, 6);
+        assert_eq!(segment.boundary_control, 0xEF);
+        assert_eq!(segment.boundary_kind, "terminal");
+        assert!(segment.transition_target.is_none());
+        assert_eq!(
+            segment
+                .lines
+                .iter()
+                .map(|line| line.line_end_control)
+                .collect::<Vec<_>>(),
+            vec![0xED, 0xEE, 0xEF]
+        );
+    }
+
+    #[test]
+    fn rejects_a_linear_segment_beyond_the_declared_line_limit() {
+        let mut source = synthetic_source();
+        let first_line_file_offset = SYNTHETIC_DATA_START;
+        for line_index in 0..=MAX_MAIN_LINEAR_SEGMENT_LINES {
+            let line_file_offset = first_line_file_offset + line_index * 2;
+            source[line_file_offset..line_file_offset + 2].copy_from_slice(&[0x20, 0xED]);
+        }
+        let bank_end = switchable_bank_file_start(SYNTHETIC_BANK) + PRG_BANK_SIZE;
+
+        let error = scan_main_linear_segment(
+            &source,
+            first_line_file_offset,
+            bank_end,
+            "synthetic-dialogue",
+            0,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("exceeds 64 linear lines"));
     }
 
     #[test]
