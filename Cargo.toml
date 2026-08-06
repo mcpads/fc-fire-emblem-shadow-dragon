@@ -11,6 +11,7 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 fontdue = "0.9"
 png = "0.18"
+retro-rp2a03 = { package = "rp2a03", git = "https://github.com/mcpads/retro-typed-isa.git", rev = "2ea602812dcdacf8b1f9e41ad815a41cdb8fb780" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha1 = "0.10"

@@ -10,6 +10,7 @@ anyhow.workspace = true
 clap.workspace = true
 fontdue.workspace = true
 png.workspace = true
+retro-rp2a03.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha1.workspace = true

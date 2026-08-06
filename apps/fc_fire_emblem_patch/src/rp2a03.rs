@@ -1,4 +1,7 @@
-use anyhow::{Result, ensure};
+//! Patch-domain RP2A03 instructions lowered through the complete typed ISA.
+
+use anyhow::{Context, Result, ensure};
+use retro_rp2a03::{AddressingMode, Assembler, Instruction as TypedInstruction, Mnemonic, Operand};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Instruction {
@@ -100,101 +103,99 @@ impl Instruction {
         }
     }
 
-    fn encode_into(self, pc: u16, output: &mut Vec<u8>) -> Result<()> {
-        match self {
-            Self::LdaImmediate(value) => output.extend_from_slice(&[0xA9, value]),
-            Self::LdaZeroPage(address) => output.extend_from_slice(&[0xA5, address]),
-            Self::LdaAbsolute(address) => {
-                output.push(0xAD);
-                output.extend_from_slice(&address.to_le_bytes());
-            }
-            Self::LdaAbsoluteX(address) => {
-                output.push(0xBD);
-                output.extend_from_slice(&address.to_le_bytes());
-            }
-            Self::LdxImmediate(value) => output.extend_from_slice(&[0xA2, value]),
-            Self::LdyImmediate(value) => output.extend_from_slice(&[0xA0, value]),
-            Self::LdyAbsoluteX(address) => {
-                output.push(0xBC);
-                output.extend_from_slice(&address.to_le_bytes());
-            }
-            Self::StaZeroPage(address) => output.extend_from_slice(&[0x85, address]),
-            Self::StyZeroPage(address) => output.extend_from_slice(&[0x84, address]),
-            Self::StaAbsolute(address) => {
-                output.push(0x8D);
-                output.extend_from_slice(&address.to_le_bytes());
-            }
-            Self::StaAbsoluteX(address) => {
-                output.push(0x9D);
-                output.extend_from_slice(&address.to_le_bytes());
-            }
-            Self::StaIndirectY(address) => output.extend_from_slice(&[0x91, address]),
-            Self::AslAccumulator => output.push(0x0A),
-            Self::LsrAccumulator => output.push(0x4A),
-            Self::AndImmediate(value) => output.extend_from_slice(&[0x29, value]),
-            Self::AdcImmediate(value) => output.extend_from_slice(&[0x69, value]),
-            Self::AdcZeroPage(address) => output.extend_from_slice(&[0x65, address]),
-            Self::SbcImmediate(value) => output.extend_from_slice(&[0xE9, value]),
-            Self::CmpImmediate(value) => output.extend_from_slice(&[0xC9, value]),
-            Self::CpxImmediate(value) => output.extend_from_slice(&[0xE0, value]),
-            Self::CpyImmediate(value) => output.extend_from_slice(&[0xC0, value]),
-            Self::IncAbsolute(address) => {
-                output.push(0xEE);
-                output.extend_from_slice(&address.to_le_bytes());
-            }
-            Self::DecAbsolute(address) => {
-                output.push(0xCE);
-                output.extend_from_slice(&address.to_le_bytes());
-            }
-            Self::Inx => output.push(0xE8),
-            Self::Tax => output.push(0xAA),
-            Self::Txa => output.push(0x8A),
-            Self::Tay => output.push(0xA8),
-            Self::Tya => output.push(0x98),
-            Self::Tsx => output.push(0xBA),
-            Self::OraImmediate(value) => output.extend_from_slice(&[0x09, value]),
-            Self::OraZeroPage(address) => output.extend_from_slice(&[0x05, address]),
-            Self::Clc => output.push(0x18),
-            Self::Sec => output.push(0x38),
-            Self::Pha => output.push(0x48),
-            Self::Php => output.push(0x08),
-            Self::Pla => output.push(0x68),
-            Self::Plp => output.push(0x28),
-            Self::JmpAbsolute(address) => {
-                output.push(0x4C);
-                output.extend_from_slice(&address.to_le_bytes());
-            }
-            Self::JsrAbsolute(address) => {
-                output.push(0x20);
-                output.extend_from_slice(&address.to_le_bytes());
-            }
-            Self::BeqAbsolute(target) => encode_relative_branch(0xF0, "BEQ", pc, target, output)?,
-            Self::BccAbsolute(target) => encode_relative_branch(0x90, "BCC", pc, target, output)?,
-            Self::BcsAbsolute(target) => encode_relative_branch(0xB0, "BCS", pc, target, output)?,
-            Self::BneAbsolute(target) => {
-                encode_relative_branch(0xD0, "BNE", pc, target, output)?;
-            }
-            Self::Rts => output.push(0x60),
-            Self::Nop => output.push(0xEA),
-        }
-        Ok(())
+    fn lower(self, pc: u16) -> Result<TypedInstruction> {
+        let (mnemonic, mode, operand) = match self {
+            Self::LdaImmediate(value) => immediate(Mnemonic::Lda, value),
+            Self::LdaZeroPage(address) => zero_page(Mnemonic::Lda, address),
+            Self::LdaAbsolute(address) => absolute(Mnemonic::Lda, address),
+            Self::LdaAbsoluteX(address) => absolute_x(Mnemonic::Lda, address),
+            Self::LdxImmediate(value) => immediate(Mnemonic::Ldx, value),
+            Self::LdyImmediate(value) => immediate(Mnemonic::Ldy, value),
+            Self::LdyAbsoluteX(address) => absolute_x(Mnemonic::Ldy, address),
+            Self::StaZeroPage(address) => zero_page(Mnemonic::Sta, address),
+            Self::StyZeroPage(address) => zero_page(Mnemonic::Sty, address),
+            Self::StaAbsolute(address) => absolute(Mnemonic::Sta, address),
+            Self::StaAbsoluteX(address) => absolute_x(Mnemonic::Sta, address),
+            Self::StaIndirectY(address) => (
+                Mnemonic::Sta,
+                AddressingMode::ZeroPageIndirectIndexedY,
+                Operand::Byte(address),
+            ),
+            Self::AslAccumulator => implied(Mnemonic::Asl, AddressingMode::Accumulator),
+            Self::LsrAccumulator => implied(Mnemonic::Lsr, AddressingMode::Accumulator),
+            Self::AndImmediate(value) => immediate(Mnemonic::And, value),
+            Self::AdcImmediate(value) => immediate(Mnemonic::Adc, value),
+            Self::AdcZeroPage(address) => zero_page(Mnemonic::Adc, address),
+            Self::SbcImmediate(value) => immediate(Mnemonic::Sbc, value),
+            Self::CmpImmediate(value) => immediate(Mnemonic::Cmp, value),
+            Self::CpxImmediate(value) => immediate(Mnemonic::Cpx, value),
+            Self::CpyImmediate(value) => immediate(Mnemonic::Cpy, value),
+            Self::IncAbsolute(address) => absolute(Mnemonic::Inc, address),
+            Self::DecAbsolute(address) => absolute(Mnemonic::Dec, address),
+            Self::Inx => implied(Mnemonic::Inx, AddressingMode::Implied),
+            Self::Tax => implied(Mnemonic::Tax, AddressingMode::Implied),
+            Self::Txa => implied(Mnemonic::Txa, AddressingMode::Implied),
+            Self::Tay => implied(Mnemonic::Tay, AddressingMode::Implied),
+            Self::Tya => implied(Mnemonic::Tya, AddressingMode::Implied),
+            Self::Tsx => implied(Mnemonic::Tsx, AddressingMode::Implied),
+            Self::OraImmediate(value) => immediate(Mnemonic::Ora, value),
+            Self::OraZeroPage(address) => zero_page(Mnemonic::Ora, address),
+            Self::Clc => implied(Mnemonic::Clc, AddressingMode::Implied),
+            Self::Sec => implied(Mnemonic::Sec, AddressingMode::Implied),
+            Self::Pha => implied(Mnemonic::Pha, AddressingMode::Implied),
+            Self::Php => implied(Mnemonic::Php, AddressingMode::Implied),
+            Self::Pla => implied(Mnemonic::Pla, AddressingMode::Implied),
+            Self::Plp => implied(Mnemonic::Plp, AddressingMode::Implied),
+            Self::JmpAbsolute(address) => absolute(Mnemonic::Jmp, address),
+            Self::JsrAbsolute(address) => absolute(Mnemonic::Jsr, address),
+            Self::BeqAbsolute(target) => relative(Mnemonic::Beq, "BEQ", pc, target)?,
+            Self::BccAbsolute(target) => relative(Mnemonic::Bcc, "BCC", pc, target)?,
+            Self::BcsAbsolute(target) => relative(Mnemonic::Bcs, "BCS", pc, target)?,
+            Self::BneAbsolute(target) => relative(Mnemonic::Bne, "BNE", pc, target)?,
+            Self::Rts => implied(Mnemonic::Rts, AddressingMode::Implied),
+            Self::Nop => implied(Mnemonic::Nop, AddressingMode::Implied),
+        };
+        TypedInstruction::new(mnemonic, mode, operand)
+            .with_context(|| format!("cannot lower {self:?} at {pc:04X} to RP2A03"))
     }
 }
 
-fn encode_relative_branch(
-    opcode: u8,
-    mnemonic: &str,
+fn immediate(mnemonic: Mnemonic, value: u8) -> (Mnemonic, AddressingMode, Operand) {
+    (mnemonic, AddressingMode::Immediate, Operand::Byte(value))
+}
+
+fn zero_page(mnemonic: Mnemonic, address: u8) -> (Mnemonic, AddressingMode, Operand) {
+    (mnemonic, AddressingMode::ZeroPage, Operand::Byte(address))
+}
+
+fn absolute(mnemonic: Mnemonic, address: u16) -> (Mnemonic, AddressingMode, Operand) {
+    (mnemonic, AddressingMode::Absolute, Operand::Word(address))
+}
+
+fn absolute_x(mnemonic: Mnemonic, address: u16) -> (Mnemonic, AddressingMode, Operand) {
+    (mnemonic, AddressingMode::AbsoluteX, Operand::Word(address))
+}
+
+fn implied(mnemonic: Mnemonic, mode: AddressingMode) -> (Mnemonic, AddressingMode, Operand) {
+    (mnemonic, mode, Operand::None)
+}
+
+fn relative(
+    mnemonic: Mnemonic,
+    display_name: &str,
     pc: u16,
     target: u16,
-    output: &mut Vec<u8>,
-) -> Result<()> {
+) -> Result<(Mnemonic, AddressingMode, Operand)> {
     let relative = i32::from(target) - (i32::from(pc) + 2);
     ensure!(
         (-128..=127).contains(&relative),
-        "{mnemonic} at {pc:04X} cannot reach {target:04X}"
+        "{display_name} at {pc:04X} cannot reach {target:04X}"
     );
-    output.extend_from_slice(&[opcode, relative as i8 as u8]);
-    Ok(())
+    Ok((
+        mnemonic,
+        AddressingMode::Relative,
+        Operand::Relative(relative as i8),
+    ))
 }
 
 pub fn assemble_at(origin: u16, instructions: &[Instruction]) -> Result<Vec<u8>> {
@@ -210,11 +211,17 @@ pub fn assemble_at(origin: u16, instructions: &[Instruction]) -> Result<Vec<u8>>
         "RP2A03 program at {origin:04X} extends past the CPU address space"
     );
 
-    let mut output = Vec::with_capacity(encoded_len);
+    let mut assembler = Assembler::new();
+    let mut offset = 0_usize;
     for instruction in instructions {
-        let pc = (origin as usize + output.len()) as u16;
-        instruction.encode_into(pc, &mut output)?;
+        let pc = (origin as usize + offset) as u16;
+        assembler.emit(instruction.lower(pc)?);
+        offset += instruction.encoded_len();
     }
+    let output = assembler
+        .assemble(origin)
+        .context("cannot assemble checked RP2A03 program")?
+        .into_bytes();
     ensure!(
         output.len() == encoded_len,
         "RP2A03 instruction length declaration disagrees with encoding"
