@@ -12,6 +12,8 @@
 
 설정 항목 `サウンド`, `アニメーション`, `ウエイトタイマー`를 각각 `사운드`, `애니메이션`, `대기시간`으로 바꾸는 기술 PoC를 제공한다. Mesen의 실제 설정 화면에서 세 한글 항목과 기존 영어 능력치 약어가 함께 유지되는 것을 확인했다. 일본어 설정 문자열에 쓰인 가나 타일만 임시로 한글 타일로 바꾸므로, 다른 일본어 화면이 깨질 수 있다. 정식 패치나 배포 후보가 아니다.
 
+전체 한글 글꼴을 위한 MMC5 후보 실험은 PRG 모드 1, 배터리 SRAM과 미러링 선택을 옮기는 정적 프로브까지 진행했다. 원본 CHR은 그대로 두었고 MMC4 CHR 래치 동작은 아직 변환하지 않았으므로, 이 산출물도 부팅·화면 동등성이나 배포 가능성을 뜻하지 않는다.
+
 ```sh
 cargo run -p fc-fire-emblem-patch -- verify-source "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- analyze-font-supply "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
@@ -23,6 +25,7 @@ cargo run -p fc-fire-emblem-patch -- validate-main-dialogue-workspace "roms/Fire
 cargo run -p fc-fire-emblem-patch -- plan-main-dialogue-reinsertion "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- verify-main-dialogue-source-roundtrip "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- build-options-poc "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
+cargo run -p fc-fire-emblem-patch -- build-mmc5-prg-probe "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 ```
 
 ROM과 빌드 결과는 저장소에 포함하지 않는다. 지금까지의 판단 흐름은 `docs/decisions.md`, 조사 근거와 현재 상태는 `docs/initial-survey.md`와 `docs/status.md`, MMC4 화면별 공급 근거는 `docs/render-paths.md`, 첫 텍스트 모집단은 `docs/text-tables.md`, 전체 한글화의 단계별 통과 조건은 `docs/roadmap.md`, 기본 조작과 치트를 포함한 실행 검증 원칙은 `docs/playtesting.md`에 정리한다.

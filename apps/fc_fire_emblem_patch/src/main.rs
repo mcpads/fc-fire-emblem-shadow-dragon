@@ -4,8 +4,10 @@ mod dialogue_inventory;
 mod font;
 mod japanese_encoding;
 mod localization;
+mod mmc5_prg;
 mod options;
 mod rom;
+mod rp2a03;
 mod static_analysis;
 mod text_inventory;
 mod tracked;
@@ -93,6 +95,14 @@ enum Command {
         preview: PathBuf,
         #[arg(long, default_value_t = 8)]
         preview_scale: u32,
+    },
+    /// Build the static MMC5 PRG and SRAM conversion probe without translation assets.
+    BuildMmc5PrgProbe {
+        source: PathBuf,
+        #[arg(long, default_value = "out/fire-emblem-fe1-mmc5-prg-probe.nes")]
+        output: PathBuf,
+        #[arg(long, default_value = "out/mmc5-prg-probe.json")]
+        report: PathBuf,
     },
 }
 
@@ -242,6 +252,18 @@ fn main() -> Result<()> {
                     write.label, write.offset, write.len
                 );
             }
+        }
+        Command::BuildMmc5PrgProbe {
+            source,
+            output,
+            report,
+        } => {
+            let summary = mmc5_prg::build_mmc5_prg_probe(&source, &output, &report)?;
+            println!("wrote {}", output.display());
+            println!("output SHA-1: {}", summary.output_sha1);
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!("tracked ROM writes: {}", summary.tracked_write_count);
         }
     }
     Ok(())
