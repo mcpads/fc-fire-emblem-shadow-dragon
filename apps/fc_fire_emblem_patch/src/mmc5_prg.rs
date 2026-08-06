@@ -22,6 +22,8 @@ const SOURCE_SELECT_HORIZONTAL_MIRRORING_ADDRESS: u16 = 0xC9CE;
 const SOURCE_SELECT_VERTICAL_MIRRORING_ADDRESS: u16 = 0xC9D6;
 const SOURCE_BOOT_SELECT_TEMPORARY_BANK_ADDRESS: u16 = 0xC1FD;
 const SOURCE_BOOT_RESTORE_BANK_ADDRESS: u16 = 0xC205;
+const SOURCE_DIALOGUE_BYTE_SELECT_BANK_ADDRESS: u16 = 0xE6A1;
+const SOURCE_DIALOGUE_BYTE_RESTORE_BANK_ADDRESS: u16 = 0xE6AB;
 const SOURCE_INDEXED_POINTER_TABLE_SELECT_BANK_ADDRESS: u16 = 0xE6BA;
 const SOURCE_INDEXED_POINTER_TABLE_RESTORE_BANK_ADDRESS: u16 = 0xE6F1;
 
@@ -178,6 +180,16 @@ pub(crate) fn create_mmc5_prg_probe_image(source_rom: &Rom) -> Result<PrgProbeIm
     )?;
     replace_absolute_store_with_subroutine_call(
         &mut image,
+        "dialogue byte PRG bank selection",
+        SOURCE_DIALOGUE_BYTE_SELECT_BANK_ADDRESS,
+    )?;
+    replace_absolute_store_with_subroutine_call(
+        &mut image,
+        "dialogue byte PRG bank restoration",
+        SOURCE_DIALOGUE_BYTE_RESTORE_BANK_ADDRESS,
+    )?;
+    replace_absolute_store_with_subroutine_call(
+        &mut image,
         "indexed pointer table PRG bank selection",
         SOURCE_INDEXED_POINTER_TABLE_SELECT_BANK_ADDRESS,
     )?;
@@ -271,7 +283,7 @@ pub fn build_mmc5_prg_probe(
         tracked_writes: probe.tracked_writes,
         unresolved_boundaries: vec![
             "MMC4 CHR latch behavior has not been converted to MMC5.",
-            "Only the four direct $A000 stores proven on the observed boot and indexed-pointer-table paths are redirected; other byte-pattern candidates remain unclassified.",
+            "Only the six direct $A000 stores proven on the observed boot, dialogue-byte, and indexed-pointer-table paths are redirected; other byte-pattern candidates remain unclassified.",
             "The all-FF cave has no direct JSR or JMP reference, but indirect and data references are not fully disproven.",
             "No runtime boot, graphics, save/load, or progression equivalence is claimed by this static probe.",
         ],
@@ -531,6 +543,8 @@ mod tests {
         for source_address in [
             SOURCE_BOOT_SELECT_TEMPORARY_BANK_ADDRESS,
             SOURCE_BOOT_RESTORE_BANK_ADDRESS,
+            SOURCE_DIALOGUE_BYTE_SELECT_BANK_ADDRESS,
+            SOURCE_DIALOGUE_BYTE_RESTORE_BANK_ADDRESS,
             SOURCE_INDEXED_POINTER_TABLE_SELECT_BANK_ADDRESS,
             SOURCE_INDEXED_POINTER_TABLE_RESTORE_BANK_ADDRESS,
         ] {
