@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use crate::{
     options::{OPTIONS_TABLE_OFFSET, SOURCE_OPTIONS_TABLE},
-    rom::{EXPECTED_CHR_SHA1, EXPECTED_SOURCE_SHA1, Rom},
+    rom::{EXPECTED_CHR_SHA1, EXPECTED_SOURCE_SHA1, HEADER_SIZE, PRG_SIZE, Rom},
     sha1_hex,
 };
 
@@ -28,6 +28,46 @@ const SOURCE_STATUS_LABELS: [u8; 32] = [
 const ENTRY_SEPARATOR: u8 = 0xED;
 const TABLE_TERMINATOR: u8 = 0xEF;
 const MMC4_LATCH_CODES: [u8; 2] = [0xFD, 0xFE];
+const PRG_BANK_SIZE: usize = 16 * 1024;
+
+struct Mmc4ChrWriter {
+    cpu_address: u16,
+    shadow_address: u8,
+    hardware_register: u16,
+    latch_domain: &'static str,
+    expected: [u8; 8],
+}
+
+const MMC4_CHR_WRITERS: [Mmc4ChrWriter; 4] = [
+    Mmc4ChrWriter {
+        cpu_address: 0xC9AE,
+        shadow_address: 0x59,
+        hardware_register: 0xB000,
+        latch_domain: "ppu_0000_fd",
+        expected: [0x85, 0x59, 0x05, 0x52, 0x8D, 0x00, 0xB0, 0x60],
+    },
+    Mmc4ChrWriter {
+        cpu_address: 0xC9B6,
+        shadow_address: 0x5A,
+        hardware_register: 0xC000,
+        latch_domain: "ppu_0000_fe",
+        expected: [0x85, 0x5A, 0x05, 0x52, 0x8D, 0x00, 0xC0, 0x60],
+    },
+    Mmc4ChrWriter {
+        cpu_address: 0xC9BE,
+        shadow_address: 0x5B,
+        hardware_register: 0xD000,
+        latch_domain: "ppu_1000_fd",
+        expected: [0x85, 0x5B, 0x05, 0x52, 0x8D, 0x00, 0xD0, 0x60],
+    },
+    Mmc4ChrWriter {
+        cpu_address: 0xC9C6,
+        shadow_address: 0x5C,
+        hardware_register: 0xE000,
+        latch_domain: "ppu_1000_fe",
+        expected: [0x85, 0x5C, 0x05, 0x52, 0x8D, 0x00, 0xE0, 0x60],
+    },
+];
 
 const HEX_GLYPHS: [[u8; 5]; 16] = [
     [0b111, 0b101, 0b101, 0b101, 0b111],
@@ -93,6 +133,7 @@ struct FontSupplyReport {
     scope: ReportScope,
     tile_format: TileFormat,
     summary: ReportSummary,
+    mmc4_chr_bank_writers: Vec<Mmc4ChrWriterReport>,
     known_references: Vec<ReferenceReport>,
     pages: Vec<PageReport>,
     font_page: FontPageReport,
@@ -126,6 +167,33 @@ struct ReportSummary {
     protected_font_code_count: usize,
     unresolved_font_code_count: usize,
     available_font_code_count: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct Mmc4ChrWriterReport {
+    cpu_address: u16,
+    cpu_address_hex: String,
+    shadow_address: u8,
+    shadow_address_hex: String,
+    page_group_shadow_address: u8,
+    page_group_shadow_address_hex: String,
+    hardware_register: u16,
+    hardware_register_hex: String,
+    latch_domain: &'static str,
+    routine_bytes_hex: String,
+    direct_jsr_candidates: Vec<DirectJsrCandidate>,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+struct DirectJsrCandidate {
+    prg_bank: usize,
+    prg_bank_hex: String,
+    prg_offset: usize,
+    prg_offset_hex: String,
+    file_offset: usize,
+    file_offset_hex: String,
+    cpu_address: u16,
+    cpu_address_hex: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -245,6 +313,7 @@ pub fn analyze_font_supply(
 
 fn build_report(rom: &Rom) -> Result<FontSupplyReport> {
     validate_known_references(rom.data())?;
+    let mmc4_chr_bank_writers = describe_mmc4_chr_writers(rom.prg())?;
     ensure!(
         rom.chr().len().is_multiple_of(CHR_PAGE_SIZE),
         "CHR size is not aligned to 4 KiB pages"
@@ -266,7 +335,7 @@ fn build_report(rom: &Rom) -> Result<FontSupplyReport> {
     let blank_pattern_count = pages.iter().map(|page| page.blank_pattern_count).sum();
 
     Ok(FontSupplyReport {
-        schema_version: 1,
+        schema_version: 2,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             chr_sha1: EXPECTED_CHR_SHA1,
@@ -290,6 +359,7 @@ fn build_report(rom: &Rom) -> Result<FontSupplyReport> {
             unresolved_font_code_count,
             available_font_code_count: 0,
         },
+        mmc4_chr_bank_writers,
         known_references: KNOWN_REFERENCES
             .iter()
             .map(|reference| ReferenceReport {
@@ -314,9 +384,81 @@ fn build_report(rom: &Rom) -> Result<FontSupplyReport> {
         unknowns: vec![
             "No font slot is classified as available until every consumer and runtime state is excluded.",
             "References list only confirmed tables; it is not the complete text or tile reference population.",
+            "Direct JSR candidates are byte-pattern matches; instruction boundaries and render-path semantics remain unconfirmed.",
             "Active Hangul slot capacity remains unknown until every target render path is measured.",
         ],
     })
+}
+
+fn describe_mmc4_chr_writers(prg: &[u8]) -> Result<Vec<Mmc4ChrWriterReport>> {
+    ensure!(
+        prg.len() == PRG_SIZE,
+        "unexpected PRG size for MMC4 writer inventory"
+    );
+
+    MMC4_CHR_WRITERS
+        .iter()
+        .map(|writer| {
+            let prg_offset = fixed_bank_prg_offset(writer.cpu_address)?;
+            let end = prg_offset + writer.expected.len();
+            ensure!(
+                prg[prg_offset..end] == writer.expected,
+                "MMC4 CHR writer at ${:04X} changed",
+                writer.cpu_address
+            );
+
+            Ok(Mmc4ChrWriterReport {
+                cpu_address: writer.cpu_address,
+                cpu_address_hex: format!("0x{:04X}", writer.cpu_address),
+                shadow_address: writer.shadow_address,
+                shadow_address_hex: format!("0x{:02X}", writer.shadow_address),
+                page_group_shadow_address: 0x52,
+                page_group_shadow_address_hex: "0x52".to_owned(),
+                hardware_register: writer.hardware_register,
+                hardware_register_hex: format!("0x{:04X}", writer.hardware_register),
+                latch_domain: writer.latch_domain,
+                routine_bytes_hex: hex_bytes(&writer.expected),
+                direct_jsr_candidates: find_direct_jsr_candidates(prg, writer.cpu_address),
+            })
+        })
+        .collect()
+}
+
+fn fixed_bank_prg_offset(cpu_address: u16) -> Result<usize> {
+    ensure!(
+        cpu_address >= 0xC000,
+        "fixed-bank CPU address must be at or above $C000"
+    );
+    Ok(PRG_SIZE - PRG_BANK_SIZE + usize::from(cpu_address - 0xC000))
+}
+
+fn find_direct_jsr_candidates(prg: &[u8], target: u16) -> Vec<DirectJsrCandidate> {
+    let [target_low, target_high] = target.to_le_bytes();
+    prg.windows(3)
+        .enumerate()
+        .filter(|(_, bytes)| bytes == &[0x20, target_low, target_high])
+        .map(|(prg_offset, _)| {
+            let prg_bank = prg_offset / PRG_BANK_SIZE;
+            let offset_in_bank = prg_offset % PRG_BANK_SIZE;
+            let cpu_base = if prg_bank == PRG_SIZE / PRG_BANK_SIZE - 1 {
+                0xC000
+            } else {
+                0x8000
+            };
+            let cpu_address = cpu_base + offset_in_bank as u16;
+            let file_offset = HEADER_SIZE + prg_offset;
+            DirectJsrCandidate {
+                prg_bank,
+                prg_bank_hex: format!("0x{prg_bank:02X}"),
+                prg_offset,
+                prg_offset_hex: format!("0x{prg_offset:05X}"),
+                file_offset,
+                file_offset_hex: format!("0x{file_offset:05X}"),
+                cpu_address,
+                cpu_address_hex: format!("0x{cpu_address:04X}"),
+            }
+        })
+        .collect()
 }
 
 fn validate_known_references(source: &[u8]) -> Result<()> {
@@ -746,5 +888,39 @@ mod tests {
         assert_eq!(summary.high_plane_only_count, 1);
         assert_eq!(summary.dual_plane_count, 1);
         assert_eq!(summary.distinct_pattern_count, 4);
+    }
+
+    #[test]
+    fn direct_jsr_candidate_inventory_preserves_bank_coordinates() {
+        let mut prg = vec![0_u8; PRG_SIZE];
+        prg[0x0123..0x0126].copy_from_slice(&[0x20, 0xBE, 0xC9]);
+        let fixed_call = PRG_SIZE - PRG_BANK_SIZE + 0x0234;
+        prg[fixed_call..fixed_call + 3].copy_from_slice(&[0x20, 0xBE, 0xC9]);
+
+        let candidates = find_direct_jsr_candidates(&prg, 0xC9BE);
+
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].prg_bank, 0);
+        assert_eq!(candidates[0].file_offset, HEADER_SIZE + 0x0123);
+        assert_eq!(candidates[0].cpu_address, 0x8123);
+        assert_eq!(candidates[1].prg_bank, 15);
+        assert_eq!(candidates[1].file_offset, HEADER_SIZE + fixed_call);
+        assert_eq!(candidates[1].cpu_address, 0xC234);
+    }
+
+    #[test]
+    fn writer_inventory_rejects_a_changed_fixed_bank_routine() {
+        let mut prg = vec![0_u8; PRG_SIZE];
+        for writer in &MMC4_CHR_WRITERS {
+            let offset = fixed_bank_prg_offset(writer.cpu_address).unwrap();
+            prg[offset..offset + writer.expected.len()].copy_from_slice(&writer.expected);
+        }
+        describe_mmc4_chr_writers(&prg).unwrap();
+
+        let offset = fixed_bank_prg_offset(0xC9BE).unwrap();
+        prg[offset] ^= 0x01;
+        let error = describe_mmc4_chr_writers(&prg).unwrap_err().to_string();
+
+        assert!(error.contains("MMC4 CHR writer at $C9BE changed"));
     }
 }
