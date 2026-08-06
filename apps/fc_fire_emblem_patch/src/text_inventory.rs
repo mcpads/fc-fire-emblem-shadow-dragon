@@ -55,6 +55,36 @@ struct ProtectedPosition {
     glyph: &'static str,
 }
 
+const COMPOSITE_TEXT_LAYOUT_CODES: [u8; 2] = [0x0F, 0x1F];
+
+const COMPOSITE_TEXT_LAYOUT_CODE_REGIONS: [TransferCodeSpec; 3] = [
+    TransferCodeSpec {
+        role: "first_pass_decrement_before_append",
+        file_offset: 0x2CF59,
+        bytes: &[
+            0xAD, 0x50, 0x04, 0x48, 0x20, 0xA9, 0x8F, 0xA5, 0x06, 0xC9, 0xEF, 0xF0, 0x3B, 0xC9,
+            0xED, 0xF0, 0x0D, 0xC9, 0x0F, 0xF0, 0x08, 0xC9, 0x1F, 0xF0, 0x04, 0xA9, 0xFF, 0xD0,
+            0x01, 0xCA, 0x20, 0x9B, 0x8F, 0xA5, 0x06, 0xC9, 0xED, 0xD0, 0xDD,
+        ],
+    },
+    TransferCodeSpec {
+        role: "second_pass_skip_combining_codes",
+        file_offset: 0x2CF84,
+        bytes: &[
+            0x20, 0xA9, 0x8F, 0xA5, 0x06, 0xC9, 0xED, 0xF0, 0x08, 0xC9, 0x0F, 0xF0, 0xF3, 0xC9,
+            0x1F, 0xF0, 0xEF, 0x20, 0x9B, 0x8F, 0xA5, 0x06, 0xC9, 0xED, 0xD0, 0xE6, 0x4C, 0x49,
+            0x8F,
+        ],
+    },
+    TransferCodeSpec {
+        role: "append_and_advance_output_cell",
+        file_offset: 0x2CFAB,
+        bytes: &[
+            0x9D, 0x11, 0x03, 0xE8, 0xE0, 0xFF, 0x90, 0x05, 0xA9, 0xEF, 0x9D, 0x10, 0x03, 0x60,
+        ],
+    },
+];
+
 const TEXT_TABLE_SPECS: [TextTableSpec; 7] = [
     TextTableSpec {
         id: "class-names",
@@ -272,6 +302,7 @@ struct TextInventoryReport {
     scope: ReportScope,
     summary: ReportSummary,
     source_code_usage: Vec<SourceCodeUsage>,
+    layout_controls: Vec<LayoutControlEvidence>,
     tables: Vec<TextTableReport>,
     unknowns: Vec<&'static str>,
 }
@@ -406,6 +437,17 @@ struct TransferCodeEvidence {
 }
 
 #[derive(Debug, Serialize)]
+struct LayoutControlEvidence {
+    scope: &'static str,
+    codes: Vec<u8>,
+    codes_hex: Vec<String>,
+    observed_behavior: &'static str,
+    inventory_referenced_byte_count: usize,
+    inventory_unique_storage_byte_count: usize,
+    code_regions: Vec<TransferCodeEvidence>,
+}
+
+#[derive(Debug, Serialize)]
 struct TextEntryReport {
     index: usize,
     pointer_cpu_address: u16,
@@ -511,13 +553,15 @@ fn build_report(source: &[u8]) -> Result<TextInventoryReport> {
         .filter(|usage| usage.referenced_unresolved_blank_font_tile_byte_count != 0)
         .count();
 
+    let layout_controls = build_layout_control_evidence(source, &source_code_usage)?;
+
     Ok(TextInventoryReport {
-        schema_version: 3,
+        schema_version: 4,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             translation_direction: "ja_to_ko",
             preserve_existing_english: true,
-            proof_boundary: "confirmed pointer tables, transfer code, and first-page CHR tile storage; downstream render semantics remain unresolved",
+            proof_boundary: "confirmed pointer tables, transfer code, first-page CHR tile storage, and bank 0B composite-parser layout controls; other downstream render semantics remain unresolved",
         },
         summary: ReportSummary {
             table_count: tables.len(),
@@ -538,6 +582,7 @@ fn build_report(source: &[u8]) -> Result<TextInventoryReport> {
             distinct_unresolved_blank_font_code_count,
         },
         source_code_usage,
+        layout_controls,
         tables,
         unknowns: vec![
             "This is not the complete game text population.",
@@ -869,41 +914,8 @@ fn build_transfer_evidence(source: &[u8], spec: &TextTableSpec) -> Result<TextTr
         spec.id
     );
 
-    let code_regions = spec
-        .transfer
-        .code_regions
-        .iter()
-        .map(|region| {
-            let end = region
-                .file_offset
-                .checked_add(region.bytes.len())
-                .context("transfer code range overflow")?;
-            ensure!(
-                end <= PRG_FILE_END,
-                "transfer code {} for {} is outside PRG",
-                region.role,
-                spec.id
-            );
-            ensure!(
-                source[region.file_offset..end] == *region.bytes,
-                "transfer code {} changed for {} at {:#X}",
-                region.role,
-                spec.id,
-                region.file_offset
-            );
-            let (prg_bank, cpu_address) = prg_file_location(region.file_offset)?;
-            Ok(TransferCodeEvidence {
-                role: region.role,
-                file_offset: region.file_offset,
-                file_offset_hex: format!("0x{:05X}", region.file_offset),
-                prg_bank,
-                prg_bank_hex: format!("0x{prg_bank:02X}"),
-                cpu_address,
-                cpu_address_hex: format!("0x{cpu_address:04X}"),
-                instruction_bytes_hex: hex_bytes(region.bytes),
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let code_regions =
+        build_code_region_evidence(source, spec.transfer.code_regions, "transfer", spec.id)?;
 
     Ok(TextTransferEvidence {
         source_pointer: spec.transfer.source_pointer,
@@ -923,6 +935,79 @@ fn build_transfer_evidence(source: &[u8], spec: &TextTableSpec) -> Result<TextTr
         explicit_copy_byte_limit: spec.transfer.explicit_copy_byte_limit,
         code_regions,
     })
+}
+
+fn build_layout_control_evidence(
+    source: &[u8],
+    source_code_usage: &[SourceCodeUsage],
+) -> Result<Vec<LayoutControlEvidence>> {
+    let mut inventory_referenced_byte_count = 0;
+    let mut inventory_unique_storage_byte_count = 0;
+    for code in COMPOSITE_TEXT_LAYOUT_CODES {
+        let usage = source_code_usage
+            .iter()
+            .find(|usage| usage.code == code)
+            .with_context(|| format!("layout code {code:02X} is absent from the text inventory"))?;
+        inventory_referenced_byte_count += usage.referenced_byte_count;
+        inventory_unique_storage_byte_count += usage.unique_storage_byte_count;
+    }
+
+    Ok(vec![LayoutControlEvidence {
+        scope: "bank_0B_composite_text_parser",
+        codes: COMPOSITE_TEXT_LAYOUT_CODES.to_vec(),
+        codes_hex: COMPOSITE_TEXT_LAYOUT_CODES
+            .iter()
+            .map(|code| format!("{code:02X}"))
+            .collect(),
+        observed_behavior: "zero_cell_combining_diacritic",
+        inventory_referenced_byte_count,
+        inventory_unique_storage_byte_count,
+        code_regions: build_code_region_evidence(
+            source,
+            &COMPOSITE_TEXT_LAYOUT_CODE_REGIONS,
+            "layout control",
+            "bank_0B_composite_text_parser",
+        )?,
+    }])
+}
+
+fn build_code_region_evidence(
+    source: &[u8],
+    regions: &[TransferCodeSpec],
+    evidence_kind: &str,
+    owner: &str,
+) -> Result<Vec<TransferCodeEvidence>> {
+    regions
+        .iter()
+        .map(|region| {
+            let end = region
+                .file_offset
+                .checked_add(region.bytes.len())
+                .with_context(|| format!("{evidence_kind} code range overflow"))?;
+            ensure!(
+                end <= PRG_FILE_END,
+                "{evidence_kind} code {} for {owner} is outside PRG",
+                region.role
+            );
+            ensure!(
+                source[region.file_offset..end] == *region.bytes,
+                "{evidence_kind} code {} changed for {owner} at {:#X}",
+                region.role,
+                region.file_offset
+            );
+            let (prg_bank, cpu_address) = prg_file_location(region.file_offset)?;
+            Ok(TransferCodeEvidence {
+                role: region.role,
+                file_offset: region.file_offset,
+                file_offset_hex: format!("0x{:05X}", region.file_offset),
+                prg_bank,
+                prg_bank_hex: format!("0x{prg_bank:02X}"),
+                cpu_address,
+                cpu_address_hex: format!("0x{cpu_address:04X}"),
+                instruction_bytes_hex: hex_bytes(region.bytes),
+            })
+        })
+        .collect()
 }
 
 fn aggregate_source_code_usage(
@@ -1205,6 +1290,29 @@ mod tests {
             .to_string();
 
         assert!(error.contains("transfer code copy_loop changed for synthetic-names"));
+    }
+
+    #[test]
+    fn rejects_composite_layout_code_that_no_longer_preserves_combining_width() {
+        let mut source = vec![0_u8; PRG_FILE_END + FIRST_FONT_PAGE_BYTES];
+        for region in &COMPOSITE_TEXT_LAYOUT_CODE_REGIONS {
+            source[region.file_offset..region.file_offset + region.bytes.len()]
+                .copy_from_slice(region.bytes);
+        }
+        source[COMPOSITE_TEXT_LAYOUT_CODE_REGIONS[0].file_offset + 28] ^= 0x01;
+
+        let error = build_code_region_evidence(
+            &source,
+            &COMPOSITE_TEXT_LAYOUT_CODE_REGIONS,
+            "layout control",
+            "bank_0B_composite_text_parser",
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains(
+            "layout control code first_pass_decrement_before_append changed for bank_0B_composite_text_parser"
+        ));
     }
 
     #[test]
