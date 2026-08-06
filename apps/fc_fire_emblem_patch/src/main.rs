@@ -3,6 +3,7 @@ mod font;
 mod localization;
 mod options;
 mod rom;
+mod static_analysis;
 mod text_inventory;
 mod tracked;
 

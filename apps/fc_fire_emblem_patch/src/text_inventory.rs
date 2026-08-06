@@ -10,6 +10,7 @@ use serde::Serialize;
 use crate::{
     rom::{EXPECTED_SOURCE_SHA1, HEADER_SIZE, PRG_SIZE, Rom},
     sha1_hex,
+    static_analysis::{AbsoluteTransferCandidate, find_absolute_transfer_candidates},
 };
 
 const PRG_BANK_SIZE: usize = 16 * 1024;
@@ -439,12 +440,16 @@ struct TransferCodeEvidence {
 #[derive(Debug, Serialize)]
 struct LayoutControlEvidence {
     scope: &'static str,
+    entry_cpu_address: u16,
+    entry_cpu_address_hex: String,
     codes: Vec<u8>,
     codes_hex: Vec<String>,
     observed_behavior: &'static str,
     inventory_referenced_byte_count: usize,
     inventory_unique_storage_byte_count: usize,
     code_regions: Vec<TransferCodeEvidence>,
+    direct_jsr_candidates: Vec<AbsoluteTransferCandidate>,
+    direct_jmp_candidates: Vec<AbsoluteTransferCandidate>,
 }
 
 #[derive(Debug, Serialize)]
@@ -556,7 +561,7 @@ fn build_report(source: &[u8]) -> Result<TextInventoryReport> {
     let layout_controls = build_layout_control_evidence(source, &source_code_usage)?;
 
     Ok(TextInventoryReport {
-        schema_version: 4,
+        schema_version: 5,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             translation_direction: "ja_to_ko",
@@ -587,6 +592,7 @@ fn build_report(source: &[u8]) -> Result<TextInventoryReport> {
         unknowns: vec![
             "This is not the complete game text population.",
             "Non-Latin bytes remain unresolved Japanese, layout, icon, or control codes until decoder semantics are proven.",
+            "Direct composite-parser JSR and JMP candidates are byte-pattern matches; instruction boundaries and caller roles remain unconfirmed.",
             "No entry is translation-ready until control tokens, layout, and relocation policy are declared.",
         ],
     })
@@ -954,6 +960,8 @@ fn build_layout_control_evidence(
 
     Ok(vec![LayoutControlEvidence {
         scope: "bank_0B_composite_text_parser",
+        entry_cpu_address: 0x8F39,
+        entry_cpu_address_hex: "0x8F39".to_owned(),
         codes: COMPOSITE_TEXT_LAYOUT_CODES.to_vec(),
         codes_hex: COMPOSITE_TEXT_LAYOUT_CODES
             .iter()
@@ -968,6 +976,16 @@ fn build_layout_control_evidence(
             "layout control",
             "bank_0B_composite_text_parser",
         )?,
+        direct_jsr_candidates: find_absolute_transfer_candidates(
+            &source[HEADER_SIZE..PRG_FILE_END],
+            0x8F39,
+            0x20,
+        ),
+        direct_jmp_candidates: find_absolute_transfer_candidates(
+            &source[HEADER_SIZE..PRG_FILE_END],
+            0x8F39,
+            0x4C,
+        ),
     }])
 }
 

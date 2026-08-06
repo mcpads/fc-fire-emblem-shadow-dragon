@@ -5,8 +5,9 @@ use serde::Serialize;
 
 use crate::{
     options::{OPTIONS_TABLE_OFFSET, SOURCE_OPTIONS_TABLE},
-    rom::{EXPECTED_CHR_SHA1, EXPECTED_SOURCE_SHA1, HEADER_SIZE, PRG_SIZE, Rom},
+    rom::{EXPECTED_CHR_SHA1, EXPECTED_SOURCE_SHA1, PRG_SIZE, Rom},
     sha1_hex,
+    static_analysis::{AbsoluteTransferCandidate, find_absolute_transfer_candidates},
 };
 
 const CHR_PAGE_SIZE: usize = 4 * 1024;
@@ -183,18 +184,6 @@ struct Mmc4ChrWriterReport {
     routine_bytes_hex: String,
     direct_jsr_candidates: Vec<AbsoluteTransferCandidate>,
     direct_jmp_candidates: Vec<AbsoluteTransferCandidate>,
-}
-
-#[derive(Debug, PartialEq, Eq, Serialize)]
-struct AbsoluteTransferCandidate {
-    prg_bank: usize,
-    prg_bank_hex: String,
-    prg_offset: usize,
-    prg_offset_hex: String,
-    file_offset: usize,
-    file_offset_hex: String,
-    cpu_address: u16,
-    cpu_address_hex: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -440,39 +429,6 @@ fn fixed_bank_prg_offset(cpu_address: u16) -> Result<usize> {
         "fixed-bank CPU address must be at or above $C000"
     );
     Ok(PRG_SIZE - PRG_BANK_SIZE + usize::from(cpu_address - 0xC000))
-}
-
-fn find_absolute_transfer_candidates(
-    prg: &[u8],
-    target: u16,
-    opcode: u8,
-) -> Vec<AbsoluteTransferCandidate> {
-    let [target_low, target_high] = target.to_le_bytes();
-    prg.windows(3)
-        .enumerate()
-        .filter(|(_, bytes)| bytes == &[opcode, target_low, target_high])
-        .map(|(prg_offset, _)| {
-            let prg_bank = prg_offset / PRG_BANK_SIZE;
-            let offset_in_bank = prg_offset % PRG_BANK_SIZE;
-            let cpu_base = if prg_bank == PRG_SIZE / PRG_BANK_SIZE - 1 {
-                0xC000
-            } else {
-                0x8000
-            };
-            let cpu_address = cpu_base + offset_in_bank as u16;
-            let file_offset = HEADER_SIZE + prg_offset;
-            AbsoluteTransferCandidate {
-                prg_bank,
-                prg_bank_hex: format!("0x{prg_bank:02X}"),
-                prg_offset,
-                prg_offset_hex: format!("0x{prg_offset:05X}"),
-                file_offset,
-                file_offset_hex: format!("0x{file_offset:05X}"),
-                cpu_address,
-                cpu_address_hex: format!("0x{cpu_address:04X}"),
-            }
-        })
-        .collect()
 }
 
 fn validate_known_references(source: &[u8]) -> Result<()> {
@@ -829,6 +785,7 @@ fn hex_bytes(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rom::HEADER_SIZE;
 
     fn source_with_known_references() -> Vec<u8> {
         let mut source = vec![0_u8; STATUS_LABELS_OFFSET + SOURCE_STATUS_LABELS.len()];
