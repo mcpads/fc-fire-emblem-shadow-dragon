@@ -518,6 +518,21 @@ pub struct DialogueStructureSummary {
     pub alias_group_count: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MainDialogueStorageRecord {
+    pub table_id: &'static str,
+    pub source_prg_bank: u8,
+    pub canonical_entry_index: usize,
+    pub entry_indices: Vec<usize>,
+    pub pointer_cpu_address: u16,
+    pub file_offset: usize,
+    pub end_file_offset_exclusive: usize,
+    pub storage_byte_count: usize,
+    pub storage_sha1: String,
+    pub prefix_byte_count: usize,
+    pub boundary_control: u8,
+}
+
 #[derive(Debug, Serialize)]
 struct DialogueStructureReport {
     schema_version: u8,
@@ -976,6 +991,52 @@ pub fn analyze_dialogue_structure(
         unique_target_count: report.summary.unique_target_count,
         alias_group_count: report.summary.alias_group_count,
     })
+}
+
+pub(crate) fn inspect_main_dialogue_storage(
+    source: &[u8],
+) -> Result<Vec<MainDialogueStorageRecord>> {
+    let report = build_report(source)?;
+    let records = report
+        .tables
+        .iter()
+        .filter(|table| table.directory_binding.is_some())
+        .flat_map(|table| {
+            table
+                .entries
+                .iter()
+                .filter(|entry| {
+                    entry.target_kind == "script_entry_start" && is_canonical_dialogue_entry(entry)
+                })
+                .map(move |entry| (table, entry))
+        })
+        .map(|(table, entry)| {
+            let storage = entry.main_record_storage.as_ref().with_context(|| {
+                format!(
+                    "{} canonical entry {} has no record-storage range",
+                    table.id, entry.index
+                )
+            })?;
+            Ok(MainDialogueStorageRecord {
+                table_id: table.id,
+                source_prg_bank: table.source_prg_bank,
+                canonical_entry_index: canonical_dialogue_entry_index(entry),
+                entry_indices: dialogue_entry_indices(entry),
+                pointer_cpu_address: entry.pointer_cpu_address,
+                file_offset: storage.file_offset,
+                end_file_offset_exclusive: storage.end_file_offset_exclusive,
+                storage_byte_count: storage.storage_byte_count,
+                storage_sha1: storage.storage_sha1.clone(),
+                prefix_byte_count: storage.prefix_byte_count,
+                boundary_control: storage.boundary_control,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    ensure!(
+        records.len() == report.summary.main_record_count,
+        "main dialogue storage record export lost coverage"
+    );
+    Ok(records)
 }
 
 fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {

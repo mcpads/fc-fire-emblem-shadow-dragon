@@ -1,4 +1,5 @@
 mod chr_inventory;
+mod dialogue_assets;
 mod dialogue_inventory;
 mod font;
 mod localization;
@@ -45,6 +46,20 @@ enum Command {
         source: PathBuf,
         #[arg(long, default_value = "out/dialogue-structure.json")]
         report: PathBuf,
+    },
+    /// Extract exact main-dialogue source storage for a private roundtrip check.
+    ExtractMainDialogueSource {
+        source: PathBuf,
+        #[arg(long, default_value = "private/dialogue/main-source.json")]
+        output: PathBuf,
+    },
+    /// Verify that a private main-dialogue source asset rebuilds the source exactly.
+    VerifyMainDialogueSourceRoundtrip {
+        source: PathBuf,
+        #[arg(long, default_value = "private/dialogue/main-source.json")]
+        asset: PathBuf,
+        #[arg(long, default_value = "out/fire-emblem-fe1-dialogue-roundtrip.nes")]
+        output: PathBuf,
     },
     /// Build the Japanese-options Hangul visibility proof.
     BuildOptionsPoc {
@@ -110,6 +125,31 @@ fn main() -> Result<()> {
                 summary.pointer_count,
                 summary.unique_target_count,
                 summary.alias_group_count
+            );
+        }
+        Command::ExtractMainDialogueSource { source, output } => {
+            let summary = dialogue_assets::extract_main_dialogue_source(&source, &output)?;
+            println!("wrote {}", output.display());
+            println!("asset SHA-1: {}", summary.asset_sha1);
+            println!(
+                "main dialogue source: {} regions, {} records, {} unique storage bytes",
+                summary.storage_region_count,
+                summary.record_count,
+                summary.unique_storage_byte_count
+            );
+        }
+        Command::VerifyMainDialogueSourceRoundtrip {
+            source,
+            asset,
+            output,
+        } => {
+            let summary =
+                dialogue_assets::verify_main_dialogue_source_roundtrip(&source, &asset, &output)?;
+            println!("wrote {}", output.display());
+            println!("output SHA-1: {}", summary.output_sha1);
+            println!(
+                "verified exact source roundtrip: {} regions, {} records",
+                summary.storage_region_count, summary.record_count
             );
         }
         Command::BuildOptionsPoc {
