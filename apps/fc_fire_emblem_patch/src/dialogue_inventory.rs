@@ -22,7 +22,20 @@ struct DialogueTableSpec {
     pointer_count: usize,
     data_file_start: usize,
     directory_group: Option<u8>,
+    separate_consumer: Option<SeparateConsumerSpec>,
     allowed_fixed_handlers: &'static [FixedHandlerSpec],
+}
+
+#[derive(Clone, Copy)]
+struct SeparateConsumerSpec {
+    prg_bank: u8,
+    loader_cpu_address: u16,
+    loader_code: &'static [u8],
+    table_set_index: u8,
+    table_root_cell_cpu_address: u16,
+    table_set_selector: &'static str,
+    entry_index_selector: &'static str,
+    destination_pointer: &'static str,
 }
 
 struct FixedHandlerSpec {
@@ -32,6 +45,21 @@ struct FixedHandlerSpec {
 }
 
 const NO_FIXED_HANDLERS: &[FixedHandlerSpec] = &[];
+
+const BATTLE_DIALOGUE_CONSUMER: SeparateConsumerSpec = SeparateConsumerSpec {
+    prg_bank: 0x04,
+    loader_cpu_address: 0x8000,
+    loader_code: &[
+        0xAD, 0x35, 0x79, 0x0A, 0xA8, 0xB9, 0x2D, 0x80, 0x85, 0x00, 0xB9, 0x2E, 0x80, 0x85, 0x01,
+        0xAD, 0x36, 0x79, 0x0A, 0xA8, 0xB1, 0x00, 0x85, 0x76, 0xC8, 0xB1, 0x00, 0x85, 0x77, 0x90,
+        0x0D, 0xA5, 0x76, 0x18, 0x69, 0x04, 0x85, 0x76, 0xA5, 0x77, 0x69, 0x00, 0x85, 0x77, 0x60,
+    ],
+    table_set_index: 0,
+    table_root_cell_cpu_address: 0x802D,
+    table_set_selector: "0x7935",
+    entry_index_selector: "0x7936",
+    destination_pointer: "0x76/0x77",
+};
 
 // Candidate locations came from the pinned Basilisk map and are admitted only
 // after all ranges, directory roots, and entry pointers validate against the
@@ -45,6 +73,7 @@ const DIALOGUE_TABLE_SPECS: [DialogueTableSpec; 8] = [
         pointer_count: 51,
         data_file_start: 0x21FA1,
         directory_group: Some(0),
+        separate_consumer: None,
         allowed_fixed_handlers: NO_FIXED_HANDLERS,
     },
     DialogueTableSpec {
@@ -55,6 +84,7 @@ const DIALOGUE_TABLE_SPECS: [DialogueTableSpec; 8] = [
         pointer_count: 94,
         data_file_start: 0x300CC,
         directory_group: Some(0),
+        separate_consumer: None,
         allowed_fixed_handlers: NO_FIXED_HANDLERS,
     },
     DialogueTableSpec {
@@ -65,6 +95,7 @@ const DIALOGUE_TABLE_SPECS: [DialogueTableSpec; 8] = [
         pointer_count: 109,
         data_file_start: 0x1C93D,
         directory_group: Some(1),
+        separate_consumer: None,
         allowed_fixed_handlers: NO_FIXED_HANDLERS,
     },
     DialogueTableSpec {
@@ -75,6 +106,7 @@ const DIALOGUE_TABLE_SPECS: [DialogueTableSpec; 8] = [
         pointer_count: 11,
         data_file_start: 0x2DDAB,
         directory_group: Some(0),
+        separate_consumer: None,
         allowed_fixed_handlers: NO_FIXED_HANDLERS,
     },
     DialogueTableSpec {
@@ -85,6 +117,7 @@ const DIALOGUE_TABLE_SPECS: [DialogueTableSpec; 8] = [
         pointer_count: 88,
         data_file_start: 0x2E826,
         directory_group: Some(1),
+        separate_consumer: None,
         allowed_fixed_handlers: NO_FIXED_HANDLERS,
     },
     DialogueTableSpec {
@@ -95,6 +128,7 @@ const DIALOGUE_TABLE_SPECS: [DialogueTableSpec; 8] = [
         pointer_count: 50,
         data_file_start: 0x0E4DB,
         directory_group: Some(0),
+        separate_consumer: None,
         allowed_fixed_handlers: NO_FIXED_HANDLERS,
     },
     DialogueTableSpec {
@@ -105,6 +139,7 @@ const DIALOGUE_TABLE_SPECS: [DialogueTableSpec; 8] = [
         pointer_count: 65,
         data_file_start: 0x104ED,
         directory_group: None,
+        separate_consumer: Some(BATTLE_DIALOGUE_CONSUMER),
         allowed_fixed_handlers: NO_FIXED_HANDLERS,
     },
     DialogueTableSpec {
@@ -115,6 +150,7 @@ const DIALOGUE_TABLE_SPECS: [DialogueTableSpec; 8] = [
         pointer_count: 66,
         data_file_start: 0x12E81,
         directory_group: Some(0),
+        separate_consumer: None,
         allowed_fixed_handlers: NO_FIXED_HANDLERS,
     },
 ];
@@ -149,6 +185,8 @@ struct ReportScope {
 struct ReportSummary {
     table_count: usize,
     directory_bound_table_count: usize,
+    separate_consumer_bound_table_count: usize,
+    consumer_bound_table_count: usize,
     unresolved_consumer_table_count: usize,
     pointer_count: usize,
     unique_target_count: usize,
@@ -177,6 +215,7 @@ struct DialogueTableReport {
     data_file_start: usize,
     data_file_start_hex: String,
     directory_binding: Option<DirectoryBindingReport>,
+    separate_consumer_binding: Option<SeparateConsumerBindingReport>,
     consumer_binding_status: &'static str,
     entries: Vec<DialogueEntryReport>,
 }
@@ -190,6 +229,27 @@ struct DirectoryBindingReport {
     directory_entry_cpu_address_hex: String,
     directory_entry_file_offset: usize,
     directory_entry_file_offset_hex: String,
+    resolved_pointer_table_cpu_address: u16,
+    resolved_pointer_table_cpu_address_hex: String,
+}
+
+#[derive(Debug, Serialize)]
+struct SeparateConsumerBindingReport {
+    prg_bank: u8,
+    prg_bank_hex: String,
+    loader_cpu_address: u16,
+    loader_cpu_address_hex: String,
+    loader_file_offset: usize,
+    loader_file_offset_hex: String,
+    loader_code_sha1: String,
+    table_set_selector: &'static str,
+    table_set_index: u8,
+    entry_index_selector: &'static str,
+    destination_pointer: &'static str,
+    table_root_cell_cpu_address: u16,
+    table_root_cell_cpu_address_hex: String,
+    table_root_cell_file_offset: usize,
+    table_root_cell_file_offset_hex: String,
     resolved_pointer_table_cpu_address: u16,
     resolved_pointer_table_cpu_address_hex: String,
 }
@@ -244,9 +304,21 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
             .iter()
             .filter(|table| table.directory_binding.is_some())
             .count(),
+        separate_consumer_bound_table_count: tables
+            .iter()
+            .filter(|table| table.separate_consumer_binding.is_some())
+            .count(),
+        consumer_bound_table_count: tables
+            .iter()
+            .filter(|table| {
+                table.directory_binding.is_some() || table.separate_consumer_binding.is_some()
+            })
+            .count(),
         unresolved_consumer_table_count: tables
             .iter()
-            .filter(|table| table.directory_binding.is_none())
+            .filter(|table| {
+                table.directory_binding.is_none() && table.separate_consumer_binding.is_none()
+            })
             .count(),
         pointer_count: tables.iter().map(|table| table.pointer_count).sum(),
         unique_target_count: tables.iter().map(|table| table.unique_target_count).sum(),
@@ -260,14 +332,13 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
             source_sha1: EXPECTED_SOURCE_SHA1,
             translation_direction: "ja_to_ko",
             preserve_existing_english: true,
-            proof_boundary: "exact pointer-table ranges, switchable-bank target mapping, aliases, and seven main dialogue-directory roots; no dialogue bytes or translations are emitted",
+            proof_boundary: "exact pointer-table ranges, switchable-bank target mapping, aliases, seven main dialogue-directory roots, and the separate battle pointer loader; no dialogue bytes or translations are emitted",
         },
         summary,
         tables,
         unknowns: vec![
             "Pointer targets are entry starts, not proven script byte ranges.",
             "The outer dialogue record state machine and complete entry termination rules remain unresolved.",
-            "The battle dialogue table is structurally confirmed, but its consumer binding is unresolved.",
             "Role labels began as external map candidates and do not prove every entry's gameplay context.",
             "Existing English and numeric content remains protected and is not a translation target.",
         ],
@@ -325,6 +396,17 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
                 pointer_table_cpu_address,
                 spec.id,
             )
+        })
+        .transpose()?;
+    ensure!(
+        !(spec.directory_group.is_some() && spec.separate_consumer.is_some()),
+        "{} declares two consumer bindings",
+        spec.id
+    );
+    let separate_consumer_binding = spec
+        .separate_consumer
+        .map(|consumer| {
+            validate_separate_consumer(source, consumer, pointer_table_cpu_address, spec.id)
         })
         .transpose()?;
 
@@ -422,12 +504,68 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
         data_file_start: spec.data_file_start,
         data_file_start_hex: format!("0x{:05X}", spec.data_file_start),
         directory_binding,
+        separate_consumer_binding,
         consumer_binding_status: if spec.directory_group.is_some() {
             "main_dialogue_directory_root_confirmed"
+        } else if spec.separate_consumer.is_some() {
+            "separate_pointer_loader_confirmed"
         } else {
             "unresolved"
         },
         entries,
+    })
+}
+
+fn validate_separate_consumer(
+    source: &[u8],
+    consumer: SeparateConsumerSpec,
+    expected_table_cpu_address: u16,
+    table_id: &str,
+) -> Result<SeparateConsumerBindingReport> {
+    let loader_file_offset =
+        switchable_cpu_to_file_offset(consumer.prg_bank, consumer.loader_cpu_address)?;
+    let loader_end = loader_file_offset
+        .checked_add(consumer.loader_code.len())
+        .context("separate dialogue consumer range overflow")?;
+    ensure!(
+        source.get(loader_file_offset..loader_end) == Some(consumer.loader_code),
+        "{table_id} separate pointer loader changed"
+    );
+    let table_root_cell_cpu_address = consumer
+        .table_root_cell_cpu_address
+        .checked_add(u16::from(consumer.table_set_index) * 2)
+        .context("separate dialogue table-root cell overflow")?;
+    let table_root_cell_file_offset =
+        switchable_cpu_to_file_offset(consumer.prg_bank, table_root_cell_cpu_address)?;
+    let resolved_pointer_table_cpu_address = u16::from_le_bytes([
+        source[table_root_cell_file_offset],
+        source[table_root_cell_file_offset + 1],
+    ]);
+    ensure!(
+        resolved_pointer_table_cpu_address == expected_table_cpu_address,
+        "{table_id} separate pointer-table root changed: expected {expected_table_cpu_address:04X}, found {resolved_pointer_table_cpu_address:04X}"
+    );
+
+    Ok(SeparateConsumerBindingReport {
+        prg_bank: consumer.prg_bank,
+        prg_bank_hex: format!("0x{:02X}", consumer.prg_bank),
+        loader_cpu_address: consumer.loader_cpu_address,
+        loader_cpu_address_hex: format!("0x{:04X}", consumer.loader_cpu_address),
+        loader_file_offset,
+        loader_file_offset_hex: format!("0x{loader_file_offset:05X}"),
+        loader_code_sha1: sha1_hex(consumer.loader_code),
+        table_set_selector: consumer.table_set_selector,
+        table_set_index: consumer.table_set_index,
+        entry_index_selector: consumer.entry_index_selector,
+        destination_pointer: consumer.destination_pointer,
+        table_root_cell_cpu_address,
+        table_root_cell_cpu_address_hex: format!("0x{table_root_cell_cpu_address:04X}"),
+        table_root_cell_file_offset,
+        table_root_cell_file_offset_hex: format!("0x{table_root_cell_file_offset:05X}"),
+        resolved_pointer_table_cpu_address,
+        resolved_pointer_table_cpu_address_hex: format!(
+            "0x{resolved_pointer_table_cpu_address:04X}"
+        ),
     })
 }
 
@@ -557,6 +695,7 @@ mod tests {
             pointer_count,
             data_file_start: SYNTHETIC_DATA_START,
             directory_group: None,
+            separate_consumer: None,
             allowed_fixed_handlers: NO_FIXED_HANDLERS,
         }
     }
@@ -652,5 +791,34 @@ mod tests {
             .to_string();
 
         assert!(error.contains("dialogue directory root changed"));
+    }
+
+    #[test]
+    fn rejects_a_changed_separate_pointer_loader() {
+        let mut source = synthetic_source();
+        let mut spec = synthetic_spec(1);
+        const CONSUMER_CODE: &[u8] = &[0xA9, 0x00, 0x60];
+        spec.separate_consumer = Some(SeparateConsumerSpec {
+            prg_bank: SYNTHETIC_BANK,
+            loader_cpu_address: 0x8000,
+            loader_code: CONSUMER_CODE,
+            table_set_index: 0,
+            table_root_cell_cpu_address: 0x8010,
+            table_set_selector: "synthetic_table_set",
+            entry_index_selector: "synthetic_entry_index",
+            destination_pointer: "synthetic_destination",
+        });
+        let loader_file_offset = switchable_bank_file_start(SYNTHETIC_BANK);
+        source[loader_file_offset..loader_file_offset + CONSUMER_CODE.len()]
+            .copy_from_slice(CONSUMER_CODE);
+        source[loader_file_offset + 0x10..loader_file_offset + 0x12]
+            .copy_from_slice(&0x8300_u16.to_le_bytes());
+        write_pointer(&mut source, 0, 0x8200);
+
+        let error = extract_dialogue_table(&source, &spec)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("separate pointer-table root changed"));
     }
 }
