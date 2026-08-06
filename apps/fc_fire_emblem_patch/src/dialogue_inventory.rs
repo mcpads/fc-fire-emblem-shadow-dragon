@@ -13,6 +13,96 @@ const SWITCHABLE_CPU_START: u16 = 0x8000;
 const SWITCHABLE_CPU_END_EXCLUSIVE: u16 = 0xC000;
 const FIXED_CPU_START: u16 = 0xC000;
 const DIALOGUE_DIRECTORY_CPU_ADDRESS: u16 = 0xBFE0;
+const MAIN_DIALOGUE_PRG_BANK: u8 = 0x0A;
+const MAIN_DIALOGUE_STATE_ADDRESS: u16 = 0x77F7;
+const MAIN_DIALOGUE_DISPATCHER_CPU_ADDRESS: u16 = 0x8000;
+const MAIN_DIALOGUE_HANDLER_TABLE_CPU_ADDRESS: u16 = 0x8006;
+const OPTIONAL_E5_PREFIX_CODE: u8 = 0xE5;
+const OPTIONAL_E8_PREFIX_CODE: u8 = 0xE8;
+const OPTIONAL_PREFIX_BYTE_COUNT: usize = 6;
+const FIXED_RECORD_HEADER_BYTE_COUNT: usize = 4;
+
+const MAIN_DIALOGUE_DISPATCHER_CODE: &[u8] = &[0xAD, 0xF7, 0x77, 0x20, 0x4C, 0xC3];
+const MAIN_DIALOGUE_STATE_HANDLERS: [u16; 18] = [
+    0xC73D, 0x802A, 0x80A2, 0x81B7, 0x80E6, 0x8119, 0x8126, 0x81B7, 0x81BE, 0x81EA, 0x839F, 0x847B,
+    0x84DA, 0x852F, 0x8588, 0x8613, 0x8634, 0x8719,
+];
+const MAIN_DIALOGUE_HANDLER_ROLES: [&str; 18] = [
+    "no_op",
+    "initialize_entry_and_resolve_pointer",
+    "inspect_optional_E5_prefix",
+    "unresolved_handler_03",
+    "consume_fixed_four_byte_record_header",
+    "unresolved_handler_05",
+    "inspect_optional_E8_prefix",
+    "unresolved_handler_07",
+    "prepare_output_pointer",
+    "decode_line_into_sram",
+    "unresolved_handler_10",
+    "unresolved_handler_11",
+    "unresolved_handler_12",
+    "unresolved_handler_13",
+    "unresolved_handler_14",
+    "unresolved_handler_15",
+    "unresolved_handler_16",
+    "unresolved_handler_17",
+];
+
+struct CodeRegionSpec {
+    role: &'static str,
+    cpu_address: u16,
+    bytes: &'static [u8],
+}
+
+const MAIN_DIALOGUE_PREFIX_CODE_REGIONS: [CodeRegionSpec; 5] = [
+    CodeRegionSpec {
+        role: "inspect_and_consume_optional_E5_prefix",
+        cpu_address: 0x80A2,
+        bytes: &[
+            0x20, 0x3A, 0x83, 0xA0, 0x00, 0x20, 0x9C, 0xE6, 0xC9, 0xE5, 0xF0, 0x07, 0xA9, 0x04,
+            0x8D, 0xF7, 0x77, 0xD0, 0x30, 0xC8, 0x20, 0x9C, 0xE6, 0x85, 0x71, 0xC8, 0x20, 0x9C,
+            0xE6, 0x85, 0x70, 0xC8, 0x20, 0x9C, 0xE6, 0x8D, 0xCF, 0x05, 0xC8, 0x20, 0x9C, 0xE6,
+            0x8D, 0xD0, 0x05, 0xC8, 0x20, 0x9C, 0xE6, 0x8D, 0x1D, 0x78, 0xC8, 0x8C, 0xFA, 0x77,
+            0x20, 0x0C, 0x83, 0xA9, 0x12, 0x20, 0x90, 0xE6, 0xEE, 0xF7, 0x77, 0x60,
+        ],
+    },
+    CodeRegionSpec {
+        role: "consume_fixed_four_byte_record_header",
+        cpu_address: 0x80E6,
+        bytes: &[
+            0x20, 0x3A, 0x83, 0xA0, 0x00, 0x20, 0x9C, 0xE6, 0x8D, 0x18, 0x78, 0xC8, 0x20, 0x9C,
+            0xE6, 0x8D, 0x19, 0x78, 0xC8, 0x20, 0x9C, 0xE6, 0x8D, 0x1A, 0x78, 0xC8, 0x20, 0x9C,
+            0xE6, 0x38, 0xE9, 0x01, 0x8D, 0x1B, 0x78, 0xC8, 0x8C, 0xFA, 0x77, 0x20, 0x0C, 0x83,
+            0xA9, 0x1F, 0x20, 0x90, 0xE6, 0xEE, 0xF7, 0x77, 0x60,
+        ],
+    },
+    CodeRegionSpec {
+        role: "inspect_and_consume_optional_E8_prefix",
+        cpu_address: 0x8126,
+        bytes: &[
+            0x20, 0x3A, 0x83, 0xA0, 0x00, 0x20, 0x9C, 0xE6, 0xC9, 0xE8, 0xF0, 0x09, 0xAD, 0x0A,
+            0x78, 0xD0, 0x31, 0xA0, 0x4F, 0xD0, 0x4A, 0xC8, 0xAE, 0xF0, 0x77, 0x20, 0x9C, 0xE6,
+            0x9D, 0x1F, 0x78, 0xC8, 0x20, 0x9C, 0xE6, 0x9D, 0x21, 0x78, 0xC8, 0x20, 0x9C, 0xE6,
+            0x9D, 0x23, 0x78, 0xC8, 0x20, 0x9C, 0xE6, 0x9D, 0x25, 0x78, 0xC8, 0x20, 0x9C, 0xE6,
+            0x9D, 0x27, 0x78, 0xC8, 0x8C, 0xFA, 0x77, 0x20, 0x0C, 0x83,
+        ],
+    },
+    CodeRegionSpec {
+        role: "advance_current_entry_pointer_by_source_index",
+        cpu_address: 0x830C,
+        bytes: &[
+            0xAE, 0xF0, 0x77, 0xAD, 0xFA, 0x77, 0x18, 0x7D, 0x12, 0x78, 0x9D, 0x12, 0x78, 0x90,
+            0x03, 0xFE, 0x14, 0x78, 0x60,
+        ],
+    },
+    CodeRegionSpec {
+        role: "bind_current_entry_pointer_for_banked_read",
+        cpu_address: 0x833A,
+        bytes: &[
+            0xAE, 0xF0, 0x77, 0xBD, 0x12, 0x78, 0x85, 0x76, 0xBD, 0x14, 0x78, 0x85, 0x77, 0x60,
+        ],
+    },
+];
 
 struct DialogueTableSpec {
     id: &'static str,
@@ -169,6 +259,7 @@ struct DialogueStructureReport {
     schema_version: u8,
     scope: ReportScope,
     summary: ReportSummary,
+    main_dialogue_state_machine: MainDialogueStateMachineReport,
     tables: Vec<DialogueTableReport>,
     unknowns: Vec<&'static str>,
 }
@@ -212,6 +303,7 @@ struct DialogueTableReport {
     unique_target_count: usize,
     alias_group_count: usize,
     aliased_entry_count: usize,
+    main_record_prefix_summary: Option<MainRecordPrefixSummary>,
     data_file_start: usize,
     data_file_start_hex: String,
     directory_binding: Option<DirectoryBindingReport>,
@@ -264,6 +356,87 @@ struct DialogueEntryReport {
     file_offset_hex: String,
     handler_role: Option<&'static str>,
     alias_entry_indices: Vec<usize>,
+    main_record_prefix: Option<MainRecordPrefixReport>,
+}
+
+#[derive(Debug, Serialize)]
+struct MainDialogueStateMachineReport {
+    prg_bank: u8,
+    prg_bank_hex: String,
+    state_address: u16,
+    state_address_hex: String,
+    dispatcher_cpu_address: u16,
+    dispatcher_cpu_address_hex: String,
+    dispatcher_file_offset: usize,
+    dispatcher_file_offset_hex: String,
+    dispatcher_code_sha1: String,
+    dispatch_helper_cpu_address: u16,
+    dispatch_helper_cpu_address_hex: String,
+    handler_table_cpu_address: u16,
+    handler_table_cpu_address_hex: String,
+    handler_table_file_offset: usize,
+    handler_table_file_offset_hex: String,
+    handler_table_sha1: String,
+    handler_count: usize,
+    handlers: Vec<DialogueStateHandlerReport>,
+    record_prefix_contract: MainRecordPrefixContract,
+    code_regions: Vec<CodeRegionReport>,
+}
+
+#[derive(Debug, Serialize)]
+struct DialogueStateHandlerReport {
+    state: usize,
+    cpu_address: u16,
+    cpu_address_hex: String,
+    file_offset: usize,
+    file_offset_hex: String,
+    structural_role: &'static str,
+    alias_state_indices: Vec<usize>,
+}
+
+#[derive(Debug, Serialize)]
+struct MainRecordPrefixContract {
+    optional_e5_prefix_code: u8,
+    optional_e5_prefix_code_hex: String,
+    optional_e5_prefix_byte_count: usize,
+    fixed_record_header_byte_count: usize,
+    optional_e8_prefix_code: u8,
+    optional_e8_prefix_code_hex: String,
+    optional_e8_prefix_byte_count: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct CodeRegionReport {
+    role: &'static str,
+    cpu_address: u16,
+    cpu_address_hex: String,
+    file_offset: usize,
+    file_offset_hex: String,
+    byte_count: usize,
+    code_sha1: String,
+}
+
+#[derive(Debug, Serialize)]
+struct MainRecordPrefixSummary {
+    unique_target_count: usize,
+    e5_prefix_unique_target_count: usize,
+    e8_prefix_unique_target_count: usize,
+    both_optional_prefixes_unique_target_count: usize,
+    no_optional_prefix_unique_target_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct MainRecordPrefixReport {
+    e5_prefix_present: bool,
+    e5_prefix_byte_count: usize,
+    fixed_record_header_file_offset: usize,
+    fixed_record_header_file_offset_hex: String,
+    fixed_record_header_byte_count: usize,
+    e8_prefix_present: bool,
+    e8_prefix_byte_count: usize,
+    first_line_file_offset: usize,
+    first_line_file_offset_hex: String,
+    total_prefix_byte_count: usize,
 }
 
 pub fn analyze_dialogue_structure(
@@ -294,6 +467,7 @@ pub fn analyze_dialogue_structure(
 }
 
 fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
+    let main_dialogue_state_machine = build_main_dialogue_state_machine(source)?;
     let tables = DIALOGUE_TABLE_SPECS
         .iter()
         .map(|spec| extract_dialogue_table(source, spec))
@@ -327,21 +501,144 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
     };
 
     Ok(DialogueStructureReport {
-        schema_version: 1,
+        schema_version: 2,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             translation_direction: "ja_to_ko",
             preserve_existing_english: true,
-            proof_boundary: "exact pointer-table ranges, switchable-bank target mapping, aliases, seven main dialogue-directory roots, and the separate battle pointer loader; no dialogue bytes or translations are emitted",
+            proof_boundary: "exact pointer-table ranges, switchable-bank target mapping, aliases, all eight consumer roots, and the main dialogue record-prefix state path; no dialogue bytes or translations are emitted",
         },
         summary,
+        main_dialogue_state_machine,
         tables,
         unknowns: vec![
             "Pointer targets are entry starts, not proven script byte ranges.",
-            "The outer dialogue record state machine and complete entry termination rules remain unresolved.",
+            "The E5, fixed four-byte, and E8 record prefix is confirmed, but complete entry termination rules remain unresolved.",
+            "Eleven of the eighteen main dialogue state handlers remain structurally named but semantically unresolved.",
             "Role labels began as external map candidates and do not prove every entry's gameplay context.",
             "Existing English and numeric content remains protected and is not a translation target.",
         ],
+    })
+}
+
+fn build_main_dialogue_state_machine(source: &[u8]) -> Result<MainDialogueStateMachineReport> {
+    let dispatcher_file_offset = switchable_cpu_to_file_offset(
+        MAIN_DIALOGUE_PRG_BANK,
+        MAIN_DIALOGUE_DISPATCHER_CPU_ADDRESS,
+    )?;
+    let dispatcher_end = dispatcher_file_offset + MAIN_DIALOGUE_DISPATCHER_CODE.len();
+    ensure!(
+        source.get(dispatcher_file_offset..dispatcher_end) == Some(MAIN_DIALOGUE_DISPATCHER_CODE),
+        "main dialogue state dispatcher changed"
+    );
+
+    let handler_table_file_offset = switchable_cpu_to_file_offset(
+        MAIN_DIALOGUE_PRG_BANK,
+        MAIN_DIALOGUE_HANDLER_TABLE_CPU_ADDRESS,
+    )?;
+    let handler_table_byte_count = MAIN_DIALOGUE_STATE_HANDLERS.len() * 2;
+    let handler_table_end = handler_table_file_offset + handler_table_byte_count;
+    let handler_table_bytes = source
+        .get(handler_table_file_offset..handler_table_end)
+        .context("main dialogue handler table is outside the source")?;
+    let actual_handlers = handler_table_bytes
+        .chunks_exact(2)
+        .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
+        .collect::<Vec<_>>();
+    ensure!(
+        actual_handlers == MAIN_DIALOGUE_STATE_HANDLERS,
+        "main dialogue state handler table changed"
+    );
+
+    let mut indices_by_handler: BTreeMap<u16, Vec<usize>> = BTreeMap::new();
+    for (state, handler) in MAIN_DIALOGUE_STATE_HANDLERS.iter().copied().enumerate() {
+        indices_by_handler.entry(handler).or_default().push(state);
+    }
+    let handlers = MAIN_DIALOGUE_STATE_HANDLERS
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(state, cpu_address)| {
+            let file_offset = if cpu_address >= FIXED_CPU_START {
+                fixed_cpu_to_file_offset(cpu_address)?
+            } else {
+                switchable_cpu_to_file_offset(MAIN_DIALOGUE_PRG_BANK, cpu_address)?
+            };
+            Ok(DialogueStateHandlerReport {
+                state,
+                cpu_address,
+                cpu_address_hex: format!("0x{cpu_address:04X}"),
+                file_offset,
+                file_offset_hex: format!("0x{file_offset:05X}"),
+                structural_role: MAIN_DIALOGUE_HANDLER_ROLES[state],
+                alias_state_indices: indices_by_handler[&cpu_address]
+                    .iter()
+                    .copied()
+                    .filter(|other| *other != state)
+                    .collect(),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let no_op_file_offset = fixed_cpu_to_file_offset(MAIN_DIALOGUE_STATE_HANDLERS[0])?;
+    ensure!(
+        source.get(no_op_file_offset) == Some(&0x60),
+        "main dialogue no-op state handler changed"
+    );
+
+    let code_regions = MAIN_DIALOGUE_PREFIX_CODE_REGIONS
+        .iter()
+        .map(|region| {
+            let file_offset =
+                switchable_cpu_to_file_offset(MAIN_DIALOGUE_PRG_BANK, region.cpu_address)?;
+            let end = file_offset
+                .checked_add(region.bytes.len())
+                .context("main dialogue prefix code range overflow")?;
+            ensure!(
+                source.get(file_offset..end) == Some(region.bytes),
+                "main dialogue prefix code {} changed",
+                region.role
+            );
+            Ok(CodeRegionReport {
+                role: region.role,
+                cpu_address: region.cpu_address,
+                cpu_address_hex: format!("0x{:04X}", region.cpu_address),
+                file_offset,
+                file_offset_hex: format!("0x{file_offset:05X}"),
+                byte_count: region.bytes.len(),
+                code_sha1: sha1_hex(region.bytes),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(MainDialogueStateMachineReport {
+        prg_bank: MAIN_DIALOGUE_PRG_BANK,
+        prg_bank_hex: format!("0x{MAIN_DIALOGUE_PRG_BANK:02X}"),
+        state_address: MAIN_DIALOGUE_STATE_ADDRESS,
+        state_address_hex: format!("0x{MAIN_DIALOGUE_STATE_ADDRESS:04X}"),
+        dispatcher_cpu_address: MAIN_DIALOGUE_DISPATCHER_CPU_ADDRESS,
+        dispatcher_cpu_address_hex: format!("0x{MAIN_DIALOGUE_DISPATCHER_CPU_ADDRESS:04X}"),
+        dispatcher_file_offset,
+        dispatcher_file_offset_hex: format!("0x{dispatcher_file_offset:05X}"),
+        dispatcher_code_sha1: sha1_hex(MAIN_DIALOGUE_DISPATCHER_CODE),
+        dispatch_helper_cpu_address: 0xC34C,
+        dispatch_helper_cpu_address_hex: "0xC34C".to_owned(),
+        handler_table_cpu_address: MAIN_DIALOGUE_HANDLER_TABLE_CPU_ADDRESS,
+        handler_table_cpu_address_hex: format!("0x{MAIN_DIALOGUE_HANDLER_TABLE_CPU_ADDRESS:04X}"),
+        handler_table_file_offset,
+        handler_table_file_offset_hex: format!("0x{handler_table_file_offset:05X}"),
+        handler_table_sha1: sha1_hex(handler_table_bytes),
+        handler_count: handlers.len(),
+        handlers,
+        record_prefix_contract: MainRecordPrefixContract {
+            optional_e5_prefix_code: OPTIONAL_E5_PREFIX_CODE,
+            optional_e5_prefix_code_hex: format!("{OPTIONAL_E5_PREFIX_CODE:02X}"),
+            optional_e5_prefix_byte_count: OPTIONAL_PREFIX_BYTE_COUNT,
+            fixed_record_header_byte_count: FIXED_RECORD_HEADER_BYTE_COUNT,
+            optional_e8_prefix_code: OPTIONAL_E8_PREFIX_CODE,
+            optional_e8_prefix_code_hex: format!("{OPTIONAL_E8_PREFIX_CODE:02X}"),
+            optional_e8_prefix_byte_count: OPTIONAL_PREFIX_BYTE_COUNT,
+        },
+        code_regions,
     })
 }
 
@@ -443,6 +740,7 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
                 file_offset_hex: format!("0x{file_offset:05X}"),
                 handler_role: Some(handler.role),
                 alias_entry_indices,
+                main_record_prefix: None,
             });
             continue;
         }
@@ -460,6 +758,10 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
             spec.id
         );
         ordinary_target_file_offsets.push(file_offset);
+        let main_record_prefix = spec
+            .directory_group
+            .map(|_| inspect_main_record_prefix(source, file_offset, bank_end, spec.id, index))
+            .transpose()?;
         entries.push(DialogueEntryReport {
             index,
             pointer_cpu_address: pointer,
@@ -469,6 +771,7 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
             file_offset_hex: format!("0x{file_offset:05X}"),
             handler_role: None,
             alias_entry_indices,
+            main_record_prefix,
         });
     }
     ensure!(
@@ -483,6 +786,39 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
         .collect::<Vec<_>>();
     let alias_group_count = alias_groups.len();
     let aliased_entry_count = alias_groups.iter().map(|indices| indices.len()).sum();
+    let main_record_prefix_summary = if spec.directory_group.is_some() {
+        let unique_prefixes = entries
+            .iter()
+            .filter(|entry| indices_by_pointer[&entry.pointer_cpu_address][0] == entry.index)
+            .filter_map(|entry| entry.main_record_prefix.as_ref())
+            .collect::<Vec<_>>();
+        ensure!(
+            unique_prefixes.len() == indices_by_pointer.len(),
+            "{} main record prefix coverage does not match its unique targets",
+            spec.id
+        );
+        Some(MainRecordPrefixSummary {
+            unique_target_count: unique_prefixes.len(),
+            e5_prefix_unique_target_count: unique_prefixes
+                .iter()
+                .filter(|prefix| prefix.e5_prefix_present)
+                .count(),
+            e8_prefix_unique_target_count: unique_prefixes
+                .iter()
+                .filter(|prefix| prefix.e8_prefix_present)
+                .count(),
+            both_optional_prefixes_unique_target_count: unique_prefixes
+                .iter()
+                .filter(|prefix| prefix.e5_prefix_present && prefix.e8_prefix_present)
+                .count(),
+            no_optional_prefix_unique_target_count: unique_prefixes
+                .iter()
+                .filter(|prefix| !prefix.e5_prefix_present && !prefix.e8_prefix_present)
+                .count(),
+        })
+    } else {
+        None
+    };
 
     Ok(DialogueTableReport {
         id: spec.id,
@@ -501,6 +837,7 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
         unique_target_count: indices_by_pointer.len(),
         alias_group_count,
         aliased_entry_count,
+        main_record_prefix_summary,
         data_file_start: spec.data_file_start,
         data_file_start_hex: format!("0x{:05X}", spec.data_file_start),
         directory_binding,
@@ -513,6 +850,61 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
             "unresolved"
         },
         entries,
+    })
+}
+
+fn inspect_main_record_prefix(
+    source: &[u8],
+    entry_file_offset: usize,
+    bank_end: usize,
+    table_id: &str,
+    entry_index: usize,
+) -> Result<MainRecordPrefixReport> {
+    ensure!(
+        entry_file_offset < bank_end,
+        "{table_id} entry {entry_index} begins outside its source bank"
+    );
+    let e5_prefix_present = source[entry_file_offset] == OPTIONAL_E5_PREFIX_CODE;
+    let e5_prefix_byte_count = if e5_prefix_present {
+        OPTIONAL_PREFIX_BYTE_COUNT
+    } else {
+        0
+    };
+    let fixed_record_header_file_offset = entry_file_offset
+        .checked_add(e5_prefix_byte_count)
+        .context("main record E5 prefix range overflow")?;
+    let after_fixed_record_header = fixed_record_header_file_offset
+        .checked_add(FIXED_RECORD_HEADER_BYTE_COUNT)
+        .context("main fixed record header range overflow")?;
+    ensure!(
+        after_fixed_record_header < bank_end,
+        "{table_id} entry {entry_index} record prefix crosses its source bank"
+    );
+    let e8_prefix_present = source[after_fixed_record_header] == OPTIONAL_E8_PREFIX_CODE;
+    let e8_prefix_byte_count = if e8_prefix_present {
+        OPTIONAL_PREFIX_BYTE_COUNT
+    } else {
+        0
+    };
+    let first_line_file_offset = after_fixed_record_header
+        .checked_add(e8_prefix_byte_count)
+        .context("main record E8 prefix range overflow")?;
+    ensure!(
+        first_line_file_offset < bank_end,
+        "{table_id} entry {entry_index} first line begins outside its source bank"
+    );
+
+    Ok(MainRecordPrefixReport {
+        e5_prefix_present,
+        e5_prefix_byte_count,
+        fixed_record_header_file_offset,
+        fixed_record_header_file_offset_hex: format!("0x{fixed_record_header_file_offset:05X}"),
+        fixed_record_header_byte_count: FIXED_RECORD_HEADER_BYTE_COUNT,
+        e8_prefix_present,
+        e8_prefix_byte_count,
+        first_line_file_offset,
+        first_line_file_offset_hex: format!("0x{first_line_file_offset:05X}"),
+        total_prefix_byte_count: first_line_file_offset - entry_file_offset,
     })
 }
 
@@ -705,6 +1097,33 @@ mod tests {
         source[offset..offset + 2].copy_from_slice(&pointer.to_le_bytes());
     }
 
+    fn write_main_dialogue_state_machine(source: &mut [u8]) {
+        let dispatcher_file_offset = switchable_cpu_to_file_offset(
+            MAIN_DIALOGUE_PRG_BANK,
+            MAIN_DIALOGUE_DISPATCHER_CPU_ADDRESS,
+        )
+        .unwrap();
+        source
+            [dispatcher_file_offset..dispatcher_file_offset + MAIN_DIALOGUE_DISPATCHER_CODE.len()]
+            .copy_from_slice(MAIN_DIALOGUE_DISPATCHER_CODE);
+        let handler_table_file_offset = switchable_cpu_to_file_offset(
+            MAIN_DIALOGUE_PRG_BANK,
+            MAIN_DIALOGUE_HANDLER_TABLE_CPU_ADDRESS,
+        )
+        .unwrap();
+        for (state, handler) in MAIN_DIALOGUE_STATE_HANDLERS.iter().enumerate() {
+            let offset = handler_table_file_offset + state * 2;
+            source[offset..offset + 2].copy_from_slice(&handler.to_le_bytes());
+        }
+        for region in &MAIN_DIALOGUE_PREFIX_CODE_REGIONS {
+            let file_offset =
+                switchable_cpu_to_file_offset(MAIN_DIALOGUE_PRG_BANK, region.cpu_address).unwrap();
+            source[file_offset..file_offset + region.bytes.len()].copy_from_slice(region.bytes);
+        }
+        let no_op_file_offset = fixed_cpu_to_file_offset(MAIN_DIALOGUE_STATE_HANDLERS[0]).unwrap();
+        source[no_op_file_offset] = 0x60;
+    }
+
     #[test]
     fn reports_aliases_without_reading_dialogue_bytes() {
         let mut source = synthetic_source();
@@ -722,6 +1141,74 @@ mod tests {
         assert_eq!(report.entries[0].alias_entry_indices, vec![1]);
         assert_eq!(report.entries[1].alias_entry_indices, vec![0]);
         assert_eq!(report.entries[2].alias_entry_indices, Vec::<usize>::new());
+    }
+
+    #[test]
+    fn validates_the_main_dialogue_state_dispatch_and_prefix_code() {
+        let mut source = synthetic_source();
+        write_main_dialogue_state_machine(&mut source);
+
+        let report = build_main_dialogue_state_machine(&source).unwrap();
+
+        assert_eq!(report.handler_count, 18);
+        assert_eq!(report.handlers[3].alias_state_indices, vec![7]);
+        assert_eq!(report.handlers[7].alias_state_indices, vec![3]);
+        assert_eq!(
+            report.record_prefix_contract.optional_e5_prefix_byte_count,
+            6
+        );
+        assert_eq!(
+            report.record_prefix_contract.fixed_record_header_byte_count,
+            4
+        );
+        assert_eq!(
+            report.record_prefix_contract.optional_e8_prefix_byte_count,
+            6
+        );
+
+        let e5_file_offset = switchable_cpu_to_file_offset(MAIN_DIALOGUE_PRG_BANK, 0x80A2).unwrap();
+        source[e5_file_offset + 9] ^= 0x01;
+        let error = build_main_dialogue_state_machine(&source)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("prefix code inspect_and_consume_optional_E5_prefix changed"));
+    }
+
+    #[test]
+    fn locates_the_first_line_after_only_declared_record_prefixes() {
+        let mut source = synthetic_source();
+        let bank_end = switchable_bank_file_start(SYNTHETIC_BANK) + PRG_BANK_SIZE;
+        let entry_file_offset = SYNTHETIC_DATA_START;
+        source[entry_file_offset] = OPTIONAL_E5_PREFIX_CODE;
+        source[entry_file_offset + OPTIONAL_PREFIX_BYTE_COUNT + FIXED_RECORD_HEADER_BYTE_COUNT] =
+            OPTIONAL_E8_PREFIX_CODE;
+
+        let full = inspect_main_record_prefix(
+            &source,
+            entry_file_offset,
+            bank_end,
+            "synthetic-dialogue",
+            0,
+        )
+        .unwrap();
+        assert!(full.e5_prefix_present);
+        assert!(full.e8_prefix_present);
+        assert_eq!(full.total_prefix_byte_count, 16);
+        assert_eq!(full.first_line_file_offset, entry_file_offset + 16);
+
+        let plain_entry_file_offset = entry_file_offset + 0x40;
+        let plain = inspect_main_record_prefix(
+            &source,
+            plain_entry_file_offset,
+            bank_end,
+            "synthetic-dialogue",
+            1,
+        )
+        .unwrap();
+        assert!(!plain.e5_prefix_present);
+        assert!(!plain.e8_prefix_present);
+        assert_eq!(plain.total_prefix_byte_count, 4);
+        assert_eq!(plain.first_line_file_offset, plain_entry_file_offset + 4);
     }
 
     #[test]
