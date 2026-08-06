@@ -12,7 +12,7 @@
 
 설정 항목 `サウンド`, `アニメーション`, `ウエイトタイマー`를 각각 `사운드`, `애니메이션`, `대기시간`으로 바꾸는 기술 PoC를 제공한다. Mesen의 실제 설정 화면에서 세 한글 항목과 기존 영어 능력치 약어가 함께 유지되는 것을 확인했다. 일본어 설정 문자열에 쓰인 가나 타일만 임시로 한글 타일로 바꾸므로, 다른 일본어 화면이 깨질 수 있다. 정식 패치나 배포 후보가 아니다.
 
-전체 한글 글꼴을 위한 MMC5 후보 실험은 PRG 모드 1, 배터리 SRAM, 미러링과 실행으로 확인한 CHR 쓰기를 옮겼다. 원본 CHR을 보존하면서 256 KiB로 확장한 상위 영역에서 한글 타일을 표시하는 경로도 확인했다. 인덱스 포인터 표와 대사 바이트 읽기의 직접 PRG 뱅크 쓰기를 옮긴 뒤 새 게임 표본의 화면 배치와 PRG RAM은 원본에 다시 합류했다. 제어된 한 화면에서는 MMC4의 FD/FE 래치 결과를 MMC5 확장 속성으로 투영하고, ROM 내부 루틴만으로 본문 렌더링을 재현했다. 아직 스크롤·후속 네임테이블 갱신·저장과 전체 진행 동등성이 남았으므로 어떤 프로브도 배포 후보가 아니다.
+전체 한글 글꼴을 위한 MMC5 후보 실험은 PRG 모드 1, 배터리 SRAM, 미러링과 실행으로 확인한 CHR 쓰기를 옮겼다. 원본 CHR을 보존하면서 256 KiB로 확장한 상위 영역에서 한글 타일을 표시하는 경로도 확인했다. 인덱스 포인터 표와 대사 바이트 읽기의 직접 PRG 뱅크 쓰기를 옮긴 뒤 새 게임 표본의 화면 배치와 PRG RAM은 원본에 다시 합류했다. 제어된 한 화면에서는 MMC4의 FD/FE 래치 결과를 MMC5 확장 속성으로 투영하고, ROM 내부 루틴만으로 본문 렌더링을 재현했다. 직접 `$2006/$2007` 쓰기 27곳을 바이트마다 가로채는 방식은 VBlank 시간 예산을 깨는 실행 결과로 기각했으며, 다음 구현은 전송 단위로 그림자를 일괄 갱신한다. 아직 스크롤·후속 네임테이블 갱신·저장과 전체 진행 동등성이 남았으므로 어떤 프로브도 배포 후보가 아니다.
 
 ```sh
 cargo run -p fc-fire-emblem-patch -- verify-source "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
@@ -31,6 +31,7 @@ cargo run -p fc-fire-emblem-patch -- build-mmc5-expanded-chr-options-probe "roms
 cargo run -p fc-fire-emblem-patch -- project-mmc4-latch-nametable path/to/nametable.bin --nametable-index 1 --fd-bank 0 --fe-bank 24 --initial-latch fe
 cargo run -p fc-fire-emblem-patch -- replay-mmc4-latch-ppu-transfers path/to/ppu-transfers.json
 cargo run -p fc-fire-emblem-patch -- build-mmc5-dialogue-exram-probe "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes" out/mmc5-exram-attributes.bin
+cargo run -p fc-fire-emblem-patch -- build-mmc5-nametable-shadow-probe "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 ```
 
 ROM과 빌드 결과는 저장소에 포함하지 않는다. 지금까지의 판단 흐름은 `docs/decisions.md`, 조사 근거와 현재 상태는 `docs/initial-survey.md`와 `docs/status.md`, MMC4 화면별 공급 근거는 `docs/render-paths.md`, 첫 텍스트 모집단은 `docs/text-tables.md`, 전체 한글화의 단계별 통과 조건은 `docs/roadmap.md`, 기본 조작과 치트를 포함한 실행 검증 원칙은 `docs/playtesting.md`에 정리한다.

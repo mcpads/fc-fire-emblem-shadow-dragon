@@ -60,6 +60,17 @@ cargo run -p fc-fire-emblem-patch -- replay-mmc4-latch-ppu-transfers \
 
 보고서는 원문 전송 바이트를 복제하지 않고 입력 SHA-1, 전송·데이터·네임테이블 적용 수와 출력 SHA-1만 기록한다. 이 명령은 ROM 갱신 코드와 비교할 호스트 측 의미 기준이며, 제로 스크롤 선택 화면만 투영하므로 자체로 런타임 소유나 스크롤 동등성을 증명하지 않는다.
 
+## MMC5 네임테이블 바이트 훅 기각 프로브
+
+`build-mmc5-nametable-shadow-probe`는 지원 원본의 직접 `STA $2006` 20곳과 `STA $2007` 7곳이 선언한 주소와 정확히 일치할 때만 CHR writer 프로브 위에 훅을 설치한다. PPU 쓰기를 먼저 실행한 뒤 A·X·Y·상태 플래그를 보존하면서 MMC5 PRG RAM 뱅크 1의 `$6800`~`$6FFF`에 두 물리 네임테이블을 모사한다. 새 코드는 typed RP2A03 조립과 Expected Write 감사를 거치며 간접 PPU 쓰기는 닫았다고 선언하지 않는다.
+
+```sh
+cargo run -p fc-fire-emblem-patch -- build-mmc5-nametable-shadow-probe \
+  "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
+```
+
+이 명령은 채택할 런타임 소유자가 아니라 기각된 시간 설계를 재현하는 개발용 프로브다. 콜드 실행 프레임 301에서 주소 상위·하위 훅은 각각 49회, 데이터 훅은 6,714회 적중했지만 실제 CIRAM과 그림자가 128바이트 갈렸고 화면도 깨졌다. 바이트마다 PRG RAM 뱅크를 바꾸고 상태를 보존하는 비용이 VBlank 전송을 지연시켰으므로 `per_byte_hook_design_eligible`과 `release_eligible`은 항상 거짓이다. 후속 구현은 PPU 큐와 직접 전송 루틴의 경계에서 데이터를 일괄 반영해야 한다.
+
 `build-mmc5-dialogue-exram-probe`는 위에서 생성한 정확히 1 KiB 입력 가운데 확인된 오른쪽 FD/FE 뱅크 `00/18`만 허용한다. CHR writer 프로브 위에서 오른쪽 FD·FE 공급 루틴을 같은 길이의 공통 검사 호출로 바꾸고, 두 그림자가 `00/18`이 되는 순간 고정 PRG의 `$FB00`~`$FEFF`에서 MMC5 ExRAM `$5C00`~`$5FFF`로 복사한다. 복사 동안 `$5104=2`, 표시 전에는 `$5104=1`을 쓰며 A·X·상태 플래그를 복원한다. 새 상대 분기는 절대 목표 주소를 받아 signed 8비트 도달 범위를 checked assembler에서 검산한다.
 
 ```sh

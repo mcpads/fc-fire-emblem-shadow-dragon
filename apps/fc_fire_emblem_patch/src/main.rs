@@ -8,6 +8,7 @@ mod mmc4_latch;
 mod mmc5_chr;
 mod mmc5_expanded_chr;
 mod mmc5_exram_probe;
+mod mmc5_nametable_shadow;
 mod mmc5_prg;
 mod options;
 mod rom;
@@ -139,6 +140,17 @@ enum Command {
         )]
         output: PathBuf,
         #[arg(long, default_value = "out/mmc5-dialogue-exram-probe.json")]
+        report: PathBuf,
+    },
+    /// Mirror every direct PPU address/data store into isolated MMC5 PRG RAM.
+    BuildMmc5NametableShadowProbe {
+        source: PathBuf,
+        #[arg(
+            long,
+            default_value = "out/fire-emblem-fe1-mmc5-nametable-shadow-probe.nes"
+        )]
+        output: PathBuf,
+        #[arg(long, default_value = "out/mmc5-nametable-shadow-probe.json")]
         report: PathBuf,
     },
     /// Project one zero-scroll MMC4 nametable into MMC5 extended attributes.
@@ -378,6 +390,23 @@ fn main() -> Result<()> {
             println!(
                 "tracked writes after CHR writer probe: {}",
                 summary.tracked_write_count
+            );
+        }
+        Command::BuildMmc5NametableShadowProbe {
+            source,
+            output,
+            report,
+        } => {
+            let summary = mmc5_nametable_shadow::build_mmc5_nametable_shadow_probe(
+                &source, &output, &report,
+            )?;
+            println!("wrote {}", output.display());
+            println!("output SHA-1: {}", summary.output_sha1);
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "hooked direct PPU stores: {}, tracked writes after CHR writer probe: {}",
+                summary.hooked_store_count, summary.tracked_write_count
             );
         }
         Command::ProjectMmc4LatchNametable {
