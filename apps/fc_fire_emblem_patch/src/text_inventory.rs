@@ -27,7 +27,7 @@ const DIALOGUE_LINE_END_CODE: u8 = 0xED;
 const DIALOGUE_STAGE_WIDTH_MASK: u8 = 0x1F;
 const DIALOGUE_TWO_PLANE_HEADER_FLAG: u8 = 0x40;
 const DIALOGUE_LINE_BUFFER_ADDRESSES: [u16; 6] = [0x7832, 0x7852, 0x7872, 0x7892, 0x78B2, 0x78D2];
-const DIALOGUE_SCRIPT_CONTROL_CODES: [u8; 15] = [
+pub(crate) const DIALOGUE_SCRIPT_CONTROL_CODES: [u8; 15] = [
     0xEA, 0xE0, 0xE9, 0xE3, 0xE2, 0xE1, 0xDF, 0xEF, 0xE7, 0xE4, 0xE6, 0xEE, 0xEB, 0xED, 0xEC,
 ];
 
@@ -66,11 +66,11 @@ struct ProtectedPosition {
     glyph: &'static str,
 }
 
-struct DialogueControlSpec {
-    code: u8,
-    current_pointer_advance_bytes: usize,
-    inline_operand_byte_count: usize,
-    transition_target_byte_count: usize,
+pub(crate) struct DialogueControlSpec {
+    pub(crate) code: u8,
+    pub(crate) current_pointer_advance_bytes: usize,
+    pub(crate) inline_operand_byte_count: usize,
+    pub(crate) transition_target_byte_count: usize,
     line_effect: &'static str,
     output_effect: &'static str,
     state_effect: &'static str,
@@ -79,7 +79,7 @@ struct DialogueControlSpec {
 
 const COMPOSITE_TEXT_LAYOUT_CODES: [u8; 2] = [0x0F, 0x1F];
 
-const DIALOGUE_CONTROL_SPECS: [DialogueControlSpec; 15] = [
+pub(crate) const DIALOGUE_CONTROL_SPECS: [DialogueControlSpec; 15] = [
     DialogueControlSpec {
         code: 0xEA,
         current_pointer_advance_bytes: 1,

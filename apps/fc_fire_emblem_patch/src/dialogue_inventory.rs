@@ -6,6 +6,7 @@ use serde::Serialize;
 use crate::{
     rom::{EXPECTED_SOURCE_SHA1, HEADER_SIZE, PRG_SIZE, Rom},
     sha1_hex,
+    text_inventory::{DIALOGUE_CONTROL_SPECS, DIALOGUE_SCRIPT_CONTROL_CODES},
 };
 
 const PRG_BANK_SIZE: usize = 16 * 1024;
@@ -21,6 +22,8 @@ const OPTIONAL_E5_PREFIX_CODE: u8 = 0xE5;
 const OPTIONAL_E8_PREFIX_CODE: u8 = 0xE8;
 const OPTIONAL_PREFIX_BYTE_COUNT: usize = 6;
 const FIXED_RECORD_HEADER_BYTE_COUNT: usize = 4;
+const MAX_MAIN_LINE_SCAN_BYTES: usize = 256;
+const MAIN_LINE_END_CODES: [u8; 7] = [0xEF, 0xE7, 0xE4, 0xE6, 0xEE, 0xEB, 0xED];
 
 const MAIN_DIALOGUE_DISPATCHER_CODE: &[u8] = &[0xAD, 0xF7, 0x77, 0x20, 0x4C, 0xC3];
 const MAIN_DIALOGUE_STATE_HANDLERS: [u16; 18] = [
@@ -292,6 +295,10 @@ struct ReportSummary {
     unique_target_count: usize,
     unique_script_entry_count: usize,
     handler_target_entry_count: usize,
+    main_first_line_count: usize,
+    max_main_first_line_storage_byte_count: usize,
+    main_first_line_protected_original_alphanumeric_literal_byte_count: usize,
+    main_first_line_end_control_counts: Vec<ControlUsageReport>,
     alias_group_count: usize,
     aliased_entry_count: usize,
 }
@@ -317,6 +324,7 @@ struct DialogueTableReport {
     alias_group_count: usize,
     aliased_entry_count: usize,
     main_record_prefix_summary: Option<MainRecordPrefixSummary>,
+    main_first_line_summary: Option<MainFirstLineSummary>,
     data_file_start: usize,
     data_file_start_hex: String,
     directory_binding: Option<DirectoryBindingReport>,
@@ -370,6 +378,7 @@ struct DialogueEntryReport {
     handler_role: Option<&'static str>,
     alias_entry_indices: Vec<usize>,
     main_record_prefix: Option<MainRecordPrefixReport>,
+    main_first_line: Option<MainFirstLineReport>,
 }
 
 #[derive(Debug, Serialize)]
@@ -452,6 +461,47 @@ struct MainRecordPrefixReport {
     total_prefix_byte_count: usize,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct MainFirstLineReport {
+    file_offset: usize,
+    file_offset_hex: String,
+    storage_byte_count: usize,
+    storage_sha1: String,
+    current_pointer_advance_bytes: usize,
+    literal_byte_count: usize,
+    protected_original_alphanumeric_literal_byte_count: usize,
+    control_token_count: usize,
+    inline_operand_byte_count: usize,
+    transition_target_byte_count: usize,
+    control_counts: Vec<ControlUsageReport>,
+    line_end_control: u8,
+    line_end_control_hex: String,
+    transition_target: Option<TransitionTargetReport>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct TransitionTargetReport {
+    selector: u8,
+    selector_hex: String,
+    target_table_id: &'static str,
+    target_entry_index: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ControlUsageReport {
+    code: u8,
+    code_hex: String,
+    count: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct MainFirstLineSummary {
+    unique_line_count: usize,
+    max_storage_byte_count: usize,
+    protected_original_alphanumeric_literal_byte_count: usize,
+    line_end_control_counts: Vec<ControlUsageReport>,
+}
+
 pub fn analyze_dialogue_structure(
     source_path: &Path,
     report_path: &Path,
@@ -485,6 +535,43 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
         .iter()
         .map(|spec| extract_dialogue_table(source, spec))
         .collect::<Result<Vec<_>>>()?;
+    let main_first_line_count = tables
+        .iter()
+        .filter_map(|table| table.main_first_line_summary.as_ref())
+        .map(|summary| summary.unique_line_count)
+        .sum();
+    let max_main_first_line_storage_byte_count = tables
+        .iter()
+        .filter_map(|table| table.main_first_line_summary.as_ref())
+        .map(|summary| summary.max_storage_byte_count)
+        .max()
+        .unwrap_or(0);
+    let main_first_line_protected_original_alphanumeric_literal_byte_count = tables
+        .iter()
+        .filter_map(|table| table.main_first_line_summary.as_ref())
+        .map(|summary| summary.protected_original_alphanumeric_literal_byte_count)
+        .sum();
+    let mut main_first_line_end_control_count_map = BTreeMap::new();
+    for usage in tables
+        .iter()
+        .filter_map(|table| table.main_first_line_summary.as_ref())
+        .flat_map(|summary| &summary.line_end_control_counts)
+    {
+        *main_first_line_end_control_count_map
+            .entry(usage.code)
+            .or_insert(0) += usage.count;
+    }
+    let main_first_line_end_control_counts =
+        control_usage_reports(main_first_line_end_control_count_map, &MAIN_LINE_END_CODES);
+    let main_unique_script_entry_count: usize = tables
+        .iter()
+        .filter(|table| table.directory_binding.is_some())
+        .map(|table| table.unique_script_entry_count)
+        .sum();
+    ensure!(
+        main_first_line_count == main_unique_script_entry_count,
+        "main first-line coverage does not match the directory-bound script entries"
+    );
     let summary = ReportSummary {
         table_count: tables.len(),
         directory_bound_table_count: tables
@@ -517,24 +604,28 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
             .iter()
             .map(|table| table.handler_target_entry_count)
             .sum(),
+        main_first_line_count,
+        max_main_first_line_storage_byte_count,
+        main_first_line_protected_original_alphanumeric_literal_byte_count,
+        main_first_line_end_control_counts,
         alias_group_count: tables.iter().map(|table| table.alias_group_count).sum(),
         aliased_entry_count: tables.iter().map(|table| table.aliased_entry_count).sum(),
     };
 
     Ok(DialogueStructureReport {
-        schema_version: 2,
+        schema_version: 3,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             translation_direction: "ja_to_ko",
             preserve_existing_english: true,
-            proof_boundary: "exact pointer-table ranges, switchable-bank target mapping, aliases, all eight consumer roots, and the main dialogue record-prefix state path; no dialogue bytes or translations are emitted",
+            proof_boundary: "exact pointer-table ranges, switchable-bank target mapping, aliases, all eight consumer roots, the main dialogue record-prefix state path, and every main entry's first line; no dialogue bytes or translations are emitted",
         },
         summary,
         main_dialogue_state_machine,
         tables,
         unknowns: vec![
             "Script targets are entry starts, not proven script byte ranges; declared code handlers are kept separate.",
-            "The E5, fixed four-byte, and E8 record prefix is confirmed, but complete entry termination rules remain unresolved.",
+            "The E5, fixed four-byte, and E8 record prefix plus every main entry's first line are confirmed, but later lines and complete entry termination rules remain unresolved.",
             "Eleven of the eighteen main dialogue state handlers remain structurally named but semantically unresolved.",
             "Role labels began as external map candidates and do not prove every entry's gameplay context.",
             "Existing English and numeric content remains protected and is not a translation target.",
@@ -763,6 +854,7 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
                 handler_role: Some(handler.role),
                 alias_entry_indices,
                 main_record_prefix: None,
+                main_first_line: None,
             });
             continue;
         }
@@ -784,6 +876,18 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
             .directory_group
             .map(|_| inspect_main_record_prefix(source, file_offset, bank_end, spec.id, index))
             .transpose()?;
+        let main_first_line = main_record_prefix
+            .as_ref()
+            .map(|prefix| {
+                scan_main_first_line(
+                    source,
+                    prefix.first_line_file_offset,
+                    bank_end,
+                    spec.id,
+                    index,
+                )
+            })
+            .transpose()?;
         entries.push(DialogueEntryReport {
             index,
             pointer_cpu_address: pointer,
@@ -794,6 +898,7 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
             handler_role: None,
             alias_entry_indices,
             main_record_prefix,
+            main_first_line,
         });
     }
     ensure!(
@@ -852,6 +957,42 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
     } else {
         None
     };
+    let main_first_line_summary = if spec.directory_group.is_some() {
+        let unique_lines = entries
+            .iter()
+            .filter(|entry| indices_by_pointer[&entry.pointer_cpu_address][0] == entry.index)
+            .filter_map(|entry| entry.main_first_line.as_ref())
+            .collect::<Vec<_>>();
+        ensure!(
+            unique_lines.len() == unique_script_entry_count,
+            "{} first-line coverage does not match its unique script entries",
+            spec.id
+        );
+        let mut line_end_control_count_map = BTreeMap::new();
+        for line in &unique_lines {
+            *line_end_control_count_map
+                .entry(line.line_end_control)
+                .or_insert(0) += 1;
+        }
+        Some(MainFirstLineSummary {
+            unique_line_count: unique_lines.len(),
+            max_storage_byte_count: unique_lines
+                .iter()
+                .map(|line| line.storage_byte_count)
+                .max()
+                .unwrap_or(0),
+            protected_original_alphanumeric_literal_byte_count: unique_lines
+                .iter()
+                .map(|line| line.protected_original_alphanumeric_literal_byte_count)
+                .sum(),
+            line_end_control_counts: control_usage_reports(
+                line_end_control_count_map,
+                &MAIN_LINE_END_CODES,
+            ),
+        })
+    } else {
+        None
+    };
 
     Ok(DialogueTableReport {
         id: spec.id,
@@ -873,6 +1014,7 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
         alias_group_count,
         aliased_entry_count,
         main_record_prefix_summary,
+        main_first_line_summary,
         data_file_start: spec.data_file_start,
         data_file_start_hex: format!("0x{:05X}", spec.data_file_start),
         directory_binding,
@@ -941,6 +1083,146 @@ fn inspect_main_record_prefix(
         first_line_file_offset_hex: format!("0x{first_line_file_offset:05X}"),
         total_prefix_byte_count: first_line_file_offset - entry_file_offset,
     })
+}
+
+fn scan_main_first_line(
+    source: &[u8],
+    line_file_offset: usize,
+    bank_end: usize,
+    table_id: &str,
+    entry_index: usize,
+) -> Result<MainFirstLineReport> {
+    let mut cursor = line_file_offset;
+    let mut literal_byte_count = 0;
+    let mut protected_original_alphanumeric_literal_byte_count = 0;
+    let mut control_token_count = 0;
+    let mut inline_operand_byte_count = 0;
+    let mut control_count_map = BTreeMap::new();
+
+    while cursor < bank_end && cursor - line_file_offset < MAX_MAIN_LINE_SCAN_BYTES {
+        let code = source[cursor];
+        let Some(control) = DIALOGUE_CONTROL_SPECS
+            .iter()
+            .find(|control| control.code == code)
+        else {
+            literal_byte_count += 1;
+            protected_original_alphanumeric_literal_byte_count +=
+                usize::from((0x60..=0x83).contains(&code));
+            cursor += 1;
+            continue;
+        };
+
+        control_token_count += 1;
+        inline_operand_byte_count += control.inline_operand_byte_count;
+        *control_count_map.entry(code).or_insert(0) += 1;
+        let storage_byte_count =
+            1 + control.inline_operand_byte_count + control.transition_target_byte_count;
+        let storage_end = cursor
+            .checked_add(storage_byte_count)
+            .context("main first-line control storage range overflow")?;
+        ensure!(
+            storage_end <= bank_end,
+            "{table_id} entry {entry_index} first-line control {code:02X} crosses its source bank"
+        );
+        if code == 0xEC {
+            ensure!(
+                source[cursor + 1] <= 3,
+                "{table_id} entry {entry_index} first-line EC operand is outside 0..3"
+            );
+        }
+        if code == 0xDF {
+            ensure!(
+                source[cursor + 1] & 0x0F < 8,
+                "{table_id} entry {entry_index} first-line DF low nibble is outside 0..7"
+            );
+        }
+
+        if MAIN_LINE_END_CODES.contains(&code) {
+            let transition_target = if control.transition_target_byte_count == 2 {
+                let selector = source[cursor + 1];
+                let target_entry_index = usize::from(source[cursor + 2]);
+                let target_table = DIALOGUE_TABLE_SPECS
+                    .iter()
+                    .find(|candidate| {
+                        candidate
+                            .directory_group
+                            .map(|group| (candidate.source_prg_bank << 4) | group)
+                            == Some(selector)
+                    })
+                    .with_context(|| {
+                        format!(
+                            "{table_id} entry {entry_index} first-line transition selector {selector:02X} is not a declared main dialogue table"
+                        )
+                    })?;
+                ensure!(
+                    target_entry_index < target_table.pointer_count,
+                    "{table_id} entry {entry_index} first-line transition target {selector:02X}:{target_entry_index:02X} is outside {}",
+                    target_table.id
+                );
+                Some(TransitionTargetReport {
+                    selector,
+                    selector_hex: format!("0x{selector:02X}"),
+                    target_table_id: target_table.id,
+                    target_entry_index,
+                })
+            } else {
+                ensure!(
+                    control.transition_target_byte_count == 0,
+                    "{table_id} entry {entry_index} first-line control {code:02X} has an unsupported transition width"
+                );
+                None
+            };
+            let storage = &source[line_file_offset..storage_end];
+            return Ok(MainFirstLineReport {
+                file_offset: line_file_offset,
+                file_offset_hex: format!("0x{line_file_offset:05X}"),
+                storage_byte_count: storage.len(),
+                storage_sha1: sha1_hex(storage),
+                current_pointer_advance_bytes: cursor - line_file_offset
+                    + control.current_pointer_advance_bytes,
+                literal_byte_count,
+                protected_original_alphanumeric_literal_byte_count,
+                control_token_count,
+                inline_operand_byte_count,
+                transition_target_byte_count: control.transition_target_byte_count,
+                control_counts: control_usage_reports(
+                    control_count_map,
+                    &DIALOGUE_SCRIPT_CONTROL_CODES,
+                ),
+                line_end_control: code,
+                line_end_control_hex: format!("{code:02X}"),
+                transition_target,
+            });
+        }
+
+        ensure!(
+            control.transition_target_byte_count == 0,
+            "{table_id} entry {entry_index} non-ending control {code:02X} has transition bytes"
+        );
+        cursor = cursor
+            .checked_add(control.current_pointer_advance_bytes)
+            .context("main first-line current pointer overflow")?;
+    }
+
+    anyhow::bail!(
+        "{table_id} entry {entry_index} has no recognized first-line end within {MAX_MAIN_LINE_SCAN_BYTES} bytes"
+    )
+}
+
+fn control_usage_reports(
+    counts: BTreeMap<u8, usize>,
+    declared_order: &[u8],
+) -> Vec<ControlUsageReport> {
+    declared_order
+        .iter()
+        .filter_map(|code| {
+            counts.get(code).map(|count| ControlUsageReport {
+                code: *code,
+                code_hex: format!("{code:02X}"),
+                count: *count,
+            })
+        })
+        .collect()
 }
 
 fn validate_separate_consumer(
@@ -1249,6 +1531,46 @@ mod tests {
         assert!(!plain.e8_prefix_present);
         assert_eq!(plain.total_prefix_byte_count, 4);
         assert_eq!(plain.first_line_file_offset, plain_entry_file_offset + 4);
+    }
+
+    #[test]
+    fn scans_a_first_line_without_emitting_its_source_bytes() {
+        let mut source = synthetic_source();
+        let line_file_offset = SYNTHETIC_DATA_START;
+        source[line_file_offset..line_file_offset + 6]
+            .copy_from_slice(&[0x60, 0xE9, 0x03, 0xE4, 0x71, 0x02]);
+        let bank_end = switchable_bank_file_start(SYNTHETIC_BANK) + PRG_BANK_SIZE;
+
+        let line =
+            scan_main_first_line(&source, line_file_offset, bank_end, "synthetic-dialogue", 0)
+                .unwrap();
+
+        assert_eq!(line.storage_byte_count, 6);
+        assert_eq!(line.current_pointer_advance_bytes, 4);
+        assert_eq!(line.literal_byte_count, 1);
+        assert_eq!(line.protected_original_alphanumeric_literal_byte_count, 1);
+        assert_eq!(line.control_token_count, 2);
+        assert_eq!(line.inline_operand_byte_count, 1);
+        assert_eq!(line.transition_target_byte_count, 2);
+        assert_eq!(line.line_end_control, 0xE4);
+        let transition = line.transition_target.unwrap();
+        assert_eq!(transition.target_table_id, "recruitment-dialogue");
+        assert_eq!(transition.target_entry_index, 2);
+    }
+
+    #[test]
+    fn rejects_an_out_of_range_first_line_operand() {
+        let mut source = synthetic_source();
+        let line_file_offset = SYNTHETIC_DATA_START;
+        source[line_file_offset..line_file_offset + 3].copy_from_slice(&[0xEC, 0x04, 0xED]);
+        let bank_end = switchable_bank_file_start(SYNTHETIC_BANK) + PRG_BANK_SIZE;
+
+        let error =
+            scan_main_first_line(&source, line_file_offset, bank_end, "synthetic-dialogue", 0)
+                .unwrap_err()
+                .to_string();
+
+        assert!(error.contains("EC operand is outside 0..3"));
     }
 
     #[test]
