@@ -89,6 +89,30 @@ const COMPOSITE_TEXT_LAYOUT_CODE_REGIONS: [TransferCodeSpec; 3] = [
     },
 ];
 
+const COMPOSITE_TEXT_CONSUMER_CODE_REGIONS: [TransferCodeSpec; 3] = [
+    TransferCodeSpec {
+        role: "invoke_two_output_stages",
+        file_offset: 0x2D618,
+        bytes: &[
+            0x20, 0x1C, 0x96, 0xEE, 0xD4, 0x05, 0x20, 0x1C, 0x96, 0x20, 0x01, 0x97, 0xEE, 0xD4,
+            0x05, 0xA9, 0x01, 0x85, 0x21, 0x60,
+        ],
+    },
+    TransferCodeSpec {
+        role: "bind_composite_output_pointer",
+        file_offset: 0x2D62C,
+        bytes: &[0xA9, 0x11, 0x85, 0x06, 0xA9, 0x03, 0x85, 0x07],
+    },
+    TransferCodeSpec {
+        role: "consume_with_shared_cursor_and_blank_separator",
+        file_offset: 0x2D6F7,
+        bytes: &[
+            0xAC, 0x10, 0x03, 0xB1, 0x06, 0xC9, 0xED, 0xD0, 0x04, 0xE6, 0x0A, 0xA9, 0xFF, 0xC8,
+            0x8C, 0x10, 0x03, 0x9D, 0x01, 0x07, 0xE8, 0xC6, 0x05, 0xD0, 0xDF, 0x60,
+        ],
+    },
+];
+
 const TEXT_TABLE_SPECS: [TextTableSpec; 7] = [
     TextTableSpec {
         id: "class-names",
@@ -462,8 +486,23 @@ struct LayoutControlEvidence {
     inventory_referenced_byte_count: usize,
     inventory_unique_storage_byte_count: usize,
     code_regions: Vec<TransferCodeEvidence>,
+    downstream_consumer: CompositeTextConsumerEvidence,
     direct_jsr_candidates: Vec<AbsoluteTransferCandidate>,
     direct_jmp_candidates: Vec<AbsoluteTransferCandidate>,
+}
+
+#[derive(Debug, Serialize)]
+struct CompositeTextConsumerEvidence {
+    entry_cpu_address: u16,
+    entry_cpu_address_hex: String,
+    source_buffer_pointer: &'static str,
+    source_cursor: &'static str,
+    stage_output_buffer: &'static str,
+    output_stage_call_count: usize,
+    segment_separator_replacement_code: u8,
+    segment_separator_replacement_code_hex: String,
+    observed_behavior: &'static str,
+    code_regions: Vec<TransferCodeEvidence>,
 }
 
 #[derive(Debug, Serialize)]
@@ -575,7 +614,7 @@ fn build_report(source: &[u8]) -> Result<TextInventoryReport> {
     let layout_controls = build_layout_control_evidence(source, &source_code_usage)?;
 
     Ok(TextInventoryReport {
-        schema_version: 6,
+        schema_version: 7,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             translation_direction: "ja_to_ko",
@@ -1001,6 +1040,23 @@ fn build_layout_control_evidence(
             "layout control",
             "bank_0B_composite_text_parser",
         )?,
+        downstream_consumer: CompositeTextConsumerEvidence {
+            entry_cpu_address: 0x9608,
+            entry_cpu_address_hex: "0x9608".to_owned(),
+            source_buffer_pointer: "0x06/0x07 = 0x0311",
+            source_cursor: "0x0310",
+            stage_output_buffer: "0x0701,X",
+            output_stage_call_count: 2,
+            segment_separator_replacement_code: COMPOSITE_OVERLAY_BLANK_CODE,
+            segment_separator_replacement_code_hex: format!("{COMPOSITE_OVERLAY_BLANK_CODE:02X}"),
+            observed_behavior: "two_output_stage_calls_consume_the_composite_buffer_through_one_shared_cursor",
+            code_regions: build_code_region_evidence(
+                source,
+                &COMPOSITE_TEXT_CONSUMER_CODE_REGIONS,
+                "downstream consumer",
+                "bank_0B_composite_text_parser",
+            )?,
+        },
         direct_jsr_candidates: find_absolute_transfer_candidates(
             &source[HEADER_SIZE..PRG_FILE_END],
             0x8F39,
@@ -1365,6 +1421,10 @@ mod tests {
             source[region.file_offset..region.file_offset + region.bytes.len()]
                 .copy_from_slice(region.bytes);
         }
+        for region in &COMPOSITE_TEXT_CONSUMER_CODE_REGIONS {
+            source[region.file_offset..region.file_offset + region.bytes.len()]
+                .copy_from_slice(region.bytes);
+        }
         let source_code_usage = COMPOSITE_TEXT_LAYOUT_CODES.map(|code| SourceCodeUsage {
             code,
             code_hex: format!("{code:02X}"),
@@ -1400,6 +1460,41 @@ mod tests {
             composite.segment_output_order,
             "combining_overlay_then_base_codes"
         );
+        assert_eq!(
+            composite.downstream_consumer.source_buffer_pointer,
+            "0x06/0x07 = 0x0311"
+        );
+        assert_eq!(composite.downstream_consumer.source_cursor, "0x0310");
+        assert_eq!(composite.downstream_consumer.output_stage_call_count, 2);
+        assert_eq!(
+            composite
+                .downstream_consumer
+                .segment_separator_replacement_code,
+            0xFF
+        );
+    }
+
+    #[test]
+    fn rejects_changed_composite_downstream_consumer_code() {
+        let mut source = vec![0_u8; PRG_FILE_END + FIRST_FONT_PAGE_BYTES];
+        for region in &COMPOSITE_TEXT_CONSUMER_CODE_REGIONS {
+            source[region.file_offset..region.file_offset + region.bytes.len()]
+                .copy_from_slice(region.bytes);
+        }
+        source[COMPOSITE_TEXT_CONSUMER_CODE_REGIONS[1].file_offset + 1] ^= 0x01;
+
+        let error = build_code_region_evidence(
+            &source,
+            &COMPOSITE_TEXT_CONSUMER_CODE_REGIONS,
+            "downstream consumer",
+            "bank_0B_composite_text_parser",
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains(
+            "downstream consumer code bind_composite_output_pointer changed for bank_0B_composite_text_parser"
+        ));
     }
 
     #[test]
