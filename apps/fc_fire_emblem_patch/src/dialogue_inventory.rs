@@ -178,8 +178,17 @@ struct DialogueTableSpec {
     pointer_count: usize,
     data_file_start: usize,
     directory_group: Option<u8>,
+    directory_selector_use: Option<DirectorySelectorUseSpec>,
     separate_consumer: Option<SeparateConsumerSpec>,
     allowed_handler_targets: &'static [HandlerTargetSpec],
+}
+
+#[derive(Clone, Copy)]
+struct DirectorySelectorUseSpec {
+    role: &'static str,
+    prg_bank: u8,
+    cpu_address: u16,
+    code: &'static [u8],
 }
 
 #[derive(Clone, Copy)]
@@ -211,6 +220,23 @@ const RECRUITMENT_HANDLER_TARGETS: &[HandlerTargetSpec] = &[HandlerTargetSpec {
     ],
 }];
 
+const EPILOGUE_ROUTING_HANDLER_TARGETS: &[HandlerTargetSpec] = &[HandlerTargetSpec {
+    cpu_address: 0xC73D,
+    role: "fixed_no_op_handler",
+    expected_code: &[0x60],
+}];
+
+const EPILOGUE_ROUTING_SELECTOR_USE: DirectorySelectorUseSpec = DirectorySelectorUseSpec {
+    role: "select_epilogue_dialogue_table_and_entry",
+    prg_bank: 0x04,
+    cpu_address: 0xA17E,
+    code: &[
+        0xA9, 0x40, 0x8D, 0xF4, 0x77, 0xA6, 0x04, 0xE0, 0x02, 0xF0, 0xDC, 0xE0, 0x01, 0xD0, 0x08,
+        0xA9, 0x41, 0x8D, 0xF4, 0x77, 0x20, 0xB7, 0xA1, 0xAE, 0x3B, 0x77, 0xE8, 0x8A, 0x8D, 0xF1,
+        0x77, 0xA9, 0x00, 0x8D, 0xF0, 0x77, 0x8D, 0x5D, 0x77, 0xA9, 0x01, 0x8D, 0xF7, 0x77,
+    ],
+};
+
 const BATTLE_DIALOGUE_CONSUMER: SeparateConsumerSpec = SeparateConsumerSpec {
     prg_bank: 0x04,
     loader_cpu_address: 0x8000,
@@ -226,10 +252,11 @@ const BATTLE_DIALOGUE_CONSUMER: SeparateConsumerSpec = SeparateConsumerSpec {
     destination_pointer: "0x76/0x77",
 };
 
-// Candidate locations came from the pinned Basilisk map and are admitted only
-// after all ranges, directory roots, and entry pointers validate against the
+// Initial candidate locations came from the pinned Basilisk map. Every table,
+// including later directory discoveries, is admitted only after its ranges,
+// roots, selector evidence when declared, and pointers validate against the
 // exact supported Japanese ROM.
-const DIALOGUE_TABLE_SPECS: [DialogueTableSpec; 8] = [
+const DIALOGUE_TABLE_SPECS: [DialogueTableSpec; 9] = [
     DialogueTableSpec {
         id: "chapter-intro-dialogue",
         role: "chapter_intro_dialogue",
@@ -238,6 +265,7 @@ const DIALOGUE_TABLE_SPECS: [DialogueTableSpec; 8] = [
         pointer_count: 51,
         data_file_start: 0x21FA1,
         directory_group: Some(0),
+        directory_selector_use: None,
         separate_consumer: None,
         allowed_handler_targets: NO_HANDLER_TARGETS,
     },
@@ -249,6 +277,7 @@ const DIALOGUE_TABLE_SPECS: [DialogueTableSpec; 8] = [
         pointer_count: 94,
         data_file_start: 0x300CC,
         directory_group: Some(0),
+        directory_selector_use: None,
         separate_consumer: None,
         allowed_handler_targets: NO_HANDLER_TARGETS,
     },
@@ -260,6 +289,7 @@ const DIALOGUE_TABLE_SPECS: [DialogueTableSpec; 8] = [
         pointer_count: 109,
         data_file_start: 0x1C93D,
         directory_group: Some(1),
+        directory_selector_use: None,
         separate_consumer: None,
         allowed_handler_targets: RECRUITMENT_HANDLER_TARGETS,
     },
@@ -271,6 +301,7 @@ const DIALOGUE_TABLE_SPECS: [DialogueTableSpec; 8] = [
         pointer_count: 11,
         data_file_start: 0x2DDAB,
         directory_group: Some(0),
+        directory_selector_use: None,
         separate_consumer: None,
         allowed_handler_targets: NO_HANDLER_TARGETS,
     },
@@ -282,6 +313,7 @@ const DIALOGUE_TABLE_SPECS: [DialogueTableSpec; 8] = [
         pointer_count: 88,
         data_file_start: 0x2E826,
         directory_group: Some(1),
+        directory_selector_use: None,
         separate_consumer: None,
         allowed_handler_targets: NO_HANDLER_TARGETS,
     },
@@ -293,6 +325,7 @@ const DIALOGUE_TABLE_SPECS: [DialogueTableSpec; 8] = [
         pointer_count: 50,
         data_file_start: 0x0E4DB,
         directory_group: Some(0),
+        directory_selector_use: None,
         separate_consumer: None,
         allowed_handler_targets: NO_HANDLER_TARGETS,
     },
@@ -304,6 +337,7 @@ const DIALOGUE_TABLE_SPECS: [DialogueTableSpec; 8] = [
         pointer_count: 65,
         data_file_start: 0x104ED,
         directory_group: None,
+        directory_selector_use: None,
         separate_consumer: Some(BATTLE_DIALOGUE_CONSUMER),
         allowed_handler_targets: NO_HANDLER_TARGETS,
     },
@@ -315,8 +349,21 @@ const DIALOGUE_TABLE_SPECS: [DialogueTableSpec; 8] = [
         pointer_count: 66,
         data_file_start: 0x12E81,
         directory_group: Some(0),
+        directory_selector_use: None,
         separate_consumer: None,
         allowed_handler_targets: NO_HANDLER_TARGETS,
+    },
+    DialogueTableSpec {
+        id: "epilogue-routing-dialogue",
+        role: "epilogue_routing_dialogue",
+        source_prg_bank: 0x04,
+        pointer_table_file_offset: 0x1397C,
+        pointer_count: 54,
+        data_file_start: 0x139E8,
+        directory_group: Some(1),
+        directory_selector_use: Some(EPILOGUE_ROUTING_SELECTOR_USE),
+        separate_consumer: None,
+        allowed_handler_targets: EPILOGUE_ROUTING_HANDLER_TARGETS,
     },
 ];
 
@@ -415,6 +462,20 @@ struct DirectoryBindingReport {
     directory_entry_file_offset_hex: String,
     resolved_pointer_table_cpu_address: u16,
     resolved_pointer_table_cpu_address_hex: String,
+    selector_use: Option<DirectorySelectorUseReport>,
+}
+
+#[derive(Debug, Serialize)]
+struct DirectorySelectorUseReport {
+    role: &'static str,
+    prg_bank: u8,
+    prg_bank_hex: String,
+    cpu_address: u16,
+    cpu_address_hex: String,
+    file_offset: usize,
+    file_offset_hex: String,
+    code_byte_count: usize,
+    code_sha1: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -843,12 +904,12 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
     };
 
     Ok(DialogueStructureReport {
-        schema_version: 6,
+        schema_version: 7,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             translation_direction: "ja_to_ko",
             preserve_existing_english: true,
-            proof_boundary: "exact pointer-table ranges, switchable-bank target mapping, aliases, all eight consumer roots, the main dialogue record-prefix state path, every main entry's initial linear segment, all explicit E4/E6 graph edges, and the E7 caller-handoff contract; no dialogue bytes or translations are emitted",
+            proof_boundary: "exact pointer-table ranges, switchable-bank target mapping, aliases, all nine consumer roots, the selector-41 epilogue-routing use, the main dialogue record-prefix state path, every main entry's initial linear segment, all explicit E4/E6 graph edges, and the E7 caller-handoff contract; no dialogue bytes or translations are emitted",
         },
         summary,
         main_dialogue_state_machine,
@@ -1103,10 +1164,16 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
                 spec.source_prg_bank,
                 group,
                 pointer_table_cpu_address,
+                spec.directory_selector_use,
                 spec.id,
             )
         })
         .transpose()?;
+    ensure!(
+        spec.directory_group.is_some() || spec.directory_selector_use.is_none(),
+        "{} declares a directory selector use without a directory root",
+        spec.id
+    );
     ensure!(
         !(spec.directory_group.is_some() && spec.separate_consumer.is_some()),
         "{} declares two consumer bindings",
@@ -1953,6 +2020,7 @@ fn validate_directory_binding(
     source_prg_bank: u8,
     group: u8,
     expected_table_cpu_address: u16,
+    selector_use: Option<DirectorySelectorUseSpec>,
     table_id: &str,
 ) -> Result<DirectoryBindingReport> {
     ensure!(
@@ -1977,6 +2045,42 @@ fn validate_directory_binding(
         "{table_id} dialogue directory root changed: expected {expected_table_cpu_address:04X}, found {resolved_pointer_table_cpu_address:04X}"
     );
     let selector = (source_prg_bank << 4) | group;
+    let selector_use = selector_use
+        .map(|selector_use| {
+            ensure!(
+                !selector_use.code.is_empty(),
+                "{table_id} declares an empty directory selector-use signature"
+            );
+            let selector_write = [0xA9, selector, 0x8D, 0xF4, 0x77];
+            ensure!(
+                selector_use
+                    .code
+                    .windows(selector_write.len())
+                    .any(|bytes| bytes == selector_write),
+                "{table_id} selector-use signature does not write selector {selector:02X}"
+            );
+            let file_offset =
+                switchable_cpu_to_file_offset(selector_use.prg_bank, selector_use.cpu_address)?;
+            let end = file_offset
+                .checked_add(selector_use.code.len())
+                .context("dialogue directory selector-use range overflow")?;
+            ensure!(
+                source.get(file_offset..end) == Some(selector_use.code),
+                "{table_id} directory selector-use code changed"
+            );
+            Ok(DirectorySelectorUseReport {
+                role: selector_use.role,
+                prg_bank: selector_use.prg_bank,
+                prg_bank_hex: format!("0x{:02X}", selector_use.prg_bank),
+                cpu_address: selector_use.cpu_address,
+                cpu_address_hex: format!("0x{:04X}", selector_use.cpu_address),
+                file_offset,
+                file_offset_hex: format!("0x{file_offset:05X}"),
+                code_byte_count: selector_use.code.len(),
+                code_sha1: sha1_hex(selector_use.code),
+            })
+        })
+        .transpose()?;
 
     Ok(DirectoryBindingReport {
         selector,
@@ -1990,6 +2094,7 @@ fn validate_directory_binding(
         resolved_pointer_table_cpu_address_hex: format!(
             "0x{resolved_pointer_table_cpu_address:04X}"
         ),
+        selector_use,
     })
 }
 
@@ -2079,6 +2184,7 @@ mod tests {
             pointer_count,
             data_file_start: SYNTHETIC_DATA_START,
             directory_group: None,
+            directory_selector_use: None,
             separate_consumer: None,
             allowed_handler_targets: NO_HANDLER_TARGETS,
         }
@@ -2489,6 +2595,38 @@ mod tests {
             .to_string();
 
         assert!(error.contains("dialogue directory root changed"));
+    }
+
+    #[test]
+    fn rejects_changed_directory_selector_use_code() {
+        let mut source = synthetic_source();
+        let mut spec = synthetic_spec(1);
+        const SELECTOR_USE_CODE: &[u8] = &[0xA9, 0x21, 0x8D, 0xF4, 0x77, 0x60];
+        spec.directory_group = Some(1);
+        spec.directory_selector_use = Some(DirectorySelectorUseSpec {
+            role: "select_synthetic_dialogue",
+            prg_bank: SYNTHETIC_BANK,
+            cpu_address: 0x8300,
+            code: SELECTOR_USE_CODE,
+        });
+        let pointer_table_cpu_address =
+            switchable_file_to_cpu(SYNTHETIC_BANK, SYNTHETIC_TABLE_OFFSET).unwrap();
+        let directory_file_offset =
+            switchable_cpu_to_file_offset(SYNTHETIC_BANK, DIALOGUE_DIRECTORY_CPU_ADDRESS + 2)
+                .unwrap();
+        source[directory_file_offset..directory_file_offset + 2]
+            .copy_from_slice(&pointer_table_cpu_address.to_le_bytes());
+        let selector_use_file_offset =
+            switchable_cpu_to_file_offset(SYNTHETIC_BANK, 0x8300).unwrap();
+        source[selector_use_file_offset..selector_use_file_offset + SELECTOR_USE_CODE.len()]
+            .copy_from_slice(SELECTOR_USE_CODE);
+        source[selector_use_file_offset + SELECTOR_USE_CODE.len() - 1] = 0xEA;
+
+        let error = extract_dialogue_table(&source, &spec)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("directory selector-use code changed"));
     }
 
     #[test]
