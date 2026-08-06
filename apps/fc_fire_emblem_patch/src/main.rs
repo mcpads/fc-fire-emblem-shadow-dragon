@@ -1,3 +1,4 @@
+mod chr_inventory;
 mod font;
 mod localization;
 mod options;
@@ -20,6 +21,16 @@ struct Cli {
 enum Command {
     /// Verify that a ROM is the exact supported Japanese source revision.
     VerifySource { source: PathBuf },
+    /// Analyze the supported source font page without declaring free slots.
+    AnalyzeFontSupply {
+        source: PathBuf,
+        #[arg(long, default_value = "out/font-supply.json")]
+        report: PathBuf,
+        #[arg(long, default_value = "out/font-page-00.png")]
+        sheet: PathBuf,
+        #[arg(long, default_value_t = 4)]
+        scale: u32,
+    },
     /// Build the Japanese-options Hangul visibility proof.
     BuildOptionsPoc {
         source: PathBuf,
@@ -45,6 +56,21 @@ fn main() -> Result<()> {
                 source_rom.mapper(),
                 source_rom.prg().len(),
                 source_rom.chr().len()
+            );
+        }
+        Command::AnalyzeFontSupply {
+            source,
+            report,
+            sheet,
+            scale,
+        } => {
+            let summary = chr_inventory::analyze_font_supply(&source, &report, &sheet, scale)?;
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!("wrote {}", sheet.display());
+            println!(
+                "CHR pages: {}, protected font codes: {}, unresolved font codes: {}",
+                summary.page_count, summary.protected_code_count, summary.unresolved_code_count
             );
         }
         Command::BuildOptionsPoc {
