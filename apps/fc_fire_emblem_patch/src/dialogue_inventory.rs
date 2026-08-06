@@ -537,6 +537,16 @@ pub(crate) struct MainDialogueStorageRecord {
     pub prefix_byte_count: usize,
     pub boundary_control: u8,
     pub literal_file_offsets: Vec<usize>,
+    pub lines: Vec<MainDialogueStorageLine>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MainDialogueStorageLine {
+    pub file_offset: usize,
+    pub storage_byte_count: usize,
+    pub storage_sha1: String,
+    pub line_end_control: u8,
+    pub literal_file_offsets: Vec<usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1066,6 +1076,20 @@ pub(crate) fn inspect_main_dialogue_storage(
                 .iter()
                 .flat_map(|line| line.literal_file_offsets.iter().copied())
                 .collect();
+            let lines = entry
+                .main_linear_segment
+                .as_ref()
+                .context("canonical main dialogue entry has no linear segment")?
+                .lines
+                .iter()
+                .map(|line| MainDialogueStorageLine {
+                    file_offset: line.file_offset,
+                    storage_byte_count: line.storage_byte_count,
+                    storage_sha1: line.storage_sha1.clone(),
+                    line_end_control: line.line_end_control,
+                    literal_file_offsets: line.literal_file_offsets.clone(),
+                })
+                .collect();
             Ok(MainDialogueStorageRecord {
                 table_id: table.id,
                 source_prg_bank: table.source_prg_bank,
@@ -1079,6 +1103,7 @@ pub(crate) fn inspect_main_dialogue_storage(
                 prefix_byte_count: storage.prefix_byte_count,
                 boundary_control: storage.boundary_control,
                 literal_file_offsets,
+                lines,
             })
         })
         .collect::<Result<Vec<_>>>()?;

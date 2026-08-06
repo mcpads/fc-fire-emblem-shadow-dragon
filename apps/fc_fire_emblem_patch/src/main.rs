@@ -54,6 +54,12 @@ enum Command {
         #[arg(long, default_value = "private/dialogue/main-source.json")]
         output: PathBuf,
     },
+    /// Create a private Japanese-to-Korean main-dialogue translation workspace.
+    ExtractMainDialogueWorkspace {
+        source: PathBuf,
+        #[arg(long, default_value = "private/dialogue/main-workspace.json")]
+        output: PathBuf,
+    },
     /// Verify that a private main-dialogue source asset rebuilds the source exactly.
     VerifyMainDialogueSourceRoundtrip {
         source: PathBuf,
@@ -137,6 +143,18 @@ fn main() -> Result<()> {
                 summary.storage_region_count,
                 summary.record_count,
                 summary.unique_storage_byte_count
+            );
+        }
+        Command::ExtractMainDialogueWorkspace { source, output } => {
+            let summary = dialogue_assets::extract_main_dialogue_workspace(&source, &output)?;
+            println!("wrote {}", output.display());
+            println!("workspace SHA-1: {}", summary.workspace_sha1);
+            println!(
+                "main dialogue workspace: {} records, {} lines, {} safe Japanese source bytes, {} relocation-blocked lines",
+                summary.record_count,
+                summary.line_count,
+                summary.safe_japanese_source_byte_count,
+                summary.blocked_line_count
             );
         }
         Command::VerifyMainDialogueSourceRoundtrip {
