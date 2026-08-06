@@ -1,4 +1,5 @@
 mod chr_inventory;
+mod dialogue_inventory;
 mod font;
 mod localization;
 mod options;
@@ -37,6 +38,12 @@ enum Command {
     AnalyzeTextTables {
         source: PathBuf,
         #[arg(long, default_value = "out/text-tables.json")]
+        report: PathBuf,
+    },
+    /// Inventory dialogue entry tables without emitting source dialogue bytes.
+    AnalyzeDialogueStructure {
+        source: PathBuf,
+        #[arg(long, default_value = "out/dialogue-structure.json")]
         report: PathBuf,
     },
     /// Build the Japanese-options Hangul visibility proof.
@@ -91,6 +98,18 @@ fn main() -> Result<()> {
                 summary.pointer_count,
                 summary.unique_string_count,
                 summary.referenced_protected_original_byte_count
+            );
+        }
+        Command::AnalyzeDialogueStructure { source, report } => {
+            let summary = dialogue_inventory::analyze_dialogue_structure(&source, &report)?;
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "dialogue tables: {}, pointers: {}, unique targets: {}, alias groups: {}",
+                summary.table_count,
+                summary.pointer_count,
+                summary.unique_target_count,
+                summary.alias_group_count
             );
         }
         Command::BuildOptionsPoc {
