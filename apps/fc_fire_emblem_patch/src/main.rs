@@ -10,6 +10,8 @@ mod mmc5_expanded_chr;
 mod mmc5_exram_probe;
 mod mmc5_nametable_shadow;
 mod mmc5_prg;
+mod mmc5_queue_runtime;
+mod mmc5_queue_shadow;
 mod options;
 mod rom;
 mod rp2a03;
@@ -151,6 +153,17 @@ enum Command {
         )]
         output: PathBuf,
         #[arg(long, default_value = "out/mmc5-nametable-shadow-probe.json")]
+        report: PathBuf,
+    },
+    /// Replay confirmed PPU queues at their publish boundaries into MMC5 PRG RAM.
+    BuildMmc5QueueShadowProbe {
+        source: PathBuf,
+        #[arg(
+            long,
+            default_value = "out/fire-emblem-fe1-mmc5-queue-shadow-probe.nes"
+        )]
+        output: PathBuf,
+        #[arg(long, default_value = "out/mmc5-queue-shadow-probe.json")]
         report: PathBuf,
     },
     /// Project one zero-scroll MMC4 nametable into MMC5 extended attributes.
@@ -407,6 +420,22 @@ fn main() -> Result<()> {
             println!(
                 "hooked direct PPU stores: {}, tracked writes after CHR writer probe: {}",
                 summary.hooked_store_count, summary.tracked_write_count
+            );
+        }
+        Command::BuildMmc5QueueShadowProbe {
+            source,
+            output,
+            report,
+        } => {
+            let summary =
+                mmc5_queue_shadow::build_mmc5_queue_shadow_probe(&source, &output, &report)?;
+            println!("wrote {}", output.display());
+            println!("output SHA-1: {}", summary.output_sha1);
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "tracked writes after CHR writer probe: {}",
+                summary.tracked_write_count
             );
         }
         Command::ProjectMmc4LatchNametable {

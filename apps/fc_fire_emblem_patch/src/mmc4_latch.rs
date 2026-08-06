@@ -100,6 +100,11 @@ impl Mmc4NametableShadow {
         Ok(nametable_write_count)
     }
 
+    #[cfg(test)]
+    pub(crate) fn physical_bytes(&self) -> &[u8] {
+        &self.physical_nametables
+    }
+
     pub(crate) fn project_zero_scroll_attributes(
         &self,
         logical_nametable: usize,

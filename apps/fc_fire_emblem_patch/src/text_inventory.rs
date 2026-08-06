@@ -1645,7 +1645,7 @@ fn build_layout_control_evidence(
                 descriptor_length_mask_hex: "0x3F".to_owned(),
                 descriptor_vertical_increment_mask: 0x80,
                 descriptor_vertical_increment_mask_hex: "0x80".to_owned(),
-                descriptor_bit_6_behavior: "both control branches advance exactly once to the first data byte; higher-level meaning remains unresolved",
+                descriptor_bit_6_behavior: "clear consumes one encoded byte per output byte; set repeats one encoded byte for the declared output length",
                 data_byte_offset: 3,
                 ppu_address_register: "0x2006",
                 ppu_data_register: "0x2007",

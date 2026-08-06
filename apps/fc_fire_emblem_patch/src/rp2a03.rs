@@ -10,6 +10,7 @@ pub enum Instruction {
     LdyImmediate(u8),
     LdyAbsoluteX(u16),
     StaZeroPage(u8),
+    StyZeroPage(u8),
     StaAbsolute(u16),
     StaAbsoluteX(u16),
     StaIndirectY(u8),
@@ -23,6 +24,7 @@ pub enum Instruction {
     CpxImmediate(u8),
     CpyImmediate(u8),
     IncAbsolute(u16),
+    DecAbsolute(u16),
     Inx,
     Tax,
     Txa,
@@ -71,6 +73,7 @@ impl Instruction {
             | Self::LdxImmediate(_)
             | Self::LdyImmediate(_)
             | Self::StaZeroPage(_)
+            | Self::StyZeroPage(_)
             | Self::StaIndirectY(_)
             | Self::AndImmediate(_)
             | Self::AdcImmediate(_)
@@ -91,6 +94,7 @@ impl Instruction {
             | Self::StaAbsolute(_)
             | Self::StaAbsoluteX(_)
             | Self::IncAbsolute(_)
+            | Self::DecAbsolute(_)
             | Self::JmpAbsolute(_)
             | Self::JsrAbsolute(_) => 3,
         }
@@ -115,6 +119,7 @@ impl Instruction {
                 output.extend_from_slice(&address.to_le_bytes());
             }
             Self::StaZeroPage(address) => output.extend_from_slice(&[0x85, address]),
+            Self::StyZeroPage(address) => output.extend_from_slice(&[0x84, address]),
             Self::StaAbsolute(address) => {
                 output.push(0x8D);
                 output.extend_from_slice(&address.to_le_bytes());
@@ -135,6 +140,10 @@ impl Instruction {
             Self::CpyImmediate(value) => output.extend_from_slice(&[0xC0, value]),
             Self::IncAbsolute(address) => {
                 output.push(0xEE);
+                output.extend_from_slice(&address.to_le_bytes());
+            }
+            Self::DecAbsolute(address) => {
+                output.push(0xCE);
                 output.extend_from_slice(&address.to_le_bytes());
             }
             Self::Inx => output.push(0xE8),
@@ -230,6 +239,7 @@ mod tests {
                 Instruction::LdyImmediate(0),
                 Instruction::LdyAbsoluteX(0x0103),
                 Instruction::StaZeroPage(0x29),
+                Instruction::StyZeroPage(0x21),
                 Instruction::StaAbsolute(0x5117),
                 Instruction::StaAbsoluteX(0x5C00),
                 Instruction::StaIndirectY(0x00),
@@ -243,6 +253,7 @@ mod tests {
                 Instruction::CpxImmediate(0x20),
                 Instruction::CpyImmediate(2),
                 Instruction::IncAbsolute(0x67F4),
+                Instruction::DecAbsolute(0x67FC),
                 Instruction::Inx,
                 Instruction::Tax,
                 Instruction::Txa,
@@ -273,11 +284,11 @@ mod tests {
             bytes,
             [
                 0xA9, 0x9F, 0xA5, 0x5B, 0xAD, 0xF0, 0x67, 0xBD, 0x00, 0xFB, 0xA2, 0x00, 0xA0, 0x00,
-                0xBC, 0x03, 0x01, 0x85, 0x29, 0x8D, 0x17, 0x51, 0x9D, 0x00, 0x5C, 0x91, 0x00, 0x0A,
-                0x4A, 0x29, 0x3F, 0x69, 0x20, 0x65, 0x01, 0xE9, 0x10, 0xC9, 0x18, 0xE0, 0x20, 0xC0,
-                0x02, 0xEE, 0xF4, 0x67, 0xE8, 0xAA, 0x8A, 0xA8, 0x98, 0xBA, 0x09, 0x80, 0x05, 0x52,
-                0x18, 0x38, 0x48, 0x08, 0x68, 0x28, 0x20, 0x30, 0xFB, 0xF0, 0xBD, 0x90, 0xBB, 0xB0,
-                0xB9, 0xD0, 0xB7, 0x4C, 0x75, 0xC0, 0x60, 0xEA,
+                0xBC, 0x03, 0x01, 0x85, 0x29, 0x84, 0x21, 0x8D, 0x17, 0x51, 0x9D, 0x00, 0x5C, 0x91,
+                0x00, 0x0A, 0x4A, 0x29, 0x3F, 0x69, 0x20, 0x65, 0x01, 0xE9, 0x10, 0xC9, 0x18, 0xE0,
+                0x20, 0xC0, 0x02, 0xEE, 0xF4, 0x67, 0xCE, 0xFC, 0x67, 0xE8, 0xAA, 0x8A, 0xA8, 0x98,
+                0xBA, 0x09, 0x80, 0x05, 0x52, 0x18, 0x38, 0x48, 0x08, 0x68, 0x28, 0x20, 0x30, 0xFB,
+                0xF0, 0xB8, 0x90, 0xB6, 0xB0, 0xB4, 0xD0, 0xB2, 0x4C, 0x75, 0xC0, 0x60, 0xEA,
             ]
         );
     }
