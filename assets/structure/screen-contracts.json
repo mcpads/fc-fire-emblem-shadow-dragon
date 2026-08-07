@@ -12,6 +12,7 @@
     ],
     "known_focus": [
       "the chapter-one-to-two sequence established the five distinct screen lifetimes",
+      "a checksummed regular-save intervention reached only the chapter-eleven intro composite",
       "a checksummed regular-save intervention reached only the chapter-twelve intro composite"
     ],
     "unresolved_focus": [
@@ -19,7 +20,7 @@
       "exact CHR pairs for the epilogue, NEXT STORY, save offer, and save-complete lifetimes",
       "save-offer no branch and every flashing or animated phase"
     ],
-    "next_action": "reach chapter eleven with a controlled valid save, then observe each known screen role without treating the chapter-twelve cold-load sample as natural completion"
+    "next_action": "from the controlled chapter-eleven start, bind its real victory trigger and use only verified progress accelerators before observing each transition screen role through the chapter-twelve intro"
   },
   "screens": [
     {
@@ -324,12 +325,15 @@
       "temporal_behavior": "the title bar remains while dialogue draws automatically; completed pages wait for A and may flash a marker",
       "known_focus": [
         "left 13/13 and right 00/18 CHR pairs on the observed chapter-two entry",
+        "left 1A/1A and right 00/18 CHR pairs on a checksummed chapter-eleven regular-save reachability intervention",
         "left 0F/0F and right 00/18 CHR pairs on a checksummed chapter-twelve regular-save reachability intervention",
-        "new map, protected chapter-number digits, Japanese chapter title, portrait, and Japanese dialogue coexist",
+        "new map, protected chapter-number digits, Japanese chapter title, and Japanese dialogue coexist; portrait presence varies by sampled page",
         "chapter-clear and cold-load entries both reached the same composite surface",
         "chapter twelve used one-based 0C in the regular file and zero-based 0B at 781D",
+        "chapter eleven used one-based 0B in the regular file and zero-based 0A at 781D",
+        "the sampled chapter-eleven completed page had no portrait while the chapter-two and chapter-twelve samples did",
         "25 E5 chapter contexts select indices 00 through 18 at 781D and the chapter-title table contains 25 pointers",
-        "the chapter-twelve completion marker appeared and disappeared across irregularly spaced samples"
+        "the chapter-eleven and chapter-twelve completion markers appeared and disappeared across irregularly spaced samples"
       ],
       "unresolved_focus": [
         "title-bar exit lifetime relative to the final dialogue page",

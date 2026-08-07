@@ -256,6 +256,7 @@ struct ChapterIntroRuntimeSample {
     left_fe_chr_page: u8,
     right_fd_chr_page: u8,
     right_fe_chr_page: u8,
+    portrait_visible_in_sample: bool,
     completion_marker_phase_union_observed: bool,
     proof_limit: &'static str,
 }
@@ -300,7 +301,7 @@ pub struct ChapterTransitionSummary {
     pub chapter_title_count: usize,
     pub chapter_intro_runtime_sample_count: usize,
     pub source_region_count: usize,
-    pub next_screen_role: &'static str,
+    pub next_observation_gate_role: &'static str,
 }
 
 pub fn analyze_chapter_transitions(
@@ -329,7 +330,7 @@ pub fn analyze_chapter_transitions(
         chapter_title_count: report.chapter_titles.pointer_count,
         chapter_intro_runtime_sample_count: report.chapter_intro_runtime_samples.len(),
         source_region_count: report.source_regions.len(),
-        next_screen_role: report.next_universalization_gate,
+        next_observation_gate_role: report.next_universalization_gate,
     })
 }
 
@@ -349,7 +350,7 @@ fn build_report(rom: &Rom) -> Result<ChapterTransitionReport> {
             translation_direction: "Japanese to Korean",
             preserve_existing_english_and_digits: true,
             dialogue_content_emitted: false,
-            proof_boundary: "source-bound chapter context, title, NEXT STORY, save-offer, and regular-save checksum producers plus the runtime-observed chapter-one-to-two sequence and chapter-twelve intro sample; no dialogue source, translation, or ROM mutation",
+            proof_boundary: "source-bound chapter context, title, NEXT STORY, save-offer, and regular-save checksum producers plus the runtime-observed chapter-one-to-two sequence and chapter-eleven and chapter-twelve intro samples; no dialogue source, translation, or ROM mutation",
         },
         observed_sequence: transition_screens(),
         chapter_intro_contexts,
@@ -379,12 +380,12 @@ fn build_report(rom: &Rom) -> Result<ChapterTransitionReport> {
             },
         ],
         source_regions,
-        next_universalization_gate: "later_chapter_transition",
+        next_universalization_gate: "chapter_eleven_to_twelve_transition_sequence",
         unresolved: vec![
             "The chapter-one epilogue and save-complete dialogue use the main dialogue engine, but their dialogue source content is intentionally outside this public report.",
             "The exact CHR pairs for chapter_clear_epilogue_dialogue, next_story_banner, chapter_save_offer, and chapter_save_complete_continue_prompt are not yet bound to each individual lifetime.",
-            "Chapter twelve is observed only through a checksummed regular-save chapter intervention; chapter eleven's epilogue, save choices, and transition into chapter twelve are not observed.",
-            "Chapter-two and chapter-twelve intro samples do not generalize the remaining twenty-three chapters, alternate save choices, or title lifetimes.",
+            "Chapters eleven and twelve are observed only through checksummed regular-save chapter interventions; chapter ten and eleven epilogues, save choices, and continuous transitions are not observed.",
+            "Chapter-two, chapter-eleven, and chapter-twelve intro samples do not generalize the remaining twenty-two chapters, alternate save choices, or title lifetimes.",
         ],
         release_eligible: false,
     })
@@ -532,8 +533,22 @@ fn chapter_intro_runtime_samples() -> Vec<ChapterIntroRuntimeSample> {
             left_fe_chr_page: 0x13,
             right_fd_chr_page: 0x00,
             right_fe_chr_page: 0x18,
+            portrait_visible_in_sample: true,
             completion_marker_phase_union_observed: false,
             proof_limit: "binds the chapter-two composite only",
+        },
+        ChapterIntroRuntimeSample {
+            sample_role: "chapter_eleven_intro",
+            chapter_number_one_based: 11,
+            chapter_index_zero_based: 10,
+            entry_method: "chapter-one regular save with file-one chapter and checksum changed in a frozen isolated run",
+            left_fd_chr_page: 0x1A,
+            left_fe_chr_page: 0x1A,
+            right_fd_chr_page: 0x00,
+            right_fe_chr_page: 0x18,
+            portrait_visible_in_sample: false,
+            completion_marker_phase_union_observed: true,
+            proof_limit: "proves chapter-eleven intro reachability and a distinct left CHR pair, not chapter-ten completion or the full transition sequence",
         },
         ChapterIntroRuntimeSample {
             sample_role: "chapter_twelve_intro",
@@ -544,6 +559,7 @@ fn chapter_intro_runtime_samples() -> Vec<ChapterIntroRuntimeSample> {
             left_fe_chr_page: 0x0F,
             right_fd_chr_page: 0x00,
             right_fe_chr_page: 0x18,
+            portrait_visible_in_sample: true,
             completion_marker_phase_union_observed: true,
             proof_limit: "proves later-chapter intro reachability and a distinct left CHR pair, not chapter-eleven completion or the full transition sequence",
         },
@@ -813,14 +829,31 @@ mod tests {
     }
 
     #[test]
-    fn later_intro_sample_does_not_claim_the_preceding_transition() {
+    fn later_intro_samples_do_not_claim_the_preceding_transitions() {
         let samples = chapter_intro_runtime_samples();
+        let chapter_eleven = samples
+            .iter()
+            .find(|sample| sample.chapter_number_one_based == 11)
+            .unwrap();
         let chapter_twelve = samples
             .iter()
             .find(|sample| sample.chapter_number_one_based == 12)
             .unwrap();
 
+        assert_eq!(chapter_eleven.chapter_index_zero_based, 10);
+        assert_eq!(
+            [
+                chapter_eleven.left_fd_chr_page,
+                chapter_eleven.left_fe_chr_page,
+                chapter_eleven.right_fd_chr_page,
+                chapter_eleven.right_fe_chr_page,
+            ],
+            [0x1A, 0x1A, 0x00, 0x18]
+        );
+        assert!(chapter_eleven.proof_limit.contains("not chapter-ten"));
+        assert!(!chapter_eleven.portrait_visible_in_sample);
         assert_eq!(chapter_twelve.chapter_index_zero_based, 11);
+        assert!(chapter_twelve.portrait_visible_in_sample);
         assert_eq!(
             [
                 chapter_twelve.left_fd_chr_page,
