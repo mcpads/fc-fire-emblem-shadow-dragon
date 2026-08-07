@@ -23,6 +23,15 @@ cargo run -p fc-fire-emblem-patch -- analyze-screen-contracts \
 
 보고서는 원문이나 캡처를 포함하지 않고 화면 역할, 구조 상태와 다음 관문만 기록한다. 실행 관측이 없는 화면은 추측으로 채우지 않으며, CHR 쌍 목록도 같은 레지스트리에서 생성해 화면 목록과 매퍼 분석이 어긋나면 실패한다.
 
+`analyze-unit-ui-text`는 다음 화면인 `unit_summary`와 `unit_status`를 국소 writer에 결속한다. `$05E8` 합성 상태 `04/07/0F`를 각각 요약 상단, 요약 아이템 목록, 상세 능력치 조립기로 검증하고, 유닛명·병종·아이템·고정 문자열·숫자·합성 파서의 공유 호출부와 `$9251 → $928A` 페이지 수명을 함께 보고한다. 원본 `HP`와 숫자·구두점은 번역 대상에서 제외하며 자동 `class_profile` 계약은 섞지 않는다.
+
+```sh
+cargo run -p fc-fire-emblem-patch -- analyze-unit-ui-text \
+  "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
+```
+
+이 명령은 보이는 한 유닛의 문자열을 직접 고치는 패치를 만들지 않는다. 세 조립 역할과 공유 원천 표가 모두 맞아야만 후속 공용 한글 페이지 설계의 입력으로 쓸 수 있다.
+
 ## 공개 저장소 자료 경계
 
 추출·재삽입 로직과 구조 메타데이터, 설정처럼 작은 메뉴·UI 번역은 추적할 수 있다. 대사 중심의 대규모 원문 추출본, 대사 번역본과 번역 작업용 중간 자산은 Git에 넣지 않는다. 그런 자료는 `private/dialogue/`, `out/` 또는 `evidence/private/` 아래에서만 생성한다. 공개 문서에는 원문 덤프 대신 범위·개수·해시·주소와 소비 경로를 기록한다.

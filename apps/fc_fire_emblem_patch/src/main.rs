@@ -23,6 +23,7 @@ mod screen_contracts;
 mod static_analysis;
 mod text_inventory;
 mod tracked;
+mod unit_ui_text;
 
 use std::path::PathBuf;
 
@@ -66,6 +67,12 @@ enum Command {
     AnalyzeScreenContracts {
         source: PathBuf,
         #[arg(long, default_value = "out/screen-contracts.json")]
+        report: PathBuf,
+    },
+    /// Bind unit-summary and unit-status composers, sources, labels, and shared page lifetime.
+    AnalyzeUnitUiText {
+        source: PathBuf,
+        #[arg(long, default_value = "out/unit-ui-text.json")]
         report: PathBuf,
     },
     /// Extract exact main-dialogue source storage for a private roundtrip check.
@@ -310,6 +317,18 @@ fn main() -> Result<()> {
                 summary.runtime_observed_screen_count,
                 summary.mixed_original_latin_screen_count,
                 summary.next_screen_role
+            );
+        }
+        Command::AnalyzeUnitUiText { source, report } => {
+            let summary = unit_ui_text::analyze_unit_ui_text(&source, &report)?;
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "unit UI text: {} screen roles, {} composers, {} fixed labels, {} Japanese labels targeted",
+                summary.screen_role_count,
+                summary.composer_count,
+                summary.fixed_label_count,
+                summary.translated_japanese_label_count
             );
         }
         Command::ExtractMainDialogueSource { source, output } => {

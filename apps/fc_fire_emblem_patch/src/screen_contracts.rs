@@ -352,7 +352,7 @@ mod tests {
     }
 
     #[test]
-    fn summary_is_the_next_mixed_text_contract_after_roster_proof() {
+    fn summary_requires_a_complete_glyph_budget_after_writer_binding() {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
         let summary = report
             .screens
@@ -366,11 +366,17 @@ mod tests {
             summary.translation_scope,
             TranslationScope::JapaneseWithPreservedOriginalLatin
         );
+        assert!(summary.next_gate.contains("glyph union"));
+        assert!(
+            summary
+                .next_gate
+                .contains("shared summary-and-status Hangul page")
+        );
         assert!(
             summary
                 .unresolved_focus
                 .iter()
-                .any(|focus| focus.contains("dynamic unit"))
+                .any(|focus| focus.contains("page budget"))
         );
     }
 

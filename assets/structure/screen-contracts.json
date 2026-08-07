@@ -131,10 +131,12 @@
         "physical nametable 1 uses 26 FD codes over 140 fetches and 72 FE codes over 820 fetches",
         "the page-00 Japanese code set is 06, 0F, 12, 13, 19, 25, 29, 2A, 30, 31, 44, 45, 4D, 5A, and 5B; original codes 61, 62, 64, 68, 71, 79, 7C, 8D, and AD remain protected",
         "A from map idle selects the unit and opens this summary; A on the selected unit opens unit_status",
-        "the bank 0B phased window handler at 9251 supplies page 00 through 928A before the right FE page settles to 18"
+        "the bank 0B phased window handler at 9251 supplies page 00 through 928A before the right FE page settles to 18",
+        "composite state 04 at 826C appends unit name, class, レベル, original HP, and numbers; state 07 at 85BE walks inventory offsets 13 through 16 and appends each item name and use count",
+        "shared appenders at 8E88, 8EBA, 8E6B, 8EEE, 8F0E, and 8F39 connect the unit, class, item, fixed-label, number, and composite-parser paths"
       ],
-      "unresolved_focus": ["all dynamic unit, class, and item text writers", "all item and equipment variants"],
-      "next_gate": "bind the shared summary-and-status Hangul page to the dynamic unit, class, item, and fixed-label writers",
+      "unresolved_focus": ["all item and equipment variants", "the complete Korean unit, class, and item glyph union and page budget"],
+      "next_gate": "measure the complete unit-UI glyph union before building the shared summary-and-status Hangul page",
       "contract_state": "observed_partial"
     },
     {
@@ -169,10 +171,12 @@
         "original codes 60, 61, 62, 66, 67, 68, 69, 71, 79, 7C, 8D, and AD remain protected as digits, H, P, S, colon, and slash",
         "36 visible sprites supply the portrait while map graphics remain visible behind the windows",
         "unit_summary opens page 00; summary-to-status changes only the left pair from 1A/1A to 13/13 and does not call the central right-FD writer again",
+        "composite state 0F at 87F2 appends fixed-label indices 00 through 06, 27, and 28 with their numeric values; the inherited summary header is not recomposed",
+        "fixed index 09 is original HP and remains protected while ten Japanese fixed labels are translation targets",
         "B returns to movement selection and a second B restores a natural map pair"
       ],
-      "unresolved_focus": ["fixed stat-label and dynamic unit and class text writers", "all unit and class variants"],
-      "next_gate": "share the unit-summary page lifetime without borrowing the automatic class-profile contract",
+      "unresolved_focus": ["all unit and class variants", "the complete Korean unit, class, item, and stat-label glyph union and page budget"],
+      "next_gate": "build on the unit-summary page lifetime without borrowing the automatic class-profile contract",
       "contract_state": "observed_partial"
     },
     {
