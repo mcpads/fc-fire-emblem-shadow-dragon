@@ -1,4 +1,5 @@
 mod chapter_map;
+mod runtime_evidence;
 mod screen_flow;
 mod source_flow;
 
@@ -14,6 +15,7 @@ use crate::{
 
 use self::{
     chapter_map::ChapterMapBinding,
+    runtime_evidence::ContinuousVictoryRuntimeEvidence,
     screen_flow::{ObservationPlan, RuntimeMapSample, VictoryRouteStep},
     source_flow::{CommandRouteBinding, SourceRegionBinding},
 };
@@ -28,6 +30,7 @@ struct ChapterVictoryReport {
     source_regions: Vec<SourceRegionBinding>,
     route_steps: Vec<VictoryRouteStep>,
     runtime_map_sample: RuntimeMapSample,
+    continuous_runtime_evidence: ContinuousVictoryRuntimeEvidence,
     observation_plan: ObservationPlan,
     unresolved: Vec<&'static str>,
     release_eligible: bool,
@@ -46,6 +49,8 @@ pub struct ChapterVictorySummary {
     pub victory_tile_count: usize,
     pub source_region_count: usize,
     pub route_step_count: usize,
+    pub runtime_screen_count: usize,
+    pub continuous_gate_closed: bool,
     pub next_observation_gate: &'static str,
 }
 
@@ -72,6 +77,8 @@ pub fn analyze_chapter_victory(
         victory_tile_count: report.chapter_map.victory_tiles.len(),
         source_region_count: report.source_regions.len(),
         route_step_count: report.route_steps.len(),
+        runtime_screen_count: report.continuous_runtime_evidence.screen_count(),
+        continuous_gate_closed: report.continuous_runtime_evidence.continuous_gate_closed(),
         next_observation_gate: report.observation_plan.next_gate,
     })
 }
@@ -87,19 +94,20 @@ fn build_report(rom: &Rom) -> Result<ChapterVictoryReport> {
             translation_direction: "Japanese to Korean",
             preserve_existing_english_and_digits: true,
             dialogue_content_emitted: false,
-            proof_boundary: "source-bound chapter-eleven victory tiles and unit-command-to-staged-victory control flow plus one runtime map sample; no dialogue source, translation, ROM mutation, coordinate teleport, or direct action-state write",
+            proof_boundary: "source-bound chapter-eleven victory tiles and unit-command-to-staged-victory control flow plus the continuous ordinary-control route from the castle command through the chapter-twelve intro with declared progression accelerations; no dialogue source, translation, ROM mutation, coordinate teleport, direct action-state write, or direct victory-stage write",
         },
         chapter_map,
         command_route,
         source_regions,
         route_steps: screen_flow::victory_route_steps(),
         runtime_map_sample: screen_flow::chapter_eleven_runtime_map_sample(),
+        continuous_runtime_evidence: runtime_evidence::continuous_chapter_eleven_victory_evidence(),
         observation_plan: screen_flow::observation_plan(),
         unresolved: vec![
-            "The two source victory tiles are initially covered by unit-occupancy tile 0x1B in the runtime map buffer; the report does not claim that しろ is visible yet.",
-            "The 0x0C outer-screen victory stages are statically bound but have not been executed in chapter eleven.",
-            "Chapter-eleven epilogue page count, portraits, flashing phases, CHR pairs, and the continuous chapter-eleven-to-twelve transition remain runtime gates.",
-            "Defeat and unfavorable-state checks remain separate later validation gates with progression cheats disabled or intentionally adverse.",
+            "The observed default-yes save choices do not establish either no-choice route.",
+            "The accelerated route establishes reachability rather than baseline difficulty or unaccelerated combat equivalence.",
+            "Defeat and unfavorable-state checks remain separate validation gates with progression cheats disabled or intentionally adverse.",
+            "Other chapter-specific victory, epilogue, portrait, CHR, and transition variants remain unobserved.",
         ],
         release_eligible: false,
     })

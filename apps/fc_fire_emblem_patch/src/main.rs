@@ -366,10 +366,12 @@ fn main() -> Result<()> {
             println!("wrote {}", report.display());
             println!("report SHA-1: {}", summary.report_sha1);
             println!(
-                "chapter victory route: {} source castle tiles, {} source-bound regions, {} route steps, next observation gate: {}",
+                "chapter victory route: {} source castle tiles, {} source-bound regions, {} route steps, {} runtime screens, continuous gate closed: {}, next observation gate: {}",
                 summary.victory_tile_count,
                 summary.source_region_count,
                 summary.route_step_count,
+                summary.runtime_screen_count,
+                summary.continuous_gate_closed,
                 summary.next_observation_gate
             );
         }

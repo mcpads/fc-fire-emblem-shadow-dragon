@@ -117,6 +117,46 @@ pub(crate) const OBSERVED_CHR_PAIRS: &[ObservedChrPair] = &[
     pair("battle_animation", PatternWindow::Left, 0x06, 0x06),
     pair("battle_animation", PatternWindow::Right, 0x02, 0x06),
     pair(
+        "chapter_clear_epilogue_dialogue",
+        PatternWindow::Left,
+        0x11,
+        0x11,
+    ),
+    pair(
+        "chapter_clear_epilogue_dialogue",
+        PatternWindow::Right,
+        0x00,
+        0x18,
+    ),
+    pair("next_story_banner", PatternWindow::Left, 0x1B, 0x1B),
+    pair("next_story_banner", PatternWindow::Right, 0x00, 0x18),
+    pair("chapter_save_offer", PatternWindow::Left, 0x1B, 0x1B),
+    pair("chapter_save_offer", PatternWindow::Right, 0x00, 0x18),
+    pair(
+        "chapter_save_complete_continue_prompt",
+        PatternWindow::Left,
+        0x1C,
+        0x1C,
+    ),
+    pair(
+        "chapter_save_complete_continue_prompt",
+        PatternWindow::Right,
+        0x00,
+        0x18,
+    ),
+    pair(
+        "chapter_transition_blackout",
+        PatternWindow::Left,
+        0x1A,
+        0x1A,
+    ),
+    pair(
+        "chapter_transition_blackout",
+        PatternWindow::Right,
+        0x18,
+        0x18,
+    ),
+    pair(
         "chapter_intro_title_dialogue_composite",
         PatternWindow::Left,
         0x13,
@@ -518,9 +558,9 @@ mod tests {
     fn registry_covers_every_observed_chr_pair() {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
 
-        assert_eq!(report.screen_count, 38);
-        assert_eq!(report.runtime_observed_screen_count, 37);
-        assert_eq!(report.chr_pair_observed_screen_count, 30);
+        assert_eq!(report.screen_count, 39);
+        assert_eq!(report.runtime_observed_screen_count, 38);
+        assert_eq!(report.chr_pair_observed_screen_count, 35);
         assert_eq!(report.mixed_original_latin_screen_count, 18);
         assert_eq!(report.preserved_original_only_screen_count, 1);
         assert_eq!(report.page_switch_verified_screen_count, 1);
@@ -528,7 +568,7 @@ mod tests {
     }
 
     #[test]
-    fn command_menu_keeps_unobserved_labels_and_action_dispatch_as_open_work() {
+    fn command_menu_keeps_remaining_labels_and_actions_as_open_work() {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
         let command_menu = report
             .screens
@@ -543,12 +583,12 @@ mod tests {
             command_menu.translation_scope,
             TranslationScope::JapaneseOnly
         );
-        assert!(command_menu.next_gate.contains("action dispatch"));
+        assert!(command_menu.next_gate.contains("expected state effect"));
         assert!(
             command_menu
                 .unresolved_focus
                 .iter()
-                .any(|focus| focus.contains("remaining 11 command labels"))
+                .any(|focus| focus.contains("remaining 9 command labels"))
         );
         assert!(
             !command_menu
@@ -568,6 +608,12 @@ mod tests {
                 .iter()
                 .any(|focus| focus.contains("C9C2") && focus.contains("00/15"))
         );
+        assert!(
+            command_menu
+                .known_focus
+                .iter()
+                .any(|focus| focus.contains("こうげき") && focus.contains("しろ"))
+        );
     }
 
     #[test]
@@ -576,13 +622,13 @@ mod tests {
 
         assert_eq!(
             report.next_observation_gate.gate_role,
-            "chapter_eleven_to_twelve_transition_sequence"
+            "chapter_transition_alternate_choice_and_failure_variants"
         );
         assert_eq!(
             report.next_observation_gate.gate_kind,
             ObservationGateKind::ScreenSequence
         );
-        assert_eq!(report.next_observation_gate.focus_screen_roles.len(), 5);
+        assert_eq!(report.next_observation_gate.focus_screen_roles.len(), 3);
         assert!(
             report
                 .next_observation_gate
@@ -604,7 +650,7 @@ mod tests {
     #[test]
     fn observation_gate_cannot_masquerade_as_a_screen_role() {
         let invalid_registry = REGISTRY_JSON.replacen(
-            "\"gate_role\": \"chapter_eleven_to_twelve_transition_sequence\"",
+            "\"gate_role\": \"chapter_transition_alternate_choice_and_failure_variants\"",
             "\"gate_role\": \"title\"",
             1,
         );
@@ -624,12 +670,13 @@ mod tests {
             .filter(|screen| screen.surface_family == "chapter_transition")
             .collect::<Vec<_>>();
 
-        assert_eq!(chapter_screens.len(), 5);
+        assert_eq!(chapter_screens.len(), 6);
         for role in [
             "chapter_clear_epilogue_dialogue",
             "next_story_banner",
             "chapter_save_offer",
             "chapter_save_complete_continue_prompt",
+            "chapter_transition_blackout",
             "chapter_intro_title_dialogue_composite",
         ] {
             assert!(
@@ -646,6 +693,17 @@ mod tests {
             next_story.translation_scope,
             TranslationScope::PreservedOriginalOnly
         );
+        assert!(
+            chapter_screens
+                .iter()
+                .all(|screen| screen.chr_pair_observed)
+        );
+        let blackout = chapter_screens
+            .iter()
+            .find(|screen| screen.screen_role == "chapter_transition_blackout")
+            .unwrap();
+        assert_eq!(blackout.input_behavior, InputBehavior::Automatic);
+        assert_eq!(blackout.translation_scope, TranslationScope::NoText);
         let intro = chapter_screens
             .iter()
             .find(|screen| screen.screen_role == "chapter_intro_title_dialogue_composite")

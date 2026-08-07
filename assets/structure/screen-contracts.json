@@ -1,26 +1,24 @@
 {
   "schema": 1,
   "next_observation_gate": {
-    "gate_role": "chapter_eleven_to_twelve_transition_sequence",
+    "gate_role": "chapter_transition_alternate_choice_and_failure_variants",
     "gate_kind": "screen_sequence",
     "focus_screen_roles": [
-      "chapter_clear_epilogue_dialogue",
-      "next_story_banner",
       "chapter_save_offer",
       "chapter_save_complete_continue_prompt",
-      "chapter_intro_title_dialogue_composite"
+      "game_over"
     ],
     "known_focus": [
-      "the chapter-one-to-two sequence established the five distinct screen lifetimes",
-      "a checksummed regular-save intervention reached only the chapter-eleven intro composite",
-      "a checksummed regular-save intervention reached only the chapter-twelve intro composite"
+      "the accelerated ordinary-control chapter-eleven route established six chapter-transition screen lifetimes through the chapter-twelve intro",
+      "the epilogue, NEXT STORY, save offer, save-complete prompt, blackout, and chapter-twelve intro have lifetime-specific CHR pairs",
+      "the observed default yes at the save offer performs a persistent save while the next default yes starts continuation"
     ],
     "unresolved_focus": [
-      "chapter-eleven epilogue through chapter-twelve intro as one continuous route",
-      "exact CHR pairs for the epilogue, NEXT STORY, save offer, and save-complete lifetimes",
-      "save-offer no branch and every flashing or animated phase"
+      "save-offer no branch",
+      "save-complete no branch and remaining flashing phases",
+      "baseline defeat and unfavorable routes with victory accelerations disabled or an explicitly adverse intervention"
     ],
-    "next_action": "from the controlled chapter-eleven start, bind its real victory trigger and use only verified progress accelerators before observing each transition screen role through the chapter-twelve intro"
+    "next_action": "restore a same-launch checkpoint before each consequential choice, bind the expected state change before input, observe both no-choice routes, and validate defeat or unfavorable branches separately without victory accelerations"
   },
   "screens": [
     {
@@ -169,12 +167,13 @@
       "temporal_behavior": "the no-move, terrain, and facility variants retain their right 00/15, 00/18, or 00/19 backing phase; each 152-frame sample kept CHR shadows stable while only cursor and map sprites animated",
       "known_focus": [
         "left 1A/1A with runtime-observed right 00/15, 00/18, and 00/19 CHR shadows",
-        "the observed variants show Japanese もちもの, たいき, たずねる, and ぶきや",
+        "the observed variants show Japanese こうげき, もちもの, たいき, たずねる, ぶきや, and しろ",
         "physical nametable 1 uses page-00 codes 01, 06, 10, 11, 19, and 24 plus FE and FF",
         "composite state 05 at 82E3 can append 15 fixed labels: こうげき, もちもの, つえ, たいき, ぶきや, たずねる, どうぐや, とうぎじょう, たからばこ, しろ, ぎょくざ, あずかりじょ, はなす, へんしん, and ひみつのみせ",
         "the composer selects direct unit capabilities, four terrain actions, adjacent talk, nonempty inventory, five facilities, and unconditional wait",
         "facility labels are selected through the table at 8457; map tile candidates A5/4B/AE/AB select labels 2A/38/39/37 through the terrain predicate at 8465",
-        "fixed indices 0F, 11, 2A, and 29 have runtime display evidence; the remaining 11 labels are statically bound but not visually observed",
+        "fixed indices 0E, 0F, 11, 29, 2A, and 38 have runtime display evidence; the remaining 9 labels are statically bound but not visually observed",
+        "A on こうげき entered weapon selection and A on しろ entered the staged chapter-victory route; other command actions remain separate gates",
         "after status exits through natural 19/19 then 15/19 and movement selection settles at 15/15, command-menu state 05 reaches the central right-FD call at C9C2 with A=00 and shadows 1A/1A + 00/15",
         "the 00/15 command menu stayed on the same CHR shadows for 152 input-free frames while three cursor-and-map-animation screen phases repeated",
         "tile 46 at row 03 column 16 produced たずねる / もちもの / たいき with right 00/19; its 152-frame sample had three repeating screen phases",
@@ -183,8 +182,8 @@
         "the chapter-one weapon-shop menu retained right 00/19 for 152 input-free frames with three repeating screen phases",
         "B cancels the pending movement, restores the cursor and unit record to 08/18, and executes no command"
       ],
-      "unresolved_focus": ["runtime display evidence for the remaining 11 command labels and representative direct-capability, talk, and other-facility variants", "individual action dispatch and semantic state transitions after selecting each command"],
-      "next_gate": "bind the highlighted-command action dispatch before pressing A, then use the known ぶきや route to enter and inventory the shop screen; keep the remaining command labels as separate coverage work",
+      "unresolved_focus": ["runtime display evidence for the remaining 9 command labels and representative staff, talk, and other-facility variants", "individual action dispatch and semantic state transitions after selecting each remaining command"],
+      "next_gate": "bind each remaining highlighted command's expected state effect before one state-coupled A, then capture its downstream screen separately",
       "contract_state": "observed_partial"
     },
     {
@@ -262,11 +261,13 @@
       "translation_scope": "japanese_only",
       "temporal_behavior": "text draws automatically over the retained map; completed pages wait for A and may flash a marker",
       "known_focus": [
-        "chapter-one objective completion enters a portrait and Japanese dialogue sequence over the retained map",
+        "left 11/11 and right 00/18 CHR pairs in the chapter-eleven route",
+        "four completed page variants retain victory stage 02; portrait visibility is true, true, false, true",
+        "dialogue completion state 0E, rather than the unchanged victory stage, binds each per-page A",
         "A advances completed pages and the terminal page enters the NEXT STORY banner"
       ],
-      "unresolved_focus": ["exact CHR pair", "completion-marker phase union", "terminal dialogue-state owner"],
-      "next_gate": "bind the terminal epilogue state without emitting dialogue content",
+      "unresolved_focus": ["remaining chapter-specific epilogue page, portrait, and marker variants"],
+      "next_gate": "reuse the four-page lifetime contract on another chapter without emitting dialogue content",
       "contract_state": "observed_partial"
     },
     {
@@ -277,11 +278,13 @@
       "translation_scope": "preserved_original_only",
       "temporal_behavior": "the centered banner remained visible for 1,200 input-free frames",
       "known_focus": [
+        "left 1B/1B and right 00/18 CHR pairs",
         "retained map and unit sprites behind a centered window",
-        "fixed-label index 3E composes original English NEXT STORY through bank 0B:886A"
+        "fixed-label index 3E composes original English NEXT STORY through bank 0B:886A",
+        "main state 03, outer state 0D, and 1,200 unchanged input-free frames establish an input wait"
       ],
-      "unresolved_focus": ["exact CHR pair", "font-page exit lifetime"],
-      "next_gate": "retain the English label unchanged while binding the banner-to-save transition owner",
+      "unresolved_focus": ["remaining chapter-specific retained-map variants"],
+      "next_gate": "retain the English label unchanged on other chapter transitions",
       "contract_state": "observed_partial"
     },
     {
@@ -292,12 +295,14 @@
       "translation_scope": "japanese_only",
       "temporal_behavior": "the yes-or-no selection cursor may flash over the retained map",
       "known_focus": [
+        "left 1B/1B and right 00/18 CHR pairs",
         "small centered Japanese save question, separate yes-or-no window, map, and unit sprites",
         "fixed-label index 32 composes the Japanese save question through bank 0B:8AE6",
+        "main state 07 and outer state 0D own the offer lifetime",
         "A on the observed default yes choice writes the chapter-clear save"
       ],
-      "unresolved_focus": ["exact CHR pair", "cursor phase union", "unobserved no-choice route"],
-      "next_gate": "bind the save mutation and no-choice route independently of the following completion prompt",
+      "unresolved_focus": ["unobserved no-choice route"],
+      "next_gate": "observe the no-choice route independently of the following completion prompt",
       "contract_state": "observed_partial"
     },
     {
@@ -308,12 +313,29 @@
       "translation_scope": "japanese_only",
       "temporal_behavior": "the selection cursor and retained map sprites may animate independently",
       "known_focus": [
+        "left 1C/1C and right 00/18 CHR pairs",
         "portrait, large Japanese save-complete and continue dialogue, yes-or-no window, map, and unit sprites",
         "the observed default yes choice continues to the next chapter introduction",
-        "saved-state samples contain left 1C/1C and right 00/15 or 00/18 phases, but exact per-lifetime ownership remains open"
+        "main state 04, outer state 0E, and dialogue state 11 own this lifetime"
       ],
-      "unresolved_focus": ["exact CHR pair for this lifetime", "cursor phase union", "unobserved no-choice route"],
-      "next_gate": "capture the offer and completion prompts in one managed run to assign their CHR phases separately",
+      "unresolved_focus": ["cursor phase union", "unobserved no-choice route"],
+      "next_gate": "observe the no-choice route and complete the cursor phase union",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "chapter_transition_blackout",
+      "surface_family": "chapter_transition",
+      "runtime_observed": true,
+      "input_behavior": "automatic",
+      "translation_scope": "no_text",
+      "temporal_behavior": "full-black automatic transition after the observed save-complete continue choice",
+      "known_focus": [
+        "left 1A/1A and right 18/18 CHR pairs",
+        "main state 00 and outer state 09",
+        "no visible text and no input required before the next chapter intro"
+      ],
+      "unresolved_focus": ["remaining chapter-specific transition timing"],
+      "next_gate": "retain this no-text lifetime boundary on another chapter transition",
       "contract_state": "observed_partial"
     },
     {
@@ -329,6 +351,7 @@
         "left 0F/0F and right 00/18 CHR pairs on a checksummed chapter-twelve regular-save reachability intervention",
         "new map, protected chapter-number digits, Japanese chapter title, and Japanese dialogue coexist; portrait presence varies by sampled page",
         "chapter-clear and cold-load entries both reached the same composite surface",
+        "the accelerated continuous chapter-eleven route reached chapter twelve with main state 00, outer state 0B, dialogue state 0E, and left 0F/0F plus right 00/18",
         "chapter twelve used one-based 0C in the regular file and zero-based 0B at 781D",
         "chapter eleven used one-based 0B in the regular file and zero-based 0A at 781D",
         "the sampled chapter-eleven completed page had no portrait while the chapter-two and chapter-twelve samples did",
@@ -337,10 +360,9 @@
       ],
       "unresolved_focus": [
         "title-bar exit lifetime relative to the final dialogue page",
-        "remaining chapter-specific map, portrait, and CHR variants",
-        "chapter-eleven epilogue through chapter-twelve save and intro as one transition sequence"
+        "remaining chapter-specific map, portrait, and CHR variants"
       ],
-      "next_gate": "observe the chapter-eleven-to-twelve transition sequence; do not treat the checksummed cold-load reachability sample as natural completion",
+      "next_gate": "separate remaining chapter-specific variants from the now-observed accelerated chapter-eleven-to-twelve route",
       "contract_state": "observed_partial"
     },
     {

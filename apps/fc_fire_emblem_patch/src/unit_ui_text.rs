@@ -717,7 +717,7 @@ mod tests {
             vec!["unit_summary_header"]
         );
         assert_eq!(report.command_menu.static_label_count, 15);
-        assert_eq!(report.command_menu.runtime_observed_label_count, 4);
+        assert_eq!(report.command_menu.runtime_observed_label_count, 6);
     }
 
     #[test]

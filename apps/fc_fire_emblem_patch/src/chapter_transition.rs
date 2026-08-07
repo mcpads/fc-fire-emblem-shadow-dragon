@@ -184,9 +184,29 @@ struct TransitionScreen {
     visible_components: &'static [&'static str],
     translation_target: &'static str,
     preserved_original: &'static [&'static str],
+    runtime_state: RuntimeScreenState,
+    observed_chr_pair: ChrPair,
     temporal_behavior: &'static str,
     input_actions: &'static [InputAction],
     unresolved_focus: &'static [&'static str],
+}
+
+#[derive(Debug, Serialize)]
+struct RuntimeScreenState {
+    outer_screen_state: u8,
+    outer_screen_state_hex: &'static str,
+    main_state: u8,
+    main_state_hex: &'static str,
+    victory_stage: Option<u8>,
+    dialogue_state: Option<u8>,
+}
+
+#[derive(Debug, Serialize)]
+struct ChrPair {
+    left_fd: u8,
+    left_fe: u8,
+    right_fd: u8,
+    right_fe: u8,
 }
 
 #[derive(Debug, Serialize)]
@@ -350,7 +370,7 @@ fn build_report(rom: &Rom) -> Result<ChapterTransitionReport> {
             translation_direction: "Japanese to Korean",
             preserve_existing_english_and_digits: true,
             dialogue_content_emitted: false,
-            proof_boundary: "source-bound chapter context, title, NEXT STORY, save-offer, and regular-save checksum producers plus the runtime-observed chapter-one-to-two sequence and chapter-eleven and chapter-twelve intro samples; no dialogue source, translation, or ROM mutation",
+            proof_boundary: "source-bound chapter context, title, NEXT STORY, save-offer, and regular-save checksum producers plus the runtime-observed chapter-one-to-two sequence, chapter-eleven intro reachability, and continuous accelerated chapter-eleven-victory-to-chapter-twelve-intro route; no dialogue source, translation, or ROM mutation",
         },
         observed_sequence: transition_screens(),
         chapter_intro_contexts,
@@ -380,12 +400,12 @@ fn build_report(rom: &Rom) -> Result<ChapterTransitionReport> {
             },
         ],
         source_regions,
-        next_universalization_gate: "chapter_eleven_to_twelve_transition_sequence",
+        next_universalization_gate: "chapter_transition_alternate_choice_and_failure_variants",
         unresolved: vec![
             "The chapter-one epilogue and save-complete dialogue use the main dialogue engine, but their dialogue source content is intentionally outside this public report.",
-            "The exact CHR pairs for chapter_clear_epilogue_dialogue, next_story_banner, chapter_save_offer, and chapter_save_complete_continue_prompt are not yet bound to each individual lifetime.",
-            "Chapters eleven and twelve are observed only through checksummed regular-save chapter interventions; chapter ten and eleven epilogues, save choices, and continuous transitions are not observed.",
-            "Chapter-two, chapter-eleven, and chapter-twelve intro samples do not generalize the remaining twenty-two chapters, alternate save choices, or title lifetimes.",
+            "The observed default-yes choices do not establish the save-offer or save-complete no-choice routes.",
+            "The accelerated continuous route establishes reachability but not baseline combat difficulty, defeat, or unfavorable branches.",
+            "Chapter-two, chapter-eleven, and chapter-twelve intro samples do not generalize the remaining twenty-two chapters or all title lifetimes.",
         ],
         release_eligible: false,
     })
@@ -554,14 +574,14 @@ fn chapter_intro_runtime_samples() -> Vec<ChapterIntroRuntimeSample> {
             sample_role: "chapter_twelve_intro",
             chapter_number_one_based: 12,
             chapter_index_zero_based: 11,
-            entry_method: "chapter-one regular save with file-one chapter and checksum changed in a frozen isolated run",
+            entry_method: "continuous chapter-eleven しろ, four-page epilogue, default-yes save, automatic blackout, and continue route with declared movement and HP progression accelerations; the same CHR pair was previously reached by a checksummed cold load",
             left_fd_chr_page: 0x0F,
             left_fe_chr_page: 0x0F,
             right_fd_chr_page: 0x00,
             right_fe_chr_page: 0x18,
             portrait_visible_in_sample: true,
             completion_marker_phase_union_observed: true,
-            proof_limit: "proves later-chapter intro reachability and a distinct left CHR pair, not chapter-eleven completion or the full transition sequence",
+            proof_limit: "proves the continuous accelerated route and a distinct left CHR pair, not baseline difficulty, unaccelerated combat equivalence, alternate save choices, or failure paths",
         },
     ]
 }
@@ -582,17 +602,16 @@ fn transition_screens() -> Vec<TransitionScreen> {
             ],
             translation_target: "Japanese dialogue only",
             preserved_original: &[],
-            temporal_behavior: "text draws automatically; completed pages wait for input",
+            runtime_state: runtime_state(0x0C, "0x0C", 0x3C, "0x3C", Some(0x02), Some(0x0E)),
+            observed_chr_pair: chr_pair(0x11, 0x11, 0x00, 0x18),
+            temporal_behavior: "four observed page variants draw automatically and then wait for A; portrait visibility was true, true, false, true",
             input_actions: &[InputAction {
                 input: "A on a completed page",
                 immediate_effect: "advance the epilogue page; the terminal page enters next_story_banner",
                 may_cause_persistent_gameplay_mutation: false,
                 next_role: "chapter_clear_epilogue_dialogue or next_story_banner",
             }],
-            unresolved_focus: &[
-                "exact CHR pair and flashing-marker phase union",
-                "terminal dialogue-state owner",
-            ],
+            unresolved_focus: &["remaining chapter-specific epilogue page and portrait variants"],
         },
         TransitionScreen {
             sequence_order: 2,
@@ -607,6 +626,8 @@ fn transition_screens() -> Vec<TransitionScreen> {
             ],
             translation_target: "none",
             preserved_original: &["NEXT STORY"],
+            runtime_state: runtime_state(0x0D, "0x0D", 0x03, "0x03", Some(0x00), Some(0x00)),
+            observed_chr_pair: chr_pair(0x1B, 0x1B, 0x00, 0x18),
             temporal_behavior: "the banner remained visible for 1,200 input-free frames",
             input_actions: &[InputAction {
                 input: "A",
@@ -614,7 +635,7 @@ fn transition_screens() -> Vec<TransitionScreen> {
                 may_cause_persistent_gameplay_mutation: false,
                 next_role: "chapter_save_offer",
             }],
-            unresolved_focus: &["exact CHR pair", "font-page exit lifetime"],
+            unresolved_focus: &["remaining chapter-specific retained-map variants"],
         },
         TransitionScreen {
             sequence_order: 3,
@@ -630,6 +651,8 @@ fn transition_screens() -> Vec<TransitionScreen> {
             ],
             translation_target: "Japanese question and choices only",
             preserved_original: &[],
+            runtime_state: runtime_state(0x0D, "0x0D", 0x07, "0x07", None, None),
+            observed_chr_pair: chr_pair(0x1B, 0x1B, 0x00, 0x18),
             temporal_behavior: "the selection cursor may flash",
             input_actions: &[
                 InputAction {
@@ -645,10 +668,7 @@ fn transition_screens() -> Vec<TransitionScreen> {
                     next_role: "chapter_save_complete_continue_prompt",
                 },
             ],
-            unresolved_focus: &[
-                "exact CHR pair and cursor phase union",
-                "the unobserved no-choice route",
-            ],
+            unresolved_focus: &["the unobserved no-choice route"],
         },
         TransitionScreen {
             sequence_order: 4,
@@ -665,20 +685,37 @@ fn transition_screens() -> Vec<TransitionScreen> {
             ],
             translation_target: "Japanese dialogue and choices only",
             preserved_original: &[],
+            runtime_state: runtime_state(0x0E, "0x0E", 0x04, "0x04", None, Some(0x11)),
+            observed_chr_pair: chr_pair(0x1C, 0x1C, 0x00, 0x18),
             temporal_behavior: "the selection cursor and map sprites may animate independently",
             input_actions: &[InputAction {
                 input: "A on the observed default yes choice",
-                immediate_effect: "continue from the completed save into the next chapter introduction",
+                immediate_effect: "continue from the completed save into the automatic black transition",
                 may_cause_persistent_gameplay_mutation: false,
-                next_role: "chapter_intro_title_dialogue_composite",
+                next_role: "chapter_transition_blackout",
             }],
             unresolved_focus: &[
-                "which observed 1C/1C plus 00/15 or 00/18 CHR phase belongs to this exact lifetime",
+                "selection-cursor phase union",
                 "the unobserved no-choice route",
             ],
         },
         TransitionScreen {
             sequence_order: 5,
+            screen_role: "chapter_transition_blackout",
+            entry_condition: "the observed default-yes continue choice leaves the save-complete prompt",
+            runtime_observed: true,
+            input_behavior: "automatic",
+            visible_components: &["full black frame"],
+            translation_target: "none",
+            preserved_original: &[],
+            runtime_state: runtime_state(0x09, "0x09", 0x00, "0x00", None, None),
+            observed_chr_pair: chr_pair(0x1A, 0x1A, 0x18, 0x18),
+            temporal_behavior: "the full-black transition advances without input",
+            input_actions: &[],
+            unresolved_focus: &["remaining chapter-specific transition timing"],
+        },
+        TransitionScreen {
+            sequence_order: 6,
             screen_role: "chapter_intro_title_dialogue_composite",
             entry_condition: "chapter-clear continuation or a cold load enters a chapter introduction",
             runtime_observed: true,
@@ -692,6 +729,8 @@ fn transition_screens() -> Vec<TransitionScreen> {
             ],
             translation_target: "Japanese chapter title and dialogue only",
             preserved_original: &["chapter-number digits"],
+            runtime_state: runtime_state(0x0B, "0x0B", 0x00, "0x00", None, Some(0x0E)),
+            observed_chr_pair: chr_pair(0x0F, 0x0F, 0x00, 0x18),
             temporal_behavior: "the title bar remains while dialogue draws automatically and completed pages wait for input",
             input_actions: &[InputAction {
                 input: "A on a completed dialogue page",
@@ -705,6 +744,33 @@ fn transition_screens() -> Vec<TransitionScreen> {
             ],
         },
     ]
+}
+
+const fn runtime_state(
+    outer_screen_state: u8,
+    outer_screen_state_hex: &'static str,
+    main_state: u8,
+    main_state_hex: &'static str,
+    victory_stage: Option<u8>,
+    dialogue_state: Option<u8>,
+) -> RuntimeScreenState {
+    RuntimeScreenState {
+        outer_screen_state,
+        outer_screen_state_hex,
+        main_state,
+        main_state_hex,
+        victory_stage,
+        dialogue_state,
+    }
+}
+
+const fn chr_pair(left_fd: u8, left_fe: u8, right_fd: u8, right_fe: u8) -> ChrPair {
+    ChrPair {
+        left_fd,
+        left_fe,
+        right_fd,
+        right_fe,
+    }
 }
 
 fn bind_source_region(rom: &Rom, spec: SourceRegionSpec) -> Result<SourceRegionBinding> {
@@ -790,6 +856,7 @@ mod tests {
                 "next_story_banner",
                 "chapter_save_offer",
                 "chapter_save_complete_continue_prompt",
+                "chapter_transition_blackout",
                 "chapter_intro_title_dialogue_composite",
             ]
         );
@@ -802,6 +869,16 @@ mod tests {
                 .iter()
                 .any(|action| action.may_cause_persistent_gameplay_mutation)
         );
+        assert_eq!(
+            [
+                screens[3].observed_chr_pair.left_fd,
+                screens[3].observed_chr_pair.left_fe,
+                screens[3].observed_chr_pair.right_fd,
+                screens[3].observed_chr_pair.right_fe,
+            ],
+            [0x1C, 0x1C, 0x00, 0x18]
+        );
+        assert_eq!(screens[4].input_behavior, "automatic");
     }
 
     #[test]
@@ -829,7 +906,7 @@ mod tests {
     }
 
     #[test]
-    fn later_intro_samples_do_not_claim_the_preceding_transitions() {
+    fn later_intro_samples_keep_entry_methods_and_proof_limits_distinct() {
         let samples = chapter_intro_runtime_samples();
         let chapter_eleven = samples
             .iter()
@@ -863,7 +940,12 @@ mod tests {
             ],
             [0x0F, 0x0F, 0x00, 0x18]
         );
-        assert!(chapter_twelve.proof_limit.contains("not chapter-eleven"));
+        assert!(
+            chapter_twelve
+                .entry_method
+                .contains("continuous chapter-eleven")
+        );
+        assert!(chapter_twelve.proof_limit.contains("baseline difficulty"));
         assert!(!regular_save_reachability().natural_progression_claimed);
     }
 }

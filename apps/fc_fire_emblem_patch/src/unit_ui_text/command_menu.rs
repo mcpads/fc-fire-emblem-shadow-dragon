@@ -145,8 +145,8 @@ pub(super) struct CommandMenuReport {
     facility_actions: Vec<FacilityActionReport>,
     facility_source: FacilitySourceReport,
     input_boundary: InputBoundaryReport,
-    runtime_observed_label_indices: [u8; 4],
-    runtime_observed_label_indices_hex: [&'static str; 4],
+    runtime_observed_label_indices: [u8; 6],
+    runtime_observed_label_indices_hex: [&'static str; 6],
     pub(super) runtime_observed_label_count: usize,
     pub(super) static_label_count: usize,
     page_lifetime_boundary: &'static str,
@@ -385,16 +385,16 @@ pub(super) fn analyze(prg: &[u8]) -> Result<CommandMenuReport> {
             state_kind: "input_waiting_command_menu",
             confirmed_menu_entry: "A on the unit's current tile after movement selection opens the command menu without relocating the unit",
             confirmed_safe_exit: "B returns from the command menu to unit_summary without executing a listed command",
-            unproven_selection_action: "A inside the command menu executes the highlighted command; individual action handlers are not yet bound by this report",
-            observation_rule: "use entry plus B exit only; do not press A inside the menu until the highlighted label and its action handler are both known",
+            unproven_selection_action: "A inside the command menu executes the highlighted command; attack-to-weapon-selection and castle-to-victory are runtime-bound by their dedicated reports, while the remaining individual action handlers are not yet bound by this report",
+            observation_rule: "bind the highlighted label and expected state effect before one state-coupled A; use entry plus B exit when that effect is not yet known",
             idle_behavior: "152 input-free frames kept the CHR shadows fixed while only cursor and map-sprite animation phases changed",
         },
-        runtime_observed_label_indices: [0x0F, 0x11, 0x2A, 0x29],
-        runtime_observed_label_indices_hex: ["0x0F", "0x11", "0x2A", "0x29"],
-        runtime_observed_label_count: 4,
+        runtime_observed_label_indices: [0x0E, 0x0F, 0x11, 0x29, 0x2A, 0x38],
+        runtime_observed_label_indices_hex: ["0x0E", "0x0F", "0x11", "0x29", "0x2A", "0x38"],
+        runtime_observed_label_count: 6,
         static_label_count: COMMAND_LABEL_SPECS.len(),
         page_lifetime_boundary: "command-menu entry executes the central right-FD supply at 0xC9C2 with composite state 0x05; runtime variants cover backing FE pages 15, 18, and 19",
-        next_gate: "bind the highlighted-command action dispatch before pressing A inside the menu, then enter one representative downstream surface; keep runtime display evidence for the remaining eleven labels separate",
+        next_gate: "bind each remaining highlighted-command action before one state-coupled A and keep runtime display evidence for the remaining nine labels separate",
     })
 }
 
@@ -622,7 +622,7 @@ mod tests {
     }
 
     #[test]
-    fn keeps_unbound_command_execution_out_of_the_observation_path() {
+    fn requires_an_expected_state_effect_before_command_execution() {
         let report = report();
         assert_eq!(
             report.input_boundary.state_kind,
@@ -639,7 +639,19 @@ mod tests {
             report
                 .input_boundary
                 .observation_rule
-                .contains("do not press A")
+                .contains("expected state effect")
+        );
+        assert!(
+            report
+                .input_boundary
+                .observation_rule
+                .contains("use entry plus B exit")
+        );
+        assert!(
+            report
+                .input_boundary
+                .unproven_selection_action
+                .contains("castle-to-victory")
         );
     }
 }

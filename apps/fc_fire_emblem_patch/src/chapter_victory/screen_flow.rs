@@ -50,7 +50,7 @@ pub(super) fn victory_route_steps() -> Vec<VictoryRouteStep> {
                 "terrain restored after unit occupancy changes",
             ],
             exit_condition: "Marth reaches either source castle coordinate through ordinary movement and opens the unit command menu",
-            proof_status: "map reached; victory coordinates source-bound; movement route not yet executed",
+            proof_status: "observed through ordinary movement, turn endings, and combat with declared movement and HP accelerations; no coordinate write was used",
         },
         VictoryRouteStep {
             order: 2,
@@ -64,7 +64,7 @@ pub(super) fn victory_route_steps() -> Vec<VictoryRouteStep> {
                 "main state 0x0F before selection",
             ],
             exit_condition: "A on しろ changes the command result and main state through the bound command dispatcher",
-            proof_status: "label and eligibility source-bound; chapter-eleven runtime variant not yet observed",
+            proof_status: "observed at row 8 column 6 with four stable labels, flashing cursor, raw selection 0x02, and main-state transition 0x0F to 0x10",
         },
         VictoryRouteStep {
             order: 3,
@@ -78,7 +78,7 @@ pub(super) fn victory_route_steps() -> Vec<VictoryRouteStep> {
                 "first visible dialogue or banner entry",
             ],
             exit_condition: "the staged handler reaches the first stable chapter-transition screen or an explicit input-wait state",
-            proof_status: "complete static route; chapter-eleven runtime execution pending",
+            proof_status: "static route and chapter-eleven runtime execution observed through main state 0x3C, victory stage 0x02, and the first completed epilogue page",
         },
         VictoryRouteStep {
             order: 4,
@@ -94,8 +94,8 @@ pub(super) fn victory_route_steps() -> Vec<VictoryRouteStep> {
                 "flashing-marker phase unions",
                 "CHR pairs per screen lifetime",
             ],
-            exit_condition: "chapter-twelve intro exits to its map with every intermediate screen and input effect recorded",
-            proof_status: "screen roles known from chapter-one progression and later intro reachability; continuous chapter-eleven sequence pending",
+            exit_condition: "chapter-twelve title and dialogue composite is visible with every intermediate screen and observed default-yes input effect recorded",
+            proof_status: "continuous chapter-eleven route observed through four epilogue pages, NEXT STORY, save offer, save-complete prompt, automatic blackout, and chapter-twelve intro",
         },
     ]
 }
@@ -114,17 +114,17 @@ pub(super) fn chapter_eleven_runtime_map_sample() -> RuntimeMapSample {
         runtime_values_at_source_victory_coordinates: &[0x1B, 0x1B],
         runtime_values_hex: &["0x1B", "0x1B"],
         interpretation: "initial unit occupancy overlays both source castle tiles in the runtime map buffer; this is not evidence that the terrain or command is absent",
-        proof_limit: "single frozen original-Japanese runtime sample after the chapter-eleven intro; no movement or しろ selection has been executed",
+        proof_limit: "the values describe the initial original-Japanese map sample; later ordinary enemy processing moved slot 6 away from row 8 column 6 and the continuous route used that freed castle tile",
     }
 }
 
 pub(super) fn observation_plan() -> ObservationPlan {
     ObservationPlan {
-        next_gate: "move Marth by ordinary game rules to row 8 column 5 or 6, observe the complete flashing-phase union of the しろ command-menu variant, then select it once under state-coupled control",
+        next_gate: "promote the closed accelerated route into the global screen registry, then validate alternate save choices, remaining chapter variants, and failure paths as separate gates",
         allowed_progression: &[
             "inspect current unit and blocker positions before choosing a movement route",
             "use the already verified movement-range acceleration only when its effect is explicit",
-            "resolve combat through the game action path and re-check any temporary HP intervention immediately before combat",
+            "resolve combat through the game action path and re-apply the complete documented enemy-HP bundle only when needed because one-time writes can be refreshed by game processing",
             "release A on the first bound state change and stop automatic execution at the next stable screen or input wait",
         ],
         screen_sampling: &[
@@ -183,13 +183,15 @@ mod tests {
     }
 
     #[test]
-    fn runtime_overlay_sample_does_not_claim_the_castle_command_is_visible() {
+    fn runtime_overlay_sample_stays_an_initial_state_not_the_route_outcome() {
         let sample = chapter_eleven_runtime_map_sample();
         assert_eq!(sample.source_victory_coordinates, [(8, 5), (8, 6)]);
         assert_eq!(
             sample.runtime_values_at_source_victory_coordinates,
             [0x1B, 0x1B]
         );
-        assert!(sample.proof_limit.contains("no movement"));
+        assert!(sample.proof_limit.contains("initial"));
+        assert!(sample.proof_limit.contains("slot 6"));
+        assert!(!sample.proof_limit.contains("no movement"));
     }
 }
