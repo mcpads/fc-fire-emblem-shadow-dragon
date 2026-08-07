@@ -4,7 +4,7 @@ members = ["apps/fc_fire_emblem_patch"]
 
 [workspace.package]
 edition = "2024"
-license = "GPL-3.0-or-later"
+license = "GPL-2.0-or-later"
 
 [workspace.dependencies]
 anyhow = "1"
