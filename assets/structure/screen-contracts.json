@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "next_screen_role": "unit_status",
+  "next_screen_role": "unit_summary",
   "screens": [
     {
       "screen_role": "title",
@@ -119,19 +119,60 @@
       "contract_state": "page_switch_verified"
     },
     {
+      "screen_role": "unit_summary",
+      "surface_family": "unit_ui",
+      "runtime_observed": true,
+      "input_behavior": "input_wait",
+      "translation_scope": "japanese_with_preserved_original_latin",
+      "temporal_behavior": "the selected-unit cursor flashes and the map animation continues; 152 input-free frames produced three screen phases while the windows and text stayed present",
+      "known_focus": [
+        "left 1A/1A and right 00/18 CHR shadows",
+        "the summary combines a Japanese unit name, class, level label, and item names with original S, HP, punctuation, slash, and digits",
+        "physical nametable 1 uses 26 FD codes over 140 fetches and 72 FE codes over 820 fetches",
+        "the page-00 Japanese code set is 06, 0F, 12, 13, 19, 25, 29, 2A, 30, 31, 44, 45, 4D, 5A, and 5B; original codes 61, 62, 64, 68, 71, 79, 7C, 8D, and AD remain protected",
+        "A from map idle selects the unit and opens this summary; A on the selected unit opens unit_status",
+        "the bank 0B phased window handler at 9251 supplies page 00 through 928A before the right FE page settles to 18"
+      ],
+      "unresolved_focus": ["all dynamic unit, class, and item text writers", "all item and equipment variants"],
+      "next_gate": "bind the shared summary-and-status Hangul page to the dynamic unit, class, item, and fixed-label writers",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "unit_command_menu",
+      "surface_family": "unit_ui",
+      "runtime_observed": true,
+      "input_behavior": "input_wait",
+      "translation_scope": "japanese_only",
+      "temporal_behavior": "the command cursor and map animation continue; 152 input-free frames produced three screen phases",
+      "known_focus": [
+        "left 1A/1A and right 00/18 CHR shadows",
+        "the observed no-move command variant shows Japanese もちもの and たいき",
+        "physical nametable 1 uses page-00 codes 01, 06, 10, 11, 19, and 24 plus FE and FF",
+        "B returns to unit_summary without ending the selected unit's action"
+      ],
+      "unresolved_focus": ["attack, staff, visit, shop, storage, arena, seize, talk, and inventory command variants", "exact command-table writers"],
+      "next_gate": "inventory command variants by unit and terrain before assigning one page contract",
+      "contract_state": "observed_partial"
+    },
+    {
       "screen_role": "unit_status",
       "surface_family": "unit_ui",
       "runtime_observed": true,
       "input_behavior": "input_wait",
       "translation_scope": "japanese_with_preserved_original_latin",
-      "temporal_behavior": "unresolved",
+      "temporal_behavior": "the detail transition settled by 32 frames and every sample through 128 additional input-free frames had the same screen SHA-256",
       "known_focus": [
         "left 13/13 and right 00/18 CHR shadows",
-        "Japanese unit name, class, level, and stat labels share page 00 with original S, HP, punctuation, and digits",
-        "map graphics remain visible behind the windows and a portrait is supplied by sprites"
+        "Japanese unit name, class, level, and nine stat labels share page 00 with original S, HP, punctuation, slash, and digits",
+        "physical nametable 1 has 32 FD and 76 FE triggers; page-00 and page-18 fetch counts are 364 and 596",
+        "page-00 Japanese codes are 01, 02, 05, 06, 07, 08, 0A, 0B, 0C, 0F, 11, 14, 19, 1A, 1B, 1C, 1E, 20, 25, 27, 28, 29, 2D, 2F, 30, 31, 44, 45, 4D, 5A, 5B, 86, and 87",
+        "original codes 60, 61, 62, 66, 67, 68, 69, 71, 79, 7C, 8D, and AD remain protected as digits, H, P, S, colon, and slash",
+        "36 visible sprites supply the portrait while map graphics remain visible behind the windows",
+        "unit_summary opens page 00; summary-to-status changes only the left pair from 1A/1A to 13/13 and does not call the central right-FD writer again",
+        "B returns to movement selection and a second B restores a natural map pair"
       ],
-      "unresolved_focus": ["exact Japanese and preserved-code tile sets", "sprite and temporal union", "screen-local writer and lifetime owner"],
-      "next_gate": "close the interactive unit-status consumer without borrowing the automatic class-profile contract",
+      "unresolved_focus": ["fixed stat-label and dynamic unit and class text writers", "all unit and class variants"],
+      "next_gate": "share the unit-summary page lifetime without borrowing the automatic class-profile contract",
       "contract_state": "observed_partial"
     },
     {

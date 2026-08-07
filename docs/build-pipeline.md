@@ -14,7 +14,7 @@
 
 ## 화면 계약 조사
 
-`analyze-screen-contracts`는 국소 주소를 패치하기 전에 화면 역할별로 일본어 대상, 보존할 원본 영어·숫자, FD 문자, FE 그래픽, 스프라이트 UI, 점멸·애니메이션, 입력 대기·자동 전이, 글꼴 페이지 진입·이탈·재진입을 함께 점검한다. 자동 병종 설명 `class_profile`과 입력 대기 능력치 `unit_status`를 분리한 현재 20개 역할 중 16개는 실행으로 관측했고 14개는 CHR 쌍까지 결속했다. 상점·아이템·후반 장 전환·엔딩은 관측 전 상태로 남긴다. 부대 목록 혼합 문자 계약을 닫았고 다음 대상은 `unit_status`다.
+`analyze-screen-contracts`는 국소 주소를 패치하기 전에 화면 역할별로 일본어 대상, 보존할 원본 영어·숫자, FD 문자, FE 그래픽, 스프라이트 UI, 점멸·애니메이션, 입력 대기·자동 전이, 글꼴 페이지 진입·이탈·재진입을 함께 점검한다. 자동 병종 설명 `class_profile`, 선택 직후 `unit_summary`, 행동 명령 `unit_command_menu`, 상세 능력치 `unit_status`를 분리한 현재 22개 역할 중 18개는 실행으로 관측했고 16개는 CHR 쌍까지 결속했다. 상점·아이템·후반 장 전환·엔딩은 관측 전 상태로 남긴다. 다음 대상은 같은 문자 페이지 수명을 공유하는 `unit_summary`와 `unit_status`다.
 
 ```sh
 cargo run -p fc-fire-emblem-patch -- analyze-screen-contracts \

@@ -73,6 +73,10 @@ pub(crate) const OBSERVED_CHR_PAIRS: &[ObservedChrPair] = &[
     pair("map_idle", PatternWindow::Right, 0x15, 0x15),
     pair("map_idle", PatternWindow::Right, 0x18, 0x18),
     pair("map_idle", PatternWindow::Right, 0x19, 0x19),
+    pair("unit_summary", PatternWindow::Left, 0x1A, 0x1A),
+    pair("unit_summary", PatternWindow::Right, 0x00, 0x18),
+    pair("unit_command_menu", PatternWindow::Left, 0x1A, 0x1A),
+    pair("unit_command_menu", PatternWindow::Right, 0x00, 0x18),
     pair("unit_status", PatternWindow::Left, 0x13, 0x13),
     pair("unit_status", PatternWindow::Right, 0x00, 0x18),
     pair("map_menu", PatternWindow::Left, 0x1A, 0x1A),
@@ -339,34 +343,34 @@ mod tests {
     fn registry_covers_every_observed_chr_pair() {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
 
-        assert_eq!(report.screen_count, 20);
-        assert_eq!(report.runtime_observed_screen_count, 16);
-        assert_eq!(report.chr_pair_observed_screen_count, 14);
-        assert_eq!(report.mixed_original_latin_screen_count, 6);
+        assert_eq!(report.screen_count, 22);
+        assert_eq!(report.runtime_observed_screen_count, 18);
+        assert_eq!(report.chr_pair_observed_screen_count, 16);
+        assert_eq!(report.mixed_original_latin_screen_count, 7);
         assert_eq!(report.page_switch_verified_screen_count, 1);
         assert_eq!(report.mixed_text_page_verified_screen_count, 1);
     }
 
     #[test]
-    fn status_is_the_next_mixed_text_contract_after_roster_proof() {
+    fn summary_is_the_next_mixed_text_contract_after_roster_proof() {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
-        let status = report
+        let summary = report
             .screens
             .iter()
             .find(|screen| screen.screen_role == report.next_screen_role)
             .unwrap();
 
-        assert!(status.runtime_observed);
-        assert!(status.chr_pair_observed);
+        assert!(summary.runtime_observed);
+        assert!(summary.chr_pair_observed);
         assert_eq!(
-            status.translation_scope,
+            summary.translation_scope,
             TranslationScope::JapaneseWithPreservedOriginalLatin
         );
         assert!(
-            status
+            summary
                 .unresolved_focus
                 .iter()
-                .any(|focus| focus.contains("exact Japanese"))
+                .any(|focus| focus.contains("dynamic unit"))
         );
     }
 
