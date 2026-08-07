@@ -20,6 +20,7 @@ mod rom;
 mod roster_localization;
 mod rp2a03;
 mod screen_contracts;
+mod shop_flow;
 mod static_analysis;
 mod text_inventory;
 mod tracked;
@@ -67,6 +68,12 @@ enum Command {
     AnalyzeScreenContracts {
         source: PathBuf,
         #[arg(long, default_value = "out/screen-contracts.json")]
+        report: PathBuf,
+    },
+    /// Bind weapon-shop entry, item selection, preflight, confirmation, and mutation boundaries.
+    AnalyzeShopFlow {
+        source: PathBuf,
+        #[arg(long, default_value = "out/shop-flow.json")]
         report: PathBuf,
     },
     /// Bind unit-summary and unit-status composers, sources, labels, and shared page lifetime.
@@ -317,6 +324,15 @@ fn main() -> Result<()> {
                 summary.runtime_observed_screen_count,
                 summary.mixed_original_latin_screen_count,
                 summary.next_screen_role
+            );
+        }
+        Command::AnalyzeShopFlow { source, report } => {
+            let summary = shop_flow::analyze_shop_flow(&source, &report)?;
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "shop flow: {} observed screens, {} source-bound code regions, next: {}",
+                summary.screen_count, summary.code_region_count, summary.next_screen_role
             );
         }
         Command::AnalyzeUnitUiText { source, report } => {

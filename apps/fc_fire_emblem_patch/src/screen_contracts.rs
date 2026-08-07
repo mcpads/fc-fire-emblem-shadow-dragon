@@ -98,6 +98,34 @@ pub(crate) const OBSERVED_CHR_PAIRS: &[ObservedChrPair] = &[
     pair("battle_animation", PatternWindow::Right, 0x02, 0x06),
     pair("chapter2_intro", PatternWindow::Left, 0x13, 0x13),
     pair("chapter2_intro", PatternWindow::Right, 0x00, 0x18),
+    pair("weapon_shop_item_list", PatternWindow::Left, 0x1E, 0x1E),
+    pair("weapon_shop_item_list", PatternWindow::Right, 0x00, 0x15),
+    pair(
+        "weapon_shop_purchase_confirmation",
+        PatternWindow::Left,
+        0x1E,
+        0x1E,
+    ),
+    pair(
+        "weapon_shop_purchase_confirmation",
+        PatternWindow::Right,
+        0x00,
+        0x15,
+    ),
+    pair(
+        "weapon_shop_purchase_result",
+        PatternWindow::Left,
+        0x1E,
+        0x1E,
+    ),
+    pair(
+        "weapon_shop_purchase_result",
+        PatternWindow::Right,
+        0x00,
+        0x15,
+    ),
+    pair("weapon_shop_exit_message", PatternWindow::Left, 0x1E, 0x1E),
+    pair("weapon_shop_exit_message", PatternWindow::Right, 0x00, 0x15),
 ];
 
 const fn pair(
@@ -341,10 +369,10 @@ mod tests {
     fn registry_covers_every_observed_chr_pair() {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
 
-        assert_eq!(report.screen_count, 22);
-        assert_eq!(report.runtime_observed_screen_count, 18);
-        assert_eq!(report.chr_pair_observed_screen_count, 16);
-        assert_eq!(report.mixed_original_latin_screen_count, 7);
+        assert_eq!(report.screen_count, 28);
+        assert_eq!(report.runtime_observed_screen_count, 22);
+        assert_eq!(report.chr_pair_observed_screen_count, 20);
+        assert_eq!(report.mixed_original_latin_screen_count, 11);
         assert_eq!(report.page_switch_verified_screen_count, 1);
         assert_eq!(report.mixed_text_page_verified_screen_count, 1);
     }
@@ -393,7 +421,7 @@ mod tests {
     }
 
     #[test]
-    fn next_screen_can_select_an_unobserved_surface() {
+    fn next_screen_selects_the_first_unobserved_shop_outcome() {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
         let next = report
             .screens
@@ -401,10 +429,42 @@ mod tests {
             .find(|screen| screen.screen_role == report.next_screen_role)
             .unwrap();
 
-        assert_eq!(next.screen_role, "shop");
+        assert_eq!(next.screen_role, "weapon_shop_inventory_full_message");
         assert!(!next.runtime_observed);
         assert_eq!(next.contract_state, ContractState::Unobserved);
-        assert!(next.next_gate.contains("ぶきや"));
+        assert!(next.next_gate.contains("four inventory slots"));
+    }
+
+    #[test]
+    fn observed_shop_screens_keep_japanese_and_preserved_latin_separate() {
+        let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
+        let shop_screens = report
+            .screens
+            .iter()
+            .filter(|screen| screen.surface_family == "weapon_shop")
+            .collect::<Vec<_>>();
+
+        assert_eq!(shop_screens.len(), 7);
+        assert_eq!(
+            shop_screens
+                .iter()
+                .filter(|screen| screen.runtime_observed)
+                .count(),
+            4
+        );
+        assert!(
+            shop_screens[..4]
+                .iter()
+                .all(|screen| screen.chr_pair_observed)
+        );
+        assert!(shop_screens[..4].iter().all(|screen| {
+            screen.translation_scope == TranslationScope::JapaneseWithPreservedOriginalLatin
+        }));
+        assert!(
+            shop_screens[4..]
+                .iter()
+                .all(|screen| screen.translation_scope == TranslationScope::Unresolved)
+        );
     }
 
     #[test]

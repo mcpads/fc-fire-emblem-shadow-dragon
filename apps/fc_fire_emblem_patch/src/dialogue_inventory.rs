@@ -551,6 +551,24 @@ pub(crate) struct MainDialogueStorageLine {
 }
 
 #[derive(Debug, Serialize)]
+pub(crate) struct ShopDialogueTableBinding {
+    pub(crate) table_id: &'static str,
+    pub(crate) source_prg_bank: u8,
+    pub(crate) source_prg_bank_hex: String,
+    pub(crate) directory_selector: u8,
+    pub(crate) directory_selector_hex: String,
+    pub(crate) directory_entry_cpu_address: u16,
+    pub(crate) directory_entry_cpu_address_hex: String,
+    pub(crate) pointer_table_cpu_address: u16,
+    pub(crate) pointer_table_cpu_address_hex: String,
+    pub(crate) pointer_table_sha1: String,
+    pub(crate) pointer_count: usize,
+    pub(crate) unique_target_count: usize,
+    pub(crate) first_entry_pointer_cpu_address: u16,
+    pub(crate) first_entry_pointer_cpu_address_hex: String,
+}
+
+#[derive(Debug, Serialize)]
 struct DialogueStructureReport {
     schema_version: u8,
     scope: ReportScope,
@@ -1117,6 +1135,39 @@ pub(crate) fn inspect_main_dialogue_storage(
         "main dialogue storage record export lost coverage"
     );
     Ok(records)
+}
+
+pub(crate) fn inspect_shop_dialogue_table(source: &[u8]) -> Result<ShopDialogueTableBinding> {
+    let spec = DIALOGUE_TABLE_SPECS
+        .iter()
+        .find(|spec| spec.id == "shop-and-item-dialogue")
+        .context("shop-and-item dialogue table is absent")?;
+    let report = extract_dialogue_table(source, spec)?;
+    let directory = report
+        .directory_binding
+        .as_ref()
+        .context("shop-and-item dialogue table has no directory binding")?;
+    let first_entry = report
+        .entries
+        .first()
+        .context("shop-and-item dialogue table is empty")?;
+
+    Ok(ShopDialogueTableBinding {
+        table_id: report.id,
+        source_prg_bank: report.source_prg_bank,
+        source_prg_bank_hex: report.source_prg_bank_hex,
+        directory_selector: directory.selector,
+        directory_selector_hex: directory.selector_hex.clone(),
+        directory_entry_cpu_address: directory.directory_entry_cpu_address,
+        directory_entry_cpu_address_hex: directory.directory_entry_cpu_address_hex.clone(),
+        pointer_table_cpu_address: report.pointer_table_cpu_address,
+        pointer_table_cpu_address_hex: report.pointer_table_cpu_address_hex,
+        pointer_table_sha1: report.pointer_table_sha1,
+        pointer_count: report.pointer_count,
+        unique_target_count: report.unique_target_count,
+        first_entry_pointer_cpu_address: first_entry.pointer_cpu_address,
+        first_entry_pointer_cpu_address_hex: first_entry.pointer_cpu_address_hex.clone(),
+    })
 }
 
 fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
