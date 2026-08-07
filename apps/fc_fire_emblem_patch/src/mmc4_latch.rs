@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{collections::BTreeSet, fs, path::Path};
 
 use anyhow::{Context, Result, bail, ensure};
 use clap::ValueEnum;
@@ -158,6 +158,10 @@ struct LatchNametableReport {
     ending_latch: &'static str,
     fd_trigger_count: usize,
     fe_trigger_count: usize,
+    fd_tile_occurrence_count: usize,
+    fe_tile_occurrence_count: usize,
+    fd_tile_codes_hex: Vec<String>,
+    fe_tile_codes_hex: Vec<String>,
     tile_attribute_count: usize,
     unused_tail_fill: u8,
     output_len: usize,
@@ -224,6 +228,10 @@ struct ProjectedAttributes {
     bytes: Vec<u8>,
     fd_trigger_count: usize,
     fe_trigger_count: usize,
+    fd_tile_occurrence_count: usize,
+    fe_tile_occurrence_count: usize,
+    fd_tile_codes: BTreeSet<u8>,
+    fe_tile_codes: BTreeSet<u8>,
     ending_latch: Mmc4Latch,
 }
 
@@ -255,6 +263,10 @@ pub fn project_mmc4_latch_nametable(
         ending_latch: projection.ending_latch.label(),
         fd_trigger_count: projection.fd_trigger_count,
         fe_trigger_count: projection.fe_trigger_count,
+        fd_tile_occurrence_count: projection.fd_tile_occurrence_count,
+        fe_tile_occurrence_count: projection.fe_tile_occurrence_count,
+        fd_tile_codes_hex: hex_codes(&projection.fd_tile_codes),
+        fe_tile_codes_hex: hex_codes(&projection.fe_tile_codes),
         tile_attribute_count: TILE_COUNT,
         unused_tail_fill,
         output_len: projection.bytes.len(),
@@ -438,12 +450,27 @@ fn project_attributes(
     let mut latch = initial_latch;
     let mut fd_trigger_count = 0;
     let mut fe_trigger_count = 0;
+    let mut fd_tile_occurrence_count = 0;
+    let mut fe_tile_occurrence_count = 0;
+    let mut fd_tile_codes = BTreeSet::new();
+    let mut fe_tile_codes = BTreeSet::new();
     for row in 0..TILE_ROW_COUNT {
         for column in 0..TILE_COLUMN_COUNT {
             let tile_index = row * TILE_COLUMN_COUNT + column;
             let palette = tile_palette(nametable, column, row);
             let bank = bank_for_latch(latch, fd_bank, fe_bank);
             bytes[tile_index] = (palette << 6) | bank;
+
+            match latch {
+                Mmc4Latch::Fd => {
+                    fd_tile_occurrence_count += 1;
+                    fd_tile_codes.insert(nametable[tile_index]);
+                }
+                Mmc4Latch::Fe => {
+                    fe_tile_occurrence_count += 1;
+                    fe_tile_codes.insert(nametable[tile_index]);
+                }
+            }
 
             match nametable[tile_index] {
                 0xFD => {
@@ -463,8 +490,16 @@ fn project_attributes(
         bytes,
         fd_trigger_count,
         fe_trigger_count,
+        fd_tile_occurrence_count,
+        fe_tile_occurrence_count,
+        fd_tile_codes,
+        fe_tile_codes,
         ending_latch: latch,
     })
+}
+
+fn hex_codes(codes: &BTreeSet<u8>) -> Vec<String> {
+    codes.iter().map(|code| format!("{code:02X}")).collect()
 }
 
 fn bank_for_latch(latch: Mmc4Latch, fd_bank: u8, fe_bank: u8) -> u8 {
@@ -503,7 +538,28 @@ mod tests {
         assert_eq!(&projection.bytes[..5], &[0x18, 0x18, 0x00, 0x00, 0x18]);
         assert_eq!(projection.fd_trigger_count, 1);
         assert_eq!(projection.fe_trigger_count, 1);
+        assert_eq!(projection.fd_tile_occurrence_count, 2);
+        assert_eq!(projection.fe_tile_occurrence_count, TILE_COUNT - 2);
+        assert_eq!(projection.fd_tile_codes, BTreeSet::from([0x00, 0xFE]));
+        assert_eq!(projection.fe_tile_codes, BTreeSet::from([0x00, 0xFD]));
         assert_eq!(projection.ending_latch, Mmc4Latch::Fe);
+    }
+
+    #[test]
+    fn tile_usage_is_sorted_and_bound_to_the_latch_before_each_trigger() {
+        let mut nametable = vec![0x20; NAMETABLE_PAGE_LEN];
+        nametable[0] = 0xFD;
+        nametable[1] = 0x31;
+        nametable[2] = 0x10;
+        nametable[3] = 0xFE;
+        nametable[4] = 0x42;
+
+        let projection = project_attributes(&nametable, 0x00, 0x15, Mmc4Latch::Fe).unwrap();
+
+        assert_eq!(projection.fd_tile_occurrence_count, 3);
+        assert_eq!(projection.fe_tile_occurrence_count, TILE_COUNT - 3);
+        assert_eq!(hex_codes(&projection.fd_tile_codes), ["10", "31", "FE"]);
+        assert_eq!(hex_codes(&projection.fe_tile_codes), ["20", "42", "FD"]);
     }
 
     #[test]

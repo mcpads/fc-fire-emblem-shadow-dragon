@@ -76,6 +76,8 @@ cargo run -p fc-fire-emblem-patch -- plan-hangul-page-proof \
 
 `project-mmc4-latch-nametable`은 실행에서 덤프한 정확히 1 KiB 또는 2 KiB 네임테이블을 받아 한 페이지의 32×30 배경 타일을 제로 스크롤 행 우선 순서로 순회한다. 각 타일에는 현재 FD/FE 래치의 6비트 CHR 뱅크와 원본 속성표의 팔레트 2비트를 결합한다. `FD`·`FE` 트리거 타일 자체는 이전 래치 뱅크를 사용하고, 전환은 다음 타일부터 적용한다. 마지막 64바이트는 화면 개입과 같은 결정적 1 KiB 입력을 만들기 위해 초기 래치 뱅크로 채운다.
 
+같은 순회에서 각 타일이 FD와 FE 가운데 어느 쪽으로 fetch되는지도 집계한다. 보고서는 양쪽의 실제 타일 수와 정렬된 고유 코드 집합을 함께 내므로, 문자·창·배경을 한 네임테이블에 섞어 세지 않고 화면별 한글 작업 집합을 분리할 수 있다. 스프라이트는 이 투영에 포함되지 않으므로 OAM과 PPU `$0000` 공급 페이지를 화면 계약에서 별도로 확인한다.
+
 ```sh
 cargo run -p fc-fire-emblem-patch -- project-mmc4-latch-nametable \
   path/to/nametable.bin \
