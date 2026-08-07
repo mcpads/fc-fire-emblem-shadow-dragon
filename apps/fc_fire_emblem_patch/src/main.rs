@@ -117,6 +117,8 @@ enum Command {
     /// Plan two expanded-CHR Hangul pages whose union exceeds one active page.
     PlanHangulPageProof {
         source: PathBuf,
+        #[arg(long, default_value = "assets/translation/options.ko.json")]
+        localization: PathBuf,
         #[arg(long, default_value = "out/hangul-page-proof.chr")]
         page_pack: PathBuf,
         #[arg(long, default_value = "out/hangul-page-proof.json")]
@@ -384,10 +386,16 @@ fn main() -> Result<()> {
         }
         Command::PlanHangulPageProof {
             source,
+            localization,
             page_pack,
             report,
         } => {
-            let summary = hangul_page_plan::plan_hangul_page_proof(&source, &page_pack, &report)?;
+            let summary = hangul_page_plan::plan_hangul_page_proof(
+                &source,
+                &localization,
+                &page_pack,
+                &report,
+            )?;
             println!("wrote {}", page_pack.display());
             println!("page pack SHA-1: {}", summary.page_pack_sha1);
             println!("wrote {}", report.display());
