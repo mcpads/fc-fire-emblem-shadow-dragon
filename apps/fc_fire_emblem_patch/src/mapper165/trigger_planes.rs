@@ -65,6 +65,7 @@ const OBSERVED_CHR_PAIRS: &[ObservedChrPair] = &[
     observed("map_menu", PatternWindow::Right, 0x00, 0x19),
     observed("unit_roster", PatternWindow::Left, 0x18, 0x18),
     observed("unit_roster", PatternWindow::Right, 0x00, 0x19),
+    observed("battle_animation", PatternWindow::Right, 0x02, 0x06),
 ];
 
 const fn observed(
