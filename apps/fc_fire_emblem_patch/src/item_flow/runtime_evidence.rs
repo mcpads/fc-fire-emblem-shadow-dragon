@@ -15,6 +15,8 @@ pub(super) struct RuntimeObservation {
     menu: Option<MenuEvidence>,
     #[serde(skip_serializing_if = "Option::is_none")]
     dialogue: Option<DialogueEvidence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    variants: Option<&'static [RuntimeVariant]>,
     inventory: InventoryEvidence,
 }
 
@@ -47,12 +49,28 @@ struct InventoryEvidence {
     mutation_observed: bool,
 }
 
+#[derive(Debug, Serialize)]
+struct RuntimeVariant {
+    role: &'static str,
+    setup: &'static str,
+    result_code: u8,
+    result_code_hex: &'static str,
+    source_record_before: &'static str,
+    source_record_after: &'static str,
+    observed_effect: &'static str,
+}
+
 pub(super) fn runtime_observations() -> Vec<RuntimeObservation> {
     const SOURCE_BEFORE: &str = "05010112120030060706070207090400081800020f00002a160000";
     const SOURCE_EQUIPPED_SECOND: &str = "050101121200300607060702070904000818000f020000162a0000";
     const SOURCE_WITH_FIRST_ITEM_REMOVED: &str =
         "050101121200300607060702070904000818000f00000016000000";
     const TRANSFER_TARGET_AFTER: &str = "040101121200300705050603070904000817000c020200262a2a00";
+    const USE_SUCCESS_BEFORE: &str = "05010111120030060706070207090400081800020f40002a160500";
+    const USE_SUCCESS_AFTER: &str = "05010112120030060706070207090400081800020f40002a160400";
+    const USE_FULL_HP: &str = "05010112120030060706070207090400081800020f40002a160500";
+    const USE_EXHAUSTED_BEFORE: &str = "05010111120030060706070207090400081800020f40002a160100";
+    const USE_EXHAUSTED_AFTER: &str = "05010112120030060706070207090400081800020f00002a160000";
 
     vec![
         RuntimeObservation {
@@ -69,6 +87,7 @@ pub(super) fn runtime_observations() -> Vec<RuntimeObservation> {
             temporal_observation: "152 regular plus 168 irregularly spaced input-free frames kept both item rows and CHR fixed while cursor and map sprites cycled through three screenshot phases",
             menu: Some(menu(1, 0x7FEE, 0x7FF3, 0x03)),
             dialogue: None,
+            variants: None,
             inventory: inventory(
                 &[
                     "item 02 / durability 2A / displayed てつのつるぎ 42",
@@ -93,6 +112,7 @@ pub(super) fn runtime_observations() -> Vec<RuntimeObservation> {
             temporal_observation: "for item 02, 152 regular plus 168 irregularly spaced input-free frames kept the three available action rows and CHR fixed while cursor and map sprites cycled through three screenshot phases",
             menu: Some(menu(2, 0x7FEF, 0x7FF4, 0x0D)),
             dialogue: None,
+            variants: None,
             inventory: inventory(
                 &[
                     "selected item 02 at record offset 13",
@@ -118,10 +138,64 @@ pub(super) fn runtime_observations() -> Vec<RuntimeObservation> {
             temporal_observation: "the result message completed by 77 frames and remained in input wait through 227 frames; a second-slot branch separately proved the item and durability swap",
             menu: None,
             dialogue: Some(dialogue(0x19, 0x19)),
+            variants: None,
             inventory: inventory(
                 &["selected slot 14 became the equipped first slot together with its durability"],
                 SOURCE_BEFORE,
                 SOURCE_EQUIPPED_SECOND,
+                None,
+            ),
+        },
+        RuntimeObservation {
+            screen_role: "item_use_result",
+            main_state: 0x1E,
+            main_state_hex: "0x1E".to_owned(),
+            left_chr_pair: Some("1A/1A"),
+            right_chr_pair: Some("00/15"),
+            screenshot_phase_sha256: &[
+                "7f3f1bf053706eed54a72c5af87286e3e44d321921550e6756aa97b3ccb3fd4a",
+                "b750f48e6b60723e31f13865545f21ec6a351800eecdef50d567858c9a923879",
+                "63bec5b19fa3a11d2f14534249dadce08720a28a866b0962e342ca192dad0f64",
+            ],
+            temporal_observation: "action code 1 automatically drew the initial use text, ran the item-family effect at progression 2, and settled at progression 3; 47 additional input-free frames kept the completed result and CHR fixed until A dismissed it and completed the unit action",
+            menu: None,
+            dialogue: Some(dialogue(0x1A, 0x19)),
+            variants: Some(&[
+                RuntimeVariant {
+                    role: "positive_heal",
+                    setup: "item 40 with durability 05 at HP 17/18",
+                    result_code: 0x1D,
+                    result_code_hex: "0x1D",
+                    source_record_before: USE_SUCCESS_BEFORE,
+                    source_record_after: USE_SUCCESS_AFTER,
+                    observed_effect: "HP increased by 1 and durability decreased from 5 to 4 in the same effect frame",
+                },
+                RuntimeVariant {
+                    role: "full_hp_no_effect",
+                    setup: "item 40 with durability 05 at HP 18/18",
+                    result_code: 0x30,
+                    result_code_hex: "0x30",
+                    source_record_before: USE_FULL_HP,
+                    source_record_after: USE_FULL_HP,
+                    observed_effect: "the no-effect result preserved HP, item, and durability",
+                },
+                RuntimeVariant {
+                    role: "exhausted_use",
+                    setup: "item 40 with durability 01 at HP 17/18",
+                    result_code: 0x1D,
+                    result_code_hex: "0x1D",
+                    source_record_before: USE_EXHAUSTED_BEFORE,
+                    source_record_after: USE_EXHAUSTED_AFTER,
+                    observed_effect: "HP increased by 1, durability reached zero, and the selected item slot was cleared",
+                },
+            ]),
+            inventory: inventory(
+                &[
+                    "selected item 40 at record offset 15",
+                    "the reversible reachability setup does not establish natural acquisition provenance",
+                ],
+                USE_SUCCESS_BEFORE,
+                USE_SUCCESS_AFTER,
                 None,
             ),
         },
@@ -138,6 +212,7 @@ pub(super) fn runtime_observations() -> Vec<RuntimeObservation> {
             temporal_observation: "211 irregularly spaced input-free frames showed a textless map overlay whose active candidate sprite or marker can be absent in one capture phase",
             menu: None,
             dialogue: None,
+            variants: None,
             inventory: inventory(
                 &[
                     "B returned to item_inventory_list at state 1B without changing the source record",
@@ -160,6 +235,7 @@ pub(super) fn runtime_observations() -> Vec<RuntimeObservation> {
             temporal_observation: "the completed transfer result remained in input wait for 218 additional irregularly spaced frames while map sprites animated",
             menu: None,
             dialogue: Some(dialogue(0x1B, 0x1A)),
+            variants: None,
             inventory: inventory(
                 &[
                     "item 02 and durability 2A moved from the source first slot to the selected target empty slot",
@@ -183,6 +259,7 @@ pub(super) fn runtime_observations() -> Vec<RuntimeObservation> {
             temporal_observation: "the completed discard result remained in input wait for 200 additional irregularly spaced frames while map sprites animated",
             menu: None,
             dialogue: Some(dialogue(0x1C, 0x1A)),
+            variants: None,
             inventory: inventory(
                 &[
                     "the selected first slot was cleared and the remaining item and durability were compacted forward",

@@ -153,7 +153,7 @@ pub(super) fn item_screens() -> Vec<ItemScreen> {
         },
         ItemScreen {
             screen_role: "item_use_result",
-            runtime_observed: false,
+            runtime_observed: true,
             input_behavior: "mixed",
             main_states: &[0x1E],
             composite_state: None,
@@ -164,8 +164,13 @@ pub(super) fn item_screens() -> Vec<ItemScreen> {
                 "item-family-specific effect or failure result",
                 "map or target context",
             ],
-            input_actions: vec![],
-            next_gate: "select a naturally usable item family, bind its effect target and failure route, then sample initial dialogue, effect, durability depletion, and exhausted-item removal separately",
+            input_actions: vec![InputAction {
+                input: "A after progression state 3",
+                immediate_effect: "dismiss the completed result dialogue, restore main state 0x19, and complete the unit action",
+                may_cause_persistent_gameplay_mutation: true,
+                next_role: "map_idle",
+            }],
+            next_gate: "bind the remaining usable item families and font-page exit lifetime without treating the observed self-heal family as universal",
         },
         ItemScreen {
             screen_role: "item_transfer_result",
@@ -206,7 +211,7 @@ pub(super) fn action_choices(labels: &[FixedLabelBinding]) -> Vec<ItemActionChoi
         (
             1,
             "item flag byte at 0xD9C3[item-1] has bit 0x40 set",
-            "state 0x1E first opens dialogue index 0x1A, then later progression state 2 selects the item-specific effect and can decrement durability or clear an exhausted item",
+            "state 0x1E first opens dialogue index 0x1A, then progression state 2 selects the item-specific effect; positive effects can decrement durability or clear an exhausted item while a no-effect result can preserve the use count",
             "return state 0x19 after item-specific progression completes",
             "item_use_result",
         ),

@@ -91,6 +91,8 @@ pub(crate) const OBSERVED_CHR_PAIRS: &[ObservedChrPair] = &[
     pair("item_action_menu", PatternWindow::Right, 0x00, 0x15),
     pair("item_equip_result", PatternWindow::Left, 0x1A, 0x1A),
     pair("item_equip_result", PatternWindow::Right, 0x00, 0x15),
+    pair("item_use_result", PatternWindow::Left, 0x1A, 0x1A),
+    pair("item_use_result", PatternWindow::Right, 0x00, 0x15),
     pair(
         "item_transfer_target_selection",
         PatternWindow::Left,
@@ -448,8 +450,8 @@ mod tests {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
 
         assert_eq!(report.screen_count, 36);
-        assert_eq!(report.runtime_observed_screen_count, 33);
-        assert_eq!(report.chr_pair_observed_screen_count, 29);
+        assert_eq!(report.runtime_observed_screen_count, 34);
+        assert_eq!(report.chr_pair_observed_screen_count, 30);
         assert_eq!(report.mixed_original_latin_screen_count, 18);
         assert_eq!(report.page_switch_verified_screen_count, 1);
         assert_eq!(report.mixed_text_page_verified_screen_count, 1);
@@ -499,7 +501,7 @@ mod tests {
     }
 
     #[test]
-    fn next_screen_moves_from_observed_item_actions_to_use_result() {
+    fn next_screen_moves_from_observed_item_use_to_later_chapter_transition() {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
         let next = report
             .screens
@@ -507,10 +509,10 @@ mod tests {
             .find(|screen| screen.screen_role == report.next_screen_role)
             .unwrap();
 
-        assert_eq!(next.screen_role, "item_use_result");
+        assert_eq!(next.screen_role, "later_chapter_transition");
         assert!(!next.runtime_observed);
         assert_eq!(next.contract_state, ContractState::Unobserved);
-        assert!(next.next_gate.contains("naturally usable item family"));
+        assert!(next.next_gate.contains("later transitions"));
     }
 
     #[test]
@@ -530,6 +532,7 @@ mod tests {
         );
         for role in [
             "item_equip_result",
+            "item_use_result",
             "item_transfer_target_selection",
             "item_transfer_result",
             "item_discard_result",

@@ -23,6 +23,11 @@ pub(super) const SELECTED_ITEM_SLOT_ADDRESS: u16 = 0x77B1;
 pub(super) const SELECTED_ITEM_ACTION_ADDRESS: u16 = 0x77B2;
 pub(super) const ELIGIBLE_RECIPIENT_COUNT_ADDRESS: u16 = 0x7750;
 pub(super) const ITEM_ACTION_RESULT_DIALOGUE_INDICES: [u8; 4] = [0x19, 0x1A, 0x1B, 0x1C];
+pub(super) const VULNERARY_ITEM_ID: u8 = 0x40;
+pub(super) const ITEM_DEFAULT_USES_TABLE_ADDRESS: u16 = 0xD87F;
+pub(super) const ITEM_ACTION_FLAGS_TABLE_ADDRESS: u16 = 0xD9C3;
+pub(super) const VULNERARY_DEFAULT_USES: u8 = 5;
+pub(super) const VULNERARY_ACTION_FLAGS: u8 = 0x41;
 
 pub(super) const MAP_STATE_POINTER_TABLE_ADDRESS: u16 = 0x8967;
 pub(super) const COMPOSITE_POINTER_TABLE_ADDRESS: u16 = 0x8006;
@@ -129,11 +134,32 @@ pub(super) const SOURCE_REGIONS: &[SourceRegionSpec] = &[
         "d551403b3b5092b301f217cc4c9474e9163e5f16",
     ),
     region(
-        "dispatch_item_use_result",
+        "dispatch_item_action_result_stage",
         0x06,
         0x9579,
-        218,
-        "a9d44b4d4d4b1011d74b31e8ba3dbe874fa4a9bb",
+        48,
+        "6d7ef375255c3a4e8631178d988eef46cee1bbff",
+    ),
+    region(
+        "dispatch_item_use_effect_family",
+        0x06,
+        0x95A9,
+        121,
+        "96b9cc408a1d906e5c545dda3cc33f63cf4213ae",
+    ),
+    region(
+        "finalize_item_use_consumption",
+        0x06,
+        0x9622,
+        49,
+        "b8c4e76ba9b5bdc6c704b69bb147a8da77651425",
+    ),
+    region(
+        "apply_vulnerary_heal",
+        0x06,
+        0x9653,
+        61,
+        "d168df1f45306ddbe91c0939483464048b3bf2ac",
     ),
     region(
         "swap_selected_item_to_equipped_slot",
@@ -316,6 +342,36 @@ pub(super) fn validate_action_result_dialogue_indices(rom: &Rom) -> Result<()> {
     ensure!(
         bytes == ITEM_ACTION_RESULT_DIALOGUE_INDICES,
         "item action result dialogue index table changed"
+    );
+    Ok(())
+}
+
+pub(super) fn validate_vulnerary_family(rom: &Rom) -> Result<()> {
+    let item_index = u16::from(VULNERARY_ITEM_ID - 1);
+    let default_uses = source_slice(
+        rom,
+        FIXED_PRG_BANK,
+        ITEM_DEFAULT_USES_TABLE_ADDRESS + item_index,
+        1,
+    )?[0];
+    ensure!(
+        default_uses == VULNERARY_DEFAULT_USES,
+        "item 0x{VULNERARY_ITEM_ID:02X} default uses changed: expected {VULNERARY_DEFAULT_USES}, found {default_uses}"
+    );
+
+    let action_flags = source_slice(
+        rom,
+        FIXED_PRG_BANK,
+        ITEM_ACTION_FLAGS_TABLE_ADDRESS + item_index,
+        1,
+    )?[0];
+    ensure!(
+        action_flags == VULNERARY_ACTION_FLAGS,
+        "item 0x{VULNERARY_ITEM_ID:02X} action flags changed: expected 0x{VULNERARY_ACTION_FLAGS:02X}, found 0x{action_flags:02X}"
+    );
+    ensure!(
+        action_flags & 0x40 != 0,
+        "item 0x{VULNERARY_ITEM_ID:02X} no longer exposes the use action"
     );
     Ok(())
 }

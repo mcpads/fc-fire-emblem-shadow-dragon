@@ -15,11 +15,13 @@ mod source_contract;
 use runtime_evidence::{RuntimeObservation, runtime_observations};
 use screen_roles::{ItemActionChoice, ItemScreen, action_choices, item_screens};
 use source_contract::{
-    COMPOSITE_STATE_ADDRESS, ELIGIBLE_RECIPIENT_COUNT_ADDRESS, ITEM_FLOW_STATES,
-    MAIN_STATE_ADDRESS, MENU_CHOICE_MASK_BASE_ADDRESS, MENU_CONTROLLER_INDEX_ADDRESS,
-    MENU_RESULT_ADDRESS, MENU_SELECTION_BASE_ADDRESS, SELECTED_ITEM_ACTION_ADDRESS,
-    SELECTED_ITEM_ADDRESS, SELECTED_ITEM_SLOT_ADDRESS, SOURCE_REGIONS, bind_source_region,
-    validate_action_result_dialogue_indices, validate_item_action_labels, validate_state_routes,
+    COMPOSITE_STATE_ADDRESS, ELIGIBLE_RECIPIENT_COUNT_ADDRESS, ITEM_ACTION_FLAGS_TABLE_ADDRESS,
+    ITEM_DEFAULT_USES_TABLE_ADDRESS, ITEM_FLOW_STATES, MAIN_STATE_ADDRESS,
+    MENU_CHOICE_MASK_BASE_ADDRESS, MENU_CONTROLLER_INDEX_ADDRESS, MENU_RESULT_ADDRESS,
+    MENU_SELECTION_BASE_ADDRESS, SELECTED_ITEM_ACTION_ADDRESS, SELECTED_ITEM_ADDRESS,
+    SELECTED_ITEM_SLOT_ADDRESS, SOURCE_REGIONS, VULNERARY_ACTION_FLAGS, VULNERARY_DEFAULT_USES,
+    VULNERARY_ITEM_ID, bind_source_region, validate_action_result_dialogue_indices,
+    validate_item_action_labels, validate_state_routes, validate_vulnerary_family,
 };
 
 #[derive(Debug, Serialize)]
@@ -30,6 +32,7 @@ struct ItemFlowReport {
     route: ItemRoute,
     screens: Vec<ItemScreen>,
     action_choices: Vec<ItemActionChoice>,
+    usable_item_families: Vec<UsableItemFamilyBinding>,
     empty_inventory_label: FixedLabelBinding,
     runtime_observations: Vec<RuntimeObservation>,
     source_regions: Vec<SourceRegionBinding>,
@@ -82,6 +85,23 @@ struct CodeLocation {
     prg_bank_hex: String,
     cpu_address: u16,
     cpu_address_hex: String,
+}
+
+#[derive(Debug, Serialize)]
+struct UsableItemFamilyBinding {
+    item_id: u8,
+    item_id_hex: String,
+    action_flags: u8,
+    action_flags_hex: String,
+    action_flags_source: CodeLocation,
+    default_uses: u8,
+    default_uses_source: CodeLocation,
+    progression_dispatch: CodeLocation,
+    effect_handler: CodeLocation,
+    effect_target: &'static str,
+    success_rule: &'static str,
+    no_effect_rule: &'static str,
+    consumption_rule: &'static str,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -144,6 +164,7 @@ pub fn analyze_item_flow(source_path: &Path, report_path: &Path) -> Result<ItemF
 fn build_report(rom: &Rom) -> Result<ItemFlowReport> {
     validate_state_routes(rom)?;
     validate_action_result_dialogue_indices(rom)?;
+    validate_vulnerary_family(rom)?;
     let labels = validate_item_action_labels(rom)?;
     let source_regions = SOURCE_REGIONS
         .iter()
@@ -162,7 +183,7 @@ fn build_report(rom: &Rom) -> Result<ItemFlowReport> {
             translation_direction: "Japanese to Korean",
             preserve_existing_english_and_digits: true,
             dialogue_content_emitted: false,
-            proof_boundary: "source-bound item screen flow plus runtime-observed equip, transfer, and discard branches; no translated dialogue or ROM mutation",
+            proof_boundary: "source-bound item screen flow plus runtime-observed equip, use, transfer, and discard branches; no translated dialogue or ROM mutation",
         },
         route: ItemRoute {
             command_result: 6,
@@ -195,12 +216,32 @@ fn build_report(rom: &Rom) -> Result<ItemFlowReport> {
         },
         screens: item_screens(),
         action_choices,
+        usable_item_families: vec![vulnerary_family()],
         empty_inventory_label,
         runtime_observations: runtime_observations(),
         source_regions,
-        unresolved_downstream_roles: vec!["item_use_result"],
+        unresolved_downstream_roles: vec!["item_transfer_target_selection"],
         release_eligible: false,
     })
+}
+
+fn vulnerary_family() -> UsableItemFamilyBinding {
+    let item_index = u16::from(VULNERARY_ITEM_ID - 1);
+    UsableItemFamilyBinding {
+        item_id: VULNERARY_ITEM_ID,
+        item_id_hex: format!("0x{VULNERARY_ITEM_ID:02X}"),
+        action_flags: VULNERARY_ACTION_FLAGS,
+        action_flags_hex: format!("0x{VULNERARY_ACTION_FLAGS:02X}"),
+        action_flags_source: location(0x0F, ITEM_ACTION_FLAGS_TABLE_ADDRESS + item_index),
+        default_uses: VULNERARY_DEFAULT_USES,
+        default_uses_source: location(0x0F, ITEM_DEFAULT_USES_TABLE_ADDRESS + item_index),
+        progression_dispatch: location(0x06, 0x95A9),
+        effect_handler: location(0x06, 0x9653),
+        effect_target: "current HP at selected unit-record offset 0x03, capped by max HP at offset 0x04",
+        success_rule: "heal min(10, max HP - current HP) and select result code 0x1D",
+        no_effect_rule: "when healing is zero, select result code 0x30 and skip consumption",
+        consumption_rule: "positive healing decrements durability; zero durability clears the selected item slot and repairs the equipped-slot invariant when needed",
+    }
 }
 
 fn location(prg_bank: u8, cpu_address: u16) -> CodeLocation {
@@ -254,6 +295,19 @@ mod tests {
         let result_table = source_file_offset(0x06, 0x9516).unwrap();
         source[result_table..result_table + ITEM_ACTION_RESULT_DIALOGUE_INDICES.len()]
             .copy_from_slice(&ITEM_ACTION_RESULT_DIALOGUE_INDICES);
+        let vulnerary_index = u16::from(VULNERARY_ITEM_ID - 1);
+        write_byte(
+            &mut source,
+            0x0F,
+            ITEM_DEFAULT_USES_TABLE_ADDRESS + vulnerary_index,
+            VULNERARY_DEFAULT_USES,
+        );
+        write_byte(
+            &mut source,
+            0x0F,
+            ITEM_ACTION_FLAGS_TABLE_ADDRESS + vulnerary_index,
+            VULNERARY_ACTION_FLAGS,
+        );
         for spec in ITEM_ACTION_LABELS {
             write_u16(
                 &mut source,
@@ -270,6 +324,11 @@ mod tests {
     fn write_u16(source: &mut [u8], bank: u8, address: u16, value: u16) {
         let offset = source_file_offset(bank, address).unwrap();
         source[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn write_byte(source: &mut [u8], bank: u8, address: u16, value: u8) {
+        let offset = source_file_offset(bank, address).unwrap();
+        source[offset] = value;
     }
 
     #[test]
@@ -316,6 +375,33 @@ mod tests {
     }
 
     #[test]
+    fn vulnerary_family_binds_use_eligibility_and_default_uses() {
+        let rom = Rom::parse(source_fixture()).unwrap();
+        validate_vulnerary_family(&rom).unwrap();
+
+        let family = vulnerary_family();
+        assert_eq!(family.item_id, 0x40);
+        assert_eq!(family.action_flags, 0x41);
+        assert_eq!(family.default_uses, 5);
+        assert_eq!(family.progression_dispatch.cpu_address, 0x95A9);
+        assert_eq!(family.effect_handler.cpu_address, 0x9653);
+    }
+
+    #[test]
+    fn rejects_changed_vulnerary_use_metadata() {
+        let mut source = source_fixture();
+        let item_index = u16::from(VULNERARY_ITEM_ID - 1);
+        write_byte(
+            &mut source,
+            0x0F,
+            ITEM_ACTION_FLAGS_TABLE_ADDRESS + item_index,
+            0x01,
+        );
+        let rom = Rom::parse(source).unwrap();
+        assert!(validate_vulnerary_family(&rom).is_err());
+    }
+
+    #[test]
     fn action_results_keep_distinct_roles_dialogues_and_return_routes() {
         let rom = Rom::parse(source_fixture()).unwrap();
         validate_action_result_dialogue_indices(&rom).unwrap();
@@ -342,6 +428,26 @@ mod tests {
             ITEM_ACTION_RESULT_DIALOGUE_INDICES
         );
         assert!(actions[2].return_route.contains("otherwise 0x19"));
+    }
+
+    #[test]
+    fn observed_item_use_keeps_success_no_effect_and_exhaustion_distinct() {
+        let observations = serde_json::to_value(runtime_observations()).unwrap();
+        let item_use = observations
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["screen_role"] == "item_use_result")
+            .unwrap();
+        let variants = item_use["variants"].as_array().unwrap();
+
+        assert_eq!(variants.len(), 3);
+        assert_eq!(variants[0]["role"], "positive_heal");
+        assert_eq!(variants[1]["role"], "full_hp_no_effect");
+        assert_eq!(variants[1]["result_code_hex"], "0x30");
+        assert_eq!(variants[2]["role"], "exhausted_use");
+        assert_eq!(item_use["left_chr_pair"], "1A/1A");
+        assert_eq!(item_use["right_chr_pair"], "00/15");
     }
 
     #[test]
