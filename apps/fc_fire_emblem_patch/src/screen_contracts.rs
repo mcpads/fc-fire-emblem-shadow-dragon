@@ -89,6 +89,20 @@ pub(crate) const OBSERVED_CHR_PAIRS: &[ObservedChrPair] = &[
     pair("item_inventory_list", PatternWindow::Right, 0x00, 0x15),
     pair("item_action_menu", PatternWindow::Left, 0x1A, 0x1A),
     pair("item_action_menu", PatternWindow::Right, 0x00, 0x15),
+    pair("item_equip_result", PatternWindow::Left, 0x1A, 0x1A),
+    pair("item_equip_result", PatternWindow::Right, 0x00, 0x15),
+    pair(
+        "item_transfer_target_selection",
+        PatternWindow::Left,
+        0x1A,
+        0x1A,
+    ),
+    pair(
+        "item_transfer_target_selection",
+        PatternWindow::Right,
+        0x15,
+        0x15,
+    ),
     pair("map_menu", PatternWindow::Left, 0x1A, 0x1A),
     pair("map_menu", PatternWindow::Right, 0x00, 0x19),
     pair("options", PatternWindow::Left, 0x1A, 0x1A),
@@ -433,10 +447,10 @@ mod tests {
     fn registry_covers_every_observed_chr_pair() {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
 
-        assert_eq!(report.screen_count, 33);
-        assert_eq!(report.runtime_observed_screen_count, 29);
-        assert_eq!(report.chr_pair_observed_screen_count, 27);
-        assert_eq!(report.mixed_original_latin_screen_count, 19);
+        assert_eq!(report.screen_count, 36);
+        assert_eq!(report.runtime_observed_screen_count, 33);
+        assert_eq!(report.chr_pair_observed_screen_count, 29);
+        assert_eq!(report.mixed_original_latin_screen_count, 18);
         assert_eq!(report.page_switch_verified_screen_count, 1);
         assert_eq!(report.mixed_text_page_verified_screen_count, 1);
     }
@@ -485,7 +499,7 @@ mod tests {
     }
 
     #[test]
-    fn next_screen_moves_from_observed_item_menus_to_action_results() {
+    fn next_screen_moves_from_observed_item_actions_to_use_result() {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
         let next = report
             .screens
@@ -493,10 +507,39 @@ mod tests {
             .find(|screen| screen.screen_role == report.next_screen_role)
             .unwrap();
 
-        assert_eq!(next.screen_role, "item_action_result");
+        assert_eq!(next.screen_role, "item_use_result");
         assert!(!next.runtime_observed);
         assert_eq!(next.contract_state, ContractState::Unobserved);
-        assert!(next.next_gate.contains("equip, use, give, discard"));
+        assert!(next.next_gate.contains("naturally usable item family"));
+    }
+
+    #[test]
+    fn item_action_results_remain_distinct_screen_roles() {
+        let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
+        let item_screens = report
+            .screens
+            .iter()
+            .filter(|screen| screen.surface_family == "item")
+            .collect::<Vec<_>>();
+
+        assert_eq!(item_screens.len(), 7);
+        assert!(
+            item_screens
+                .iter()
+                .all(|screen| screen.screen_role != "item_action_result")
+        );
+        for role in [
+            "item_equip_result",
+            "item_transfer_target_selection",
+            "item_transfer_result",
+            "item_discard_result",
+        ] {
+            assert!(
+                item_screens
+                    .iter()
+                    .any(|screen| screen.screen_role == role && screen.runtime_observed)
+            );
+        }
     }
 
     #[test]

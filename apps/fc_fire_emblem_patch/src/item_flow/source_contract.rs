@@ -22,6 +22,7 @@ pub(super) const SELECTED_ITEM_ADDRESS: u16 = 0x77B0;
 pub(super) const SELECTED_ITEM_SLOT_ADDRESS: u16 = 0x77B1;
 pub(super) const SELECTED_ITEM_ACTION_ADDRESS: u16 = 0x77B2;
 pub(super) const ELIGIBLE_RECIPIENT_COUNT_ADDRESS: u16 = 0x7750;
+pub(super) const ITEM_ACTION_RESULT_DIALOGUE_INDICES: [u8; 4] = [0x19, 0x1A, 0x1B, 0x1C];
 
 pub(super) const MAP_STATE_POINTER_TABLE_ADDRESS: u16 = 0x8967;
 pub(super) const COMPOSITE_POINTER_TABLE_ADDRESS: u16 = 0x8006;
@@ -65,6 +66,13 @@ pub(super) const SOURCE_REGIONS: &[SourceRegionSpec] = &[
         "2d5074bc6862f0004d4013113def3788c5639927",
     ),
     region(
+        "select_item_transfer_target",
+        0x06,
+        0x914B,
+        156,
+        "81ccd909dce8881aa6b8eefbfe24a339bd6a4484",
+    ),
+    region(
         "enter_item_inventory_flow",
         0x06,
         0x93D4,
@@ -91,6 +99,13 @@ pub(super) const SOURCE_REGIONS: &[SourceRegionSpec] = &[
         0x944C,
         202,
         "9601f0ae0d7fba3fbf7896d6ea9bb9cee5cd1ba9",
+    ),
+    region(
+        "select_item_action_result_dialogue",
+        0x06,
+        0x9516,
+        4,
+        "dd10ce1c999a9f53c8dd5dfdda02c757ac100836",
     ),
     region(
         "count_inventory_items",
@@ -292,6 +307,15 @@ pub(super) fn validate_state_routes(rom: &Rom) -> Result<()> {
     ensure!(
         handler == 0x90B6,
         "unit command result 6 no longer enters item flow"
+    );
+    Ok(())
+}
+
+pub(super) fn validate_action_result_dialogue_indices(rom: &Rom) -> Result<()> {
+    let bytes = source_slice(rom, 0x06, 0x9516, ITEM_ACTION_RESULT_DIALOGUE_INDICES.len())?;
+    ensure!(
+        bytes == ITEM_ACTION_RESULT_DIALOGUE_INDICES,
+        "item action result dialogue index table changed"
     );
     Ok(())
 }

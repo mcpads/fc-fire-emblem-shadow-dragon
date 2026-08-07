@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "next_screen_role": "item_action_result",
+  "next_screen_role": "item_use_result",
   "screens": [
     {
       "screen_role": "title",
@@ -488,34 +488,86 @@
       "contract_state": "observed_partial"
     },
     {
-      "screen_role": "item_action_result",
+      "screen_role": "item_transfer_target_selection",
+      "surface_family": "item",
+      "runtime_observed": true,
+      "input_behavior": "input_wait",
+      "translation_scope": "no_text",
+      "temporal_behavior": "211 irregularly spaced input-free frames showed two map phases; the active candidate sprite or marker can be absent in one capture",
+      "known_focus": [
+        "action code 2 enters main state 1D and the textless 1A/1A + 15/15 map overlay",
+        "bank 06:914B maps direction input within the eligible-recipient list, A approves a candidate, and B requests the non-mutating cancel route",
+        "B returned to item_inventory_list state 1B with the source unit record byte-identical",
+        "A copies the approved target into 7715 before bank 06:952A moves item and durability and clears the source slot"
+      ],
+      "unresolved_focus": ["multiple-candidate direction variants", "full-recipient capacity feedback"],
+      "next_gate": "observe the full-recipient branch and multiple-candidate movement while sampling more than one flashing phase",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "item_equip_result",
+      "surface_family": "item",
+      "runtime_observed": true,
+      "input_behavior": "input_wait",
+      "translation_scope": "japanese_only",
+      "temporal_behavior": "the result message completed by 77 frames and stayed visible without input through 227 frames while map sprites animated",
+      "known_focus": [
+        "main state 1D swaps the selected item and durability with the first slot before entering state 1E",
+        "dialogue index 19 uses return state 19 after the shared dialogue wait",
+        "selecting record slot 14 changed item and durability pairs 02/2A,0F/16 to 0F/16,02/2A",
+        "the observed result used left 1A/1A and right 00/15 CHR pairs"
+      ],
+      "unresolved_focus": ["dialogue dismissal inputs", "right 00/18 and 00/19 backing variants", "font-page exit and re-entry lifetime"],
+      "next_gate": "bind dialogue dismissal and sample the remaining backing variants without generalizing this result to item use",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "item_use_result",
       "surface_family": "item",
       "runtime_observed": false,
       "input_behavior": "mixed",
       "translation_scope": "japanese_with_preserved_original_latin",
       "temporal_behavior": "unresolved",
       "known_focus": [
-        "main state 1D at bank 06:944C selects equip, use, give, or discard behavior and state 1E at 06:9579 owns item-use effects and result progression",
-        "equip swaps the selected item and durability with the equipped first slot, use can decrement durability and clear an exhausted item, and discard clears then compacts inventory",
-        "the action-dependent result dialogue must not be generalized from one item family"
+        "action code 1 selects initial dialogue index 1A and forces return state 19",
+        "state 1E at bank 06:9579 dispatches progression by 05DB; progression state 2 selects item-family-specific effects",
+        "successful effects can decrement durability, clear an exhausted item, compact inventory, and repair the equipped first slot"
       ],
-      "unresolved_focus": ["equip, use, give, discard, depleted-use, and failed-effect result layouts", "dialogue producer and font-page lifetime"],
-      "next_gate": "observe equip, use, give, discard, depleted-use, and failed-effect results from reversible states after binding the selected action",
+      "unresolved_focus": ["usable item-family layouts", "effect target selection", "failed-effect results", "depleted-use result", "font-page lifetime"],
+      "next_gate": "choose a naturally usable item family, bind its target and failure effects, then observe each automatic and input-wait stage separately",
       "contract_state": "unobserved"
     },
     {
-      "screen_role": "item_transfer_target_selection",
+      "screen_role": "item_transfer_result",
       "surface_family": "item",
-      "runtime_observed": false,
+      "runtime_observed": true,
       "input_behavior": "input_wait",
-      "translation_scope": "japanese_with_preserved_original_latin",
-      "temporal_behavior": "unresolved",
+      "translation_scope": "japanese_only",
+      "temporal_behavior": "the completed transfer result remained visible for 218 additional irregularly spaced input-free frames while map sprites animated",
       "known_focus": [
-        "action code 2 enters recipient selection before bank 06:952A moves item and durability into the target buffer and clears the source slot"
+        "dialogue index 1B used return state 1A because the source inventory remained nonempty",
+        "bank 06:952A moved item 02 and durability 2A to the approved target empty slot and cleared the source first slot",
+        "bank 06:955A compacted source item 0F and durability 16 into the first slot"
       ],
-      "unresolved_focus": ["recipient selector layout", "cancel and full-recipient branches", "font-page lifetime"],
-      "next_gate": "bind recipient selection input and distinguish cancel, no-capacity, and completed-transfer outcomes before pressing A",
-      "contract_state": "unobserved"
+      "unresolved_focus": ["exact CHR pair", "dialogue dismissal inputs", "empty-source return state 19", "font-page exit and re-entry lifetime"],
+      "next_gate": "bind dialogue dismissal and compare the empty-source and full-recipient branches",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "item_discard_result",
+      "surface_family": "item",
+      "runtime_observed": true,
+      "input_behavior": "input_wait",
+      "translation_scope": "japanese_only",
+      "temporal_behavior": "the completed discard result remained visible for 200 additional irregularly spaced input-free frames while map sprites animated",
+      "known_focus": [
+        "main state 1D cleared the selected first item and durability before compacting the source inventory",
+        "dialogue index 1C used return state 1A because item 0F and durability 16 remained",
+        "the source record changed from item pairs 02/2A,0F/16 to one compacted 0F/16 pair"
+      ],
+      "unresolved_focus": ["exact CHR pair", "dialogue dismissal inputs", "empty-after-discard return state 19", "font-page exit and re-entry lifetime"],
+      "next_gate": "bind dialogue dismissal and observe the empty-after-discard return-state variant",
+      "contract_state": "observed_partial"
     },
     {
       "screen_role": "later_chapter_transition",
