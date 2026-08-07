@@ -347,7 +347,7 @@ struct PageLifetimeReport {
     phase_dispatcher: CodeRegionReport,
     right_fd_page_supply: CodeRegionReport,
     runtime_evidence: &'static str,
-    unresolved_runtime_variant: &'static str,
+    runtime_variant_coverage: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -511,7 +511,7 @@ fn build_report(
             phase_dispatcher: region_report(region("dispatch_unit_window_phase_from_05de")),
             right_fd_page_supply: region_report(region("open_unit_ui_right_fd_page_00")),
             runtime_evidence: "unit_summary and unit_command_menu entry each execute the right-FD supply; unit_summary-to-unit_status changes the left CHR pair without another right-FD supply",
-            unresolved_runtime_variant: "unit_command_menu has runtime right 00/15 and 00/18 evidence; a possible 00/19 backing-page variant is not yet observed",
+            runtime_variant_coverage: "unit_summary, unit_command_menu, and unit_status each have runtime right 00/15, 00/18, and 00/19 evidence",
         },
         implementation_boundary: ImplementationBoundary {
             required_design: "budget one unit-UI family across four composition roles, fifteen command labels, and shared dynamic source tables while preserving every observed backing-page variant",
@@ -717,7 +717,7 @@ mod tests {
             vec!["unit_summary_header"]
         );
         assert_eq!(report.command_menu.static_label_count, 15);
-        assert_eq!(report.command_menu.runtime_observed_label_count, 2);
+        assert_eq!(report.command_menu.runtime_observed_label_count, 4);
     }
 
     #[test]

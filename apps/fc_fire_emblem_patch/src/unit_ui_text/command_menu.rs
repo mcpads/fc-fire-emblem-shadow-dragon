@@ -25,6 +25,15 @@ const TERRAIN_PREDICATE: [u8; 26] = [
     0x48, 0xAD, 0x01, 0x05, 0x0A, 0xA8, 0xB9, 0x3D, 0xED, 0x85, 0x00, 0xB9, 0x3E, 0xED, 0x85, 0x01,
     0xAC, 0x00, 0x05, 0x68, 0xD1, 0x00, 0xF0, 0x01, 0x18, 0x60,
 ];
+const FACILITY_SELECTOR_ADDRESS: u16 = 0xA291;
+const FACILITY_SELECTOR_HEX: &str = concat!(
+    "A9008DD0778DDB05ADF4760AB052AC747688980AA8B9FFA48504B900A58505D023CD0105D019C8B104CD0005D011C8B104C905D019",
+    "ADF5054A9004A905D00FA904208FC3A000B104C9F0D0D5F0128DD077204CC33DC7F2A2F2A217A33DC7F2A260",
+);
+const CHAPTER_FACILITY_POINTER_TABLE_ADDRESS: u16 = 0xA4FF;
+const CHAPTER_ONE_FACILITY_POINTER: [u8; 2] = [0x31, 0xA5];
+const CHAPTER_ONE_FACILITY_RECORD_ADDRESS: u16 = 0xA531;
+const CHAPTER_ONE_WEAPON_SHOP_RECORD: [u8; 5] = [0x03, 0x1A, 0x01, 0x00, 0xF0];
 
 pub(super) const COMMAND_LABEL_SPECS: &[FixedLabelSpec] = &[
     fixed_label(
@@ -134,9 +143,10 @@ pub(super) struct CommandMenuReport {
     decision_flow: Vec<DecisionStepReport>,
     terrain_actions: Vec<TerrainActionReport>,
     facility_actions: Vec<FacilityActionReport>,
+    facility_source: FacilitySourceReport,
     input_boundary: InputBoundaryReport,
-    runtime_observed_label_indices: [u8; 2],
-    runtime_observed_label_indices_hex: [&'static str; 2],
+    runtime_observed_label_indices: [u8; 4],
+    runtime_observed_label_indices_hex: [&'static str; 4],
     pub(super) runtime_observed_label_count: usize,
     pub(super) static_label_count: usize,
     page_lifetime_boundary: &'static str,
@@ -178,6 +188,18 @@ struct FacilityActionReport {
 }
 
 #[derive(Debug, Serialize)]
+struct FacilitySourceReport {
+    selector: CodeRegionReport,
+    current_row_address_hex: &'static str,
+    current_column_address_hex: &'static str,
+    selected_facility_index_address_hex: &'static str,
+    chapter_pointer_table_address_hex: &'static str,
+    chapter_one_record_address_hex: &'static str,
+    chapter_one_weapon_shop_record_hex: &'static str,
+    chapter_one_runtime_route: &'static str,
+}
+
+#[derive(Debug, Serialize)]
 struct InputBoundaryReport {
     state_kind: &'static str,
     confirmed_menu_entry: &'static str,
@@ -206,6 +228,25 @@ pub(super) fn analyze(prg: &[u8]) -> Result<CommandMenuReport> {
         TERRAIN_PREDICATE_ADDRESS,
         &TERRAIN_PREDICATE,
         "unit-command-menu terrain predicate",
+    )?;
+    let facility_selector = decode_hex(FACILITY_SELECTOR_HEX, "facility selector")?;
+    validate_region(
+        prg,
+        FACILITY_SELECTOR_ADDRESS,
+        &facility_selector,
+        "map facility selector",
+    )?;
+    validate_region(
+        prg,
+        CHAPTER_FACILITY_POINTER_TABLE_ADDRESS,
+        &CHAPTER_ONE_FACILITY_POINTER,
+        "chapter-one facility pointer",
+    )?;
+    validate_region(
+        prg,
+        CHAPTER_ONE_FACILITY_RECORD_ADDRESS,
+        &CHAPTER_ONE_WEAPON_SHOP_RECORD,
+        "chapter-one weapon-shop record",
     )?;
 
     let file_offset = HEADER_SIZE + composer_offset;
@@ -326,6 +367,20 @@ pub(super) fn analyze(prg: &[u8]) -> Result<CommandMenuReport> {
                 )
             })
             .collect(),
+        facility_source: FacilitySourceReport {
+            selector: code_region_report(
+                "select_map_facility_for_current_tile",
+                FACILITY_SELECTOR_ADDRESS,
+                &facility_selector,
+            )?,
+            current_row_address_hex: "0x0501",
+            current_column_address_hex: "0x0500",
+            selected_facility_index_address_hex: "0x77D0",
+            chapter_pointer_table_address_hex: "0xA4FF",
+            chapter_one_record_address_hex: "0xA531",
+            chapter_one_weapon_shop_record_hex: "03 1A 01 00 F0",
+            chapter_one_runtime_route: "row 0x03, column 0x1A selects facility index 0x01 (ぶきや); 0xF0 terminates the chapter-one record list",
+        },
         input_boundary: InputBoundaryReport {
             state_kind: "input_waiting_command_menu",
             confirmed_menu_entry: "A on the unit's current tile after movement selection opens the command menu without relocating the unit",
@@ -334,12 +389,12 @@ pub(super) fn analyze(prg: &[u8]) -> Result<CommandMenuReport> {
             observation_rule: "use entry plus B exit only; do not press A inside the menu until the highlighted label and its action handler are both known",
             idle_behavior: "152 input-free frames kept the CHR shadows fixed while only cursor and map-sprite animation phases changed",
         },
-        runtime_observed_label_indices: [0x0F, 0x11],
-        runtime_observed_label_indices_hex: ["0x0F", "0x11"],
-        runtime_observed_label_count: 2,
+        runtime_observed_label_indices: [0x0F, 0x11, 0x2A, 0x29],
+        runtime_observed_label_indices_hex: ["0x0F", "0x11", "0x2A", "0x29"],
+        runtime_observed_label_count: 4,
         static_label_count: COMMAND_LABEL_SPECS.len(),
-        page_lifetime_boundary: "command-menu entry executes the central right-FD supply at 0xC9C2 with composite state 0x05; one observed entry supplies 00 while the backing FE page is 15",
-        next_gate: "observe representative terrain and facility variants, determine whether a right 00/19 variant is reachable, and include all fifteen labels in the unit-UI glyph union",
+        page_lifetime_boundary: "command-menu entry executes the central right-FD supply at 0xC9C2 with composite state 0x05; runtime variants cover backing FE pages 15, 18, and 19",
+        next_gate: "bind the highlighted-command action dispatch before pressing A inside the menu, then enter one representative downstream surface; keep runtime display evidence for the remaining eleven labels separate",
     })
 }
 
@@ -420,16 +475,36 @@ fn validate_region(prg: &[u8], address: u16, expected: &[u8], role: &str) -> Res
     Ok(())
 }
 
+fn code_region_report(role: &'static str, address: u16, bytes: &[u8]) -> Result<CodeRegionReport> {
+    let prg_offset = banked_prg_offset(UNIT_UI_BANK, address)?;
+    let file_offset = HEADER_SIZE + prg_offset;
+    Ok(CodeRegionReport {
+        role,
+        prg_bank: UNIT_UI_BANK,
+        prg_bank_hex: format!("0x{UNIT_UI_BANK:02X}"),
+        cpu_address: address,
+        cpu_address_hex: format!("0x{address:04X}"),
+        file_offset,
+        file_offset_hex: format!("0x{file_offset:05X}"),
+        byte_count: bytes.len(),
+        bytes_hex: hex(bytes),
+    })
+}
+
 fn decode_composer_hex() -> Result<Vec<u8>> {
+    decode_hex(COMPOSER_HEX, "unit-command-menu composer")
+}
+
+fn decode_hex(source: &str, role: &str) -> Result<Vec<u8>> {
     ensure!(
-        COMPOSER_HEX.len().is_multiple_of(2),
-        "unit-command-menu composer hex has an odd length"
+        source.len().is_multiple_of(2),
+        "{role} hex has an odd length"
     );
-    (0..COMPOSER_HEX.len())
+    (0..source.len())
         .step_by(2)
         .map(|offset| {
-            u8::from_str_radix(&COMPOSER_HEX[offset..offset + 2], 16)
-                .map_err(|error| anyhow::anyhow!("invalid command-menu composer hex: {error}"))
+            u8::from_str_radix(&source[offset..offset + 2], 16)
+                .map_err(|error| anyhow::anyhow!("invalid {role} hex: {error}"))
         })
         .collect()
 }
@@ -444,6 +519,19 @@ pub(super) fn install_fixture(prg: &mut [u8]) {
     let predicate_offset = banked_prg_offset(UNIT_UI_BANK, TERRAIN_PREDICATE_ADDRESS).unwrap();
     prg[predicate_offset..predicate_offset + TERRAIN_PREDICATE.len()]
         .copy_from_slice(&TERRAIN_PREDICATE);
+    let facility_selector = decode_hex(FACILITY_SELECTOR_HEX, "facility selector").unwrap();
+    let facility_selector_offset =
+        banked_prg_offset(UNIT_UI_BANK, FACILITY_SELECTOR_ADDRESS).unwrap();
+    prg[facility_selector_offset..facility_selector_offset + facility_selector.len()]
+        .copy_from_slice(&facility_selector);
+    let pointer_offset =
+        banked_prg_offset(UNIT_UI_BANK, CHAPTER_FACILITY_POINTER_TABLE_ADDRESS).unwrap();
+    prg[pointer_offset..pointer_offset + CHAPTER_ONE_FACILITY_POINTER.len()]
+        .copy_from_slice(&CHAPTER_ONE_FACILITY_POINTER);
+    let record_offset =
+        banked_prg_offset(UNIT_UI_BANK, CHAPTER_ONE_FACILITY_RECORD_ADDRESS).unwrap();
+    prg[record_offset..record_offset + CHAPTER_ONE_WEAPON_SHOP_RECORD.len()]
+        .copy_from_slice(&CHAPTER_ONE_WEAPON_SHOP_RECORD);
 }
 
 #[cfg(test)]
@@ -504,6 +592,14 @@ mod tests {
                 (0xAB, 0x37, "たからばこ"),
                 (0x46, 0x2A, "たずねる"),
             ]
+        );
+        assert_eq!(
+            report.facility_source.selector.cpu_address,
+            FACILITY_SELECTOR_ADDRESS
+        );
+        assert_eq!(
+            report.facility_source.chapter_one_weapon_shop_record_hex,
+            "03 1A 01 00 F0"
         );
         assert_eq!(
             report

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "next_screen_role": "unit_command_menu",
+  "next_screen_role": "shop",
   "screens": [
     {
       "screen_role": "title",
@@ -145,21 +145,25 @@
       "runtime_observed": true,
       "input_behavior": "input_wait",
       "translation_scope": "japanese_only",
-      "temporal_behavior": "at right 00/15, 152 input-free frames kept the CHR shadows stable while the command cursor and map sprites produced three screen hashes",
+      "temporal_behavior": "the no-move, terrain, and facility variants retain their right 00/15, 00/18, or 00/19 backing phase; each 152-frame sample kept CHR shadows stable while only cursor and map sprites animated",
       "known_focus": [
-        "left 1A/1A with runtime-observed right 00/15 and 00/18 CHR shadows",
-        "the observed no-move command variant shows Japanese もちもの and たいき",
+        "left 1A/1A with runtime-observed right 00/15, 00/18, and 00/19 CHR shadows",
+        "the observed variants show Japanese もちもの, たいき, たずねる, and ぶきや",
         "physical nametable 1 uses page-00 codes 01, 06, 10, 11, 19, and 24 plus FE and FF",
         "composite state 05 at 82E3 can append 15 fixed labels: こうげき, もちもの, つえ, たいき, ぶきや, たずねる, どうぐや, とうぎじょう, たからばこ, しろ, ぎょくざ, あずかりじょ, はなす, へんしん, and ひみつのみせ",
         "the composer selects direct unit capabilities, four terrain actions, adjacent talk, nonempty inventory, five facilities, and unconditional wait",
         "facility labels are selected through the table at 8457; map tile candidates A5/4B/AE/AB select labels 2A/38/39/37 through the terrain predicate at 8465",
-        "only fixed indices 0F and 11 have runtime display evidence; the remaining 13 labels are statically bound but not visually observed",
+        "fixed indices 0F, 11, 2A, and 29 have runtime display evidence; the remaining 11 labels are statically bound but not visually observed",
         "after status exits through natural 19/19 then 15/19 and movement selection settles at 15/15, command-menu state 05 reaches the central right-FD call at C9C2 with A=00 and shadows 1A/1A + 00/15",
         "the 00/15 command menu stayed on the same CHR shadows for 152 input-free frames while three cursor-and-map-animation screen phases repeated",
-        "B returns to unit_summary without ending the selected unit's action"
+        "tile 46 at row 03 column 16 produced たずねる / もちもの / たいき with right 00/19; its 152-frame sample had three repeating screen phases",
+        "the bank 0B:A291 facility selector reads chapter pointers at A4FF, compares current row 0501 and column 0500, and writes the matching facility index to 77D0",
+        "the chapter-one record at A531 is 03 1A 01 00 F0, so row 03 column 1A selects facility index 01 and displays ぶきや",
+        "the chapter-one weapon-shop menu retained right 00/19 for 152 input-free frames with three repeating screen phases",
+        "B cancels the pending movement, restores the cursor and unit record to 08/18, and executes no command"
       ],
-      "unresolved_focus": ["runtime display evidence for the remaining 13 command labels and representative unit, terrain, and facility variants", "whether the map's 19 backing phase can produce a right 00/19 command-menu variant", "semantic state transitions after selecting each command"],
-      "next_gate": "observe representative terrain and facility variants, determine whether right 00/19 is reachable, and include all fifteen labels in the unit-UI glyph union",
+      "unresolved_focus": ["runtime display evidence for the remaining 11 command labels and representative direct-capability, talk, and other-facility variants", "individual action dispatch and semantic state transitions after selecting each command"],
+      "next_gate": "bind the highlighted-command action dispatch before pressing A, then use the known ぶきや route to enter and inventory the shop screen; keep the remaining command labels as separate coverage work",
       "contract_state": "observed_partial"
     },
     {
@@ -274,7 +278,7 @@
       "temporal_behavior": "unresolved",
       "known_focus": [],
       "unresolved_focus": ["all screen-contract dimensions"],
-      "next_gate": "reach and split buy, sell, inventory, price, and exit surfaces",
+      "next_gate": "bind the ぶきや command handler before pressing A, then reach and split buy, sell, inventory, price, and exit surfaces",
       "contract_state": "unobserved"
     },
     {

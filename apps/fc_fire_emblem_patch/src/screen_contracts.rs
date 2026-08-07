@@ -80,6 +80,7 @@ pub(crate) const OBSERVED_CHR_PAIRS: &[ObservedChrPair] = &[
     pair("unit_command_menu", PatternWindow::Left, 0x1A, 0x1A),
     pair("unit_command_menu", PatternWindow::Right, 0x00, 0x15),
     pair("unit_command_menu", PatternWindow::Right, 0x00, 0x18),
+    pair("unit_command_menu", PatternWindow::Right, 0x00, 0x19),
     pair("unit_status", PatternWindow::Left, 0x13, 0x13),
     pair("unit_status", PatternWindow::Right, 0x00, 0x15),
     pair("unit_status", PatternWindow::Right, 0x00, 0x18),
@@ -262,13 +263,9 @@ fn build_report(
         );
     }
 
-    let next_target = roles
+    roles
         .get(registry.next_screen_role.as_str())
         .context("next screen role is absent from registry")?;
-    ensure!(
-        next_target.runtime_observed,
-        "next screen must be runtime observed"
-    );
 
     let screens = registry
         .screens
@@ -353,12 +350,12 @@ mod tests {
     }
 
     #[test]
-    fn command_menu_requires_runtime_page_and_variant_evidence() {
+    fn command_menu_keeps_unobserved_labels_and_action_dispatch_as_open_work() {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
         let command_menu = report
             .screens
             .iter()
-            .find(|screen| screen.screen_role == report.next_screen_role)
+            .find(|screen| screen.screen_role == "unit_command_menu")
             .unwrap();
 
         assert_eq!(command_menu.screen_role, "unit_command_menu");
@@ -368,21 +365,22 @@ mod tests {
             command_menu.translation_scope,
             TranslationScope::JapaneseOnly
         );
-        assert!(
-            command_menu
-                .next_gate
-                .contains("terrain and facility variants")
-        );
-        assert!(command_menu.next_gate.contains("glyph union"));
+        assert!(command_menu.next_gate.contains("action dispatch"));
         assert!(
             command_menu
                 .unresolved_focus
                 .iter()
-                .any(|focus| focus.contains("remaining 13 command labels"))
+                .any(|focus| focus.contains("remaining 11 command labels"))
+        );
+        assert!(
+            !command_menu
+                .unresolved_focus
+                .iter()
+                .any(|focus| focus.contains("00/19"))
         );
         assert!(
             command_menu
-                .unresolved_focus
+                .known_focus
                 .iter()
                 .any(|focus| focus.contains("00/19"))
         );
@@ -392,6 +390,21 @@ mod tests {
                 .iter()
                 .any(|focus| focus.contains("C9C2") && focus.contains("00/15"))
         );
+    }
+
+    #[test]
+    fn next_screen_can_select_an_unobserved_surface() {
+        let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
+        let next = report
+            .screens
+            .iter()
+            .find(|screen| screen.screen_role == report.next_screen_role)
+            .unwrap();
+
+        assert_eq!(next.screen_role, "shop");
+        assert!(!next.runtime_observed);
+        assert_eq!(next.contract_state, ContractState::Unobserved);
+        assert!(next.next_gate.contains("ぶきや"));
     }
 
     #[test]
