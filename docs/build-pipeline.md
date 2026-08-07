@@ -58,7 +58,7 @@ cargo run -p fc-fire-emblem-patch -- plan-hangul-page-proof \
 
 `build-mapper165-hangul-page-probe`는 검증된 mapper 165 무번역 이미지를 메모리에서 재생성한 뒤 두 4 KiB 페이지를 물리 페이지 `34/35`에 붙이고 설정 표를 한글 코드로 바꾼다. 뱅크 `0B:$93B7`의 11바이트 행 계산을 같은 길이의 `JSR`과 `NOP`로 바꾸고, 고정 뱅크 `$FB20`~`$FB67`의 typed RP2A03 루틴이 원래 `$0034/$0035` 계산을 수행한 뒤 페이지를 선택한다.
 
-루틴은 `$52=00`, `$59/$5A=1A/1A`, `$5B/$5C=00/15`를 모두 만족할 때만 개입한다. `$0034=20/40`은 A의 `88`, `30`은 B의 `8C`를 오른쪽 FD 레지스터에 쓰며, 화면 계약이 다르면 기존 `$FAC0` 쌍 인식 선택기로 돌아간다. 원래 `INY` 직후 상태 플래그와 Y를 복원하고, 코드 구간은 원본에 선행 직접 `JSR/JMP`가 없고 전부 `FF`일 때만 쓴다. 보고서의 `runtime_hook_installed`는 참이지만 `runtime_verified`는 거짓이다.
+루틴은 `$52=00`, `$59/$5A=1A/1A`, `$5B/$5C=00/15`를 모두 만족할 때만 개입한다. `$0034=20/40`은 A의 `88`, `30`은 B의 `8C`를 오른쪽 FD 레지스터에 쓰며, 화면 계약이 다르면 기존 `$FAC0` 쌍 인식 선택기로 돌아간다. 원래 `INY` 직후 상태 플래그와 Y를 복원하고, 코드 구간은 원본에 선행 직접 `JSR/JMP`가 없고 전부 `FF`일 때만 쓴다. 보고서의 `runtime_hook_installed`는 참이고 `runtime_verified`는 거짓이다. 이 값은 빌드만으로 실행을 주장하지 않는 정적 보고서 경계이며, 별도 콜드 실행의 페이지 왕복과 이탈 복구 결과는 [현재 상태](status.md)에 기록한다.
 
 ```sh
 cargo run -p fc-fire-emblem-patch -- build-mapper165-hangul-page-probe \
