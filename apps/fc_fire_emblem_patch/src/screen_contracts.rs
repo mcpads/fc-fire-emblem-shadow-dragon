@@ -116,8 +116,18 @@ pub(crate) const OBSERVED_CHR_PAIRS: &[ObservedChrPair] = &[
     pair("battle_animation", PatternWindow::Left, 0x02, 0x06),
     pair("battle_animation", PatternWindow::Left, 0x06, 0x06),
     pair("battle_animation", PatternWindow::Right, 0x02, 0x06),
-    pair("chapter2_intro", PatternWindow::Left, 0x13, 0x13),
-    pair("chapter2_intro", PatternWindow::Right, 0x00, 0x18),
+    pair(
+        "chapter_intro_title_dialogue_composite",
+        PatternWindow::Left,
+        0x13,
+        0x13,
+    ),
+    pair(
+        "chapter_intro_title_dialogue_composite",
+        PatternWindow::Right,
+        0x00,
+        0x18,
+    ),
     pair("weapon_shop_item_list", PatternWindow::Left, 0x1E, 0x1E),
     pair("weapon_shop_item_list", PatternWindow::Right, 0x00, 0x15),
     pair(
@@ -233,6 +243,7 @@ enum TranslationScope {
     NoText,
     JapaneseOnly,
     JapaneseWithPreservedOriginalLatin,
+    PreservedOriginalOnly,
     Unresolved,
 }
 
@@ -278,6 +289,7 @@ struct ScreenContractReport {
     runtime_observed_screen_count: usize,
     chr_pair_observed_screen_count: usize,
     mixed_original_latin_screen_count: usize,
+    preserved_original_only_screen_count: usize,
     page_switch_verified_screen_count: usize,
     mixed_text_page_verified_screen_count: usize,
     next_screen_role: String,
@@ -426,6 +438,10 @@ fn build_report(
                 screen.translation_scope == TranslationScope::JapaneseWithPreservedOriginalLatin
             })
             .count(),
+        preserved_original_only_screen_count: screens
+            .iter()
+            .filter(|screen| screen.translation_scope == TranslationScope::PreservedOriginalOnly)
+            .count(),
         page_switch_verified_screen_count: screens
             .iter()
             .filter(|screen| screen.contract_state == ContractState::PageSwitchVerified)
@@ -449,10 +465,11 @@ mod tests {
     fn registry_covers_every_observed_chr_pair() {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
 
-        assert_eq!(report.screen_count, 36);
-        assert_eq!(report.runtime_observed_screen_count, 34);
+        assert_eq!(report.screen_count, 39);
+        assert_eq!(report.runtime_observed_screen_count, 37);
         assert_eq!(report.chr_pair_observed_screen_count, 30);
         assert_eq!(report.mixed_original_latin_screen_count, 18);
+        assert_eq!(report.preserved_original_only_screen_count, 1);
         assert_eq!(report.page_switch_verified_screen_count, 1);
         assert_eq!(report.mixed_text_page_verified_screen_count, 1);
     }
@@ -513,6 +530,48 @@ mod tests {
         assert!(!next.runtime_observed);
         assert_eq!(next.contract_state, ContractState::Unobserved);
         assert!(next.next_gate.contains("later transitions"));
+    }
+
+    #[test]
+    fn chapter_transition_screens_keep_distinct_lifetimes_and_translation_scopes() {
+        let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
+        let chapter_screens = report
+            .screens
+            .iter()
+            .filter(|screen| screen.surface_family == "chapter_transition")
+            .collect::<Vec<_>>();
+
+        assert_eq!(chapter_screens.len(), 6);
+        for role in [
+            "chapter_clear_epilogue_dialogue",
+            "next_story_banner",
+            "chapter_save_offer",
+            "chapter_save_complete_continue_prompt",
+            "chapter_intro_title_dialogue_composite",
+        ] {
+            assert!(
+                chapter_screens
+                    .iter()
+                    .any(|screen| screen.screen_role == role && screen.runtime_observed)
+            );
+        }
+        let next_story = chapter_screens
+            .iter()
+            .find(|screen| screen.screen_role == "next_story_banner")
+            .unwrap();
+        assert_eq!(
+            next_story.translation_scope,
+            TranslationScope::PreservedOriginalOnly
+        );
+        let intro = chapter_screens
+            .iter()
+            .find(|screen| screen.screen_role == "chapter_intro_title_dialogue_composite")
+            .unwrap();
+        assert!(intro.chr_pair_observed);
+        assert_eq!(
+            intro.translation_scope,
+            TranslationScope::JapaneseWithPreservedOriginalLatin
+        );
     }
 
     #[test]

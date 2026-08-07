@@ -689,7 +689,7 @@ const TEXT_TABLE_SPECS: [TextTableSpec; 7] = [
         id: "chapter-names",
         role: "chapter names",
         table_file_offset: 0x3EE18,
-        pointer_count: 0x18,
+        pointer_count: 0x19,
         terminator: 0xED,
         consumer_file_offset: 0x2CEF2,
         consumer_bytes: [0xB9, 0x08, 0xEE, 0x85, 0x00, 0xB9, 0x09, 0xEE, 0x85, 0x01],

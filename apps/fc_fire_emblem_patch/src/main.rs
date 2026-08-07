@@ -1,3 +1,4 @@
+mod chapter_transition;
 mod chr_inventory;
 mod dialogue_assets;
 mod dialogue_inventory;
@@ -69,6 +70,12 @@ enum Command {
     AnalyzeScreenContracts {
         source: PathBuf,
         #[arg(long, default_value = "out/screen-contracts.json")]
+        report: PathBuf,
+    },
+    /// Bind chapter-clear, save, title, and chapter-intro screen lifetimes and producers.
+    AnalyzeChapterTransitions {
+        source: PathBuf,
+        #[arg(long, default_value = "out/chapter-transitions.json")]
         report: PathBuf,
     },
     /// Bind weapon-shop entry, item selection, preflight, confirmation, and mutation boundaries.
@@ -330,6 +337,19 @@ fn main() -> Result<()> {
                 summary.screen_count,
                 summary.runtime_observed_screen_count,
                 summary.mixed_original_latin_screen_count,
+                summary.next_screen_role
+            );
+        }
+        Command::AnalyzeChapterTransitions { source, report } => {
+            let summary = chapter_transition::analyze_chapter_transitions(&source, &report)?;
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "chapter transitions: {} observed screens, {} chapter contexts, {} chapter titles, {} source-bound regions, next: {}",
+                summary.screen_count,
+                summary.chapter_context_count,
+                summary.chapter_title_count,
+                summary.source_region_count,
                 summary.next_screen_role
             );
         }

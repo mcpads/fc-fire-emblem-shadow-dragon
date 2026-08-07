@@ -360,7 +360,7 @@ pub fn plan_main_dialogue_reinsertion(
     validate_workspace_binding(&workspace, &expected_workspace)?;
     let translation_counts = validate_workspace_translations(&workspace)?;
 
-    let source_records = inspect_main_dialogue_storage(rom.data())?;
+    let source_records = inspect_main_dialogue_storage(rom.data())?.records;
     ensure!(
         source_records.len() == workspace.records.len(),
         "main dialogue layout lost workspace records"
@@ -591,7 +591,8 @@ fn validate_workspace_translations(
 }
 
 fn build_workspace(source: &[u8]) -> Result<MainDialogueWorkspace> {
-    let records = inspect_main_dialogue_storage(source)?;
+    let inspection = inspect_main_dialogue_storage(source)?;
+    let records = inspection.records;
     let safe_japanese_offsets = safe_japanese_literal_offsets(source, &records)?;
     let workspace_records = records
         .iter()
@@ -620,8 +621,8 @@ fn build_workspace(source: &[u8]) -> Result<MainDialogueWorkspace> {
         "main dialogue workspace must contain exactly 2732 source lines"
     );
     ensure!(
-        safe_japanese_offsets.len() == 27_900,
-        "main dialogue workspace Japanese source boundary changed"
+        safe_japanese_offsets.len() == inspection.safe_japanese_translation_source_byte_count,
+        "main dialogue workspace Japanese source boundary disagrees with the dialogue inventory"
     );
     Ok(workspace)
 }
@@ -1213,7 +1214,7 @@ fn append_literal_markup(markup: &mut String, code: u8) {
 }
 
 fn build_source_asset(source: &[u8]) -> Result<MainDialogueSourceAsset> {
-    let records = inspect_main_dialogue_storage(source)?;
+    let records = inspect_main_dialogue_storage(source)?.records;
     let owned_ranges = normalize_storage_ranges(&records)?;
     let storage_regions = owned_ranges
         .iter()

@@ -541,6 +541,12 @@ pub(crate) struct MainDialogueStorageRecord {
     pub lines: Vec<MainDialogueStorageLine>,
 }
 
+#[derive(Debug)]
+pub(crate) struct MainDialogueStorageInspection {
+    pub(crate) records: Vec<MainDialogueStorageRecord>,
+    pub(crate) safe_japanese_translation_source_byte_count: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MainDialogueStorageLine {
     pub file_offset: usize,
@@ -548,6 +554,14 @@ pub(crate) struct MainDialogueStorageLine {
     pub storage_sha1: String,
     pub line_end_control: u8,
     pub literal_file_offsets: Vec<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ChapterIntroContextBinding {
+    pub(crate) entry_indices: Vec<usize>,
+    pub(crate) file_offset: usize,
+    pub(crate) prefix_payload: [u8; OPTIONAL_PREFIX_BYTE_COUNT - 1],
+    pub(crate) chapter_index: u8,
 }
 
 #[derive(Debug, Serialize)]
@@ -1065,7 +1079,7 @@ pub fn analyze_dialogue_structure(
 
 pub(crate) fn inspect_main_dialogue_storage(
     source: &[u8],
-) -> Result<Vec<MainDialogueStorageRecord>> {
+) -> Result<MainDialogueStorageInspection> {
     let report = build_report(source)?;
     let records = report
         .tables
@@ -1134,7 +1148,63 @@ pub(crate) fn inspect_main_dialogue_storage(
         records.len() == report.summary.main_record_count,
         "main dialogue storage record export lost coverage"
     );
-    Ok(records)
+    Ok(MainDialogueStorageInspection {
+        records,
+        safe_japanese_translation_source_byte_count: report
+            .summary
+            .main_safe_japanese_translation_source_byte_count,
+    })
+}
+
+pub(crate) fn inspect_chapter_intro_contexts(
+    source: &[u8],
+) -> Result<Vec<ChapterIntroContextBinding>> {
+    let report = build_report(source)?;
+    let table = report
+        .tables
+        .iter()
+        .find(|table| table.id == "chapter-intro-dialogue")
+        .context("chapter-intro dialogue table is absent")?;
+
+    table
+        .entries
+        .iter()
+        .filter(|entry| {
+            entry.target_kind == "script_entry_start" && is_canonical_dialogue_entry(entry)
+        })
+        .filter(|entry| {
+            entry
+                .main_record_prefix
+                .as_ref()
+                .is_some_and(|prefix| prefix.e5_prefix_present)
+        })
+        .map(|entry| {
+            let prefix_end = entry
+                .file_offset
+                .checked_add(OPTIONAL_PREFIX_BYTE_COUNT)
+                .context("chapter-intro E5 prefix range overflow")?;
+            let prefix = source
+                .get(entry.file_offset..prefix_end)
+                .context("chapter-intro E5 prefix is outside the source")?;
+            ensure!(
+                prefix[0] == OPTIONAL_E5_PREFIX_CODE,
+                "chapter-intro E5 prefix marker changed"
+            );
+            let prefix_payload: [u8; OPTIONAL_PREFIX_BYTE_COUNT - 1] = prefix[1..]
+                .try_into()
+                .expect("E5 payload has a fixed length");
+            let mut entry_indices = vec![entry.index];
+            entry_indices.extend(entry.alias_entry_indices.iter().copied());
+            entry_indices.sort_unstable();
+
+            Ok(ChapterIntroContextBinding {
+                entry_indices,
+                file_offset: entry.file_offset,
+                chapter_index: prefix_payload[4],
+                prefix_payload,
+            })
+        })
+        .collect()
 }
 
 pub(crate) fn inspect_shop_dialogue_table(source: &[u8]) -> Result<ShopDialogueTableBinding> {

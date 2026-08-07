@@ -234,27 +234,82 @@
       "contract_state": "observed_partial"
     },
     {
-      "screen_role": "chapter_save",
-      "surface_family": "chapter_transition",
-      "runtime_observed": true,
-      "input_behavior": "input_wait",
-      "translation_scope": "japanese_with_preserved_original_latin",
-      "temporal_behavior": "save-slot cursor may flash",
-      "known_focus": ["chapter-clear save and cold-load path reached"],
-      "unresolved_focus": ["CHR pairs", "exact Japanese and preserved numeric tile sets", "transition owner"],
-      "next_gate": "capture the save surface before generalizing chapter transitions",
-      "contract_state": "observed_partial"
-    },
-    {
-      "screen_role": "chapter2_intro",
+      "screen_role": "chapter_clear_epilogue_dialogue",
       "surface_family": "chapter_transition",
       "runtime_observed": true,
       "input_behavior": "mixed",
       "translation_scope": "japanese_only",
-      "temporal_behavior": "intro presentation and message waits",
-      "known_focus": ["left 13/13 and right 00/18 CHR pairs", "chapter-clear and cold-load entries"],
-      "unresolved_focus": ["title and dialogue sub-surface boundaries"],
-      "next_gate": "separate chapter title, terrain, and dialogue lifetimes",
+      "temporal_behavior": "text draws automatically over the retained map; completed pages wait for A and may flash a marker",
+      "known_focus": [
+        "chapter-one objective completion enters a portrait and Japanese dialogue sequence over the retained map",
+        "A advances completed pages and the terminal page enters the NEXT STORY banner"
+      ],
+      "unresolved_focus": ["exact CHR pair", "completion-marker phase union", "terminal dialogue-state owner"],
+      "next_gate": "bind the terminal epilogue state without emitting dialogue content",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "next_story_banner",
+      "surface_family": "chapter_transition",
+      "runtime_observed": true,
+      "input_behavior": "input_wait",
+      "translation_scope": "preserved_original_only",
+      "temporal_behavior": "the centered banner remained visible for 1,200 input-free frames",
+      "known_focus": [
+        "retained map and unit sprites behind a centered window",
+        "fixed-label index 3E composes original English NEXT STORY through bank 0B:886A"
+      ],
+      "unresolved_focus": ["exact CHR pair", "font-page exit lifetime"],
+      "next_gate": "retain the English label unchanged while binding the banner-to-save transition owner",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "chapter_save_offer",
+      "surface_family": "chapter_transition",
+      "runtime_observed": true,
+      "input_behavior": "input_wait",
+      "translation_scope": "japanese_only",
+      "temporal_behavior": "the yes-or-no selection cursor may flash over the retained map",
+      "known_focus": [
+        "small centered Japanese save question, separate yes-or-no window, map, and unit sprites",
+        "fixed-label index 32 composes the Japanese save question through bank 0B:8AE6",
+        "A on the observed default yes choice writes the chapter-clear save"
+      ],
+      "unresolved_focus": ["exact CHR pair", "cursor phase union", "unobserved no-choice route"],
+      "next_gate": "bind the save mutation and no-choice route independently of the following completion prompt",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "chapter_save_complete_continue_prompt",
+      "surface_family": "chapter_transition",
+      "runtime_observed": true,
+      "input_behavior": "input_wait",
+      "translation_scope": "japanese_only",
+      "temporal_behavior": "the selection cursor and retained map sprites may animate independently",
+      "known_focus": [
+        "portrait, large Japanese save-complete and continue dialogue, yes-or-no window, map, and unit sprites",
+        "the observed default yes choice continues to the next chapter introduction",
+        "saved-state samples contain left 1C/1C and right 00/15 or 00/18 phases, but exact per-lifetime ownership remains open"
+      ],
+      "unresolved_focus": ["exact CHR pair for this lifetime", "cursor phase union", "unobserved no-choice route"],
+      "next_gate": "capture the offer and completion prompts in one managed run to assign their CHR phases separately",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "chapter_intro_title_dialogue_composite",
+      "surface_family": "chapter_transition",
+      "runtime_observed": true,
+      "input_behavior": "mixed",
+      "translation_scope": "japanese_with_preserved_original_latin",
+      "temporal_behavior": "the title bar remains while dialogue draws automatically; completed pages wait for A and may flash a marker",
+      "known_focus": [
+        "left 13/13 and right 00/18 CHR pairs on the observed chapter-two entry",
+        "new map, protected chapter-number digits, Japanese chapter title, portrait, and Japanese dialogue coexist",
+        "chapter-clear and cold-load entries both reached the same composite surface",
+        "25 E5 chapter contexts select indices 00 through 18 at 781D and the chapter-title table contains 25 pointers"
+      ],
+      "unresolved_focus": ["title-bar exit lifetime relative to the final dialogue page", "later chapter-specific map, portrait, and CHR variants"],
+      "next_gate": "sample a later chapter transition before treating the chapter-two composite as universal",
       "contract_state": "observed_partial"
     },
     {
