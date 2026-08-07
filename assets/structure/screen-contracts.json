@@ -1,0 +1,243 @@
+{
+  "schema": 1,
+  "next_screen_role": "unit_roster",
+  "screens": [
+    {
+      "screen_role": "title",
+      "surface_family": "front_end",
+      "runtime_observed": true,
+      "input_behavior": "mixed",
+      "translation_scope": "japanese_with_preserved_original_latin",
+      "temporal_behavior": "animated title presentation followed by input wait",
+      "known_focus": ["left 14/14 and right 00/14 CHR pairs"],
+      "unresolved_focus": ["separate logo graphics from Japanese text and preserved original Latin"],
+      "next_gate": "classify title text and logo consumers",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "new_game_choice",
+      "surface_family": "front_end",
+      "runtime_observed": true,
+      "input_behavior": "input_wait",
+      "translation_scope": "japanese_only",
+      "temporal_behavior": "selection cursor may flash",
+      "known_focus": ["left 1A/1A and right 00/00 CHR pairs"],
+      "unresolved_focus": ["cursor phase union and exact text tile use"],
+      "next_gate": "bind menu text, cursor, and transition owner",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "intro_terrain",
+      "surface_family": "chapter_intro",
+      "runtime_observed": true,
+      "input_behavior": "automatic",
+      "translation_scope": "no_text",
+      "temporal_behavior": "animated terrain presentation",
+      "known_focus": ["left 1A/1A and right 15/15 graphics pairs"],
+      "unresolved_focus": ["animation phase coverage"],
+      "next_gate": "retain as the no-font lifetime boundary",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "intro_dialogue",
+      "surface_family": "dialogue",
+      "runtime_observed": true,
+      "input_behavior": "mixed",
+      "translation_scope": "japanese_only",
+      "temporal_behavior": "text draw is automatic; completed messages wait for A and may flash a marker",
+      "known_focus": ["left 07/07 and right 00/18 CHR pairs", "main dialogue renderer path"],
+      "unresolved_focus": ["message marker phase union", "screen-local glyph working set"],
+      "next_gate": "bind one complete dialogue scene to its glyph set",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "later_intro_dialogue",
+      "surface_family": "dialogue",
+      "runtime_observed": true,
+      "input_behavior": "mixed",
+      "translation_scope": "japanese_only",
+      "temporal_behavior": "text draw is automatic; completed messages wait for A",
+      "known_focus": ["left 11/11 and right 00/18 CHR pairs"],
+      "unresolved_focus": ["portrait or scene sprite coverage", "screen-local glyph working set"],
+      "next_gate": "compare dialogue background variants without changing the text contract",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "map_idle",
+      "surface_family": "map",
+      "runtime_observed": true,
+      "input_behavior": "input_wait",
+      "translation_scope": "no_text",
+      "temporal_behavior": "map units animate or flash while input waits",
+      "known_focus": ["left 1A/1A and right 15/15 graphics pairs"],
+      "unresolved_focus": ["sprite and cursor phase union", "all map entry and return paths"],
+      "next_gate": "use as the natural-page restoration boundary",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "map_menu",
+      "surface_family": "map_ui",
+      "runtime_observed": true,
+      "input_behavior": "input_wait",
+      "translation_scope": "japanese_only",
+      "temporal_behavior": "selection cursor may flash",
+      "known_focus": ["left 1A/1A and right 00/19 CHR pairs"],
+      "unresolved_focus": ["exact menu tile set", "cursor phase union", "per-command transitions"],
+      "next_gate": "bind menu labels and each command transition",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "options",
+      "surface_family": "map_ui",
+      "runtime_observed": true,
+      "input_behavior": "input_wait",
+      "translation_scope": "japanese_only",
+      "temporal_behavior": "152 input-free frames were visually stable",
+      "known_focus": [
+        "left 1A/1A and right 00/15 CHR pairs",
+        "FD labels, FE map and window, sprite cursor, row state",
+        "Hangul pages 88/8C/88 and natural-page restoration"
+      ],
+      "unresolved_focus": ["normal gameplay re-entry path"],
+      "next_gate": "verify a normal exit and re-entry path",
+      "contract_state": "page_switch_verified"
+    },
+    {
+      "screen_role": "unit_status",
+      "surface_family": "unit_ui",
+      "runtime_observed": true,
+      "input_behavior": "input_wait",
+      "translation_scope": "japanese_with_preserved_original_latin",
+      "temporal_behavior": "unresolved",
+      "known_focus": ["left 13/13 and right 00/18 CHR pairs", "original stat abbreviations and digits share the font page"],
+      "unresolved_focus": ["exact Japanese and preserved-code tile sets", "sprite and temporal union", "screen-local writer and lifetime owner"],
+      "next_gate": "use after the roster to confirm the same mixed-text policy on another consumer",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "unit_roster",
+      "surface_family": "unit_ui",
+      "runtime_observed": true,
+      "input_behavior": "input_wait",
+      "translation_scope": "japanese_with_preserved_original_latin",
+      "temporal_behavior": "selection and row UI may flash",
+      "known_focus": ["left 18/18 and right 00/19 CHR pairs", "Japanese names share page 00 with original LV and HP"],
+      "unresolved_focus": [
+        "exact Japanese and preserved-code tile sets",
+        "sprite and temporal phase union",
+        "screen-local writer and lifetime owner",
+        "entry, exit, and re-entry"
+      ],
+      "next_gate": "next mixed-text screen: bind tile use, temporal UI, owner, and lifetime",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "battle_animation",
+      "surface_family": "battle",
+      "runtime_observed": true,
+      "input_behavior": "automatic",
+      "translation_scope": "japanese_with_preserved_original_latin",
+      "temporal_behavior": "fully animated battle sequence",
+      "known_focus": ["left 02/06 then 06/06 and right 02/06 CHR pairs"],
+      "unresolved_focus": ["all battle UI text states", "damage and HP numeral preservation", "animation phase coverage"],
+      "next_gate": "inventory pre-battle, damage, defeat, and return surfaces separately",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "game_over",
+      "surface_family": "defeat",
+      "runtime_observed": true,
+      "input_behavior": "mixed",
+      "translation_scope": "japanese_only",
+      "temporal_behavior": "message presentation followed by title transition",
+      "known_focus": ["left 07/07 and right 00/18 CHR pairs", "turn-boundary defeat path"],
+      "unresolved_focus": ["message completion marker and transition timing"],
+      "next_gate": "bind the loss message and title-return lifetime",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "chapter_save",
+      "surface_family": "chapter_transition",
+      "runtime_observed": true,
+      "input_behavior": "input_wait",
+      "translation_scope": "japanese_with_preserved_original_latin",
+      "temporal_behavior": "save-slot cursor may flash",
+      "known_focus": ["chapter-clear save and cold-load path reached"],
+      "unresolved_focus": ["CHR pairs", "exact Japanese and preserved numeric tile sets", "transition owner"],
+      "next_gate": "capture the save surface before generalizing chapter transitions",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "chapter2_intro",
+      "surface_family": "chapter_transition",
+      "runtime_observed": true,
+      "input_behavior": "mixed",
+      "translation_scope": "japanese_only",
+      "temporal_behavior": "intro presentation and message waits",
+      "known_focus": ["left 13/13 and right 00/18 CHR pairs", "chapter-clear and cold-load entries"],
+      "unresolved_focus": ["title and dialogue sub-surface boundaries"],
+      "next_gate": "separate chapter title, terrain, and dialogue lifetimes",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "suspend_message",
+      "surface_family": "save_flow",
+      "runtime_observed": true,
+      "input_behavior": "terminal_instruction",
+      "translation_scope": "japanese_only",
+      "temporal_behavior": "static instruction after suspend selection",
+      "known_focus": ["natural suspend, SRAM, power-cycle, and one-shot resume path reached"],
+      "unresolved_focus": ["CHR pairs", "text and transition owner", "re-entry boundary after resume"],
+      "next_gate": "capture its complete screen contract without changing save semantics",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "shop",
+      "surface_family": "shop",
+      "runtime_observed": false,
+      "input_behavior": "unresolved",
+      "translation_scope": "unresolved",
+      "temporal_behavior": "unresolved",
+      "known_focus": [],
+      "unresolved_focus": ["all screen-contract dimensions"],
+      "next_gate": "reach and split buy, sell, inventory, price, and exit surfaces",
+      "contract_state": "unobserved"
+    },
+    {
+      "screen_role": "item_flow",
+      "surface_family": "item",
+      "runtime_observed": false,
+      "input_behavior": "unresolved",
+      "translation_scope": "unresolved",
+      "temporal_behavior": "unresolved",
+      "known_focus": [],
+      "unresolved_focus": ["all screen-contract dimensions"],
+      "next_gate": "reach and split item list, use, trade, discard, and result surfaces",
+      "contract_state": "unobserved"
+    },
+    {
+      "screen_role": "later_chapter_transition",
+      "surface_family": "chapter_transition",
+      "runtime_observed": false,
+      "input_behavior": "unresolved",
+      "translation_scope": "unresolved",
+      "temporal_behavior": "unresolved",
+      "known_focus": [],
+      "unresolved_focus": ["all screen-contract dimensions", "chapter-specific graphics and title variants"],
+      "next_gate": "sample later transitions before treating chapter 2 as universal",
+      "contract_state": "unobserved"
+    },
+    {
+      "screen_role": "ending",
+      "surface_family": "ending",
+      "runtime_observed": false,
+      "input_behavior": "unresolved",
+      "translation_scope": "unresolved",
+      "temporal_behavior": "unresolved",
+      "known_focus": [],
+      "unresolved_focus": ["all screen-contract dimensions", "credits and epilogue routing"],
+      "next_gate": "reach ending families and separate automatic, message, and credits surfaces",
+      "contract_state": "unobserved"
+    }
+  ]
+}

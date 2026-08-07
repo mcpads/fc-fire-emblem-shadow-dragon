@@ -18,6 +18,7 @@ mod mmc5_queue_shadow;
 mod options;
 mod rom;
 mod rp2a03;
+mod screen_contracts;
 mod static_analysis;
 mod text_inventory;
 mod tracked;
@@ -58,6 +59,12 @@ enum Command {
     AnalyzeDialogueStructure {
         source: PathBuf,
         #[arg(long, default_value = "out/dialogue-structure.json")]
+        report: PathBuf,
+    },
+    /// Inventory screen-level text, graphics, temporal UI, input, and font-lifetime contracts.
+    AnalyzeScreenContracts {
+        source: PathBuf,
+        #[arg(long, default_value = "out/screen-contracts.json")]
         report: PathBuf,
     },
     /// Extract exact main-dialogue source storage for a private roundtrip check.
@@ -288,6 +295,18 @@ fn main() -> Result<()> {
                 summary.pointer_count,
                 summary.unique_target_count,
                 summary.alias_group_count
+            );
+        }
+        Command::AnalyzeScreenContracts { source, report } => {
+            let summary = screen_contracts::analyze_screen_contracts(&source, &report)?;
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "screen contracts: {}, runtime observed: {}, mixed original-Latin: {}, next: {}",
+                summary.screen_count,
+                summary.runtime_observed_screen_count,
+                summary.mixed_original_latin_screen_count,
+                summary.next_screen_role
             );
         }
         Command::ExtractMainDialogueSource { source, output } => {

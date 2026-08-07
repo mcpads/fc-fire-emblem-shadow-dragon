@@ -9,26 +9,14 @@ use serde::Serialize;
 
 use crate::{
     rom::{EXPECTED_SOURCE_SHA1, Rom},
+    screen_contracts::{OBSERVED_CHR_PAIRS, ObservedChrPair},
     sha1_hex,
 };
 
+pub(super) use crate::screen_contracts::PatternWindow;
+
 const CHR_PAGE_SIZE: usize = 0x1000;
 const FD_TILE_HIGH_PLANE_OFFSET: usize = 0x0FD8;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) enum PatternWindow {
-    Left,
-    Right,
-}
-
-impl PatternWindow {
-    pub(super) fn label(self) -> &'static str {
-        match self {
-            Self::Left => "ppu_0000",
-            Self::Right => "ppu_1000",
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ObservedVariantPair {
@@ -36,56 +24,6 @@ pub(super) struct ObservedVariantPair {
     pub(super) fd_source_page: u8,
     pub(super) fe_source_page: u8,
     pub(super) required_high_plane: [u8; 8],
-}
-
-#[derive(Debug, Clone, Copy)]
-struct ObservedChrPair {
-    screen_role: &'static str,
-    pattern_window: PatternWindow,
-    fd_source_page: u8,
-    fe_source_page: u8,
-}
-
-const OBSERVED_CHR_PAIRS: &[ObservedChrPair] = &[
-    observed("title", PatternWindow::Left, 0x14, 0x14),
-    observed("title", PatternWindow::Right, 0x00, 0x14),
-    observed("new_game_choice", PatternWindow::Left, 0x1A, 0x1A),
-    observed("new_game_choice", PatternWindow::Right, 0x00, 0x00),
-    observed("intro_terrain", PatternWindow::Left, 0x1A, 0x1A),
-    observed("intro_terrain", PatternWindow::Right, 0x15, 0x15),
-    observed("intro_dialogue", PatternWindow::Left, 0x07, 0x07),
-    observed("intro_dialogue", PatternWindow::Right, 0x00, 0x18),
-    observed("game_over", PatternWindow::Left, 0x07, 0x07),
-    observed("game_over", PatternWindow::Right, 0x00, 0x18),
-    observed("later_intro_dialogue", PatternWindow::Left, 0x11, 0x11),
-    observed("later_intro_dialogue", PatternWindow::Right, 0x00, 0x18),
-    observed("map_idle", PatternWindow::Left, 0x1A, 0x1A),
-    observed("map_idle", PatternWindow::Right, 0x15, 0x15),
-    observed("unit_status", PatternWindow::Left, 0x13, 0x13),
-    observed("unit_status", PatternWindow::Right, 0x00, 0x18),
-    observed("map_menu", PatternWindow::Left, 0x1A, 0x1A),
-    observed("map_menu", PatternWindow::Right, 0x00, 0x19),
-    observed("unit_roster", PatternWindow::Left, 0x18, 0x18),
-    observed("unit_roster", PatternWindow::Right, 0x00, 0x19),
-    observed("battle_animation", PatternWindow::Left, 0x02, 0x06),
-    observed("battle_animation", PatternWindow::Left, 0x06, 0x06),
-    observed("battle_animation", PatternWindow::Right, 0x02, 0x06),
-    observed("chapter2_intro", PatternWindow::Left, 0x13, 0x13),
-    observed("chapter2_intro", PatternWindow::Right, 0x00, 0x18),
-];
-
-const fn observed(
-    screen_role: &'static str,
-    pattern_window: PatternWindow,
-    fd_source_page: u8,
-    fe_source_page: u8,
-) -> ObservedChrPair {
-    ObservedChrPair {
-        screen_role,
-        pattern_window,
-        fd_source_page,
-        fe_source_page,
-    }
 }
 
 #[derive(Debug, Serialize)]
@@ -381,8 +319,11 @@ mod tests {
     fn equal_fd_and_fe_high_planes_need_no_variant() {
         let plane = [0x20; 8];
         let chr = chr_with_page_planes(&[(0, plane), (1, plane)]);
-        let report =
-            analyze_observations(&chr, &[observed("screen", PatternWindow::Right, 0, 1)]).unwrap();
+        let report = analyze_observations(
+            &chr,
+            &[ObservedChrPair::new("screen", PatternWindow::Right, 0, 1)],
+        )
+        .unwrap();
 
         assert!(report.all_observed_pairs_exact_without_variants);
         assert_eq!(report.required_variant_page_count, 0);
@@ -396,8 +337,8 @@ mod tests {
         let report = analyze_observations(
             &chr,
             &[
-                observed("first", PatternWindow::Left, 0, 1),
-                observed("second", PatternWindow::Right, 0, 2),
+                ObservedChrPair::new("first", PatternWindow::Left, 0, 1),
+                ObservedChrPair::new("second", PatternWindow::Right, 0, 2),
             ],
         )
         .unwrap();
@@ -416,8 +357,8 @@ mod tests {
         let report = analyze_observations(
             &chr,
             &[
-                observed("mismatch", PatternWindow::Right, 0, 1),
-                observed("natural", PatternWindow::Right, 0, 2),
+                ObservedChrPair::new("mismatch", PatternWindow::Right, 0, 1),
+                ObservedChrPair::new("natural", PatternWindow::Right, 0, 2),
             ],
         )
         .unwrap();
@@ -439,8 +380,8 @@ mod tests {
         let report = analyze_observations(
             &chr,
             &[
-                observed("first", PatternWindow::Left, 0, 0),
-                observed("second", PatternWindow::Left, 0, 0),
+                ObservedChrPair::new("first", PatternWindow::Left, 0, 0),
+                ObservedChrPair::new("second", PatternWindow::Left, 0, 0),
             ],
         )
         .unwrap();
@@ -458,6 +399,7 @@ mod tests {
         let chr = chr_with_page_planes(&[
             (0, [0x20; 8]),
             (0x14, [0; 8]),
+            (0x15, [0x20; 8]),
             (0x18, [0x20; 8]),
             (0x19, [0x20; 8]),
         ]);

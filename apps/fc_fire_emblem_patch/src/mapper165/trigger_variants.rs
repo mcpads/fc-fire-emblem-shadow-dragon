@@ -163,7 +163,7 @@ mod tests {
         for (index, byte) in chr.iter_mut().enumerate() {
             *byte = (index / CHR_PAGE_SIZE) as u8;
         }
-        for page in [0x00, 0x18, 0x19] {
+        for page in [0x00, 0x15, 0x18, 0x19] {
             let start = page * CHR_PAGE_SIZE + FD_TILE_HIGH_PLANE_OFFSET;
             chr[start..start + 8].fill(0x20);
         }
