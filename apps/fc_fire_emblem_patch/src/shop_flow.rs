@@ -129,9 +129,10 @@ struct ShopFlowReport {
     purchase_mutation: PurchaseMutation,
     runtime_purchase_observation: RuntimePurchaseObservation,
     runtime_exit_observation: RuntimeExitObservation,
+    runtime_inventory_full_observation: RuntimeInventoryFullObservation,
     dialogue_table: ShopDialogueTableBinding,
     code_regions: Vec<CodeRegionBinding>,
-    unresolved_downstream_roles: [&'static str; 3],
+    unresolved_downstream_roles: Vec<&'static str>,
     release_eligible: bool,
 }
 
@@ -259,6 +260,29 @@ struct RuntimeExitObservation {
 }
 
 #[derive(Debug, Serialize)]
+struct RuntimeInventoryFullObservation {
+    setup_kind: &'static str,
+    setup_inventory_items: [u8; 4],
+    setup_inventory_durability: [u8; 4],
+    outer_state_sequence: [u8; 3],
+    dialogue_entry_sequence: [u8; 2],
+    stored_funds_before: u16,
+    stored_funds_after: u16,
+    inventory_items_after: [u8; 4],
+    inventory_durability_after: [u8; 4],
+    branch_mutated_funds_or_inventory: bool,
+    screenshot_sha256: &'static str,
+    chr_pair: ChrPair,
+    temporal_observation: &'static str,
+    advance_input: &'static str,
+    outer_state_after_completion: u8,
+    completion_flag_value: u8,
+    returned_screen_role: &'static str,
+    returned_screenshot_sha256: &'static str,
+    evidence_scope: &'static str,
+}
+
+#[derive(Debug, Serialize)]
 struct CodeRegionBinding {
     role: &'static str,
     prg_bank: u8,
@@ -375,12 +399,13 @@ fn build_report(rom: &Rom) -> Result<ShopFlowReport> {
             purchase_confirmation_screen(),
             purchase_result_screen(),
             exit_message_screen(),
+            inventory_full_message_screen(),
         ],
         preflight_branches: vec![
             PreflightBranch {
                 condition: "selected unit has no free inventory slot",
                 dialogue_entry_index: 3,
-                outer_state_after_branch: 7,
+                outer_state_after_branch: 8,
                 mutates_funds_or_inventory: false,
                 next_role: "weapon_shop_inventory_full_message",
             },
@@ -461,10 +486,30 @@ fn build_report(rom: &Rom) -> Result<ShopFlowReport> {
             returned_screenshot_sha256: "7c2bb933bf6876a2f032c36710fc53495add36774e1415f615efd44d343c534a",
             completion_effect: "returns to the map and completes the unit facility action without another funds or inventory write",
         },
+        runtime_inventory_full_observation: RuntimeInventoryFullObservation {
+            setup_kind: "reversible runtime copy of the third item and durability into the fourth empty slot",
+            setup_inventory_items: [0x02, 0x0F, 0x02, 0x02],
+            setup_inventory_durability: [0x2A, 0x16, 0x2A, 0x2A],
+            outer_state_sequence: [4, 7, 8],
+            dialogue_entry_sequence: [3, 6],
+            stored_funds_before: 0x00A8,
+            stored_funds_after: 0x00A8,
+            inventory_items_after: [0x02, 0x0F, 0x02, 0x02],
+            inventory_durability_after: [0x2A, 0x16, 0x2A, 0x2A],
+            branch_mutated_funds_or_inventory: false,
+            screenshot_sha256: "90f436083be6ff4e0af8ac3f88d8c70061abec9aff664995cc0be7c09c96d0ea",
+            chr_pair: observed_shop_chr_pair(),
+            temporal_observation: "CHR 1E/1E + 00/15 and the complete screenshot stayed stable across 152 regular and 168 irregularly spaced input-free frames",
+            advance_input: "A",
+            outer_state_after_completion: 0,
+            completion_flag_value: 1,
+            returned_screen_role: "map_idle",
+            returned_screenshot_sha256: "93946a26fd1d900c03c119051f161214537a5e49b1405af9bb9208a55ac24114",
+            evidence_scope: "the branch is runtime-observed from a declared reversible RAM setup, not a natural-play reproduction",
+        },
         dialogue_table,
         code_regions,
-        unresolved_downstream_roles: [
-            "weapon_shop_inventory_full_message",
+        unresolved_downstream_roles: vec![
             "weapon_shop_insufficient_funds_message",
             "weapon_shop_item_restriction_message",
         ],
@@ -624,6 +669,35 @@ fn exit_message_screen() -> ShopScreen {
             "map background and unit sprites",
         ],
         temporal_observation: "CHR 1E/1E + 00/15 and screenshot SHA-256 15d1d0ad...403b6f stayed stable across 152 regular and 168 irregularly spaced input-free frames",
+        input_actions: vec![InputAction {
+            input: "A",
+            immediate_effect: "finish the dialogue, reset shop outer state to 0, return to map idle, and complete the facility action",
+            persistent_gameplay_mutation: true,
+            next_role: "map_idle",
+        }],
+    }
+}
+
+fn inventory_full_message_screen() -> ShopScreen {
+    ShopScreen {
+        screen_role: "weapon_shop_inventory_full_message",
+        runtime_observed: true,
+        outer_state: 8,
+        menu_controller_state: None,
+        selectable_entry_count: 0,
+        choice_mask: 0,
+        choice_mask_hex: "0x00".to_owned(),
+        chr_pair: observed_shop_chr_pair(),
+        translation_target: "Japanese inventory-full and automatic exit dialogue only",
+        preserved_original: &["item-list price digits", "funds digits", "G"],
+        visible_components: &[
+            "retained six-row item list and prices",
+            "retained current funds",
+            "character portrait",
+            "inventory-full dialogue followed by exit dialogue in the same window",
+            "map background and unit sprites",
+        ],
+        temporal_observation: "CHR 1E/1E + 00/15 and screenshot SHA-256 90f43608...96d0ea stayed stable across 152 regular and 168 irregularly spaced input-free frames",
         input_actions: vec![InputAction {
             input: "A",
             immediate_effect: "finish the dialogue, reset shop outer state to 0, return to map idle, and complete the facility action",
@@ -849,6 +923,17 @@ mod tests {
 
         assert_eq!(exit.outer_state, 8);
         assert_eq!(exit.menu_controller_state, None);
+        assert!(advance.persistent_gameplay_mutation);
+        assert_eq!(advance.next_role, "map_idle");
+    }
+
+    #[test]
+    fn inventory_full_message_is_a_non_purchase_branch_that_finishes_the_facility_action() {
+        let screen = inventory_full_message_screen();
+        let advance = screen.input_actions.first().unwrap();
+
+        assert_eq!(screen.outer_state, 8);
+        assert_eq!(screen.selectable_entry_count, 0);
         assert!(advance.persistent_gameplay_mutation);
         assert_eq!(advance.next_role, "map_idle");
     }

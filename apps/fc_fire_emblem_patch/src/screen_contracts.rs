@@ -126,6 +126,18 @@ pub(crate) const OBSERVED_CHR_PAIRS: &[ObservedChrPair] = &[
     ),
     pair("weapon_shop_exit_message", PatternWindow::Left, 0x1E, 0x1E),
     pair("weapon_shop_exit_message", PatternWindow::Right, 0x00, 0x15),
+    pair(
+        "weapon_shop_inventory_full_message",
+        PatternWindow::Left,
+        0x1E,
+        0x1E,
+    ),
+    pair(
+        "weapon_shop_inventory_full_message",
+        PatternWindow::Right,
+        0x00,
+        0x15,
+    ),
 ];
 
 const fn pair(
@@ -370,9 +382,9 @@ mod tests {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
 
         assert_eq!(report.screen_count, 28);
-        assert_eq!(report.runtime_observed_screen_count, 22);
-        assert_eq!(report.chr_pair_observed_screen_count, 20);
-        assert_eq!(report.mixed_original_latin_screen_count, 11);
+        assert_eq!(report.runtime_observed_screen_count, 23);
+        assert_eq!(report.chr_pair_observed_screen_count, 21);
+        assert_eq!(report.mixed_original_latin_screen_count, 12);
         assert_eq!(report.page_switch_verified_screen_count, 1);
         assert_eq!(report.mixed_text_page_verified_screen_count, 1);
     }
@@ -421,7 +433,7 @@ mod tests {
     }
 
     #[test]
-    fn next_screen_selects_the_first_unobserved_shop_outcome() {
+    fn next_screen_selects_the_next_unobserved_shop_outcome() {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
         let next = report
             .screens
@@ -429,10 +441,13 @@ mod tests {
             .find(|screen| screen.screen_role == report.next_screen_role)
             .unwrap();
 
-        assert_eq!(next.screen_role, "weapon_shop_inventory_full_message");
+        assert_eq!(next.screen_role, "weapon_shop_insufficient_funds_message");
         assert!(!next.runtime_observed);
         assert_eq!(next.contract_state, ContractState::Unobserved);
-        assert!(next.next_gate.contains("four inventory slots"));
+        assert!(
+            next.next_gate
+                .contains("lower only reversible runtime funds")
+        );
     }
 
     #[test]
@@ -450,18 +465,18 @@ mod tests {
                 .iter()
                 .filter(|screen| screen.runtime_observed)
                 .count(),
-            4
+            5
         );
         assert!(
-            shop_screens[..4]
+            shop_screens[..5]
                 .iter()
                 .all(|screen| screen.chr_pair_observed)
         );
-        assert!(shop_screens[..4].iter().all(|screen| {
+        assert!(shop_screens[..5].iter().all(|screen| {
             screen.translation_scope == TranslationScope::JapaneseWithPreservedOriginalLatin
         }));
         assert!(
-            shop_screens[4..]
+            shop_screens[5..]
                 .iter()
                 .all(|screen| screen.translation_scope == TranslationScope::Unresolved)
         );
