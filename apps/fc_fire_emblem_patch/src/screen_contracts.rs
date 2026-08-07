@@ -261,10 +261,6 @@ fn build_report(
         .get(registry.next_screen_role.as_str())
         .context("next screen role is absent from registry")?;
     ensure!(
-        next_target.translation_scope == TranslationScope::JapaneseWithPreservedOriginalLatin,
-        "next screen must exercise preserved original Latin"
-    );
-    ensure!(
         next_target.runtime_observed,
         "next screen must be runtime observed"
     );
@@ -352,31 +348,42 @@ mod tests {
     }
 
     #[test]
-    fn summary_requires_a_complete_glyph_budget_after_writer_binding() {
+    fn command_menu_requires_runtime_page_and_variant_evidence() {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
-        let summary = report
+        let command_menu = report
             .screens
             .iter()
             .find(|screen| screen.screen_role == report.next_screen_role)
             .unwrap();
 
-        assert!(summary.runtime_observed);
-        assert!(summary.chr_pair_observed);
+        assert_eq!(command_menu.screen_role, "unit_command_menu");
+        assert!(command_menu.runtime_observed);
+        assert!(command_menu.chr_pair_observed);
         assert_eq!(
-            summary.translation_scope,
-            TranslationScope::JapaneseWithPreservedOriginalLatin
+            command_menu.translation_scope,
+            TranslationScope::JapaneseOnly
         );
-        assert!(summary.next_gate.contains("glyph union"));
         assert!(
-            summary
+            command_menu
                 .next_gate
-                .contains("shared summary-and-status Hangul page")
+                .contains("entry-time right-FD supply")
         );
         assert!(
-            summary
+            command_menu
+                .next_gate
+                .contains("terrain and facility variants")
+        );
+        assert!(
+            command_menu
                 .unresolved_focus
                 .iter()
-                .any(|focus| focus.contains("page budget"))
+                .any(|focus| focus.contains("remaining 13 command labels"))
+        );
+        assert!(
+            command_menu
+                .unresolved_focus
+                .iter()
+                .any(|focus| focus.contains("supplies the right FD page"))
         );
     }
 

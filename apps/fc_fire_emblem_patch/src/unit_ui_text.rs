@@ -8,8 +8,10 @@ use crate::{
     sha1_hex,
 };
 
+mod command_menu;
+
 const PRG_BANK_SIZE: usize = 16 * 1024;
-const UNIT_UI_BANK: usize = 0x0B;
+pub(super) const UNIT_UI_BANK: usize = 0x0B;
 const SWITCHABLE_CPU_BASE: u16 = 0x8000;
 const FIXED_STRING_POINTER_TABLE_ADDRESS: u16 = 0x8FC2;
 
@@ -153,15 +155,15 @@ const CODE_REGION_SPECS: &[CodeRegionSpec] = &[
     },
 ];
 
-struct FixedLabelSpec {
-    index: u8,
+pub(super) struct FixedLabelSpec {
+    pub(super) index: u8,
     source_text: &'static str,
     translation_scope: &'static str,
     pointer: u16,
     expected: &'static [u8],
 }
 
-const FIXED_LABEL_SPECS: &[FixedLabelSpec] = &[
+const SUMMARY_AND_STATUS_LABEL_SPECS: &[FixedLabelSpec] = &[
     fixed_label(
         0x00,
         "ちから",
@@ -245,7 +247,7 @@ const FIXED_LABEL_SPECS: &[FixedLabelSpec] = &[
     ),
 ];
 
-const fn fixed_label(
+pub(super) const fn fixed_label(
     index: u8,
     source_text: &'static str,
     translation_scope: &'static str,
@@ -270,6 +272,7 @@ struct UnitUiTextReport {
     shared_appenders: Vec<CodeRegionReport>,
     fixed_labels: Vec<FixedLabelReport>,
     dynamic_sources: Vec<DynamicSourceReport>,
+    command_menu: command_menu::CommandMenuReport,
     page_lifetime: PageLifetimeReport,
     implementation_boundary: ImplementationBoundary,
 }
@@ -299,17 +302,17 @@ struct CompositionStateReport {
     handler: CodeRegionReport,
 }
 
-#[derive(Debug, Serialize)]
-struct CodeRegionReport {
-    role: &'static str,
-    prg_bank: usize,
-    prg_bank_hex: String,
-    cpu_address: u16,
-    cpu_address_hex: String,
-    file_offset: usize,
-    file_offset_hex: String,
-    byte_count: usize,
-    bytes_hex: String,
+#[derive(Debug, Serialize, Clone)]
+pub(super) struct CodeRegionReport {
+    pub(super) role: &'static str,
+    pub(super) prg_bank: usize,
+    pub(super) prg_bank_hex: String,
+    pub(super) cpu_address: u16,
+    pub(super) cpu_address_hex: String,
+    pub(super) file_offset: usize,
+    pub(super) file_offset_hex: String,
+    pub(super) byte_count: usize,
+    pub(super) bytes_hex: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -337,11 +340,13 @@ struct DynamicSourceReport {
 #[derive(Debug, Serialize)]
 struct PageLifetimeReport {
     opened_by_screen_role: &'static str,
-    inherited_by_screen_role: &'static str,
+    proven_inherited_by_screen_roles: Vec<&'static str>,
+    candidate_shared_screen_roles: Vec<&'static str>,
     phase_state_address: &'static str,
     phase_dispatcher: CodeRegionReport,
     right_fd_page_supply: CodeRegionReport,
     runtime_evidence: &'static str,
+    unresolved_boundary: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -358,6 +363,7 @@ pub struct UnitUiTextSummary {
     pub composer_count: usize,
     pub fixed_label_count: usize,
     pub translated_japanese_label_count: usize,
+    pub command_label_count: usize,
 }
 
 pub fn analyze_unit_ui_text(source_path: &Path, report_path: &Path) -> Result<UnitUiTextSummary> {
@@ -385,13 +391,20 @@ pub fn analyze_unit_ui_text(source_path: &Path, report_path: &Path) -> Result<Un
             .iter()
             .filter(|label| label.translation_scope == "japanese_only")
             .count(),
+        command_label_count: report.command_menu.static_label_count,
     })
 }
 
 fn build_report(prg: &[u8]) -> Result<UnitUiTextReport> {
     ensure!(prg.len() == PRG_SIZE, "unexpected PRG size");
     validate_code_regions(prg)?;
-    let fixed_labels = validate_fixed_labels(prg)?;
+    let command_menu = command_menu::analyze(prg)?;
+    let fixed_labels = validate_fixed_labels(
+        prg,
+        SUMMARY_AND_STATUS_LABEL_SPECS
+            .iter()
+            .chain(command_menu::COMMAND_LABEL_SPECS),
+    )?;
 
     Ok(UnitUiTextReport {
         schema: 1,
@@ -402,6 +415,12 @@ fn build_report(prg: &[u8]) -> Result<UnitUiTextReport> {
                 composers: vec!["unit_summary_header", "unit_summary_items"],
                 inherited_content: vec![],
                 translation_scope: "translate Japanese unit, class, level, and item text; preserve original Latin, digits, slash, and punctuation",
+            },
+            ScreenRoleReport {
+                screen_role: "unit_command_menu",
+                composers: vec!["unit_command_menu"],
+                inherited_content: vec![],
+                translation_scope: "translate all fifteen conditional Japanese command labels; do not infer one command set from the observed inventory-and-wait variant",
             },
             ScreenRoleReport {
                 screen_role: "unit_status",
@@ -415,6 +434,11 @@ fn build_report(prg: &[u8]) -> Result<UnitUiTextReport> {
             dispatcher: region_report(region("dispatch_composite_text_role_from_05e8")),
             relevant_states: vec![
                 composition_state(0x04, "unit_summary_header", 0x826C),
+                composition_state_with_report(
+                    0x05,
+                    "unit_command_menu",
+                    command_menu.composer.clone(),
+                ),
                 composition_state(0x07, "unit_summary_items", 0x85BE),
                 composition_state(0x0F, "unit_status_stats", 0x87F2),
             ],
@@ -452,16 +476,19 @@ fn build_report(prg: &[u8]) -> Result<UnitUiTextReport> {
                 destination: "composite buffer 0x0451,X",
             },
         ],
+        command_menu,
         page_lifetime: PageLifetimeReport {
             opened_by_screen_role: "unit_summary",
-            inherited_by_screen_role: "unit_status",
+            proven_inherited_by_screen_roles: vec!["unit_status"],
+            candidate_shared_screen_roles: vec!["unit_command_menu"],
             phase_state_address: "0x05DE",
             phase_dispatcher: region_report(region("dispatch_unit_window_phase_from_05de")),
             right_fd_page_supply: region_report(region("open_unit_ui_right_fd_page_00")),
             runtime_evidence: "unit_summary entry executes the right-FD supply; unit_summary-to-unit_status changes the left CHR pair without another right-FD supply",
+            unresolved_boundary: "unit_command_menu has the same observed right 00/18 pair, but its entry-time right-FD supply has not been traced",
         },
         implementation_boundary: ImplementationBoundary {
-            required_design: "one unit-UI page lifetime fed by three composition roles and shared dynamic source tables",
+            required_design: "resolve the unit-command-menu page boundary, then budget one unit-UI family across four composition roles, fifteen command labels, and shared dynamic source tables",
             rejected_shortcut: "per-unit or per-visible-string byte patches",
             preserved_original: ["Latin letters", "digits", "punctuation and slash"],
             separate_screen_contract: "automatic class_profile",
@@ -483,9 +510,12 @@ fn validate_code_regions(prg: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn validate_fixed_labels(prg: &[u8]) -> Result<Vec<FixedLabelReport>> {
-    FIXED_LABEL_SPECS
-        .iter()
+fn validate_fixed_labels<'a>(
+    prg: &[u8],
+    specs: impl IntoIterator<Item = &'a FixedLabelSpec>,
+) -> Result<Vec<FixedLabelReport>> {
+    specs
+        .into_iter()
         .map(|spec| {
             let pointer_address = FIXED_STRING_POINTER_TABLE_ADDRESS + u16::from(spec.index) * 2;
             let pointer_offset = banked_prg_offset(UNIT_UI_BANK, pointer_address)?;
@@ -549,6 +579,21 @@ fn composition_state(
     }
 }
 
+fn composition_state_with_report(
+    state: u8,
+    role: &'static str,
+    handler: CodeRegionReport,
+) -> CompositionStateReport {
+    CompositionStateReport {
+        state,
+        state_hex: format!("0x{state:02X}"),
+        role,
+        handler_address: handler.cpu_address,
+        handler_address_hex: handler.cpu_address_hex.clone(),
+        handler,
+    }
+}
+
 fn region(role: &str) -> &'static CodeRegionSpec {
     CODE_REGION_SPECS
         .iter()
@@ -573,7 +618,7 @@ fn region_report(spec: &CodeRegionSpec) -> CodeRegionReport {
     }
 }
 
-fn banked_prg_offset(bank: usize, cpu_address: u16) -> Result<usize> {
+pub(super) fn banked_prg_offset(bank: usize, cpu_address: u16) -> Result<usize> {
     ensure!(bank < PRG_SIZE / PRG_BANK_SIZE, "PRG bank out of range");
     ensure!(
         (SWITCHABLE_CPU_BASE..0xC000).contains(&cpu_address),
@@ -582,7 +627,7 @@ fn banked_prg_offset(bank: usize, cpu_address: u16) -> Result<usize> {
     Ok(bank * PRG_BANK_SIZE + usize::from(cpu_address - SWITCHABLE_CPU_BASE))
 }
 
-fn hex(bytes: &[u8]) -> String {
+pub(super) fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02X}")).collect()
 }
 
@@ -596,7 +641,11 @@ mod tests {
             let offset = banked_prg_offset(UNIT_UI_BANK, spec.cpu_address).unwrap();
             prg[offset..offset + spec.expected.len()].copy_from_slice(spec.expected);
         }
-        for spec in FIXED_LABEL_SPECS {
+        command_menu::install_fixture(&mut prg);
+        for spec in SUMMARY_AND_STATUS_LABEL_SPECS
+            .iter()
+            .chain(command_menu::COMMAND_LABEL_SPECS)
+        {
             let pointer_address = FIXED_STRING_POINTER_TABLE_ADDRESS + u16::from(spec.index) * 2;
             let pointer_offset = banked_prg_offset(UNIT_UI_BANK, pointer_address).unwrap();
             prg[pointer_offset..pointer_offset + 2].copy_from_slice(&spec.pointer.to_le_bytes());
@@ -607,7 +656,7 @@ mod tests {
     }
 
     #[test]
-    fn binds_three_screen_composition_roles_and_shared_page_lifetime() {
+    fn binds_the_unit_ui_family_without_overclaiming_command_page_lifetime() {
         let report = build_report(&contract_fixture()).unwrap();
 
         let states = report
@@ -620,16 +669,26 @@ mod tests {
             states,
             vec![
                 (0x04, "unit_summary_header", 0x826C),
+                (0x05, "unit_command_menu", 0x82E3),
                 (0x07, "unit_summary_items", 0x85BE),
                 (0x0F, "unit_status_stats", 0x87F2),
             ]
         );
         assert_eq!(report.page_lifetime.opened_by_screen_role, "unit_summary");
-        assert_eq!(report.page_lifetime.inherited_by_screen_role, "unit_status");
         assert_eq!(
-            report.screen_roles[1].inherited_content,
+            report.page_lifetime.proven_inherited_by_screen_roles,
+            vec!["unit_status"]
+        );
+        assert_eq!(
+            report.page_lifetime.candidate_shared_screen_roles,
+            vec!["unit_command_menu"]
+        );
+        assert_eq!(
+            report.screen_roles[2].inherited_content,
             vec!["unit_summary_header"]
         );
+        assert_eq!(report.command_menu.static_label_count, 15);
+        assert_eq!(report.command_menu.runtime_observed_label_count, 2);
     }
 
     #[test]
@@ -649,7 +708,7 @@ mod tests {
                 .iter()
                 .filter(|label| label.translation_scope == "japanese_only")
                 .count(),
-            10
+            25
         );
     }
 
@@ -672,5 +731,15 @@ mod tests {
 
         let error = build_report(&prg).unwrap_err().to_string();
         assert!(error.contains("index 0x27"));
+    }
+
+    #[test]
+    fn rejects_a_changed_command_menu_composer() {
+        let mut prg = contract_fixture();
+        let offset = banked_prg_offset(UNIT_UI_BANK, command_menu::composer_address()).unwrap();
+        prg[offset + 0x20] ^= 0x01;
+
+        let error = build_report(&prg).unwrap_err().to_string();
+        assert!(error.contains("unit-command-menu composer"));
     }
 }
