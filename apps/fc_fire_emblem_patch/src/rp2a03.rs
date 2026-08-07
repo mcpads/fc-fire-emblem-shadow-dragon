@@ -9,6 +9,7 @@ pub enum Instruction {
     LdaZeroPage(u8),
     LdaAbsolute(u16),
     LdaAbsoluteX(u16),
+    LdaIndirectY(u8),
     LdxImmediate(u8),
     LdyImmediate(u8),
     LdyAbsoluteX(u16),
@@ -22,6 +23,7 @@ pub enum Instruction {
     AndImmediate(u8),
     AdcImmediate(u8),
     AdcZeroPage(u8),
+    AdcAbsoluteX(u16),
     SbcImmediate(u8),
     CmpImmediate(u8),
     CpxImmediate(u8),
@@ -29,6 +31,7 @@ pub enum Instruction {
     IncAbsolute(u16),
     DecAbsolute(u16),
     Inx,
+    Iny,
     Tax,
     Txa,
     Tay,
@@ -62,6 +65,7 @@ impl Instruction {
             | Self::Pla
             | Self::Plp
             | Self::Inx
+            | Self::Iny
             | Self::Tax
             | Self::Txa
             | Self::Tay
@@ -73,6 +77,7 @@ impl Instruction {
             | Self::Nop => 1,
             Self::LdaImmediate(_)
             | Self::LdaZeroPage(_)
+            | Self::LdaIndirectY(_)
             | Self::LdxImmediate(_)
             | Self::LdyImmediate(_)
             | Self::StaZeroPage(_)
@@ -93,6 +98,7 @@ impl Instruction {
             | Self::BneAbsolute(_) => 2,
             Self::LdaAbsolute(_)
             | Self::LdaAbsoluteX(_)
+            | Self::AdcAbsoluteX(_)
             | Self::LdyAbsoluteX(_)
             | Self::StaAbsolute(_)
             | Self::StaAbsoluteX(_)
@@ -109,6 +115,11 @@ impl Instruction {
             Self::LdaZeroPage(address) => zero_page(Mnemonic::Lda, address),
             Self::LdaAbsolute(address) => absolute(Mnemonic::Lda, address),
             Self::LdaAbsoluteX(address) => absolute_x(Mnemonic::Lda, address),
+            Self::LdaIndirectY(address) => (
+                Mnemonic::Lda,
+                AddressingMode::ZeroPageIndirectIndexedY,
+                Operand::Byte(address),
+            ),
             Self::LdxImmediate(value) => immediate(Mnemonic::Ldx, value),
             Self::LdyImmediate(value) => immediate(Mnemonic::Ldy, value),
             Self::LdyAbsoluteX(address) => absolute_x(Mnemonic::Ldy, address),
@@ -126,6 +137,7 @@ impl Instruction {
             Self::AndImmediate(value) => immediate(Mnemonic::And, value),
             Self::AdcImmediate(value) => immediate(Mnemonic::Adc, value),
             Self::AdcZeroPage(address) => zero_page(Mnemonic::Adc, address),
+            Self::AdcAbsoluteX(address) => absolute_x(Mnemonic::Adc, address),
             Self::SbcImmediate(value) => immediate(Mnemonic::Sbc, value),
             Self::CmpImmediate(value) => immediate(Mnemonic::Cmp, value),
             Self::CpxImmediate(value) => immediate(Mnemonic::Cpx, value),
@@ -133,6 +145,7 @@ impl Instruction {
             Self::IncAbsolute(address) => absolute(Mnemonic::Inc, address),
             Self::DecAbsolute(address) => absolute(Mnemonic::Dec, address),
             Self::Inx => implied(Mnemonic::Inx, AddressingMode::Implied),
+            Self::Iny => implied(Mnemonic::Iny, AddressingMode::Implied),
             Self::Tax => implied(Mnemonic::Tax, AddressingMode::Implied),
             Self::Txa => implied(Mnemonic::Txa, AddressingMode::Implied),
             Self::Tay => implied(Mnemonic::Tay, AddressingMode::Implied),
@@ -298,6 +311,21 @@ mod tests {
                 0xF0, 0xB8, 0x90, 0xB6, 0xB0, 0xB4, 0xD0, 0xB2, 0x4C, 0x75, 0xC0, 0x60, 0xEA,
             ]
         );
+    }
+
+    #[test]
+    fn encodes_options_row_calculation_addressing_forms() {
+        let bytes = assemble_at(
+            0x93B7,
+            &[
+                Instruction::LdaIndirectY(0x6E),
+                Instruction::AdcAbsoluteX(0x93D8),
+                Instruction::Iny,
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(bytes, [0xB1, 0x6E, 0x7D, 0xD8, 0x93, 0xC8]);
     }
 
     #[test]

@@ -12,7 +12,7 @@
 
 설정 항목 `サウンド`, `アニメーション`, `ウエイトタイマー`를 각각 `사운드`, `애니메이션`, `대기시간`으로 바꾸는 기술 PoC를 제공한다. Mesen의 실제 설정 화면에서 세 한글 항목과 기존 영어 능력치 약어가 함께 유지되는 것을 확인했다. 일본어 설정 문자열에 쓰인 가나 타일만 임시로 한글 타일로 바꾸므로, 다른 일본어 화면이 깨질 수 있다. 정식 패치나 배포 후보가 아니다.
 
-매퍼 변환은 MMC2식 CHR 래치와 MMC3식 PRG·SRAM을 함께 제공하는 mapper 165를 채택했다. 무번역 프로브는 원본 CHR을 보존한 채 재배치하고, 관측한 FD/FE 쌍용 변형 페이지 1개를 자동 생성한다. 타이틀·자동 능력치·1장 인트로 대화·전투·게임 오버·중단 저장과 재개·1장 완료 저장·콜드 로드·2장 전환 표본이 원본과 동등해 G2를 통과했다. 다음 관문은 실제 설정 글리프 12자를 공유하면서 합집합이 활성 슬롯 예산을 넘는 한글 페이지의 `A → B → A` 동적 교체다. 아직 정식 패치나 배포 후보는 아니다.
+매퍼 변환은 MMC2식 CHR 래치와 MMC3식 PRG·SRAM을 함께 제공하는 mapper 165를 채택했다. 무번역 프로브는 원본 CHR을 보존한 채 재배치하고, 관측한 FD/FE 쌍용 변형 페이지 1개를 자동 생성한다. 타이틀·자동 능력치·1장 인트로 대화·전투·게임 오버·중단 저장과 재개·1장 완료 저장·콜드 로드·2장 전환 표본이 원본과 동등해 G2를 통과했다. 실제 설정 글리프 12자를 공유하면서 합집합이 활성 슬롯 예산을 넘는 한글 페이지 두 개와 화면 전용 `A → B → A` 훅까지 ROM에 결속했다. 다음 관문은 이 프로브의 콜드 실행과 화면 이탈 복구, 별도 영문 동시 표시 화면 검증이다. 아직 정식 패치나 배포 후보는 아니다.
 
 ```sh
 cargo run -p fc-fire-emblem-patch -- verify-source "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
@@ -29,6 +29,7 @@ cargo run -p fc-fire-emblem-patch -- build-mapper165-parity-probe "roms/Fire Emb
 cargo run -p fc-fire-emblem-patch -- analyze-mapper165-trigger-planes "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- analyze-mapper165-direct-chr-pairs "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- plan-hangul-page-proof "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
+cargo run -p fc-fire-emblem-patch -- build-mapper165-hangul-page-probe "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- build-mmc5-prg-probe "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- build-mmc5-chr-writer-probe "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- build-mmc5-expanded-chr-options-probe "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"

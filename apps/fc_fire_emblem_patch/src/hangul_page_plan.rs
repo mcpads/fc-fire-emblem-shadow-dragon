@@ -93,24 +93,8 @@ pub(crate) fn plan_hangul_page_proof(
 ) -> Result<HangulPageProofSummary> {
     let source_rom = Rom::from_path(source_path)?;
     source_rom.verify_supported_japanese()?;
-    let source_font_page = &source_rom.chr()[..FONT_PAGE_SIZE];
     let localization = OptionsLocalization::from_path(localization_path)?;
-    let requested_pages = proof_page_glyphs(&localization)?;
-    let font = load_dalmoori()?;
-
-    let pages = PROOF_PAGE_IDS
-        .iter()
-        .enumerate()
-        .map(|(index, id)| {
-            plan_page(
-                id,
-                FIRST_EXTENSION_CHR_PAGE + u8::try_from(index)?,
-                source_font_page,
-                &requested_pages[index],
-                &font,
-            )
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let pages = plan_hangul_pages(&source_rom, &localization)?;
 
     let shared_screen_glyph_count = pages[0].report.shared_screen_glyph_count;
     let shared_screen_assignments_identical = pages[0].report.assignments
@@ -142,21 +126,14 @@ pub(crate) fn plan_hangul_page_proof(
         "proof page union must exceed one active Hangul page"
     );
 
-    let page_pack = pages
-        .iter()
-        .flat_map(|page| page.bytes.iter().copied())
-        .collect::<Vec<_>>();
-    ensure!(
-        page_pack.len() == PROOF_PAGE_IDS.len() * FONT_PAGE_SIZE,
-        "Hangul proof page pack size mismatch"
-    );
+    let page_pack = page_pack_bytes(&pages)?;
     let page_pack_sha1 = sha1_hex(&page_pack);
     let maximum_extension_page_count =
         usize::from(MAXIMUM_CHR_PAGE_COUNT - FIRST_EXTENSION_CHR_PAGE);
     let report = HangulPageProofReport {
         schema: 1,
         source_sha1: crate::rom::EXPECTED_SOURCE_SHA1,
-        source_font_page_sha1: sha1_hex(source_font_page),
+        source_font_page_sha1: sha1_hex(&source_rom.chr()[..FONT_PAGE_SIZE]),
         storage_strategy: "expanded_chr_rom_pages",
         protected_original_code_count: protected_original_codes().len(),
         reserved_code_count: reserved_font_codes().len(),
@@ -188,6 +165,52 @@ pub(crate) fn plan_hangul_page_proof(
         page_union_glyph_count,
         maximum_extension_page_count,
     })
+}
+
+pub(crate) fn assemble_hangul_page_pack(
+    source_rom: &Rom,
+    localization: &OptionsLocalization,
+) -> Result<Vec<u8>> {
+    page_pack_bytes(&plan_hangul_pages(source_rom, localization)?)
+}
+
+fn plan_hangul_pages(
+    source_rom: &Rom,
+    localization: &OptionsLocalization,
+) -> Result<Vec<PlannedPage>> {
+    ensure!(
+        source_rom.chr().len() >= FONT_PAGE_SIZE,
+        "source ROM has no complete font page"
+    );
+    let source_font_page = &source_rom.chr()[..FONT_PAGE_SIZE];
+    let requested_pages = proof_page_glyphs(localization)?;
+    let font = load_dalmoori()?;
+
+    PROOF_PAGE_IDS
+        .iter()
+        .enumerate()
+        .map(|(index, id)| {
+            plan_page(
+                id,
+                FIRST_EXTENSION_CHR_PAGE + u8::try_from(index)?,
+                source_font_page,
+                &requested_pages[index],
+                &font,
+            )
+        })
+        .collect()
+}
+
+fn page_pack_bytes(pages: &[PlannedPage]) -> Result<Vec<u8>> {
+    let page_pack = pages
+        .iter()
+        .flat_map(|page| page.bytes.iter().copied())
+        .collect::<Vec<_>>();
+    ensure!(
+        page_pack.len() == PROOF_PAGE_IDS.len() * FONT_PAGE_SIZE,
+        "Hangul proof page pack size mismatch"
+    );
+    Ok(page_pack)
 }
 
 fn plan_page(

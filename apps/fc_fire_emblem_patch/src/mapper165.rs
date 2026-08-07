@@ -11,6 +11,7 @@ use crate::{
     tracked::TrackedImage,
 };
 pub(crate) mod direct_chr_pairs;
+pub(crate) mod hangul_page_probe;
 mod runtime;
 #[cfg(test)]
 mod tests;
@@ -151,6 +152,15 @@ pub struct BuildSummary {
     pub tracked_write_count: usize,
 }
 
+struct AssembledParityImage {
+    output: Vec<u8>,
+    trigger_variant_plan: TriggerVariantPlan,
+    cave_file_start: usize,
+    direct_code_cave_transfer_count: usize,
+    routines: Vec<runtime::AssembledRoutine>,
+    tracked_writes: Vec<TrackedWrite>,
+}
+
 pub fn build_mapper165_parity_probe(
     source_path: &Path,
     output_path: &Path,
@@ -158,9 +168,110 @@ pub fn build_mapper165_parity_probe(
 ) -> Result<BuildSummary> {
     let source_rom = Rom::from_path(source_path)?;
     source_rom.verify_supported_japanese()?;
-    verify_complete_prg_writer_inventory(&source_rom)?;
+    let assembled = assemble_mapper165_parity_image(&source_rom)?;
+    let output_rom =
+        Rom::parse(assembled.output.clone()).context("parse mapper 165 parity probe")?;
+    let output_sha1 = sha1_hex(&assembled.output);
+    let relocated_source_chr_sha1 = sha1_hex(&output_rom.chr()[OUTPUT_CHR_PADDING_SIZE..]);
+    let output_chr_sha1 = sha1_hex(output_rom.chr());
+    let report = Mapper165ParityReport {
+        schema: 2,
+        source_sha1: EXPECTED_SOURCE_SHA1,
+        output_sha1: output_sha1.clone(),
+        source_mapper: source_rom.mapper(),
+        output_mapper: output_rom.mapper(),
+        prg_size: output_rom.prg().len(),
+        chr_size: output_rom.chr().len(),
+        source_chr_sha1: EXPECTED_CHR_SHA1,
+        relocated_source_chr_sha1,
+        output_chr_sha1,
+        battery_flag_preserved: true,
+        chr_layout: ChrLayoutEvidence {
+            reserved_prefix_size: OUTPUT_CHR_PADDING_SIZE,
+            source_chr_offset: OUTPUT_CHR_PADDING_SIZE,
+            source_4k_page_bias: 2,
+            maximum_4k_chr_rom_pages: 64,
+            remaining_4k_pages_at_maximum_size: 30,
+        },
+        trigger_plane_correction: TriggerPlaneCorrectionEvidence {
+            installed_variants: assembled
+                .trigger_variant_plan
+                .installed_variants
+                .iter()
+                .map(|variant| InstalledTriggerVariantEvidence {
+                    physical_4k_page: variant.physical_page,
+                    mapper_register_value: variant.mapper_register_value,
+                    fd_source_page: variant.fd_source_page,
+                    required_high_plane_sha1: sha1_hex(&variant.required_high_plane),
+                    compatible_fe_source_pages: variant.compatible_fe_source_pages.clone(),
+                    pattern_windows: variant
+                        .pattern_windows
+                        .iter()
+                        .map(|window| window.label())
+                        .collect(),
+                })
+                .collect(),
+            selector_entries: assembled
+                .trigger_variant_plan
+                .selector_entries
+                .iter()
+                .map(|entry| PairSelectorEvidence {
+                    pattern_window: entry.pattern_window.label(),
+                    fd_source_page: entry.fd_source_page,
+                    fe_source_page: entry.fe_source_page,
+                    mapper_register_value: entry.mapper_register_value,
+                })
+                .collect(),
+            central_right_writers_pair_aware: true,
+            direct_writers_pair_aware: false,
+        },
+        code_cave: CodeCaveEvidence {
+            cpu_start: format!("0x{CODE_CAVE_START_ADDRESS:04X}"),
+            file_start: format!("0x{:06X}", assembled.cave_file_start),
+            len: CODE_CAVE_LEN,
+            expected_fill: "0xFF",
+        },
+        direct_code_cave_transfer_count: assembled.direct_code_cave_transfer_count,
+        routines: assembled
+            .routines
+            .iter()
+            .map(|routine| RoutinePlacement {
+                role: routine.role,
+                cpu_address: format!("0x{:04X}", routine.cpu_address),
+                len: routine.bytes.len(),
+            })
+            .collect(),
+        prg_writer_count: SOURCE_PRG_BANK_WRITERS.len() + 1,
+        central_chr_writer_count: CENTRAL_CHR_WRITERS.len(),
+        direct_chr_writer_count: DIRECT_CHR_WRITERS.len(),
+        tracked_writes: assembled.tracked_writes,
+        unresolved_boundaries: vec![
+            "Observed central PPU $1000 pairs use generated trigger-plane variants; unobserved pairs still require visible parity measurement.",
+            "Direct CHR writers are limited to instruction-boundary sites proven by fixed-bank disassembly, adjacent register groups, or prior runtime traces; isolated byte-pattern candidates remain unclassified.",
+            "The classified direct-writer pairs need no trigger-plane variants; late-game executions outside the current runtime sample remain part of full regression.",
+            "The probe preserves and relocates the source CHR but does not add Korean glyphs or translation assets.",
+            "Runtime parity covers suspend persistence, one adverse game-over path, and the chapter-one completion/save/cold-load transition, not whole-game regression.",
+        ],
+        release_eligible: false,
+    };
+    let report_bytes =
+        serde_json::to_vec_pretty(&report).context("serialize mapper 165 parity report")?;
+    let report_sha1 = sha1_hex(&report_bytes);
+    let tracked_write_count = report.tracked_writes.len();
 
-    let (base, trigger_variant_plan) = create_chr_relocated_image(&source_rom)?;
+    write_file(output_path, &assembled.output)?;
+    write_file(report_path, &report_bytes)?;
+    Ok(BuildSummary {
+        output_sha1,
+        report_sha1,
+        tracked_write_count,
+    })
+}
+
+fn assemble_mapper165_parity_image(source_rom: &Rom) -> Result<AssembledParityImage> {
+    verify_complete_prg_writer_inventory(source_rom)?;
+
+    let (base, trigger_variant_plan) = create_chr_relocated_image(source_rom)?;
     let cave_file_start = fixed_bank_file_offset(CODE_CAVE_START_ADDRESS)?;
     let cave_file_end = cave_file_start
         .checked_add(CODE_CAVE_LEN)
@@ -242,101 +353,21 @@ pub fn build_mapper165_parity_probe(
         })
         .collect::<Vec<_>>();
     let output = image.into_data();
-    let output_rom = Rom::parse(output.clone()).context("parse mapper 165 parity probe")?;
-    verify_output(&source_rom, &output_rom, &output, &trigger_variant_plan)?;
+    let output_rom = Rom::parse(output.clone()).context("parse mapper 165 parity image")?;
+    verify_output(source_rom, &output_rom, &output, &trigger_variant_plan)?;
 
-    let output_sha1 = sha1_hex(&output);
-    let relocated_source_chr_sha1 = sha1_hex(&output_rom.chr()[OUTPUT_CHR_PADDING_SIZE..]);
-    let output_chr_sha1 = sha1_hex(output_rom.chr());
-    let report = Mapper165ParityReport {
-        schema: 2,
-        source_sha1: EXPECTED_SOURCE_SHA1,
-        output_sha1: output_sha1.clone(),
-        source_mapper: source_rom.mapper(),
-        output_mapper: output_rom.mapper(),
-        prg_size: output_rom.prg().len(),
-        chr_size: output_rom.chr().len(),
-        source_chr_sha1: EXPECTED_CHR_SHA1,
-        relocated_source_chr_sha1,
-        output_chr_sha1,
-        battery_flag_preserved: true,
-        chr_layout: ChrLayoutEvidence {
-            reserved_prefix_size: OUTPUT_CHR_PADDING_SIZE,
-            source_chr_offset: OUTPUT_CHR_PADDING_SIZE,
-            source_4k_page_bias: 2,
-            maximum_4k_chr_rom_pages: 64,
-            remaining_4k_pages_at_maximum_size: 30,
-        },
-        trigger_plane_correction: TriggerPlaneCorrectionEvidence {
-            installed_variants: trigger_variant_plan
-                .installed_variants
-                .iter()
-                .map(|variant| InstalledTriggerVariantEvidence {
-                    physical_4k_page: variant.physical_page,
-                    mapper_register_value: variant.mapper_register_value,
-                    fd_source_page: variant.fd_source_page,
-                    required_high_plane_sha1: sha1_hex(&variant.required_high_plane),
-                    compatible_fe_source_pages: variant.compatible_fe_source_pages.clone(),
-                    pattern_windows: variant
-                        .pattern_windows
-                        .iter()
-                        .map(|window| window.label())
-                        .collect(),
-                })
-                .collect(),
-            selector_entries: trigger_variant_plan
-                .selector_entries
-                .iter()
-                .map(|entry| PairSelectorEvidence {
-                    pattern_window: entry.pattern_window.label(),
-                    fd_source_page: entry.fd_source_page,
-                    fe_source_page: entry.fe_source_page,
-                    mapper_register_value: entry.mapper_register_value,
-                })
-                .collect(),
-            central_right_writers_pair_aware: true,
-            direct_writers_pair_aware: false,
-        },
-        code_cave: CodeCaveEvidence {
-            cpu_start: format!("0x{CODE_CAVE_START_ADDRESS:04X}"),
-            file_start: format!("0x{cave_file_start:06X}"),
-            len: CODE_CAVE_LEN,
-            expected_fill: "0xFF",
-        },
+    Ok(AssembledParityImage {
+        output,
+        trigger_variant_plan,
+        cave_file_start,
         direct_code_cave_transfer_count,
-        routines: routines
-            .iter()
-            .map(|routine| RoutinePlacement {
-                role: routine.role,
-                cpu_address: format!("0x{:04X}", routine.cpu_address),
-                len: routine.bytes.len(),
-            })
-            .collect(),
-        prg_writer_count: SOURCE_PRG_BANK_WRITERS.len() + 1,
-        central_chr_writer_count: CENTRAL_CHR_WRITERS.len(),
-        direct_chr_writer_count: DIRECT_CHR_WRITERS.len(),
+        routines,
         tracked_writes,
-        unresolved_boundaries: vec![
-            "Observed central PPU $1000 pairs use generated trigger-plane variants; unobserved pairs still require visible parity measurement.",
-            "Direct CHR writers are limited to instruction-boundary sites proven by fixed-bank disassembly, adjacent register groups, or prior runtime traces; isolated byte-pattern candidates remain unclassified.",
-            "The classified direct-writer pairs need no trigger-plane variants; late-game executions outside the current runtime sample remain part of full regression.",
-            "The probe preserves and relocates the source CHR but does not add Korean glyphs or translation assets.",
-            "Runtime parity covers suspend persistence, one adverse game-over path, and the chapter-one completion/save/cold-load transition, not whole-game regression.",
-        ],
-        release_eligible: false,
-    };
-    let report_bytes =
-        serde_json::to_vec_pretty(&report).context("serialize mapper 165 parity report")?;
-    let report_sha1 = sha1_hex(&report_bytes);
-    let tracked_write_count = report.tracked_writes.len();
-
-    write_file(output_path, &output)?;
-    write_file(report_path, &report_bytes)?;
-    Ok(BuildSummary {
-        output_sha1,
-        report_sha1,
-        tracked_write_count,
     })
+}
+
+pub(super) fn assemble_mapper165_parity_bytes(source_rom: &Rom) -> Result<Vec<u8>> {
+    Ok(assemble_mapper165_parity_image(source_rom)?.output)
 }
 
 fn create_chr_relocated_image(source_rom: &Rom) -> Result<(Vec<u8>, TriggerVariantPlan)> {
