@@ -150,6 +150,42 @@ pub(crate) const OBSERVED_CHR_PAIRS: &[ObservedChrPair] = &[
         0x00,
         0x15,
     ),
+    pair(
+        "weapon_shop_item_restriction_confirmation",
+        PatternWindow::Left,
+        0x1E,
+        0x1E,
+    ),
+    pair(
+        "weapon_shop_item_restriction_confirmation",
+        PatternWindow::Right,
+        0x00,
+        0x15,
+    ),
+    pair(
+        "weapon_shop_declined_continue_prompt",
+        PatternWindow::Left,
+        0x1E,
+        0x1E,
+    ),
+    pair(
+        "weapon_shop_declined_continue_prompt",
+        PatternWindow::Right,
+        0x00,
+        0x15,
+    ),
+    pair(
+        "weapon_shop_purchase_inventory_full_exit",
+        PatternWindow::Left,
+        0x1E,
+        0x1E,
+    ),
+    pair(
+        "weapon_shop_purchase_inventory_full_exit",
+        PatternWindow::Right,
+        0x00,
+        0x15,
+    ),
 ];
 
 const fn pair(
@@ -393,10 +429,10 @@ mod tests {
     fn registry_covers_every_observed_chr_pair() {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
 
-        assert_eq!(report.screen_count, 28);
-        assert_eq!(report.runtime_observed_screen_count, 24);
-        assert_eq!(report.chr_pair_observed_screen_count, 22);
-        assert_eq!(report.mixed_original_latin_screen_count, 13);
+        assert_eq!(report.screen_count, 30);
+        assert_eq!(report.runtime_observed_screen_count, 27);
+        assert_eq!(report.chr_pair_observed_screen_count, 25);
+        assert_eq!(report.mixed_original_latin_screen_count, 15);
         assert_eq!(report.page_switch_verified_screen_count, 1);
         assert_eq!(report.mixed_text_page_verified_screen_count, 1);
     }
@@ -445,7 +481,7 @@ mod tests {
     }
 
     #[test]
-    fn next_screen_selects_the_next_unobserved_shop_outcome() {
+    fn next_screen_moves_from_the_closed_shop_family_to_item_flow() {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
         let next = report
             .screens
@@ -453,10 +489,10 @@ mod tests {
             .find(|screen| screen.screen_role == report.next_screen_role)
             .unwrap();
 
-        assert_eq!(next.screen_role, "weapon_shop_item_restriction_message");
+        assert_eq!(next.screen_role, "item_flow");
         assert!(!next.runtime_observed);
         assert_eq!(next.contract_state, ContractState::Unobserved);
-        assert!(next.next_gate.contains("solve the item-specific predicate"));
+        assert!(next.next_gate.contains("split item list"));
     }
 
     #[test]
@@ -468,26 +504,31 @@ mod tests {
             .filter(|screen| screen.surface_family == "weapon_shop")
             .collect::<Vec<_>>();
 
-        assert_eq!(shop_screens.len(), 7);
+        assert_eq!(shop_screens.len(), 9);
         assert_eq!(
             shop_screens
                 .iter()
                 .filter(|screen| screen.runtime_observed)
                 .count(),
-            6
+            9
         );
-        assert!(
-            shop_screens[..6]
+        assert!(shop_screens.iter().all(|screen| screen.chr_pair_observed));
+        assert_eq!(
+            shop_screens
                 .iter()
-                .all(|screen| screen.chr_pair_observed)
+                .filter(|screen| {
+                    screen.translation_scope == TranslationScope::JapaneseWithPreservedOriginalLatin
+                })
+                .count(),
+            8
         );
-        assert!(shop_screens[..6].iter().all(|screen| {
-            screen.translation_scope == TranslationScope::JapaneseWithPreservedOriginalLatin
-        }));
-        assert!(
-            shop_screens[6..]
-                .iter()
-                .all(|screen| screen.translation_scope == TranslationScope::Unresolved)
+        let declined_prompt = shop_screens
+            .iter()
+            .find(|screen| screen.screen_role == "weapon_shop_declined_continue_prompt")
+            .unwrap();
+        assert_eq!(
+            declined_prompt.translation_scope,
+            TranslationScope::JapaneseOnly
         );
     }
 

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "next_screen_role": "weapon_shop_item_restriction_message",
+  "next_screen_role": "item_flow",
   "screens": [
     {
       "screen_role": "title",
@@ -284,10 +284,9 @@
       ],
       "unresolved_focus": [
         "item-name and price producer bindings",
-        "selection marker background-versus-sprite producer",
-        "exit and three preflight-rejection screen contracts"
+        "selection marker background-versus-sprite producer"
       ],
-      "next_gate": "bind the retained item and price producers while downstream shop outcomes are sampled separately",
+      "next_gate": "bind the retained item and price producers without merging the nine observed shop layouts",
       "contract_state": "observed_partial"
     },
     {
@@ -304,10 +303,10 @@
         "bank 06 state 07 at 9B86 treats result 1 as the only purchase mutation and results 0 or 2 as one non-mutating decline path"
       ],
       "unresolved_focus": [
-        "purchase-result presentation",
+        "confirmation-dialogue producer and line lifetime",
         "font-page lifetime after accepted and declined exits"
       ],
-      "next_gate": "snapshot the reversible runtime state, execute the statically bound accepted path once, and inventory its result screen before testing rejection branches",
+      "next_gate": "bind the confirmation producer while preserving accepted and declined continuation roles",
       "contract_state": "observed_partial"
     },
     {
@@ -369,7 +368,7 @@
         "inventory-full and exit dialogue producer and line lifetime",
         "natural-play reproduction independent of the reversible forced-state reachability proof"
       ],
-      "next_gate": "bind the dialogue producer while the next reversible item-list setup lowers only stored funds for the insufficient-funds branch",
+      "next_gate": "bind the dialogue producer while keeping preflight and post-purchase inventory-full layouts separate",
       "contract_state": "observed_partial"
     },
     {
@@ -391,23 +390,66 @@
         "insufficient-funds and continue-shopping dialogue producer and line lifetime",
         "natural-play reproduction independent of the reversible forced-state reachability proof"
       ],
-      "next_gate": "bind the dialogue producer while statically solving the item-specific predicate before choosing a representative runtime case",
+      "next_gate": "bind the dialogue producer while keeping this state-0C layout separate from other continue-shopping prompts",
       "contract_state": "observed_partial"
     },
     {
-      "screen_role": "weapon_shop_item_restriction_message",
+      "screen_role": "weapon_shop_item_restriction_confirmation",
       "surface_family": "weapon_shop",
-      "runtime_observed": false,
-      "input_behavior": "unresolved",
-      "translation_scope": "unresolved",
-      "temporal_behavior": "unresolved after the item-specific preflight branch",
+      "runtime_observed": true,
+      "input_behavior": "input_wait",
+      "translation_scope": "japanese_with_preserved_original_latin",
+      "temporal_behavior": "the retained item list and buy-anyway prompt kept one screenshot across 152 regular and 168 irregularly spaced input-free frames",
       "known_focus": [
-        "bank 06 9A69 selects dialogue index 04 when the item-specific check returns carry set",
-        "the branch does not mutate funds or inventory"
+        "left 1E/1E and right 00/15 CHR pairs",
+        "bank 06 A35E rejected live shop item 11 for selected unit class 01: required weapon level 01 was met by level 06 and flag D9D3 bit 0 was clear, but class 01 was absent from family list 0B/0C/0E/0F",
+        "menu selection base 7FF3 uses live controller index 05CE=03, so the representative second-item selection changed effective address 7FF6",
+        "the preflight selected dialogue index 04 and advanced outer state 04 through 05/06 to 07 without changing funds or inventory",
+        "Japanese item-restriction warning and yes/no labels coexist with six item rows, price and funds digits, G, portrait, map, and unit sprites",
+        "B followed state 07 through 08/09/0A/0B to 0C and dialogue index 36 without changing funds or inventory",
+        "A on yes deliberately bought the unusable item through the ordinary purchase mutation block"
       ],
-      "unresolved_focus": ["exact item and unit condition", "all visible screen components", "input and continuation", "CHR and temporal behavior"],
-      "next_gate": "solve the item-specific predicate before selecting a representative runtime case",
-      "contract_state": "unobserved"
+      "unresolved_focus": [
+        "item-restriction dialogue producer and line lifetime",
+        "other personal-item and weapon-level predicate variants"
+      ],
+      "next_gate": "bind the shared warning producer without collapsing its buy-anyway and decline continuations",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "weapon_shop_declined_continue_prompt",
+      "surface_family": "weapon_shop",
+      "runtime_observed": true,
+      "input_behavior": "input_wait",
+      "translation_scope": "japanese_only",
+      "temporal_behavior": "the post-decline continue-shopping prompt kept one screenshot across 152 regular and 168 irregularly spaced input-free frames",
+      "known_focus": [
+        "left 1E/1E and right 00/15 CHR pairs",
+        "the screen shows Japanese continue-shopping dialogue, two Japanese choices, a sprite cursor, map, and unit sprites without item rows, funds, G, or portrait",
+        "A on yes advanced outer state 0C to 03 and then 04 to rebuild the item list without a funds or inventory write",
+        "state 0C results 0 or 2 share the already bound non-mutating exit-dialogue route"
+      ],
+      "unresolved_focus": ["continue-shopping dialogue producer and line lifetime"],
+      "next_gate": "keep this layout distinct from purchase-result and insufficient-funds state-0C variants when binding dialogue output",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "weapon_shop_purchase_inventory_full_exit",
+      "surface_family": "weapon_shop",
+      "runtime_observed": true,
+      "input_behavior": "input_wait",
+      "translation_scope": "japanese_with_preserved_original_latin",
+      "temporal_behavior": "the purchase result and automatic exit presentation kept one screenshot across 152 regular and 168 irregularly spaced input-free frames",
+      "known_focus": [
+        "left 1E/1E and right 00/15 CHR pairs",
+        "accepting the item-restriction warning bought item 11 for 400G, changed stored funds 00A8 to 0080, filled slot 770A with item 11, and set durability 770E to 21",
+        "because the purchase filled the fourth and last slot, bank 06 state 07 settled at state 08 with dialogue indices 05 then 06 instead of entering the state-0C continue-shopping result",
+        "Japanese purchase and exit dialogue coexist with the retained six-row item list, price and updated-funds digits, G, portrait, map, and unit sprites",
+        "A raised completion flag 7803 to 01, reset outer state 05DB to 00, and returned to map 1A/1A + 15/15 without another funds or inventory write"
+      ],
+      "unresolved_focus": ["purchase and exit dialogue producer and line lifetime"],
+      "next_gate": "keep this last-slot purchase layout distinct from preflight inventory-full and ordinary purchase-result screens",
+      "contract_state": "observed_partial"
     },
     {
       "screen_role": "item_flow",

@@ -331,8 +331,8 @@ fn main() -> Result<()> {
             println!("wrote {}", report.display());
             println!("report SHA-1: {}", summary.report_sha1);
             println!(
-                "shop flow: {} observed screens, {} source-bound code regions, next: {}",
-                summary.screen_count, summary.code_region_count, summary.next_screen_role
+                "shop flow: {} observed screens, {} source-bound regions, next: {}",
+                summary.screen_count, summary.source_region_count, summary.next_screen_role
             );
         }
         Command::AnalyzeUnitUiText { source, report } => {

@@ -12,11 +12,14 @@ use crate::{
 const PRG_BANK_SIZE: usize = 16 * 1024;
 const SWITCHABLE_CPU_START: u16 = 0x8000;
 const SWITCHABLE_CPU_END_EXCLUSIVE: u16 = 0xC000;
+const FIXED_CPU_START: u16 = 0xC000;
+const FIXED_PRG_BANK: usize = 0x0F;
 
 const SHOP_OUTER_STATE_ADDRESS: u16 = 0x05DB;
+const MENU_CONTROLLER_INDEX_ADDRESS: u16 = 0x05CE;
 const MENU_CONTROLLER_STATE_ADDRESS: u16 = 0x05DE;
 const MENU_CHOICE_MASK_ADDRESS: u16 = 0x7FEE;
-const MENU_SELECTION_ADDRESS: u16 = 0x7FF3;
+const MENU_SELECTION_BASE_ADDRESS: u16 = 0x7FF3;
 const MENU_RESULT_ADDRESS: u16 = 0x05EB;
 const SELECTED_FACILITY_ADDRESS: u16 = 0x77D0;
 const DIALOGUE_ENTRY_INDEX_ADDRESS: u16 = 0x77F1;
@@ -30,7 +33,7 @@ const SHOP_STATE_HANDLERS: [u16; 13] = [
 const MENU_CONTROLLER_HANDLERS: [u16; 7] = [0xC73D, 0x9265, 0x92A2, 0x92C9, 0x92FB, 0x9333, 0x93E0];
 
 #[derive(Clone, Copy)]
-struct CodeRegionSpec {
+struct SourceRegionSpec {
     role: &'static str,
     prg_bank: u8,
     cpu_address: u16,
@@ -38,83 +41,97 @@ struct CodeRegionSpec {
     expected_sha1: &'static str,
 }
 
-const CODE_REGIONS: [CodeRegionSpec; 11] = [
-    CodeRegionSpec {
+const SOURCE_REGIONS: [SourceRegionSpec; 13] = [
+    SourceRegionSpec {
         role: "dispatch_shop_outer_state",
         prg_bank: 0x06,
         cpu_address: 0x99AC,
         byte_count: 32,
         expected_sha1: "84933e684dbb18ff2cbfbd01f736fc9517cc5051",
     },
-    CodeRegionSpec {
+    SourceRegionSpec {
         role: "initialize_facility_dialogue",
         prg_bank: 0x06,
         cpu_address: 0x99CC,
         byte_count: 31,
         expected_sha1: "7f11d9aad54a0f5de2531f89c073d04f95aadc8e",
     },
-    CodeRegionSpec {
+    SourceRegionSpec {
         role: "handle_item_list_selection_and_preflight",
         prg_bank: 0x06,
         cpu_address: 0x9A0E,
         byte_count: 139,
         expected_sha1: "6dbd72473d14a71c3c88c586c5e7c1beb0ca7fe0",
     },
-    CodeRegionSpec {
+    SourceRegionSpec {
         role: "select_preflight_dialogue_entry",
         prg_bank: 0x06,
         cpu_address: 0x9A99,
         byte_count: 24,
         expected_sha1: "a15ffda682d6311a0fcd9fb732e3df2a8ec62f9e",
     },
-    CodeRegionSpec {
+    SourceRegionSpec {
         role: "handle_purchase_confirmation",
         prg_bank: 0x06,
         cpu_address: 0x9B86,
         byte_count: 106,
         expected_sha1: "a42a4c7b801e1a7a64875b94d37fc27b97c0d2ae",
     },
-    CodeRegionSpec {
+    SourceRegionSpec {
         role: "select_purchase_outcome_dialogue_entry",
         prg_bank: 0x06,
         cpu_address: 0x9BF0,
         byte_count: 18,
         expected_sha1: "542146bb01530e2daa83d21410a457e850c14e27",
     },
-    CodeRegionSpec {
+    SourceRegionSpec {
         role: "handle_continue_shopping_prompt",
         prg_bank: 0x06,
         cpu_address: 0x9C1A,
         byte_count: 24,
         expected_sha1: "8d745b05523bfe32e51efee584ab9f6cbdf9463f",
     },
-    CodeRegionSpec {
+    SourceRegionSpec {
         role: "complete_shop_exit_after_dialogue",
         prg_bank: 0x06,
         cpu_address: 0xA122,
         byte_count: 28,
         expected_sha1: "ae07c98348c1225d4b50ad705919bbd453c0d8a3",
     },
-    CodeRegionSpec {
+    SourceRegionSpec {
         role: "handle_dialogue_advance_input",
         prg_bank: 0x0A,
         cpu_address: 0x8588,
         byte_count: 94,
         expected_sha1: "037bc1e987031ddef73d60e149dc89712e14a04c",
     },
-    CodeRegionSpec {
+    SourceRegionSpec {
         role: "dispatch_shared_menu_controller",
         prg_bank: 0x0B,
         cpu_address: 0x9251,
         byte_count: 20,
         expected_sha1: "6a47e88c3ba87070c4b144c2aac233de7f604fe8",
     },
-    CodeRegionSpec {
+    SourceRegionSpec {
         role: "handle_shared_menu_input",
         prg_bank: 0x0B,
         cpu_address: 0x9333,
         byte_count: 121,
         expected_sha1: "ae003b21ace9212154d7616e38f2d542893c9c47",
+    },
+    SourceRegionSpec {
+        role: "evaluate_unit_item_eligibility",
+        prg_bank: 0x06,
+        cpu_address: 0xA35E,
+        byte_count: 0x73,
+        expected_sha1: "9557d82d7b1984b51602540018b8666c07c07aec",
+    },
+    SourceRegionSpec {
+        role: "item_family_allowed_class_lists",
+        prg_bank: 0x06,
+        cpu_address: 0xA3D1,
+        byte_count: 0x42,
+        expected_sha1: "3630b571e27d741cf416f146c822c9ff09dcc2a1",
     },
 ];
 
@@ -131,8 +148,9 @@ struct ShopFlowReport {
     runtime_exit_observation: RuntimeExitObservation,
     runtime_inventory_full_observation: RuntimeInventoryFullObservation,
     runtime_insufficient_funds_observation: RuntimeInsufficientFundsObservation,
+    runtime_item_restriction_observation: RuntimeItemRestrictionObservation,
     dialogue_table: ShopDialogueTableBinding,
-    code_regions: Vec<CodeRegionBinding>,
+    source_regions: Vec<SourceRegionBinding>,
     unresolved_downstream_roles: Vec<&'static str>,
     release_eligible: bool,
 }
@@ -158,6 +176,10 @@ struct ShopRoute {
     dialogue_directory_selector_hex: String,
     dialogue_directory_selector_address: u16,
     outer_state_address: u16,
+    menu_controller_index_address: u16,
+    menu_selection_base_address: u16,
+    observed_menu_controller_index: u8,
+    observed_menu_selection_address: u16,
     outer_state_dispatcher: CodeLocation,
     outer_state_handlers: Vec<StateHandler>,
 }
@@ -199,7 +221,8 @@ struct InputAction {
 struct PreflightBranch {
     condition: &'static str,
     dialogue_entry_index: u8,
-    outer_state_after_branch: u8,
+    first_outer_state: u8,
+    settled_outer_state: u8,
     mutates_funds_or_inventory: bool,
     next_role: &'static str,
 }
@@ -306,7 +329,75 @@ struct RuntimeInsufficientFundsObservation {
 }
 
 #[derive(Debug, Serialize)]
-struct CodeRegionBinding {
+struct RuntimeItemRestrictionObservation {
+    setup_kind: &'static str,
+    eligibility_case: ItemEligibilityCase,
+    warning_outer_state_sequence: [u8; 4],
+    warning_dialogue_entry_index: u8,
+    warning_mutated_funds_or_inventory: bool,
+    warning_screenshot_sha256: &'static str,
+    chr_pair: ChrPair,
+    warning_temporal_observation: &'static str,
+    decline_route: RestrictionDeclineRoute,
+    accepted_route: RestrictionAcceptedRoute,
+    evidence_scope: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct ItemEligibilityCase {
+    selected_unit_id: u8,
+    selected_unit_class: u8,
+    selected_unit_weapon_level: u8,
+    selected_shop_ordinal: u8,
+    selected_item_id: u8,
+    required_weapon_level: u8,
+    item_flag_byte: u8,
+    allowed_class_ids: [u8; 4],
+    failure_reason: &'static str,
+    menu_controller_index_address: u16,
+    menu_controller_index_value: u8,
+    menu_selection_base_address: u16,
+    effective_menu_selection_address: u16,
+}
+
+#[derive(Debug, Serialize)]
+struct RestrictionDeclineRoute {
+    input: &'static str,
+    outer_state_sequence: [u8; 6],
+    dialogue_entry_index: u8,
+    mutated_funds_or_inventory: bool,
+    prompt_screen_role: &'static str,
+    prompt_screenshot_sha256: &'static str,
+    prompt_temporal_observation: &'static str,
+    continue_input: &'static str,
+    returned_outer_state: u8,
+    returned_screen_role: &'static str,
+    returned_screenshot_sha256: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct RestrictionAcceptedRoute {
+    input: &'static str,
+    outer_state_sequence: [u8; 2],
+    dialogue_entry_sequence: [u8; 2],
+    stored_funds_before: u16,
+    stored_funds_after: u16,
+    item_destination_address: u16,
+    item_value: u8,
+    durability_destination_address: u16,
+    durability_value: u8,
+    result_screen_role: &'static str,
+    result_screenshot_sha256: &'static str,
+    result_temporal_observation: &'static str,
+    completion_input: &'static str,
+    completion_flag_value: u8,
+    outer_state_after_completion: u8,
+    returned_screen_role: &'static str,
+    returned_screenshot_sha256: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct SourceRegionBinding {
     role: &'static str,
     prg_bank: u8,
     prg_bank_hex: String,
@@ -315,7 +406,7 @@ struct CodeRegionBinding {
     file_offset: usize,
     file_offset_hex: String,
     byte_count: usize,
-    code_sha1: String,
+    source_sha1: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -336,7 +427,7 @@ struct StateHandler {
 pub struct ShopFlowSummary {
     pub report_sha1: String,
     pub screen_count: usize,
-    pub code_region_count: usize,
+    pub source_region_count: usize,
     pub next_screen_role: &'static str,
 }
 
@@ -359,17 +450,18 @@ pub fn analyze_shop_flow(source_path: &Path, report_path: &Path) -> Result<ShopF
     Ok(ShopFlowSummary {
         report_sha1,
         screen_count: report.screens.len(),
-        code_region_count: report.code_regions.len(),
+        source_region_count: report.source_regions.len(),
         next_screen_role: report.unresolved_downstream_roles[0],
     })
 }
 
 fn build_report(rom: &Rom) -> Result<ShopFlowReport> {
-    let code_regions = CODE_REGIONS
+    let source_regions = SOURCE_REGIONS
         .iter()
-        .map(|spec| bind_code_region(rom, *spec))
+        .map(|spec| bind_source_region(rom, *spec))
         .collect::<Result<Vec<_>>>()?;
     validate_state_tables(rom)?;
+    validate_item_eligibility_case(rom)?;
     let dialogue_table = inspect_shop_dialogue_table(rom.data())?;
     ensure!(
         dialogue_table.directory_selector == 0xB1,
@@ -405,6 +497,10 @@ fn build_report(rom: &Rom) -> Result<ShopFlowReport> {
             dialogue_directory_selector_hex: "0xB1".to_owned(),
             dialogue_directory_selector_address: DIALOGUE_DIRECTORY_SELECTOR_ADDRESS,
             outer_state_address: SHOP_OUTER_STATE_ADDRESS,
+            menu_controller_index_address: MENU_CONTROLLER_INDEX_ADDRESS,
+            menu_selection_base_address: MENU_SELECTION_BASE_ADDRESS,
+            observed_menu_controller_index: 3,
+            observed_menu_selection_address: 0x7FF6,
             outer_state_dispatcher: location(0x06, 0x99AC),
             outer_state_handlers: SHOP_STATE_HANDLERS
                 .iter()
@@ -424,33 +520,40 @@ fn build_report(rom: &Rom) -> Result<ShopFlowReport> {
             exit_message_screen(),
             inventory_full_message_screen(),
             insufficient_funds_message_screen(),
+            item_restriction_confirmation_screen(),
+            declined_continue_prompt_screen(),
+            purchase_inventory_full_exit_screen(),
         ],
         preflight_branches: vec![
             PreflightBranch {
                 condition: "selected unit has no free inventory slot",
                 dialogue_entry_index: 3,
-                outer_state_after_branch: 8,
+                first_outer_state: 7,
+                settled_outer_state: 8,
                 mutates_funds_or_inventory: false,
                 next_role: "weapon_shop_inventory_full_message",
             },
             PreflightBranch {
                 condition: "stored funds are lower than the selected price",
                 dialogue_entry_index: 2,
-                outer_state_after_branch: 8,
+                first_outer_state: 8,
+                settled_outer_state: 12,
                 mutates_funds_or_inventory: false,
                 next_role: "weapon_shop_insufficient_funds_message",
             },
             PreflightBranch {
                 condition: "item-specific eligibility check returns carry set",
                 dialogue_entry_index: 4,
-                outer_state_after_branch: 5,
+                first_outer_state: 5,
+                settled_outer_state: 7,
                 mutates_funds_or_inventory: false,
-                next_role: "weapon_shop_item_restriction_message",
+                next_role: "weapon_shop_item_restriction_confirmation",
             },
             PreflightBranch {
                 condition: "inventory, funds, and item-specific checks pass",
                 dialogue_entry_index: 1,
-                outer_state_after_branch: 5,
+                first_outer_state: 5,
+                settled_outer_state: 7,
                 mutates_funds_or_inventory: false,
                 next_role: "weapon_shop_purchase_confirmation",
             },
@@ -551,9 +654,66 @@ fn build_report(rom: &Rom) -> Result<ShopFlowReport> {
             returned_screenshot_sha256: "1f3945c0dab791a70cc31b4f3f0f3d36d0e9bdd3cbe58437895ba069df3a00bb",
             evidence_scope: "the branch is runtime-observed from a declared reversible RAM setup, not a natural-play reproduction",
         },
+        runtime_item_restriction_observation: RuntimeItemRestrictionObservation {
+            setup_kind: "selected the second live weapon-shop item after restoring funds from the prior reversible insufficient-funds setup; no unit, item, price, or eligibility bytes were changed",
+            eligibility_case: ItemEligibilityCase {
+                selected_unit_id: 0x05,
+                selected_unit_class: 0x01,
+                selected_unit_weapon_level: 0x06,
+                selected_shop_ordinal: 2,
+                selected_item_id: 0x11,
+                required_weapon_level: 0x01,
+                item_flag_byte: 0x0C,
+                allowed_class_ids: [0x0B, 0x0C, 0x0E, 0x0F],
+                failure_reason: "weapon level meets the requirement and item flag bit 0 is clear, but class 01 is absent from the item-family class list",
+                menu_controller_index_address: MENU_CONTROLLER_INDEX_ADDRESS,
+                menu_controller_index_value: 3,
+                menu_selection_base_address: MENU_SELECTION_BASE_ADDRESS,
+                effective_menu_selection_address: 0x7FF6,
+            },
+            warning_outer_state_sequence: [4, 5, 6, 7],
+            warning_dialogue_entry_index: 4,
+            warning_mutated_funds_or_inventory: false,
+            warning_screenshot_sha256: "a468c110024cd91785dc0739ce88e4f881c3f564dccc41ce2b63d32a13872d15",
+            chr_pair: observed_shop_chr_pair(),
+            warning_temporal_observation: "CHR 1E/1E + 00/15 and the complete screenshot stayed stable across 152 regular and 168 irregularly spaced input-free frames",
+            decline_route: RestrictionDeclineRoute {
+                input: "B",
+                outer_state_sequence: [7, 8, 9, 10, 11, 12],
+                dialogue_entry_index: 0x36,
+                mutated_funds_or_inventory: false,
+                prompt_screen_role: "weapon_shop_declined_continue_prompt",
+                prompt_screenshot_sha256: "d6960eb7bd3a5c5557b834e4a675be43c0c1edb46b8c75572c2707fda7f40081",
+                prompt_temporal_observation: "CHR 1E/1E + 00/15 and the complete screenshot stayed stable across 152 regular and 168 irregularly spaced input-free frames",
+                continue_input: "A on yes",
+                returned_outer_state: 4,
+                returned_screen_role: "weapon_shop_item_list",
+                returned_screenshot_sha256: "2a122f8f48709c39bd737d1be072e49a94abeaf142d89d8a502f99c6158eacf4",
+            },
+            accepted_route: RestrictionAcceptedRoute {
+                input: "A on yes",
+                outer_state_sequence: [7, 8],
+                dialogue_entry_sequence: [5, 6],
+                stored_funds_before: 0x00A8,
+                stored_funds_after: 0x0080,
+                item_destination_address: 0x770A,
+                item_value: 0x11,
+                durability_destination_address: 0x770E,
+                durability_value: 0x21,
+                result_screen_role: "weapon_shop_purchase_inventory_full_exit",
+                result_screenshot_sha256: "690761339ca7db244303260dd2aa73da4a3c2b7626b79a046cacfa533853d587",
+                result_temporal_observation: "the accepted warning filled the last inventory slot; CHR 1E/1E + 00/15 and the complete purchase-and-exit screenshot stayed stable across 152 regular and 168 irregularly spaced input-free frames",
+                completion_input: "A",
+                completion_flag_value: 1,
+                outer_state_after_completion: 0,
+                returned_screen_role: "map_idle",
+                returned_screenshot_sha256: "3639fe437ea05b04be815bf391147fcb483fb984481c44d60b8d0b8acfe9fbc1",
+            },
+            evidence_scope: "the item and unit predicate is source-bound and runtime-observed; only stored funds were restored after the separately declared insufficient-funds setup",
+        },
         dialogue_table,
-        code_regions,
-        unresolved_downstream_roles: vec!["weapon_shop_item_restriction_message"],
+        source_regions,
+        unresolved_downstream_roles: vec!["item_flow"],
         release_eligible: false,
     })
 }
@@ -641,7 +801,7 @@ fn purchase_confirmation_screen() -> ShopScreen {
                 input: "A on no or B",
                 immediate_effect: "select the declined dialogue path without entering the mutation block",
                 persistent_gameplay_mutation: false,
-                next_role: "weapon_shop_declined_message",
+                next_role: "weapon_shop_declined_continue_prompt",
             },
         ],
     }
@@ -791,6 +951,122 @@ fn insufficient_funds_message_screen() -> ShopScreen {
     }
 }
 
+fn item_restriction_confirmation_screen() -> ShopScreen {
+    ShopScreen {
+        screen_role: "weapon_shop_item_restriction_confirmation",
+        runtime_observed: true,
+        outer_state: 7,
+        menu_controller_state: Some(5),
+        selectable_entry_count: 2,
+        choice_mask: 0x03,
+        choice_mask_hex: "0x03".to_owned(),
+        chr_pair: observed_shop_chr_pair(),
+        translation_target: "Japanese item-restriction warning and yes/no labels only",
+        preserved_original: &["item-list price digits", "funds digits", "G"],
+        visible_components: &[
+            "retained six-row item list and prices",
+            "retained current funds",
+            "character portrait",
+            "item-restriction warning and buy-anyway question",
+            "two-choice window",
+            "sprite selection cursor",
+            "map background and unit sprites",
+        ],
+        temporal_observation: "CHR 1E/1E + 00/15 and screenshot SHA-256 a468c110...72d15 stayed stable across 152 regular and 168 irregularly spaced input-free frames",
+        input_actions: vec![
+            InputAction {
+                input: "up or down",
+                immediate_effect: "toggle only the buy-anyway selected ordinal",
+                persistent_gameplay_mutation: false,
+                next_role: "weapon_shop_item_restriction_confirmation",
+            },
+            InputAction {
+                input: "A on yes",
+                immediate_effect: "enter the ordinary purchase mutation block despite the eligibility warning; the observed last free slot then selects the inventory-full exit result",
+                persistent_gameplay_mutation: true,
+                next_role: "weapon_shop_purchase_inventory_full_exit",
+            },
+            InputAction {
+                input: "A on no or B",
+                immediate_effect: "skip the purchase mutation and advance to the continue-shopping prompt",
+                persistent_gameplay_mutation: false,
+                next_role: "weapon_shop_declined_continue_prompt",
+            },
+        ],
+    }
+}
+
+fn declined_continue_prompt_screen() -> ShopScreen {
+    ShopScreen {
+        screen_role: "weapon_shop_declined_continue_prompt",
+        runtime_observed: true,
+        outer_state: 12,
+        menu_controller_state: Some(5),
+        selectable_entry_count: 2,
+        choice_mask: 0x03,
+        choice_mask_hex: "0x03".to_owned(),
+        chr_pair: observed_shop_chr_pair(),
+        translation_target: "Japanese continue-shopping dialogue and yes/no labels only",
+        preserved_original: &[],
+        visible_components: &[
+            "continue-shopping dialogue",
+            "two-choice window",
+            "sprite selection cursor",
+            "map background and unit sprites",
+        ],
+        temporal_observation: "CHR 1E/1E + 00/15 and screenshot SHA-256 d6960eb7...f40081 stayed stable across 152 regular and 168 irregularly spaced input-free frames",
+        input_actions: vec![
+            InputAction {
+                input: "up or down",
+                immediate_effect: "toggle only the continue-shopping selected ordinal",
+                persistent_gameplay_mutation: false,
+                next_role: "weapon_shop_declined_continue_prompt",
+            },
+            InputAction {
+                input: "A on yes",
+                immediate_effect: "set outer state 3 and rebuild the item list",
+                persistent_gameplay_mutation: false,
+                next_role: "weapon_shop_item_list",
+            },
+            InputAction {
+                input: "A on no or B",
+                immediate_effect: "select the weapon-shop exit dialogue route",
+                persistent_gameplay_mutation: false,
+                next_role: "weapon_shop_exit_message",
+            },
+        ],
+    }
+}
+
+fn purchase_inventory_full_exit_screen() -> ShopScreen {
+    ShopScreen {
+        screen_role: "weapon_shop_purchase_inventory_full_exit",
+        runtime_observed: true,
+        outer_state: 8,
+        menu_controller_state: None,
+        selectable_entry_count: 0,
+        choice_mask: 0,
+        choice_mask_hex: "0x00".to_owned(),
+        chr_pair: observed_shop_chr_pair(),
+        translation_target: "Japanese purchase result and automatic exit dialogue only",
+        preserved_original: &["item-list price digits", "updated funds digits", "G"],
+        visible_components: &[
+            "retained six-row item list and prices",
+            "updated current funds",
+            "character portrait",
+            "purchase result followed by exit dialogue",
+            "map background and unit sprites",
+        ],
+        temporal_observation: "CHR 1E/1E + 00/15 and screenshot SHA-256 69076133...53d587 stayed stable across 152 regular and 168 irregularly spaced input-free frames",
+        input_actions: vec![InputAction {
+            input: "A",
+            immediate_effect: "finish the dialogue, reset shop outer state to 0, return to map idle, and complete the facility action",
+            persistent_gameplay_mutation: true,
+            next_role: "map_idle",
+        }],
+    }
+}
+
 fn observed_shop_chr_pair() -> ChrPair {
     ChrPair {
         left_fd: 0x1E,
@@ -830,6 +1106,10 @@ fn validate_state_tables(rom: &Rom) -> Result<()> {
     );
 
     ensure!(
+        MENU_CONTROLLER_INDEX_ADDRESS == 0x05CE,
+        "menu controller index address drift"
+    );
+    ensure!(
         MENU_CONTROLLER_STATE_ADDRESS == 0x05DE,
         "menu controller address drift"
     );
@@ -838,14 +1118,34 @@ fn validate_state_tables(rom: &Rom) -> Result<()> {
         "menu choice-mask address drift"
     );
     ensure!(
-        MENU_SELECTION_ADDRESS == 0x7FF3,
-        "menu selection address drift"
+        MENU_SELECTION_BASE_ADDRESS == 0x7FF3,
+        "menu selection base address drift"
     );
     ensure!(MENU_RESULT_ADDRESS == 0x05EB, "menu result address drift");
     Ok(())
 }
 
-fn bind_code_region(rom: &Rom, spec: CodeRegionSpec) -> Result<CodeRegionBinding> {
+fn validate_item_eligibility_case(rom: &Rom) -> Result<()> {
+    let requirement = fixed_slice(rom, 0xD6C3, 1)?[0];
+    let flags = fixed_slice(rom, 0xD9D3, 1)?[0];
+    let allowed_classes = switchable_slice(rom, 0x06, 0xA3FE, 5)?;
+
+    ensure!(
+        requirement == 0x01,
+        "representative item 11 weapon-level requirement changed"
+    );
+    ensure!(
+        flags == 0x0C,
+        "representative item 11 eligibility flags changed"
+    );
+    ensure!(
+        allowed_classes == [0x0B, 0x0C, 0x0E, 0x0F, 0xEF],
+        "representative item 11 allowed-class list changed"
+    );
+    Ok(())
+}
+
+fn bind_source_region(rom: &Rom, spec: SourceRegionSpec) -> Result<SourceRegionBinding> {
     let bytes = switchable_slice(rom, spec.prg_bank, spec.cpu_address, spec.byte_count)?;
     let actual_sha1 = sha1_hex(bytes);
     ensure!(
@@ -857,7 +1157,7 @@ fn bind_code_region(rom: &Rom, spec: CodeRegionSpec) -> Result<CodeRegionBinding
     );
     let file_offset = switchable_file_offset(spec.prg_bank, spec.cpu_address)?;
 
-    Ok(CodeRegionBinding {
+    Ok(SourceRegionBinding {
         role: spec.role,
         prg_bank: spec.prg_bank,
         prg_bank_hex: format!("0x{:02X}", spec.prg_bank),
@@ -866,7 +1166,7 @@ fn bind_code_region(rom: &Rom, spec: CodeRegionSpec) -> Result<CodeRegionBinding
         file_offset,
         file_offset_hex: format!("0x{file_offset:05X}"),
         byte_count: spec.byte_count,
-        code_sha1: actual_sha1,
+        source_sha1: actual_sha1,
     })
 }
 
@@ -878,6 +1178,24 @@ fn switchable_slice(rom: &Rom, prg_bank: u8, cpu_address: u16, byte_count: usize
     rom.data()
         .get(file_offset..end)
         .with_context(|| format!("shop-flow code range exceeds ROM at {file_offset:05X}"))
+}
+
+fn fixed_slice(rom: &Rom, cpu_address: u16, byte_count: usize) -> Result<&[u8]> {
+    let file_offset = fixed_file_offset(cpu_address)?;
+    let end = file_offset
+        .checked_add(byte_count)
+        .context("shop-flow fixed source range overflow")?;
+    rom.data()
+        .get(file_offset..end)
+        .with_context(|| format!("shop-flow fixed source range exceeds ROM at {file_offset:05X}"))
+}
+
+fn fixed_file_offset(cpu_address: u16) -> Result<usize> {
+    ensure!(
+        cpu_address >= FIXED_CPU_START,
+        "fixed CPU address {cpu_address:04X} is below the fixed window"
+    );
+    Ok(HEADER_SIZE + FIXED_PRG_BANK * PRG_BANK_SIZE + usize::from(cpu_address - FIXED_CPU_START))
 }
 
 fn switchable_file_offset(prg_bank: u8, cpu_address: u16) -> Result<usize> {
@@ -912,7 +1230,7 @@ mod tests {
     fn source_fixture() -> Vec<u8> {
         let mut source = vec![0; HEADER_SIZE + PRG_SIZE + CHR_SIZE];
         source[..HEADER_SIZE].copy_from_slice(&EXPECTED_HEADER);
-        for spec in CODE_REGIONS {
+        for spec in SOURCE_REGIONS {
             let file_offset = switchable_file_offset(spec.prg_bank, spec.cpu_address).unwrap();
             let expected = match spec.role {
                 "dispatch_shop_outer_state" => {
@@ -937,6 +1255,12 @@ mod tests {
             };
             source[file_offset..file_offset + expected.len()].copy_from_slice(&expected);
         }
+        let requirement_offset = fixed_file_offset(0xD6C3).unwrap();
+        let flags_offset = fixed_file_offset(0xD9D3).unwrap();
+        let classes_offset = switchable_file_offset(0x06, 0xA3FE).unwrap();
+        source[requirement_offset] = 0x01;
+        source[flags_offset] = 0x0C;
+        source[classes_offset..classes_offset + 5].copy_from_slice(&[0x0B, 0x0C, 0x0E, 0x0F, 0xEF]);
         source
     }
 
@@ -983,7 +1307,7 @@ mod tests {
             .unwrap();
 
         assert!(!decline.persistent_gameplay_mutation);
-        assert_eq!(decline.next_role, "weapon_shop_declined_message");
+        assert_eq!(decline.next_role, "weapon_shop_declined_continue_prompt");
     }
 
     #[test]
@@ -1038,6 +1362,54 @@ mod tests {
     }
 
     #[test]
+    fn item_restriction_warning_preserves_both_the_decline_and_buy_anyway_routes() {
+        let screen = item_restriction_confirmation_screen();
+        let decline = screen
+            .input_actions
+            .iter()
+            .find(|action| action.input == "A on no or B")
+            .unwrap();
+        let accept = screen
+            .input_actions
+            .iter()
+            .find(|action| action.input == "A on yes")
+            .unwrap();
+
+        assert_eq!(screen.outer_state, 7);
+        assert_eq!(screen.selectable_entry_count, 2);
+        assert!(!decline.persistent_gameplay_mutation);
+        assert_eq!(decline.next_role, "weapon_shop_declined_continue_prompt");
+        assert!(accept.persistent_gameplay_mutation);
+        assert_eq!(accept.next_role, "weapon_shop_purchase_inventory_full_exit");
+    }
+
+    #[test]
+    fn declined_continue_prompt_can_rebuild_the_item_list_without_a_purchase() {
+        let screen = declined_continue_prompt_screen();
+        let continue_shopping = screen
+            .input_actions
+            .iter()
+            .find(|action| action.input == "A on yes")
+            .unwrap();
+
+        assert_eq!(screen.outer_state, 12);
+        assert!(screen.preserved_original.is_empty());
+        assert!(!continue_shopping.persistent_gameplay_mutation);
+        assert_eq!(continue_shopping.next_role, "weapon_shop_item_list");
+    }
+
+    #[test]
+    fn purchase_that_fills_inventory_uses_the_automatic_exit_screen() {
+        let screen = purchase_inventory_full_exit_screen();
+        let advance = screen.input_actions.first().unwrap();
+
+        assert_eq!(screen.outer_state, 8);
+        assert_eq!(screen.selectable_entry_count, 0);
+        assert!(advance.persistent_gameplay_mutation);
+        assert_eq!(advance.next_role, "map_idle");
+    }
+
+    #[test]
     fn changed_state_table_is_rejected() {
         let mut source = source_fixture();
         let offset = switchable_file_offset(0x06, 0x99B2).unwrap();
@@ -1045,5 +1417,15 @@ mod tests {
         let rom = Rom::parse(source).unwrap();
 
         assert!(validate_state_tables(&rom).is_err());
+    }
+
+    #[test]
+    fn changed_item_eligibility_requirement_is_rejected() {
+        let mut source = source_fixture();
+        let offset = fixed_file_offset(0xD6C3).unwrap();
+        source[offset] ^= 1;
+        let rom = Rom::parse(source).unwrap();
+
+        assert!(validate_item_eligibility_case(&rom).is_err());
     }
 }
