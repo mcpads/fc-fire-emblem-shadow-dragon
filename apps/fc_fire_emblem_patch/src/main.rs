@@ -333,11 +333,11 @@ fn main() -> Result<()> {
             println!("wrote {}", report.display());
             println!("report SHA-1: {}", summary.report_sha1);
             println!(
-                "screen contracts: {}, runtime observed: {}, mixed original-Latin: {}, next: {}",
+                "screen contracts: {}, runtime observed: {}, mixed original-Latin: {}, next observation gate: {}",
                 summary.screen_count,
                 summary.runtime_observed_screen_count,
                 summary.mixed_original_latin_screen_count,
-                summary.next_screen_role
+                summary.next_observation_gate_role
             );
         }
         Command::AnalyzeChapterTransitions { source, report } => {

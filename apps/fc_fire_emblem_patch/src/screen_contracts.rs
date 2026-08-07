@@ -266,8 +266,25 @@ enum ContractState {
 #[serde(deny_unknown_fields)]
 struct ScreenContractRegistry {
     schema: u32,
-    next_screen_role: String,
+    next_observation_gate: ScreenObservationGate,
     screens: Vec<ScreenContractSeed>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ObservationGateKind {
+    ScreenSequence,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ScreenObservationGate {
+    gate_role: String,
+    gate_kind: ObservationGateKind,
+    focus_screen_roles: Vec<String>,
+    known_focus: Vec<String>,
+    unresolved_focus: Vec<String>,
+    next_action: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -298,7 +315,7 @@ struct ScreenContractReport {
     preserved_original_only_screen_count: usize,
     page_switch_verified_screen_count: usize,
     mixed_text_page_verified_screen_count: usize,
-    next_screen_role: String,
+    next_observation_gate: ScreenObservationGate,
     screens: Vec<ScreenContract>,
     unresolved_surface_families: Vec<String>,
     release_eligible: bool,
@@ -324,7 +341,7 @@ pub struct ScreenContractSummary {
     pub screen_count: usize,
     pub runtime_observed_screen_count: usize,
     pub mixed_original_latin_screen_count: usize,
-    pub next_screen_role: String,
+    pub next_observation_gate_role: String,
 }
 
 pub fn analyze_screen_contracts(
@@ -350,7 +367,7 @@ pub fn analyze_screen_contracts(
         screen_count: report.screen_count,
         runtime_observed_screen_count: report.runtime_observed_screen_count,
         mixed_original_latin_screen_count: report.mixed_original_latin_screen_count,
-        next_screen_role: report.next_screen_role,
+        next_observation_gate_role: report.next_observation_gate.gate_role,
     })
 }
 
@@ -389,9 +406,33 @@ fn build_report(
         );
     }
 
-    roles
-        .get(registry.next_screen_role.as_str())
-        .context("next screen role is absent from registry")?;
+    ensure!(
+        !roles.contains_key(registry.next_observation_gate.gate_role.as_str()),
+        "observation gate {} must not masquerade as a screen role",
+        registry.next_observation_gate.gate_role
+    );
+    ensure!(
+        !registry.next_observation_gate.focus_screen_roles.is_empty(),
+        "observation gate has no focus screen roles"
+    );
+    let mut focus_roles = BTreeSet::new();
+    for role in &registry.next_observation_gate.focus_screen_roles {
+        ensure!(
+            focus_roles.insert(role.as_str()),
+            "observation gate repeats focus screen role {role}"
+        );
+        roles
+            .get(role.as_str())
+            .with_context(|| format!("observation gate references unknown screen role {role}"))?;
+    }
+    ensure!(
+        !registry.next_observation_gate.unresolved_focus.is_empty(),
+        "observation gate has no unresolved focus"
+    );
+    ensure!(
+        !registry.next_observation_gate.next_action.is_empty(),
+        "observation gate has no next action"
+    );
 
     let screens = registry
         .screens
@@ -456,7 +497,7 @@ fn build_report(
             .iter()
             .filter(|screen| screen.contract_state == ContractState::MixedTextPageVerified)
             .count(),
-        next_screen_role: registry.next_screen_role,
+        next_observation_gate: registry.next_observation_gate,
         screens,
         unresolved_surface_families,
         release_eligible: false,
@@ -471,7 +512,7 @@ mod tests {
     fn registry_covers_every_observed_chr_pair() {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
 
-        assert_eq!(report.screen_count, 39);
+        assert_eq!(report.screen_count, 38);
         assert_eq!(report.runtime_observed_screen_count, 37);
         assert_eq!(report.chr_pair_observed_screen_count, 30);
         assert_eq!(report.mixed_original_latin_screen_count, 18);
@@ -524,18 +565,48 @@ mod tests {
     }
 
     #[test]
-    fn next_screen_moves_from_observed_item_use_to_later_chapter_transition() {
+    fn next_observation_gate_reuses_real_screen_roles_without_becoming_a_screen() {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
-        let next = report
-            .screens
-            .iter()
-            .find(|screen| screen.screen_role == report.next_screen_role)
-            .unwrap();
 
-        assert_eq!(next.screen_role, "later_chapter_transition");
-        assert!(!next.runtime_observed);
-        assert_eq!(next.contract_state, ContractState::Unobserved);
-        assert!(next.next_gate.contains("later transitions"));
+        assert_eq!(
+            report.next_observation_gate.gate_role,
+            "chapter_eleven_to_twelve_transition_sequence"
+        );
+        assert_eq!(
+            report.next_observation_gate.gate_kind,
+            ObservationGateKind::ScreenSequence
+        );
+        assert_eq!(report.next_observation_gate.focus_screen_roles.len(), 5);
+        assert!(
+            report
+                .next_observation_gate
+                .focus_screen_roles
+                .iter()
+                .all(|role| report
+                    .screens
+                    .iter()
+                    .any(|screen| &screen.screen_role == role))
+        );
+        assert!(
+            !report
+                .screens
+                .iter()
+                .any(|screen| { screen.screen_role == report.next_observation_gate.gate_role })
+        );
+    }
+
+    #[test]
+    fn observation_gate_cannot_masquerade_as_a_screen_role() {
+        let invalid_registry = REGISTRY_JSON.replacen(
+            "\"gate_role\": \"chapter_eleven_to_twelve_transition_sequence\"",
+            "\"gate_role\": \"title\"",
+            1,
+        );
+
+        let error = build_report(&invalid_registry, OBSERVED_CHR_PAIRS)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("must not masquerade as a screen role"));
     }
 
     #[test]
@@ -547,7 +618,7 @@ mod tests {
             .filter(|screen| screen.surface_family == "chapter_transition")
             .collect::<Vec<_>>();
 
-        assert_eq!(chapter_screens.len(), 6);
+        assert_eq!(chapter_screens.len(), 5);
         for role in [
             "chapter_clear_epilogue_dialogue",
             "next_story_banner",

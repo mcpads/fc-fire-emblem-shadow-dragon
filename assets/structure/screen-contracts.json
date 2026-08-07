@@ -1,6 +1,26 @@
 {
   "schema": 1,
-  "next_screen_role": "later_chapter_transition",
+  "next_observation_gate": {
+    "gate_role": "chapter_eleven_to_twelve_transition_sequence",
+    "gate_kind": "screen_sequence",
+    "focus_screen_roles": [
+      "chapter_clear_epilogue_dialogue",
+      "next_story_banner",
+      "chapter_save_offer",
+      "chapter_save_complete_continue_prompt",
+      "chapter_intro_title_dialogue_composite"
+    ],
+    "known_focus": [
+      "the chapter-one-to-two sequence established the five distinct screen lifetimes",
+      "a checksummed regular-save intervention reached only the chapter-twelve intro composite"
+    ],
+    "unresolved_focus": [
+      "chapter-eleven epilogue through chapter-twelve intro as one continuous route",
+      "exact CHR pairs for the epilogue, NEXT STORY, save offer, and save-complete lifetimes",
+      "save-offer no branch and every flashing or animated phase"
+    ],
+    "next_action": "reach chapter eleven with a controlled valid save, then observe each known screen role without treating the chapter-twelve cold-load sample as natural completion"
+  },
   "screens": [
     {
       "screen_role": "title",
@@ -633,18 +653,6 @@
       "unresolved_focus": ["exact CHR pair", "dialogue dismissal inputs", "empty-after-discard return state 19", "font-page exit and re-entry lifetime"],
       "next_gate": "bind dialogue dismissal and observe the empty-after-discard return-state variant",
       "contract_state": "observed_partial"
-    },
-    {
-      "screen_role": "later_chapter_transition",
-      "surface_family": "chapter_transition",
-      "runtime_observed": false,
-      "input_behavior": "unresolved",
-      "translation_scope": "unresolved",
-      "temporal_behavior": "unresolved",
-      "known_focus": [],
-      "unresolved_focus": ["all screen-contract dimensions", "chapter-specific graphics and title variants"],
-      "next_gate": "sample later transitions before treating chapter 2 as universal",
-      "contract_state": "unobserved"
     },
     {
       "screen_role": "ending",
