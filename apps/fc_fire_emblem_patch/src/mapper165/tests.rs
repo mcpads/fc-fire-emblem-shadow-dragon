@@ -42,6 +42,23 @@ fn chr_selectors_bias_source_pages_away_from_chr_ram() {
 }
 
 #[test]
+fn expanded_chr_pages_encode_within_mapper_capacity() {
+    assert_eq!(
+        encode_chr_page_register(FIRST_EXTENSION_CHR_PAGE).unwrap(),
+        0x88
+    );
+    assert_eq!(
+        encode_chr_page_register(FIRST_EXTENSION_CHR_PAGE + 1).unwrap(),
+        0x8C
+    );
+    assert_eq!(
+        encode_chr_page_register(MAXIMUM_CHR_PAGE_COUNT - 1).unwrap(),
+        0xFC
+    );
+    assert!(encode_chr_page_register(MAXIMUM_CHR_PAGE_COUNT).is_err());
+}
+
+#[test]
 fn central_writer_redirects_preserve_source_lengths() {
     let source_prg = assemble_at(
         SOURCE_SELECT_PRG_BANK_AND_SAVE_ADDRESS,

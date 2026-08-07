@@ -32,6 +32,8 @@ use writer_sites::{CENTRAL_CHR_WRITERS, DIRECT_CHR_WRITERS, SOURCE_PRG_BANK_WRIT
 const OUTPUT_MAPPER: u16 = 165;
 const OUTPUT_CHR_PADDING_SIZE: usize = 8 * 1024;
 const OUTPUT_CHR_BANK_COUNT: u8 = 17;
+pub(crate) const FIRST_EXTENSION_CHR_PAGE: u8 = OUTPUT_CHR_BANK_COUNT * 2;
+pub(crate) const MAXIMUM_CHR_PAGE_COUNT: u8 = 64;
 const RESET_INITIALIZER_ADDRESS: u16 = 0xFA00;
 const SELECT_PRG_BANK_ADDRESS: u16 = 0xFA20;
 const SELECT_LEFT_FD_CHR_BANK_ADDRESS: u16 = 0xFA40;
@@ -46,6 +48,19 @@ const CODE_CAVE_LEN: usize = 0x110;
 const SOURCE_SELECT_PRG_BANK_AND_SAVE_ADDRESS: u16 = 0xC9A6;
 const SOURCE_SELECT_HORIZONTAL_MIRRORING_ADDRESS: u16 = 0xC9CE;
 const SOURCE_SELECT_VERTICAL_MIRRORING_ADDRESS: u16 = 0xC9D6;
+
+pub(crate) fn encode_chr_page_register(physical_page: u8) -> Result<u8> {
+    ensure!(
+        physical_page < MAXIMUM_CHR_PAGE_COUNT,
+        "physical CHR page {physical_page} exceeds mapper 165 capacity"
+    );
+    if physical_page == 0 {
+        return Ok(1);
+    }
+    physical_page
+        .checked_mul(4)
+        .ok_or_else(|| anyhow::anyhow!("physical CHR page cannot be encoded for mapper 165"))
+}
 
 #[derive(Debug, Serialize)]
 struct Mapper165ParityReport {
@@ -304,9 +319,9 @@ pub fn build_mapper165_parity_probe(
         unresolved_boundaries: vec![
             "Observed central PPU $1000 pairs use generated trigger-plane variants; unobserved pairs still require visible parity measurement.",
             "Direct CHR writers are limited to instruction-boundary sites proven by fixed-bank disassembly, adjacent register groups, or prior runtime traces; isolated byte-pattern candidates remain unclassified.",
-            "Direct CHR writers keep source-page mapping without pair-aware FD correction until their paired runtime values are classified.",
+            "The classified direct-writer pairs need no trigger-plane variants; late-game executions outside the current runtime sample remain part of full regression.",
             "The probe preserves and relocates the source CHR but does not add Korean glyphs or translation assets.",
-            "Save RAM is enabled statically, but save/load persistence and adverse gameplay paths still require runtime verification.",
+            "Runtime parity covers suspend persistence, one adverse game-over path, and the chapter-one completion/save/cold-load transition, not whole-game regression.",
         ],
         release_eligible: false,
     };

@@ -2,6 +2,8 @@ mod chr_inventory;
 mod dialogue_assets;
 mod dialogue_inventory;
 mod font;
+mod font_slots;
+mod hangul_page_plan;
 mod japanese_encoding;
 mod localization;
 mod mapper165;
@@ -110,6 +112,14 @@ enum Command {
         #[arg(long, default_value = "out/fire-emblem-fe1-mapper165-parity-probe.nes")]
         output: PathBuf,
         #[arg(long, default_value = "out/mapper165-parity-probe.json")]
+        report: PathBuf,
+    },
+    /// Plan two expanded-CHR Hangul pages whose union exceeds one active page.
+    PlanHangulPageProof {
+        source: PathBuf,
+        #[arg(long, default_value = "out/hangul-page-proof.chr")]
+        page_pack: PathBuf,
+        #[arg(long, default_value = "out/hangul-page-proof.json")]
         report: PathBuf,
     },
     /// Compare MMC4 and mapper 165 FD-trigger tile planes for observed CHR pairs.
@@ -371,6 +381,23 @@ fn main() -> Result<()> {
             println!("wrote {}", report.display());
             println!("report SHA-1: {}", summary.report_sha1);
             println!("tracked ROM writes: {}", summary.tracked_write_count);
+        }
+        Command::PlanHangulPageProof {
+            source,
+            page_pack,
+            report,
+        } => {
+            let summary = hangul_page_plan::plan_hangul_page_proof(&source, &page_pack, &report)?;
+            println!("wrote {}", page_pack.display());
+            println!("page pack SHA-1: {}", summary.page_pack_sha1);
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "Hangul pages: {} active slots, {}-glyph proof union, {} extension pages available",
+                summary.active_hangul_slot_count,
+                summary.page_union_glyph_count,
+                summary.maximum_extension_page_count
+            );
         }
         Command::AnalyzeMapper165TriggerPlanes { source, report } => {
             let summary =

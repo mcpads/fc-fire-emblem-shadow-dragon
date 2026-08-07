@@ -45,6 +45,17 @@ cargo run -p fc-fire-emblem-patch -- analyze-mapper165-direct-chr-pairs \
   "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 ```
 
+## 동적 한글 페이지 계획
+
+`plan-hangul-page-proof`는 원본 글꼴 페이지를 기준으로 확장 CHR-ROM에 들어갈 4 KiB 한글 페이지 두 개를 만든다. 현재 보호가 확정된 영어·숫자·부속 문장부호·제어·래치 42코드와 합성 레이아웃 3코드는 원본 타일을 그대로 유지한다. 나머지 211코드만 한글 활성 슬롯으로 배정하며, 한 페이지의 중복 글리프·211자 초과·보호 타일 변경·mapper 165의 256 KiB CHR 범위 초과를 거부한다.
+
+```sh
+cargo run -p fc-fire-emblem-patch -- plan-hangul-page-proof \
+  "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
+```
+
+현재 합성 표본은 서로 겹치지 않는 106자 페이지 A와 B를 만들어 각 페이지는 예산 안에 두면서 합집합 212자로 한 페이지 한계를 넘긴다. 물리 페이지는 `34/35`, mapper 레지스터 값은 `88/8C`이고, 기존 무번역 프로브 뒤에는 최대 30페이지가 남아 페이지별 배정 총량 상한은 6,330칸이다. 이는 화면별 중복과 실제 번역 코퍼스를 반영한 최종 수용량이 아니다. 산출물의 `runtime_bound`는 거짓이며, ROM 삽입·화면 선택·`A → B → A` 실행 전환을 통과하기 전에는 G3 완료 증거로 쓰지 않는다.
+
 ## MMC5 PRG 정적 프로브
 
 `build-mmc5-prg-probe`는 번역·한글 자산 없이 지원 일본판을 mapper 5 헤더로 바꾸고, 원본 마지막 16 KiB PRG 뱅크의 확인된 `FF` 구간 `$FA00`~`$FA7F`에 최소 초기화·뱅크·미러링 루틴을 배치한다. 새 실행 코드는 허용된 RP2A03 명령과 주소 지정 형식만 받는 checked assembler로 생성한다. 이 구간을 대상으로 하는 직접 `JSR`·`JMP` 3바이트 패턴이 PRG 전체에서 하나라도 나오면 쓰지 않는다.

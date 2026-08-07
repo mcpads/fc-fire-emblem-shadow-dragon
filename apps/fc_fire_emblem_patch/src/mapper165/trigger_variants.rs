@@ -2,7 +2,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Result, ensure};
 
-use super::trigger_planes::{PatternWindow, observed_variant_pairs};
+use super::{
+    encode_chr_page_register,
+    trigger_planes::{PatternWindow, observed_variant_pairs},
+};
 
 const CHR_PAGE_SIZE: usize = 0x1000;
 const FD_TILE_HIGH_PLANE_OFFSET: usize = 0x0FD8;
@@ -67,7 +70,7 @@ pub(super) fn install_observed_trigger_variants(
     for (((fd_source_page, required_high_plane), (fe_pages, windows)), physical_page) in
         grouped.into_iter().zip(VARIANT_PHYSICAL_PAGES)
     {
-        let mapper_register_value = mapper_register_for_physical_page(physical_page)?;
+        let mapper_register_value = encode_chr_page_register(physical_page)?;
         let source_start = fd_source_page as usize * CHR_PAGE_SIZE;
         let source_end = source_start + CHR_PAGE_SIZE;
         ensure!(
@@ -151,15 +154,6 @@ pub(super) fn verify_installed_trigger_variants(
     Ok(())
 }
 
-fn mapper_register_for_physical_page(physical_page: u8) -> Result<u8> {
-    if physical_page == 0 {
-        return Ok(1);
-    }
-    physical_page
-        .checked_mul(4)
-        .ok_or_else(|| anyhow::anyhow!("physical CHR page cannot be encoded for mapper 165"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -205,7 +199,7 @@ mod tests {
 
     #[test]
     fn physical_page_zero_uses_a_nonzero_register_value_instead_of_chr_ram() {
-        assert_eq!(mapper_register_for_physical_page(0).unwrap(), 1);
-        assert_eq!(mapper_register_for_physical_page(1).unwrap(), 4);
+        assert_eq!(encode_chr_page_register(0).unwrap(), 1);
+        assert_eq!(encode_chr_page_register(1).unwrap(), 4);
     }
 }

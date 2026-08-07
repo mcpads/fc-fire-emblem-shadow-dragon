@@ -4,6 +4,10 @@ use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
+    font_slots::{
+        LATCH_TRIGGER_CODES, LAYOUT_RESERVED_CODES, PRESERVED_DISPLAY_CODES,
+        protected_original_codes,
+    },
     options::{OPTIONS_TABLE_OFFSET, SOURCE_OPTIONS_TABLE},
     rom::{EXPECTED_CHR_SHA1, EXPECTED_SOURCE_SHA1, PRG_SIZE, Rom},
     sha1_hex,
@@ -31,8 +35,6 @@ const SOURCE_STATUS_LABELS: [u8; 32] = [
 
 const ENTRY_SEPARATOR: u8 = 0xED;
 const TABLE_TERMINATOR: u8 = 0xEF;
-const MMC4_LATCH_CODES: [u8; 2] = [0xFD, 0xFE];
-const PROVISIONAL_LAYOUT_RESERVED_CODES: [u8; 3] = [0x0F, 0x1F, 0xFF];
 const PRG_BANK_SIZE: usize = 16 * 1024;
 
 struct Mmc4ControlRoutine {
@@ -597,19 +599,28 @@ fn calculate_active_slot_ceiling(slots: &[SlotReport]) -> Result<ActiveSlotCeili
         .filter(|slot| slot.code_assignment == Decision::Protected)
         .count();
     ensure!(
-        PROVISIONAL_LAYOUT_RESERVED_CODES
+        LAYOUT_RESERVED_CODES
             .iter()
             .all(|code| slots[usize::from(*code)].code_assignment == Decision::Unresolved),
         "provisional layout reservation overlaps a protected code"
     );
-    let current_reserved_code_count =
-        confirmed_protected_code_count + PROVISIONAL_LAYOUT_RESERVED_CODES.len();
+    let current_reserved_code_count = confirmed_protected_code_count + LAYOUT_RESERVED_CODES.len();
+
+    let reported_protected_codes = slots
+        .iter()
+        .filter(|slot| slot.code_assignment == Decision::Protected)
+        .map(|slot| slot.code)
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        reported_protected_codes == protected_original_codes(),
+        "font report protected-code set disagrees with the shared slot contract"
+    );
 
     Ok(ActiveSlotCeiling {
         total_font_code_count: TILES_PER_PAGE,
         confirmed_protected_code_count,
-        provisional_layout_reserved_codes: PROVISIONAL_LAYOUT_RESERVED_CODES.to_vec(),
-        provisional_layout_reserved_codes_hex: PROVISIONAL_LAYOUT_RESERVED_CODES
+        provisional_layout_reserved_codes: LAYOUT_RESERVED_CODES.to_vec(),
+        provisional_layout_reserved_codes_hex: LAYOUT_RESERVED_CODES
             .iter()
             .map(|code| format!("{code:02X}"))
             .collect(),
@@ -751,7 +762,7 @@ fn describe_font_page(page: &[u8]) -> Vec<SlotReport> {
                 .any(|occurrence| occurrence.scope == ReferenceScope::PreservedOriginal);
             let is_preserved_glyph = is_declared_preserved_glyph(code);
             let is_control = [ENTRY_SEPARATOR, TABLE_TERMINATOR].contains(&code);
-            let is_latch = MMC4_LATCH_CODES.contains(&code);
+            let is_latch = LATCH_TRIGGER_CODES.contains(&code);
 
             let mut code_assignment_reasons = Vec::new();
             if is_preserved_glyph {
@@ -823,7 +834,7 @@ fn describe_font_page(page: &[u8]) -> Vec<SlotReport> {
 }
 
 fn is_declared_preserved_glyph(code: u8) -> bool {
-    (0x60..=0x83).contains(&code) || [0x8D, 0x9B].contains(&code)
+    PRESERVED_DISPLAY_CODES.contains(&code)
 }
 
 fn declared_glyph(code: u8) -> Option<String> {
