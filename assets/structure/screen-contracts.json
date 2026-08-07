@@ -69,7 +69,7 @@
       "input_behavior": "input_wait",
       "translation_scope": "no_text",
       "temporal_behavior": "map units animate or flash while input waits",
-      "known_focus": ["left 1A/1A and right 15/15 graphics pairs"],
+      "known_focus": ["left 1A/1A and right 15/15, 18/18, and 19/19 animation pairs"],
       "unresolved_focus": ["sprite and cursor phase union", "all map entry and return paths"],
       "next_gate": "use as the natural-page restoration boundary",
       "contract_state": "observed_partial"
@@ -120,15 +120,20 @@
       "runtime_observed": true,
       "input_behavior": "input_wait",
       "translation_scope": "japanese_with_preserved_original_latin",
-      "temporal_behavior": "selection and row UI may flash",
-      "known_focus": ["left 18/18 and right 00/19 CHR pairs", "Japanese names share page 00 with original LV and HP"],
-      "unresolved_focus": [
-        "exact Japanese and preserved-code tile sets",
-        "sprite and temporal phase union",
-        "screen-local writer and lifetime owner",
-        "entry, exit, and re-entry"
+      "temporal_behavior": "screen and OAM were stable for 152 frames in each observed 00/15 and 00/19 backing-page variant",
+      "known_focus": [
+        "left 18/18 and right 00/15 or 00/19 CHR pairs retain the current map animation page",
+        "physical nametable 1 uses 29 FD codes over 306 fetches and 33 FE codes over 654 fetches",
+        "17 Japanese codes share page 00 with protected digits 0, 1, 2, 6, 8 and original H, L, P, V",
+        "28 portrait sprites and one cursor sprite remain stable",
+        "B exits to the animated map and SELECT then first-item A re-enters the roster",
+        "entry writes the current backing page and then page 00 through the established 0B:$9324 and 0B:$928A suppliers"
       ],
-      "next_gate": "next mixed-text screen: bind tile use, temporal UI, owner, and lifetime",
+      "unresolved_focus": [
+        "possible 00/18 backing-page entry variant",
+        "Hangul page binding with visible preservation of original LV and HP"
+      ],
+      "next_gate": "bind a Hangul roster page while preserving original LV, HP, digits, portraits, and backing-page lifetime",
       "contract_state": "observed_partial"
     },
     {

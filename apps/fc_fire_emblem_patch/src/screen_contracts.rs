@@ -69,6 +69,8 @@ pub(crate) const OBSERVED_CHR_PAIRS: &[ObservedChrPair] = &[
     pair("later_intro_dialogue", PatternWindow::Right, 0x00, 0x18),
     pair("map_idle", PatternWindow::Left, 0x1A, 0x1A),
     pair("map_idle", PatternWindow::Right, 0x15, 0x15),
+    pair("map_idle", PatternWindow::Right, 0x18, 0x18),
+    pair("map_idle", PatternWindow::Right, 0x19, 0x19),
     pair("unit_status", PatternWindow::Left, 0x13, 0x13),
     pair("unit_status", PatternWindow::Right, 0x00, 0x18),
     pair("map_menu", PatternWindow::Left, 0x1A, 0x1A),
@@ -76,6 +78,7 @@ pub(crate) const OBSERVED_CHR_PAIRS: &[ObservedChrPair] = &[
     pair("options", PatternWindow::Left, 0x1A, 0x1A),
     pair("options", PatternWindow::Right, 0x00, 0x15),
     pair("unit_roster", PatternWindow::Left, 0x18, 0x18),
+    pair("unit_roster", PatternWindow::Right, 0x00, 0x15),
     pair("unit_roster", PatternWindow::Right, 0x00, 0x19),
     pair("battle_animation", PatternWindow::Left, 0x02, 0x06),
     pair("battle_animation", PatternWindow::Left, 0x06, 0x06),
@@ -352,7 +355,7 @@ mod tests {
             roster
                 .unresolved_focus
                 .iter()
-                .any(|focus| focus == "entry, exit, and re-entry")
+                .any(|focus| focus.contains("Hangul page binding"))
         );
     }
 

@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, fs, path::Path};
+use std::{collections::BTreeMap, fs, path::Path};
 
 use anyhow::{Context, Result, bail, ensure};
 use clap::ValueEnum;
@@ -162,12 +162,20 @@ struct LatchNametableReport {
     fe_tile_occurrence_count: usize,
     fd_tile_codes_hex: Vec<String>,
     fe_tile_codes_hex: Vec<String>,
+    fd_tile_occurrences: Vec<TileOccurrence>,
+    fe_tile_occurrences: Vec<TileOccurrence>,
     tile_attribute_count: usize,
     unused_tail_fill: u8,
     output_len: usize,
     output_sha1: String,
     unresolved_boundaries: Vec<&'static str>,
     release_eligible: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct TileOccurrence {
+    code_hex: String,
+    count: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -230,8 +238,8 @@ struct ProjectedAttributes {
     fe_trigger_count: usize,
     fd_tile_occurrence_count: usize,
     fe_tile_occurrence_count: usize,
-    fd_tile_codes: BTreeSet<u8>,
-    fe_tile_codes: BTreeSet<u8>,
+    fd_tile_occurrences: BTreeMap<u8, usize>,
+    fe_tile_occurrences: BTreeMap<u8, usize>,
     ending_latch: Mmc4Latch,
 }
 
@@ -265,8 +273,10 @@ pub fn project_mmc4_latch_nametable(
         fe_trigger_count: projection.fe_trigger_count,
         fd_tile_occurrence_count: projection.fd_tile_occurrence_count,
         fe_tile_occurrence_count: projection.fe_tile_occurrence_count,
-        fd_tile_codes_hex: hex_codes(&projection.fd_tile_codes),
-        fe_tile_codes_hex: hex_codes(&projection.fe_tile_codes),
+        fd_tile_codes_hex: hex_codes(&projection.fd_tile_occurrences),
+        fe_tile_codes_hex: hex_codes(&projection.fe_tile_occurrences),
+        fd_tile_occurrences: tile_occurrences(&projection.fd_tile_occurrences),
+        fe_tile_occurrences: tile_occurrences(&projection.fe_tile_occurrences),
         tile_attribute_count: TILE_COUNT,
         unused_tail_fill,
         output_len: projection.bytes.len(),
@@ -452,8 +462,8 @@ fn project_attributes(
     let mut fe_trigger_count = 0;
     let mut fd_tile_occurrence_count = 0;
     let mut fe_tile_occurrence_count = 0;
-    let mut fd_tile_codes = BTreeSet::new();
-    let mut fe_tile_codes = BTreeSet::new();
+    let mut fd_tile_occurrences = BTreeMap::new();
+    let mut fe_tile_occurrences = BTreeMap::new();
     for row in 0..TILE_ROW_COUNT {
         for column in 0..TILE_COLUMN_COUNT {
             let tile_index = row * TILE_COLUMN_COUNT + column;
@@ -464,11 +474,15 @@ fn project_attributes(
             match latch {
                 Mmc4Latch::Fd => {
                     fd_tile_occurrence_count += 1;
-                    fd_tile_codes.insert(nametable[tile_index]);
+                    *fd_tile_occurrences
+                        .entry(nametable[tile_index])
+                        .or_insert(0) += 1;
                 }
                 Mmc4Latch::Fe => {
                     fe_tile_occurrence_count += 1;
-                    fe_tile_codes.insert(nametable[tile_index]);
+                    *fe_tile_occurrences
+                        .entry(nametable[tile_index])
+                        .or_insert(0) += 1;
                 }
             }
 
@@ -492,14 +506,27 @@ fn project_attributes(
         fe_trigger_count,
         fd_tile_occurrence_count,
         fe_tile_occurrence_count,
-        fd_tile_codes,
-        fe_tile_codes,
+        fd_tile_occurrences,
+        fe_tile_occurrences,
         ending_latch: latch,
     })
 }
 
-fn hex_codes(codes: &BTreeSet<u8>) -> Vec<String> {
-    codes.iter().map(|code| format!("{code:02X}")).collect()
+fn hex_codes(occurrences: &BTreeMap<u8, usize>) -> Vec<String> {
+    occurrences
+        .keys()
+        .map(|code| format!("{code:02X}"))
+        .collect()
+}
+
+fn tile_occurrences(occurrences: &BTreeMap<u8, usize>) -> Vec<TileOccurrence> {
+    occurrences
+        .iter()
+        .map(|(code, count)| TileOccurrence {
+            code_hex: format!("{code:02X}"),
+            count: *count,
+        })
+        .collect()
 }
 
 fn bank_for_latch(latch: Mmc4Latch, fd_bank: u8, fe_bank: u8) -> u8 {
@@ -540,8 +567,14 @@ mod tests {
         assert_eq!(projection.fe_trigger_count, 1);
         assert_eq!(projection.fd_tile_occurrence_count, 2);
         assert_eq!(projection.fe_tile_occurrence_count, TILE_COUNT - 2);
-        assert_eq!(projection.fd_tile_codes, BTreeSet::from([0x00, 0xFE]));
-        assert_eq!(projection.fe_tile_codes, BTreeSet::from([0x00, 0xFD]));
+        assert_eq!(
+            projection.fd_tile_occurrences,
+            BTreeMap::from([(0x00, 1), (0xFE, 1)])
+        );
+        assert_eq!(
+            projection.fe_tile_occurrences,
+            BTreeMap::from([(0x00, TILE_COUNT - 3), (0xFD, 1)])
+        );
         assert_eq!(projection.ending_latch, Mmc4Latch::Fe);
     }
 
@@ -558,8 +591,17 @@ mod tests {
 
         assert_eq!(projection.fd_tile_occurrence_count, 3);
         assert_eq!(projection.fe_tile_occurrence_count, TILE_COUNT - 3);
-        assert_eq!(hex_codes(&projection.fd_tile_codes), ["10", "31", "FE"]);
-        assert_eq!(hex_codes(&projection.fe_tile_codes), ["20", "42", "FD"]);
+        assert_eq!(
+            hex_codes(&projection.fd_tile_occurrences),
+            ["10", "31", "FE"]
+        );
+        assert_eq!(
+            hex_codes(&projection.fe_tile_occurrences),
+            ["20", "42", "FD"]
+        );
+        assert_eq!(projection.fd_tile_occurrences[&0x10], 1);
+        assert_eq!(projection.fd_tile_occurrences[&0x31], 1);
+        assert_eq!(projection.fd_tile_occurrences[&0xFE], 1);
     }
 
     #[test]
