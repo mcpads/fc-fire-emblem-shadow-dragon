@@ -130,6 +130,7 @@ struct ShopFlowReport {
     runtime_purchase_observation: RuntimePurchaseObservation,
     runtime_exit_observation: RuntimeExitObservation,
     runtime_inventory_full_observation: RuntimeInventoryFullObservation,
+    runtime_insufficient_funds_observation: RuntimeInsufficientFundsObservation,
     dialogue_table: ShopDialogueTableBinding,
     code_regions: Vec<CodeRegionBinding>,
     unresolved_downstream_roles: Vec<&'static str>,
@@ -283,6 +284,28 @@ struct RuntimeInventoryFullObservation {
 }
 
 #[derive(Debug, Serialize)]
+struct RuntimeInsufficientFundsObservation {
+    setup_kind: &'static str,
+    stored_funds_before_setup: u16,
+    stored_funds_after_setup: u16,
+    inventory_items: [u8; 4],
+    inventory_durability: [u8; 4],
+    outer_state_sequence: [u8; 6],
+    dialogue_entry_sequence: [u8; 2],
+    branch_mutated_funds_or_inventory: bool,
+    screenshot_sha256: &'static str,
+    chr_pair: ChrPair,
+    temporal_observation: &'static str,
+    continue_input: &'static str,
+    outer_state_after_continue: u8,
+    funds_after_continue: u16,
+    inventory_items_after_continue: [u8; 4],
+    returned_screen_role: &'static str,
+    returned_screenshot_sha256: &'static str,
+    evidence_scope: &'static str,
+}
+
+#[derive(Debug, Serialize)]
 struct CodeRegionBinding {
     role: &'static str,
     prg_bank: u8,
@@ -400,6 +423,7 @@ fn build_report(rom: &Rom) -> Result<ShopFlowReport> {
             purchase_result_screen(),
             exit_message_screen(),
             inventory_full_message_screen(),
+            insufficient_funds_message_screen(),
         ],
         preflight_branches: vec![
             PreflightBranch {
@@ -507,12 +531,29 @@ fn build_report(rom: &Rom) -> Result<ShopFlowReport> {
             returned_screenshot_sha256: "93946a26fd1d900c03c119051f161214537a5e49b1405af9bb9208a55ac24114",
             evidence_scope: "the branch is runtime-observed from a declared reversible RAM setup, not a natural-play reproduction",
         },
+        runtime_insufficient_funds_observation: RuntimeInsufficientFundsObservation {
+            setup_kind: "reversible runtime write of stored funds from 0x00A8 to 0x0000 while retaining one free inventory slot",
+            stored_funds_before_setup: 0x00A8,
+            stored_funds_after_setup: 0x0000,
+            inventory_items: [0x02, 0x0F, 0x02, 0x00],
+            inventory_durability: [0x2A, 0x16, 0x2A, 0x00],
+            outer_state_sequence: [4, 8, 9, 10, 11, 12],
+            dialogue_entry_sequence: [2, 0x36],
+            branch_mutated_funds_or_inventory: false,
+            screenshot_sha256: "d74c34516389161786e8dc4dc93cabd07807b0bdd7baafbfa6d9731ed93b2c9a",
+            chr_pair: observed_shop_chr_pair(),
+            temporal_observation: "CHR 1E/1E + 00/15 and the complete screenshot stayed stable across 152 regular and 168 irregularly spaced input-free frames",
+            continue_input: "A on yes",
+            outer_state_after_continue: 4,
+            funds_after_continue: 0x0000,
+            inventory_items_after_continue: [0x02, 0x0F, 0x02, 0x00],
+            returned_screen_role: "weapon_shop_item_list",
+            returned_screenshot_sha256: "1f3945c0dab791a70cc31b4f3f0f3d36d0e9bdd3cbe58437895ba069df3a00bb",
+            evidence_scope: "the branch is runtime-observed from a declared reversible RAM setup, not a natural-play reproduction",
+        },
         dialogue_table,
         code_regions,
-        unresolved_downstream_roles: vec![
-            "weapon_shop_insufficient_funds_message",
-            "weapon_shop_item_restriction_message",
-        ],
+        unresolved_downstream_roles: vec!["weapon_shop_item_restriction_message"],
         release_eligible: false,
     })
 }
@@ -704,6 +745,49 @@ fn inventory_full_message_screen() -> ShopScreen {
             persistent_gameplay_mutation: true,
             next_role: "map_idle",
         }],
+    }
+}
+
+fn insufficient_funds_message_screen() -> ShopScreen {
+    ShopScreen {
+        screen_role: "weapon_shop_insufficient_funds_message",
+        runtime_observed: true,
+        outer_state: 12,
+        menu_controller_state: Some(5),
+        selectable_entry_count: 2,
+        choice_mask: 0x03,
+        choice_mask_hex: "0x03".to_owned(),
+        chr_pair: observed_shop_chr_pair(),
+        translation_target: "Japanese insufficient-funds and continue-shopping dialogue plus yes/no labels only",
+        preserved_original: &["funds digits", "G"],
+        visible_components: &[
+            "current funds",
+            "insufficient-funds and continue-shopping dialogue",
+            "two-choice window",
+            "sprite selection cursor",
+            "map background and unit sprites",
+        ],
+        temporal_observation: "CHR 1E/1E + 00/15 and screenshot SHA-256 d74c3451...3b2c9a stayed stable across 152 regular and 168 irregularly spaced input-free frames",
+        input_actions: vec![
+            InputAction {
+                input: "up or down",
+                immediate_effect: "toggle only the continue-shopping selected ordinal",
+                persistent_gameplay_mutation: false,
+                next_role: "weapon_shop_insufficient_funds_message",
+            },
+            InputAction {
+                input: "A on yes",
+                immediate_effect: "set outer state 3 and rebuild the item list",
+                persistent_gameplay_mutation: false,
+                next_role: "weapon_shop_item_list",
+            },
+            InputAction {
+                input: "A on no or B",
+                immediate_effect: "select the weapon-shop exit dialogue route",
+                persistent_gameplay_mutation: false,
+                next_role: "weapon_shop_exit_message",
+            },
+        ],
     }
 }
 
@@ -936,6 +1020,21 @@ mod tests {
         assert_eq!(screen.selectable_entry_count, 0);
         assert!(advance.persistent_gameplay_mutation);
         assert_eq!(advance.next_role, "map_idle");
+    }
+
+    #[test]
+    fn insufficient_funds_message_can_return_to_the_item_list_without_a_purchase() {
+        let screen = insufficient_funds_message_screen();
+        let continue_shopping = screen
+            .input_actions
+            .iter()
+            .find(|action| action.input == "A on yes")
+            .unwrap();
+
+        assert_eq!(screen.outer_state, 12);
+        assert_eq!(screen.selectable_entry_count, 2);
+        assert!(!continue_shopping.persistent_gameplay_mutation);
+        assert_eq!(continue_shopping.next_role, "weapon_shop_item_list");
     }
 
     #[test]

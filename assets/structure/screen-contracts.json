@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "next_screen_role": "weapon_shop_insufficient_funds_message",
+  "next_screen_role": "weapon_shop_item_restriction_message",
   "screens": [
     {
       "screen_role": "title",
@@ -375,17 +375,24 @@
     {
       "screen_role": "weapon_shop_insufficient_funds_message",
       "surface_family": "weapon_shop",
-      "runtime_observed": false,
-      "input_behavior": "unresolved",
-      "translation_scope": "unresolved",
-      "temporal_behavior": "unresolved after the funds preflight branch",
+      "runtime_observed": true,
+      "input_behavior": "input_wait",
+      "translation_scope": "japanese_with_preserved_original_latin",
+      "temporal_behavior": "the insufficient-funds and continue-shopping prompt retained one screenshot across 152 regular and 168 irregularly spaced input-free frames",
       "known_focus": [
-        "bank 06 9A46 selects dialogue index 02 and outer state 08 when stored funds are lower than the selected price",
-        "the branch does not mutate funds or inventory"
+        "left 1E/1E and right 00/15 CHR pairs",
+        "a declared reversible RAM setup lowered stored funds from 00A8 to 0000 while inventory 02/0F/02/00 retained one free slot",
+        "the preflight moved outer state 04 through 08/09/0A/0B to 0C while dialogue index 02 advanced to 36",
+        "Japanese insufficient-funds and continue-shopping dialogue coexist with 0G, a two-choice window, sprite cursor, map, and unit sprites while the item list and portrait are absent",
+        "the rejection did not write funds, item slots, or durability",
+        "A on yes moved state 0C to 03 and then 04 to rebuild the item list without another funds or inventory write"
       ],
-      "unresolved_focus": ["all visible screen components", "input and continuation", "CHR and temporal behavior"],
-      "next_gate": "restore the item-list state, lower only reversible runtime funds below one listed price, and observe the rejection without changing the ROM or save file",
-      "contract_state": "unobserved"
+      "unresolved_focus": [
+        "insufficient-funds and continue-shopping dialogue producer and line lifetime",
+        "natural-play reproduction independent of the reversible forced-state reachability proof"
+      ],
+      "next_gate": "bind the dialogue producer while statically solving the item-specific predicate before choosing a representative runtime case",
+      "contract_state": "observed_partial"
     },
     {
       "screen_role": "weapon_shop_item_restriction_message",
