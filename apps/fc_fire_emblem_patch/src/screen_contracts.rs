@@ -61,6 +61,8 @@ pub(crate) const OBSERVED_CHR_PAIRS: &[ObservedChrPair] = &[
     pair("new_game_choice", PatternWindow::Right, 0x00, 0x00),
     pair("intro_terrain", PatternWindow::Left, 0x1A, 0x1A),
     pair("intro_terrain", PatternWindow::Right, 0x15, 0x15),
+    pair("class_profile", PatternWindow::Left, 0x14, 0x14),
+    pair("class_profile", PatternWindow::Right, 0x00, 0x14),
     pair("intro_dialogue", PatternWindow::Left, 0x07, 0x07),
     pair("intro_dialogue", PatternWindow::Right, 0x00, 0x18),
     pair("game_over", PatternWindow::Left, 0x07, 0x07),
@@ -337,9 +339,10 @@ mod tests {
     fn registry_covers_every_observed_chr_pair() {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
 
-        assert_eq!(report.screen_count, 19);
-        assert_eq!(report.runtime_observed_screen_count, 15);
-        assert_eq!(report.chr_pair_observed_screen_count, 13);
+        assert_eq!(report.screen_count, 20);
+        assert_eq!(report.runtime_observed_screen_count, 16);
+        assert_eq!(report.chr_pair_observed_screen_count, 14);
+        assert_eq!(report.mixed_original_latin_screen_count, 6);
         assert_eq!(report.page_switch_verified_screen_count, 1);
         assert_eq!(report.mixed_text_page_verified_screen_count, 1);
     }

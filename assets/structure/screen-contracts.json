@@ -39,6 +39,22 @@
       "contract_state": "observed_partial"
     },
     {
+      "screen_role": "class_profile",
+      "surface_family": "chapter_intro",
+      "runtime_observed": true,
+      "input_behavior": "automatic",
+      "translation_scope": "japanese_with_preserved_original_latin",
+      "temporal_behavior": "automatic no-input presentation; duration and animation-phase union are unresolved",
+      "known_focus": [
+        "central shadows remain left 14/14 and right 00/14 while bank 0D direct writers select actual left 02/02 and right 00/00 pages",
+        "page 00 background combines a Japanese class name and description with original STR, SKI, WLV, AGI, DEF, MOV, H.P, EXP, punctuation, and digits",
+        "18 visible unit sprites use the separately selected page 02 in the frame-1929 OAM sample"
+      ],
+      "unresolved_focus": ["exact Japanese description tile set", "automatic entry and exit lifetime", "sprite and temporal phase union"],
+      "next_gate": "bind the automatic class-profile page lifetime independently of the interactive unit-status screen",
+      "contract_state": "observed_partial"
+    },
+    {
       "screen_role": "intro_dialogue",
       "surface_family": "dialogue",
       "runtime_observed": true,
@@ -109,9 +125,13 @@
       "input_behavior": "input_wait",
       "translation_scope": "japanese_with_preserved_original_latin",
       "temporal_behavior": "unresolved",
-      "known_focus": ["left 13/13 and right 00/18 CHR pairs", "original stat abbreviations and digits share the font page"],
+      "known_focus": [
+        "left 13/13 and right 00/18 CHR shadows",
+        "Japanese unit name, class, level, and stat labels share page 00 with original S, HP, punctuation, and digits",
+        "map graphics remain visible behind the windows and a portrait is supplied by sprites"
+      ],
       "unresolved_focus": ["exact Japanese and preserved-code tile sets", "sprite and temporal union", "screen-local writer and lifetime owner"],
-      "next_gate": "use after the roster to confirm the same mixed-text policy on another consumer",
+      "next_gate": "close the interactive unit-status consumer without borrowing the automatic class-profile contract",
       "contract_state": "observed_partial"
     },
     {
