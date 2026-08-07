@@ -70,6 +70,8 @@ const OBSERVED_CHR_PAIRS: &[ObservedChrPair] = &[
     observed("battle_animation", PatternWindow::Left, 0x02, 0x06),
     observed("battle_animation", PatternWindow::Left, 0x06, 0x06),
     observed("battle_animation", PatternWindow::Right, 0x02, 0x06),
+    observed("chapter2_intro", PatternWindow::Left, 0x13, 0x13),
+    observed("chapter2_intro", PatternWindow::Right, 0x00, 0x18),
 ];
 
 const fn observed(
@@ -347,8 +349,8 @@ fn analyze_observations(
         pair_aware_selector_required,
         all_observed_pairs_exact_without_variants,
         unresolved_boundaries: vec![
-            "Observed pairs cover the documented title, early chapter, dialogue, status, menu, battle, and defeat paths only.",
-            "Shop, item, save/load, chapter transition, and ending pairs remain unobserved.",
+            "Observed pairs cover the documented title, early chapter, dialogue, status, menu, battle, defeat, and early chapter-transition paths only.",
+            "Shop, item, later chapter-transition, and ending pairs remain unobserved.",
             "This report plans required CHR variants but does not allocate pages or patch runtime selectors.",
         ],
         release_eligible: false,

@@ -12,7 +12,7 @@
 | UNROM512, mapper 30 | 512 KiB PRG, 최대 32 KiB 뱅크 CHR-RAM | 원본과 같은 배터리 PRG RAM이 없고 래치도 없음 | 제외 |
 | MMC5, mapper 5 | 최대 1 MiB PRG·CHR, PRG RAM, 배경 타일별 4 KiB CHR 선택 | 모든 네임테이블·스크롤 상태를 새 소유자가 유지해야 하며 VBlank 시간 예산을 넘김 | 주 경로에서 제외 |
 | J.Y. ASIC, mapper 209 | 16 KiB PRG 모드, 큰 CHR, MMC4식 래치 | Mesen 구현에서 16 KiB 모드 설정 뒤 `$6000` 배터리 RAM을 유지할 수 없음 | 제외 |
-| MMC3+MMC2 hybrid, mapper 165 | MMC3식 PRG·SRAM과 MMC2식 FD/FE 래치, 최대 256 KiB CHR-ROM, 4 KiB CHR-RAM | MMC4와 FD 트리거 시점이 달라 일부 페이지 쌍의 트리거 비트플레인 보정 필요 | 우선 후보 |
+| MMC3+MMC2 hybrid, mapper 165 | MMC3식 PRG·SRAM과 MMC2식 FD/FE 래치, 최대 256 KiB CHR-ROM, 4 KiB CHR-RAM | MMC4와 FD 트리거 시점이 달라 일부 페이지 쌍의 트리거 비트플레인 보정 필요 | 채택 |
 
 근거 사양은 [MMC4](https://www.nesdev.org/wiki/MMC4), [MMC5](https://www.nesdev.org/wiki/MMC5), [mapper 165](https://www.nesdev.org/wiki/INES_Mapper_165), [J.Y. Company ASIC](https://www.nesdev.org/wiki/J.Y._Company_ASIC), [UNROM512](https://www.nesdev.org/wiki/INES_Mapper_030), [Nintendo 매퍼 비교](https://www.nesdev.org/wiki/Comparison_of_Nintendo_mappers)를 따른다.
 
@@ -26,7 +26,7 @@ MMC5 확장 속성 실험은 한 화면의 래치 결과를 표현할 수 있음
 
 프레임 800의 오른쪽 FD/FE 쌍 `00/14`에서는 트리거 타일 두 칸의 한 비트플레인만 달라 16픽셀 차이가 났다. mapper 165는 FD 페이지를 `$xFD0`에서, MMC4는 `$xFD8`에서 전환하기 때문이다. 같은 FD `00`과 FE `18`을 쓰는 인트로 대화는 원본과 정확히 같아, 해결 대상은 네임테이블 전체가 아니라 FD/FE 페이지 쌍에 따른 트리거 타일 비트플레인이다.
 
-관측 쌍에 따른 공급 규칙은 구현했고 전투의 직접 왼쪽 `02/06`, `06/06`과 오른쪽 `02/06`도 자연 페이지로 호환됨을 확인했다. 직접 CHR writer 31곳의 쌍 분류는 완료했다. 자연 중단 저장·재개와 검증된 턴 경계 게임 오버 표본은 원본과 동등하며, 현재 남은 G2 관문은 정규 장 완료 저장·불러오기와 장 전환의 진행 동등성이다.
+관측 쌍에 따른 공급 규칙은 구현했고 전투의 직접 왼쪽 `02/06`, `06/06`과 오른쪽 `02/06`도 자연 페이지로 호환됨을 확인했다. 직접 CHR writer 31곳의 쌍 분류를 완료했다. 자연 중단 저장·재개, 검증된 턴 경계 게임 오버, 실제 전투와 이동을 거친 1장 완료, 정규 저장, native power cycle 뒤 `ロードする`, 2장 전환 표본도 원본과 동등하다. 이 범위에서 G2를 통과해 mapper 165를 채택한다. 다음 관문은 CHR-RAM 또는 확장 CHR-ROM으로 한글 페이지 `A → B → A`를 실증하는 것이다.
 
 ## MMC5 실험 당시 통과 조건
 
