@@ -345,10 +345,11 @@ fn main() -> Result<()> {
             println!("wrote {}", report.display());
             println!("report SHA-1: {}", summary.report_sha1);
             println!(
-                "chapter transitions: {} observed screens, {} chapter contexts, {} chapter titles, {} source-bound regions, next: {}",
+                "chapter transitions: {} observed screens, {} chapter contexts, {} chapter titles, {} intro runtime samples, {} source-bound regions, next: {}",
                 summary.screen_count,
                 summary.chapter_context_count,
                 summary.chapter_title_count,
+                summary.chapter_intro_runtime_sample_count,
                 summary.source_region_count,
                 summary.next_screen_role
             );

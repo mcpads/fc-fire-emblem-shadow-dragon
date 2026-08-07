@@ -304,12 +304,19 @@
       "temporal_behavior": "the title bar remains while dialogue draws automatically; completed pages wait for A and may flash a marker",
       "known_focus": [
         "left 13/13 and right 00/18 CHR pairs on the observed chapter-two entry",
+        "left 0F/0F and right 00/18 CHR pairs on a checksummed chapter-twelve regular-save reachability intervention",
         "new map, protected chapter-number digits, Japanese chapter title, portrait, and Japanese dialogue coexist",
         "chapter-clear and cold-load entries both reached the same composite surface",
-        "25 E5 chapter contexts select indices 00 through 18 at 781D and the chapter-title table contains 25 pointers"
+        "chapter twelve used one-based 0C in the regular file and zero-based 0B at 781D",
+        "25 E5 chapter contexts select indices 00 through 18 at 781D and the chapter-title table contains 25 pointers",
+        "the chapter-twelve completion marker appeared and disappeared across irregularly spaced samples"
       ],
-      "unresolved_focus": ["title-bar exit lifetime relative to the final dialogue page", "later chapter-specific map, portrait, and CHR variants"],
-      "next_gate": "sample a later chapter transition before treating the chapter-two composite as universal",
+      "unresolved_focus": [
+        "title-bar exit lifetime relative to the final dialogue page",
+        "remaining chapter-specific map, portrait, and CHR variants",
+        "chapter-eleven epilogue through chapter-twelve save and intro as one transition sequence"
+      ],
+      "next_gate": "observe the chapter-eleven-to-twelve transition sequence; do not treat the checksummed cold-load reachability sample as natural completion",
       "contract_state": "observed_partial"
     },
     {

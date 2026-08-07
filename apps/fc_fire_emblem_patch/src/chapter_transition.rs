@@ -51,6 +51,25 @@ const SAVE_OFFER_POINTER_BYTES: &[u8] = &[0xAA, 0x91];
 const SAVE_OFFER_LABEL_BYTES: &[u8] = &[
     0x3D, 0x3F, 0x4C, 0x0F, 0x0B, 0x20, 0x0C, 0x05, 0xFF, 0x9C, 0xED,
 ];
+const REGULAR_SAVE_CHECKSUM_BYTES: &[u8] = &[
+    0x38, 0xA5, 0x02, 0xE5, 0x00, 0x85, 0x02, 0xA5, 0x03, 0xE5, 0x01, 0x85, 0x03, 0xA9, 0x00, 0x85,
+    0x04, 0x85, 0x05, 0xA8, 0xA6, 0x02, 0xF0, 0x02, 0xE6, 0x03, 0xB1, 0x00, 0x18, 0x65, 0x04, 0x85,
+    0x04, 0x90, 0x02, 0xE6, 0x05, 0xC8, 0xD0, 0x02, 0xE6, 0x01, 0xC6, 0x02, 0xD0, 0xEC, 0xC6, 0x03,
+    0xD0, 0xE8, 0x60,
+];
+const WRITE_REGULAR_FILE_ONE_CHECKSUM_BYTES: &[u8] = &[
+    0xA9, 0x00, 0x85, 0x00, 0xA9, 0x60, 0x85, 0x01, 0xA9, 0x42, 0x85, 0x02, 0xA9, 0x65, 0x85, 0x03,
+    0x20, 0x52, 0x9D, 0xA5, 0x04, 0x8D, 0x42, 0x65, 0xA5, 0x05, 0x8D, 0x43, 0x65, 0xA2, 0x03, 0xBD,
+    0x4E, 0x9D, 0x9D, 0x88, 0x6A, 0xCA, 0x10, 0xF7, 0xEE, 0xEE, 0x05, 0x60,
+];
+const VALIDATE_REGULAR_SAVE_CHECKSUM_BYTES: &[u8] = &[
+    0xA5, 0x67, 0xD0, 0x23, 0xA9, 0x00, 0x85, 0x00, 0xA9, 0x60, 0x85, 0x01, 0xA9, 0x42, 0x85, 0x02,
+    0xA9, 0x65, 0x85, 0x03, 0x20, 0x52, 0x9D, 0xA5, 0x04, 0xCD, 0x42, 0x65, 0xD0, 0x31, 0xA5, 0x05,
+    0xCD, 0x43, 0x65, 0xD0, 0x2A, 0xF0, 0x21, 0xA9, 0x44, 0x85, 0x00, 0xA9, 0x65, 0x85, 0x01, 0xA9,
+    0x86, 0x85, 0x02, 0xA9, 0x6A, 0x85, 0x03, 0x20, 0x52, 0x9D, 0xA5, 0x04, 0xCD, 0x86, 0x6A, 0xD0,
+    0x0E, 0xA5, 0x05, 0xCD, 0x87, 0x6A, 0xD0, 0x07, 0x20, 0x2D, 0xC7, 0xEE, 0xEE, 0x05, 0x60, 0xA9,
+    0x06, 0x8D, 0xEE, 0x05, 0x60,
+];
 
 const SOURCE_REGIONS: &[SourceRegionSpec] = &[
     SourceRegionSpec::new(
@@ -91,6 +110,24 @@ const SOURCE_REGIONS: &[SourceRegionSpec] = &[
         0x91AA,
         SAVE_OFFER_LABEL_BYTES,
     ),
+    SourceRegionSpec::new(
+        "calculate_regular_save_checksum",
+        0x0B,
+        0x9D52,
+        REGULAR_SAVE_CHECKSUM_BYTES,
+    ),
+    SourceRegionSpec::new(
+        "write_regular_file_one_checksum",
+        0x0B,
+        0x9AD0,
+        WRITE_REGULAR_FILE_ONE_CHECKSUM_BYTES,
+    ),
+    SourceRegionSpec::new(
+        "validate_regular_save_checksum",
+        0x0B,
+        0x9FA8,
+        VALIDATE_REGULAR_SAVE_CHECKSUM_BYTES,
+    ),
 ];
 
 #[derive(Clone, Copy)]
@@ -120,6 +157,8 @@ struct ChapterTransitionReport {
     observed_sequence: Vec<TransitionScreen>,
     chapter_intro_contexts: ChapterIntroContextSummary,
     chapter_titles: ChapterTitleSummary,
+    regular_save_reachability: RegularSaveReachability,
+    chapter_intro_runtime_samples: Vec<ChapterIntroRuntimeSample>,
     fixed_labels: Vec<FixedLabelBinding>,
     source_regions: Vec<SourceRegionBinding>,
     next_universalization_gate: &'static str,
@@ -191,6 +230,37 @@ struct ChapterTitleSummary {
 }
 
 #[derive(Debug, Serialize)]
+struct RegularSaveReachability {
+    file_one_data_start_address: u16,
+    file_one_data_start_address_hex: &'static str,
+    file_one_data_end_exclusive_address: u16,
+    file_one_data_end_exclusive_address_hex: &'static str,
+    file_one_chapter_address: u16,
+    file_one_chapter_address_hex: &'static str,
+    file_one_checksum_address: u16,
+    file_one_checksum_address_hex: &'static str,
+    checksum_byte_order: &'static str,
+    checksum_algorithm: &'static str,
+    chapter_number_basis: &'static str,
+    runtime_use: &'static str,
+    natural_progression_claimed: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct ChapterIntroRuntimeSample {
+    sample_role: &'static str,
+    chapter_number_one_based: u8,
+    chapter_index_zero_based: u8,
+    entry_method: &'static str,
+    left_fd_chr_page: u8,
+    left_fe_chr_page: u8,
+    right_fd_chr_page: u8,
+    right_fe_chr_page: u8,
+    completion_marker_phase_union_observed: bool,
+    proof_limit: &'static str,
+}
+
+#[derive(Debug, Serialize)]
 struct FixedLabelBinding {
     screen_role: &'static str,
     index: u8,
@@ -228,6 +298,7 @@ pub struct ChapterTransitionSummary {
     pub screen_count: usize,
     pub chapter_context_count: usize,
     pub chapter_title_count: usize,
+    pub chapter_intro_runtime_sample_count: usize,
     pub source_region_count: usize,
     pub next_screen_role: &'static str,
 }
@@ -256,6 +327,7 @@ pub fn analyze_chapter_transitions(
         screen_count: report.observed_sequence.len(),
         chapter_context_count: report.chapter_intro_contexts.unique_context_count,
         chapter_title_count: report.chapter_titles.pointer_count,
+        chapter_intro_runtime_sample_count: report.chapter_intro_runtime_samples.len(),
         source_region_count: report.source_regions.len(),
         next_screen_role: report.next_universalization_gate,
     })
@@ -277,11 +349,13 @@ fn build_report(rom: &Rom) -> Result<ChapterTransitionReport> {
             translation_direction: "Japanese to Korean",
             preserve_existing_english_and_digits: true,
             dialogue_content_emitted: false,
-            proof_boundary: "source-bound chapter context, title, NEXT STORY, and save-offer producers plus the runtime-observed chapter-one-to-two surface sequence; no dialogue source, translation, or ROM mutation",
+            proof_boundary: "source-bound chapter context, title, NEXT STORY, save-offer, and regular-save checksum producers plus the runtime-observed chapter-one-to-two sequence and chapter-twelve intro sample; no dialogue source, translation, or ROM mutation",
         },
         observed_sequence: transition_screens(),
         chapter_intro_contexts,
         chapter_titles,
+        regular_save_reachability: regular_save_reachability(),
+        chapter_intro_runtime_samples: chapter_intro_runtime_samples(),
         fixed_labels: vec![
             FixedLabelBinding {
                 screen_role: "next_story_banner",
@@ -309,7 +383,8 @@ fn build_report(rom: &Rom) -> Result<ChapterTransitionReport> {
         unresolved: vec![
             "The chapter-one epilogue and save-complete dialogue use the main dialogue engine, but their dialogue source content is intentionally outside this public report.",
             "The exact CHR pairs for chapter_clear_epilogue_dialogue, next_story_banner, chapter_save_offer, and chapter_save_complete_continue_prompt are not yet bound to each individual lifetime.",
-            "Only the chapter-one-to-two transition and chapter-two cold-load entry are runtime observed; later chapter-specific graphics, alternate save choices, and title lifetimes are not generalized.",
+            "Chapter twelve is observed only through a checksummed regular-save chapter intervention; chapter eleven's epilogue, save choices, and transition into chapter twelve are not observed.",
+            "Chapter-two and chapter-twelve intro samples do not generalize the remaining twenty-three chapters, alternate save choices, or title lifetimes.",
         ],
         release_eligible: false,
     })
@@ -426,6 +501,53 @@ fn bind_chapter_titles(rom: &Rom) -> Result<ChapterTitleSummary> {
         selector_address_hex: "0x781D",
         translation_target: "Japanese chapter-title glyphs only; preserve original chapter-number digits",
     })
+}
+
+fn regular_save_reachability() -> RegularSaveReachability {
+    RegularSaveReachability {
+        file_one_data_start_address: 0x6000,
+        file_one_data_start_address_hex: "0x6000",
+        file_one_data_end_exclusive_address: 0x6542,
+        file_one_data_end_exclusive_address_hex: "0x6542",
+        file_one_chapter_address: 0x6519,
+        file_one_chapter_address_hex: "0x6519",
+        file_one_checksum_address: 0x6542,
+        file_one_checksum_address_hex: "0x6542",
+        checksum_byte_order: "little-endian",
+        checksum_algorithm: "16-bit wrapping sum of every byte in 0x6000..0x6542",
+        chapter_number_basis: "one-based MAP number; the E5 intro context later writes the zero-based value to 0x781D",
+        runtime_use: "reachability intervention only; change the chapter byte and recompute the checksum before selecting regular file one",
+        natural_progression_claimed: false,
+    }
+}
+
+fn chapter_intro_runtime_samples() -> Vec<ChapterIntroRuntimeSample> {
+    vec![
+        ChapterIntroRuntimeSample {
+            sample_role: "chapter_two_intro",
+            chapter_number_one_based: 2,
+            chapter_index_zero_based: 1,
+            entry_method: "natural chapter-one completion and regular-save cold load",
+            left_fd_chr_page: 0x13,
+            left_fe_chr_page: 0x13,
+            right_fd_chr_page: 0x00,
+            right_fe_chr_page: 0x18,
+            completion_marker_phase_union_observed: false,
+            proof_limit: "binds the chapter-two composite only",
+        },
+        ChapterIntroRuntimeSample {
+            sample_role: "chapter_twelve_intro",
+            chapter_number_one_based: 12,
+            chapter_index_zero_based: 11,
+            entry_method: "chapter-one regular save with file-one chapter and checksum changed in a frozen isolated run",
+            left_fd_chr_page: 0x0F,
+            left_fe_chr_page: 0x0F,
+            right_fd_chr_page: 0x00,
+            right_fe_chr_page: 0x18,
+            completion_marker_phase_union_observed: true,
+            proof_limit: "proves later-chapter intro reachability and a distinct left CHR pair, not chapter-eleven completion or the full transition sequence",
+        },
+    ]
 }
 
 fn transition_screens() -> Vec<TransitionScreen> {
@@ -681,9 +803,34 @@ mod tests {
         assert_eq!(source_file_offset(0x0B, 0x886A).unwrap(), 0x2C87A);
         assert_eq!(source_file_offset(0x0B, 0x88C4).unwrap(), 0x2C8D4);
         assert_eq!(source_file_offset(0x0B, 0x8AE6).unwrap(), 0x2CAF6);
+        assert_eq!(source_file_offset(0x0B, 0x9AD0).unwrap(), 0x2DAE0);
+        assert_eq!(source_file_offset(0x0B, 0x9D52).unwrap(), 0x2DD62);
+        assert_eq!(source_file_offset(0x0B, 0x9FA8).unwrap(), 0x2DFB8);
         assert_eq!(
             source_file_offset(0x0F, CHAPTER_TITLE_POINTER_TABLE_ADDRESS).unwrap(),
             0x3EE18
         );
+    }
+
+    #[test]
+    fn later_intro_sample_does_not_claim_the_preceding_transition() {
+        let samples = chapter_intro_runtime_samples();
+        let chapter_twelve = samples
+            .iter()
+            .find(|sample| sample.chapter_number_one_based == 12)
+            .unwrap();
+
+        assert_eq!(chapter_twelve.chapter_index_zero_based, 11);
+        assert_eq!(
+            [
+                chapter_twelve.left_fd_chr_page,
+                chapter_twelve.left_fe_chr_page,
+                chapter_twelve.right_fd_chr_page,
+                chapter_twelve.right_fe_chr_page,
+            ],
+            [0x0F, 0x0F, 0x00, 0x18]
+        );
+        assert!(chapter_twelve.proof_limit.contains("not chapter-eleven"));
+        assert!(!regular_save_reachability().natural_progression_claimed);
     }
 }

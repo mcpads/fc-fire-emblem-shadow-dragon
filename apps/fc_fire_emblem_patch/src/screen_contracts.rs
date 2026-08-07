@@ -128,6 +128,12 @@ pub(crate) const OBSERVED_CHR_PAIRS: &[ObservedChrPair] = &[
         0x00,
         0x18,
     ),
+    pair(
+        "chapter_intro_title_dialogue_composite",
+        PatternWindow::Left,
+        0x0F,
+        0x0F,
+    ),
     pair("weapon_shop_item_list", PatternWindow::Left, 0x1E, 0x1E),
     pair("weapon_shop_item_list", PatternWindow::Right, 0x00, 0x15),
     pair(
