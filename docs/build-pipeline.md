@@ -18,11 +18,16 @@
 
 `analyze-chapter-transitions`는 1장 종료부터 2장 도입까지를 종료 대사, `NEXT STORY`, 저장 제안, 저장 완료, 장 제목·대사 합성 화면으로 나눈다. 장 인트로 `E5` 문맥 25개가 `$781D=00..18`을 공급하고, 장 제목 표 `$EE08`도 25개 포인터를 가지며 마지막 문자열이 다음 장소 이름 표 `3EFC7` 직전에서 끝나는지 검사한다. `NEXT STORY` 인덱스 `3E`와 저장 질문 인덱스 `32`의 포인터·원본 바이트·합성 소비자도 고정한다. 정규 파일 1의 장 번호 `$6519`, `$6000..$6542` 16비트 가산 체크섬, 기록·검증 코드도 결속하고 2장 `13/13+00/18`, 도달 개입으로 연 11장 `1A/1A+00/18`, 12장 `0F/0F+00/18` 도입 표본을 분리한다. 보고서는 장 종료·저장 완료 대사 원문을 출력하지 않으며, 콜드 로드 도달을 이전 장의 자연 완료로 일반화하지 않는다.
 
+`analyze-chapter-victory`는 11장 지도 포인터와 25×32 타일 구조를 검사해 성 타일 `4B` 두 개를 행 8, 열 5·6에 결속한다. `しろ` 라벨 인덱스 `38`, 명령 비트 3의 `06:$907B`, 주 상태 `3C`, `06:$9390 → 0F:$C027 → 03:$8006`과 외부 화면 상태 `0C`의 4단계 처리기 표를 한 경로로 묶는다. 코드 구간은 고정 원본 바이트뿐 아니라 고정된 `retro-rp2a03`의 typed decoder로 명령 경계를 다시 확인한다. 보고서는 지도 전체나 대사 원문을 출력하지 않으며, 좌표·행동 상태 직접 쓰기를 완료 증거로 허용하지 않는다.
+
 ```sh
 cargo run -p fc-fire-emblem-patch -- analyze-screen-contracts \
   "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 
 cargo run -p fc-fire-emblem-patch -- analyze-chapter-transitions \
+  "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
+
+cargo run -p fc-fire-emblem-patch -- analyze-chapter-victory \
   "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 ```
 

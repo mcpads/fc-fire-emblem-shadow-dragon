@@ -1,4 +1,5 @@
 mod chapter_transition;
+mod chapter_victory;
 mod chr_inventory;
 mod dialogue_assets;
 mod dialogue_inventory;
@@ -76,6 +77,12 @@ enum Command {
     AnalyzeChapterTransitions {
         source: PathBuf,
         #[arg(long, default_value = "out/chapter-transitions.json")]
+        report: PathBuf,
+    },
+    /// Bind chapter-eleven victory tiles and the castle-command-to-transition route.
+    AnalyzeChapterVictory {
+        source: PathBuf,
+        #[arg(long, default_value = "out/chapter-victory-route.json")]
         report: PathBuf,
     },
     /// Bind weapon-shop entry, item selection, preflight, confirmation, and mutation boundaries.
@@ -352,6 +359,18 @@ fn main() -> Result<()> {
                 summary.chapter_intro_runtime_sample_count,
                 summary.source_region_count,
                 summary.next_observation_gate_role
+            );
+        }
+        Command::AnalyzeChapterVictory { source, report } => {
+            let summary = chapter_victory::analyze_chapter_victory(&source, &report)?;
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "chapter victory route: {} source castle tiles, {} source-bound regions, {} route steps, next observation gate: {}",
+                summary.victory_tile_count,
+                summary.source_region_count,
+                summary.route_step_count,
+                summary.next_observation_gate
             );
         }
         Command::AnalyzeShopFlow { source, report } => {
