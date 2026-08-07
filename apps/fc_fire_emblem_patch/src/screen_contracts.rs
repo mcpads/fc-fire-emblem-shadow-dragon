@@ -79,6 +79,7 @@ pub(crate) const OBSERVED_CHR_PAIRS: &[ObservedChrPair] = &[
     pair("options", PatternWindow::Right, 0x00, 0x15),
     pair("unit_roster", PatternWindow::Left, 0x18, 0x18),
     pair("unit_roster", PatternWindow::Right, 0x00, 0x15),
+    pair("unit_roster", PatternWindow::Right, 0x00, 0x18),
     pair("unit_roster", PatternWindow::Right, 0x00, 0x19),
     pair("battle_animation", PatternWindow::Left, 0x02, 0x06),
     pair("battle_animation", PatternWindow::Left, 0x06, 0x06),
@@ -119,6 +120,7 @@ enum TranslationScope {
 #[serde(rename_all = "snake_case")]
 enum ContractState {
     PageSwitchVerified,
+    MixedTextPageVerified,
     ObservedPartial,
     Unobserved,
 }
@@ -157,6 +159,7 @@ struct ScreenContractReport {
     chr_pair_observed_screen_count: usize,
     mixed_original_latin_screen_count: usize,
     page_switch_verified_screen_count: usize,
+    mixed_text_page_verified_screen_count: usize,
     next_screen_role: String,
     screens: Vec<ScreenContract>,
     unresolved_surface_families: Vec<String>,
@@ -315,6 +318,10 @@ fn build_report(
             .iter()
             .filter(|screen| screen.contract_state == ContractState::PageSwitchVerified)
             .count(),
+        mixed_text_page_verified_screen_count: screens
+            .iter()
+            .filter(|screen| screen.contract_state == ContractState::MixedTextPageVerified)
+            .count(),
         next_screen_role: registry.next_screen_role,
         screens,
         unresolved_surface_families,
@@ -334,28 +341,29 @@ mod tests {
         assert_eq!(report.runtime_observed_screen_count, 15);
         assert_eq!(report.chr_pair_observed_screen_count, 13);
         assert_eq!(report.page_switch_verified_screen_count, 1);
+        assert_eq!(report.mixed_text_page_verified_screen_count, 1);
     }
 
     #[test]
-    fn roster_is_the_next_mixed_text_contract() {
+    fn status_is_the_next_mixed_text_contract_after_roster_proof() {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
-        let roster = report
+        let status = report
             .screens
             .iter()
             .find(|screen| screen.screen_role == report.next_screen_role)
             .unwrap();
 
-        assert!(roster.runtime_observed);
-        assert!(roster.chr_pair_observed);
+        assert!(status.runtime_observed);
+        assert!(status.chr_pair_observed);
         assert_eq!(
-            roster.translation_scope,
+            status.translation_scope,
             TranslationScope::JapaneseWithPreservedOriginalLatin
         );
         assert!(
-            roster
+            status
                 .unresolved_focus
                 .iter()
-                .any(|focus| focus.contains("Hangul page binding"))
+                .any(|focus| focus.contains("exact Japanese"))
         );
     }
 

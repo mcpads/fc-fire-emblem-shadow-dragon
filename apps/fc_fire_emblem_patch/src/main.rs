@@ -17,6 +17,7 @@ mod mmc5_queue_runtime;
 mod mmc5_queue_shadow;
 mod options;
 mod rom;
+mod roster_localization;
 mod rp2a03;
 mod screen_contracts;
 mod static_analysis;
@@ -131,11 +132,13 @@ enum Command {
         #[arg(long, default_value = "out/hangul-page-proof.json")]
         report: PathBuf,
     },
-    /// Build mapper 165 with two screen-bound Hangul pages and an A-B-A row selector.
+    /// Build mapper 165 with options and mixed-text roster Hangul pages.
     BuildMapper165HangulPageProbe {
         source: PathBuf,
         #[arg(long, default_value = "assets/translation/options.ko.json")]
         localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/roster.ko.json")]
+        roster_localization: PathBuf,
         #[arg(
             long,
             default_value = "out/fire-emblem-fe1-mapper165-hangul-page-probe.nes"
@@ -442,12 +445,14 @@ fn main() -> Result<()> {
         Command::BuildMapper165HangulPageProbe {
             source,
             localization,
+            roster_localization,
             output,
             report,
         } => {
             let summary = mapper165::hangul_page_probe::build_mapper165_hangul_page_probe(
                 &source,
                 &localization,
+                &roster_localization,
                 &output,
                 &report,
             )?;
@@ -455,7 +460,8 @@ fn main() -> Result<()> {
             println!("output SHA-1: {}", summary.output_sha1);
             println!("wrote {}", report.display());
             println!("report SHA-1: {}", summary.report_sha1);
-            println!("page pack SHA-1: {}", summary.page_pack_sha1);
+            println!("options page pack SHA-1: {}", summary.page_pack_sha1);
+            println!("roster page SHA-1: {}", summary.roster_page_sha1);
             println!("tracked ROM writes: {}", summary.tracked_write_count);
         }
         Command::AnalyzeMapper165TriggerPlanes { source, report } => {

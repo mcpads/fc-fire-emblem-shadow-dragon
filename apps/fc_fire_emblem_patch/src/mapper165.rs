@@ -12,6 +12,8 @@ use crate::{
 };
 pub(crate) mod direct_chr_pairs;
 pub(crate) mod hangul_page_probe;
+mod options_page;
+mod roster_page;
 mod runtime;
 #[cfg(test)]
 mod tests;

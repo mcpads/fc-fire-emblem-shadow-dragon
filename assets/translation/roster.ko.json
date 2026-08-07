@@ -1,0 +1,19 @@
+{
+  "format_version": 1,
+  "translate_from": "ja",
+  "translate_to": "ko",
+  "preserve_existing_english": true,
+  "status": "technical_poc",
+  "screen_role": "unit_roster",
+  "entry": {
+    "id": "name_header",
+    "source_japanese": "なまえ",
+    "korean": "이름",
+    "source_codes": [21, 32, 3],
+    "korean_codes": [21, 32]
+  },
+  "glyphs": [
+    { "code": 21, "character": "이" },
+    { "code": 32, "character": "름" }
+  ]
+}

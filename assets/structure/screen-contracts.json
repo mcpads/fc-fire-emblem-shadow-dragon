@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "next_screen_role": "unit_roster",
+  "next_screen_role": "unit_status",
   "screens": [
     {
       "screen_role": "title",
@@ -120,21 +120,19 @@
       "runtime_observed": true,
       "input_behavior": "input_wait",
       "translation_scope": "japanese_with_preserved_original_latin",
-      "temporal_behavior": "screen and OAM were stable for 152 frames in each observed 00/15 and 00/19 backing-page variant",
+      "temporal_behavior": "screen and OAM were stable for 152 frames after the 00/18 cold-entry transition settled; 00/15 and 00/19 backing variants were also visibly verified",
       "known_focus": [
-        "left 18/18 and right 00/15 or 00/19 CHR pairs retain the current map animation page",
+        "left 18/18 and right 00/15, 00/18, or 00/19 CHR pairs retain the current map animation page",
         "physical nametable 1 uses 29 FD codes over 306 fetches and 33 FE codes over 654 fetches",
         "17 Japanese codes share page 00 with protected digits 0, 1, 2, 6, 8 and original H, L, P, V",
         "28 portrait sprites and one cursor sprite remain stable",
         "B exits to the animated map and SELECT then first-item A re-enters the roster",
-        "entry writes the current backing page and then page 00 through the established 0B:$9324 and 0B:$928A suppliers"
+        "entry writes the current backing page and then page 00 through the established 0B:$9324 and 0B:$928A suppliers",
+        "Hangul header page 36 preserves original LV, HP, digits, Japanese unit names, portraits, and all three observed backing-page variants"
       ],
-      "unresolved_focus": [
-        "possible 00/18 backing-page entry variant",
-        "Hangul page binding with visible preservation of original LV and HP"
-      ],
-      "next_gate": "bind a Hangul roster page while preserving original LV, HP, digits, portraits, and backing-page lifetime",
-      "contract_state": "observed_partial"
+      "unresolved_focus": [],
+      "next_gate": "retain as a mixed-text regression surface while unit_status closes the next consumer contract",
+      "contract_state": "mixed_text_page_verified"
     },
     {
       "screen_role": "battle_animation",
