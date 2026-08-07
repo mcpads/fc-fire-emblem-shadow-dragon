@@ -74,11 +74,16 @@ pub(crate) const OBSERVED_CHR_PAIRS: &[ObservedChrPair] = &[
     pair("map_idle", PatternWindow::Right, 0x18, 0x18),
     pair("map_idle", PatternWindow::Right, 0x19, 0x19),
     pair("unit_summary", PatternWindow::Left, 0x1A, 0x1A),
+    pair("unit_summary", PatternWindow::Right, 0x00, 0x15),
     pair("unit_summary", PatternWindow::Right, 0x00, 0x18),
+    pair("unit_summary", PatternWindow::Right, 0x00, 0x19),
     pair("unit_command_menu", PatternWindow::Left, 0x1A, 0x1A),
+    pair("unit_command_menu", PatternWindow::Right, 0x00, 0x15),
     pair("unit_command_menu", PatternWindow::Right, 0x00, 0x18),
     pair("unit_status", PatternWindow::Left, 0x13, 0x13),
+    pair("unit_status", PatternWindow::Right, 0x00, 0x15),
     pair("unit_status", PatternWindow::Right, 0x00, 0x18),
+    pair("unit_status", PatternWindow::Right, 0x00, 0x19),
     pair("map_menu", PatternWindow::Left, 0x1A, 0x1A),
     pair("map_menu", PatternWindow::Right, 0x00, 0x19),
     pair("options", PatternWindow::Left, 0x1A, 0x1A),
@@ -366,13 +371,9 @@ mod tests {
         assert!(
             command_menu
                 .next_gate
-                .contains("entry-time right-FD supply")
-        );
-        assert!(
-            command_menu
-                .next_gate
                 .contains("terrain and facility variants")
         );
+        assert!(command_menu.next_gate.contains("glyph union"));
         assert!(
             command_menu
                 .unresolved_focus
@@ -383,7 +384,13 @@ mod tests {
             command_menu
                 .unresolved_focus
                 .iter()
-                .any(|focus| focus.contains("supplies the right FD page"))
+                .any(|focus| focus.contains("00/19"))
+        );
+        assert!(
+            command_menu
+                .known_focus
+                .iter()
+                .any(|focus| focus.contains("C9C2") && focus.contains("00/15"))
         );
     }
 

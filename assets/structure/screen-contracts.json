@@ -126,17 +126,17 @@
       "translation_scope": "japanese_with_preserved_original_latin",
       "temporal_behavior": "the selected-unit cursor flashes and the map animation continues; 152 input-free frames produced three screen phases while the windows and text stayed present",
       "known_focus": [
-        "left 1A/1A and right 00/18 CHR shadows",
+        "left 1A/1A with runtime-observed right 00/15, 00/18, and 00/19 CHR shadows",
         "the summary combines a Japanese unit name, class, level label, and item names with original S, HP, punctuation, slash, and digits",
         "physical nametable 1 uses 26 FD codes over 140 fetches and 72 FE codes over 820 fetches",
         "the page-00 Japanese code set is 06, 0F, 12, 13, 19, 25, 29, 2A, 30, 31, 44, 45, 4D, 5A, and 5B; original codes 61, 62, 64, 68, 71, 79, 7C, 8D, and AD remain protected",
         "A from map idle selects the unit and opens this summary; A on the selected unit opens unit_status",
-        "the bank 0B phased window handler at 9251 supplies page 00 through 928A before the right FE page settles to 18",
+        "the bank 0B phased window handler at 9251 supplies page 00 through 928A before the right FE page settles to the current 15, 18, or 19 map backing phase",
         "composite state 04 at 826C appends unit name, class, レベル, original HP, and numbers; state 07 at 85BE walks inventory offsets 13 through 16 and appends each item name and use count",
         "shared appenders at 8E88, 8EBA, 8E6B, 8EEE, 8F0E, and 8F39 connect the unit, class, item, fixed-label, number, and composite-parser paths"
       ],
-      "unresolved_focus": ["all item and equipment variants", "the complete Korean unit, class, and item glyph union and page budget after the command-menu page boundary is known"],
-      "next_gate": "resolve the command-menu page boundary before measuring one complete unit-UI glyph union",
+      "unresolved_focus": ["all item and equipment variants", "the complete Korean unit, class, item, command, and stat-label glyph union and page budget"],
+      "next_gate": "measure the complete unit-UI glyph union while preserving all three observed backing-page variants",
       "contract_state": "observed_partial"
     },
     {
@@ -145,19 +145,21 @@
       "runtime_observed": true,
       "input_behavior": "input_wait",
       "translation_scope": "japanese_only",
-      "temporal_behavior": "the command cursor and map animation continue; 152 input-free frames produced three screen phases",
+      "temporal_behavior": "at right 00/15, 152 input-free frames kept the CHR shadows stable while the command cursor and map sprites produced three screen hashes",
       "known_focus": [
-        "left 1A/1A and right 00/18 CHR shadows",
+        "left 1A/1A with runtime-observed right 00/15 and 00/18 CHR shadows",
         "the observed no-move command variant shows Japanese もちもの and たいき",
         "physical nametable 1 uses page-00 codes 01, 06, 10, 11, 19, and 24 plus FE and FF",
         "composite state 05 at 82E3 can append 15 fixed labels: こうげき, もちもの, つえ, たいき, ぶきや, たずねる, どうぐや, とうぎじょう, たからばこ, しろ, ぎょくざ, あずかりじょ, はなす, へんしん, and ひみつのみせ",
         "the composer selects direct unit capabilities, four terrain actions, adjacent talk, nonempty inventory, five facilities, and unconditional wait",
         "facility labels are selected through the table at 8457; map tile candidates A5/4B/AE/AB select labels 2A/38/39/37 through the terrain predicate at 8465",
         "only fixed indices 0F and 11 have runtime display evidence; the remaining 13 labels are statically bound but not visually observed",
+        "after status exits through natural 19/19 then 15/19 and movement selection settles at 15/15, command-menu state 05 reaches the central right-FD call at C9C2 with A=00 and shadows 1A/1A + 00/15",
+        "the 00/15 command menu stayed on the same CHR shadows for 152 input-free frames while three cursor-and-map-animation screen phases repeated",
         "B returns to unit_summary without ending the selected unit's action"
       ],
-      "unresolved_focus": ["runtime display evidence for the remaining 13 command labels and representative unit, terrain, and facility variants", "whether command-menu entry supplies the right FD page or inherits the page opened for unit_summary", "semantic state transitions after selecting each command"],
-      "next_gate": "trace the command-menu entry-time right-FD supply and observe representative terrain and facility variants before assigning one unit-UI page budget",
+      "unresolved_focus": ["runtime display evidence for the remaining 13 command labels and representative unit, terrain, and facility variants", "whether the map's 19 backing phase can produce a right 00/19 command-menu variant", "semantic state transitions after selecting each command"],
+      "next_gate": "observe representative terrain and facility variants, determine whether right 00/19 is reachable, and include all fifteen labels in the unit-UI glyph union",
       "contract_state": "observed_partial"
     },
     {
@@ -168,19 +170,19 @@
       "translation_scope": "japanese_with_preserved_original_latin",
       "temporal_behavior": "the detail transition settled by 32 frames and every sample through 128 additional input-free frames had the same screen SHA-256",
       "known_focus": [
-        "left 13/13 and right 00/18 CHR shadows",
+        "left 13/13 with runtime-observed right 00/15, 00/18, and 00/19 CHR shadows",
         "Japanese unit name, class, level, and nine stat labels share page 00 with original S, HP, punctuation, slash, and digits",
         "physical nametable 1 has 32 FD and 76 FE triggers; page-00 and page-18 fetch counts are 364 and 596",
         "page-00 Japanese codes are 01, 02, 05, 06, 07, 08, 0A, 0B, 0C, 0F, 11, 14, 19, 1A, 1B, 1C, 1E, 20, 25, 27, 28, 29, 2D, 2F, 30, 31, 44, 45, 4D, 5A, 5B, 86, and 87",
         "original codes 60, 61, 62, 66, 67, 68, 69, 71, 79, 7C, 8D, and AD remain protected as digits, H, P, S, colon, and slash",
         "36 visible sprites supply the portrait while map graphics remain visible behind the windows",
-        "unit_summary opens page 00; summary-to-status changes only the left pair from 1A/1A to 13/13 and does not call the central right-FD writer again",
+        "unit_summary opens page 00; summary-to-status changes only the left pair from 1A/1A to 13/13, preserves the current 15, 18, or 19 backing phase, and does not call the central right-FD writer again",
         "composite state 0F at 87F2 appends fixed-label indices 00 through 06, 27, and 28 with their numeric values; the inherited summary header is not recomposed",
         "fixed index 09 is original HP and remains protected while ten Japanese fixed labels are translation targets",
         "B returns to movement selection and a second B restores a natural map pair"
       ],
-      "unresolved_focus": ["all unit and class variants", "the complete Korean unit, class, item, command, and stat-label glyph union and page budget after the command-menu page boundary is known"],
-      "next_gate": "retain the proven summary-to-status inheritance while the command-menu page boundary is resolved separately",
+      "unresolved_focus": ["all unit and class variants", "the complete Korean unit, class, item, command, and stat-label glyph union and page budget"],
+      "next_gate": "retain the proven summary-to-status inheritance and all three backing-page variants in the shared unit-UI glyph budget",
       "contract_state": "observed_partial"
     },
     {

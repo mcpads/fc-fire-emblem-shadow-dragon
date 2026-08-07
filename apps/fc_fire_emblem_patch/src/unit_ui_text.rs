@@ -339,14 +339,13 @@ struct DynamicSourceReport {
 
 #[derive(Debug, Serialize)]
 struct PageLifetimeReport {
-    opened_by_screen_role: &'static str,
+    right_fd_page_supplied_by_screen_roles: Vec<&'static str>,
     proven_inherited_by_screen_roles: Vec<&'static str>,
-    candidate_shared_screen_roles: Vec<&'static str>,
     phase_state_address: &'static str,
     phase_dispatcher: CodeRegionReport,
     right_fd_page_supply: CodeRegionReport,
     runtime_evidence: &'static str,
-    unresolved_boundary: &'static str,
+    unresolved_runtime_variant: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -478,17 +477,16 @@ fn build_report(prg: &[u8]) -> Result<UnitUiTextReport> {
         ],
         command_menu,
         page_lifetime: PageLifetimeReport {
-            opened_by_screen_role: "unit_summary",
+            right_fd_page_supplied_by_screen_roles: vec!["unit_summary", "unit_command_menu"],
             proven_inherited_by_screen_roles: vec!["unit_status"],
-            candidate_shared_screen_roles: vec!["unit_command_menu"],
             phase_state_address: "0x05DE",
             phase_dispatcher: region_report(region("dispatch_unit_window_phase_from_05de")),
             right_fd_page_supply: region_report(region("open_unit_ui_right_fd_page_00")),
-            runtime_evidence: "unit_summary entry executes the right-FD supply; unit_summary-to-unit_status changes the left CHR pair without another right-FD supply",
-            unresolved_boundary: "unit_command_menu has the same observed right 00/18 pair, but its entry-time right-FD supply has not been traced",
+            runtime_evidence: "unit_summary and unit_command_menu entry each execute the right-FD supply; unit_summary-to-unit_status changes the left CHR pair without another right-FD supply",
+            unresolved_runtime_variant: "unit_command_menu has runtime right 00/15 and 00/18 evidence; a possible 00/19 backing-page variant is not yet observed",
         },
         implementation_boundary: ImplementationBoundary {
-            required_design: "resolve the unit-command-menu page boundary, then budget one unit-UI family across four composition roles, fifteen command labels, and shared dynamic source tables",
+            required_design: "budget one unit-UI family across four composition roles, fifteen command labels, and shared dynamic source tables while preserving every observed backing-page variant",
             rejected_shortcut: "per-unit or per-visible-string byte patches",
             preserved_original: ["Latin letters", "digits", "punctuation and slash"],
             separate_screen_contract: "automatic class_profile",
@@ -656,7 +654,7 @@ mod tests {
     }
 
     #[test]
-    fn binds_the_unit_ui_family_without_overclaiming_command_page_lifetime() {
+    fn binds_unit_ui_page_supply_and_inheritance_roles() {
         let report = build_report(&contract_fixture()).unwrap();
 
         let states = report
@@ -674,14 +672,13 @@ mod tests {
                 (0x0F, "unit_status_stats", 0x87F2),
             ]
         );
-        assert_eq!(report.page_lifetime.opened_by_screen_role, "unit_summary");
+        assert_eq!(
+            report.page_lifetime.right_fd_page_supplied_by_screen_roles,
+            vec!["unit_summary", "unit_command_menu"]
+        );
         assert_eq!(
             report.page_lifetime.proven_inherited_by_screen_roles,
             vec!["unit_status"]
-        );
-        assert_eq!(
-            report.page_lifetime.candidate_shared_screen_roles,
-            vec!["unit_command_menu"]
         );
         assert_eq!(
             report.screen_roles[2].inherited_content,

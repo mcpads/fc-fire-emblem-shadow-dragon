@@ -230,8 +230,8 @@ pub(super) fn analyze(prg: &[u8]) -> Result<CommandMenuReport> {
         runtime_observed_label_indices_hex: ["0x0F", "0x11"],
         runtime_observed_label_count: 2,
         static_label_count: COMMAND_LABEL_SPECS.len(),
-        page_lifetime_boundary: "the screen uses the observed right 00/18 pair, but its exact right-FD supply event is not yet traced",
-        next_gate: "observe representative terrain and facility variants and trace whether command-menu entry supplies or inherits the right FD page",
+        page_lifetime_boundary: "command-menu entry executes the central right-FD supply at 0xC9C2 with composite state 0x05; one observed entry supplies 00 while the backing FE page is 15",
+        next_gate: "observe representative terrain and facility variants, determine whether a right 00/19 variant is reachable, and include all fifteen labels in the unit-UI glyph union",
     })
 }
 
