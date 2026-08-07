@@ -324,12 +324,16 @@ fn main() -> Result<()> {
             println!("wrote {}", report.display());
             println!("report SHA-1: {}", summary.report_sha1);
             println!(
-                "unit UI text: {} screen roles, {} composers, {} fixed labels, {} Japanese labels targeted, {} command labels",
+                "unit UI text: {} screen roles, {} composers, {} fixed labels, {} Japanese labels targeted, {} command labels, {} dynamic pointers / {} unique strings, provisional Hangul ceiling {}, family-page fit {}",
                 summary.screen_role_count,
                 summary.composer_count,
                 summary.fixed_label_count,
                 summary.translated_japanese_label_count,
-                summary.command_label_count
+                summary.command_label_count,
+                summary.dynamic_pointer_count,
+                summary.dynamic_unique_string_count,
+                summary.provisional_hangul_slot_ceiling,
+                summary.single_family_page_fit
             );
         }
         Command::ExtractMainDialogueSource { source, output } => {

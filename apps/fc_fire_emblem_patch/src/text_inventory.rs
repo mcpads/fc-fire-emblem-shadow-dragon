@@ -720,6 +720,64 @@ const TEXT_TABLE_SPECS: [TextTableSpec; 7] = [
     },
 ];
 
+#[derive(Clone, Debug)]
+pub(crate) struct TextTableBudget {
+    pub(crate) id: &'static str,
+    pub(crate) pointer_count: usize,
+    pub(crate) unique_string_count: usize,
+    pub(crate) referenced_text_byte_count: usize,
+    pub(crate) unique_text_storage_byte_count: usize,
+    pub(crate) max_entry_byte_count: usize,
+    pub(crate) source_codes: BTreeSet<u8>,
+}
+
+pub(crate) fn scoped_text_table_budgets(
+    source: &[u8],
+    requested_ids: &[&str],
+) -> Result<Vec<TextTableBudget>> {
+    requested_text_table_specs(requested_ids)?
+        .into_iter()
+        .map(|spec| {
+            let table = extract_table(source, spec)?;
+            Ok(TextTableBudget {
+                id: table.id,
+                pointer_count: table.pointer_count,
+                unique_string_count: table.unique_string_count,
+                referenced_text_byte_count: table.referenced_text_byte_count,
+                unique_text_storage_byte_count: table.unique_text_storage_byte_count,
+                max_entry_byte_count: table
+                    .entries
+                    .iter()
+                    .map(|entry| entry.byte_length)
+                    .max()
+                    .unwrap_or(0),
+                source_codes: table
+                    .source_code_usage
+                    .iter()
+                    .map(|usage| usage.code)
+                    .collect(),
+            })
+        })
+        .collect()
+}
+
+fn requested_text_table_specs(requested_ids: &[&str]) -> Result<Vec<&'static TextTableSpec>> {
+    let mut seen = BTreeSet::new();
+    requested_ids
+        .iter()
+        .map(|requested_id| {
+            ensure!(
+                seen.insert(*requested_id),
+                "duplicate text table id {requested_id}"
+            );
+            TEXT_TABLE_SPECS
+                .iter()
+                .find(|spec| spec.id == *requested_id)
+                .with_context(|| format!("unknown text table id {requested_id}"))
+        })
+        .collect()
+}
+
 #[derive(Debug)]
 pub struct TextInventorySummary {
     pub report_sha1: String,
@@ -2070,6 +2128,30 @@ mod tests {
             source[region.file_offset..region.file_offset + region.bytes.len()]
                 .copy_from_slice(region.bytes);
         }
+    }
+
+    #[test]
+    fn resolves_requested_tables_in_caller_order() {
+        let specs = requested_text_table_specs(&["enemy-names", "class-names"]).unwrap();
+        assert_eq!(
+            specs.iter().map(|spec| spec.id).collect::<Vec<_>>(),
+            ["enemy-names", "class-names"]
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_or_duplicate_requested_tables() {
+        let unknown = requested_text_table_specs(&["missing-names"])
+            .err()
+            .expect("unknown table must fail")
+            .to_string();
+        assert!(unknown.contains("unknown text table id missing-names"));
+
+        let duplicate = requested_text_table_specs(&["unit-names", "unit-names"])
+            .err()
+            .expect("duplicate table must fail")
+            .to_string();
+        assert!(duplicate.contains("duplicate text table id unit-names"));
     }
 
     #[test]

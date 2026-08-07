@@ -9,6 +9,7 @@ use crate::{
 };
 
 mod command_menu;
+mod glyph_budget;
 
 const PRG_BANK_SIZE: usize = 16 * 1024;
 pub(super) const UNIT_UI_BANK: usize = 0x0B;
@@ -272,6 +273,7 @@ struct UnitUiTextReport {
     shared_appenders: Vec<CodeRegionReport>,
     fixed_labels: Vec<FixedLabelReport>,
     dynamic_sources: Vec<DynamicSourceReport>,
+    glyph_budget: glyph_budget::GlyphBudgetReport,
     command_menu: command_menu::CommandMenuReport,
     page_lifetime: PageLifetimeReport,
     implementation_boundary: ImplementationBoundary,
@@ -363,12 +365,22 @@ pub struct UnitUiTextSummary {
     pub fixed_label_count: usize,
     pub translated_japanese_label_count: usize,
     pub command_label_count: usize,
+    pub dynamic_pointer_count: usize,
+    pub dynamic_unique_string_count: usize,
+    pub provisional_hangul_slot_ceiling: usize,
+    pub single_family_page_fit: &'static str,
 }
 
 pub fn analyze_unit_ui_text(source_path: &Path, report_path: &Path) -> Result<UnitUiTextSummary> {
     let source_rom = Rom::from_path(source_path)?;
     source_rom.verify_supported_japanese()?;
-    let report = build_report(source_rom.prg())?;
+    let fixed_japanese_label_count = SUMMARY_AND_STATUS_LABEL_SPECS
+        .iter()
+        .chain(command_menu::COMMAND_LABEL_SPECS)
+        .filter(|label| label.translation_scope == "japanese_only")
+        .count();
+    let glyph_budget = glyph_budget::analyze(source_rom.data(), fixed_japanese_label_count)?;
+    let report = build_report(source_rom.prg(), glyph_budget)?;
     let report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize unit-UI text report")?;
     let report_sha1 = sha1_hex(&report_bytes);
@@ -391,10 +403,17 @@ pub fn analyze_unit_ui_text(source_path: &Path, report_path: &Path) -> Result<Un
             .filter(|label| label.translation_scope == "japanese_only")
             .count(),
         command_label_count: report.command_menu.static_label_count,
+        dynamic_pointer_count: report.glyph_budget.dynamic_pointer_count(),
+        dynamic_unique_string_count: report.glyph_budget.dynamic_unique_string_count(),
+        provisional_hangul_slot_ceiling: report.glyph_budget.provisional_hangul_slot_ceiling(),
+        single_family_page_fit: report.glyph_budget.single_family_page_fit(),
     })
 }
 
-fn build_report(prg: &[u8]) -> Result<UnitUiTextReport> {
+fn build_report(
+    prg: &[u8],
+    glyph_budget: glyph_budget::GlyphBudgetReport,
+) -> Result<UnitUiTextReport> {
     ensure!(prg.len() == PRG_SIZE, "unexpected PRG size");
     validate_code_regions(prg)?;
     let command_menu = command_menu::analyze(prg)?;
@@ -404,6 +423,14 @@ fn build_report(prg: &[u8]) -> Result<UnitUiTextReport> {
             .iter()
             .chain(command_menu::COMMAND_LABEL_SPECS),
     )?;
+    ensure!(
+        fixed_labels
+            .iter()
+            .filter(|label| label.translation_scope == "japanese_only")
+            .count()
+            == glyph_budget.fixed_japanese_label_count(),
+        "unit-UI fixed-label count disagrees with the glyph budget"
+    );
 
     Ok(UnitUiTextReport {
         schema: 1,
@@ -475,6 +502,7 @@ fn build_report(prg: &[u8]) -> Result<UnitUiTextReport> {
                 destination: "composite buffer 0x0451,X",
             },
         ],
+        glyph_budget,
         command_menu,
         page_lifetime: PageLifetimeReport {
             right_fd_page_supplied_by_screen_roles: vec!["unit_summary", "unit_command_menu"],
@@ -653,9 +681,13 @@ mod tests {
         prg
     }
 
+    fn build_fixture_report(prg: &[u8]) -> Result<UnitUiTextReport> {
+        build_report(prg, glyph_budget::fixture_report(25))
+    }
+
     #[test]
     fn binds_unit_ui_page_supply_and_inheritance_roles() {
-        let report = build_report(&contract_fixture()).unwrap();
+        let report = build_fixture_report(&contract_fixture()).unwrap();
 
         let states = report
             .composition_dispatch
@@ -690,7 +722,7 @@ mod tests {
 
     #[test]
     fn preserves_original_hp_label_while_targeting_japanese_labels() {
-        let report = build_report(&contract_fixture()).unwrap();
+        let report = build_fixture_report(&contract_fixture()).unwrap();
         let hp = report
             .fixed_labels
             .iter()
@@ -715,7 +747,7 @@ mod tests {
         let offset = banked_prg_offset(UNIT_UI_BANK, 0x85BE).unwrap();
         prg[offset + 19] ^= 0x01;
 
-        let error = build_report(&prg).unwrap_err().to_string();
+        let error = build_fixture_report(&prg).unwrap_err().to_string();
         assert!(error.contains("compose_unit_summary_items"));
     }
 
@@ -726,7 +758,7 @@ mod tests {
         let offset = banked_prg_offset(UNIT_UI_BANK, pointer_address).unwrap();
         prg[offset] ^= 0x01;
 
-        let error = build_report(&prg).unwrap_err().to_string();
+        let error = build_fixture_report(&prg).unwrap_err().to_string();
         assert!(error.contains("index 0x27"));
     }
 
@@ -736,7 +768,7 @@ mod tests {
         let offset = banked_prg_offset(UNIT_UI_BANK, command_menu::composer_address()).unwrap();
         prg[offset + 0x20] ^= 0x01;
 
-        let error = build_report(&prg).unwrap_err().to_string();
+        let error = build_fixture_report(&prg).unwrap_err().to_string();
         assert!(error.contains("unit-command-menu composer"));
     }
 }
