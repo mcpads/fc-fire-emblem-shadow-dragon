@@ -4,6 +4,7 @@ mod dialogue_inventory;
 mod font;
 mod font_slots;
 mod hangul_page_plan;
+mod item_flow;
 mod japanese_encoding;
 mod localization;
 mod mapper165;
@@ -74,6 +75,12 @@ enum Command {
     AnalyzeShopFlow {
         source: PathBuf,
         #[arg(long, default_value = "out/shop-flow.json")]
+        report: PathBuf,
+    },
+    /// Bind unit-command inventory entry, item rows, conditional actions, and mutations.
+    AnalyzeItemFlow {
+        source: PathBuf,
+        #[arg(long, default_value = "out/item-flow.json")]
         report: PathBuf,
     },
     /// Bind unit-summary and unit-status composers, sources, labels, and shared page lifetime.
@@ -333,6 +340,18 @@ fn main() -> Result<()> {
             println!(
                 "shop flow: {} observed screens, {} source-bound regions, next: {}",
                 summary.screen_count, summary.source_region_count, summary.next_screen_role
+            );
+        }
+        Command::AnalyzeItemFlow { source, report } => {
+            let summary = item_flow::analyze_item_flow(&source, &report)?;
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "item flow: {} screen roles, {} source-bound regions, {} action choices, next: {}",
+                summary.screen_count,
+                summary.source_region_count,
+                summary.action_count,
+                summary.next_screen_role
             );
         }
         Command::AnalyzeUnitUiText { source, report } => {

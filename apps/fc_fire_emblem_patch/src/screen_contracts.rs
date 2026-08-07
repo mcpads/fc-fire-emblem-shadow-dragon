@@ -85,6 +85,10 @@ pub(crate) const OBSERVED_CHR_PAIRS: &[ObservedChrPair] = &[
     pair("unit_status", PatternWindow::Right, 0x00, 0x15),
     pair("unit_status", PatternWindow::Right, 0x00, 0x18),
     pair("unit_status", PatternWindow::Right, 0x00, 0x19),
+    pair("item_inventory_list", PatternWindow::Left, 0x1A, 0x1A),
+    pair("item_inventory_list", PatternWindow::Right, 0x00, 0x15),
+    pair("item_action_menu", PatternWindow::Left, 0x1A, 0x1A),
+    pair("item_action_menu", PatternWindow::Right, 0x00, 0x15),
     pair("map_menu", PatternWindow::Left, 0x1A, 0x1A),
     pair("map_menu", PatternWindow::Right, 0x00, 0x19),
     pair("options", PatternWindow::Left, 0x1A, 0x1A),
@@ -429,10 +433,10 @@ mod tests {
     fn registry_covers_every_observed_chr_pair() {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
 
-        assert_eq!(report.screen_count, 30);
-        assert_eq!(report.runtime_observed_screen_count, 27);
-        assert_eq!(report.chr_pair_observed_screen_count, 25);
-        assert_eq!(report.mixed_original_latin_screen_count, 15);
+        assert_eq!(report.screen_count, 33);
+        assert_eq!(report.runtime_observed_screen_count, 29);
+        assert_eq!(report.chr_pair_observed_screen_count, 27);
+        assert_eq!(report.mixed_original_latin_screen_count, 19);
         assert_eq!(report.page_switch_verified_screen_count, 1);
         assert_eq!(report.mixed_text_page_verified_screen_count, 1);
     }
@@ -481,7 +485,7 @@ mod tests {
     }
 
     #[test]
-    fn next_screen_moves_from_the_closed_shop_family_to_item_flow() {
+    fn next_screen_moves_from_observed_item_menus_to_action_results() {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
         let next = report
             .screens
@@ -489,10 +493,10 @@ mod tests {
             .find(|screen| screen.screen_role == report.next_screen_role)
             .unwrap();
 
-        assert_eq!(next.screen_role, "item_flow");
+        assert_eq!(next.screen_role, "item_action_result");
         assert!(!next.runtime_observed);
         assert_eq!(next.contract_state, ContractState::Unobserved);
-        assert!(next.next_gate.contains("split item list"));
+        assert!(next.next_gate.contains("equip, use, give, discard"));
     }
 
     #[test]

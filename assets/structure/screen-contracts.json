@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "next_screen_role": "item_flow",
+  "next_screen_role": "item_action_result",
   "screens": [
     {
       "screen_role": "title",
@@ -452,15 +452,69 @@
       "contract_state": "observed_partial"
     },
     {
-      "screen_role": "item_flow",
+      "screen_role": "item_inventory_list",
+      "surface_family": "item",
+      "runtime_observed": true,
+      "input_behavior": "input_wait",
+      "translation_scope": "japanese_with_preserved_original_latin",
+      "temporal_behavior": "152 regular and 168 irregularly spaced input-free frames retained two item rows and fixed CHR while cursor and map sprites cycled through three screenshot phases",
+      "known_focus": [
+        "left 1A/1A and right 00/15 CHR pairs",
+        "composite state 07 at bank 0B:85BE reads unit-record item slots 13 through 16 and appends item names plus durability",
+        "the observed record displayed てつのつるぎ 42 and てやり 22; the durability digits remain original",
+        "fixed label index 17 is original Latin NO ITEM and remains untranslated",
+        "A stores selected item and slot at 77B0/77B1 before opening item_action_menu; B rebuilds unit_command_menu without changing the unit record"
+      ],
+      "unresolved_focus": ["empty-inventory display", "right 00/18 and 00/19 backing variants"],
+      "next_gate": "observe an empty inventory and remaining backing variants separately; do not infer them from the two-item sample",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "item_action_menu",
+      "surface_family": "item",
+      "runtime_observed": true,
+      "input_behavior": "input_wait",
+      "translation_scope": "japanese_with_preserved_original_latin",
+      "temporal_behavior": "152 regular and 168 irregularly spaced input-free frames retained the conditional action rows and fixed CHR while cursor and map sprites cycled through three screenshot phases",
+      "known_focus": [
+        "left 1A/1A and right 00/15 CHR pairs",
+        "composite state 09 at bank 0B:8613 conditionally appends そうび, つかう, わたす, and unconditional すてる before shifting the availability mask down four bits",
+        "item 02 produced normalized mask 0D and displayed そうび / わたす / すてる while retaining the parent item list and durability digits",
+        "A maps the selected ordinal to action code 0 through 3 and crosses an action-specific mutation boundary; B returns to item_inventory_list without changing the unit record",
+        "observed screenshot phases include SHA-256 aa0d289b4a62ef84e61ef537eab263965ba6ab841c696eacb2d1fcd9f39456a1"
+      ],
+      "unresolved_focus": ["runtime variants containing つかう", "right 00/18 and 00/19 backing variants"],
+      "next_gate": "bind each highlighted action and its downstream screen before executing A",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "item_action_result",
       "surface_family": "item",
       "runtime_observed": false,
-      "input_behavior": "unresolved",
-      "translation_scope": "unresolved",
+      "input_behavior": "mixed",
+      "translation_scope": "japanese_with_preserved_original_latin",
       "temporal_behavior": "unresolved",
-      "known_focus": [],
-      "unresolved_focus": ["all screen-contract dimensions"],
-      "next_gate": "reach and split item list, use, trade, discard, and result surfaces",
+      "known_focus": [
+        "main state 1D at bank 06:944C selects equip, use, give, or discard behavior and state 1E at 06:9579 owns item-use effects and result progression",
+        "equip swaps the selected item and durability with the equipped first slot, use can decrement durability and clear an exhausted item, and discard clears then compacts inventory",
+        "the action-dependent result dialogue must not be generalized from one item family"
+      ],
+      "unresolved_focus": ["equip, use, give, discard, depleted-use, and failed-effect result layouts", "dialogue producer and font-page lifetime"],
+      "next_gate": "observe equip, use, give, discard, depleted-use, and failed-effect results from reversible states after binding the selected action",
+      "contract_state": "unobserved"
+    },
+    {
+      "screen_role": "item_transfer_target_selection",
+      "surface_family": "item",
+      "runtime_observed": false,
+      "input_behavior": "input_wait",
+      "translation_scope": "japanese_with_preserved_original_latin",
+      "temporal_behavior": "unresolved",
+      "known_focus": [
+        "action code 2 enters recipient selection before bank 06:952A moves item and durability into the target buffer and clears the source slot"
+      ],
+      "unresolved_focus": ["recipient selector layout", "cancel and full-recipient branches", "font-page lifetime"],
+      "next_gate": "bind recipient selection input and distinguish cancel, no-capacity, and completed-transfer outcomes before pressing A",
       "contract_state": "unobserved"
     },
     {
