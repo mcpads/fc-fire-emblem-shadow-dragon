@@ -131,6 +131,10 @@ pub(super) struct CommandMenuReport {
     fixed_label_indices: Vec<u8>,
     fixed_label_indices_hex: Vec<String>,
     selection_groups: Vec<SelectionGroup>,
+    decision_flow: Vec<DecisionStepReport>,
+    terrain_actions: Vec<TerrainActionReport>,
+    facility_actions: Vec<FacilityActionReport>,
+    input_boundary: InputBoundaryReport,
     runtime_observed_label_indices: [u8; 2],
     runtime_observed_label_indices_hex: [&'static str; 2],
     pub(super) runtime_observed_label_count: usize,
@@ -144,6 +148,43 @@ struct SelectionGroup {
     role: &'static str,
     source_signal: &'static str,
     label_indices_hex: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DecisionStepReport {
+    selection_mask_bit: u8,
+    role: &'static str,
+    label_indices_hex: Vec<String>,
+    source_labels: Vec<&'static str>,
+    inclusion_condition: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct TerrainActionReport {
+    map_tile_code: u8,
+    map_tile_code_hex: String,
+    label_index: u8,
+    label_index_hex: String,
+    source_label: &'static str,
+    eligibility: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct FacilityActionReport {
+    facility_index: u8,
+    label_index: u8,
+    label_index_hex: String,
+    source_label: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct InputBoundaryReport {
+    state_kind: &'static str,
+    confirmed_menu_entry: &'static str,
+    confirmed_safe_exit: &'static str,
+    unproven_selection_action: &'static str,
+    observation_rule: &'static str,
+    idle_behavior: &'static str,
 }
 
 pub(super) fn analyze(prg: &[u8]) -> Result<CommandMenuReport> {
@@ -226,6 +267,73 @@ pub(super) fn analyze(prg: &[u8]) -> Result<CommandMenuReport> {
                 &[0x11],
             ),
         ],
+        decision_flow: vec![
+            decision_step(0, "attack", &[0x0E], "0x7731 is nonzero"),
+            decision_step(
+                1,
+                "staff",
+                &[0x10],
+                "helper 0B:847F returns carry set and either 0x0092 bit 7, 0x7751 nonzero, or 0x0092 bit 5 is set",
+            ),
+            decision_step(
+                2,
+                "transform",
+                &[0x3C],
+                "unit-record class byte at offset 0x01 equals 0x10 and the bank-06 helper leaves 0x7751 nonzero",
+            ),
+            decision_step(
+                3,
+                "terrain_action",
+                &[0x2A, 0x38, 0x39, 0x37],
+                "the current map tile matches an eligible terrain candidate through 0B:8465",
+            ),
+            decision_step(
+                4,
+                "talk",
+                &[0x3B],
+                "the unit tables at 0xEDB5/0xEDC4 resolve an eligible target and the absolute X/Y distance sum is below 2",
+            ),
+            decision_step(
+                5,
+                "inventory",
+                &[0x0F],
+                "any unit-record item slot at offsets 0x13 through 0x16 is nonzero",
+            ),
+            decision_step(
+                6,
+                "facility",
+                &[0x29, 0x33, 0x34, 0x3A, 0x3D],
+                "0x77D0 is a nonzero facility index into 0B:8457",
+            ),
+            decision_step(7, "wait", &[0x11], "unconditional final command"),
+        ],
+        terrain_actions: vec![
+            terrain_action(0xA5, 0x2A, "unit id 0x01"),
+            terrain_action(0x4B, 0x38, "unit id 0x01"),
+            terrain_action(0xAE, 0x39, "unit id 0x01"),
+            terrain_action(
+                0xAB,
+                0x37,
+                "unit id 0x01 when 0x767E is nonzero, or class id 0x09",
+            ),
+            terrain_action(0x46, 0x2A, "any unit through the separate fallback"),
+        ],
+        facility_actions: (1_u8..=5)
+            .map(|facility_index| {
+                facility_action(
+                    facility_index,
+                    SELECTION_TABLES[usize::from(facility_index)],
+                )
+            })
+            .collect(),
+        input_boundary: InputBoundaryReport {
+            state_kind: "input_waiting_command_menu",
+            confirmed_menu_entry: "A on the unit's current tile after movement selection opens the command menu without relocating the unit",
+            confirmed_safe_exit: "B returns from the command menu to unit_summary without executing a listed command",
+            unproven_selection_action: "A inside the command menu executes the highlighted command; individual action handlers are not yet bound by this report",
+            observation_rule: "use entry plus B exit only; do not press A inside the menu until the highlighted label and its action handler are both known",
+            idle_behavior: "152 input-free frames kept the CHR shadows fixed while only cursor and map-sprite animation phases changed",
+        },
         runtime_observed_label_indices: [0x0F, 0x11],
         runtime_observed_label_indices_hex: ["0x0F", "0x11"],
         runtime_observed_label_count: 2,
@@ -248,6 +356,58 @@ fn selection_group(
             .map(|index| format!("0x{index:02X}"))
             .collect(),
     }
+}
+
+fn decision_step(
+    selection_mask_bit: u8,
+    role: &'static str,
+    label_indices: &[u8],
+    inclusion_condition: &'static str,
+) -> DecisionStepReport {
+    DecisionStepReport {
+        selection_mask_bit,
+        role,
+        label_indices_hex: label_indices
+            .iter()
+            .map(|index| format!("0x{index:02X}"))
+            .collect(),
+        source_labels: label_indices
+            .iter()
+            .map(|index| command_label(*index).source_text)
+            .collect(),
+        inclusion_condition,
+    }
+}
+
+fn terrain_action(
+    map_tile_code: u8,
+    label_index: u8,
+    eligibility: &'static str,
+) -> TerrainActionReport {
+    TerrainActionReport {
+        map_tile_code,
+        map_tile_code_hex: format!("0x{map_tile_code:02X}"),
+        label_index,
+        label_index_hex: format!("0x{label_index:02X}"),
+        source_label: command_label(label_index).source_text,
+        eligibility,
+    }
+}
+
+fn facility_action(facility_index: u8, label_index: u8) -> FacilityActionReport {
+    FacilityActionReport {
+        facility_index,
+        label_index,
+        label_index_hex: format!("0x{label_index:02X}"),
+        source_label: command_label(label_index).source_text,
+    }
+}
+
+fn command_label(index: u8) -> &'static FixedLabelSpec {
+    COMMAND_LABEL_SPECS
+        .iter()
+        .find(|label| label.index == index)
+        .unwrap_or_else(|| panic!("missing command label 0x{index:02X}"))
 }
 
 fn validate_region(prg: &[u8], address: u16, expected: &[u8], role: &str) -> Result<()> {
@@ -289,4 +449,101 @@ pub(super) fn install_fixture(prg: &mut [u8]) {
 #[cfg(test)]
 pub(super) fn composer_address() -> u16 {
     COMPOSER_ADDRESS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rom::PRG_SIZE;
+
+    fn report() -> CommandMenuReport {
+        let mut prg = vec![0; PRG_SIZE];
+        install_fixture(&mut prg);
+        analyze(&prg).unwrap()
+    }
+
+    #[test]
+    fn binds_selection_mask_bits_to_decision_order() {
+        let report = report();
+        assert_eq!(
+            report
+                .decision_flow
+                .iter()
+                .map(|step| (step.selection_mask_bit, step.role))
+                .collect::<Vec<_>>(),
+            [
+                (0, "attack"),
+                (1, "staff"),
+                (2, "transform"),
+                (3, "terrain_action"),
+                (4, "talk"),
+                (5, "inventory"),
+                (6, "facility"),
+                (7, "wait"),
+            ]
+        );
+    }
+
+    #[test]
+    fn resolves_terrain_and_facility_codes_to_source_labels() {
+        let report = report();
+        assert_eq!(
+            report
+                .terrain_actions
+                .iter()
+                .map(|action| (
+                    action.map_tile_code,
+                    action.label_index,
+                    action.source_label
+                ))
+                .collect::<Vec<_>>(),
+            [
+                (0xA5, 0x2A, "たずねる"),
+                (0x4B, 0x38, "しろ"),
+                (0xAE, 0x39, "ぎょくざ"),
+                (0xAB, 0x37, "たからばこ"),
+                (0x46, 0x2A, "たずねる"),
+            ]
+        );
+        assert_eq!(
+            report
+                .facility_actions
+                .iter()
+                .map(|action| (
+                    action.facility_index,
+                    action.label_index,
+                    action.source_label
+                ))
+                .collect::<Vec<_>>(),
+            [
+                (1, 0x29, "ぶきや"),
+                (2, 0x33, "どうぐや"),
+                (3, 0x34, "とうぎじょう"),
+                (4, 0x3A, "あずかりじょ"),
+                (5, 0x3D, "ひみつのみせ"),
+            ]
+        );
+    }
+
+    #[test]
+    fn keeps_unbound_command_execution_out_of_the_observation_path() {
+        let report = report();
+        assert_eq!(
+            report.input_boundary.state_kind,
+            "input_waiting_command_menu"
+        );
+        assert!(report.input_boundary.confirmed_safe_exit.starts_with('B'));
+        assert!(
+            report
+                .input_boundary
+                .unproven_selection_action
+                .starts_with('A')
+        );
+        assert!(
+            report
+                .input_boundary
+                .observation_rule
+                .contains("do not press A")
+        );
+    }
 }
