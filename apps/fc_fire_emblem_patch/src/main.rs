@@ -562,7 +562,7 @@ fn main() -> Result<()> {
             println!("wrote {}", report.display());
             println!("report SHA-1: {}", summary.report_sha1);
             println!("options page pack SHA-1: {}", summary.page_pack_sha1);
-            println!("roster page SHA-1: {}", summary.roster_page_sha1);
+            println!("roster page pack SHA-1: {}", summary.roster_page_pack_sha1);
             println!("tracked ROM writes: {}", summary.tracked_write_count);
         }
         Command::AnalyzeMapper165TriggerPlanes { source, report } => {

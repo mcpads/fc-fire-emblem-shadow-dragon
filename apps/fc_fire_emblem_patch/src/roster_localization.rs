@@ -9,7 +9,8 @@ use serde::Deserialize;
 
 use crate::{
     font::{load_dalmoori, rasterize_glyph},
-    font_slots::{FONT_PAGE_SIZE, FONT_TILE_SIZE, protected_original_codes},
+    font_slots::{FONT_PAGE_SIZE, FONT_TILE_SIZE, active_hangul_codes},
+    hangul_page_plan::{ScreenPagePairPlan, plan_screen_page_pair},
 };
 
 pub(crate) const ROSTER_TEXT_PRG_BANK: u8 = 0x0B;
@@ -23,6 +24,12 @@ const EXPECTED_SCREEN_ROLE: &str = "unit_roster";
 const EXPECTED_ENTRY_ID: &str = "name_header";
 const EXPECTED_SOURCE_JAPANESE: &str = "なまえ";
 const EXPECTED_SOURCE_CODES: [u8; ROSTER_HEADER_JAPANESE_FIELD_LEN] = [0x15, 0x20, 0x03];
+const ROSTER_PAGE_IDS: [&str; 2] = ["roster_page_a", "roster_page_b"];
+const ROSTER_PAGE_LOCAL_PROOF_GLYPH_COUNT: usize = 105;
+const ROSTER_VISIBLE_FD_CODES: [u8; 29] = [
+    0x03, 0x0F, 0x15, 0x20, 0x30, 0x31, 0x35, 0x39, 0x3B, 0x3C, 0x3F, 0x40, 0x44, 0x4D, 0x50, 0x5A,
+    0x5F, 0x60, 0x61, 0x62, 0x66, 0x68, 0x71, 0x75, 0x79, 0x7F, 0xA9, 0xFE, 0xFF,
+];
 
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct RosterLocalization {
@@ -55,6 +62,7 @@ struct RosterGlyphAssignment {
 pub(crate) struct ValidatedRosterLocalization {
     pub(crate) replacement_header: [u8; SOURCE_ROSTER_HEADER.len()],
     pub(crate) tiles: BTreeMap<u8, [u8; FONT_TILE_SIZE]>,
+    characters_by_code: BTreeMap<u8, char>,
 }
 
 impl RosterLocalization {
@@ -102,8 +110,8 @@ impl RosterLocalization {
             self.entry
                 .korean_codes
                 .iter()
-                .all(|code| EXPECTED_SOURCE_CODES.contains(code)),
-            "roster Korean codes must reuse Japanese header slots"
+                .all(|code| active_hangul_codes().contains(code)),
+            "roster Korean codes must use active Hangul slots"
         );
         ensure!(
             self.entry
@@ -172,47 +180,60 @@ impl RosterLocalization {
         Ok(ValidatedRosterLocalization {
             replacement_header,
             tiles,
+            characters_by_code,
         })
     }
 }
 
-pub(crate) fn build_roster_font_page(
+pub(crate) fn build_roster_page_pair(
     source_font_page: &[u8],
     localization: &ValidatedRosterLocalization,
-) -> Result<Vec<u8>> {
-    ensure!(
-        source_font_page.len() == FONT_PAGE_SIZE,
-        "roster source font page must be exactly 4 KiB"
-    );
-    let mut page = source_font_page.to_vec();
-    for (code, tile) in &localization.tiles {
-        let start = usize::from(*code) * FONT_TILE_SIZE;
-        page[start..start + FONT_TILE_SIZE].copy_from_slice(tile);
+    physical_pages: [u8; 2],
+) -> Result<ScreenPagePairPlan> {
+    let visible_codes = ROSTER_VISIBLE_FD_CODES.into_iter().collect::<BTreeSet<_>>();
+    let shared_glyphs = localization
+        .characters_by_code
+        .iter()
+        .map(|(code, character)| (*code, *character))
+        .collect::<Vec<_>>();
+    let pages = plan_screen_page_pair(
+        source_font_page,
+        ROSTER_PAGE_IDS,
+        physical_pages,
+        &shared_glyphs,
+        &visible_codes,
+        ROSTER_PAGE_LOCAL_PROOF_GLYPH_COUNT,
+    )?;
+
+    for page in pages.page_pack.chunks_exact(FONT_PAGE_SIZE) {
+        let changed_visible_codes = visible_codes
+            .iter()
+            .copied()
+            .filter(|code| !localization.tiles.contains_key(code))
+            .filter(|code| {
+                let start = usize::from(*code) * FONT_TILE_SIZE;
+                source_font_page[start..start + FONT_TILE_SIZE]
+                    != page[start..start + FONT_TILE_SIZE]
+            })
+            .collect::<Vec<_>>();
+        ensure!(
+            changed_visible_codes.is_empty(),
+            "roster page changed untranslated visible codes: {changed_visible_codes:02X?}"
+        );
     }
 
-    let changed_codes = (u8::MIN..=u8::MAX)
-        .filter(|code| {
-            let start = usize::from(*code) * FONT_TILE_SIZE;
-            source_font_page[start..start + FONT_TILE_SIZE] != page[start..start + FONT_TILE_SIZE]
-        })
-        .collect::<BTreeSet<_>>();
-    ensure!(
-        changed_codes == localization.tiles.keys().copied().collect(),
-        "roster page changed tiles outside its Korean glyph assignments"
-    );
-    ensure!(
-        protected_original_codes().into_iter().all(|code| {
-            let start = usize::from(code) * FONT_TILE_SIZE;
-            source_font_page[start..start + FONT_TILE_SIZE] == page[start..start + FONT_TILE_SIZE]
-        }),
-        "roster page changed a protected original English, digit, control, or latch tile"
-    );
-    Ok(page)
+    Ok(pages)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn source_font_page() -> Vec<u8> {
+        (0..FONT_PAGE_SIZE)
+            .map(|index| (index % 251) as u8)
+            .collect()
+    }
 
     fn roster_localization() -> RosterLocalization {
         serde_json::from_str(include_str!(concat!(
@@ -239,20 +260,16 @@ mod tests {
     }
 
     #[test]
-    fn roster_page_changes_only_two_japanese_tiles() {
-        let source = (0..FONT_PAGE_SIZE)
-            .map(|index| (index % 251) as u8)
-            .collect::<Vec<_>>();
+    fn roster_page_pair_exceeds_one_page_without_changing_other_visible_codes() {
+        let source = source_font_page();
         let validated = roster_localization().validate().unwrap();
-        let page = build_roster_font_page(&source, &validated).unwrap();
+        let pages = build_roster_page_pair(&source, &validated, [36, 37]).unwrap();
 
-        for code in u8::MIN..=u8::MAX {
-            let start = usize::from(code) * FONT_TILE_SIZE;
-            assert_eq!(
-                source[start..start + FONT_TILE_SIZE] != page[start..start + FONT_TILE_SIZE],
-                [0x15, 0x20].contains(&code)
-            );
-        }
+        assert_eq!(pages.assignment_count_per_page, 107);
+        assert_eq!(pages.page_local_proof_glyph_count, 105);
+        assert_eq!(pages.page_union_glyph_count, 212);
+        assert_eq!(pages.page_pack.len(), 2 * FONT_PAGE_SIZE);
+        assert_ne!(pages.page_sha1s[0], pages.page_sha1s[1]);
     }
 
     #[test]

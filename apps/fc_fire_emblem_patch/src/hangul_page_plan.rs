@@ -85,6 +85,14 @@ pub(crate) struct HangulPageProofSummary {
     pub(crate) maximum_extension_page_count: usize,
 }
 
+pub(crate) struct ScreenPagePairPlan {
+    pub(crate) page_pack: Vec<u8>,
+    pub(crate) page_sha1s: [String; 2],
+    pub(crate) assignment_count_per_page: usize,
+    pub(crate) page_local_proof_glyph_count: usize,
+    pub(crate) page_union_glyph_count: usize,
+}
+
 pub(crate) fn plan_hangul_page_proof(
     source_path: &Path,
     localization_path: &Path,
@@ -172,6 +180,75 @@ pub(crate) fn assemble_hangul_page_pack(
     localization: &OptionsLocalization,
 ) -> Result<Vec<u8>> {
     page_pack_bytes(&plan_hangul_pages(source_rom, localization)?)
+}
+
+pub(crate) fn plan_screen_page_pair(
+    source_font_page: &[u8],
+    page_ids: [&'static str; 2],
+    physical_pages: [u8; 2],
+    shared_glyphs: &[(u8, char)],
+    screen_visible_codes: &BTreeSet<u8>,
+    page_local_proof_glyph_count: usize,
+) -> Result<ScreenPagePairPlan> {
+    ensure!(
+        source_font_page.len() == FONT_PAGE_SIZE,
+        "source font page must be exactly 4 KiB"
+    );
+    let shared = shared_glyphs
+        .iter()
+        .map(|(code, character)| PlannedGlyph {
+            code: *code,
+            character: *character,
+            scope: "screen_shared",
+        })
+        .collect::<Vec<_>>();
+    let requested_pages =
+        screen_page_glyphs(&shared, screen_visible_codes, page_local_proof_glyph_count)?;
+    let font = load_dalmoori()?;
+    let pages = page_ids
+        .iter()
+        .enumerate()
+        .map(|(index, id)| {
+            plan_page(
+                id,
+                physical_pages[index],
+                source_font_page,
+                &requested_pages[index],
+                &font,
+            )
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let page_union_glyph_count = pages
+        .iter()
+        .flat_map(|page| {
+            page.report
+                .assignments
+                .iter()
+                .map(|assignment| assignment.character)
+        })
+        .collect::<BTreeSet<_>>()
+        .len();
+    ensure!(
+        page_union_glyph_count > ACTIVE_HANGUL_SLOT_COUNT,
+        "screen page-pair union must exceed one active Hangul page"
+    );
+    let page_sha1s = [
+        pages[0].report.page_sha1.clone(),
+        pages[1].report.page_sha1.clone(),
+    ];
+    let assignment_count_per_page = pages[0].report.glyph_count;
+    ensure!(
+        pages[1].report.glyph_count == assignment_count_per_page,
+        "screen page-pair assignment counts differ"
+    );
+
+    Ok(ScreenPagePairPlan {
+        page_pack: page_pack_bytes(&pages)?,
+        page_sha1s,
+        assignment_count_per_page,
+        page_local_proof_glyph_count,
+        page_union_glyph_count,
+    })
 }
 
 fn plan_hangul_pages(
@@ -323,26 +400,59 @@ fn proof_page_glyphs(localization: &OptionsLocalization) -> Result<Vec<Vec<Plann
         "options screen proof contains duplicate shared Hangul glyphs"
     );
 
+    screen_page_glyphs(&shared, &BTreeSet::new(), PAGE_LOCAL_PROOF_GLYPH_COUNT)
+}
+
+fn screen_page_glyphs(
+    shared: &[PlannedGlyph],
+    screen_visible_codes: &BTreeSet<u8>,
+    page_local_proof_glyph_count: usize,
+) -> Result<Vec<Vec<PlannedGlyph>>> {
+    ensure!(
+        shared
+            .iter()
+            .map(|glyph| glyph.character)
+            .collect::<BTreeSet<_>>()
+            .len()
+            == shared.len(),
+        "screen page pair contains duplicate shared Hangul glyphs"
+    );
+    ensure!(
+        shared
+            .iter()
+            .map(|glyph| glyph.code)
+            .collect::<BTreeSet<_>>()
+            .len()
+            == shared.len(),
+        "screen page pair contains duplicate shared codes"
+    );
+    let shared_characters = shared
+        .iter()
+        .map(|glyph| glyph.character)
+        .collect::<BTreeSet<_>>();
     let shared_codes = shared
         .iter()
         .map(|glyph| glyph.code)
         .collect::<BTreeSet<_>>();
     let page_local_codes = active_hangul_codes()
         .into_iter()
-        .filter(|code| !shared_codes.contains(code))
-        .take(PAGE_LOCAL_PROOF_GLYPH_COUNT)
+        .filter(|code| !shared_codes.contains(code) && !screen_visible_codes.contains(code))
+        .take(page_local_proof_glyph_count)
         .collect::<Vec<_>>();
     ensure!(
-        page_local_codes.len() == PAGE_LOCAL_PROOF_GLYPH_COUNT,
-        "not enough page-local Hangul codes after shared screen assignments"
+        page_local_codes.len() == page_local_proof_glyph_count,
+        "not enough page-local Hangul codes after shared and visible screen assignments"
     );
-    let proof_glyphs = proof_glyphs(&shared_characters)?;
+    let proof_glyphs = proof_glyphs(
+        &shared_characters,
+        page_local_proof_glyph_count * PROOF_PAGE_IDS.len(),
+    )?;
 
     (0..PROOF_PAGE_IDS.len())
         .map(|page_index| {
-            let start = page_index * PAGE_LOCAL_PROOF_GLYPH_COUNT;
-            let end = start + PAGE_LOCAL_PROOF_GLYPH_COUNT;
-            let mut page = shared.clone();
+            let start = page_index * page_local_proof_glyph_count;
+            let end = start + page_local_proof_glyph_count;
+            let mut page = shared.to_vec();
             page.extend(
                 page_local_codes
                     .iter()
@@ -359,8 +469,7 @@ fn proof_page_glyphs(localization: &OptionsLocalization) -> Result<Vec<Vec<Plann
         .collect()
 }
 
-fn proof_glyphs(excluded: &BTreeSet<char>) -> Result<Vec<char>> {
-    let required_count = PAGE_LOCAL_PROOF_GLYPH_COUNT * PROOF_PAGE_IDS.len();
+fn proof_glyphs(excluded: &BTreeSet<char>, required_count: usize) -> Result<Vec<char>> {
     let mut glyphs = Vec::with_capacity(required_count);
     let mut scalar = FIRST_HANGUL_SYLLABLE;
     while glyphs.len() < required_count {

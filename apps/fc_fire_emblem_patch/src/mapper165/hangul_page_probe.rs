@@ -12,7 +12,7 @@ use crate::{
     rom::{EXPECTED_SOURCE_SHA1, PRG_SIZE, Rom},
     roster_localization::{
         ROSTER_HEADER_CPU_ADDRESS, ROSTER_TEXT_PRG_BANK, RosterLocalization, SOURCE_ROSTER_HEADER,
-        build_roster_font_page,
+        build_roster_page_pair,
     },
     sha1_hex,
     tracked::TrackedImage,
@@ -30,9 +30,15 @@ use super::{
         row_calculation as options_row_calculation, row_hook as options_row_hook,
     },
     roster_page::{
-        ALIGNMENT_PADDING_PHYSICAL_CHR_PAGE, CENTRAL_RIGHT_FD_SELECTOR_CALL_ADDRESS,
-        PAGE_REGISTER as ROSTER_PAGE_REGISTER, PAGE_ROUTINE_ADDRESS as ROSTER_PAGE_ROUTINE_ADDRESS,
-        PAGE_ROUTINE_END as ROSTER_PAGE_ROUTINE_END, PHYSICAL_CHR_PAGE as ROSTER_PHYSICAL_CHR_PAGE,
+        CENTRAL_RIGHT_FD_SELECTOR_CALL_ADDRESS, HEADER_CALL_ADDRESS as ROSTER_HEADER_CALL_ADDRESS,
+        HEADER_RESOURCE_ID as ROSTER_HEADER_RESOURCE_ID,
+        OWNER_CONSTRUCTOR_ADDRESS as ROSTER_OWNER_CONSTRUCTOR_ADDRESS,
+        OWNER_CONSTRUCTOR_PRG_BANK as ROSTER_OWNER_CONSTRUCTOR_PRG_BANK,
+        OWNER_CONSTRUCTOR_SIGNATURE as ROSTER_OWNER_CONSTRUCTOR_SIGNATURE,
+        PAGE_REGISTERS as ROSTER_PAGE_REGISTERS,
+        PAGE_ROUTINE_ADDRESS as ROSTER_PAGE_ROUTINE_ADDRESS,
+        PAGE_ROUTINE_END as ROSTER_PAGE_ROUTINE_END,
+        PHYSICAL_CHR_PAGES as ROSTER_PHYSICAL_CHR_PAGES,
         build_page_routine as build_roster_page_routine, central_right_fd_selector_call,
     },
 };
@@ -52,8 +58,7 @@ struct HangulPageProbeReport {
     prg_size: usize,
     chr_size: usize,
     page_pack_sha1: String,
-    roster_page_sha1: String,
-    alignment_padding_page_sha1: String,
+    roster_page_pack_sha1: String,
     pages: Vec<PageBindingReport>,
     screen_contract: ScreenContractReport,
     roster_screen_contract: RosterScreenContractReport,
@@ -90,16 +95,35 @@ struct ScreenContractReport {
 #[derive(Debug, Serialize)]
 struct RosterScreenContractReport {
     screen_role: &'static str,
+    owner_prg_bank: u8,
+    owner_constructor_cpu_address: String,
+    owner_descriptor_signature_occurrences: usize,
+    owner_resource_id: u8,
+    owner_resource_call_cpu_address: String,
+    owner_header_cpu_address: String,
+    lifetime_state: Vec<LifetimeStateByteReport>,
     left_fd: u8,
     left_fe: u8,
     right_fd: u8,
     observed_right_fe: Vec<u8>,
     unobserved_right_fe: Vec<u8>,
+    page_a_right_fe: Vec<u8>,
+    page_b_right_fe: Vec<u8>,
+    page_assignment_count: usize,
+    page_local_proof_glyph_count: usize,
+    page_union_glyph_count: usize,
     translated_header_codes: Vec<u8>,
     cleared_source_codes: Vec<u8>,
     preserved_original_codes: Vec<u8>,
     preserved_original_labels: Vec<&'static str>,
     fallback: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct LifetimeStateByteReport {
+    address: String,
+    value: u8,
+    role: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -118,6 +142,7 @@ struct HookReport {
 struct RosterHookReport {
     source_cpu_address: String,
     source_len: usize,
+    original_target_cpu_address: String,
     routine_cpu_start: String,
     routine_cpu_end_exclusive: String,
     routine_len: usize,
@@ -136,7 +161,7 @@ pub(crate) struct HangulPageProbeSummary {
     pub(crate) output_sha1: String,
     pub(crate) report_sha1: String,
     pub(crate) page_pack_sha1: String,
-    pub(crate) roster_page_sha1: String,
+    pub(crate) roster_page_pack_sha1: String,
     pub(crate) tracked_write_count: usize,
 }
 
@@ -149,6 +174,25 @@ pub(crate) fn build_mapper165_hangul_page_probe(
 ) -> Result<HangulPageProbeSummary> {
     let source_rom = Rom::from_path(source_path)?;
     source_rom.verify_supported_japanese()?;
+    let roster_owner_constructor_offset = switchable_bank_file_offset(
+        ROSTER_OWNER_CONSTRUCTOR_PRG_BANK,
+        ROSTER_OWNER_CONSTRUCTOR_ADDRESS,
+    )?;
+    ensure!(
+        source_rom.data()[roster_owner_constructor_offset
+            ..roster_owner_constructor_offset + ROSTER_OWNER_CONSTRUCTOR_SIGNATURE.len()]
+            == ROSTER_OWNER_CONSTRUCTOR_SIGNATURE,
+        "roster owner constructor signature changed"
+    );
+    let roster_owner_descriptor_signature_occurrences = source_rom
+        .prg()
+        .windows(ROSTER_OWNER_CONSTRUCTOR_SIGNATURE.len())
+        .filter(|window| *window == ROSTER_OWNER_CONSTRUCTOR_SIGNATURE)
+        .count();
+    ensure!(
+        roster_owner_descriptor_signature_occurrences == 1,
+        "roster owner descriptor signature must occur exactly once"
+    );
     let localization = OptionsLocalization::from_path(localization_path)?;
     let validated_localization = localization.validate()?;
     let page_pack = assemble_hangul_page_pack(&source_rom, &localization)?;
@@ -158,24 +202,25 @@ pub(crate) fn build_mapper165_hangul_page_probe(
     );
     let roster_localization = RosterLocalization::from_path(roster_localization_path)?;
     let validated_roster_localization = roster_localization.validate()?;
-    let roster_page = build_roster_font_page(
+    let roster_pages = build_roster_page_pair(
         &source_rom.chr()[..CHR_PAGE_SIZE],
         &validated_roster_localization,
+        ROSTER_PHYSICAL_CHR_PAGES,
     )?;
-    let alignment_padding_page = vec![0_u8; CHR_PAGE_SIZE];
     let page_a_register = encode_chr_page_register(FIRST_EXTENSION_CHR_PAGE)?;
     let page_b_register = encode_chr_page_register(FIRST_EXTENSION_CHR_PAGE + 1)?;
     ensure!(
         page_a_register == OPTIONS_PAGE_A_REGISTER && page_b_register == OPTIONS_PAGE_B_REGISTER,
         "Hangul page register contract changed"
     );
-    let roster_page_register = encode_chr_page_register(ROSTER_PHYSICAL_CHR_PAGE)?;
+    let roster_page_registers = [
+        encode_chr_page_register(ROSTER_PHYSICAL_CHR_PAGES[0])?,
+        encode_chr_page_register(ROSTER_PHYSICAL_CHR_PAGES[1])?,
+    ];
     ensure!(
-        roster_page_register == ROSTER_PAGE_REGISTER,
-        "roster Hangul page register contract changed"
+        roster_page_registers == ROSTER_PAGE_REGISTERS,
+        "roster Hangul page registers changed"
     );
-    let alignment_padding_page_register =
-        encode_chr_page_register(ALIGNMENT_PADDING_PHYSICAL_CHR_PAGE)?;
 
     let parity_base = assemble_mapper165_parity_bytes(&source_rom)?;
     let parity_base_sha1 = sha1_hex(&parity_base);
@@ -209,7 +254,8 @@ pub(crate) fn build_mapper165_hangul_page_probe(
         "options page routine cave has {options_direct_transfer_count} pre-existing direct transfers"
     );
 
-    let roster_routine = build_roster_page_routine(roster_page_register)?;
+    let roster_routine =
+        build_roster_page_routine(roster_page_registers[0], roster_page_registers[1])?;
     ensure!(
         ROSTER_PAGE_ROUTINE_ADDRESS as usize + roster_routine.len()
             == ROSTER_PAGE_ROUTINE_END as usize,
@@ -237,8 +283,7 @@ pub(crate) fn build_mapper165_hangul_page_probe(
 
     let mut expanded_base = parity_base.clone();
     expanded_base.extend_from_slice(&page_pack);
-    expanded_base.extend_from_slice(&roster_page);
-    expanded_base.extend_from_slice(&alignment_padding_page);
+    expanded_base.extend_from_slice(&roster_pages.page_pack);
     ensure!(
         expanded_base.len() == parity_base.len() + EXTENSION_PAGE_COUNT * CHR_PAGE_SIZE,
         "mapper 165 Hangul extension page count changed"
@@ -293,7 +338,7 @@ pub(crate) fn build_mapper165_hangul_page_probe(
         &replacement_hook,
     )?;
     image.write_expected(
-        "central right FD selector to roster-aware selector",
+        "central right FD selector to roster-lifetime selector",
         fixed_bank_file_offset(CENTRAL_RIGHT_FD_SELECTOR_CALL_ADDRESS)?,
         &central_right_fd_selector_call(SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS)?,
         &central_right_fd_selector_call(ROSTER_PAGE_ROUTINE_ADDRESS)?,
@@ -315,16 +360,14 @@ pub(crate) fn build_mapper165_hangul_page_probe(
         &parity_rom,
         &output_rom,
         &page_pack,
-        &roster_page,
-        &alignment_padding_page,
+        &roster_pages.page_pack,
         &validated_localization.replacement_table,
         &validated_roster_localization.replacement_header,
     )?;
 
     let output_sha1 = sha1_hex(&output);
     let page_pack_sha1 = sha1_hex(&page_pack);
-    let roster_page_sha1 = sha1_hex(&roster_page);
-    let alignment_padding_page_sha1 = sha1_hex(&alignment_padding_page);
+    let roster_page_pack_sha1 = sha1_hex(&roster_pages.page_pack);
     let report = HangulPageProbeReport {
         schema: 1,
         source_sha1: EXPECTED_SOURCE_SHA1,
@@ -334,8 +377,7 @@ pub(crate) fn build_mapper165_hangul_page_probe(
         prg_size: output_rom.prg().len(),
         chr_size: output_rom.chr().len(),
         page_pack_sha1: page_pack_sha1.clone(),
-        roster_page_sha1: roster_page_sha1.clone(),
-        alignment_padding_page_sha1: alignment_padding_page_sha1.clone(),
+        roster_page_pack_sha1: roster_page_pack_sha1.clone(),
         pages: vec![
             PageBindingReport {
                 role: "options_page_a",
@@ -350,16 +392,16 @@ pub(crate) fn build_mapper165_hangul_page_probe(
                 page_sha1: sha1_hex(&page_pack[CHR_PAGE_SIZE..]),
             },
             PageBindingReport {
-                role: "unit_roster",
-                physical_4k_page: ROSTER_PHYSICAL_CHR_PAGE,
-                mapper_register_value: roster_page_register,
-                page_sha1: roster_page_sha1.clone(),
+                role: "unit_roster_page_a",
+                physical_4k_page: ROSTER_PHYSICAL_CHR_PAGES[0],
+                mapper_register_value: roster_page_registers[0],
+                page_sha1: roster_pages.page_sha1s[0].clone(),
             },
             PageBindingReport {
-                role: "ines_8k_alignment_padding",
-                physical_4k_page: ALIGNMENT_PADDING_PHYSICAL_CHR_PAGE,
-                mapper_register_value: alignment_padding_page_register,
-                page_sha1: alignment_padding_page_sha1,
+                role: "unit_roster_page_b",
+                physical_4k_page: ROSTER_PHYSICAL_CHR_PAGES[1],
+                mapper_register_value: roster_page_registers[1],
+                page_sha1: roster_pages.page_sha1s[1].clone(),
             },
         ],
         screen_contract: ScreenContractReport {
@@ -374,16 +416,49 @@ pub(crate) fn build_mapper165_hangul_page_probe(
         },
         roster_screen_contract: RosterScreenContractReport {
             screen_role: "unit_roster",
+            owner_prg_bank: ROSTER_OWNER_CONSTRUCTOR_PRG_BANK,
+            owner_constructor_cpu_address: format!("0x{ROSTER_OWNER_CONSTRUCTOR_ADDRESS:04X}"),
+            owner_descriptor_signature_occurrences: roster_owner_descriptor_signature_occurrences,
+            owner_resource_id: ROSTER_HEADER_RESOURCE_ID,
+            owner_resource_call_cpu_address: format!("0x{ROSTER_HEADER_CALL_ADDRESS:04X}"),
+            owner_header_cpu_address: format!("0x{ROSTER_HEADER_CPU_ADDRESS:04X}"),
+            lifetime_state: vec![
+                LifetimeStateByteReport {
+                    address: "0x05CF".to_owned(),
+                    value: 0x12,
+                    role: "roster window descriptor byte zero",
+                },
+                LifetimeStateByteReport {
+                    address: "0x05D0".to_owned(),
+                    value: 0x04,
+                    role: "roster window descriptor byte one",
+                },
+                LifetimeStateByteReport {
+                    address: "0x0070".to_owned(),
+                    value: 0x30,
+                    role: "roster window horizontal placement",
+                },
+                LifetimeStateByteReport {
+                    address: "0x0071".to_owned(),
+                    value: 0x40,
+                    role: "roster window vertical placement",
+                },
+            ],
             left_fd: 0x18,
             left_fe: 0x18,
             right_fd: 0x00,
             observed_right_fe: vec![0x15, 0x18, 0x19],
             unobserved_right_fe: vec![],
+            page_a_right_fe: vec![0x18, 0x19],
+            page_b_right_fe: vec![0x15],
+            page_assignment_count: roster_pages.assignment_count_per_page,
+            page_local_proof_glyph_count: roster_pages.page_local_proof_glyph_count,
+            page_union_glyph_count: roster_pages.page_union_glyph_count,
             translated_header_codes: vec![0x15, 0x20],
             cleared_source_codes: vec![0x03],
             preserved_original_codes: vec![0x60, 0x61, 0x62, 0x66, 0x68, 0x71, 0x75, 0x79, 0x7F],
             preserved_original_labels: vec!["0", "1", "2", "6", "8", "H", "L", "P", "V"],
-            fallback: "call the existing pair-aware right FD selector for every other contract",
+            fallback: "call the existing pair-aware selector unless the exact roster descriptor and an observed right FE phase both match",
         },
         hook: HookReport {
             source_prg_bank: OPTIONS_ROW_PRG_BANK,
@@ -398,6 +473,9 @@ pub(crate) fn build_mapper165_hangul_page_probe(
         roster_hook: RosterHookReport {
             source_cpu_address: format!("0x{CENTRAL_RIGHT_FD_SELECTOR_CALL_ADDRESS:04X}"),
             source_len: 3,
+            original_target_cpu_address: format!(
+                "0x{SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS:04X}"
+            ),
             routine_cpu_start: format!("0x{ROSTER_PAGE_ROUTINE_ADDRESS:04X}"),
             routine_cpu_end_exclusive: format!("0x{ROSTER_PAGE_ROUTINE_END:04X}"),
             routine_len: roster_routine.len(),
@@ -409,7 +487,7 @@ pub(crate) fn build_mapper165_hangul_page_probe(
         runtime_hook_installed: true,
         runtime_verified: false,
         unresolved_boundaries: vec![
-            "The mixed Hangul and original-Latin roster page needs cold visible proof for the observed 00/15, 00/18, and 00/19 backing-page variants.",
+            "Cold visible roster A-B-A evidence stays external to this static build report, so runtime_verified remains false by construction.",
             "The options A-B-A selector and natural-page restoration need a regression check on this expanded output.",
             "The mixed roster contract covers the three observed 00/15, 00/18, and 00/19 backing-page variants; other pairs still fall back to the natural page.",
             "The pages prove screen-bound selection, not final corpus packing or whole-game coverage.",
@@ -427,7 +505,7 @@ pub(crate) fn build_mapper165_hangul_page_probe(
         output_sha1,
         report_sha1,
         page_pack_sha1,
-        roster_page_sha1,
+        roster_page_pack_sha1,
         tracked_write_count,
     })
 }
@@ -436,8 +514,7 @@ fn verify_output(
     parity_rom: &Rom,
     output_rom: &Rom,
     page_pack: &[u8],
-    roster_page: &[u8],
-    alignment_padding_page: &[u8],
+    roster_page_pack: &[u8],
     replacement_table: &[u8],
     replacement_roster_header: &[u8],
 ) -> Result<()> {
@@ -450,11 +527,7 @@ fn verify_output(
         "Hangul page output PRG size changed"
     );
     ensure!(
-        output_rom.chr().len()
-            == parity_rom.chr().len()
-                + page_pack.len()
-                + roster_page.len()
-                + alignment_padding_page.len(),
+        output_rom.chr().len() == parity_rom.chr().len() + page_pack.len() + roster_page_pack.len(),
         "Hangul page output CHR size is incorrect"
     );
     ensure!(
@@ -466,15 +539,10 @@ fn verify_output(
             == *page_pack,
         "Hangul page probe appended different options page bytes"
     );
-    let roster_page_start = parity_rom.chr().len() + page_pack.len();
+    let roster_page_pack_start = parity_rom.chr().len() + page_pack.len();
     ensure!(
-        output_rom.chr()[roster_page_start..roster_page_start + roster_page.len()] == *roster_page,
-        "Hangul page probe appended different roster page bytes"
-    );
-    let padding_page_start = roster_page_start + roster_page.len();
-    ensure!(
-        output_rom.chr()[padding_page_start..] == *alignment_padding_page,
-        "Hangul page probe appended different iNES alignment padding bytes"
+        output_rom.chr()[roster_page_pack_start..] == *roster_page_pack,
+        "Hangul page probe appended different roster page-pair bytes"
     );
     ensure!(
         output_rom.data()[OPTIONS_TABLE_OFFSET..OPTIONS_TABLE_OFFSET + replacement_table.len()]
