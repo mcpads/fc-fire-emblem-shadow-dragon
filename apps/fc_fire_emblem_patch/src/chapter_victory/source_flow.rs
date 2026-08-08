@@ -1,8 +1,11 @@
 use anyhow::{Context, Result, ensure};
-use retro_rp2a03::decode_bytes;
 use serde::Serialize;
 
-use crate::{rom::HEADER_SIZE, sha1_hex};
+use crate::{
+    rom::HEADER_SIZE,
+    sha1_hex,
+    typed_source::{TypedInstructionBinding, decode_rp2a03_sequence},
+};
 
 const PRG_BANK_SIZE: usize = 16 * 1024;
 const SWITCHABLE_CPU_START: u16 = 0x8000;
@@ -235,16 +238,6 @@ pub(super) struct SourceRegionBinding {
     typed_instructions: Vec<TypedInstructionBinding>,
 }
 
-#[derive(Debug, Serialize)]
-struct TypedInstructionBinding {
-    cpu_address: u16,
-    cpu_address_hex: String,
-    mnemonic: String,
-    addressing_mode: String,
-    operand: String,
-    control_flow: String,
-}
-
 #[derive(Debug, Serialize, Clone, PartialEq, Eq)]
 struct Location {
     prg_bank: u8,
@@ -320,7 +313,7 @@ fn bind_source_region(prg: &[u8], spec: SourceRegionSpec) -> Result<SourceRegion
         .with_context(|| format!("{} is outside PRG", spec.role))?;
     ensure!(actual == spec.bytes, "{} source bytes changed", spec.role);
     let typed_instructions = match spec.kind {
-        RegionKind::Code => decode_typed_sequence(actual, spec.cpu_address, spec.role)?,
+        RegionKind::Code => decode_rp2a03_sequence(actual, spec.cpu_address, spec.role)?,
         RegionKind::Data => Vec::new(),
     };
 
@@ -337,40 +330,6 @@ fn bind_source_region(prg: &[u8], spec: SourceRegionSpec) -> Result<SourceRegion
         source_sha1: sha1_hex(actual),
         typed_instructions,
     })
-}
-
-fn decode_typed_sequence(
-    bytes: &[u8],
-    origin: u16,
-    role: &str,
-) -> Result<Vec<TypedInstructionBinding>> {
-    let mut reports = Vec::new();
-    let mut offset = 0_usize;
-    while offset < bytes.len() {
-        let instruction = decode_bytes(&bytes[offset..])
-            .with_context(|| format!("decode {role} at +0x{offset:X} through typed RP2A03 ISA"))?;
-        ensure!(
-            instruction.opcode_is_documented(),
-            "{role} contains undocumented selector at +0x{offset:X}"
-        );
-        let address = origin
-            .checked_add(offset as u16)
-            .context("typed RP2A03 address overflow")?;
-        reports.push(TypedInstructionBinding {
-            cpu_address: address,
-            cpu_address_hex: format!("0x{address:04X}"),
-            mnemonic: instruction.mnemonic().to_string(),
-            addressing_mode: format!("{:?}", instruction.addressing_mode()),
-            operand: format!("{:?}", instruction.operand()),
-            control_flow: format!("{:?}", instruction.control_flow(address)),
-        });
-        offset += instruction.encoded_len();
-    }
-    ensure!(
-        offset == bytes.len(),
-        "{role} typed decode did not consume the full region"
-    );
-    Ok(reports)
 }
 
 fn prg_offset(prg_bank: u8, cpu_address: u16) -> Result<usize> {
@@ -433,11 +392,5 @@ mod tests {
                 .filter(|region| region.region_kind == "rp2a03_code")
                 .all(|region| !region.typed_instructions.is_empty())
         );
-    }
-
-    #[test]
-    fn typed_decode_rejects_a_truncated_region() {
-        let error = decode_typed_sequence(&[0x4C, 0x00], 0x8000, "truncated_test").unwrap_err();
-        assert!(error.to_string().contains("typed RP2A03 ISA"));
     }
 }

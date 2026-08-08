@@ -104,7 +104,7 @@ fn build_report(rom: &Rom) -> Result<ChapterVictoryReport> {
         continuous_runtime_evidence: runtime_evidence::continuous_chapter_eleven_victory_evidence(),
         observation_plan: screen_flow::observation_plan(),
         unresolved: vec![
-            "The observed default-yes save choices do not establish either no-choice route.",
+            "The save-offer no choice is source-bound and runtime-observed; the save-complete no-choice route remains unobserved.",
             "The accelerated route establishes reachability rather than baseline difficulty or unaccelerated combat equivalence.",
             "Defeat and unfavorable-state checks remain separate validation gates with progression cheats disabled or intentionally adverse.",
             "Other chapter-specific victory, epilogue, portrait, CHR, and transition variants remain unobserved.",

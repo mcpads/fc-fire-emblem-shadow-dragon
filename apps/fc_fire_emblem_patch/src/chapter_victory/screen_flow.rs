@@ -120,7 +120,7 @@ pub(super) fn chapter_eleven_runtime_map_sample() -> RuntimeMapSample {
 
 pub(super) fn observation_plan() -> ObservationPlan {
     ObservationPlan {
-        next_gate: "promote the closed accelerated route into the global screen registry, then validate alternate save choices, remaining chapter variants, and failure paths as separate gates",
+        next_gate: "validate the save-complete no choice, remaining chapter variants, and failure paths as separate gates",
         allowed_progression: &[
             "inspect current unit and blocker positions before choosing a movement route",
             "use the already verified movement-range acceleration only when its effect is explicit",

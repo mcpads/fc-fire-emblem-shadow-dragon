@@ -7,6 +7,7 @@ use crate::{
     dialogue_inventory::inspect_chapter_intro_contexts,
     rom::{EXPECTED_SOURCE_SHA1, HEADER_SIZE, Rom},
     sha1_hex,
+    typed_source::{TypedInstructionBinding, decode_rp2a03_sequence},
 };
 
 const PRG_BANK_SIZE: usize = 16 * 1024;
@@ -70,65 +71,164 @@ const VALIDATE_REGULAR_SAVE_CHECKSUM_BYTES: &[u8] = &[
     0x0E, 0xA5, 0x05, 0xCD, 0x87, 0x6A, 0xD0, 0x07, 0x20, 0x2D, 0xC7, 0xEE, 0xEE, 0x05, 0x60, 0xA9,
     0x06, 0x8D, 0xEE, 0x05, 0x60,
 ];
+const DISPATCH_OUTER_SCREEN_STATE_BYTES: &[u8] = &[0xA5, 0x24, 0x20, 0x4C, 0xC3];
+const OUTER_SCREEN_0D_HANDLER_POINTER_BYTES: &[u8] = &[0xAC, 0xB5];
+const DISPATCH_CHAPTER_TRANSITION_STATE_BYTES: &[u8] =
+    &[0x20, 0x88, 0xC2, 0xA5, 0x84, 0x20, 0x4C, 0xC3];
+const SAVE_OFFER_STATE_POINTERS_BYTES: &[u8] = &[0xF3, 0xB6, 0x26, 0xB7, 0x37, 0xB7];
+const RUN_SAVE_OFFER_CHOICE_STATE_BYTES: &[u8] = &[
+    0xAD, 0xCC, 0x05, 0xC9, 0x03, 0xF0, 0x15, 0x20, 0x5C, 0xE6, 0xAD, 0xEB, 0x05, 0xC9, 0x02, 0xF0,
+    0x1F, 0xA9, 0x0E, 0x85, 0x24, 0xA9, 0x02, 0x85, 0x84, 0x4C, 0xA1, 0xB7, 0xA9, 0x05, 0x8D, 0xCC,
+    0x05, 0xAC, 0xCE, 0x05, 0xA9, 0x03, 0x99, 0xEE, 0x7F, 0xA9, 0x00, 0x8D, 0xD3, 0x05, 0xF0, 0x02,
+    0xE6, 0x84, 0x60,
+];
+const CLOSE_SAVE_OFFER_NO_CHOICE_BYTES: &[u8] = &[
+    0x20, 0x5C, 0xE6, 0x20, 0x6E, 0xE6, 0xAD, 0xCE, 0x05, 0xD0, 0x05, 0x20, 0x8C, 0xB5, 0xE6, 0x84,
+    0x60,
+];
+const ENTER_NEXT_CHAPTER_WITHOUT_SAVE_BYTES: &[u8] = &[
+    0x20, 0x5C, 0xE6, 0xAD, 0xF4, 0x05, 0xF0, 0x09, 0xA9, 0x02, 0x85, 0x44, 0xA9, 0x04, 0x4C, 0xFA,
+    0xC9, 0xA9, 0x01, 0x8D, 0xF0, 0x06, 0xAD, 0xE0, 0x05, 0xF0, 0x05, 0xE6, 0x23, 0x4C, 0xC0, 0xFF,
+    0xA9, 0x00, 0x8D, 0xEC, 0x05, 0x8D, 0x7D, 0x76, 0x8D, 0x7F, 0x76, 0x85, 0x84, 0x85, 0x60, 0x8D,
+    0xF4, 0x05, 0xA9, 0x01, 0x8D, 0x75, 0x76, 0x85, 0x24, 0x60,
+];
+const READ_ACTIVE_MENU_SELECTION_BYTES: &[u8] = &[
+    0xAE, 0xCE, 0x05, 0xCA, 0xBD, 0xEE, 0x7F, 0x20, 0x40, 0x98, 0x85, 0x0B, 0xAE, 0xCE, 0x05, 0xCA,
+    0xBC, 0xF3, 0x7F, 0xA5, 0x14, 0xC9, 0x80, 0xF0, 0x45,
+];
+const ADVANCE_MENU_SELECTION_BYTES: &[u8] = &[
+    0xC4, 0x0B, 0xD0, 0x04, 0xA9, 0x01, 0xD0, 0x02, 0xC8, 0x98, 0x9D, 0xF3, 0x7F, 0x20, 0x8D, 0xF1,
+    0xD0, 0x2E,
+];
+const COMMIT_MENU_SELECTION_BYTES: &[u8] = &[
+    0x20, 0x87, 0xF1, 0xBD, 0xF3, 0x7F, 0xAA, 0xAC, 0xCE, 0x05, 0x88, 0xB9, 0xEE, 0x7F, 0x20, 0x4D,
+    0x98, 0x8D, 0xEB, 0x05,
+];
 
 const SOURCE_REGIONS: &[SourceRegionSpec] = &[
-    SourceRegionSpec::new(
+    SourceRegionSpec::code(
         "compose_next_story_banner",
         0x0B,
         0x886A,
         NEXT_STORY_COMPOSER_BYTES,
     ),
-    SourceRegionSpec::new(
+    SourceRegionSpec::code(
         "compose_chapter_title",
         0x0B,
         0x88C4,
         CHAPTER_TITLE_COMPOSER_BYTES,
     ),
-    SourceRegionSpec::new(
+    SourceRegionSpec::code(
         "compose_chapter_save_offer",
         0x0B,
         0x8AE6,
         SAVE_OFFER_COMPOSER_BYTES,
     ),
-    SourceRegionSpec::new(
+    SourceRegionSpec::data(
         "chapter_title_pointer_table",
         0x0F,
         CHAPTER_TITLE_POINTER_TABLE_ADDRESS,
         CHAPTER_TITLE_POINTER_TABLE_BYTES,
     ),
-    SourceRegionSpec::new("next_story_pointer", 0x0B, 0x903E, NEXT_STORY_POINTER_BYTES),
-    SourceRegionSpec::new("next_story_label", 0x0B, 0x91FB, NEXT_STORY_LABEL_BYTES),
-    SourceRegionSpec::new(
+    SourceRegionSpec::data("next_story_pointer", 0x0B, 0x903E, NEXT_STORY_POINTER_BYTES),
+    SourceRegionSpec::data("next_story_label", 0x0B, 0x91FB, NEXT_STORY_LABEL_BYTES),
+    SourceRegionSpec::data(
         "chapter_save_offer_pointer",
         0x0B,
         0x9026,
         SAVE_OFFER_POINTER_BYTES,
     ),
-    SourceRegionSpec::new(
+    SourceRegionSpec::data(
         "chapter_save_offer_label",
         0x0B,
         0x91AA,
         SAVE_OFFER_LABEL_BYTES,
     ),
-    SourceRegionSpec::new(
+    SourceRegionSpec::code(
         "calculate_regular_save_checksum",
         0x0B,
         0x9D52,
         REGULAR_SAVE_CHECKSUM_BYTES,
     ),
-    SourceRegionSpec::new(
+    SourceRegionSpec::code(
         "write_regular_file_one_checksum",
         0x0B,
         0x9AD0,
         WRITE_REGULAR_FILE_ONE_CHECKSUM_BYTES,
     ),
-    SourceRegionSpec::new(
+    SourceRegionSpec::code(
         "validate_regular_save_checksum",
         0x0B,
         0x9FA8,
         VALIDATE_REGULAR_SAVE_CHECKSUM_BYTES,
     ),
+    SourceRegionSpec::code(
+        "dispatch_outer_screen_state",
+        0x06,
+        0x8400,
+        DISPATCH_OUTER_SCREEN_STATE_BYTES,
+    ),
+    SourceRegionSpec::data(
+        "outer_screen_0d_handler_pointer",
+        0x06,
+        0x841F,
+        OUTER_SCREEN_0D_HANDLER_POINTER_BYTES,
+    ),
+    SourceRegionSpec::code(
+        "dispatch_chapter_transition_state",
+        0x06,
+        0xB5AC,
+        DISPATCH_CHAPTER_TRANSITION_STATE_BYTES,
+    ),
+    SourceRegionSpec::data(
+        "save_offer_state_pointers",
+        0x06,
+        0xB5C2,
+        SAVE_OFFER_STATE_POINTERS_BYTES,
+    ),
+    SourceRegionSpec::code(
+        "run_save_offer_choice_state",
+        0x06,
+        0xB6F3,
+        RUN_SAVE_OFFER_CHOICE_STATE_BYTES,
+    ),
+    SourceRegionSpec::code(
+        "close_save_offer_no_choice",
+        0x06,
+        0xB726,
+        CLOSE_SAVE_OFFER_NO_CHOICE_BYTES,
+    ),
+    SourceRegionSpec::code(
+        "enter_next_chapter_without_save",
+        0x06,
+        0xB737,
+        ENTER_NEXT_CHAPTER_WITHOUT_SAVE_BYTES,
+    ),
+    SourceRegionSpec::code(
+        "read_active_menu_selection",
+        0x0B,
+        0x9333,
+        READ_ACTIVE_MENU_SELECTION_BYTES,
+    ),
+    SourceRegionSpec::code(
+        "advance_menu_selection",
+        0x0B,
+        0x936C,
+        ADVANCE_MENU_SELECTION_BYTES,
+    ),
+    SourceRegionSpec::code(
+        "commit_menu_selection",
+        0x0B,
+        0x9391,
+        COMMIT_MENU_SELECTION_BYTES,
+    ),
 ];
+
+#[derive(Clone, Copy)]
+enum RegionKind {
+    Code,
+    Data,
+}
 
 #[derive(Clone, Copy)]
 struct SourceRegionSpec {
@@ -136,15 +236,37 @@ struct SourceRegionSpec {
     prg_bank: u8,
     cpu_address: u16,
     bytes: &'static [u8],
+    kind: RegionKind,
 }
 
 impl SourceRegionSpec {
-    const fn new(role: &'static str, prg_bank: u8, cpu_address: u16, bytes: &'static [u8]) -> Self {
+    const fn code(
+        role: &'static str,
+        prg_bank: u8,
+        cpu_address: u16,
+        bytes: &'static [u8],
+    ) -> Self {
         Self {
             role,
             prg_bank,
             cpu_address,
             bytes,
+            kind: RegionKind::Code,
+        }
+    }
+
+    const fn data(
+        role: &'static str,
+        prg_bank: u8,
+        cpu_address: u16,
+        bytes: &'static [u8],
+    ) -> Self {
+        Self {
+            role,
+            prg_bank,
+            cpu_address,
+            bytes,
+            kind: RegionKind::Data,
         }
     }
 }
@@ -158,6 +280,7 @@ struct ChapterTransitionReport {
     chapter_intro_contexts: ChapterIntroContextSummary,
     chapter_titles: ChapterTitleSummary,
     regular_save_reachability: RegularSaveReachability,
+    save_offer_no_branch: SaveOfferNoBranchContract,
     chapter_intro_runtime_samples: Vec<ChapterIntroRuntimeSample>,
     fixed_labels: Vec<FixedLabelBinding>,
     source_regions: Vec<SourceRegionBinding>,
@@ -267,6 +390,37 @@ struct RegularSaveReachability {
 }
 
 #[derive(Debug, Serialize)]
+struct SaveOfferNoBranchContract {
+    screen_role: &'static str,
+    outer_screen_state_address: u16,
+    outer_screen_state_address_hex: &'static str,
+    offer_outer_screen_state: u8,
+    offer_outer_screen_state_hex: &'static str,
+    main_state_address: u16,
+    main_state_address_hex: &'static str,
+    owned_main_state_sequence: [u8; 4],
+    owned_main_state_sequence_hex: [&'static str; 4],
+    menu_depth_address: u16,
+    menu_depth_address_hex: &'static str,
+    observed_menu_depth: u8,
+    active_selection_address: u16,
+    active_selection_address_hex: &'static str,
+    default_yes_selection: u8,
+    no_selection: u8,
+    committed_result_address: u16,
+    committed_result_address_hex: &'static str,
+    no_committed_result: u8,
+    no_branch_exit_outer_state: u8,
+    no_branch_exit_outer_state_hex: &'static str,
+    no_branch_blackout_chr_pair: ChrPair,
+    persistent_save_route_entered: bool,
+    next_role: &'static str,
+    stable_sample_offsets_frames: [u16; 8],
+    stable_sample_screenshot_sha256: &'static str,
+    runtime_evidence: &'static str,
+}
+
+#[derive(Debug, Serialize)]
 struct ChapterIntroRuntimeSample {
     sample_role: &'static str,
     chapter_number_one_based: u8,
@@ -296,6 +450,7 @@ struct FixedLabelBinding {
 #[derive(Debug, Serialize)]
 struct SourceRegionBinding {
     role: &'static str,
+    region_kind: &'static str,
     prg_bank: u8,
     prg_bank_hex: String,
     cpu_address: u16,
@@ -304,6 +459,7 @@ struct SourceRegionBinding {
     file_offset_hex: String,
     byte_count: usize,
     source_sha1: String,
+    typed_instructions: Vec<TypedInstructionBinding>,
 }
 
 #[derive(Debug, Serialize)]
@@ -376,6 +532,7 @@ fn build_report(rom: &Rom) -> Result<ChapterTransitionReport> {
         chapter_intro_contexts,
         chapter_titles,
         regular_save_reachability: regular_save_reachability(),
+        save_offer_no_branch: save_offer_no_branch_contract(),
         chapter_intro_runtime_samples: chapter_intro_runtime_samples(),
         fixed_labels: vec![
             FixedLabelBinding {
@@ -403,7 +560,7 @@ fn build_report(rom: &Rom) -> Result<ChapterTransitionReport> {
         next_universalization_gate: "chapter_transition_alternate_choice_and_failure_variants",
         unresolved: vec![
             "The chapter-one epilogue and save-complete dialogue use the main dialogue engine, but their dialogue source content is intentionally outside this public report.",
-            "The observed default-yes choices do not establish the save-offer or save-complete no-choice routes.",
+            "The save-offer no choice is source-bound and runtime-observed; the save-complete no-choice route remains unobserved.",
             "The accelerated continuous route establishes reachability but not baseline combat difficulty, defeat, or unfavorable branches.",
             "Chapter-two, chapter-eleven, and chapter-twelve intro samples do not generalize the remaining twenty-two chapters or all title lifetimes.",
         ],
@@ -542,6 +699,38 @@ fn regular_save_reachability() -> RegularSaveReachability {
     }
 }
 
+fn save_offer_no_branch_contract() -> SaveOfferNoBranchContract {
+    SaveOfferNoBranchContract {
+        screen_role: "chapter_save_offer",
+        outer_screen_state_address: 0x0024,
+        outer_screen_state_address_hex: "0x0024",
+        offer_outer_screen_state: 0x0D,
+        offer_outer_screen_state_hex: "0x0D",
+        main_state_address: 0x0084,
+        main_state_address_hex: "0x0084",
+        owned_main_state_sequence: [0x07, 0x08, 0x09, 0x00],
+        owned_main_state_sequence_hex: ["0x07", "0x08", "0x09", "0x00"],
+        menu_depth_address: 0x05CE,
+        menu_depth_address_hex: "0x05CE",
+        observed_menu_depth: 0x02,
+        active_selection_address: 0x7FF4,
+        active_selection_address_hex: "0x7FF4",
+        default_yes_selection: 0x01,
+        no_selection: 0x02,
+        committed_result_address: 0x05EB,
+        committed_result_address_hex: "0x05EB",
+        no_committed_result: 0x02,
+        no_branch_exit_outer_state: 0x01,
+        no_branch_exit_outer_state_hex: "0x01",
+        no_branch_blackout_chr_pair: chr_pair(0x1B, 0x1B, 0x18, 0x18),
+        persistent_save_route_entered: false,
+        next_role: "chapter_transition_blackout",
+        stable_sample_offsets_frames: [0, 7, 19, 43, 82, 171, 308, 565],
+        stable_sample_screenshot_sha256: "a05ea43bc1844701650cfee6d441862d16d60fc1f7f0035704ce15dbbcfb352c",
+        runtime_evidence: "with menu depth 02, Down changed only active selection slot 0x7FF4 from 01 to 02; A committed 02 to 0x05EB, main state advanced 07->08->09->00, bank 06:B76E wrote outer state 01, the no-save blackout used CHR 1B/1B + 18/18, and the next chapter map loaded without visiting the save-complete prompt",
+    }
+}
+
 fn chapter_intro_runtime_samples() -> Vec<ChapterIntroRuntimeSample> {
     vec![
         ChapterIntroRuntimeSample {
@@ -653,7 +842,7 @@ fn transition_screens() -> Vec<TransitionScreen> {
             preserved_original: &[],
             runtime_state: runtime_state(0x0D, "0x0D", 0x07, "0x07", None, None),
             observed_chr_pair: chr_pair(0x1B, 0x1B, 0x00, 0x18),
-            temporal_behavior: "the selection cursor may flash",
+            temporal_behavior: "the selected-no composite was pixel-stable at irregular offsets through 565 input-free frames",
             input_actions: &[
                 InputAction {
                     input: "up or down",
@@ -667,8 +856,14 @@ fn transition_screens() -> Vec<TransitionScreen> {
                     may_cause_persistent_gameplay_mutation: true,
                     next_role: "chapter_save_complete_continue_prompt",
                 },
+                InputAction {
+                    input: "A on the observed no choice",
+                    immediate_effect: "skip the save-complete prompt, close through main states 08 and 09, and enter the no-save blackout",
+                    may_cause_persistent_gameplay_mutation: false,
+                    next_role: "chapter_transition_blackout",
+                },
             ],
-            unresolved_focus: &["the unobserved no-choice route"],
+            unresolved_focus: &["remaining chapter-specific retained-map variants"],
         },
         TransitionScreen {
             sequence_order: 4,
@@ -702,7 +897,7 @@ fn transition_screens() -> Vec<TransitionScreen> {
         TransitionScreen {
             sequence_order: 5,
             screen_role: "chapter_transition_blackout",
-            entry_condition: "the observed default-yes continue choice leaves the save-complete prompt",
+            entry_condition: "the observed default-yes continue choice leaves the save-complete prompt, or the observed save-offer no choice skips that prompt",
             runtime_observed: true,
             input_behavior: "automatic",
             visible_components: &["full black frame"],
@@ -710,9 +905,12 @@ fn transition_screens() -> Vec<TransitionScreen> {
             preserved_original: &[],
             runtime_state: runtime_state(0x09, "0x09", 0x00, "0x00", None, None),
             observed_chr_pair: chr_pair(0x1A, 0x1A, 0x18, 0x18),
-            temporal_behavior: "the full-black transition advances without input",
+            temporal_behavior: "both observed full-black routes advance without input; the save route used outer state 09 and the no-save route wrote outer state 01",
             input_actions: &[],
-            unresolved_focus: &["remaining chapter-specific transition timing"],
+            unresolved_focus: &[
+                "remaining chapter-specific transition timing",
+                "the complete outer-state lifetime after the no-save route writes 01",
+            ],
         },
         TransitionScreen {
             sequence_order: 6,
@@ -783,9 +981,17 @@ fn bind_source_region(rom: &Rom, spec: SourceRegionSpec) -> Result<SourceRegionB
         .get(file_offset..end)
         .with_context(|| format!("{} source region is outside the ROM", spec.role))?;
     ensure!(actual == spec.bytes, "{} source bytes changed", spec.role);
+    let typed_instructions = match spec.kind {
+        RegionKind::Code => decode_rp2a03_sequence(actual, spec.cpu_address, spec.role)?,
+        RegionKind::Data => Vec::new(),
+    };
 
     Ok(SourceRegionBinding {
         role: spec.role,
+        region_kind: match spec.kind {
+            RegionKind::Code => "rp2a03_code",
+            RegionKind::Data => "data",
+        },
         prg_bank: spec.prg_bank,
         prg_bank_hex: format!("0x{:02X}", spec.prg_bank),
         cpu_address: spec.cpu_address,
@@ -794,6 +1000,7 @@ fn bind_source_region(rom: &Rom, spec: SourceRegionSpec) -> Result<SourceRegionB
         file_offset_hex: format!("0x{file_offset:05X}"),
         byte_count: spec.bytes.len(),
         source_sha1: sha1_hex(actual),
+        typed_instructions,
     })
 }
 
@@ -869,6 +1076,11 @@ mod tests {
                 .iter()
                 .any(|action| action.may_cause_persistent_gameplay_mutation)
         );
+        assert!(screens[2].input_actions.iter().any(|action| {
+            action.input.contains("no choice")
+                && !action.may_cause_persistent_gameplay_mutation
+                && action.next_role == "chapter_transition_blackout"
+        }));
         assert_eq!(
             [
                 screens[3].observed_chr_pair.left_fd,
@@ -899,10 +1111,54 @@ mod tests {
         assert_eq!(source_file_offset(0x0B, 0x9AD0).unwrap(), 0x2DAE0);
         assert_eq!(source_file_offset(0x0B, 0x9D52).unwrap(), 0x2DD62);
         assert_eq!(source_file_offset(0x0B, 0x9FA8).unwrap(), 0x2DFB8);
+        assert_eq!(source_file_offset(0x06, 0x8400).unwrap(), 0x18410);
+        assert_eq!(source_file_offset(0x06, 0xB6F3).unwrap(), 0x1B703);
+        assert_eq!(source_file_offset(0x06, 0xB737).unwrap(), 0x1B747);
+        assert_eq!(source_file_offset(0x0B, 0x9333).unwrap(), 0x2D343);
         assert_eq!(
             source_file_offset(0x0F, CHAPTER_TITLE_POINTER_TABLE_ADDRESS).unwrap(),
             0x3EE18
         );
+    }
+
+    #[test]
+    fn save_offer_no_choice_owns_a_distinct_close_and_blackout_route() {
+        let contract = save_offer_no_branch_contract();
+
+        assert_eq!(contract.offer_outer_screen_state, 0x0D);
+        assert_eq!(contract.owned_main_state_sequence, [0x07, 0x08, 0x09, 0x00]);
+        assert_eq!(contract.observed_menu_depth, 2);
+        assert_eq!(contract.active_selection_address, 0x7FF4);
+        assert_eq!(contract.no_selection, 2);
+        assert_eq!(contract.no_committed_result, 2);
+        assert_eq!(contract.no_branch_exit_outer_state, 1);
+        assert!(!contract.persistent_save_route_entered);
+        assert_eq!(contract.next_role, "chapter_transition_blackout");
+        assert_eq!(
+            [
+                contract.no_branch_blackout_chr_pair.left_fd,
+                contract.no_branch_blackout_chr_pair.left_fe,
+                contract.no_branch_blackout_chr_pair.right_fd,
+                contract.no_branch_blackout_chr_pair.right_fe,
+            ],
+            [0x1B, 0x1B, 0x18, 0x18]
+        );
+        assert_eq!(contract.stable_sample_offsets_frames.last(), Some(&565));
+    }
+
+    #[test]
+    fn chapter_transition_code_regions_use_typed_rp2a03_decode() {
+        for spec in SOURCE_REGIONS {
+            if matches!(spec.kind, RegionKind::Code) {
+                let instructions =
+                    decode_rp2a03_sequence(spec.bytes, spec.cpu_address, spec.role).unwrap();
+                assert!(
+                    !instructions.is_empty(),
+                    "{} has no instructions",
+                    spec.role
+                );
+            }
+        }
     }
 
     #[test]

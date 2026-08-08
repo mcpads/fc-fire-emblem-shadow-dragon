@@ -27,6 +27,7 @@ mod shop_flow;
 mod static_analysis;
 mod text_inventory;
 mod tracked;
+mod typed_source;
 mod unit_ui_text;
 
 use std::path::PathBuf;

@@ -152,6 +152,12 @@ pub(crate) const OBSERVED_CHR_PAIRS: &[ObservedChrPair] = &[
     ),
     pair(
         "chapter_transition_blackout",
+        PatternWindow::Left,
+        0x1B,
+        0x1B,
+    ),
+    pair(
+        "chapter_transition_blackout",
         PatternWindow::Right,
         0x18,
         0x18,
@@ -704,6 +710,34 @@ mod tests {
             .unwrap();
         assert_eq!(blackout.input_behavior, InputBehavior::Automatic);
         assert_eq!(blackout.translation_scope, TranslationScope::NoText);
+        assert!(
+            blackout
+                .known_focus
+                .iter()
+                .any(|focus| focus.contains("outer state 01") && focus.contains("1B/1B"))
+        );
+        assert!(OBSERVED_CHR_PAIRS.iter().any(|pair| {
+            pair.screen_role == "chapter_transition_blackout"
+                && pair.pattern_window == PatternWindow::Left
+                && pair.fd_source_page == 0x1B
+                && pair.fe_source_page == 0x1B
+        }));
+        let save_offer = chapter_screens
+            .iter()
+            .find(|screen| screen.screen_role == "chapter_save_offer")
+            .unwrap();
+        assert!(
+            save_offer
+                .known_focus
+                .iter()
+                .any(|focus| focus.contains("7FF4") && focus.contains("01 to 02"))
+        );
+        assert!(
+            save_offer
+                .unresolved_focus
+                .iter()
+                .all(|focus| !focus.contains("no-choice"))
+        );
         let intro = chapter_screens
             .iter()
             .find(|screen| screen.screen_role == "chapter_intro_title_dialogue_composite")

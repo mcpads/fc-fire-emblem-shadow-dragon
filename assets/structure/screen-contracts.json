@@ -11,14 +11,14 @@
     "known_focus": [
       "the accelerated ordinary-control chapter-eleven route established six chapter-transition screen lifetimes through the chapter-twelve intro",
       "the epilogue, NEXT STORY, save offer, save-complete prompt, blackout, and chapter-twelve intro have lifetime-specific CHR pairs",
-      "the observed default yes at the save offer performs a persistent save while the next default yes starts continuation"
+      "the observed default yes at the save offer performs a persistent save while the next default yes starts continuation",
+      "the save-offer no choice commits selection 02 and bypasses the save-complete prompt through a distinct 1B/1B + 18/18 automatic blackout"
     ],
     "unresolved_focus": [
-      "save-offer no branch",
       "save-complete no branch and remaining flashing phases",
       "baseline defeat and unfavorable routes with victory accelerations disabled or an explicitly adverse intervention"
     ],
-    "next_action": "restore a same-launch checkpoint before each consequential choice, bind the expected state change before input, observe both no-choice routes, and validate defeat or unfavorable branches separately without victory accelerations"
+    "next_action": "restore the same-launch checkpoint before the save-complete choice, bind its expected no-choice state change before input, and validate defeat or unfavorable branches separately without victory accelerations"
   },
   "screens": [
     {
@@ -293,16 +293,18 @@
       "runtime_observed": true,
       "input_behavior": "input_wait",
       "translation_scope": "japanese_only",
-      "temporal_behavior": "the yes-or-no selection cursor may flash over the retained map",
+      "temporal_behavior": "the selected-no composite remained pixel-stable at eight irregular offsets through 565 input-free frames",
       "known_focus": [
         "left 1B/1B and right 00/18 CHR pairs",
         "small centered Japanese save question, separate yes-or-no window, map, and unit sprites",
         "fixed-label index 32 composes the Japanese save question through bank 0B:8AE6",
         "main state 07 and outer state 0D own the offer lifetime",
-        "A on the observed default yes choice writes the chapter-clear save"
+        "menu depth 02 selects through active slot 7FF4; Down changed only that slot from 01 to 02",
+        "A on the observed default yes choice writes the chapter-clear save",
+        "A on selected no commits result 02 to 05EB, advances main states 07 to 08 to 09 to 00, and skips the save-complete prompt"
       ],
-      "unresolved_focus": ["unobserved no-choice route"],
-      "next_gate": "observe the no-choice route independently of the following completion prompt",
+      "unresolved_focus": ["remaining chapter-specific retained-map variants"],
+      "next_gate": "reuse the source-bound selection and close-state contract on another chapter",
       "contract_state": "observed_partial"
     },
     {
@@ -328,13 +330,14 @@
       "runtime_observed": true,
       "input_behavior": "automatic",
       "translation_scope": "no_text",
-      "temporal_behavior": "full-black automatic transition after the observed save-complete continue choice",
+      "temporal_behavior": "full-black automatic transition after either the observed save-complete continue choice or the save-offer no choice",
       "known_focus": [
         "left 1A/1A and right 18/18 CHR pairs",
         "main state 00 and outer state 09",
-        "no visible text and no input required before the next chapter intro"
+        "the save-offer no branch writes outer state 01 after clearing main state and uses left 1B/1B with right 18/18",
+        "no visible text and no input required before the next chapter intro or map"
       ],
-      "unresolved_focus": ["remaining chapter-specific transition timing"],
+      "unresolved_focus": ["remaining chapter-specific transition timing", "complete outer-state lifetime after the no-save route writes 01"],
       "next_gate": "retain this no-text lifetime boundary on another chapter transition",
       "contract_state": "observed_partial"
     },
