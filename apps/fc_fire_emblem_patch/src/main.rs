@@ -82,6 +82,18 @@ enum Command {
         #[arg(long, default_value = "out/battle-text-workset.json")]
         report: PathBuf,
     },
+    /// Expand mapper 165 PRG and embed the translated battle glyph atlas.
+    BuildBattleTextCacheBase {
+        source: PathBuf,
+        #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
+        fixed_workspace: PathBuf,
+        #[arg(long, default_value = "private/dialogue/battle-workspace.json")]
+        dialogue_workspace: PathBuf,
+        #[arg(long, default_value = "out/battle-text-cache-base.nes")]
+        output: PathBuf,
+        #[arg(long, default_value = "out/battle-text-cache-base.json")]
+        report: PathBuf,
+    },
     /// Inventory dialogue entry tables without emitting source dialogue bytes.
     AnalyzeDialogueStructure {
         source: PathBuf,
@@ -454,6 +466,13 @@ fn main() -> Result<()> {
                 summary.union_glyph_count,
                 summary.conservative_combination_upper_bound
             );
+        }
+        Command::BuildBattleTextCacheBase { source, fixed_workspace, dialogue_workspace, output, report } => {
+            let summary = mapper165::battle_text_cache_probe::build_battle_text_cache_base(
+                &source, &fixed_workspace, &dialogue_workspace, &output, &report)?;
+            println!("wrote {}", output.display()); println!("output SHA-1: {}", summary.output_sha1);
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!("battle glyph atlas: {} glyphs, {} bytes", summary.glyph_count, summary.glyph_atlas_byte_count);
         }
         Command::AnalyzeDialogueStructure { source, report } => {
             let summary = dialogue_inventory::analyze_dialogue_structure(&source, &report)?;
