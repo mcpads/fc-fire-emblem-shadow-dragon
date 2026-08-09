@@ -19,6 +19,8 @@ pub(crate) struct BattleDialogueValidationSummary {
     pub(crate) filled_line_count: usize,
     pub(crate) complete_line_count: usize,
     pub(crate) target_glyph_count: usize,
+    pub(crate) translated_record_storage_byte_count: usize,
+    pub(crate) preserved_unreferenced_storage_byte_count: usize,
     pub(crate) planned_storage_byte_count: usize,
     pub(crate) remaining_storage_byte_count: usize,
 }
@@ -164,7 +166,10 @@ pub(crate) fn validate_battle_dialogue_workspace(
     validate_workspace_binding(rom.data(), &workspace)?;
     let (filled_line_count, complete_line_count, target_glyph_count) =
         validate_translation_fields(&workspace)?;
-    let planned_storage_byte_count = planned_storage_byte_count(&workspace)?;
+    let translated_record_storage_byte_count = planned_storage_byte_count(&workspace)?;
+    let preserved_unreferenced_storage_byte_count = 16;
+    let planned_storage_byte_count = translated_record_storage_byte_count
+        + preserved_unreferenced_storage_byte_count;
     let physical_storage_byte_count = 1_168;
     ensure!(
         planned_storage_byte_count <= physical_storage_byte_count,
@@ -181,6 +186,8 @@ pub(crate) fn validate_battle_dialogue_workspace(
         filled_line_count,
         complete_line_count,
         target_glyph_count,
+        translated_record_storage_byte_count,
+        preserved_unreferenced_storage_byte_count,
         planned_storage_byte_count,
         remaining_storage_byte_count: physical_storage_byte_count - planned_storage_byte_count,
     })

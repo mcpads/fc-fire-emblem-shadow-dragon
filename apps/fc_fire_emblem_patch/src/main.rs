@@ -558,12 +558,14 @@ fn main() -> Result<()> {
             println!("validated {}", workspace.display());
             println!("workspace SHA-1: {}", summary.workspace_sha1);
             println!(
-                "battle dialogue translations: {} records, {} lines, {} filled, {} complete, {} target glyphs, {} planned bytes, {} bytes remaining",
+                "battle dialogue translations: {} records, {} lines, {} filled, {} complete, {} target glyphs, {} translated-record bytes + {} preserved bytes = {} planned bytes, {} bytes remaining",
                 summary.record_count,
                 summary.line_count,
                 summary.filled_line_count,
                 summary.complete_line_count,
                 summary.target_glyph_count,
+                summary.translated_record_storage_byte_count,
+                summary.preserved_unreferenced_storage_byte_count,
                 summary.planned_storage_byte_count,
                 summary.remaining_storage_byte_count
             );
