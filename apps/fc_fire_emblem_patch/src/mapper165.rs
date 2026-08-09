@@ -10,6 +10,7 @@ use crate::{
     static_analysis::find_absolute_write_candidates,
     tracked::TrackedImage,
 };
+pub(crate) mod dialogue_slice_probe;
 pub(crate) mod direct_chr_pairs;
 pub(crate) mod hangul_page_probe;
 mod options_page;

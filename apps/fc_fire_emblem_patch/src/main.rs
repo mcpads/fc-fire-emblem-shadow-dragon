@@ -212,6 +212,21 @@ enum Command {
         #[arg(long, default_value = "out/mapper165-hangul-page-probe.json")]
         report: PathBuf,
     },
+    /// Build one reviewed main-dialogue record as an end-to-end mapper 165 development probe.
+    BuildMainDialogueSliceProbe {
+        source: PathBuf,
+        #[arg(long, default_value = "private/dialogue/main-workspace.json")]
+        workspace: PathBuf,
+        #[arg(long, default_value = "chapter-intro-dialogue:000")]
+        record_id: String,
+        #[arg(
+            long,
+            default_value = "out/fire-emblem-fe1-main-dialogue-slice-probe.nes"
+        )]
+        output: PathBuf,
+        #[arg(long, default_value = "out/main-dialogue-slice-probe.json")]
+        report: PathBuf,
+    },
     /// Compare MMC4 and mapper 165 FD-trigger tile planes for observed CHR pairs.
     AnalyzeMapper165TriggerPlanes {
         source: PathBuf,
@@ -653,6 +668,29 @@ fn main() -> Result<()> {
             println!("options page pack SHA-1: {}", summary.page_pack_sha1);
             println!("roster page pack SHA-1: {}", summary.roster_page_pack_sha1);
             println!("tracked ROM writes: {}", summary.tracked_write_count);
+        }
+        Command::BuildMainDialogueSliceProbe {
+            source,
+            workspace,
+            record_id,
+            output,
+            report,
+        } => {
+            let summary = mapper165::dialogue_slice_probe::build_dialogue_slice_probe(
+                &source, &workspace, &record_id, &output, &report,
+            )?;
+            println!("wrote {}", output.display());
+            println!("output SHA-1: {}", summary.output_sha1);
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "dialogue slice: {} lines, {} unique glyphs, {} planned bytes, {} bytes remaining, {} tracked writes",
+                summary.translated_line_count,
+                summary.unique_glyph_count,
+                summary.planned_storage_byte_count,
+                summary.remaining_storage_byte_count,
+                summary.tracked_write_count
+            );
         }
         Command::AnalyzeMapper165TriggerPlanes { source, report } => {
             let summary =

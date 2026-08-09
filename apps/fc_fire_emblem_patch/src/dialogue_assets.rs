@@ -19,6 +19,7 @@ mod glyph_workset;
 mod layout_packing;
 mod markup;
 mod model;
+mod slice;
 mod source_asset;
 #[cfg(test)]
 mod tests;
@@ -32,6 +33,7 @@ pub use model::{
     DialogueLayoutPlanSummary, DialogueSourceAssetSummary, DialogueSourceRoundtripSummary,
     DialogueWorkspaceSummary, DialogueWorkspaceValidationSummary,
 };
+pub(crate) use slice::{MainDialogueSlicePlan, plan_main_dialogue_slice};
 use source_asset::*;
 use workspace::*;
 
