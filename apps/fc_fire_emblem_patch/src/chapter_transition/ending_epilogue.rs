@@ -1,6 +1,8 @@
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
+mod probe_plan;
+
 use crate::{
     dialogue_inventory::{
         TranslationSurfaceDialogueTableBinding,
@@ -18,6 +20,7 @@ use super::{
         ROSTER_RECORD_CAPACITY, ROSTER_RECORD_STRIDE,
     },
 };
+use probe_plan::{EndingEpilogueVariantObservationPlan, ending_epilogue_variant_observation_plan};
 
 const INITIAL_CURSOR: u8 = 0x35;
 const FIRST_CANDIDATE_ID: u8 = 0x35;
@@ -87,6 +90,7 @@ pub(super) struct EndingCharacterEpilogueTranslationSurface {
     routing_selector: u8,
     routing_selector_hex: &'static str,
     selector_flow: EndingEpilogueSelectorFlow,
+    variant_observation_plan: EndingEpilogueVariantObservationPlan,
     dialogue_literal_inventory: TranslationSurfaceLiteralInventory,
     dialogue_literal_inventory_scope: &'static str,
     selector_writer: CodeLocation,
@@ -271,6 +275,7 @@ pub(super) fn bind_ending_character_epilogue(
             completion_condition: "after candidate 0x01, the next decrement makes 0x773B negative and phase 0x0F jumps to ending phase 0x17",
             semantic_boundary: "the producer and gameplay evidence prove absent, inactive-or-defeated, and active branches; exact causes inside the inactive class, including whether every record means character death, still require runtime variant evidence",
         },
+        variant_observation_plan: ending_epilogue_variant_observation_plan(),
         dialogue_literal_inventory,
         dialogue_literal_inventory_scope: "all canonical first linear segments in selector tables 0x40 and 0x41; every routing-table transition targets the included direct epilogue table",
         selector_writer: location(0x04, 0xA17E),
