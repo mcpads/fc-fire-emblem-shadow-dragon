@@ -1,57 +1,27 @@
 {
   "schema": 2,
   "next_observation_gate": {
-    "gate_role": "sound_test_control_and_downstream_screen_partition",
-    "gate_kind": "screen_partition",
+    "gate_role": "battle_and_ending_translation_surface_binding",
+    "gate_kind": "screen_sequence",
     "focus_screen_roles": [
-      "sound_test"
+      "battle_animation",
+      "ending_chapter_record_scroll",
+      "ending_character_epilogue"
     ],
     "known_focus": [
-      "the terminal notice contains a source-bound up, down, left, right, up, A unlock that opens an observed sound test whose English labels and digits are preserved",
-      "all six sound-test controller masks are source-bound before input",
-      "Start and Select enter dedicated six-phase battle-test and thirty-phase ending state machines rather than reversible sound-test controls",
-      "source phase counts are kept outside the visible screen count until runtime partitions them"
+      "all six sound-test controls now have source and runtime evidence; Up and Down change the selector while A and B emit transient sound-event writes",
+      "Start automatically reuses shared battle-animation lifetimes instead of exposing one screen per outer source phase",
+      "Select automatically reaches preserved-English story and credits, Japanese chapter records and character epilogues, and a blinking preserved final signature without further input",
+      "visible lifetimes, not source phase counts or single-frame captures, define the screen roles"
     ],
     "unresolved_focus": [
-      "runtime effects of the source-bound Up, Down, A, and B controls",
-      "visible lifetime partition, text scope, CHR pairs, sprites, temporal phases, inputs, and exit behavior of the two downstream families"
+      "source writers, source tables, and glyph unions for the Japanese battle messages and labels",
+      "source writers and structural boundaries for Japanese chapter records and character epilogues",
+      "temporal union checks that retain English, Roman names, digits, portraits, sprites, and the blinking final signature"
     ],
-    "next_action": "restore a sound-test checkpoint and verify one source-bound control per branch; sample Start and Select downstream families without further input before defining any visible screen role"
+    "next_action": "bind each Japanese-bearing battle and ending lifetime to its source writer and text structure, then size Hangul page coverage while preserving every observed English, Roman-name, digit, portrait, sprite, and blinking phase"
   },
-  "unpartitioned_surface_families": [
-    {
-      "family_role": "battle_animation_test_sequence",
-      "surface_family": "battle_animation_test",
-      "entry_condition": "Start on sound_test advances dialogue substate 0C to 0D and dispatches bank 07 handler index 03 at AA2B",
-      "source_bound": true,
-      "known_focus": [
-        "the dedicated loop dispatches six source phases through state 7730 and does not return to the sound-test input handler",
-        "this path is separate from the ordinary gameplay battle_animation role even if visible assets later overlap",
-        "published behavior describes an indefinitely repeating debug battle sequence"
-      ],
-      "unresolved_focus": [
-        "visible phase-to-screen partition and temporal union",
-        "Japanese text, preserved Latin and digits, CHR pairs, sprites, and exit behavior"
-      ],
-      "next_gate": "enter only from a restorable sound-test checkpoint, observe without input first, and partition visible lifetimes before testing any downstream controls"
-    },
-    {
-      "family_role": "ending_sequence",
-      "surface_family": "ending",
-      "entry_condition": "Select on sound_test advances dialogue substate 0C to 0E, prepares ending memory, then substate 0F loops bank 04 handler index 04 at 9EC6",
-      "source_bound": true,
-      "known_focus": [
-        "bank 04 initializes states 7730..7733 and dispatches thirty source phases through state 7731",
-        "thirty source phases are not assumed to equal thirty visible screens",
-        "published behavior describes entry into the ending available at the current chapter progress"
-      ],
-      "unresolved_focus": [
-        "automatic, message, character epilogue, and credits screen partition",
-        "Japanese narrative targets, preserved Latin and digits, portraits, CHR pairs, temporal phases, inputs, and terminal behavior"
-      ],
-      "next_gate": "enter only from a restorable sound-test checkpoint and partition visible lifetimes with irregular no-input samples before advancing any message or credits screen"
-    }
-  ],
+  "unpartitioned_surface_families": [],
   "screens": [
     {
       "screen_role": "title",
@@ -267,10 +237,20 @@
       "runtime_observed": true,
       "input_behavior": "automatic",
       "translation_scope": "japanese_with_preserved_original_latin",
-      "temporal_behavior": "fully animated battle sequence",
-      "known_focus": ["left 02/06 then 06/06 and right 02/06 CHR pairs"],
-      "unresolved_focus": ["all battle UI text states", "damage and HP numeral preservation", "animation phase coverage"],
-      "next_gate": "inventory pre-battle, damage, defeat, and return surfaces separately",
+      "temporal_behavior": "the sound-test Start route automatically repeats shared battle lifetimes; its outer state reached 7730=05 by offset 19 and stayed there while the inner battle surfaces continued changing through offset 3000",
+      "known_focus": [
+        "left 02/06 then 06/06 and right 02/06 CHR pairs on the ordinary gameplay route",
+        "the source-bound Start route enters substate 0D and reveals transition blank, one- and two-unit panels, forecast, strike, damage, critical, defeat, EXP, and subsequent battle-pair lifetimes without further input",
+        "Japanese unit names, weapons, forecast labels, strike messages, damage messages, critical messages, and result messages share the battle surface",
+        "original LV, HIT, EXP, HP bars, percentages, damage values, and other digits remain preservation targets",
+        "six outer test phases do not equal six visible screens; the visible sequence is owned by the shared inner battle engine"
+      ],
+      "unresolved_focus": [
+        "source writers and text structures for every observed Japanese label and message lifetime",
+        "complete CHR, sprite, and animation-phase union across ordinary and debug battle pairs",
+        "defeat and unfavorable battle variants needed by the final regression route"
+      ],
+      "next_gate": "bind the observed unit-panel, forecast, strike, damage, critical, defeat, and EXP lifetimes to their shared source writers before budgeting Hangul pages",
       "contract_state": "observed_partial"
     },
     {
@@ -382,19 +362,104 @@
       "runtime_observed": true,
       "input_behavior": "input_wait",
       "translation_scope": "preserved_original_only",
-      "temporal_behavior": "substate 0B cleared the prior composition and substate 0C displayed the sound test without further input",
+      "temporal_behavior": "substate 0B cleared the prior composition and substate 0C displayed the sound test without further input; its original-English labels remain stable while the selected values change",
       "known_focus": [
         "left 1C/1C and right 00/18 CHR shadow pairs",
         "black background, original English SOUND TEST MODE and interface labels, and sound-number digits",
         "the hidden sequence was source-bound before runtime execution",
-        "input byte 18 binds Up and Down to sound number 775C, A and B to sound-event writes at 06F0..06F7, Start to battle_animation_test_sequence, and Select to ending_sequence",
-        "Start and Select enter dedicated downstream state machines and do not behave like reversible sound-number controls"
+        "Up changed 775C from 00 to 01 and visibly displayed sound 1; Down wrapped 00 to 50 and visibly displayed decimal 80",
+        "A at selector 01 transiently wrote 02 to 06F0 and B wrote 01 to 06F0 at source PC 9C3D; the audio consumer clears these bytes before ordinary frozen-frame reads",
+        "Start advanced substate 0C to 0D and entered the automatic repeating shared battle-animation surface",
+        "Select advanced substate 0C to 0E and then 0F, and the complete ending ran automatically to terminal phase 1D"
+      ],
+      "unresolved_focus": [],
+      "next_gate": "retain the sound test as a preserved-original regression surface while source-binding the Japanese-bearing shared battle and ending roles",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "ending_opening_and_cast_scroll",
+      "surface_family": "ending",
+      "runtime_observed": true,
+      "input_behavior": "automatic",
+      "translation_scope": "preserved_original_only",
+      "temporal_behavior": "phase 7731=01 automatically scrolls the original-English ending text, CAST label, and Roman character names; no additional input was issued",
+      "known_focus": [
+        "left 1C/1C and right 00/00 CHR shadow pairs",
+        "original English story text, CAST label, and Roman character names are preservation targets",
+        "irregular samples from offsets 171 through 6500 cover text emergence, full paragraphs, and early and late cast names"
+      ],
+      "unresolved_focus": ["complete English scroll-phase glyph union and transition into the chapter records"],
+      "next_gate": "retain as a preserved-original temporal regression surface",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "ending_chapter_record_scroll",
+      "surface_family": "ending",
+      "runtime_observed": true,
+      "input_behavior": "automatic",
+      "translation_scope": "japanese_with_preserved_original_latin",
+      "temporal_behavior": "phase 7731=01 continues automatically into the Japanese chapter-record list without an input or state change",
+      "known_focus": [
+        "left 1C/1C and right 00/00 CHR shadow pairs",
+        "Japanese chapter titles and the Japanese turn unit are translation targets while chapter and turn digits remain preserved",
+        "offsets 8000, 10000, and 12500 cover early, middle, and late chapter records"
       ],
       "unresolved_focus": [
-        "runtime effects of the source-bound sound-number and event controls",
-        "visible screen lifetimes inside the unpartitioned Start and Select downstream families"
+        "source writer and table boundaries for Japanese chapter records without emitting bulk narrative content",
+        "complete record-list glyph union and transition into staff credits"
       ],
-      "next_gate": "runtime-check only the already source-bound control being tested and keep all English labels and digits unchanged",
+      "next_gate": "bind the Japanese chapter-record writer and structure while preserving chapter and turn digits",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "ending_staff_credits",
+      "surface_family": "ending",
+      "runtime_observed": true,
+      "input_behavior": "automatic",
+      "translation_scope": "preserved_original_only",
+      "temporal_behavior": "the no-input ending advanced to phase 7731=08 and displayed English staff roles and Roman names automatically",
+      "known_focus": [
+        "left 1C/1C and right 00/00 CHR shadow pairs",
+        "original English role labels and Roman staff names remain unchanged",
+        "phase 08 was visible at offset 15000 before the route advanced automatically to character epilogues"
+      ],
+      "unresolved_focus": ["complete staff-role phase union and transitions between the thirty source phases"],
+      "next_gate": "retain as a preserved-original temporal regression surface",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "ending_character_epilogue",
+      "surface_family": "ending",
+      "runtime_observed": true,
+      "input_behavior": "automatic",
+      "translation_scope": "japanese_only",
+      "temporal_behavior": "phase 7731=10 automatically cycles portrait and Japanese epilogue compositions without input",
+      "known_focus": [
+        "observed left CHR shadow pairs include 1D/1D, 10/10, and 13/13 with right 00/00",
+        "portrait, Japanese character name, and Japanese epilogue lines change as one automatic lifetime",
+        "offsets 18000, 18251, 18703, and 19037 visibly cover distinct characters and portrait-page changes"
+      ],
+      "unresolved_focus": [
+        "source pointer, writer, portrait, and temporal union for every character epilogue",
+        "complete epilogue content and translations remain outside this structural screen contract"
+      ],
+      "next_gate": "bind reusable epilogue pointer and writer structure without folding bulk narrative work into the screen contract",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "ending_final_signature",
+      "surface_family": "ending",
+      "runtime_observed": true,
+      "input_behavior": "automatic",
+      "translation_scope": "preserved_original_only",
+      "temporal_behavior": "terminal phase 7731=1D alternates the original signature and copyright with full-black frames indefinitely without input",
+      "known_focus": [
+        "left 1C/1C and right 18/00 CHR shadow pairs",
+        "original graphical signature, copyright symbol, 1990 digits, and Nintendo label remain unchanged",
+        "offsets 21000 and 28000 show the signature while offsets 24000 and 33000 show the complementary blank phase"
+      ],
+      "unresolved_focus": [],
+      "next_gate": "retain both visible and blank phases in ending regression captures",
       "contract_state": "observed_partial"
     },
     {

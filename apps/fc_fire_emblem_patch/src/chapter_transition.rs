@@ -754,7 +754,7 @@ struct SoundTestControlContract {
     sound_event_base_address_hex: &'static str,
     sound_event_slot_count: u8,
     controls: Vec<SoundTestControl>,
-    downstream_families: Vec<UnpartitionedDownstreamFamily>,
+    downstream_families: Vec<DownstreamFamilyContract>,
     controls_runtime_observed: bool,
     translation_handling: &'static str,
     proof_boundary: &'static str,
@@ -771,7 +771,7 @@ struct SoundTestControl {
 }
 
 #[derive(Debug, Serialize)]
-struct UnpartitionedDownstreamFamily {
+struct DownstreamFamilyContract {
     family_role: &'static str,
     entry_dialogue_substate: u8,
     prg_bank: u8,
@@ -786,6 +786,7 @@ struct UnpartitionedDownstreamFamily {
     static_flow: &'static str,
     runtime_observed: bool,
     screen_partition_status: &'static str,
+    visible_screen_roles: &'static [&'static str],
     translation_scope_status: &'static str,
 }
 
@@ -895,7 +896,7 @@ fn build_report(rom: &Rom) -> Result<ChapterTransitionReport> {
             translation_direction: "Japanese to Korean",
             preserve_existing_english_and_digits: true,
             dialogue_content_emitted: false,
-            proof_boundary: "source-bound chapter context, title, NEXT STORY, both save-choice branches, regular-save checksum producers, terminal-notice sound-test unlock, all sound-test controller effects, and the battle-test and ending state-machine entries plus the runtime-observed chapter-one-to-two sequence, chapter-eleven intro reachability, and continuous accelerated chapter-eleven-victory-to-chapter-twelve-intro route; no dialogue source, translation, or ROM mutation",
+            proof_boundary: "source-bound chapter context, title, NEXT STORY, both save-choice branches, regular-save checksum producers, terminal-notice sound-test unlock, all sound-test controller effects, and the battle-test and ending state machines; runtime observes every sound-test control, the repeating shared battle lifetimes, and the automatic mixed-language ending through its blinking terminal phase, plus the chapter-one-to-two sequence, chapter-eleven intro reachability, and continuous accelerated chapter-eleven-victory-to-chapter-twelve-intro route; no dialogue source, translation, or ROM mutation",
         },
         observed_screens: transition_screens(),
         chapter_intro_contexts,
@@ -928,11 +929,11 @@ fn build_report(rom: &Rom) -> Result<ChapterTransitionReport> {
             },
         ],
         source_regions,
-        next_universalization_gate: "sound_test_control_and_downstream_screen_partition",
+        next_universalization_gate: "battle_and_ending_translation_surface_binding",
         unresolved: vec![
             "The chapter-one epilogue and save-complete dialogue use the main dialogue engine, but their dialogue source content is intentionally outside this public report.",
             "The save-offer no choice and save-complete no choice are source-bound and runtime-observed; the latter opens a terminal power-off notice with a source-bound sound-test unlock.",
-            "Every sound-test control effect and both downstream state-machine entries are source-bound, but no control or downstream visible lifetime has been runtime-observed yet.",
+            "Every sound-test control and both downstream state machines are source-bound and runtime-observed; Start reuses the shared battle-animation lifetimes, while Select partitions the automatic ending into preserved opening-and-cast, Japanese chapter-record, preserved staff, Japanese epilogue, and preserved final-signature roles.",
             "The accelerated continuous route establishes reachability but not baseline combat difficulty, defeat, or unfavorable branches.",
             "Chapter-two, chapter-eleven, and chapter-twelve intro samples do not generalize the remaining twenty-two chapters or all title lifetimes.",
         ],
@@ -1209,7 +1210,7 @@ fn sound_test_control_contract() -> SoundTestControlContract {
             },
         ],
         downstream_families: vec![
-            UnpartitionedDownstreamFamily {
+            DownstreamFamilyContract {
                 family_role: "battle_animation_test_sequence",
                 entry_dialogue_substate: 0x0D,
                 prg_bank: 0x07,
@@ -1222,11 +1223,12 @@ fn sound_test_control_contract() -> SoundTestControlContract {
                 phase_state_address_hex: "0x7730",
                 phase_pointer_count: BATTLE_ANIMATION_TEST_PHASE_POINTERS_BYTES.len() / 2,
                 static_flow: "the bank handler runs a dedicated loop and dispatches six source phases from 0x7730",
-                runtime_observed: false,
-                screen_partition_status: "unpartitioned until visible phase lifetimes and any inputs are observed",
-                translation_scope_status: "unresolved; do not infer it from the ordinary battle-animation screen",
+                runtime_observed: true,
+                screen_partition_status: "the six source phases reach 0x7730=0x05 before the visible battle sequence; the remaining lifetimes reuse the shared battle_animation role rather than forming six screens",
+                visible_screen_roles: &["battle_animation"],
+                translation_scope_status: "Japanese battle labels and messages are translation targets; existing Latin abbreviations and digits remain preserved",
             },
-            UnpartitionedDownstreamFamily {
+            DownstreamFamilyContract {
                 family_role: "ending_sequence",
                 entry_dialogue_substate: 0x0E,
                 prg_bank: 0x04,
@@ -1239,14 +1241,21 @@ fn sound_test_control_contract() -> SoundTestControlContract {
                 phase_state_address_hex: "0x7731",
                 phase_pointer_count: ENDING_SEQUENCE_PHASE_POINTERS_BYTES.len() / 2,
                 static_flow: "substate 0x0E prepares ending memory; substate 0x0F loops bank 0x04 handler 0x04, which initializes and dispatches thirty source phases from 0x7731",
-                runtime_observed: false,
-                screen_partition_status: "unpartitioned until automatic, message, epilogue, and credits lifetimes are observed",
-                translation_scope_status: "unresolved; Japanese narrative text, preserved Latin, and credits must be classified per visible lifetime",
+                runtime_observed: true,
+                screen_partition_status: "the no-input route partitions phase 0x01 into a preserved opening-and-cast scroll and a Japanese-bearing chapter-record scroll, followed by preserved staff credits, phase-0x10 Japanese character epilogues, and the phase-0x1D blinking final signature",
+                visible_screen_roles: &[
+                    "ending_opening_and_cast_scroll",
+                    "ending_chapter_record_scroll",
+                    "ending_staff_credits",
+                    "ending_character_epilogue",
+                    "ending_final_signature",
+                ],
+                translation_scope_status: "translate Japanese chapter records and character epilogues only; preserve the original English story, cast, staff, signature, copyright, Roman names, and digits",
             },
         ],
-        controls_runtime_observed: false,
+        controls_runtime_observed: true,
         translation_handling: "preserve every original English label and digit on the sound-test screen",
-        proof_boundary: "source-binds every controller mask and the two downstream state-machine entries; no sound-test control or downstream family has yet been executed in this contract",
+        proof_boundary: "runtime verifies selector wrap, transient A and B sound-event writes, Start's repeating shared battle lifetimes, and Select's automatic mixed-language ending through its blinking terminal phase; source content and translation remain outside this structural contract",
     }
 }
 
@@ -1891,7 +1900,7 @@ mod tests {
     }
 
     #[test]
-    fn sound_test_controls_bind_two_unpartitioned_downstream_families() {
+    fn sound_test_controls_bind_two_runtime_partitioned_downstream_families() {
         let contract = sound_test_control_contract();
 
         assert_eq!(contract.sound_number_address, 0x775C);
@@ -1923,6 +1932,8 @@ mod tests {
         assert_eq!(battle_test.bank_handler_index, 0x03);
         assert_eq!(battle_test.entry_point, 0xAA2B);
         assert_eq!(battle_test.phase_pointer_count, 6);
+        assert!(battle_test.runtime_observed);
+        assert_eq!(battle_test.visible_screen_roles, ["battle_animation"]);
         let ending = contract
             .downstream_families
             .iter()
@@ -1933,7 +1944,18 @@ mod tests {
         assert_eq!(ending.bank_handler_index, 0x04);
         assert_eq!(ending.entry_point, 0x9EC6);
         assert_eq!(ending.phase_pointer_count, 30);
-        assert!(!contract.controls_runtime_observed);
+        assert!(ending.runtime_observed);
+        assert_eq!(
+            ending.visible_screen_roles,
+            [
+                "ending_opening_and_cast_scroll",
+                "ending_chapter_record_scroll",
+                "ending_staff_credits",
+                "ending_character_epilogue",
+                "ending_final_signature",
+            ]
+        );
+        assert!(contract.controls_runtime_observed);
     }
 
     #[test]

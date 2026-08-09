@@ -159,6 +159,58 @@ pub(crate) const OBSERVED_CHR_PAIRS: &[ObservedChrPair] = &[
     pair("sound_test", PatternWindow::Left, 0x1C, 0x1C),
     pair("sound_test", PatternWindow::Right, 0x00, 0x18),
     pair(
+        "ending_opening_and_cast_scroll",
+        PatternWindow::Left,
+        0x1C,
+        0x1C,
+    ),
+    pair(
+        "ending_opening_and_cast_scroll",
+        PatternWindow::Right,
+        0x00,
+        0x00,
+    ),
+    pair(
+        "ending_chapter_record_scroll",
+        PatternWindow::Left,
+        0x1C,
+        0x1C,
+    ),
+    pair(
+        "ending_chapter_record_scroll",
+        PatternWindow::Right,
+        0x00,
+        0x00,
+    ),
+    pair("ending_staff_credits", PatternWindow::Left, 0x1C, 0x1C),
+    pair("ending_staff_credits", PatternWindow::Right, 0x00, 0x00),
+    pair(
+        "ending_character_epilogue",
+        PatternWindow::Left,
+        0x1D,
+        0x1D,
+    ),
+    pair(
+        "ending_character_epilogue",
+        PatternWindow::Left,
+        0x10,
+        0x10,
+    ),
+    pair(
+        "ending_character_epilogue",
+        PatternWindow::Left,
+        0x13,
+        0x13,
+    ),
+    pair(
+        "ending_character_epilogue",
+        PatternWindow::Right,
+        0x00,
+        0x00,
+    ),
+    pair("ending_final_signature", PatternWindow::Left, 0x1C, 0x1C),
+    pair("ending_final_signature", PatternWindow::Right, 0x18, 0x00),
+    pair(
         "chapter_transition_blackout",
         PatternWindow::Left,
         0x1A,
@@ -631,26 +683,21 @@ mod tests {
     fn registry_covers_every_observed_chr_pair() {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
 
-        assert_eq!(report.screen_count, 40);
-        assert_eq!(report.unpartitioned_surface_family_count, 2);
-        assert_eq!(report.runtime_observed_screen_count, 40);
-        assert_eq!(report.chr_pair_observed_screen_count, 37);
-        assert_eq!(report.mixed_original_latin_screen_count, 18);
-        assert_eq!(report.preserved_original_only_screen_count, 2);
+        assert_eq!(report.screen_count, 45);
+        assert_eq!(report.unpartitioned_surface_family_count, 0);
+        assert_eq!(report.runtime_observed_screen_count, 45);
+        assert_eq!(report.chr_pair_observed_screen_count, 42);
+        assert_eq!(report.mixed_original_latin_screen_count, 19);
+        assert_eq!(report.preserved_original_only_screen_count, 5);
         assert_eq!(report.page_switch_verified_screen_count, 1);
         assert_eq!(report.mixed_text_page_verified_screen_count, 1);
-        assert_eq!(
-            report.unresolved_surface_families,
-            ["battle_animation_test", "ending"]
-        );
-        assert!(report
-            .unpartitioned_surface_families
-            .iter()
-            .any(|family| family.family_role == "ending_sequence"
-                && family
-                    .known_focus
-                    .iter()
-                    .any(|focus| focus.contains("thirty"))));
+        assert!(report.unresolved_surface_families.is_empty());
+        assert!(report.unpartitioned_surface_families.is_empty());
+        assert!(report.screens.iter().any(|screen| {
+            screen.screen_role == "ending_character_epilogue"
+                && screen.runtime_observed
+                && screen.input_behavior == InputBehavior::Automatic
+        }));
     }
 
     #[test]
@@ -698,15 +745,19 @@ mod tests {
 
         assert_eq!(
             report.next_observation_gate.gate_role,
-            "sound_test_control_and_downstream_screen_partition"
+            "battle_and_ending_translation_surface_binding"
         );
         assert_eq!(
             report.next_observation_gate.gate_kind,
-            ObservationGateKind::ScreenPartition
+            ObservationGateKind::ScreenSequence
         );
         assert_eq!(
             report.next_observation_gate.focus_screen_roles,
-            ["sound_test"]
+            [
+                "battle_animation",
+                "ending_chapter_record_scroll",
+                "ending_character_epilogue",
+            ]
         );
         assert!(report
             .next_observation_gate
@@ -725,7 +776,7 @@ mod tests {
     #[test]
     fn observation_gate_cannot_masquerade_as_a_screen_role() {
         let invalid_registry = REGISTRY_JSON.replacen(
-            "\"gate_role\": \"sound_test_control_and_downstream_screen_partition\"",
+            "\"gate_role\": \"battle_and_ending_translation_surface_binding\"",
             "\"gate_role\": \"title\"",
             1,
         );
@@ -737,17 +788,39 @@ mod tests {
     }
 
     #[test]
-    fn unpartitioned_family_cannot_masquerade_as_a_screen_role() {
-        let invalid_registry = REGISTRY_JSON.replacen(
-            "\"family_role\": \"ending_sequence\"",
-            "\"family_role\": \"title\"",
-            1,
-        );
+    fn ending_lifetimes_keep_translation_scopes_and_terminal_blink_distinct() {
+        let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
+        let ending = report
+            .screens
+            .iter()
+            .filter(|screen| screen.surface_family == "ending")
+            .collect::<Vec<_>>();
 
-        let error = build_report(&invalid_registry, OBSERVED_CHR_PAIRS)
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("masquerades as a screen role"));
+        assert_eq!(ending.len(), 5);
+        assert!(ending.iter().any(|screen| {
+            screen.screen_role == "ending_opening_and_cast_scroll"
+                && screen.translation_scope == TranslationScope::PreservedOriginalOnly
+        }));
+        assert!(ending.iter().any(|screen| {
+            screen.screen_role == "ending_chapter_record_scroll"
+                && screen.translation_scope
+                    == TranslationScope::JapaneseWithPreservedOriginalLatin
+        }));
+        assert!(ending.iter().any(|screen| {
+            screen.screen_role == "ending_staff_credits"
+                && screen.translation_scope == TranslationScope::PreservedOriginalOnly
+        }));
+        assert!(ending.iter().any(|screen| {
+            screen.screen_role == "ending_character_epilogue"
+                && screen.translation_scope == TranslationScope::JapaneseOnly
+        }));
+        assert!(ending.iter().any(|screen| {
+            screen.screen_role == "ending_final_signature"
+                && screen
+                    .temporal_behavior
+                    .contains("alternates the original signature")
+                && screen.unresolved_focus.is_empty()
+        }));
     }
 
     #[test]
