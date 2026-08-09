@@ -298,6 +298,21 @@ pub(crate) struct BattleDialogueRecordStorageReport {
     pub(crate) literal_file_offsets: Vec<usize>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct BattleDialogueTranslationRecord {
+    pub(crate) table_id: &'static str,
+    pub(crate) source_prg_bank: u8,
+    pub(crate) canonical_entry_index: usize,
+    pub(crate) entry_indices: Vec<usize>,
+    pub(crate) pointer_cpu_address: u16,
+    pub(crate) pointer_file_offsets: Vec<usize>,
+    pub(crate) file_offset: usize,
+    pub(crate) end_file_offset_exclusive: usize,
+    pub(crate) storage_sha1: String,
+    pub(crate) header_hex: String,
+    pub(crate) literal_file_offsets: Vec<usize>,
+}
+
 #[derive(Debug, Serialize)]
 pub(crate) struct BattleDialogueRecordStorageSummary {
     pub(crate) pointer_referenced_record_count: usize,

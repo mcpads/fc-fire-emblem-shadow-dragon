@@ -85,6 +85,65 @@ pub(crate) fn inspect_main_dialogue_graph(source: &[u8]) -> Result<MainDialogueG
     Ok(build_report(source)?.main_dialogue_graph)
 }
 
+pub(crate) fn inspect_battle_dialogue_translation_records(
+    source: &[u8],
+) -> Result<Vec<BattleDialogueTranslationRecord>> {
+    let report = build_report(source)?;
+    let table = report
+        .tables
+        .iter()
+        .find(|table| table.id == BATTLE_DIALOGUE_TABLE_ID)
+        .context("battle-dialogue table is absent")?;
+    let mut entry_indices_by_pointer = BTreeMap::<u16, Vec<usize>>::new();
+    for entry in &table.entries {
+        entry_indices_by_pointer
+            .entry(entry.pointer_cpu_address)
+            .or_default()
+            .push(entry.index);
+    }
+
+    let mut records = Vec::new();
+    for entry in &table.entries {
+        let entry_indices = &entry_indices_by_pointer[&entry.pointer_cpu_address];
+        if entry_indices[0] != entry.index {
+            continue;
+        }
+        let storage = entry
+            .battle_record_storage
+            .as_ref()
+            .context("canonical battle-dialogue entry has no storage report")?;
+        let pointer_file_offsets = entry_indices
+            .iter()
+            .map(|index| table.pointer_table_file_offset + index * 2)
+            .collect::<Vec<_>>();
+        records.push(BattleDialogueTranslationRecord {
+            table_id: table.id,
+            source_prg_bank: table.source_prg_bank,
+            canonical_entry_index: entry.index,
+            entry_indices: entry_indices.clone(),
+            pointer_cpu_address: entry.pointer_cpu_address,
+            pointer_file_offsets,
+            file_offset: storage.file_offset,
+            end_file_offset_exclusive: storage.end_file_offset_exclusive,
+            storage_sha1: storage.storage_sha1.clone(),
+            header_hex: storage.header_hex.clone(),
+            literal_file_offsets: storage.literal_file_offsets.clone(),
+        });
+    }
+    ensure!(
+        records.len() == 28,
+        "battle-dialogue translation record count changed"
+    );
+    records.sort_by_key(|record| record.file_offset);
+    ensure!(
+        records
+            .windows(2)
+            .all(|pair| pair[0].file_offset < pair[1].file_offset),
+        "battle-dialogue translation record storage overlaps or aliases"
+    );
+    Ok(records)
+}
+
 pub(crate) fn inspect_chapter_intro_contexts(
     source: &[u8],
 ) -> Result<Vec<ChapterIntroContextBinding>> {

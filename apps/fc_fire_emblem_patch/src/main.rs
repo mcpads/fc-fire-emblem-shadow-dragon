@@ -137,6 +137,12 @@ enum Command {
         #[arg(long, default_value = "private/dialogue/main-workspace.json")]
         output: PathBuf,
     },
+    /// Create a private Japanese-to-Korean battle-dialogue translation workspace.
+    ExtractBattleDialogueWorkspace {
+        source: PathBuf,
+        #[arg(long, default_value = "private/dialogue/battle-workspace.json")]
+        output: PathBuf,
+    },
     /// Validate private translations without encoding or writing a ROM.
     ValidateMainDialogueWorkspace {
         source: PathBuf,
@@ -519,6 +525,18 @@ fn main() -> Result<()> {
                 summary.line_count,
                 summary.safe_japanese_source_byte_count,
                 summary.blocked_line_count,
+                summary.preserved_translation_line_count
+            );
+        }
+        Command::ExtractBattleDialogueWorkspace { source, output } => {
+            let summary = dialogue_assets::extract_battle_dialogue_workspace(&source, &output)?;
+            println!("wrote {}", output.display());
+            println!("workspace SHA-1: {}", summary.workspace_sha1);
+            println!(
+                "battle dialogue workspace: {} records, {} lines, {} Japanese source bytes, {} preserved translations",
+                summary.record_count,
+                summary.line_count,
+                summary.japanese_source_byte_count,
                 summary.preserved_translation_line_count
             );
         }
