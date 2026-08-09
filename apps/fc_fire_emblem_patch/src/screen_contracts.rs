@@ -788,7 +788,7 @@ mod tests {
     }
 
     #[test]
-    fn ending_lifetimes_keep_translation_scopes_and_terminal_blink_distinct() {
+    fn ending_lifetimes_keep_translation_scopes_and_static_terminal_distinct() {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
         let ending = report
             .screens
@@ -818,7 +818,7 @@ mod tests {
             screen.screen_role == "ending_final_signature"
                 && screen
                     .temporal_behavior
-                    .contains("alternates the original signature")
+                    .contains("keeps the original signature")
                 && screen.unresolved_focus.is_empty()
         }));
     }

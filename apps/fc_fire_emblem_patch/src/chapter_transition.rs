@@ -1248,7 +1248,7 @@ fn build_report(rom: &Rom) -> Result<ChapterTransitionReport> {
             translation_direction: "Japanese to Korean",
             preserve_existing_english_and_digits: true,
             dialogue_content_emitted: false,
-            proof_boundary: "source-bound chapter context, title, NEXT STORY, both save-choice branches, regular-save checksum producers, terminal-notice sound-test unlock, all sound-test controller effects, and the battle-test and ending state machines; runtime observes every sound-test control, the repeating shared battle lifetimes, and the automatic mixed-language ending through its blinking terminal phase, plus the chapter-one-to-two sequence, chapter-eleven intro reachability, and continuous accelerated chapter-eleven-victory-to-chapter-twelve-intro route; no dialogue source, translation, or ROM mutation",
+            proof_boundary: "source-bound chapter context, title, NEXT STORY, both save-choice branches, regular-save checksum producers, terminal-notice sound-test unlock, all sound-test controller effects, and the battle-test and ending state machines; runtime observes every sound-test control, the repeating shared battle lifetimes, and the automatic mixed-language ending through its static terminal phase, plus the chapter-one-to-two sequence, chapter-eleven intro reachability, and continuous accelerated chapter-eleven-victory-to-chapter-twelve-intro route; no dialogue source, translation, or ROM mutation",
         },
         observed_screens: transition_screens(),
         chapter_intro_contexts,
@@ -1953,7 +1953,7 @@ fn sound_test_control_contract() -> SoundTestControlContract {
                 phase_pointer_count: ENDING_SEQUENCE_PHASE_POINTERS_BYTES.len() / 2,
                 static_flow: "substate 0x0E prepares ending memory; substate 0x0F loops bank 0x04 handler 0x04, which initializes and dispatches thirty source phases from 0x7731",
                 runtime_observed: true,
-                screen_partition_status: "the no-input route partitions phase 0x01 into a preserved opening-and-cast scroll and a Japanese-bearing chapter-record scroll, followed by preserved staff credits, phase-0x10 Japanese character epilogues, and the phase-0x1D blinking final signature",
+                screen_partition_status: "the no-input route partitions phase 0x01 into a preserved opening-and-cast scroll and a Japanese-bearing chapter-record scroll, followed by preserved staff credits, phase-0x10 Japanese character epilogues, and the phase-0x1D static final signature",
                 visible_screen_roles: &[
                     "ending_opening_and_cast_scroll",
                     "ending_chapter_record_scroll",
@@ -1966,7 +1966,7 @@ fn sound_test_control_contract() -> SoundTestControlContract {
         ],
         controls_runtime_observed: true,
         translation_handling: "preserve every original English label and digit on the sound-test screen",
-        proof_boundary: "runtime verifies selector wrap, transient A and B sound-event writes, Start's repeating shared battle lifetimes, and Select's automatic mixed-language ending through its blinking terminal phase; source content and translation remain outside this structural contract",
+        proof_boundary: "runtime verifies selector wrap, transient A and B sound-event writes, Start's repeating shared battle lifetimes, and Select's automatic mixed-language ending through its static terminal phase; source content and translation remain outside this structural contract",
     }
 }
 
@@ -2272,7 +2272,7 @@ fn transition_screens() -> Vec<TransitionScreen> {
                 "preserve every original English label and digit",
                 "runtime-observed sound-number selection and transient event writes",
                 "Start's repeating shared battle lifetimes",
-                "Select's automatic preserved and Japanese ending lifetimes through terminal blinking",
+                "Select's automatic preserved and Japanese ending lifetimes through the static terminal signature",
             ],
             unresolved_focus: &[
                 "the complete battle and ending temporal glyph, portrait, sprite, defeat, and unfavorable-variant union",

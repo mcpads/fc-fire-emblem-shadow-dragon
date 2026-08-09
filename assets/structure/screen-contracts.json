@@ -11,14 +11,15 @@
     "known_focus": [
       "all six sound-test controls now have source and runtime evidence; Up and Down change the selector while A and B emit transient sound-event writes",
       "Start automatically reuses shared battle-animation lifetimes instead of exposing one screen per outer source phase",
-      "Select automatically reaches preserved-English story and credits, Japanese chapter records and character epilogues, and a blinking preserved final signature without further input",
+      "Select automatically reaches preserved-English story and credits, Japanese chapter records and character epilogues, and a static preserved final signature without further input",
       "the shared battle engine is source-bound to the unit, enemy, class, item, and battle-dialogue sources; the ending record stream and both epilogue dialogue tables are also structurally bound",
       "the separate battle state machine bounds 28 pointer-referenced EF-terminated records over 1,152 disjoint bytes; one additional 16-byte structural record has no table reference and remains preserved",
       "visible lifetimes, not source phase counts or single-frame captures, define the screen roles"
     ],
     "unresolved_focus": [
       "complete temporal glyph, portrait, sprite, defeat, and unfavorable-variant unions",
-      "temporal union checks that retain English, digits, portraits, sprites, and the blinking final signature"
+      "temporal union checks that retain English, digits, portraits, sprites, and the static final signature",
+      "ordinary favorable, unfavorable, and defeat battle routes plus the remaining character-epilogue variants"
     ],
     "next_action": "collect complete temporal glyph, portrait, sprite, defeat, and unfavorable-variant unions before sizing Hangul page coverage"
   },
@@ -457,14 +458,15 @@
       "runtime_observed": true,
       "input_behavior": "automatic",
       "translation_scope": "preserved_original_only",
-      "temporal_behavior": "terminal phase 7731=1D alternates the original signature and copyright with full-black frames indefinitely without input",
+      "temporal_behavior": "terminal phase 7731=1D keeps the original signature and copyright static without input; four frozen samples over 12,000 frames had identical screenshot, nametable, OAM, and palette hashes",
       "known_focus": [
         "left 1C/1C and right 18/00 CHR shadow pairs",
         "original graphical signature, copyright symbol, 1990 digits, and Nintendo label remain unchanged",
-        "offsets 21000 and 28000 show the signature while offsets 24000 and 33000 show the complementary blank phase"
+        "phase 1D dispatches the no-op handler C73D and 7732=00 disables the ending temporal updater",
+        "offsets 21000, 24000, 28000, and 33000 have identical screenshot, nametable, OAM, and palette hashes"
       ],
       "unresolved_focus": [],
-      "next_gate": "retain both visible and blank phases in ending regression captures",
+      "next_gate": "retain the static original signature while testing temporal UI elsewhere",
       "contract_state": "observed_partial"
     },
     {

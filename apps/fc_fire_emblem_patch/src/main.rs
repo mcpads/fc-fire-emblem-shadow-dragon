@@ -25,6 +25,7 @@ mod rp2a03;
 mod screen_contracts;
 mod shop_flow;
 mod static_analysis;
+mod temporal_surface;
 mod text_inventory;
 mod tracked;
 mod typed_source;
@@ -78,6 +79,13 @@ enum Command {
     AnalyzeChapterTransitions {
         source: PathBuf,
         #[arg(long, default_value = "out/chapter-transitions.json")]
+        report: PathBuf,
+    },
+    /// Aggregate private frozen-frame dumps into battle and ending temporal unions.
+    AnalyzeTemporalSurfaces {
+        source: PathBuf,
+        manifest: PathBuf,
+        #[arg(long, default_value = "out/temporal-surfaces.json")]
         report: PathBuf,
     },
     /// Bind chapter-eleven victory tiles and the castle-command-to-transition route.
@@ -360,6 +368,22 @@ fn main() -> Result<()> {
                 summary.chapter_intro_runtime_sample_count,
                 summary.source_region_count,
                 summary.next_observation_gate_role
+            );
+        }
+        Command::AnalyzeTemporalSurfaces {
+            source,
+            manifest,
+            report,
+        } => {
+            let summary = temporal_surface::analyze_temporal_surfaces(&source, &manifest, &report)?;
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "temporal surfaces: {} routes, {} samples, {} CHR pairs, required route coverage complete: {}",
+                summary.route_count,
+                summary.sample_count,
+                summary.chr_pair_count,
+                summary.required_route_coverage_complete
             );
         }
         Command::AnalyzeChapterVictory { source, report } => {
