@@ -6,12 +6,15 @@ use std::{
 
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use crate::{
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
 };
+
+mod capture_state;
+
+use capture_state::{ChrPairReport, parse_capture_state};
 
 const MANIFEST_SCHEMA: u8 = 1;
 const REPORT_SCHEMA: u8 = 1;
@@ -199,14 +202,6 @@ struct SampleReport {
     memory_expectation_count: usize,
 }
 
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
-struct ChrPairReport {
-    left_fd: u8,
-    left_fe: u8,
-    right_fd: u8,
-    right_fe: u8,
-}
-
 #[derive(Debug, Serialize)]
 struct TemporalUnionReport {
     screen_roles: Vec<String>,
@@ -232,15 +227,6 @@ struct CaptureFiles {
     nametable: Vec<u8>,
     oam: Vec<u8>,
     palette: Vec<u8>,
-}
-
-struct CaptureState {
-    producer_frame_count: u64,
-    chr_pair: ChrPairReport,
-    left_latch: u8,
-    right_latch: u8,
-    background_enabled: bool,
-    sprites_enabled: bool,
 }
 
 #[derive(Default)]
@@ -789,42 +775,6 @@ fn decode_hex(value: &str) -> Result<Vec<u8>> {
                 .with_context(|| format!("invalid hex byte at character {index}"))
         })
         .collect()
-}
-
-fn parse_capture_state(bytes: &[u8]) -> Result<CaptureState> {
-    let state: BTreeMap<String, Value> =
-        serde_json::from_slice(bytes).context("parse producer state JSON")?;
-    let unsigned = |key: &str| -> Result<u64> {
-        state
-            .get(key)
-            .and_then(Value::as_u64)
-            .with_context(|| format!("producer state has no unsigned {key}"))
-    };
-    let boolean = |key: &str| -> Result<bool> {
-        state
-            .get(key)
-            .and_then(Value::as_bool)
-            .with_context(|| format!("producer state has no boolean {key}"))
-    };
-    let byte = |key: &str| -> Result<u8> {
-        unsigned(key)?
-            .try_into()
-            .with_context(|| format!("producer state {key} does not fit a byte"))
-    };
-
-    Ok(CaptureState {
-        producer_frame_count: unsigned("frameCount")?,
-        chr_pair: ChrPairReport {
-            left_fd: byte("mapper.leftChrPage[0]")?,
-            left_fe: byte("mapper.leftChrPage[1]")?,
-            right_fd: byte("mapper.rightChrPage[0]")?,
-            right_fe: byte("mapper.rightChrPage[1]")?,
-        },
-        left_latch: byte("mapper.leftLatch")?,
-        right_latch: byte("mapper.rightLatch")?,
-        background_enabled: boolean("ppu.mask.backgroundEnabled")?,
-        sprites_enabled: boolean("ppu.mask.spritesEnabled")?,
-    })
 }
 
 fn nametable_tile_codes_for(nametable: &[u8]) -> BTreeSet<u8> {
