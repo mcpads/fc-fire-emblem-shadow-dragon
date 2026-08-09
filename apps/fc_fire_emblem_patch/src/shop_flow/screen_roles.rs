@@ -1,5 +1,43 @@
 use super::*;
 
+pub(super) fn purchase_question_handoff_observation() -> RuntimeE7HandoffObservation {
+    RuntimeE7HandoffObservation {
+        source_screen_role: "weapon_shop_item_list",
+        input: "A on the first item",
+        source_outer_state: 4,
+        handoff_outer_state: 5,
+        settled_outer_state: 7,
+        caller_flag_address: 0x7809,
+        caller_flag_address_hex: "0x7809",
+        caller_flag_value: 1,
+        observer_prg_bank: 0x06,
+        observer_prg_bank_hex: "0x06",
+        observer_read_cpu_address: 0xA144,
+        observer_read_cpu_address_hex: "0xA144",
+        chr_pair_at_handoff: ChrPair {
+            left_fd: 0x1E,
+            left_fe: 0x1E,
+            right_fd: 0x00,
+            right_fe: 0x18,
+        },
+        item_list_screenshot_sha256: "a35a6c07fdf13777188dc19371adf3a5681d571d5725e24a77c267460bc10261",
+        handoff_screenshot_sha256: "98f4c941d6e3c115863c7896732c8eef8e16aa0ea04470401bd39b4f5b0c372a",
+        settled_screenshot_sha256: "74ed3fade742ab3cf6738e48f3e3907b0989fa201e43d12e9baec066f76a8dde",
+        item_list_nametable_sha256: "9152ae537608912ac13e8e2efa77168b5d2a7d57a18a9ad5eec23c9651329469",
+        handoff_nametable_sha256: "bfd547fdbcc8eac92baee4163ae0e4fe0c96571d07dcb600c53571b59e6fe2ea",
+        settled_nametable_sha256: "a500c9ec7a1949bc077f6f6e5bfe6af1445051a738508aaf741a62994233b4df",
+        item_list_to_handoff_changed_byte_count: 16,
+        handoff_to_settled_changed_byte_count: 40,
+        retained_visible_content: &[
+            "six item-name and price rows",
+            "current funds and original G label",
+            "character portrait",
+            "purchase question",
+        ],
+        page_lifetime_requirement: "the retained item list and the selected purchase-question dialogue must share a compatible font-page assignment across the E7 caller handoff; switching to a dialogue-only page at the $7809 observer is invalid",
+    }
+}
+
 pub(super) fn item_list_screen() -> ShopScreen {
     ShopScreen {
         screen_role: "weapon_shop_item_list",

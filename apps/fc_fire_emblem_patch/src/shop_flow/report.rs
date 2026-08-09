@@ -9,6 +9,7 @@ pub(super) struct ShopFlowReport {
     pub(super) screens: Vec<ShopScreen>,
     pub(super) preflight_branches: Vec<PreflightBranch>,
     pub(super) purchase_mutation: PurchaseMutation,
+    pub(super) runtime_e7_handoff_observation: RuntimeE7HandoffObservation,
     pub(super) runtime_purchase_observation: RuntimePurchaseObservation,
     pub(super) runtime_exit_observation: RuntimeExitObservation,
     pub(super) runtime_inventory_full_observation: RuntimeInventoryFullObservation,
@@ -18,6 +19,33 @@ pub(super) struct ShopFlowReport {
     pub(super) source_regions: Vec<SourceRegionBinding>,
     pub(super) unresolved_downstream_roles: Vec<&'static str>,
     pub(super) release_eligible: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct RuntimeE7HandoffObservation {
+    pub(super) source_screen_role: &'static str,
+    pub(super) input: &'static str,
+    pub(super) source_outer_state: u8,
+    pub(super) handoff_outer_state: u8,
+    pub(super) settled_outer_state: u8,
+    pub(super) caller_flag_address: u16,
+    pub(super) caller_flag_address_hex: &'static str,
+    pub(super) caller_flag_value: u8,
+    pub(super) observer_prg_bank: u8,
+    pub(super) observer_prg_bank_hex: &'static str,
+    pub(super) observer_read_cpu_address: u16,
+    pub(super) observer_read_cpu_address_hex: &'static str,
+    pub(super) chr_pair_at_handoff: ChrPair,
+    pub(super) item_list_screenshot_sha256: &'static str,
+    pub(super) handoff_screenshot_sha256: &'static str,
+    pub(super) settled_screenshot_sha256: &'static str,
+    pub(super) item_list_nametable_sha256: &'static str,
+    pub(super) handoff_nametable_sha256: &'static str,
+    pub(super) settled_nametable_sha256: &'static str,
+    pub(super) item_list_to_handoff_changed_byte_count: usize,
+    pub(super) handoff_to_settled_changed_byte_count: usize,
+    pub(super) retained_visible_content: &'static [&'static str],
+    pub(super) page_lifetime_requirement: &'static str,
 }
 
 #[derive(Debug, Serialize)]

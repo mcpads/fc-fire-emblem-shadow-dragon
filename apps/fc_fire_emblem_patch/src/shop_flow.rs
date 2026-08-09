@@ -162,6 +162,7 @@ fn build_report(rom: &Rom) -> Result<ShopFlowReport> {
             declined_dialogue_entry_index: 0x36,
             mutation_boundary: "only confirmation menu result 1 reaches $9BA4 and subtracts funds before inserting item and durability",
         },
+        runtime_e7_handoff_observation: purchase_question_handoff_observation(),
         runtime_purchase_observation: RuntimePurchaseObservation {
             source_screen_role: "weapon_shop_purchase_confirmation",
             result_screen_role: "weapon_shop_purchase_result",

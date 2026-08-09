@@ -72,6 +72,27 @@ fn item_list_a_is_preflight_only_but_confirmation_yes_crosses_mutation_boundary(
 }
 
 #[test]
+fn e7_purchase_question_handoff_keeps_the_item_list_in_the_font_page_lifetime() {
+    let observation = purchase_question_handoff_observation();
+
+    assert_eq!(observation.source_outer_state, 4);
+    assert_eq!(observation.handoff_outer_state, 5);
+    assert_eq!(observation.settled_outer_state, 7);
+    assert_eq!(observation.caller_flag_address, 0x7809);
+    assert_eq!(observation.observer_read_cpu_address, 0xA144);
+    assert!(
+        observation
+            .retained_visible_content
+            .contains(&"six item-name and price rows")
+    );
+    assert!(
+        observation
+            .page_lifetime_requirement
+            .contains("dialogue-only page")
+    );
+}
+
+#[test]
 fn confirmation_cancel_and_no_share_the_non_mutating_path() {
     let confirmation = purchase_confirmation_screen();
     let decline = confirmation
