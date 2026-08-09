@@ -14,6 +14,7 @@ use crate::{
 };
 
 mod dialogue_path;
+mod fixed_workspace;
 mod report;
 mod source_spec;
 mod table_analysis;
@@ -21,6 +22,7 @@ mod table_analysis;
 mod tests;
 
 use dialogue_path::*;
+pub(crate) use fixed_workspace::extract_fixed_text_workspace;
 pub use report::TextInventorySummary;
 use report::*;
 use source_spec::*;

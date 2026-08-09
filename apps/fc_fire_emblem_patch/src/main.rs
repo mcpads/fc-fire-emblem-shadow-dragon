@@ -65,6 +65,12 @@ enum Command {
         #[arg(long, default_value = "out/text-tables.json")]
         report: PathBuf,
     },
+    /// Create a private workspace for battle class, item, ally, and enemy names.
+    ExtractFixedTextWorkspace {
+        source: PathBuf,
+        #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
+        output: PathBuf,
+    },
     /// Inventory dialogue entry tables without emitting source dialogue bytes.
     AnalyzeDialogueStructure {
         source: PathBuf,
@@ -403,6 +409,17 @@ fn main() -> Result<()> {
                 summary.pointer_count,
                 summary.unique_string_count,
                 summary.referenced_protected_original_byte_count
+            );
+        }
+        Command::ExtractFixedTextWorkspace { source, output } => {
+            let summary = text_inventory::extract_fixed_text_workspace(&source, &output)?;
+            println!("wrote {}", output.display());
+            println!("workspace SHA-1: {}", summary.workspace_sha1);
+            println!(
+                "fixed text: {} unique entries, {} Japanese-bearing, {} translations preserved",
+                summary.entry_count,
+                summary.japanese_entry_count,
+                summary.preserved_translation_count
             );
         }
         Command::AnalyzeDialogueStructure { source, report } => {
