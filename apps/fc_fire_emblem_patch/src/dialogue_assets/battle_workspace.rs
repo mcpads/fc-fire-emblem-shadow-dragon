@@ -19,6 +19,8 @@ pub(crate) struct BattleDialogueValidationSummary {
     pub(crate) filled_line_count: usize,
     pub(crate) complete_line_count: usize,
     pub(crate) target_glyph_count: usize,
+    pub(crate) planned_storage_byte_count: usize,
+    pub(crate) remaining_storage_byte_count: usize,
 }
 
 #[derive(Debug)]
@@ -162,6 +164,12 @@ pub(crate) fn validate_battle_dialogue_workspace(
     validate_workspace_binding(rom.data(), &workspace)?;
     let (filled_line_count, complete_line_count, target_glyph_count) =
         validate_translation_fields(&workspace)?;
+    let planned_storage_byte_count = planned_storage_byte_count(&workspace)?;
+    let physical_storage_byte_count = 1_168;
+    ensure!(
+        planned_storage_byte_count <= physical_storage_byte_count,
+        "battle translations require {planned_storage_byte_count} bytes but the owned physical region has {physical_storage_byte_count}"
+    );
     Ok(BattleDialogueValidationSummary {
         workspace_sha1: sha1_hex(&workspace_bytes),
         record_count: workspace.records.len(),
@@ -173,6 +181,8 @@ pub(crate) fn validate_battle_dialogue_workspace(
         filled_line_count,
         complete_line_count,
         target_glyph_count,
+        planned_storage_byte_count,
+        remaining_storage_byte_count: physical_storage_byte_count - planned_storage_byte_count,
     })
 }
 
@@ -383,6 +393,49 @@ fn validate_translation_fields(workspace: &BattleDialogueWorkspace) -> Result<(u
     Ok((filled, complete, target_glyphs))
 }
 
+fn planned_storage_byte_count(workspace: &BattleDialogueWorkspace) -> Result<usize> {
+    workspace.records.iter().try_fold(0usize, |total, record| {
+        let body_byte_count = record.lines.iter().try_fold(0usize, |record_total, line| {
+            let line_byte_count = if line.status == TranslationStatus::Untranslated {
+                source_markup_byte_count(&line.source_markup)?
+            } else {
+                encode_korean_markup(&line.korean)?.len()
+            };
+            record_total
+                .checked_add(line_byte_count)
+                .context("battle record planned size overflow")
+        })?;
+        total
+            .checked_add(4 + body_byte_count)
+            .context("battle workspace planned size overflow")
+    })
+}
+
+fn source_markup_byte_count(markup: &str) -> Result<usize> {
+    let mut byte_count = 0usize;
+    let mut chars = markup.char_indices().peekable();
+    while let Some((start, character)) = chars.next() {
+        if character == '{' {
+            let end = chars
+                .by_ref()
+                .find_map(|(index, candidate)| (candidate == '}').then_some(index))
+                .context("battle source markup token has no closing brace")?;
+            byte_count += decode_protected_token(&markup[start..=end])?.len();
+            continue;
+        }
+        ensure!(character != '}', "battle source markup has unmatched brace");
+        ensure!(
+            encode_protected_literal(character).is_some()
+                || (0..=u8::MAX).any(|code| {
+                    japanese_text_glyph(code).is_some_and(|glyph| glyph == character.to_string())
+                }),
+            "battle source markup contains an unencodable character {character:?}"
+        );
+        byte_count += 1;
+    }
+    Ok(byte_count)
+}
+
 fn decode_battle_record_lines(
     source: &[u8],
     record: &crate::dialogue_inventory::BattleDialogueTranslationRecord,
@@ -504,5 +557,14 @@ mod tests {
 
         let error = validate_translation_fields(&workspace).unwrap_err();
         assert!(error.to_string().contains("changed a control token"));
+    }
+
+    #[test]
+    fn battle_markup_size_counts_dynamic_operands_and_quote_controls() {
+        assert_eq!(
+            source_markup_byte_count("{EC:02}あA{AB}{ED}").unwrap(),
+            6
+        );
+        assert_eq!(encode_korean_markup("{AB}한{AC}{ED}").unwrap().len(), 4);
     }
 }

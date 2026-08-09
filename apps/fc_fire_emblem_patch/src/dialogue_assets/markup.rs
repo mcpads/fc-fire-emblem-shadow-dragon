@@ -245,6 +245,9 @@ pub(super) fn decode_protected_token(token: &str) -> Result<Vec<u8>> {
     if body == "SP" {
         return Ok(vec![0xFF]);
     }
+    if matches!(body, "AB" | "AC") {
+        return Ok(vec![decode_hex_byte(body)?]);
+    }
     if let Some(literal) = body.strip_prefix("LIT:") {
         return Ok(vec![decode_hex_byte(literal)?]);
     }

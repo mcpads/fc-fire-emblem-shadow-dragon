@@ -289,6 +289,8 @@ cargo run -p fc-fire-emblem-patch -- build-mmc5-dialogue-exram-probe \
 
 `import-battle-dialogue-draft`는 비공개 TSV의 `line_id<TAB>korean_markup`을 작업공간에 병합한다. TSV는 일본어가 있는 줄을 빠짐없이 정확히 한 번씩 포함해야 하고, 병합 결과가 보호 토큰 검증을 통과해야만 작업공간을 원자적으로 교체한다. 현재 일본어 포함 70줄을 모두 `needs_human_review` 초벌로 채웠으며 제어 전용 30줄은 원문 상태를 유지한다.
 
+전투 초벌의 4바이트 헤더·본문·제어 토큰을 글리프당 1바이트 논리열로 다시 세면 28레코드 합계 1,026바이트다. 포인터 참조 원본 1,152바이트와 미참조 보존 레코드까지 포함한 물리 영역 1,168바이트보다 작아 142바이트를 남긴다. 이 계산은 저장 용량만 닫으며 포인터 재배치·글꼴 페이지·실행 표시는 별도 관문이다.
+
 ```sh
 cargo run -p fc-fire-emblem-patch -- extract-battle-dialogue-workspace \
   'roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes'
