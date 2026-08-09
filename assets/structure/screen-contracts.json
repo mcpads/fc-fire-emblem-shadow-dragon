@@ -1,27 +1,57 @@
 {
-  "schema": 1,
+  "schema": 2,
   "next_observation_gate": {
-    "gate_role": "chapter_transition_failure_and_remaining_chapter_variants",
-    "gate_kind": "screen_sequence",
+    "gate_role": "sound_test_control_and_downstream_screen_partition",
+    "gate_kind": "screen_partition",
     "focus_screen_roles": [
-      "chapter_clear_epilogue_dialogue",
-      "chapter_intro_title_dialogue_composite",
-      "game_over"
+      "sound_test"
     ],
     "known_focus": [
-      "the accelerated ordinary-control chapter-eleven route established six mainline chapter-transition screen lifetimes through the chapter-twelve intro",
-      "the epilogue, NEXT STORY, save offer, save-complete prompt, blackout, and chapter-twelve intro have lifetime-specific CHR pairs",
-      "the observed default yes at the save offer performs a persistent save while the next default yes starts continuation",
-      "the save-offer no choice commits selection 02 and bypasses the save-complete prompt through a distinct 1B/1B + 18/18 automatic blackout",
-      "the save-complete no choice commits selection 02 at menu depth 03, enters a distinct Japanese power-off notice, and keeps outer state 0E and main state 04",
-      "the terminal notice contains a source-bound up, down, left, right, up, A unlock that opens an observed sound test whose English labels and digits are preserved"
+      "the terminal notice contains a source-bound up, down, left, right, up, A unlock that opens an observed sound test whose English labels and digits are preserved",
+      "all six sound-test controller masks are source-bound before input",
+      "Start and Select enter dedicated six-phase battle-test and thirty-phase ending state machines rather than reversible sound-test controls",
+      "source phase counts are kept outside the visible screen count until runtime partitions them"
     ],
     "unresolved_focus": [
-      "remaining chapter-specific epilogue, title, portrait, CHR, and flashing variants",
-      "baseline defeat and unfavorable routes with victory accelerations disabled or an explicitly adverse intervention"
+      "runtime effects of the source-bound Up, Down, A, and B controls",
+      "visible lifetime partition, text scope, CHR pairs, sprites, temporal phases, inputs, and exit behavior of the two downstream families"
     ],
-    "next_action": "use the per-screen focus gaps to select another chapter-specific transition variant, and validate defeat or unfavorable branches separately without victory accelerations"
+    "next_action": "restore a sound-test checkpoint and verify one source-bound control per branch; sample Start and Select downstream families without further input before defining any visible screen role"
   },
+  "unpartitioned_surface_families": [
+    {
+      "family_role": "battle_animation_test_sequence",
+      "surface_family": "battle_animation_test",
+      "entry_condition": "Start on sound_test advances dialogue substate 0C to 0D and dispatches bank 07 handler index 03 at AA2B",
+      "source_bound": true,
+      "known_focus": [
+        "the dedicated loop dispatches six source phases through state 7730 and does not return to the sound-test input handler",
+        "this path is separate from the ordinary gameplay battle_animation role even if visible assets later overlap",
+        "published behavior describes an indefinitely repeating debug battle sequence"
+      ],
+      "unresolved_focus": [
+        "visible phase-to-screen partition and temporal union",
+        "Japanese text, preserved Latin and digits, CHR pairs, sprites, and exit behavior"
+      ],
+      "next_gate": "enter only from a restorable sound-test checkpoint, observe without input first, and partition visible lifetimes before testing any downstream controls"
+    },
+    {
+      "family_role": "ending_sequence",
+      "surface_family": "ending",
+      "entry_condition": "Select on sound_test advances dialogue substate 0C to 0E, prepares ending memory, then substate 0F loops bank 04 handler index 04 at 9EC6",
+      "source_bound": true,
+      "known_focus": [
+        "bank 04 initializes states 7730..7733 and dispatches thirty source phases through state 7731",
+        "thirty source phases are not assumed to equal thirty visible screens",
+        "published behavior describes entry into the ending available at the current chapter progress"
+      ],
+      "unresolved_focus": [
+        "automatic, message, character epilogue, and credits screen partition",
+        "Japanese narrative targets, preserved Latin and digits, portraits, CHR pairs, temporal phases, inputs, and terminal behavior"
+      ],
+      "next_gate": "enter only from a restorable sound-test checkpoint and partition visible lifetimes with irregular no-input samples before advancing any message or credits screen"
+    }
+  ],
   "screens": [
     {
       "screen_role": "title",
@@ -356,13 +386,15 @@
       "known_focus": [
         "left 1C/1C and right 00/18 CHR shadow pairs",
         "black background, original English SOUND TEST MODE and interface labels, and sound-number digits",
-        "the hidden sequence was source-bound before runtime execution"
+        "the hidden sequence was source-bound before runtime execution",
+        "input byte 18 binds Up and Down to sound number 775C, A and B to sound-event writes at 06F0..06F7, Start to battle_animation_test_sequence, and Select to ending_sequence",
+        "Start and Select enter dedicated downstream state machines and do not behave like reversible sound-number controls"
       ],
       "unresolved_focus": [
-        "runtime effects of sound selection and playback controls",
-        "runtime effects and downstream screens of the Start and Select branches"
+        "runtime effects of the source-bound sound-number and event controls",
+        "visible screen lifetimes inside the unpartitioned Start and Select downstream families"
       ],
-      "next_gate": "bind sound-test controls before input and keep all English labels and digits unchanged",
+      "next_gate": "runtime-check only the already source-bound control being tested and keep all English labels and digits unchanged",
       "contract_state": "observed_partial"
     },
     {
@@ -723,18 +755,6 @@
       "unresolved_focus": ["exact CHR pair", "dialogue dismissal inputs", "empty-after-discard return state 19", "font-page exit and re-entry lifetime"],
       "next_gate": "bind dialogue dismissal and observe the empty-after-discard return-state variant",
       "contract_state": "observed_partial"
-    },
-    {
-      "screen_role": "ending",
-      "surface_family": "ending",
-      "runtime_observed": false,
-      "input_behavior": "unresolved",
-      "translation_scope": "unresolved",
-      "temporal_behavior": "unresolved",
-      "known_focus": [],
-      "unresolved_focus": ["all screen-contract dimensions", "credits and epilogue routing"],
-      "next_gate": "reach ending families and separate automatic, message, and credits surfaces",
-      "contract_state": "unobserved"
     }
   ]
 }

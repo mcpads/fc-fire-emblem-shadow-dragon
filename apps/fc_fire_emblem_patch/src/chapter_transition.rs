@@ -144,6 +144,72 @@ const ENTER_SOUND_TEST_BYTES: &[u8] = &[
     0x8D, 0x5C, 0x77, 0x8D, 0x00, 0xB0, 0x8D, 0x00, 0xC0, 0x8D, 0x00, 0xD0, 0x8D, 0x00, 0xE0, 0xEE,
     0xEE, 0x05, 0x60,
 ];
+const ROUTE_SOUND_TEST_START_OR_SELECT_BYTES: &[u8] = &[0xEE, 0xEE, 0x05, 0xEE, 0xEE, 0x05, 0x60];
+const ENTER_BATTLE_ANIMATION_TEST_BYTES: &[u8] = &[
+    0xA9, 0x00, 0x8D, 0x30, 0x77, 0xA9, 0x03, 0x85, 0x44, 0xA9, 0x07, 0x4C, 0xFA, 0xC9,
+];
+const HANDLE_SOUND_TEST_INPUT_BYTES: &[u8] = &[
+    0xA5, 0x18, 0x29, 0x10, 0xD0, 0xE8, 0xA5, 0x18, 0x29, 0x20, 0xD0, 0xDF, 0xA5, 0x18, 0x4A, 0x4A,
+    0x4A, 0xB0, 0x26, 0x4A, 0xB0, 0x12, 0xA5, 0x18, 0x0A, 0x90, 0x03, 0x20, 0xD2, 0x9C, 0x0A, 0x90,
+    0x3C, 0xA9, 0x01, 0x8D, 0xF0, 0x06, 0xD0, 0x35, 0xEE, 0x5C, 0x77, 0xAD, 0x5C, 0x77, 0xC9, 0x50,
+    0x90, 0x14, 0xA9, 0x00, 0x8D, 0x5C, 0x77, 0xF0, 0x0D, 0xCE, 0x5C, 0x77, 0xAD, 0x5C, 0x77, 0x10,
+    0x05, 0xA9, 0x50, 0x8D, 0x5C, 0x77, 0xA9, 0x04, 0x85, 0x09, 0xA9, 0x1E, 0x85, 0x08, 0xAD, 0x5C,
+    0x77, 0x85, 0x00, 0xA9, 0x00, 0x85, 0x01, 0x20, 0xBA, 0xC7, 0x20, 0x75, 0x9C, 0x60,
+];
+const COMPOSE_SOUND_TEST_VALUES_BYTES: &[u8] = &[
+    0xA9, 0x21, 0x8D, 0x81, 0x07, 0xA9, 0x73, 0x8D, 0x82, 0x07, 0xA9, 0x03, 0x8D, 0x83, 0x07, 0xAD,
+    0x20, 0x04, 0x8D, 0x84, 0x07, 0xAD, 0x21, 0x04, 0x8D, 0x85, 0x07, 0xAD, 0x22, 0x04, 0x8D, 0x86,
+    0x07, 0xA9, 0x21, 0x8D, 0x87, 0x07, 0xA9, 0xAE, 0x8D, 0x88, 0x07, 0xA9, 0x01, 0x8D, 0x89, 0x07,
+    0xAD, 0x5C, 0x77, 0x20, 0x9B, 0xC3, 0x09, 0x60, 0x8D, 0x8A, 0x07, 0xA9, 0x21, 0x8D, 0x8B, 0x07,
+    0xA9, 0xB2, 0x8D, 0x8C, 0x07, 0xA9, 0x01, 0x8D, 0x8D, 0x07, 0xAD, 0x5C, 0x77, 0x29, 0x07, 0x09,
+    0x60, 0x8D, 0x8E, 0x07, 0xA2, 0x00, 0x8E, 0x8F, 0x07, 0xE8, 0x86, 0x21, 0x60,
+];
+const QUEUE_SELECTED_SOUND_BYTES: &[u8] = &[
+    0xAD, 0x5C, 0x77, 0x20, 0x9B, 0xC3, 0xAA, 0xAD, 0x5C, 0x77, 0x29, 0x07, 0xA8, 0xB9, 0xE8, 0x9C,
+    0x9D, 0xF0, 0x06, 0x68, 0x68, 0x60,
+];
+const SOUND_EVENT_BIT_BYTES: &[u8] = &[0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80];
+const PREPARE_ENDING_SEQUENCE_BYTES: &[u8] = &[
+    0xA9, 0x77, 0x85, 0x01, 0xA9, 0x30, 0x85, 0x00, 0xA9, 0x00, 0x85, 0x03, 0xA9, 0x2F, 0x85, 0x02,
+    0xA9, 0x00, 0x8D, 0xCE, 0x05, 0x20, 0x25, 0xC2, 0xEE, 0xEE, 0x05, 0x60,
+];
+const RUN_ENDING_SEQUENCE_LOOP_BYTES: &[u8] = &[
+    0x20, 0x88, 0xC2, 0xA9, 0x00, 0x85, 0x37, 0xA9, 0x04, 0x85, 0x44, 0x20, 0xFA, 0xC9, 0x20, 0x36,
+    0xC3, 0xE6, 0x30, 0x20, 0x0D, 0xC7, 0x4C, 0x0C, 0x9D,
+];
+const BATTLE_ANIMATION_TEST_HANDLER_POINTER_BYTES: &[u8] = &[0x2B, 0xAA];
+const RUN_BATTLE_ANIMATION_TEST_LOOP_BYTES: &[u8] = &[
+    0xA9, 0x00, 0x85, 0xD0, 0x20, 0x4A, 0xAA, 0x20, 0x36, 0xC3, 0xE6, 0x30, 0xA9, 0x00, 0x85, 0x20,
+    0x85, 0xD0, 0xA5, 0x20, 0xD0, 0x03, 0x4C, 0x3D, 0xAA, 0x20, 0x4E, 0xC0, 0x4C, 0x2B, 0xAA,
+];
+const DISPATCH_BATTLE_ANIMATION_TEST_PHASE_BYTES: &[u8] = &[0xAD, 0x30, 0x77, 0x20, 0x4C, 0xC3];
+const BATTLE_ANIMATION_TEST_PHASE_POINTERS_BYTES: &[u8] = &[
+    0x5F, 0xAA, 0x82, 0xAA, 0x0D, 0xAB, 0xB8, 0xAB, 0x0A, 0xAC, 0x1E, 0xAC,
+];
+const ENDING_SEQUENCE_HANDLER_POINTER_BYTES: &[u8] = &[0xC6, 0x9E];
+const RUN_ENDING_SEQUENCE_BYTES: &[u8] =
+    &[0x20, 0x85, 0x9E, 0x20, 0xD0, 0x9E, 0x20, 0x15, 0x9F, 0x60];
+const INITIALIZE_ENDING_SEQUENCE_BYTES: &[u8] = &[
+    0xAD, 0x30, 0x77, 0xD0, 0x3B, 0x20, 0xCE, 0xC9, 0x20, 0x1F, 0xC7, 0x20, 0x3D, 0xC2, 0x20, 0x4E,
+    0xC2, 0x20, 0x0D, 0xC7, 0xA9, 0xAC, 0x85, 0x01, 0xA9, 0xC8, 0x85, 0x00, 0x20, 0xE7, 0xC3, 0x20,
+    0x2D, 0xC7, 0xA9, 0x00, 0x20, 0xBE, 0xC9, 0x20, 0xC6, 0xC9, 0xA2, 0x01, 0x8E, 0x30, 0x77, 0xCA,
+    0x86, 0xCB, 0x86, 0xCA, 0x8E, 0x31, 0x77, 0x8E, 0x32, 0x77, 0xA5, 0xCD, 0x29, 0xFC, 0x85, 0xCD,
+    0x60,
+];
+const UPDATE_ENDING_SEQUENCE_TEMPORAL_STATE_BYTES: &[u8] = &[
+    0xA5, 0x30, 0x29, 0x07, 0xD0, 0x2C, 0xAD, 0x32, 0x77, 0xF0, 0x39, 0xE6, 0xCA, 0xA5, 0xCA, 0xC9,
+    0xF0, 0xD0, 0x0A, 0xA5, 0xCD, 0x49, 0x02, 0x85, 0xCD, 0xA9, 0x00, 0x85, 0xCA, 0xA5, 0xCA, 0x4A,
+    0xB0, 0x10, 0x4A, 0xB0, 0x0D, 0x4A, 0xB0, 0x0A, 0x4A, 0xB0, 0x07, 0xA9, 0x01, 0x8D, 0x33, 0x77,
+    0xD0, 0x12, 0xAD, 0x33, 0x77, 0xC9, 0x01, 0xD0, 0x06, 0xEE, 0x33, 0x77, 0x4C, 0x14, 0x9F, 0xA9,
+    0x00, 0x8D, 0x33, 0x77, 0x60,
+];
+const DISPATCH_ENDING_SEQUENCE_PHASE_BYTES: &[u8] = &[0xAD, 0x31, 0x77, 0x20, 0x4C, 0xC3];
+const ENDING_SEQUENCE_PHASE_POINTERS_BYTES: &[u8] = &[
+    0xA5, 0xA3, 0xE0, 0xA3, 0xED, 0x9F, 0x54, 0xA0, 0xE9, 0xA0, 0xFA, 0x9F, 0x11, 0xA0, 0x2D, 0xA0,
+    0x54, 0xA0, 0x71, 0xA0, 0x64, 0x9F, 0x83, 0x9F, 0x54, 0xA0, 0x57, 0x9F, 0x23, 0xA1, 0x65, 0xA1,
+    0x33, 0xA2, 0x52, 0xA2, 0x5D, 0xA2, 0x69, 0xA2, 0x7E, 0xA2, 0x94, 0xA2, 0x84, 0xA3, 0xCA, 0x9F,
+    0x2D, 0xA0, 0x54, 0xA0, 0xD3, 0xA0, 0x08, 0xA5, 0x35, 0xA5, 0x3D, 0xC7,
+];
 
 const SOURCE_REGIONS: &[SourceRegionSpec] = &[
     SourceRegionSpec::code(
@@ -329,6 +395,109 @@ const SOURCE_REGIONS: &[SourceRegionSpec] = &[
         SOUND_TEST_UNLOCK_SEQUENCE_BYTES,
     ),
     SourceRegionSpec::code("enter_sound_test", 0x0B, 0x9BCF, ENTER_SOUND_TEST_BYTES),
+    SourceRegionSpec::code(
+        "route_sound_test_start_or_select",
+        0x0B,
+        0x9C02,
+        ROUTE_SOUND_TEST_START_OR_SELECT_BYTES,
+    ),
+    SourceRegionSpec::code(
+        "enter_battle_animation_test",
+        0x0B,
+        0x9C09,
+        ENTER_BATTLE_ANIMATION_TEST_BYTES,
+    ),
+    SourceRegionSpec::code(
+        "handle_sound_test_input",
+        0x0B,
+        0x9C17,
+        HANDLE_SOUND_TEST_INPUT_BYTES,
+    ),
+    SourceRegionSpec::code(
+        "compose_sound_test_values",
+        0x0B,
+        0x9C75,
+        COMPOSE_SOUND_TEST_VALUES_BYTES,
+    ),
+    SourceRegionSpec::code(
+        "queue_selected_sound",
+        0x0B,
+        0x9CD2,
+        QUEUE_SELECTED_SOUND_BYTES,
+    ),
+    SourceRegionSpec::data("sound_event_bits", 0x0B, 0x9CE8, SOUND_EVENT_BIT_BYTES),
+    SourceRegionSpec::code(
+        "prepare_ending_sequence",
+        0x0B,
+        0x9CF0,
+        PREPARE_ENDING_SEQUENCE_BYTES,
+    ),
+    SourceRegionSpec::code(
+        "run_ending_sequence_loop",
+        0x0B,
+        0x9D0C,
+        RUN_ENDING_SEQUENCE_LOOP_BYTES,
+    ),
+    SourceRegionSpec::data(
+        "battle_animation_test_handler_pointer",
+        0x07,
+        0xBFA6,
+        BATTLE_ANIMATION_TEST_HANDLER_POINTER_BYTES,
+    ),
+    SourceRegionSpec::code(
+        "run_battle_animation_test_loop",
+        0x07,
+        0xAA2B,
+        RUN_BATTLE_ANIMATION_TEST_LOOP_BYTES,
+    ),
+    SourceRegionSpec::code(
+        "dispatch_battle_animation_test_phase",
+        0x07,
+        0xAA4A,
+        DISPATCH_BATTLE_ANIMATION_TEST_PHASE_BYTES,
+    ),
+    SourceRegionSpec::data(
+        "battle_animation_test_phase_pointers",
+        0x07,
+        0xAA50,
+        BATTLE_ANIMATION_TEST_PHASE_POINTERS_BYTES,
+    ),
+    SourceRegionSpec::data(
+        "ending_sequence_handler_pointer",
+        0x04,
+        0xBFA8,
+        ENDING_SEQUENCE_HANDLER_POINTER_BYTES,
+    ),
+    SourceRegionSpec::code(
+        "run_ending_sequence",
+        0x04,
+        0x9EC6,
+        RUN_ENDING_SEQUENCE_BYTES,
+    ),
+    SourceRegionSpec::code(
+        "initialize_ending_sequence",
+        0x04,
+        0x9E85,
+        INITIALIZE_ENDING_SEQUENCE_BYTES,
+    ),
+    SourceRegionSpec::code(
+        "update_ending_sequence_temporal_state",
+        0x04,
+        0x9ED0,
+        UPDATE_ENDING_SEQUENCE_TEMPORAL_STATE_BYTES,
+    ),
+    SourceRegionSpec::code(
+        "dispatch_ending_sequence_phase",
+        0x04,
+        0x9F15,
+        DISPATCH_ENDING_SEQUENCE_PHASE_BYTES,
+    ),
+    SourceRegionSpec::data(
+        "ending_sequence_phase_pointers",
+        0x04,
+        0x9F1B,
+        ENDING_SEQUENCE_PHASE_POINTERS_BYTES,
+    ),
 ];
 
 #[derive(Clone, Copy)]
@@ -389,6 +558,7 @@ struct ChapterTransitionReport {
     regular_save_reachability: RegularSaveReachability,
     save_offer_no_branch: SaveOfferNoBranchContract,
     save_complete_no_branch: SaveCompleteNoBranchContract,
+    sound_test_controls: SoundTestControlContract,
     chapter_intro_runtime_samples: Vec<ChapterIntroRuntimeSample>,
     fixed_labels: Vec<FixedLabelBinding>,
     source_regions: Vec<SourceRegionBinding>,
@@ -571,6 +741,55 @@ struct SaveCompleteNoBranchContract {
 }
 
 #[derive(Debug, Serialize)]
+struct SoundTestControlContract {
+    screen_role: &'static str,
+    input_address: u16,
+    input_address_hex: &'static str,
+    sound_number_address: u16,
+    sound_number_address_hex: &'static str,
+    initial_sound_number: u8,
+    upper_boundary: u8,
+    upper_boundary_hex: &'static str,
+    sound_event_base_address: u16,
+    sound_event_base_address_hex: &'static str,
+    sound_event_slot_count: u8,
+    controls: Vec<SoundTestControl>,
+    downstream_families: Vec<UnpartitionedDownstreamFamily>,
+    controls_runtime_observed: bool,
+    translation_handling: &'static str,
+    proof_boundary: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct SoundTestControl {
+    input: &'static str,
+    input_mask: u8,
+    input_mask_hex: &'static str,
+    source_effect: &'static str,
+    next_dialogue_substate: Option<u8>,
+    downstream_family_role: Option<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
+struct UnpartitionedDownstreamFamily {
+    family_role: &'static str,
+    entry_dialogue_substate: u8,
+    prg_bank: u8,
+    prg_bank_hex: &'static str,
+    bank_handler_index: u8,
+    bank_handler_index_hex: &'static str,
+    entry_point: u16,
+    entry_point_hex: &'static str,
+    phase_state_address: u16,
+    phase_state_address_hex: &'static str,
+    phase_pointer_count: usize,
+    static_flow: &'static str,
+    runtime_observed: bool,
+    screen_partition_status: &'static str,
+    translation_scope_status: &'static str,
+}
+
+#[derive(Debug, Serialize)]
 struct ChapterIntroRuntimeSample {
     sample_role: &'static str,
     chapter_number_one_based: u8,
@@ -676,7 +895,7 @@ fn build_report(rom: &Rom) -> Result<ChapterTransitionReport> {
             translation_direction: "Japanese to Korean",
             preserve_existing_english_and_digits: true,
             dialogue_content_emitted: false,
-            proof_boundary: "source-bound chapter context, title, NEXT STORY, both save-choice branches, regular-save checksum producers, terminal-notice sound-test unlock, and the runtime-observed chapter-one-to-two sequence, chapter-eleven intro reachability, and continuous accelerated chapter-eleven-victory-to-chapter-twelve-intro route; no dialogue source, translation, or ROM mutation",
+            proof_boundary: "source-bound chapter context, title, NEXT STORY, both save-choice branches, regular-save checksum producers, terminal-notice sound-test unlock, all sound-test controller effects, and the battle-test and ending state-machine entries plus the runtime-observed chapter-one-to-two sequence, chapter-eleven intro reachability, and continuous accelerated chapter-eleven-victory-to-chapter-twelve-intro route; no dialogue source, translation, or ROM mutation",
         },
         observed_screens: transition_screens(),
         chapter_intro_contexts,
@@ -684,6 +903,7 @@ fn build_report(rom: &Rom) -> Result<ChapterTransitionReport> {
         regular_save_reachability: regular_save_reachability(),
         save_offer_no_branch: save_offer_no_branch_contract(),
         save_complete_no_branch: save_complete_no_branch_contract(),
+        sound_test_controls: sound_test_control_contract(),
         chapter_intro_runtime_samples: chapter_intro_runtime_samples(),
         fixed_labels: vec![
             FixedLabelBinding {
@@ -708,10 +928,11 @@ fn build_report(rom: &Rom) -> Result<ChapterTransitionReport> {
             },
         ],
         source_regions,
-        next_universalization_gate: "chapter_transition_failure_and_remaining_chapter_variants",
+        next_universalization_gate: "sound_test_control_and_downstream_screen_partition",
         unresolved: vec![
             "The chapter-one epilogue and save-complete dialogue use the main dialogue engine, but their dialogue source content is intentionally outside this public report.",
             "The save-offer no choice and save-complete no choice are source-bound and runtime-observed; the latter opens a terminal power-off notice with a source-bound sound-test unlock.",
+            "Every sound-test control effect and both downstream state-machine entries are source-bound, but no control or downstream visible lifetime has been runtime-observed yet.",
             "The accelerated continuous route establishes reachability but not baseline combat difficulty, defeat, or unfavorable branches.",
             "Chapter-two, chapter-eleven, and chapter-twelve intro samples do not generalize the remaining twenty-two chapters or all title lifetimes.",
         ],
@@ -921,6 +1142,111 @@ fn save_complete_no_branch_contract() -> SaveCompleteNoBranchContract {
         sound_test_chr_pair: chr_pair(0x1C, 0x1C, 0x00, 0x18),
         sound_test_translation_handling: "preserve original English labels and digits",
         runtime_evidence: "with menu depth 03, Down changed active selection slot 0x7FF5 from 01 to 02; A committed 02 to 0x05EB and advanced dialogue substates 07->08->09->0A while outer state 0E and main state 04 remained; the Japanese data-loss power-off notice settled by frame 130 and remained pixel-stable through frame 900; the source-bound up, down, left, right, up, A sequence advanced 0x775B and entered substate 0C, where the original-English sound test became visible",
+    }
+}
+
+fn sound_test_control_contract() -> SoundTestControlContract {
+    SoundTestControlContract {
+        screen_role: "sound_test",
+        input_address: 0x0018,
+        input_address_hex: "0x0018",
+        sound_number_address: 0x775C,
+        sound_number_address_hex: "0x775C",
+        initial_sound_number: 0x00,
+        upper_boundary: 0x50,
+        upper_boundary_hex: "0x50",
+        sound_event_base_address: 0x06F0,
+        sound_event_base_address_hex: "0x06F0",
+        sound_event_slot_count: 8,
+        controls: vec![
+            SoundTestControl {
+                input: "up",
+                input_mask: 0x08,
+                input_mask_hex: "0x08",
+                source_effect: "increment 0x775C; values at or above 0x50 wrap to 0x00; redraw the sound number and selected event bit",
+                next_dialogue_substate: None,
+                downstream_family_role: None,
+            },
+            SoundTestControl {
+                input: "down",
+                input_mask: 0x04,
+                input_mask_hex: "0x04",
+                source_effect: "decrement 0x775C; a negative result wraps to 0x50; redraw the sound number and selected event bit",
+                next_dialogue_substate: None,
+                downstream_family_role: None,
+            },
+            SoundTestControl {
+                input: "A",
+                input_mask: 0x80,
+                input_mask_hex: "0x80",
+                source_effect: "map 0x775C to one of eight event slots at 0x06F0 and write the matching one-hot bit",
+                next_dialogue_substate: None,
+                downstream_family_role: None,
+            },
+            SoundTestControl {
+                input: "B",
+                input_mask: 0x40,
+                input_mask_hex: "0x40",
+                source_effect: "write 0x01 to the base sound-event slot 0x06F0",
+                next_dialogue_substate: None,
+                downstream_family_role: None,
+            },
+            SoundTestControl {
+                input: "Start",
+                input_mask: 0x10,
+                input_mask_hex: "0x10",
+                source_effect: "increment dialogue substate 0x0C to 0x0D and tail-dispatch bank 0x07 handler index 0x03",
+                next_dialogue_substate: Some(0x0D),
+                downstream_family_role: Some("battle_animation_test_sequence"),
+            },
+            SoundTestControl {
+                input: "Select",
+                input_mask: 0x20,
+                input_mask_hex: "0x20",
+                source_effect: "increment dialogue substate 0x0C twice to 0x0E, prepare the ending state, then run substate 0x0F through bank 0x04 handler index 0x04",
+                next_dialogue_substate: Some(0x0E),
+                downstream_family_role: Some("ending_sequence"),
+            },
+        ],
+        downstream_families: vec![
+            UnpartitionedDownstreamFamily {
+                family_role: "battle_animation_test_sequence",
+                entry_dialogue_substate: 0x0D,
+                prg_bank: 0x07,
+                prg_bank_hex: "0x07",
+                bank_handler_index: 0x03,
+                bank_handler_index_hex: "0x03",
+                entry_point: 0xAA2B,
+                entry_point_hex: "0xAA2B",
+                phase_state_address: 0x7730,
+                phase_state_address_hex: "0x7730",
+                phase_pointer_count: BATTLE_ANIMATION_TEST_PHASE_POINTERS_BYTES.len() / 2,
+                static_flow: "the bank handler runs a dedicated loop and dispatches six source phases from 0x7730",
+                runtime_observed: false,
+                screen_partition_status: "unpartitioned until visible phase lifetimes and any inputs are observed",
+                translation_scope_status: "unresolved; do not infer it from the ordinary battle-animation screen",
+            },
+            UnpartitionedDownstreamFamily {
+                family_role: "ending_sequence",
+                entry_dialogue_substate: 0x0E,
+                prg_bank: 0x04,
+                prg_bank_hex: "0x04",
+                bank_handler_index: 0x04,
+                bank_handler_index_hex: "0x04",
+                entry_point: 0x9EC6,
+                entry_point_hex: "0x9EC6",
+                phase_state_address: 0x7731,
+                phase_state_address_hex: "0x7731",
+                phase_pointer_count: ENDING_SEQUENCE_PHASE_POINTERS_BYTES.len() / 2,
+                static_flow: "substate 0x0E prepares ending memory; substate 0x0F loops bank 0x04 handler 0x04, which initializes and dispatches thirty source phases from 0x7731",
+                runtime_observed: false,
+                screen_partition_status: "unpartitioned until automatic, message, epilogue, and credits lifetimes are observed",
+                translation_scope_status: "unresolved; Japanese narrative text, preserved Latin, and credits must be classified per visible lifetime",
+            },
+        ],
+        controls_runtime_observed: false,
+        translation_handling: "preserve every original English label and digit on the sound-test screen",
+        proof_boundary: "source-binds every controller mask and the two downstream state-machine entries; no sound-test control or downstream family has yet been executed in this contract",
     }
 }
 
@@ -1190,16 +1516,47 @@ fn transition_screens() -> Vec<TransitionScreen> {
             runtime_state: runtime_state(0x0E, "0x0E", 0x04, "0x04", None, None),
             observed_chr_pair: chr_pair(0x1C, 0x1C, 0x00, 0x18),
             temporal_behavior: "the hidden sequence entered substate 0B, cleared the old composition, and displayed the sound test at substate 0C without further input",
-            input_actions: &[],
+            input_actions: &[
+                InputAction {
+                    input: "up or down",
+                    immediate_effect: "change sound number 0x775C with source-defined wraparound and redraw its number and event bit",
+                    may_cause_persistent_gameplay_mutation: false,
+                    next_role: "sound_test",
+                },
+                InputAction {
+                    input: "A",
+                    immediate_effect: "map the selected sound number to one event slot at 0x06F0..0x06F7 and write its one-hot bit",
+                    may_cause_persistent_gameplay_mutation: false,
+                    next_role: "sound_test",
+                },
+                InputAction {
+                    input: "B",
+                    immediate_effect: "write 01 to the base sound-event slot 0x06F0",
+                    may_cause_persistent_gameplay_mutation: false,
+                    next_role: "sound_test",
+                },
+                InputAction {
+                    input: "Start",
+                    immediate_effect: "advance to substate 0D and enter bank-07 handler 03, an unpartitioned six-phase battle-animation test sequence",
+                    may_cause_persistent_gameplay_mutation: false,
+                    next_role: "battle_animation_test_sequence",
+                },
+                InputAction {
+                    input: "Select",
+                    immediate_effect: "advance through substates 0E and 0F into bank-04 handler 04, an unpartitioned thirty-phase ending sequence",
+                    may_cause_persistent_gameplay_mutation: false,
+                    next_role: "ending_sequence",
+                },
+            ],
             focus_elements: &[
                 "preserve every original English label and digit",
-                "sound-number selection and playback controls",
-                "Start and Select debug-viewer branches",
+                "source-bound sound-number selection and event controls",
+                "Start and Select downstream state-machine entries",
                 "screen exit and re-entry behavior",
             ],
             unresolved_focus: &[
-                "runtime effects of sound selection and playback controls",
-                "runtime effects and downstream screens of the Start and Select branches",
+                "runtime effects of the source-bound sound selection and event writes",
+                "visible screen lifetimes inside the six-phase battle-animation test and thirty-phase ending sequence",
             ],
         },
         TransitionScreen {
@@ -1467,6 +1824,9 @@ mod tests {
         assert_eq!(source_file_offset(0x0B, 0x9B35).unwrap(), 0x2DB45);
         assert_eq!(source_file_offset(0x0B, 0x9BA0).unwrap(), 0x2DBB0);
         assert_eq!(source_file_offset(0x0B, 0x9BCF).unwrap(), 0x2DBDF);
+        assert_eq!(source_file_offset(0x0B, 0x9C17).unwrap(), 0x2DC27);
+        assert_eq!(source_file_offset(0x07, 0xAA2B).unwrap(), 0x1EA3B);
+        assert_eq!(source_file_offset(0x04, 0x9EC6).unwrap(), 0x11ED6);
         assert_eq!(
             source_file_offset(0x0F, CHAPTER_TITLE_POINTER_TABLE_ADDRESS).unwrap(),
             0x3EE18
@@ -1528,6 +1888,52 @@ mod tests {
             ],
             [0x1C, 0x1C, 0x00, 0x18]
         );
+    }
+
+    #[test]
+    fn sound_test_controls_bind_two_unpartitioned_downstream_families() {
+        let contract = sound_test_control_contract();
+
+        assert_eq!(contract.sound_number_address, 0x775C);
+        assert_eq!(contract.initial_sound_number, 0);
+        assert_eq!(contract.upper_boundary, 0x50);
+        assert_eq!(contract.sound_event_base_address, 0x06F0);
+        assert_eq!(contract.sound_event_slot_count, 8);
+        assert_eq!(contract.controls.len(), 6);
+        for (input, mask) in [
+            ("up", 0x08),
+            ("down", 0x04),
+            ("A", 0x80),
+            ("B", 0x40),
+            ("Start", 0x10),
+            ("Select", 0x20),
+        ] {
+            assert!(contract
+                .controls
+                .iter()
+                .any(|control| control.input == input && control.input_mask == mask));
+        }
+        let battle_test = contract
+            .downstream_families
+            .iter()
+            .find(|family| family.family_role == "battle_animation_test_sequence")
+            .unwrap();
+        assert_eq!(battle_test.entry_dialogue_substate, 0x0D);
+        assert_eq!(battle_test.prg_bank, 0x07);
+        assert_eq!(battle_test.bank_handler_index, 0x03);
+        assert_eq!(battle_test.entry_point, 0xAA2B);
+        assert_eq!(battle_test.phase_pointer_count, 6);
+        let ending = contract
+            .downstream_families
+            .iter()
+            .find(|family| family.family_role == "ending_sequence")
+            .unwrap();
+        assert_eq!(ending.entry_dialogue_substate, 0x0E);
+        assert_eq!(ending.prg_bank, 0x04);
+        assert_eq!(ending.bank_handler_index, 0x04);
+        assert_eq!(ending.entry_point, 0x9EC6);
+        assert_eq!(ending.phase_pointer_count, 30);
+        assert!(!contract.controls_runtime_observed);
     }
 
     #[test]

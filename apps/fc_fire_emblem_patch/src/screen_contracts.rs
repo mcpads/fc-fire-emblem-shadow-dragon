@@ -334,12 +334,14 @@ struct ScreenContractRegistry {
     schema: u32,
     next_observation_gate: ScreenObservationGate,
     screens: Vec<ScreenContractSeed>,
+    unpartitioned_surface_families: Vec<UnpartitionedSurfaceFamily>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum ObservationGateKind {
     ScreenSequence,
+    ScreenPartition,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -368,6 +370,18 @@ struct ScreenContractSeed {
     contract_state: ContractState,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct UnpartitionedSurfaceFamily {
+    family_role: String,
+    surface_family: String,
+    entry_condition: String,
+    source_bound: bool,
+    known_focus: Vec<String>,
+    unresolved_focus: Vec<String>,
+    next_gate: String,
+}
+
 #[derive(Debug, Serialize)]
 struct ScreenContractReport {
     schema: u32,
@@ -375,6 +389,7 @@ struct ScreenContractReport {
     registry_sha1: String,
     coverage_dimensions: [&'static str; 8],
     screen_count: usize,
+    unpartitioned_surface_family_count: usize,
     runtime_observed_screen_count: usize,
     chr_pair_observed_screen_count: usize,
     mixed_original_latin_screen_count: usize,
@@ -383,6 +398,7 @@ struct ScreenContractReport {
     mixed_text_page_verified_screen_count: usize,
     next_observation_gate: ScreenObservationGate,
     screens: Vec<ScreenContract>,
+    unpartitioned_surface_families: Vec<UnpartitionedSurfaceFamily>,
     unresolved_surface_families: Vec<String>,
     release_eligible: bool,
 }
@@ -444,17 +460,45 @@ fn build_report(
     let registry: ScreenContractRegistry =
         serde_json::from_str(registry_json).context("parse screen-contract registry")?;
     ensure!(
-        registry.schema == 1,
+        registry.schema == 2,
         "unsupported screen-contract registry schema"
     );
     ensure!(!registry.screens.is_empty(), "no screen contracts supplied");
-
     let mut roles = BTreeMap::new();
     for seed in &registry.screens {
         ensure!(
             roles.insert(seed.screen_role.as_str(), seed).is_none(),
             "duplicate screen role {}",
             seed.screen_role
+        );
+    }
+
+    let mut family_roles = BTreeSet::new();
+    for family in &registry.unpartitioned_surface_families {
+        ensure!(
+            family_roles.insert(family.family_role.as_str()),
+            "duplicate unpartitioned surface family {}",
+            family.family_role
+        );
+        ensure!(
+            !roles.contains_key(family.family_role.as_str()),
+            "unpartitioned surface family {} masquerades as a screen role",
+            family.family_role
+        );
+        ensure!(
+            !family.entry_condition.is_empty(),
+            "unpartitioned surface family {} has no entry condition",
+            family.family_role
+        );
+        ensure!(
+            !family.known_focus.is_empty() && !family.unresolved_focus.is_empty(),
+            "unpartitioned surface family {} lacks focus boundaries",
+            family.family_role
+        );
+        ensure!(
+            !family.next_gate.is_empty(),
+            "unpartitioned surface family {} has no next gate",
+            family.family_role
         );
     }
 
@@ -517,16 +561,23 @@ fn build_report(
             contract_state: seed.contract_state,
         })
         .collect::<Vec<_>>();
-    let unresolved_surface_families = screens
+    let mut unresolved_surface_families = screens
         .iter()
         .filter(|screen| !screen.runtime_observed)
         .map(|screen| screen.surface_family.clone())
         .collect::<BTreeSet<_>>()
         .into_iter()
-        .collect::<Vec<_>>();
+        .collect::<BTreeSet<_>>();
+    unresolved_surface_families.extend(
+        registry
+            .unpartitioned_surface_families
+            .iter()
+            .map(|family| family.surface_family.clone()),
+    );
+    let unresolved_surface_families = unresolved_surface_families.into_iter().collect::<Vec<_>>();
 
     Ok(ScreenContractReport {
-        schema: 1,
+        schema: 2,
         source_sha1: EXPECTED_SOURCE_SHA1,
         registry_sha1: sha1_hex(registry_json.as_bytes()),
         coverage_dimensions: [
@@ -540,6 +591,7 @@ fn build_report(
             "font-page entry, exit, and re-entry lifetime",
         ],
         screen_count: screens.len(),
+        unpartitioned_surface_family_count: registry.unpartitioned_surface_families.len(),
         runtime_observed_screen_count: screens
             .iter()
             .filter(|screen| screen.runtime_observed)
@@ -565,6 +617,7 @@ fn build_report(
             .count(),
         next_observation_gate: registry.next_observation_gate,
         screens,
+        unpartitioned_surface_families: registry.unpartitioned_surface_families,
         unresolved_surface_families,
         release_eligible: false,
     })
@@ -578,13 +631,26 @@ mod tests {
     fn registry_covers_every_observed_chr_pair() {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
 
-        assert_eq!(report.screen_count, 41);
+        assert_eq!(report.screen_count, 40);
+        assert_eq!(report.unpartitioned_surface_family_count, 2);
         assert_eq!(report.runtime_observed_screen_count, 40);
         assert_eq!(report.chr_pair_observed_screen_count, 37);
         assert_eq!(report.mixed_original_latin_screen_count, 18);
         assert_eq!(report.preserved_original_only_screen_count, 2);
         assert_eq!(report.page_switch_verified_screen_count, 1);
         assert_eq!(report.mixed_text_page_verified_screen_count, 1);
+        assert_eq!(
+            report.unresolved_surface_families,
+            ["battle_animation_test", "ending"]
+        );
+        assert!(report
+            .unpartitioned_surface_families
+            .iter()
+            .any(|family| family.family_role == "ending_sequence"
+                && family
+                    .known_focus
+                    .iter()
+                    .any(|focus| focus.contains("thirty"))));
     }
 
     #[test]
@@ -632,13 +698,16 @@ mod tests {
 
         assert_eq!(
             report.next_observation_gate.gate_role,
-            "chapter_transition_failure_and_remaining_chapter_variants"
+            "sound_test_control_and_downstream_screen_partition"
         );
         assert_eq!(
             report.next_observation_gate.gate_kind,
-            ObservationGateKind::ScreenSequence
+            ObservationGateKind::ScreenPartition
         );
-        assert_eq!(report.next_observation_gate.focus_screen_roles.len(), 3);
+        assert_eq!(
+            report.next_observation_gate.focus_screen_roles,
+            ["sound_test"]
+        );
         assert!(report
             .next_observation_gate
             .focus_screen_roles
@@ -656,7 +725,7 @@ mod tests {
     #[test]
     fn observation_gate_cannot_masquerade_as_a_screen_role() {
         let invalid_registry = REGISTRY_JSON.replacen(
-            "\"gate_role\": \"chapter_transition_failure_and_remaining_chapter_variants\"",
+            "\"gate_role\": \"sound_test_control_and_downstream_screen_partition\"",
             "\"gate_role\": \"title\"",
             1,
         );
@@ -665,6 +734,20 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("must not masquerade as a screen role"));
+    }
+
+    #[test]
+    fn unpartitioned_family_cannot_masquerade_as_a_screen_role() {
+        let invalid_registry = REGISTRY_JSON.replacen(
+            "\"family_role\": \"ending_sequence\"",
+            "\"family_role\": \"title\"",
+            1,
+        );
+
+        let error = build_report(&invalid_registry, OBSERVED_CHR_PAIRS)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("masquerades as a screen role"));
     }
 
     #[test]
