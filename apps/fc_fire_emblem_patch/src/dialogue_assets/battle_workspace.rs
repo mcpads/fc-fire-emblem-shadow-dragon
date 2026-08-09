@@ -2,6 +2,12 @@ use std::collections::BTreeMap;
 
 use super::*;
 
+mod layout;
+#[cfg(test)]
+mod layout_tests;
+
+pub(crate) use layout::plan_battle_dialogue_reinsertion;
+
 #[derive(Debug)]
 pub(crate) struct BattleDialogueWorkspaceSummary {
     pub(crate) workspace_sha1: String,
@@ -478,7 +484,7 @@ fn decode_battle_record_lines(
         }
         markup.push('}');
         cursor = end;
-        if matches!(code, 0xED | 0xEE | 0xEF) {
+        if matches!(code, 0xED..=0xEF) {
             let index = lines.len();
             lines.push(BattleDialogueWorkspaceLine {
                 id: format!(

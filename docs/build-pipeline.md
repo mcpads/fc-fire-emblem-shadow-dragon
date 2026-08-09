@@ -289,10 +289,13 @@ cargo run -p fc-fire-emblem-patch -- build-mmc5-dialogue-exram-probe \
 
 `import-battle-dialogue-draft`는 비공개 TSV의 `line_id<TAB>korean_markup`을 작업공간에 병합한다. TSV는 일본어가 있는 줄을 빠짐없이 정확히 한 번씩 포함해야 하고, 병합 결과가 보호 토큰 검증을 통과해야만 작업공간을 원자적으로 교체한다. 현재 일본어 포함 70줄을 모두 `needs_human_review` 초벌로 채웠으며 제어 전용 30줄은 원문 상태를 유지한다.
 
-전투 초벌의 4바이트 헤더·본문·제어 토큰을 글리프당 1바이트 논리열로 다시 세면 포인터 참조 28레코드는 1,026바이트다. 여기에 포인터가 가리키지 않더라도 삭제하지 않을 원본 레코드 16바이트를 더한 실제 계획은 1,042/1,168바이트이며 126바이트를 남긴다. 이 계산은 저장 용량만 닫으며 포인터 재배치·글꼴 페이지·실행 표시는 별도 관문이다.
+전투 초벌의 4바이트 헤더·본문·제어 토큰을 글리프당 1바이트 논리열로 다시 세면 포인터 참조 28레코드는 1,026바이트다. 여기에 포인터가 가리키지 않더라도 삭제하지 않을 원본 레코드 16바이트를 더한 실제 계획은 1,042/1,168바이트이며 126바이트를 남긴다. `plan-battle-dialogue-reinsertion`은 미참조 레코드의 정확한 원래 위치와 SHA-1을 다시 확인하고, 그 앞뒤 두 소유 구간에 28개 레코드를 자르지 않고 채운다. 배치 결과에서 별칭을 포함한 포인터 65개의 새 CPU 주소를 계산하며 상세 보고서에는 대사·글리프 문자·로컬 경로를 싣지 않는다. 현재 보고서 SHA-1은 `4a96219a7e9ddc91dd98bced71e8ab32435afaf3`이다. 이 단계는 실제 ROM 쓰기·글꼴 페이지·실행 표시를 아직 닫지 않는다.
 
 ```sh
 cargo run -p fc-fire-emblem-patch -- extract-battle-dialogue-workspace \
+  'roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes'
+
+cargo run -p fc-fire-emblem-patch -- plan-battle-dialogue-reinsertion \
   'roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes'
 ```
 

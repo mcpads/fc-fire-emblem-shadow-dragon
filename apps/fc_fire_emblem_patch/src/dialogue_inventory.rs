@@ -144,6 +144,34 @@ pub(crate) fn inspect_battle_dialogue_translation_records(
     Ok(records)
 }
 
+pub(crate) fn inspect_battle_dialogue_physical_layout(
+    source: &[u8],
+) -> Result<BattleDialoguePhysicalLayout> {
+    let report = build_report(source)?;
+    let table = report
+        .tables
+        .iter()
+        .find(|table| table.id == BATTLE_DIALOGUE_TABLE_ID)
+        .context("battle-dialogue table is absent")?;
+    let summary = table
+        .battle_record_storage_summary
+        .as_ref()
+        .context("battle-dialogue physical storage summary is absent")?;
+    ensure!(
+        summary.unreferenced_records.len() == 1,
+        "battle-dialogue unreferenced record count changed"
+    );
+    let unreferenced = &summary.unreferenced_records[0];
+    Ok(BattleDialoguePhysicalLayout {
+        data_file_start: table.data_file_start,
+        data_file_end_exclusive: summary.physical_data_file_end_exclusive,
+        preserved_unreferenced_file_offset: unreferenced.file_offset,
+        preserved_unreferenced_end_file_offset_exclusive: unreferenced
+            .end_file_offset_exclusive,
+        preserved_unreferenced_storage_sha1: unreferenced.storage_sha1.clone(),
+    })
+}
+
 pub(crate) fn inspect_chapter_intro_contexts(
     source: &[u8],
 ) -> Result<Vec<ChapterIntroContextBinding>> {

@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     dialogue_inventory::{
-        MainDialogueStorageLine, MainDialogueStorageRecord, inspect_battle_dialogue_translation_records,
+        MainDialogueStorageLine, MainDialogueStorageRecord,
+        inspect_battle_dialogue_physical_layout, inspect_battle_dialogue_translation_records,
         inspect_main_dialogue_graph, inspect_main_dialogue_storage, switchable_file_to_cpu,
     },
     japanese_encoding::{is_japanese_text_code, japanese_text_glyph},
@@ -29,7 +30,7 @@ mod workspace;
 pub(crate) use glyph_workset::analyze_main_dialogue_glyph_workset;
 pub(crate) use battle_workspace::{
     extract_battle_dialogue_workspace, import_battle_dialogue_draft,
-    validate_battle_dialogue_workspace,
+    plan_battle_dialogue_reinsertion, validate_battle_dialogue_workspace,
 };
 use layout_packing::*;
 use markup::*;

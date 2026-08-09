@@ -156,6 +156,14 @@ enum Command {
         #[arg(long, default_value = "private/dialogue/battle-draft.tsv")]
         draft: PathBuf,
     },
+    /// Plan battle-dialogue relocation while preserving the unreferenced physical record.
+    PlanBattleDialogueReinsertion {
+        source: PathBuf,
+        #[arg(long, default_value = "private/dialogue/battle-workspace.json")]
+        workspace: PathBuf,
+        #[arg(long, default_value = "private/dialogue/battle-layout.json")]
+        report: PathBuf,
+    },
     /// Validate private translations without encoding or writing a ROM.
     ValidateMainDialogueWorkspace {
         source: PathBuf,
@@ -577,6 +585,24 @@ fn main() -> Result<()> {
             println!(
                 "imported {} battle dialogue draft lines",
                 summary.imported_line_count
+            );
+        }
+        Command::PlanBattleDialogueReinsertion {
+            source,
+            workspace,
+            report,
+        } => {
+            let summary =
+                dialogue_assets::plan_battle_dialogue_reinsertion(&source, &workspace, &report)?;
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "battle dialogue layout: {} records, {} pointer writes, {} translated bytes + {} preserved bytes, {} bytes remaining",
+                summary.record_count,
+                summary.pointer_write_count,
+                summary.translated_record_storage_byte_count,
+                summary.preserved_storage_byte_count,
+                summary.remaining_storage_byte_count
             );
         }
         Command::ValidateMainDialogueWorkspace { source, workspace } => {

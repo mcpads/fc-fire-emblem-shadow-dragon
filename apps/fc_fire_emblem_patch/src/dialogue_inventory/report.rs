@@ -313,6 +313,15 @@ pub(crate) struct BattleDialogueTranslationRecord {
     pub(crate) literal_file_offsets: Vec<usize>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct BattleDialoguePhysicalLayout {
+    pub(crate) data_file_start: usize,
+    pub(crate) data_file_end_exclusive: usize,
+    pub(crate) preserved_unreferenced_file_offset: usize,
+    pub(crate) preserved_unreferenced_end_file_offset_exclusive: usize,
+    pub(crate) preserved_unreferenced_storage_sha1: String,
+}
+
 #[derive(Debug, Serialize)]
 pub(crate) struct BattleDialogueRecordStorageSummary {
     pub(crate) pointer_referenced_record_count: usize,
