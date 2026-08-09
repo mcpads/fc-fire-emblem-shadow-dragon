@@ -5,6 +5,7 @@ use crate::rp2a03::{Instruction, assemble_at};
 pub(crate) const PAYLOAD_LEN: usize = 0x200;
 pub(crate) const REPLAY_QUEUE_ADDRESS: u16 = 0x6000;
 pub(crate) const INITIALIZE_ADDRESS: u16 = 0x6120;
+pub(crate) const CLEAR_PHYSICAL_NAMETABLE_ZERO_ADDRESS: u16 = 0x6180;
 pub(crate) const STATE_START: u16 = 0x67E0;
 pub(crate) const STATE_LEN: u8 = 0x20;
 pub(crate) const MAGIC: &[u8; 4] = b"NQB1";
@@ -26,6 +27,7 @@ const BATCH_COUNT: u16 = 0x67E0;
 const COMMAND_COUNT: u16 = 0x67E2;
 const DATA_COUNT: u16 = 0x67E4;
 const NAMETABLE_DATA_COUNT: u16 = 0x67E6;
+const DIRECT_CLEAR_COUNT: u16 = 0x67E8;
 const VALUE: u16 = 0x67F0;
 const DESCRIPTOR: u16 = 0x67F1;
 const PPU_ADDRESS_HIGH: u16 = 0x67F4;
@@ -46,6 +48,10 @@ pub(crate) fn build_payload() -> Result<Vec<u8>> {
         (INCREMENT_ACROSS_ADDRESS, increment_across()?),
         (MASK_AND_RETURN_ADDRESS, mask_and_return()?),
         (INITIALIZE_ADDRESS, initialize()?),
+        (
+            CLEAR_PHYSICAL_NAMETABLE_ZERO_ADDRESS,
+            clear_physical_nametable_zero()?,
+        ),
     ] {
         let start = usize::from(address - REPLAY_QUEUE_ADDRESS);
         let end = start
@@ -228,8 +234,7 @@ fn mask_and_return() -> Result<Vec<u8>> {
 
 fn initialize() -> Result<Vec<u8>> {
     let fill_loop_address = INITIALIZE_ADDRESS + 0x04;
-    let attribute_loop_address = INITIALIZE_ADDRESS + 0x23;
-    let state_loop_address = INITIALIZE_ADDRESS + 0x32;
+    let state_loop_address = INITIALIZE_ADDRESS + 0x23;
     let mut instructions = vec![
         Instruction::LdaImmediate(0xFF),
         Instruction::LdxImmediate(0),
@@ -245,13 +250,6 @@ fn initialize() -> Result<Vec<u8>> {
         Instruction::BneAbsolute(fill_loop_address),
         Instruction::LdaImmediate(0),
         Instruction::LdxImmediate(0),
-        Instruction::StaAbsoluteX(0x6BC0),
-        Instruction::StaAbsoluteX(0x6FC0),
-        Instruction::Inx,
-        Instruction::CpxImmediate(0x40),
-        Instruction::BneAbsolute(attribute_loop_address),
-        Instruction::LdaImmediate(0),
-        Instruction::LdxImmediate(0),
         Instruction::StaAbsoluteX(STATE_START),
         Instruction::Inx,
         Instruction::CpxImmediate(STATE_LEN),
@@ -265,6 +263,34 @@ fn initialize() -> Result<Vec<u8>> {
     assemble_at(INITIALIZE_ADDRESS, &instructions)
 }
 
+fn clear_physical_nametable_zero() -> Result<Vec<u8>> {
+    let fill_loop_address = CLEAR_PHYSICAL_NAMETABLE_ZERO_ADDRESS + 0x0C;
+    let attribute_loop_address = CLEAR_PHYSICAL_NAMETABLE_ZERO_ADDRESS + 0x1F;
+    assemble_at(
+        CLEAR_PHYSICAL_NAMETABLE_ZERO_ADDRESS,
+        &[
+            Instruction::IncAbsolute(DIRECT_CLEAR_COUNT),
+            Instruction::BneAbsolute(CLEAR_PHYSICAL_NAMETABLE_ZERO_ADDRESS + 0x08),
+            Instruction::IncAbsolute(DIRECT_CLEAR_COUNT + 1),
+            Instruction::LdaImmediate(0xFF),
+            Instruction::LdxImmediate(0),
+            Instruction::StaAbsoluteX(0x6800),
+            Instruction::StaAbsoluteX(0x6900),
+            Instruction::StaAbsoluteX(0x6A00),
+            Instruction::StaAbsoluteX(0x6B00),
+            Instruction::Inx,
+            Instruction::BneAbsolute(fill_loop_address),
+            Instruction::LdaImmediate(0),
+            Instruction::LdxImmediate(0),
+            Instruction::StaAbsoluteX(0x6BC0),
+            Instruction::Inx,
+            Instruction::CpxImmediate(0x40),
+            Instruction::BneAbsolute(attribute_loop_address),
+            Instruction::Rts,
+        ],
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,9 +300,11 @@ mod tests {
         let payload = build_payload().unwrap();
         let replay = replay_queue().unwrap();
         let initializer = initialize().unwrap();
+        let clear = clear_physical_nametable_zero().unwrap();
         assert_eq!(payload.len(), PAYLOAD_LEN);
         assert!(replay.len() <= usize::from(MIRROR_DATA_ADDRESS - REPLAY_QUEUE_ADDRESS));
         assert!(initializer.len() < 0x100);
+        assert!(clear.len() <= usize::from(STATE_START - CLEAR_PHYSICAL_NAMETABLE_ZERO_ADDRESS));
         assert_eq!(
             &payload[usize::from(INITIALIZE_ADDRESS - REPLAY_QUEUE_ADDRESS)
                 ..usize::from(INITIALIZE_ADDRESS - REPLAY_QUEUE_ADDRESS) + initializer.len()],

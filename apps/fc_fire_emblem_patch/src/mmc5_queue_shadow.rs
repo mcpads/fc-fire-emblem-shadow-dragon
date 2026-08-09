@@ -13,6 +13,8 @@ use crate::{
     tracked::TrackedImage,
 };
 
+mod direct_clear;
+
 const CHR_MODE_RESET_TAIL_ADDRESS: u16 = 0xFA65;
 const QUEUE_ACCUMULATOR_PUBLISH_WRAPPER_ADDRESS: u16 = 0xFA80;
 const QUEUE_Y_PUBLISH_WRAPPER_ADDRESS: u16 = 0xFAA0;
@@ -95,6 +97,7 @@ struct QueueShadowProbeReport {
     queue_replay_cpu_address: String,
     queue_replay_direct_transfer_candidate_count: usize,
     publisher_boundaries: Vec<QueuePublisherReport>,
+    direct_transfer_boundaries: Vec<direct_clear::DirectTransferBoundaryReport>,
     ppu_data_store_hooks: usize,
     runtime: RuntimeReport,
     direct_fixed_code_transfer_count: usize,
@@ -152,11 +155,16 @@ pub fn build_mmc5_queue_shadow_probe(
     let source_rom = Rom::from_path(source_path)?;
     source_rom.verify_supported_japanese()?;
     validate_queue_publisher_contracts(&source_rom)?;
+    direct_clear::validate_source(&source_rom)?;
 
     let direct_fixed_code_transfer_count = count_direct_transfers_to_range(
         source_rom.prg(),
         QUEUE_ACCUMULATOR_PUBLISH_WRAPPER_ADDRESS,
         RUNTIME_PAYLOAD_SOURCE_ADDRESS,
+    )? + count_direct_transfers_to_range(
+        source_rom.prg(),
+        direct_clear::WRAPPER_ADDRESS,
+        direct_clear::wrapper_end()?,
     )?;
     ensure!(
         direct_fixed_code_transfer_count == 0,
@@ -179,6 +187,7 @@ pub fn build_mmc5_queue_shadow_probe(
     for publisher in QUEUE_PUBLISHERS {
         redirect_queue_publisher(&mut image, *publisher)?;
     }
+    direct_clear::redirect_source_clear(&mut image)?;
 
     image.verify_all_changes_tracked(&base)?;
     let tracked_delta_writes = image
@@ -237,6 +246,7 @@ pub fn build_mmc5_queue_shadow_probe(
                 })
             })
             .collect::<Result<Vec<_>>>()?,
+        direct_transfer_boundaries: vec![direct_clear::report()?],
         ppu_data_store_hooks: 0,
         runtime: RuntimeReport {
             prg_ram_bank: 1,
@@ -255,7 +265,7 @@ pub fn build_mmc5_queue_shadow_probe(
                 queue_runtime::PHYSICAL_NAMETABLE_END - queue_runtime::PHYSICAL_NAMETABLE_START,
             ),
             initial_tile_byte: "0xFF".to_owned(),
-            initial_attribute_byte: "0x00".to_owned(),
+            initial_attribute_byte: "0xFF until a confirmed direct clear or queue write".to_owned(),
             mirroring_source: "source zero-page $C8: 0 vertical, nonzero horizontal",
             initialization_magic: String::from_utf8_lossy(queue_runtime::MAGIC).into_owned(),
         },
@@ -263,7 +273,7 @@ pub fn build_mmc5_queue_shadow_probe(
         direct_payload_transfer_candidate_count,
         tracked_delta_writes,
         unresolved_boundaries: vec![
-            "This probe mirrors the three confirmed queue publishers before they set $21; other publishers and direct PPU transfer loops remain unowned.",
+            "This probe mirrors the three confirmed queue publishers before they set $21 and the confirmed bank 0D page-zero clear; other publishers and direct PPU transfer loops remain unowned.",
             "The runtime shadow is not yet connected to MMC5 ExRAM display attributes.",
             "The all-FF runtime payload source has direct JSR/JMP byte-pattern candidates; they are reported rather than interpreted as instruction-boundary references.",
             "PRG RAM bank 1 is isolated from the source save bank in Mesen, but save/load compatibility and other execution environments remain unverified.",
@@ -343,6 +353,7 @@ fn install_fixed_routines(image: &mut TrackedImage) -> Result<()> {
             &instructions,
         )?;
     }
+    direct_clear::install_wrapper(image)?;
     Ok(())
 }
 
