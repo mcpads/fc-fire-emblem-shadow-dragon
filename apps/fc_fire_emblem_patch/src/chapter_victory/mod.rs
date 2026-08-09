@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 
 use crate::{
-    rom::{Rom, EXPECTED_SOURCE_SHA1},
+    rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
 };
 

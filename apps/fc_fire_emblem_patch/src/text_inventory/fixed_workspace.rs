@@ -7,13 +7,21 @@ use std::{
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 
+use super::battle_message_templates::extract_battle_message_templates;
 use super::*;
 use crate::{
     japanese_encoding::japanese_text_glyph,
+    mmc5_prg::fixed_bank_file_offset,
     rom::{EXPECTED_SOURCE_SHA1, Rom},
 };
 
-const TABLE_IDS: [&str; 4] = ["class-names", "item-names", "unit-names", "enemy-names"];
+const TABLE_IDS: [&str; 5] = [
+    "class-names",
+    "item-names",
+    "unit-names",
+    "enemy-names",
+    "terrain-names",
+];
 
 #[derive(Debug)]
 pub(crate) struct FixedTextWorkspaceSummary {
@@ -40,6 +48,8 @@ struct FixedTextEntry {
     source_index: usize,
     alias_indices: Vec<usize>,
     pointer_cpu_address_hex: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_file_offset_hex: Option<String>,
     source_bytes_hex: String,
     source_sha1: String,
     japanese_markup: String,
@@ -55,8 +65,37 @@ pub(crate) enum FixedTextLogicalByte {
 
 #[derive(Clone, Debug)]
 pub(crate) struct FixedTextPlannedEntry {
+    pub(crate) id: String,
     pub(crate) table_id: String,
+    pub(crate) source_index: usize,
+    pub(crate) file_offset: usize,
+    pub(crate) source_storage_byte_count: usize,
     pub(crate) logical_bytes: Vec<FixedTextLogicalByte>,
+}
+
+impl FixedTextPlannedEntry {
+    pub(crate) fn unique_glyphs(&self) -> BTreeSet<char> {
+        self.logical_bytes
+            .iter()
+            .filter_map(|byte| match byte {
+                FixedTextLogicalByte::TargetGlyph(glyph) => Some(*glyph),
+                FixedTextLogicalByte::Encoded(_) => None,
+            })
+            .collect()
+    }
+
+    pub(crate) fn encoded_bytes(&self, assignments: &BTreeMap<char, u8>) -> Result<Vec<u8>> {
+        self.logical_bytes
+            .iter()
+            .map(|byte| match byte {
+                FixedTextLogicalByte::Encoded(value) => Ok(*value),
+                FixedTextLogicalByte::TargetGlyph(glyph) => assignments
+                    .get(glyph)
+                    .copied()
+                    .with_context(|| format!("missing fixed-text code assignment for {glyph:?}")),
+            })
+            .collect()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -121,6 +160,7 @@ pub(crate) fn plan_fixed_text(rom: &Rom, workspace_path: &Path) -> Result<FixedT
                 && entry.source_index == source.source_index
                 && entry.alias_indices == source.alias_indices
                 && entry.pointer_cpu_address_hex == source.pointer_cpu_address_hex
+                && entry.source_file_offset_hex == source.source_file_offset_hex
                 && entry.source_bytes_hex == source.source_bytes_hex
                 && entry.source_sha1 == source.source_sha1
                 && entry.japanese_markup == source.japanese_markup,
@@ -148,8 +188,21 @@ pub(crate) fn plan_fixed_text(rom: &Rom, workspace_path: &Path) -> Result<FixedT
                 logical_bytes.len(),
                 source_len
             );
+            let file_offset = if let Some(encoded) = &entry.source_file_offset_hex {
+                usize::from_str_radix(encoded.trim_start_matches("0x"), 16)
+                    .with_context(|| format!("decode source file offset for {}", entry.id))?
+            } else {
+                let pointer_cpu_address =
+                    u16::from_str_radix(entry.pointer_cpu_address_hex.trim_start_matches("0x"), 16)
+                        .with_context(|| format!("decode pointer for {}", entry.id))?;
+                fixed_bank_file_offset(pointer_cpu_address)?
+            };
             Ok(FixedTextPlannedEntry {
+                id: entry.id.clone(),
                 table_id: entry.table_id.clone(),
+                source_index: entry.source_index,
+                file_offset,
+                source_storage_byte_count: source_len,
                 logical_bytes,
             })
         })
@@ -216,6 +269,7 @@ fn build_workspace(source: &[u8]) -> Result<FixedTextWorkspace> {
                 source_index: entry.index,
                 alias_indices: entry.alias_entry_indices.clone(),
                 pointer_cpu_address_hex: entry.pointer_cpu_address_hex.clone(),
+                source_file_offset_hex: None,
                 source_bytes_hex: entry.raw_bytes_hex.clone(),
                 source_sha1: entry.raw_sha1.clone(),
                 japanese_markup: decode_source_markup(&raw),
@@ -224,8 +278,28 @@ fn build_workspace(source: &[u8]) -> Result<FixedTextWorkspace> {
             });
         }
     }
+    for template in extract_battle_message_templates(source)? {
+        entries.push(FixedTextEntry {
+            id: format!("battle-message-templates:{:03}", template.index),
+            table_id: "battle-message-templates".to_owned(),
+            source_index: template.index,
+            alias_indices: vec![template.index],
+            pointer_cpu_address_hex: format!("0x{:04X}", template.pointer_cpu_address),
+            source_file_offset_hex: Some(format!("0x{:05X}", template.file_offset)),
+            source_bytes_hex: template
+                .raw_bytes
+                .iter()
+                .map(|byte| format!("{byte:02X}"))
+                .collect::<Vec<_>>()
+                .join(" "),
+            source_sha1: sha1_hex(&template.raw_bytes),
+            japanese_markup: decode_source_markup(&template.raw_bytes),
+            korean_markup: String::new(),
+            status: "untranslated".to_owned(),
+        });
+    }
     ensure!(
-        entries.len() == 233,
+        entries.len() == 270,
         "battle fixed-text unique entry count changed"
     );
     Ok(FixedTextWorkspace {
@@ -267,6 +341,7 @@ fn preserve_translations(
                     && old.source_index == entry.source_index
                     && old.alias_indices == entry.alias_indices
                     && old.pointer_cpu_address_hex == entry.pointer_cpu_address_hex
+                    && old.source_file_offset_hex == entry.source_file_offset_hex
                     && old.source_bytes_hex == entry.source_bytes_hex
                     && old.source_sha1 == entry.source_sha1
                     && old.japanese_markup == entry.japanese_markup,
@@ -381,6 +456,7 @@ mod tests {
             source_index: 0,
             alias_indices: vec![],
             pointer_cpu_address_hex: "0x0000".to_owned(),
+            source_file_offset_hex: None,
             source_bytes_hex: String::new(),
             source_sha1: String::new(),
             japanese_markup: "Sナイト".to_owned(),
@@ -395,7 +471,10 @@ mod tests {
     #[test]
     fn target_markup_keeps_layout_tokens_and_one_byte_hangul() {
         let encoded = encode_target_markup("활{FF}").unwrap();
-        assert!(matches!(encoded[0], FixedTextLogicalByte::TargetGlyph('활')));
+        assert!(matches!(
+            encoded[0],
+            FixedTextLogicalByte::TargetGlyph('활')
+        ));
         assert!(matches!(encoded[1], FixedTextLogicalByte::Encoded(0xFF)));
         assert_eq!(encoded.len(), 2);
     }

@@ -93,7 +93,8 @@ pub(crate) fn extract_battle_dialogue_workspace(
             );
             for pointer_file_offset in &record.pointer_file_offsets {
                 ensure!(
-                    rom.data().get(*pointer_file_offset..*pointer_file_offset + 2)
+                    rom.data()
+                        .get(*pointer_file_offset..*pointer_file_offset + 2)
                         == Some(&record.pointer_cpu_address.to_le_bytes()),
                     "battle-dialogue pointer source bytes changed"
                 );
@@ -167,8 +168,8 @@ pub(crate) fn validate_battle_dialogue_workspace(
 ) -> Result<BattleDialogueValidationSummary> {
     let rom = Rom::from_path(source_path)?;
     rom.verify_supported_japanese()?;
-    let workspace_bytes = fs::read(workspace_path)
-        .with_context(|| format!("read {}", workspace_path.display()))?;
+    let workspace_bytes =
+        fs::read(workspace_path).with_context(|| format!("read {}", workspace_path.display()))?;
     let workspace: BattleDialogueWorkspace = serde_json::from_slice(&workspace_bytes)
         .with_context(|| format!("parse {}", workspace_path.display()))?;
     validate_workspace_binding(rom.data(), &workspace)?;
@@ -176,8 +177,8 @@ pub(crate) fn validate_battle_dialogue_workspace(
         validate_translation_fields(&workspace)?;
     let translated_record_storage_byte_count = planned_storage_byte_count(&workspace)?;
     let preserved_unreferenced_storage_byte_count = 16;
-    let planned_storage_byte_count = translated_record_storage_byte_count
-        + preserved_unreferenced_storage_byte_count;
+    let planned_storage_byte_count =
+        translated_record_storage_byte_count + preserved_unreferenced_storage_byte_count;
     let physical_storage_byte_count = 1_168;
     ensure!(
         planned_storage_byte_count <= physical_storage_byte_count,
@@ -205,23 +206,25 @@ pub(crate) fn import_battle_dialogue_draft(
     workspace_path: &Path,
     draft_path: &Path,
 ) -> Result<BattleDialogueDraftImportSummary> {
-    let workspace_bytes = fs::read(workspace_path)
-        .with_context(|| format!("read {}", workspace_path.display()))?;
+    let workspace_bytes =
+        fs::read(workspace_path).with_context(|| format!("read {}", workspace_path.display()))?;
     let mut workspace: BattleDialogueWorkspace = serde_json::from_slice(&workspace_bytes)
         .with_context(|| format!("parse {}", workspace_path.display()))?;
-    let draft = fs::read_to_string(draft_path)
-        .with_context(|| format!("read {}", draft_path.display()))?;
+    let draft =
+        fs::read_to_string(draft_path).with_context(|| format!("read {}", draft_path.display()))?;
     let mut translations = BTreeMap::new();
     for (line_number, row) in draft.lines().enumerate() {
         if row.is_empty() || row.starts_with('#') {
             continue;
         }
-        let (id, korean) = row.split_once('\t').with_context(|| {
-            format!("draft line {} has no tab separator", line_number + 1)
-        })?;
+        let (id, korean) = row
+            .split_once('\t')
+            .with_context(|| format!("draft line {} has no tab separator", line_number + 1))?;
         ensure!(!korean.is_empty(), "draft translation {id} is empty");
         ensure!(
-            translations.insert(id.to_owned(), korean.to_owned()).is_none(),
+            translations
+                .insert(id.to_owned(), korean.to_owned())
+                .is_none(),
             "draft contains duplicate line {id}"
         );
     }
@@ -262,7 +265,10 @@ fn preserve_translations(
     fresh: &mut BattleDialogueWorkspace,
     existing: &BattleDialogueWorkspace,
 ) -> Result<usize> {
-    ensure!(existing.format_version == 1, "battle workspace format changed");
+    ensure!(
+        existing.format_version == 1,
+        "battle workspace format changed"
+    );
     let mut existing_header = existing.clone();
     existing_header.records.clear();
     let mut fresh_header = fresh.clone();
@@ -338,15 +344,26 @@ fn validate_workspace_binding(source: &[u8], workspace: &BattleDialogueWorkspace
     );
     for (actual, source_record) in workspace.records.iter().zip(&records) {
         ensure!(
-            actual.id == format!("{}:{:03}", source_record.table_id, source_record.canonical_entry_index)
+            actual.id
+                == format!(
+                    "{}:{:03}",
+                    source_record.table_id, source_record.canonical_entry_index
+                )
                 && actual.table_id == source_record.table_id
                 && actual.source_prg_bank == source_record.source_prg_bank
                 && actual.canonical_entry_index == source_record.canonical_entry_index
                 && actual.entry_indices == source_record.entry_indices
-                && actual.pointer_cpu_address_hex == format!("0x{:04X}", source_record.pointer_cpu_address)
-                && actual.pointer_file_offsets_hex == source_record.pointer_file_offsets.iter().map(|offset| format!("0x{offset:05X}")).collect::<Vec<_>>()
+                && actual.pointer_cpu_address_hex
+                    == format!("0x{:04X}", source_record.pointer_cpu_address)
+                && actual.pointer_file_offsets_hex
+                    == source_record
+                        .pointer_file_offsets
+                        .iter()
+                        .map(|offset| format!("0x{offset:05X}"))
+                        .collect::<Vec<_>>()
                 && actual.file_offset_hex == format!("0x{:05X}", source_record.file_offset)
-                && actual.end_file_offset_exclusive_hex == format!("0x{:05X}", source_record.end_file_offset_exclusive)
+                && actual.end_file_offset_exclusive_hex
+                    == format!("0x{:05X}", source_record.end_file_offset_exclusive)
                 && actual.source_storage_sha1 == source_record.storage_sha1
                 && actual.header_hex == source_record.header_hex,
             "battle workspace record binding changed at {}",
@@ -372,16 +389,26 @@ fn validate_workspace_binding(source: &[u8], workspace: &BattleDialogueWorkspace
     Ok(())
 }
 
-fn validate_translation_fields(workspace: &BattleDialogueWorkspace) -> Result<(usize, usize, usize)> {
+fn validate_translation_fields(
+    workspace: &BattleDialogueWorkspace,
+) -> Result<(usize, usize, usize)> {
     let mut filled = 0;
     let mut complete = 0;
     let mut target_glyphs = 0;
     for line in workspace.records.iter().flat_map(|record| &record.lines) {
         if line.status == TranslationStatus::Untranslated {
-            ensure!(line.korean.is_empty(), "{} is untranslated but not empty", line.id);
+            ensure!(
+                line.korean.is_empty(),
+                "{} is untranslated but not empty",
+                line.id
+            );
             continue;
         }
-        ensure!(!line.korean.is_empty(), "{} is translated but empty", line.id);
+        ensure!(
+            !line.korean.is_empty(),
+            "{} is translated but empty",
+            line.id
+        );
         let source = inspect_markup(&line.source_markup, MarkupRole::Source)
             .with_context(|| format!("inspect battle source at {}", line.id))?;
         let target = inspect_markup(&line.korean, MarkupRole::KoreanTarget)
@@ -502,7 +529,10 @@ fn decode_battle_record_lines(
             japanese_count = 0;
         }
     }
-    ensure!(markup.is_empty(), "battle-dialogue record has an unterminated line");
+    ensure!(
+        markup.is_empty(),
+        "battle-dialogue record has an unterminated line"
+    );
     Ok(lines)
 }
 
@@ -576,10 +606,7 @@ mod tests {
 
     #[test]
     fn battle_markup_size_counts_dynamic_operands_and_quote_controls() {
-        assert_eq!(
-            source_markup_byte_count("{EC:02}あA{AB}{ED}").unwrap(),
-            6
-        );
+        assert_eq!(source_markup_byte_count("{EC:02}あA{AB}{ED}").unwrap(), 6);
         assert_eq!(encode_korean_markup("{AB}한{AC}{ED}").unwrap().len(), 4);
     }
 }

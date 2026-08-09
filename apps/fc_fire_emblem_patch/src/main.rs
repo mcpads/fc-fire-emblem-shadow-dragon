@@ -66,7 +66,7 @@ enum Command {
         #[arg(long, default_value = "out/text-tables.json")]
         report: PathBuf,
     },
-    /// Create a private workspace for battle class, item, ally, and enemy names.
+    /// Create a private workspace for battle names, terrain, and message templates.
     ExtractFixedTextWorkspace {
         source: PathBuf,
         #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
@@ -92,6 +92,18 @@ enum Command {
         #[arg(long, default_value = "out/battle-text-cache-base.nes")]
         output: PathBuf,
         #[arg(long, default_value = "out/battle-text-cache-base.json")]
+        report: PathBuf,
+    },
+    /// Build one proven battle combination with fixed text and dialogue sharing a codebook.
+    BuildBattleCombinationProbe {
+        source: PathBuf,
+        #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
+        fixed_workspace: PathBuf,
+        #[arg(long, default_value = "private/dialogue/battle-workspace.json")]
+        dialogue_workspace: PathBuf,
+        #[arg(long, default_value = "out/battle-combination-probe.nes")]
+        output: PathBuf,
+        #[arg(long, default_value = "out/battle-combination-probe.json")]
         report: PathBuf,
     },
     /// Inventory dialogue entry tables without emitting source dialogue bytes.
@@ -467,12 +479,50 @@ fn main() -> Result<()> {
                 summary.conservative_combination_upper_bound
             );
         }
-        Command::BuildBattleTextCacheBase { source, fixed_workspace, dialogue_workspace, output, report } => {
+        Command::BuildBattleTextCacheBase {
+            source,
+            fixed_workspace,
+            dialogue_workspace,
+            output,
+            report,
+        } => {
             let summary = mapper165::battle_text_cache_probe::build_battle_text_cache_base(
-                &source, &fixed_workspace, &dialogue_workspace, &output, &report)?;
-            println!("wrote {}", output.display()); println!("output SHA-1: {}", summary.output_sha1);
+                &source,
+                &fixed_workspace,
+                &dialogue_workspace,
+                &output,
+                &report,
+            )?;
+            println!("wrote {}", output.display());
+            println!("output SHA-1: {}", summary.output_sha1);
             println!("report SHA-1: {}", summary.report_sha1);
-            println!("battle glyph atlas: {} glyphs, {} bytes", summary.glyph_count, summary.glyph_atlas_byte_count);
+            println!(
+                "battle glyph atlas: {} glyphs, {} bytes",
+                summary.glyph_count, summary.glyph_atlas_byte_count
+            );
+        }
+        Command::BuildBattleCombinationProbe {
+            source,
+            fixed_workspace,
+            dialogue_workspace,
+            output,
+            report,
+        } => {
+            let summary =
+                mapper165::battle_combination_probe::build_gameplay_battle_combination_probe(
+                    &source,
+                    &fixed_workspace,
+                    &dialogue_workspace,
+                    &output,
+                    &report,
+                )?;
+            println!("wrote {}", output.display());
+            println!("output SHA-1: {}", summary.output_sha1);
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "gameplay battle combination: {} glyphs, {} tracked writes",
+                summary.glyph_count, summary.tracked_write_count
+            );
         }
         Command::AnalyzeDialogueStructure { source, report } => {
             let summary = dialogue_inventory::analyze_dialogue_structure(&source, &report)?;

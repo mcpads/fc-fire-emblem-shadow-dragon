@@ -11,6 +11,8 @@ use crate::{
     text_inventory::plan_fixed_text,
 };
 
+pub(crate) const FORECAST_LABEL_GLYPHS: [char; 4] = ['지', '형', '효', '과'];
+
 #[derive(Debug)]
 pub(crate) struct BattleTextWorksetSummary {
     pub(crate) report_sha1: String,
@@ -38,6 +40,9 @@ struct BattleTextWorksetReport {
     max_name_entry_glyph_count: usize,
     max_class_entry_glyph_count: usize,
     max_item_entry_glyph_count: usize,
+    max_terrain_entry_glyph_count: usize,
+    max_message_template_glyph_count: usize,
+    forecast_label_glyph_count: usize,
     conservative_combination_upper_bound: usize,
     conservative_combination_fits_one_page: bool,
     encoded_original_byte_count: usize,
@@ -61,6 +66,7 @@ pub(crate) fn analyze_battle_text_workset(
     let union = fixed_glyphs
         .union(&dialogue_glyphs)
         .copied()
+        .chain(FORECAST_LABEL_GLYPHS)
         .collect::<BTreeSet<_>>();
     let overlap_glyph_count = fixed_glyphs.intersection(&dialogue_glyphs).count();
     let max_name_entry_glyph_count = fixed
@@ -68,11 +74,18 @@ pub(crate) fn analyze_battle_text_workset(
         .max(fixed.table_max_entry_glyph_count("enemy-names"));
     let max_class_entry_glyph_count = fixed.table_max_entry_glyph_count("class-names");
     let max_item_entry_glyph_count = fixed.table_max_entry_glyph_count("item-names");
+    let max_terrain_entry_glyph_count = fixed.table_max_entry_glyph_count("terrain-names");
+    let max_message_template_glyph_count =
+        fixed.table_max_entry_glyph_count("battle-message-templates");
+    let forecast_label_glyph_count = FORECAST_LABEL_GLYPHS.len();
     let max_dialogue_record_glyph_count = dialogue.max_record_unique_glyph_count();
     let conservative_combination_upper_bound = max_dialogue_record_glyph_count
         + 2 * max_name_entry_glyph_count
         + 2 * max_class_entry_glyph_count
-        + 2 * max_item_entry_glyph_count;
+        + 2 * max_item_entry_glyph_count
+        + 2 * max_terrain_entry_glyph_count
+        + max_message_template_glyph_count
+        + forecast_label_glyph_count;
     let fixed_workspace_bytes = fs::read(fixed_workspace_path)
         .with_context(|| format!("read {}", fixed_workspace_path.display()))?;
     let dialogue_workspace_bytes = fs::read(dialogue_workspace_path)
@@ -94,6 +107,9 @@ pub(crate) fn analyze_battle_text_workset(
         max_name_entry_glyph_count,
         max_class_entry_glyph_count,
         max_item_entry_glyph_count,
+        max_terrain_entry_glyph_count,
+        max_message_template_glyph_count,
+        forecast_label_glyph_count,
         conservative_combination_upper_bound,
         conservative_combination_fits_one_page: conservative_combination_upper_bound
             <= ACTIVE_HANGUL_SLOT_COUNT,

@@ -13,6 +13,7 @@ use crate::{
     static_analysis::{AbsoluteTransferCandidate, find_absolute_transfer_candidates},
 };
 
+mod battle_message_templates;
 mod dialogue_path;
 mod fixed_workspace;
 mod report;

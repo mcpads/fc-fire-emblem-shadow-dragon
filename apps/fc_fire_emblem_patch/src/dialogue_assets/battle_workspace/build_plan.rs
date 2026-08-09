@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::*;
 use super::layout::pack_record_sizes;
+use super::*;
 
 pub(crate) struct BattleDialogueReinsertionPlan {
     pub(crate) workspace_sha1: String,
@@ -21,12 +21,38 @@ pub(crate) struct BattleDialoguePlannedRecord {
     pub(crate) pointer_file_offsets: Vec<usize>,
     pub(crate) planned_pointer_cpu_address: u16,
     pub(crate) planned_file_offset: usize,
+    pub(crate) source_file_offset: usize,
+    pub(crate) source_storage_byte_count: usize,
     logical_bytes: Vec<LogicalDialogueByte>,
 }
 
 impl BattleDialoguePlannedRecord {
     pub(crate) fn storage_byte_count(&self) -> usize {
         self.logical_bytes.len()
+    }
+
+    pub(crate) fn unique_glyphs(&self) -> BTreeSet<char> {
+        self.logical_bytes
+            .iter()
+            .filter_map(|byte| match byte {
+                LogicalDialogueByte::TargetGlyph(character) => Some(*character),
+                LogicalDialogueByte::Encoded(_) => None,
+            })
+            .collect()
+    }
+
+    pub(crate) fn encoded_bytes(&self, assignments: &BTreeMap<char, u8>) -> Result<Vec<u8>> {
+        self.logical_bytes
+            .iter()
+            .map(|byte| match byte {
+                LogicalDialogueByte::Encoded(value) => Ok(*value),
+                LogicalDialogueByte::TargetGlyph(character) => {
+                    assignments.get(character).copied().with_context(|| {
+                        format!("missing battle-dialogue code assignment for {character:?}")
+                    })
+                }
+            })
+            .collect()
     }
 }
 
@@ -53,17 +79,7 @@ impl BattleDialogueReinsertionPlan {
     pub(crate) fn max_record_unique_glyph_count(&self) -> usize {
         self.records
             .iter()
-            .map(|record| {
-                record
-                    .logical_bytes
-                    .iter()
-                    .filter_map(|byte| match byte {
-                        LogicalDialogueByte::TargetGlyph(character) => Some(*character),
-                        LogicalDialogueByte::Encoded(_) => None,
-                    })
-                    .collect::<BTreeSet<_>>()
-                    .len()
-            })
+            .map(|record| record.unique_glyphs().len())
             .max()
             .unwrap_or(0)
     }
@@ -75,19 +91,7 @@ impl BattleDialogueReinsertionPlan {
         self.records
             .iter()
             .map(|record| {
-                let bytes = record
-                    .logical_bytes
-                    .iter()
-                    .map(|byte| match byte {
-                        LogicalDialogueByte::Encoded(value) => Ok(*value),
-                        LogicalDialogueByte::TargetGlyph(character) => assignments
-                            .get(character)
-                            .copied()
-                            .with_context(|| {
-                                format!("missing battle-dialogue code assignment for {character:?}")
-                            }),
-                    })
-                    .collect::<Result<Vec<_>>>()?;
+                let bytes = record.encoded_bytes(assignments)?;
                 Ok(EncodedBattleDialogueRecord {
                     canonical_entry_index: record.canonical_entry_index,
                     pointer_file_offsets: record.pointer_file_offsets.clone(),
@@ -105,8 +109,8 @@ pub(crate) fn plan_battle_dialogue_records(
     workspace_path: &Path,
 ) -> Result<BattleDialogueReinsertionPlan> {
     rom.verify_supported_japanese()?;
-    let workspace_bytes = fs::read(workspace_path)
-        .with_context(|| format!("read {}", workspace_path.display()))?;
+    let workspace_bytes =
+        fs::read(workspace_path).with_context(|| format!("read {}", workspace_path.display()))?;
     let workspace: BattleDialogueWorkspace = serde_json::from_slice(&workspace_bytes)
         .with_context(|| format!("parse {}", workspace_path.display()))?;
     validate_workspace_binding(rom.data(), &workspace)?;
@@ -156,10 +160,7 @@ pub(crate) fn plan_battle_dialogue_records(
             Ok(logical_bytes)
         })
         .collect::<Result<Vec<_>>>()?;
-    let record_sizes = logical_records
-        .iter()
-        .map(Vec::len)
-        .collect::<Vec<_>>();
+    let record_sizes = logical_records.iter().map(Vec::len).collect::<Vec<_>>();
     let segments = [
         (
             physical.data_file_start,
@@ -185,6 +186,9 @@ pub(crate) fn plan_battle_dialogue_records(
                     planned_file_offset,
                 )?,
                 planned_file_offset,
+                source_file_offset: source_record.file_offset,
+                source_storage_byte_count: source_record.end_file_offset_exclusive
+                    - source_record.file_offset,
                 logical_bytes,
             })
         })

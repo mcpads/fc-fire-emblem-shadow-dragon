@@ -16,8 +16,8 @@ use crate::{
     tracked::TrackedImage,
 };
 
-mod glyph_workset;
 mod battle_workspace;
+mod glyph_workset;
 mod layout_packing;
 mod markup;
 mod model;
@@ -27,12 +27,12 @@ mod source_asset;
 mod tests;
 mod workspace;
 
-pub(crate) use glyph_workset::analyze_main_dialogue_glyph_workset;
 pub(crate) use battle_workspace::{
     EncodedBattleDialogueRecord, extract_battle_dialogue_workspace, import_battle_dialogue_draft,
-    plan_battle_dialogue_reinsertion, validate_battle_dialogue_workspace,
-    plan_battle_dialogue_records,
+    plan_battle_dialogue_records, plan_battle_dialogue_reinsertion,
+    validate_battle_dialogue_workspace,
 };
+pub(crate) use glyph_workset::analyze_main_dialogue_glyph_workset;
 use layout_packing::*;
 use markup::*;
 use model::*;

@@ -166,8 +166,7 @@ pub(crate) fn inspect_battle_dialogue_physical_layout(
         data_file_start: table.data_file_start,
         data_file_end_exclusive: summary.physical_data_file_end_exclusive,
         preserved_unreferenced_file_offset: unreferenced.file_offset,
-        preserved_unreferenced_end_file_offset_exclusive: unreferenced
-            .end_file_offset_exclusive,
+        preserved_unreferenced_end_file_offset_exclusive: unreferenced.end_file_offset_exclusive,
         preserved_unreferenced_storage_sha1: unreferenced.storage_sha1.clone(),
     })
 }

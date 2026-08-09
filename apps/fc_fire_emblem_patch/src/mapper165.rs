@@ -10,10 +10,11 @@ use crate::{
     static_analysis::find_absolute_write_candidates,
     tracked::TrackedImage,
 };
+pub(crate) mod battle_combination_probe;
 pub(crate) mod battle_dialogue_probe;
 pub(crate) mod battle_text_cache_probe;
-pub(crate) mod dialogue_slice_probe;
 mod dialogue_probe_font;
+pub(crate) mod dialogue_slice_probe;
 pub(crate) mod direct_chr_pairs;
 pub(crate) mod hangul_page_probe;
 mod options_page;

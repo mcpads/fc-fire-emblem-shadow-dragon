@@ -90,8 +90,16 @@ fn observed_shop_lifetime_counts_retained_source_slots_and_both_dialogue_records
         .map(|index| char::from_u32(0xAC00 + index).unwrap())
         .collect::<String>();
     let workspace = workspace_with_records(vec![
-        record("shop-and-item-dialogue", 0, &format!("{first_glyphs}{{EF}}")),
-        record("shop-and-item-dialogue", 1, &format!("{second_glyphs}{{E7}}")),
+        record(
+            "shop-and-item-dialogue",
+            0,
+            &format!("{first_glyphs}{{EF}}"),
+        ),
+        record(
+            "shop-and-item-dialogue",
+            1,
+            &format!("{second_glyphs}{{E7}}"),
+        ),
     ]);
 
     let report =
@@ -106,9 +114,11 @@ fn observed_shop_lifetime_counts_retained_source_slots_and_both_dialogue_records
     assert!(!lifetime.filled_set_fits_one_page_so_far);
     assert_eq!(lifetime.approved_slot_demand, Some(211));
     assert_eq!(lifetime.approved_set_fits_one_page, Some(false));
-    assert!(!report
-        .capacity
-        .filled_observed_screen_lifetimes_fit_one_page_so_far);
+    assert!(
+        !report
+            .capacity
+            .filled_observed_screen_lifetimes_fit_one_page_so_far
+    );
     assert_eq!(
         report
             .capacity
