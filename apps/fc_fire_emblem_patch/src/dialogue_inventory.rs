@@ -1,5 +1,7 @@
 mod battle_dialogue;
-mod main_dialogue;
+mod main_dialogue_graph;
+mod main_dialogue_record;
+mod main_dialogue_state;
 mod report;
 mod source_binding;
 mod source_spec;
@@ -7,7 +9,9 @@ mod source_spec;
 mod tests;
 
 use battle_dialogue::*;
-use main_dialogue::*;
+use main_dialogue_graph::*;
+use main_dialogue_record::*;
+use main_dialogue_state::*;
 pub(crate) use report::*;
 pub(crate) use source_binding::switchable_file_to_cpu;
 use source_binding::{
