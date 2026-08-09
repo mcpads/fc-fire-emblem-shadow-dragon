@@ -1,10 +1,11 @@
 {
   "schema": 2,
   "next_observation_gate": {
-    "gate_role": "ending_character_epilogue_variant_union",
+    "gate_role": "chapter_variant_transition_union",
     "gate_kind": "screen_sequence",
     "focus_screen_roles": [
-      "ending_character_epilogue"
+      "chapter_clear_epilogue_dialogue",
+      "chapter_intro_title_dialogue_composite"
     ],
     "known_focus": [
       "all six sound-test controls now have source and runtime evidence; Up and Down change the selector while A and B emit transient sound-event writes",
@@ -14,13 +15,14 @@
       "the separate battle state machine bounds 28 pointer-referenced EF-terminated records over 1,152 disjoint bytes; one additional 16-byte structural record has no table reference and remains preserved",
       "visible lifetimes, not source phase counts or single-frame captures, define the screen roles",
       "all five required temporal route roles now pass over 62 irregular frozen-frame samples: shared sound-test battle, favorable gameplay battle, unfavorable gameplay battle, gameplay defeat, and the automatic ending",
-      "the no-cheat favorable route and the separate unfavorable and defeat routes close ordinary battle polarity without treating the accelerated chapter-transition route as difficulty evidence"
+      "the no-cheat favorable route and the separate unfavorable and defeat routes close ordinary battle polarity without treating the accelerated chapter-transition route as difficulty evidence",
+      "the character-epilogue union now covers 112 visible entries over 560 irregular samples and 13 CHR pairs; selector event writes additionally expose transient direct entry 3F"
     ],
     "unresolved_focus": [
-      "remaining character-epilogue glyph, portrait, speaker, CHR, nametable, and sprite variants across roster and survival conditions",
-      "temporal union checks that retain English, digits, Roman names, portraits, sprites, and the static final signature"
+      "chapter-specific retained-map epilogue and portrait variants beyond the observed chapter-eleven completion",
+      "the remaining twenty-two chapter-intro title, portrait, and CHR lifetimes beyond chapters two, eleven, and twelve"
     ],
-    "next_action": "collect the remaining character-epilogue variants before sizing final Hangul page coverage"
+    "next_action": "compute the reviewed Korean glyph working set now that the character-epilogue union is closed, while retaining later chapter-variant runtime checks"
   },
   "unpartitioned_surface_families": [],
   "screens": [

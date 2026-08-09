@@ -12,8 +12,8 @@ use crate::{
     sha1_hex,
 };
 
-mod capture_state;
-mod route_analysis;
+pub(crate) mod capture_state;
+pub(crate) mod route_analysis;
 #[cfg(test)]
 mod tests;
 

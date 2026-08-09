@@ -83,10 +83,10 @@ pub(super) fn ending_epilogue_variant_observation_plan() -> EndingEpilogueVarian
             EpilogueVariantObservationRun {
                 run_role: "all_routing_candidates",
                 roster_intervention: "copy one valid record template into identities 0x01 through 0x35, set action to 0xFF and a valid location index, and place identity 0x00 in record 53",
-                expected_branch: "selector 0x41 entries 0x35 down through 0x02 followed by direct table 0x40 entry 0x00; routing entry 0x01 is a source-bound no-op",
+                expected_branch: "selector 0x41 entries 0x35 down through 0x02 followed by direct table 0x40 entry 0x00; synthetic routing entry 0x01 advances to a blank phase-0x10 wait and is not a visible entry",
                 expected_classified_candidate_count: CANDIDATE_COUNT,
                 expected_visible_entry_count: Some(CANDIDATE_COUNT - 1),
-                required_observation: "collect the routing-entry portrait, CHR, nametable, OAM, palette, location-name, and dialogue-control transition union",
+                required_observation: "collect the routing-entry portrait, CHR, nametable, OAM, palette, location-name, and dialogue-control transition union, and hold entry 0x01 without input long enough to distinguish a blank wait from a delayed render",
             },
         ],
         irregular_sample_offsets_frames: IRREGULAR_SAMPLE_OFFSETS,

@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
+mod observed_variants;
 mod probe_plan;
 
 use crate::{
@@ -20,6 +21,7 @@ use super::{
         ROSTER_RECORD_CAPACITY, ROSTER_RECORD_STRIDE,
     },
 };
+use observed_variants::{EndingEpilogueVariantObservation, ending_epilogue_variant_observation};
 use probe_plan::{EndingEpilogueVariantObservationPlan, ending_epilogue_variant_observation_plan};
 
 const INITIAL_CURSOR: u8 = 0x35;
@@ -91,6 +93,7 @@ pub(super) struct EndingCharacterEpilogueTranslationSurface {
     routing_selector_hex: &'static str,
     selector_flow: EndingEpilogueSelectorFlow,
     variant_observation_plan: EndingEpilogueVariantObservationPlan,
+    variant_observation: EndingEpilogueVariantObservation,
     dialogue_literal_inventory: TranslationSurfaceLiteralInventory,
     dialogue_literal_inventory_scope: &'static str,
     selector_writer: CodeLocation,
@@ -273,9 +276,10 @@ pub(super) fn bind_ending_character_epilogue(
             location_name_destination_hex: "0x7902",
             inactive_location_producer: location(0x06, 0xB67B),
             completion_condition: "after candidate 0x01, the next decrement makes 0x773B negative and phase 0x0F jumps to ending phase 0x17",
-            semantic_boundary: "the producer and gameplay evidence prove absent, inactive-or-defeated, and active branches; exact causes inside the inactive class, including whether every record means character death, still require runtime variant evidence",
+            semantic_boundary: "producer, natural execution, and controlled branch evidence distinguish absent, inactive-or-defeated, and active branches; the rendering union is closed, but exact causes inside the inactive class cannot all be labeled as death",
         },
         variant_observation_plan: ending_epilogue_variant_observation_plan(),
+        variant_observation: ending_epilogue_variant_observation(),
         dialogue_literal_inventory,
         dialogue_literal_inventory_scope: "all canonical first linear segments in selector tables 0x40 and 0x41; every routing-table transition targets the included direct epilogue table",
         selector_writer: location(0x04, 0xA17E),
@@ -283,9 +287,7 @@ pub(super) fn bind_ending_character_epilogue(
         input_behavior: "automatic; phase 0x0F scans and selects an entry, and phase 0x10 waits for the shared dialogue engine before advancing",
         translation_handling: "translate Japanese character names, location names, and epilogue lines only; preserve original Latin and digit codes",
         unresolved: &[
-            "observe inactive or defeated character variants before narrowing the 0xFF branch to a specific outcome such as death",
-            "complete portrait and CHR-page union across candidate and dialogue-control variants",
-            "runtime coverage of direct, routing, and direct-extension epilogue entries",
+            "separate causes inside inactive-or-defeated action 0xFF remain unresolved; synthetic branch coverage cannot label every cause as death",
         ],
     })
 }

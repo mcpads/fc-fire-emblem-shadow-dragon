@@ -3,6 +3,7 @@ mod chapter_victory;
 mod chr_inventory;
 mod dialogue_assets;
 mod dialogue_inventory;
+mod epilogue_variant_evidence;
 mod font;
 mod font_slots;
 mod hangul_page_plan;
@@ -87,6 +88,17 @@ enum Command {
         source: PathBuf,
         manifest: PathBuf,
         #[arg(long, default_value = "out/temporal-surfaces.json")]
+        report: PathBuf,
+    },
+    /// Validate character-epilogue variants without emitting dialogue or evidence paths.
+    AnalyzeEpilogueVariants {
+        source: PathBuf,
+        captures: PathBuf,
+        #[arg(long, default_value = "out/fire-emblem-fe1-mapper165-parity-probe.nes")]
+        capture_rom: PathBuf,
+        #[arg(long, default_value = "out/mapper165-parity-probe.json")]
+        mapper_report: PathBuf,
+        #[arg(long, default_value = "out/ending-epilogue-variants.json")]
         report: PathBuf,
     },
     /// Bind chapter-eleven victory tiles and the castle-command-to-transition route.
@@ -385,6 +397,30 @@ fn main() -> Result<()> {
                 summary.sample_count,
                 summary.chr_pair_count,
                 summary.required_route_coverage_complete
+            );
+        }
+        Command::AnalyzeEpilogueVariants {
+            source,
+            captures,
+            capture_rom,
+            mapper_report,
+            report,
+        } => {
+            let summary = epilogue_variant_evidence::analyze_epilogue_variants(
+                &source,
+                &capture_rom,
+                &mapper_report,
+                &captures,
+                &report,
+            )?;
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "epilogue variants: {} visible entries, {} irregular samples, {} CHR pairs, evidence complete: {}",
+                summary.visible_entry_count,
+                summary.sample_count,
+                summary.chr_pair_count,
+                summary.evidence_complete
             );
         }
         Command::AnalyzeChapterVictory { source, report } => {

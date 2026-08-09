@@ -391,7 +391,7 @@ pub(super) fn decode_hex(value: &str) -> Result<Vec<u8>> {
         .collect()
 }
 
-pub(super) fn nametable_tile_codes_for(nametable: &[u8]) -> BTreeSet<u8> {
+pub(crate) fn nametable_tile_codes_for(nametable: &[u8]) -> BTreeSet<u8> {
     (0..2)
         .flat_map(|page| {
             let start = page * NAMETABLE_PAGE_BYTE_COUNT;
@@ -402,7 +402,7 @@ pub(super) fn nametable_tile_codes_for(nametable: &[u8]) -> BTreeSet<u8> {
         .collect()
 }
 
-pub(super) fn visible_sprite_tile_codes_for(oam: &[u8]) -> (BTreeSet<u8>, usize) {
+pub(crate) fn visible_sprite_tile_codes_for(oam: &[u8]) -> (BTreeSet<u8>, usize) {
     let visible_sprites = oam
         .chunks_exact(4)
         .filter(|sprite| sprite[0] <= VISIBLE_SPRITE_Y_MAX)
@@ -411,7 +411,7 @@ pub(super) fn visible_sprite_tile_codes_for(oam: &[u8]) -> (BTreeSet<u8>, usize)
     (tile_codes, visible_sprites.len())
 }
 
-pub(super) fn hex_codes(codes: BTreeSet<u8>) -> Vec<String> {
+pub(crate) fn hex_codes(codes: BTreeSet<u8>) -> Vec<String> {
     codes
         .into_iter()
         .map(|code| format!("{code:02X}"))

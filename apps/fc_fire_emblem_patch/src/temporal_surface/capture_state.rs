@@ -8,23 +8,23 @@ const MAPPER165_SOURCE_PAGE_BIAS: u8 = 2;
 const MAPPER165_PAGE_REGISTER_SCALE: u8 = 4;
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
-pub(super) struct ChrPairReport {
-    pub(super) left_fd: u8,
-    pub(super) left_fe: u8,
-    pub(super) right_fd: u8,
-    pub(super) right_fe: u8,
+pub(crate) struct ChrPairReport {
+    pub(crate) left_fd: u8,
+    pub(crate) left_fe: u8,
+    pub(crate) right_fd: u8,
+    pub(crate) right_fe: u8,
 }
 
-pub(super) struct CaptureState {
-    pub(super) producer_frame_count: u64,
-    pub(super) chr_pair: ChrPairReport,
-    pub(super) left_latch: u8,
-    pub(super) right_latch: u8,
-    pub(super) background_enabled: bool,
-    pub(super) sprites_enabled: bool,
+pub(crate) struct CaptureState {
+    pub(crate) producer_frame_count: u64,
+    pub(crate) chr_pair: ChrPairReport,
+    pub(crate) left_latch: u8,
+    pub(crate) right_latch: u8,
+    pub(crate) background_enabled: bool,
+    pub(crate) sprites_enabled: bool,
 }
 
-pub(super) fn parse_capture_state(bytes: &[u8]) -> Result<CaptureState> {
+pub(crate) fn parse_capture_state(bytes: &[u8]) -> Result<CaptureState> {
     let state: BTreeMap<String, Value> =
         serde_json::from_slice(bytes).context("parse producer state JSON")?;
     let unsigned = |key: &str| -> Result<u64> {

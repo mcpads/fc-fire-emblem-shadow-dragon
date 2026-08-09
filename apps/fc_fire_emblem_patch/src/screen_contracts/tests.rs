@@ -76,7 +76,7 @@ fn next_observation_gate_reuses_real_screen_roles_without_becoming_a_screen() {
 
     assert_eq!(
         report.next_observation_gate.gate_role,
-        "ending_character_epilogue_variant_union"
+        "chapter_variant_transition_union"
     );
     assert_eq!(
         report.next_observation_gate.gate_kind,
@@ -84,7 +84,10 @@ fn next_observation_gate_reuses_real_screen_roles_without_becoming_a_screen() {
     );
     assert_eq!(
         report.next_observation_gate.focus_screen_roles,
-        ["ending_character_epilogue"]
+        [
+            "chapter_clear_epilogue_dialogue",
+            "chapter_intro_title_dialogue_composite"
+        ]
     );
     assert!(
         report
@@ -107,7 +110,7 @@ fn next_observation_gate_reuses_real_screen_roles_without_becoming_a_screen() {
 #[test]
 fn observation_gate_cannot_masquerade_as_a_screen_role() {
     let invalid_registry = REGISTRY_JSON.replacen(
-        "\"gate_role\": \"ending_character_epilogue_variant_union\"",
+        "\"gate_role\": \"chapter_variant_transition_union\"",
         "\"gate_role\": \"title\"",
         1,
     );
