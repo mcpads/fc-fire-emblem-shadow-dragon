@@ -1,11 +1,9 @@
 {
   "schema": 2,
   "next_observation_gate": {
-    "gate_role": "battle_and_ending_temporal_glyph_variant_union",
+    "gate_role": "ending_character_epilogue_variant_union",
     "gate_kind": "screen_sequence",
     "focus_screen_roles": [
-      "battle_animation",
-      "ending_chapter_record_scroll",
       "ending_character_epilogue"
     ],
     "known_focus": [
@@ -14,14 +12,15 @@
       "Select automatically reaches preserved-English story and credits, Japanese chapter records and character epilogues, and a static preserved final signature without further input",
       "the shared battle engine is source-bound to the unit, enemy, class, item, and battle-dialogue sources; the ending record stream and both epilogue dialogue tables are also structurally bound",
       "the separate battle state machine bounds 28 pointer-referenced EF-terminated records over 1,152 disjoint bytes; one additional 16-byte structural record has no table reference and remains preserved",
-      "visible lifetimes, not source phase counts or single-frame captures, define the screen roles"
+      "visible lifetimes, not source phase counts or single-frame captures, define the screen roles",
+      "all five required temporal route roles now pass over 62 irregular frozen-frame samples: shared sound-test battle, favorable gameplay battle, unfavorable gameplay battle, gameplay defeat, and the automatic ending",
+      "the no-cheat favorable route and the separate unfavorable and defeat routes close ordinary battle polarity without treating the accelerated chapter-transition route as difficulty evidence"
     ],
     "unresolved_focus": [
-      "complete temporal glyph, portrait, sprite, defeat, and unfavorable-variant unions",
-      "temporal union checks that retain English, digits, portraits, sprites, and the static final signature",
-      "ordinary favorable, unfavorable, and defeat battle routes plus the remaining character-epilogue variants"
+      "remaining character-epilogue glyph, portrait, speaker, CHR, nametable, and sprite variants across roster and survival conditions",
+      "temporal union checks that retain English, digits, Roman names, portraits, sprites, and the static final signature"
     ],
-    "next_action": "collect complete temporal glyph, portrait, sprite, defeat, and unfavorable-variant unions before sizing Hangul page coverage"
+    "next_action": "collect the remaining character-epilogue variants before sizing final Hangul page coverage"
   },
   "unpartitioned_surface_families": [],
   "screens": [
@@ -248,13 +247,13 @@
         "bank 05 shared phase state 047C has 32 handlers and binds the visible route to unit, enemy, class, item, and bank 04 battle-dialogue sources",
         "bank 04 battle state 7937 has nine handlers; EC consumes one selector byte 00..03, EF ends each of 28 pointer-referenced records, and their 1,152 storage bytes are disjoint",
         "one additional 16-byte EF-terminated structural record has no pointer-table reference and remains unchanged rather than being admitted as a translation target",
-        "six outer test phases do not equal six visible screens; the visible sequence is owned by the shared inner battle engine"
+        "six outer test phases do not equal six visible screens; the visible sequence is owned by the shared inner battle engine",
+        "the required temporal union includes 11 sound-test, 10 favorable gameplay, 11 unfavorable gameplay, and 12 defeat samples; the favorable route uses no cheat or memory write and excludes its map-return boundary"
       ],
       "unresolved_focus": [
-        "complete CHR, sprite, and animation-phase union across ordinary and debug battle pairs",
-        "defeat and unfavorable battle variants needed by the final regression route"
+        "final translated Hangul battle-page regression across actual Korean name, class, item, and message combinations"
       ],
-      "next_gate": "complete the temporal glyph, sprite, defeat, and unfavorable-variant union before budgeting Hangul pages",
+      "next_gate": "use the completed battle temporal union as the page-budget and translated-render regression input",
       "contract_state": "observed_partial"
     },
     {

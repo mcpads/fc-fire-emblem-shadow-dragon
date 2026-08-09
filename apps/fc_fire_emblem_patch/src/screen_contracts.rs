@@ -745,7 +745,7 @@ mod tests {
 
         assert_eq!(
             report.next_observation_gate.gate_role,
-            "battle_and_ending_temporal_glyph_variant_union"
+            "ending_character_epilogue_variant_union"
         );
         assert_eq!(
             report.next_observation_gate.gate_kind,
@@ -753,11 +753,7 @@ mod tests {
         );
         assert_eq!(
             report.next_observation_gate.focus_screen_roles,
-            [
-                "battle_animation",
-                "ending_chapter_record_scroll",
-                "ending_character_epilogue",
-            ]
+            ["ending_character_epilogue"]
         );
         assert!(report
             .next_observation_gate
@@ -776,7 +772,7 @@ mod tests {
     #[test]
     fn observation_gate_cannot_masquerade_as_a_screen_role() {
         let invalid_registry = REGISTRY_JSON.replacen(
-            "\"gate_role\": \"battle_and_ending_temporal_glyph_variant_union\"",
+            "\"gate_role\": \"ending_character_epilogue_variant_union\"",
             "\"gate_role\": \"title\"",
             1,
         );

@@ -328,7 +328,7 @@ fn bind_battle_animation_translation_surface(
         ],
         translation_handling: "the debug route reuses the gameplay battle engine and its shared text sources; translate Japanese names, labels, and messages while preserving LV, HIT, EXP, HP bars, percentages, and digits",
         unresolved: &[
-            "complete CHR, sprite, and temporal union including the remaining favorable gameplay battle variant",
+            "run the final translated Hangul battle-page regression across actual Korean name, class, item, and message combinations",
         ],
     })
 }

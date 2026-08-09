@@ -509,7 +509,7 @@ pub(super) fn transition_screens() -> Vec<TransitionScreen> {
                 "Select's automatic preserved and Japanese ending lifetimes through the static terminal signature",
             ],
             unresolved_focus: &[
-                "the favorable gameplay battle and remaining ending temporal glyph, portrait, and sprite variants",
+                "the remaining character-epilogue temporal glyph, portrait, speaker, CHR, nametable, and sprite variants",
             ],
         },
         TransitionScreen {
