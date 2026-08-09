@@ -1,3 +1,4 @@
+mod battle_source;
 mod ending_epilogue;
 mod report;
 mod runtime_routes;
@@ -29,6 +30,7 @@ use translation_surfaces::{TranslationSurfaceContracts, bind_translation_surface
 fn source_region_specs() -> impl Iterator<Item = SourceRegionSpec> {
     SOURCE_REGIONS
         .iter()
+        .chain(battle_source::SOURCE_REGIONS.iter())
         .chain(ending_epilogue::SOURCE_REGIONS.iter())
         .chain(unit_record_history::SOURCE_REGIONS.iter())
         .copied()

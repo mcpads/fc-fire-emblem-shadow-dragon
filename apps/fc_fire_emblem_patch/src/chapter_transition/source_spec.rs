@@ -538,118 +538,6 @@ pub(super) const SOURCE_REGIONS: &[SourceRegionSpec] = &[
         0x4A2,
         "137f18180b51a86fac7a1f0c6eb9fa4269ec2504",
     ),
-    SourceRegionSpec::code_sha1(
-        "run_shared_battle_engine_from_sound_test",
-        0x07,
-        0xAC1E,
-        0x26,
-        "27075559ba7defcd24dc61cd28ebf6e99ff88e7a",
-    ),
-    SourceRegionSpec::data_sha1(
-        "shared_battle_engine_handler_pointer",
-        0x05,
-        0xBFA4,
-        0x02,
-        "da38bd1c14953cb7859c16b635e320a01f76842f",
-    ),
-    SourceRegionSpec::code_sha1(
-        "run_shared_battle_engine",
-        0x05,
-        0x8161,
-        0x38,
-        "b0106e99310617647c8269f280da1b817fb1d0ba",
-    ),
-    SourceRegionSpec::code_sha1(
-        "dispatch_shared_battle_phase",
-        0x05,
-        0x81EC,
-        0x06,
-        "4bf9a98f9cd26d644033b0fb842547b0d813578f",
-    ),
-    SourceRegionSpec::data_sha1(
-        "shared_battle_phase_pointers",
-        0x05,
-        0x81F2,
-        0x40,
-        "bb68fab54876f2528deefa1510bb072c842b589b",
-    ),
-    SourceRegionSpec::code_sha1(
-        "select_battle_unit_name_source",
-        0x05,
-        0x8946,
-        0x64,
-        "59aaa072d60da44b131a9ae1f61610c10fc9284c",
-    ),
-    SourceRegionSpec::code_sha1(
-        "compose_battle_unit_name",
-        0x05,
-        0x89AA,
-        0x2D,
-        "9b44526183e896b7d5c9663e2205f360e0044d94",
-    ),
-    SourceRegionSpec::data_sha1(
-        "battle_unit_name_source_descriptors",
-        0x05,
-        0x8AC8,
-        0x10,
-        "8ada253db8cdc36605d9bb787e7e4249fa609086",
-    ),
-    SourceRegionSpec::code_sha1(
-        "compose_battle_class_name",
-        0x05,
-        0x8A39,
-        0x2B,
-        "8678eda290772b6eb51e3e68c599cfe6d21e8869",
-    ),
-    SourceRegionSpec::code_sha1(
-        "compose_battle_item_name",
-        0x05,
-        0x8A64,
-        0x30,
-        "87c58551a70e5565d6fb4e2ec4a3ff201c938c39",
-    ),
-    SourceRegionSpec::code_sha1(
-        "compose_battle_item_and_dialogue",
-        0x05,
-        0x837F,
-        0x54,
-        "04fe38538773af19195ddf9eb0bedb0932cf9389",
-    ),
-    SourceRegionSpec::code_sha1(
-        "override_battle_dialogue_selector",
-        0x05,
-        0x85A5,
-        0x39,
-        "aa56addfa83a5e303d828650b1753e434b5ce28e",
-    ),
-    SourceRegionSpec::code_sha1(
-        "compose_battle_dialogue",
-        0x05,
-        0x85DE,
-        0xCF,
-        "f81f49a58e82048d10a073e65a55e065ee38989e",
-    ),
-    SourceRegionSpec::code_sha1(
-        "compose_battle_dialogue_continuation_one",
-        0x05,
-        0x86E1,
-        0x44,
-        "2231aad643a5961dd6a6fc5984cf39a0e5f55fab",
-    ),
-    SourceRegionSpec::code_sha1(
-        "compose_battle_dialogue_continuation_two",
-        0x05,
-        0x8725,
-        0x7C,
-        "a9e98ce0c3f855e8fe8662506ad7c63091286917",
-    ),
-    SourceRegionSpec::code_sha1(
-        "compose_battle_class_and_dialogue",
-        0x05,
-        0x8D1E,
-        0x66,
-        "b0fcd473ae534dd95cd660d6ac70d2cf13b1b996",
-    ),
 ];
 
 #[derive(Clone, Copy)]
@@ -726,7 +614,7 @@ impl SourceRegionSpec {
         }
     }
 
-    const fn data_sha1(
+    pub(super) const fn data_sha1(
         role: &'static str,
         prg_bank: u8,
         cpu_address: u16,
