@@ -1858,7 +1858,7 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
         tables,
         unknowns: vec![
             "All directory-bound script entries and all twenty-eight pointer-referenced battle records have bounded consumed storage ranges; main records may share bytes, while battle records are disjoint and one additional unreferenced structural record remains preserved but not admitted as a translation target.",
-            "Battle record boundaries are proven, but the complete temporal glyph, portrait, sprite, defeat, and unfavorable-variant union remains open before Hangul page budgeting.",
+            "Battle record boundaries are proven, but the favorable gameplay battle and remaining ending temporal glyph, portrait, and sprite variants remain open before Hangul page budgeting.",
             "The E5, fixed four-byte, and E8 record prefix, each initial linear segment, all E4/E6 graph edges, and the E7 caller handoff are confirmed, but caller-specific outcomes after the handoff remain unresolved.",
             "Eleven direct outer dispatch bindings reuse four observer handlers across twenty-two state slots; indirect bindings are not excluded, and bank 04:A20F has no confirmed direct dispatch binding.",
             "Ten of the eighteen main dialogue state handlers remain structurally named but semantically unresolved.",

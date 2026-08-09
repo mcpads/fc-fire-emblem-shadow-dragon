@@ -1163,7 +1163,7 @@ fn build_report(rom: &Rom) -> Result<ChapterTransitionReport> {
             "The save-offer no choice and save-complete no choice are source-bound and runtime-observed; the latter opens a terminal power-off notice with a source-bound sound-test unlock.",
             "Every sound-test control and both downstream state machines are source-bound and runtime-observed; the shared battle text tables and writers, ending chapter-record stream, turn interpolation, and character-epilogue dialogue tables are now structurally bound without emitting their content.",
             "The separate battle-dialogue state machine now bounds twenty-eight pointer-referenced EF-terminated records and one unreferenced structural record; the latter remains preserved and is not admitted as a translation target.",
-            "The complete battle and ending CHR, glyph, portrait, sprite, temporal, defeat, and unfavorable-variant union remains open.",
+            "The ordinary favorable-battle route and the remaining ending variants keep the complete CHR, glyph, portrait, sprite, and temporal union open.",
             "The accelerated continuous route establishes reachability but not baseline combat difficulty, defeat, or unfavorable branches.",
             "Chapter-two, chapter-eleven, and chapter-twelve intro samples do not generalize the remaining twenty-two chapters or all title lifetimes.",
         ],
@@ -1794,7 +1794,7 @@ fn transition_screens() -> Vec<TransitionScreen> {
                 "Select's automatic preserved and Japanese ending lifetimes through the static terminal signature",
             ],
             unresolved_focus: &[
-                "the complete battle and ending temporal glyph, portrait, sprite, defeat, and unfavorable-variant union",
+                "the favorable gameplay battle and remaining ending temporal glyph, portrait, and sprite variants",
             ],
         },
         TransitionScreen {
