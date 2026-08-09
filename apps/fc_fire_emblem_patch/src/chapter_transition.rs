@@ -3,6 +3,7 @@ mod ending_epilogue;
 mod ending_source;
 mod report;
 mod runtime_routes;
+mod sound_test_source;
 mod source_binding;
 mod source_spec;
 #[cfg(test)]
@@ -31,6 +32,7 @@ use translation_surfaces::{TranslationSurfaceContracts, bind_translation_surface
 fn source_region_specs() -> impl Iterator<Item = SourceRegionSpec> {
     SOURCE_REGIONS
         .iter()
+        .chain(sound_test_source::SOURCE_REGIONS.iter())
         .chain(ending_source::SOURCE_REGIONS.iter())
         .chain(battle_source::SOURCE_REGIONS.iter())
         .chain(ending_epilogue::SOURCE_REGIONS.iter())
