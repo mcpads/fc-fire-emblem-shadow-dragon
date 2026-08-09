@@ -243,3 +243,49 @@ pub(super) fn write_file(path: &Path, data: &[u8]) -> Result<()> {
     }
     fs::write(path, data).with_context(|| format!("write {}", path.display()))
 }
+
+pub(super) fn write_file_atomically(path: &Path, data: &[u8]) -> Result<()> {
+    use std::{
+        fs::OpenOptions,
+        io::Write,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)
+        .with_context(|| format!("create output directory {}", parent.display()))?;
+    let file_name = path
+        .file_name()
+        .context("atomic output path must name a file")?
+        .to_string_lossy();
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("system clock is before Unix epoch")?
+        .as_nanos();
+    let temporary_path = parent.join(format!(".{file_name}.tmp-{}-{nonce}", std::process::id()));
+    let result = (|| -> Result<()> {
+        let mut temporary = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temporary_path)
+            .with_context(|| format!("create temporary output {}", temporary_path.display()))?;
+        temporary
+            .write_all(data)
+            .with_context(|| format!("write temporary output {}", temporary_path.display()))?;
+        temporary
+            .sync_all()
+            .with_context(|| format!("sync temporary output {}", temporary_path.display()))?;
+        fs::rename(&temporary_path, path).with_context(|| {
+            format!(
+                "replace {} with temporary output {}",
+                path.display(),
+                temporary_path.display()
+            )
+        })?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary_path);
+    }
+    result
+}

@@ -25,6 +25,7 @@ pub struct DialogueWorkspaceSummary {
     pub line_count: usize,
     pub safe_japanese_source_byte_count: usize,
     pub blocked_line_count: usize,
+    pub preserved_translation_line_count: usize,
 }
 
 #[derive(Debug)]

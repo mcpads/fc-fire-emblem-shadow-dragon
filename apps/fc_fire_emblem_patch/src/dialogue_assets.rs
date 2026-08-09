@@ -64,7 +64,25 @@ pub fn extract_main_dialogue_workspace(
 ) -> Result<DialogueWorkspaceSummary> {
     let rom = Rom::from_path(source_path)?;
     rom.verify_supported_japanese()?;
-    let workspace = build_workspace(rom.data())?;
+    let mut workspace = build_workspace(rom.data())?;
+    let preserved_translation_line_count = if workspace_path.exists() {
+        let existing_bytes = fs::read(workspace_path).with_context(|| {
+            format!(
+                "read existing main dialogue workspace {}",
+                workspace_path.display()
+            )
+        })?;
+        let existing: MainDialogueWorkspace = serde_json::from_slice(&existing_bytes)
+            .with_context(|| {
+                format!(
+                    "parse existing main dialogue workspace {}",
+                    workspace_path.display()
+                )
+            })?;
+        preserve_workspace_translations(&mut workspace, &existing)?
+    } else {
+        0
+    };
     let line_count = workspace
         .records
         .iter()
@@ -79,7 +97,7 @@ pub fn extract_main_dialogue_workspace(
     let mut workspace_bytes =
         serde_json::to_vec_pretty(&workspace).context("serialize main dialogue workspace")?;
     workspace_bytes.push(b'\n');
-    write_file(workspace_path, &workspace_bytes)?;
+    write_file_atomically(workspace_path, &workspace_bytes)?;
 
     Ok(DialogueWorkspaceSummary {
         workspace_sha1: sha1_hex(&workspace_bytes),
@@ -87,6 +105,7 @@ pub fn extract_main_dialogue_workspace(
         line_count,
         safe_japanese_source_byte_count: workspace.safe_japanese_source_byte_count,
         blocked_line_count,
+        preserved_translation_line_count,
     })
 }
 

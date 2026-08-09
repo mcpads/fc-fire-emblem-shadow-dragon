@@ -1,4 +1,9 @@
+use std::collections::BTreeMap;
+
 use super::*;
+
+#[cfg(test)]
+mod tests;
 
 pub(super) fn validate_workspace_translations(
     workspace: &MainDialogueWorkspace,
@@ -32,6 +37,76 @@ pub(super) fn validate_workspace_translations(
         }
     }
     Ok(counts)
+}
+
+pub(super) fn preserve_workspace_translations(
+    fresh: &mut MainDialogueWorkspace,
+    existing: &MainDialogueWorkspace,
+) -> Result<usize> {
+    ensure!(
+        existing.format_version <= WORKSPACE_FORMAT_VERSION,
+        "existing main dialogue workspace format is newer than this tool"
+    );
+    ensure!(
+        existing.source_sha1 == fresh.source_sha1
+            && existing.translate_from == fresh.translate_from
+            && existing.translate_to == fresh.translate_to
+            && existing.preserve_existing_english == fresh.preserve_existing_english
+            && existing.purpose == fresh.purpose,
+        "existing main dialogue workspace translation scope changed"
+    );
+    validate_workspace_translations(existing)?;
+
+    let mut existing_lines = BTreeMap::new();
+    for record in &existing.records {
+        for line in &record.lines {
+            ensure!(
+                existing_lines.insert(line.id.as_str(), line).is_none(),
+                "existing main dialogue workspace has duplicate line ID {}",
+                line.id
+            );
+        }
+    }
+
+    let mut merged = fresh.clone();
+    let mut fresh_line_ids = BTreeSet::new();
+    let mut preserved_count = 0;
+    for record in &mut merged.records {
+        for line in &mut record.lines {
+            ensure!(
+                fresh_line_ids.insert(line.id.clone()),
+                "fresh main dialogue workspace has duplicate line ID {}",
+                line.id
+            );
+            let Some(existing_line) = existing_lines.remove(line.id.as_str()) else {
+                continue;
+            };
+            if existing_line.status == TranslationStatus::Untranslated {
+                continue;
+            }
+            ensure!(
+                existing_line.source_markup == line.source_markup,
+                "translated source changed at {}; refusing to overwrite the existing workspace",
+                line.id
+            );
+            line.korean.clone_from(&existing_line.korean);
+            line.status = existing_line.status;
+            preserved_count += 1;
+        }
+    }
+
+    if let Some(orphaned) = existing_lines
+        .values()
+        .find(|line| line.status != TranslationStatus::Untranslated)
+    {
+        anyhow::bail!(
+            "translated line {} no longer exists; refusing to overwrite the existing workspace",
+            orphaned.id
+        );
+    }
+    validate_workspace_translations(&merged)?;
+    *fresh = merged;
+    Ok(preserved_count)
 }
 
 pub(super) fn build_workspace(source: &[u8]) -> Result<MainDialogueWorkspace> {

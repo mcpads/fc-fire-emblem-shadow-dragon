@@ -499,11 +499,12 @@ fn main() -> Result<()> {
             println!("wrote {}", output.display());
             println!("workspace SHA-1: {}", summary.workspace_sha1);
             println!(
-                "main dialogue workspace: {} records, {} lines, {} safe Japanese source bytes, {} relocation-blocked lines",
+                "main dialogue workspace: {} records, {} lines, {} safe Japanese source bytes, {} relocation-blocked lines, {} preserved translations",
                 summary.record_count,
                 summary.line_count,
                 summary.safe_japanese_source_byte_count,
-                summary.blocked_line_count
+                summary.blocked_line_count,
+                summary.preserved_translation_line_count
             );
         }
         Command::ValidateMainDialogueWorkspace { source, workspace } => {
