@@ -10,14 +10,18 @@ use crate::{
     source_literals::TranslationSurfaceLiteralInventory,
 };
 
-use super::{CodeLocation, SourceRegionSpec, location};
+use super::{
+    CodeLocation, SourceRegionSpec, location,
+    unit_record_history::{
+        INACTIVE_ACTION_VALUE, ROSTER_ACTION_OFFSET, ROSTER_BUFFER_ADDRESS, ROSTER_IDENTITY_OFFSET,
+        ROSTER_LOCATION_OFFSET, ROSTER_RECORD_CAPACITY, ROSTER_RECORD_STRIDE,
+    },
+};
 
 const INITIAL_CURSOR: u8 = 0x35;
 const FIRST_CANDIDATE_ID: u8 = 0x35;
 const LAST_CANDIDATE_ID: u8 = 0x01;
 const CANDIDATE_COUNT: usize = 53;
-const ROSTER_RECORD_CAPACITY: usize = 54;
-const ROSTER_RECORD_STRIDE: u8 = 0x1B;
 
 pub(super) const SOURCE_REGIONS: &[SourceRegionSpec] = &[
     SourceRegionSpec::code_sha1(
@@ -112,10 +116,10 @@ struct EndingEpilogueSelectorFlow {
     roster_record_stride_hex: &'static str,
     identity_offset: u8,
     identity_offset_hex: &'static str,
-    variant_marker_offset: u8,
-    variant_marker_offset_hex: &'static str,
-    alternate_variant_marker: u8,
-    alternate_variant_marker_hex: &'static str,
+    action_byte_offset: u8,
+    action_byte_offset_hex: &'static str,
+    inactive_action_value: u8,
+    inactive_action_value_hex: &'static str,
     classification_result_address: u16,
     classification_result_address_hex: &'static str,
     classification_cases: &'static [EpilogueClassificationCase],
@@ -134,6 +138,7 @@ struct EndingEpilogueSelectorFlow {
     location_name_pointer_table: CodeLocation,
     location_name_destination: u16,
     location_name_destination_hex: &'static str,
+    inactive_location_producer: CodeLocation,
     completion_condition: &'static str,
     semantic_boundary: &'static str,
 }
@@ -158,14 +163,14 @@ const CLASSIFICATION_CASES: &[EpilogueClassificationCase] = &[
     EpilogueClassificationCase {
         result: 0x01,
         result_hex: "0x01",
-        source_condition: "matching roster record offset 0x12 equals 0xFF",
+        source_condition: "matching roster record has inactive or defeated action byte 0xFF at offset 0x12",
         action: "select routing table 0x41 and copy the record's location-name field before opening the candidate-numbered entry",
         visible_entry: true,
     },
     EpilogueClassificationCase {
         result: 0x00,
         result_hex: "0x00",
-        source_condition: "matching roster record offset 0x12 is not 0xFF",
+        source_condition: "matching roster record action byte at offset 0x12 is not 0xFF",
         action: "keep direct table 0x40 and open the candidate-numbered entry",
         visible_entry: true,
     },
@@ -232,17 +237,17 @@ pub(super) fn bind_ending_character_epilogue(
             last_candidate_id_hex: "0x01",
             candidate_count: CANDIDATE_COUNT,
             scan_order: "phase 0x0F decrements 0x773B before classification, so candidate ids run from 0x35 down through 0x01",
-            roster_buffer_address: 0x906A,
+            roster_buffer_address: ROSTER_BUFFER_ADDRESS,
             roster_buffer_address_hex: "0x906A",
             roster_record_capacity: ROSTER_RECORD_CAPACITY,
             roster_record_stride: ROSTER_RECORD_STRIDE,
             roster_record_stride_hex: "0x1B",
-            identity_offset: 0x00,
+            identity_offset: ROSTER_IDENTITY_OFFSET,
             identity_offset_hex: "0x00",
-            variant_marker_offset: 0x12,
-            variant_marker_offset_hex: "0x12",
-            alternate_variant_marker: 0xFF,
-            alternate_variant_marker_hex: "0xFF",
+            action_byte_offset: ROSTER_ACTION_OFFSET,
+            action_byte_offset_hex: "0x12",
+            inactive_action_value: INACTIVE_ACTION_VALUE,
+            inactive_action_value_hex: "0xFF",
             classification_result_address: 0x0004,
             classification_result_address_hex: "0x0004",
             classification_cases: CLASSIFICATION_CASES,
@@ -256,13 +261,14 @@ pub(super) fn bind_ending_character_epilogue(
             character_name_pointer_table: location(0x0F, 0xDE2B),
             character_name_destination: 0x78F2,
             character_name_destination_hex: "0x78F2",
-            alternate_location_index_offset: 0x0E,
+            alternate_location_index_offset: ROSTER_LOCATION_OFFSET,
             alternate_location_index_offset_hex: "0x0E",
             location_name_pointer_table: location(0x0F, 0xEFB7),
             location_name_destination: 0x7902,
             location_name_destination_hex: "0x7902",
+            inactive_location_producer: location(0x06, 0xB67B),
             completion_condition: "after candidate 0x01, the next decrement makes 0x773B negative and phase 0x0F jumps to ending phase 0x17",
-            semantic_boundary: "the code proves absent, marker-0xFF, and marker-not-0xFF branches; assigning a gameplay label such as dead or surviving to offset 0x12 still requires producer or runtime evidence",
+            semantic_boundary: "the producer and gameplay evidence prove absent, inactive-or-defeated, and active branches; exact causes inside the inactive class, including whether every record means character death, still require runtime variant evidence",
         },
         dialogue_literal_inventory,
         dialogue_literal_inventory_scope: "all canonical first linear segments in selector tables 0x40 and 0x41; every routing-table transition targets the included direct epilogue table",
@@ -271,7 +277,7 @@ pub(super) fn bind_ending_character_epilogue(
         input_behavior: "automatic; phase 0x0F scans and selects an entry, and phase 0x10 waits for the shared dialogue engine before advancing",
         translation_handling: "translate Japanese character names, location names, and epilogue lines only; preserve original Latin and digit codes",
         unresolved: &[
-            "bind the gameplay producer semantics of roster record offset 0x12 before naming the two visible branches as survival outcomes",
+            "observe inactive or defeated character variants before narrowing the 0xFF branch to a specific outcome such as death",
             "complete portrait and CHR-page union across candidate and dialogue-control variants",
             "runtime coverage of direct, routing, and direct-extension epilogue entries",
         ],

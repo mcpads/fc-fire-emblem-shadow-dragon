@@ -6,6 +6,7 @@ mod source_spec;
 #[cfg(test)]
 mod tests;
 mod translation_surfaces;
+mod unit_record_history;
 
 use std::{fs, path::Path};
 
@@ -29,6 +30,7 @@ fn source_region_specs() -> impl Iterator<Item = SourceRegionSpec> {
     SOURCE_REGIONS
         .iter()
         .chain(ending_epilogue::SOURCE_REGIONS.iter())
+        .chain(unit_record_history::SOURCE_REGIONS.iter())
         .copied()
 }
 
@@ -96,6 +98,7 @@ fn build_report(rom: &Rom) -> Result<ChapterTransitionReport> {
         save_offer_no_branch: save_offer_no_branch_contract(),
         save_complete_no_branch: save_complete_no_branch_contract(),
         sound_test_controls: sound_test_control_contract(),
+        unit_record_history: unit_record_history::unit_record_history_contract(),
         translation_surfaces,
         chapter_intro_runtime_samples: chapter_intro_runtime_samples(),
         fixed_labels: vec![

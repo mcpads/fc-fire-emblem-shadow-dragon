@@ -1,4 +1,4 @@
-use super::*;
+use super::{unit_record_history::UnitRecordHistoryContract, *};
 
 #[derive(Debug, Serialize)]
 pub(super) struct ChapterTransitionReport {
@@ -12,6 +12,7 @@ pub(super) struct ChapterTransitionReport {
     pub(super) save_offer_no_branch: SaveOfferNoBranchContract,
     pub(super) save_complete_no_branch: SaveCompleteNoBranchContract,
     pub(super) sound_test_controls: SoundTestControlContract,
+    pub(super) unit_record_history: UnitRecordHistoryContract,
     pub(super) translation_surfaces: TranslationSurfaceContracts,
     pub(super) chapter_intro_runtime_samples: Vec<ChapterIntroRuntimeSample>,
     pub(super) fixed_labels: Vec<FixedLabelBinding>,
