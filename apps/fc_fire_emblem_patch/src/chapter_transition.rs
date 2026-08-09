@@ -1,5 +1,7 @@
 mod battle_source;
+mod battle_translation;
 mod ending_epilogue;
+mod ending_scroll;
 mod ending_source;
 mod report;
 mod runtime_routes;
