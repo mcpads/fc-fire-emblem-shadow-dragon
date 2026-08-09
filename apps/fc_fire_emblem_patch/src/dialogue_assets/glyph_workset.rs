@@ -142,6 +142,7 @@ fn build_glyph_workset_report(
     let observed_screen_lifetimes = observed_screen_lifetime_reports(
         &filled_glyphs_by_record,
         &approved_glyphs_by_record,
+        graph,
         active_slot_count,
         working_set_ready,
     )?;

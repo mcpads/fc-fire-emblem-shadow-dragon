@@ -2,71 +2,39 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, ensure};
 
-use crate::font_slots::active_hangul_codes;
+use crate::dialogue_inventory::MainDialogueGraphReport;
 
 use super::{DialogueRecordKey, report::ObservedScreenLifetimeReport};
 
-const SHOP_PURCHASE_SCREEN_ROLE: &str = "weapon-shop purchase handoff";
-const SHOP_PURCHASE_LIFETIME_RECORDS: [(&str, usize); 2] =
-    [("shop-and-item-dialogue", 0), ("shop-and-item-dialogue", 1)];
-const SHOP_PURCHASE_RETAINED_SOURCE_CODES: [u8; 17] = [
-    0x01, 0x03, 0x04, 0x06, 0x12, 0x13, 0x19, 0x1A, 0x21, 0x25, 0x26, 0x29, 0x2A, 0x32, 0x35,
-    0x4E, 0x5F,
-];
+mod epilogue;
+mod shop;
 
 pub(super) fn observed_screen_lifetime_reports(
     filled_glyphs_by_record: &BTreeMap<DialogueRecordKey, BTreeSet<char>>,
     approved_glyphs_by_record: &BTreeMap<DialogueRecordKey, BTreeSet<char>>,
+    graph: &MainDialogueGraphReport,
     active_slot_count: usize,
     working_set_ready: bool,
 ) -> Result<Vec<ObservedScreenLifetimeReport>> {
-    let shop_table_is_present = filled_glyphs_by_record
-        .keys()
-        .any(|(table_id, _)| table_id == "shop-and-item-dialogue");
-    if !shop_table_is_present {
-        return Ok(Vec::new());
-    }
-
-    let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
-    let retained_source_codes = SHOP_PURCHASE_RETAINED_SOURCE_CODES
-        .into_iter()
-        .collect::<BTreeSet<_>>();
-    ensure!(
-        retained_source_codes.len() == SHOP_PURCHASE_RETAINED_SOURCE_CODES.len(),
-        "{SHOP_PURCHASE_SCREEN_ROLE} retained source codes contain duplicates"
-    );
-    ensure!(
-        retained_source_codes.is_subset(&active_codes),
-        "{SHOP_PURCHASE_SCREEN_ROLE} retained source codes include a reserved font slot"
-    );
-
-    let filled_glyphs = glyph_union_for_records(
+    let mut reports = Vec::new();
+    if let Some(report) = shop::purchase_handoff_report(
         filled_glyphs_by_record,
-        &SHOP_PURCHASE_LIFETIME_RECORDS,
-        SHOP_PURCHASE_SCREEN_ROLE,
-    )?;
-    let approved_glyphs = glyph_union_for_records(
         approved_glyphs_by_record,
-        &SHOP_PURCHASE_LIFETIME_RECORDS,
-        SHOP_PURCHASE_SCREEN_ROLE,
-    )?;
-    let preserved_active_source_code_count = retained_source_codes.len();
-    let filled_slot_demand = preserved_active_source_code_count + filled_glyphs.len();
-    let approved_slot_demand =
-        working_set_ready.then_some(preserved_active_source_code_count + approved_glyphs.len());
-
-    Ok(vec![ObservedScreenLifetimeReport {
-        screen_role: SHOP_PURCHASE_SCREEN_ROLE,
-        source_record_count: SHOP_PURCHASE_LIFETIME_RECORDS.len(),
-        filled_unique_glyph_count: filled_glyphs.len(),
-        preserved_active_source_code_count,
-        filled_slot_demand,
-        filled_set_fits_one_page_so_far: filled_slot_demand <= active_slot_count,
-        approved_unique_glyph_count: approved_glyphs.len(),
-        approved_slot_demand,
-        approved_set_fits_one_page: approved_slot_demand
-            .map(|slot_demand| slot_demand <= active_slot_count),
-    }])
+        active_slot_count,
+        working_set_ready,
+    )? {
+        reports.push(report);
+    }
+    if let Some(report) = epilogue::ending_character_family_report(
+        filled_glyphs_by_record,
+        approved_glyphs_by_record,
+        graph,
+        active_slot_count,
+        working_set_ready,
+    )? {
+        reports.push(report);
+    }
+    Ok(reports)
 }
 
 fn glyph_union_for_records(
@@ -90,4 +58,68 @@ fn glyph_union_for_records(
         );
     }
     Ok(glyphs)
+}
+
+fn maximum_transition_chain_glyph_union(
+    table_ids: &[&str],
+    glyphs_by_record: &BTreeMap<DialogueRecordKey, BTreeSet<char>>,
+    graph: &MainDialogueGraphReport,
+) -> Result<(usize, BTreeSet<char>)> {
+    let mut next_record = BTreeMap::new();
+    for edge in &graph.transition_edges {
+        let source = (
+            edge.source_table_id.to_owned(),
+            edge.source_canonical_entry_index,
+        );
+        let target = (
+            edge.target_table_id.to_owned(),
+            edge.target_canonical_entry_index,
+        );
+        ensure!(
+            next_record.insert(source.clone(), target).is_none(),
+            "main-dialogue record {}:{} has multiple transition targets",
+            source.0,
+            source.1
+        );
+    }
+
+    let mut maximum_record_count = 0;
+    let mut maximum_glyphs = BTreeSet::new();
+    for start in glyphs_by_record
+        .keys()
+        .filter(|(table_id, _)| table_ids.contains(&table_id.as_str()))
+    {
+        let mut current = start.clone();
+        let mut chain_records = BTreeSet::new();
+        let mut chain_glyphs = BTreeSet::new();
+        loop {
+            ensure!(
+                chain_records.insert(current.clone()),
+                "observed screen lifetime transition chain contains a cycle at {}:{}",
+                current.0,
+                current.1
+            );
+            chain_glyphs.extend(
+                glyphs_by_record
+                    .get(&current)
+                    .with_context(|| {
+                        format!(
+                            "observed screen lifetime transition target {}:{} is missing from the workspace",
+                            current.0, current.1
+                        )
+                    })?
+                    .iter()
+                    .copied(),
+            );
+            let Some(next) = next_record.get(&current) else {
+                break;
+            };
+            current = next.clone();
+        }
+        if chain_glyphs.len() > maximum_glyphs.len() {
+            maximum_record_count = chain_records.len();
+            maximum_glyphs = chain_glyphs;
+        }
+    }
+    Ok((maximum_record_count, maximum_glyphs))
 }

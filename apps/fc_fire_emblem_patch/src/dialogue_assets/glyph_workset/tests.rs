@@ -117,6 +117,30 @@ fn observed_shop_lifetime_counts_retained_source_slots_and_both_dialogue_records
     );
 }
 
+#[test]
+fn observed_epilogue_family_reserves_names_locations_and_the_dialogue_chain() {
+    let glyphs = (0..94)
+        .map(|index| char::from_u32(0xAC00 + index).unwrap())
+        .collect::<String>();
+    let workspace = workspace_with_records(vec![record(
+        "epilogue-dialogue",
+        0,
+        &format!("{glyphs}{{E7}}"),
+    )]);
+
+    let report =
+        build_glyph_workset_report(&workspace, &empty_graph(), "workspace-sha1".to_owned())
+            .unwrap();
+
+    let lifetime = &report.observed_screen_lifetimes[0];
+    assert_eq!(lifetime.source_record_count, 1);
+    assert_eq!(lifetime.filled_unique_glyph_count, 94);
+    assert_eq!(lifetime.preserved_active_source_code_count, 99);
+    assert_eq!(lifetime.additional_target_glyph_reservation_count, 18);
+    assert_eq!(lifetime.filled_slot_demand, 211);
+    assert!(!lifetime.filled_set_fits_one_page_so_far);
+}
+
 fn workspace_with_lines(lines: Vec<WorkspaceLine>) -> MainDialogueWorkspace {
     workspace_with_records(vec![WorkspaceRecord {
         id: "record".to_owned(),

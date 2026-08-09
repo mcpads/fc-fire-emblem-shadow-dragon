@@ -26,9 +26,12 @@ pub(super) struct MainDialogueGlyphWorksetReport {
 #[derive(Debug, Serialize)]
 pub(super) struct ObservedScreenLifetimeReport {
     pub(super) screen_role: &'static str,
+    pub(super) budget_basis: &'static str,
+    pub(super) evidence_digest: &'static str,
     pub(super) source_record_count: usize,
     pub(super) filled_unique_glyph_count: usize,
     pub(super) preserved_active_source_code_count: usize,
+    pub(super) additional_target_glyph_reservation_count: usize,
     pub(super) filled_slot_demand: usize,
     pub(super) filled_set_fits_one_page_so_far: bool,
     pub(super) approved_unique_glyph_count: usize,
