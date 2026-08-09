@@ -50,6 +50,24 @@ impl BattleDialogueReinsertionPlan {
             .collect()
     }
 
+    pub(crate) fn max_record_unique_glyph_count(&self) -> usize {
+        self.records
+            .iter()
+            .map(|record| {
+                record
+                    .logical_bytes
+                    .iter()
+                    .filter_map(|byte| match byte {
+                        LogicalDialogueByte::TargetGlyph(character) => Some(*character),
+                        LogicalDialogueByte::Encoded(_) => None,
+                    })
+                    .collect::<BTreeSet<_>>()
+                    .len()
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
     pub(crate) fn encoded_records(
         &self,
         assignments: &BTreeMap<char, u8>,

@@ -1,3 +1,4 @@
+mod battle_text_workset;
 mod chapter_transition;
 mod chapter_victory;
 mod chr_inventory;
@@ -70,6 +71,16 @@ enum Command {
         source: PathBuf,
         #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
         output: PathBuf,
+    },
+    /// Measure translated battle names, classes, items, and messages without emitting text.
+    AnalyzeBattleTextWorkset {
+        source: PathBuf,
+        #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
+        fixed_workspace: PathBuf,
+        #[arg(long, default_value = "private/dialogue/battle-workspace.json")]
+        dialogue_workspace: PathBuf,
+        #[arg(long, default_value = "out/battle-text-workset.json")]
+        report: PathBuf,
     },
     /// Inventory dialogue entry tables without emitting source dialogue bytes.
     AnalyzeDialogueStructure {
@@ -420,6 +431,28 @@ fn main() -> Result<()> {
                 summary.entry_count,
                 summary.japanese_entry_count,
                 summary.preserved_translation_count
+            );
+        }
+        Command::AnalyzeBattleTextWorkset {
+            source,
+            fixed_workspace,
+            dialogue_workspace,
+            report,
+        } => {
+            let summary = battle_text_workset::analyze_battle_text_workset(
+                &source,
+                &fixed_workspace,
+                &dialogue_workspace,
+                &report,
+            )?;
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "battle glyphs: fixed {}, dialogue {}, union {}, conservative combination upper bound {}",
+                summary.fixed_glyph_count,
+                summary.dialogue_glyph_count,
+                summary.union_glyph_count,
+                summary.conservative_combination_upper_bound
             );
         }
         Command::AnalyzeDialogueStructure { source, report } => {

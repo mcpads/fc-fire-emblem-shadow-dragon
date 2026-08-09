@@ -22,7 +22,7 @@ mod table_analysis;
 mod tests;
 
 use dialogue_path::*;
-pub(crate) use fixed_workspace::extract_fixed_text_workspace;
+pub(crate) use fixed_workspace::{extract_fixed_text_workspace, plan_fixed_text};
 pub use report::TextInventorySummary;
 use report::*;
 use source_spec::*;

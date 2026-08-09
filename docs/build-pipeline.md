@@ -309,7 +309,12 @@ cargo run -p fc-fire-emblem-patch -- build-battle-dialogue-probe \
 ```sh
 cargo run -p fc-fire-emblem-patch -- extract-fixed-text-workspace \
   'roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes'
+
+cargo run -p fc-fire-emblem-patch -- analyze-battle-text-workset \
+  'roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes'
 ```
+
+`analyze-battle-text-workset`은 네 고정 표의 번역을 글리프당 한 바이트 논리열로 만들고 각 문자열이 원래 소유 길이 안에 드는지 검사한 뒤, 전투 대사 계획과 합친 글리프 수만 공개한다. 고정 표 210글리프와 대사 150글리프의 합집합은 287글리프로 정적 한 페이지에 들어가지 않는다. 대사 레코드 최대 61자에 양측 이름 최대 6자씩·병종 4자씩·아이템 6자씩을 모두 더한 조합 상한은 93/210이다. 그러므로 후속 구현은 전체 집합을 한 페이지에 고정하지 않고 현재 전투 조합을 CHR-RAM에 적재하며 두 문자열 계열을 같은 로컬 코드북으로 바꿔야 한다. 보고서는 글리프 문자·원문·번역문을 싣지 않는다.
 
 `analyze-main-dialogue-glyph-workset`은 이 검증을 통과한 작업 골격에서 채워진 줄과 `complete`로 승인된 줄의 한글 집합을 따로 센다. 공개 보고서는 상태별 줄 수, 글리프 수, 정렬 집합 SHA-1과 활성 슬롯 210칸 비교만 기록하고 대사, 글리프 문자, 줄 ID와 입력 경로를 기록하지 않는다. 모든 2,812줄이 `complete`일 때만 승인 집합을 최종 작업 집합으로 인정하고 단일 페이지 수용 여부를 판정한다. 현재 의미 있는 일본어 2,541줄은 `needs_human_review`, 완료 줄은 0개다. 채워진 집합은 고유 한글 698자이고 한 줄 고유 한글은 최대 14자다. 명시적인 `E4`/`E6` 대사 전이 사슬은 최대 174자로 활성 슬롯 210칸에 들어간다. 실행 관측으로 결속한 화면 수명은 남아 있는 원본 활성 코드와 동시에 보이는 대사 레코드의 한글 합집합을 더해 별도로 검사한다.
 

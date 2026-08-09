@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::Path,
+};
 
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -41,6 +45,116 @@ struct FixedTextEntry {
     japanese_markup: String,
     korean_markup: String,
     status: String,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum FixedTextLogicalByte {
+    TargetGlyph(char),
+    Encoded(u8),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct FixedTextPlannedEntry {
+    pub(crate) table_id: String,
+    pub(crate) logical_bytes: Vec<FixedTextLogicalByte>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct FixedTextPlan {
+    pub(crate) entries: Vec<FixedTextPlannedEntry>,
+}
+
+impl FixedTextPlan {
+    pub(crate) fn unique_glyphs(&self) -> BTreeSet<char> {
+        self.entries
+            .iter()
+            .flat_map(|entry| &entry.logical_bytes)
+            .filter_map(|byte| match byte {
+                FixedTextLogicalByte::TargetGlyph(glyph) => Some(*glyph),
+                FixedTextLogicalByte::Encoded(_) => None,
+            })
+            .collect()
+    }
+
+    pub(crate) fn table_max_entry_glyph_count(&self, table_id: &str) -> usize {
+        self.entries
+            .iter()
+            .filter(|entry| entry.table_id == table_id)
+            .map(|entry| {
+                entry
+                    .logical_bytes
+                    .iter()
+                    .filter(|byte| matches!(byte, FixedTextLogicalByte::TargetGlyph(_)))
+                    .count()
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
+    pub(crate) fn encoded_original_byte_count(&self) -> usize {
+        self.entries
+            .iter()
+            .flat_map(|entry| &entry.logical_bytes)
+            .filter_map(|byte| match byte {
+                FixedTextLogicalByte::Encoded(value) => Some(*value),
+                FixedTextLogicalByte::TargetGlyph(_) => None,
+            })
+            .count()
+    }
+}
+
+pub(crate) fn plan_fixed_text(rom: &Rom, workspace_path: &Path) -> Result<FixedTextPlan> {
+    rom.verify_supported_japanese()?;
+    let bytes =
+        fs::read(workspace_path).with_context(|| format!("read {}", workspace_path.display()))?;
+    let workspace: FixedTextWorkspace = serde_json::from_slice(&bytes)
+        .with_context(|| format!("parse {}", workspace_path.display()))?;
+    let fresh = build_workspace(rom.data())?;
+    ensure!(
+        workspace.entries.len() == fresh.entries.len(),
+        "fixed text workspace entry count changed"
+    );
+    for (entry, source) in workspace.entries.iter().zip(&fresh.entries) {
+        ensure!(
+            entry.id == source.id
+                && entry.table_id == source.table_id
+                && entry.source_index == source.source_index
+                && entry.alias_indices == source.alias_indices
+                && entry.pointer_cpu_address_hex == source.pointer_cpu_address_hex
+                && entry.source_bytes_hex == source.source_bytes_hex
+                && entry.source_sha1 == source.source_sha1
+                && entry.japanese_markup == source.japanese_markup,
+            "fixed text workspace binding changed for {}",
+            source.id
+        );
+        validate_translation(entry)?;
+        ensure!(
+            entry.status != "untranslated",
+            "{} is not translated",
+            entry.id
+        );
+    }
+    let entries = workspace
+        .entries
+        .iter()
+        .map(|entry| {
+            let logical_bytes = encode_target_markup(&entry.korean_markup)
+                .with_context(|| format!("encode {}", entry.id))?;
+            let source_len = entry.source_bytes_hex.split_whitespace().count();
+            ensure!(
+                logical_bytes.len() <= source_len,
+                "{} needs {} bytes but owns only {}",
+                entry.id,
+                logical_bytes.len(),
+                source_len
+            );
+            Ok(FixedTextPlannedEntry {
+                table_id: entry.table_id.clone(),
+                logical_bytes,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(FixedTextPlan { entries })
 }
 
 pub(crate) fn extract_fixed_text_workspace(
@@ -223,6 +337,38 @@ fn is_japanese_character(character: char) -> bool {
         || character == '」'
 }
 
+fn encode_target_markup(markup: &str) -> Result<Vec<FixedTextLogicalByte>> {
+    let chars = markup.chars().collect::<Vec<_>>();
+    let mut output = Vec::new();
+    let mut index = 0;
+    while index < chars.len() {
+        if chars[index] == '{' {
+            ensure!(
+                index + 3 < chars.len() && chars[index + 3] == '}',
+                "invalid fixed text token"
+            );
+            let encoded = format!("{}{}", chars[index + 1], chars[index + 2]);
+            output.push(FixedTextLogicalByte::Encoded(
+                u8::from_str_radix(&encoded, 16).context("decode fixed text token")?,
+            ));
+            index += 4;
+        } else if ('가'..='힣').contains(&chars[index]) {
+            output.push(FixedTextLogicalByte::TargetGlyph(chars[index]));
+            index += 1;
+        } else if chars[index].is_ascii() {
+            let code = (0u8..=u8::MAX)
+                .find(|code| protected_alphanumeric_glyph(*code) == Some(&chars[index].to_string()))
+                .or_else(|| (chars[index] == '.').then_some(0x9B))
+                .with_context(|| format!("unsupported preserved ASCII {:?}", chars[index]))?;
+            output.push(FixedTextLogicalByte::Encoded(code));
+            index += 1;
+        } else {
+            anyhow::bail!("unsupported fixed text character {:?}", chars[index]);
+        }
+    }
+    Ok(output)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -244,5 +390,19 @@ mod tests {
         validate_translation(&entry).unwrap();
         entry.korean_markup = "나이트".to_owned();
         assert!(validate_translation(&entry).is_err());
+    }
+
+    #[test]
+    fn target_markup_keeps_layout_tokens_and_one_byte_hangul() {
+        let encoded = encode_target_markup("활{FF}").unwrap();
+        assert!(matches!(encoded[0], FixedTextLogicalByte::TargetGlyph('활')));
+        assert!(matches!(encoded[1], FixedTextLogicalByte::Encoded(0xFF)));
+        assert_eq!(encoded.len(), 2);
+    }
+
+    #[test]
+    fn target_markup_rejects_japanese_and_malformed_tokens() {
+        assert!(encode_target_markup("ゆみ").is_err());
+        assert!(encode_target_markup("활{F}").is_err());
     }
 }
