@@ -141,6 +141,29 @@ fn observed_epilogue_family_reserves_names_locations_and_the_dialogue_chain() {
     assert!(!lifetime.filled_set_fits_one_page_so_far);
 }
 
+#[test]
+fn observed_game_over_budget_uses_every_victory_and_defeat_glyph() {
+    let glyphs = (0..121)
+        .map(|index| char::from_u32(0xAC00 + index).unwrap())
+        .collect::<String>();
+    let workspace = workspace_with_records(vec![record(
+        "victory-and-defeat-dialogue",
+        0,
+        &format!("{glyphs}{{E7}}"),
+    )]);
+
+    let report =
+        build_glyph_workset_report(&workspace, &empty_graph(), "workspace-sha1".to_owned())
+            .unwrap();
+
+    let lifetime = &report.observed_screen_lifetimes[0];
+    assert_eq!(lifetime.source_record_count, 1);
+    assert_eq!(lifetime.filled_unique_glyph_count, 121);
+    assert_eq!(lifetime.preserved_active_source_code_count, 90);
+    assert_eq!(lifetime.filled_slot_demand, 211);
+    assert!(!lifetime.filled_set_fits_one_page_so_far);
+}
+
 fn workspace_with_lines(lines: Vec<WorkspaceLine>) -> MainDialogueWorkspace {
     workspace_with_records(vec![WorkspaceRecord {
         id: "record".to_owned(),

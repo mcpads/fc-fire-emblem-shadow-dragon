@@ -7,6 +7,7 @@ use crate::dialogue_inventory::MainDialogueGraphReport;
 use super::{DialogueRecordKey, report::ObservedScreenLifetimeReport};
 
 mod epilogue;
+mod game_over;
 mod shop;
 
 pub(super) fn observed_screen_lifetime_reports(
@@ -29,6 +30,14 @@ pub(super) fn observed_screen_lifetime_reports(
         filled_glyphs_by_record,
         approved_glyphs_by_record,
         graph,
+        active_slot_count,
+        working_set_ready,
+    )? {
+        reports.push(report);
+    }
+    if let Some(report) = game_over::turn_boundary_game_over_report(
+        filled_glyphs_by_record,
+        approved_glyphs_by_record,
         active_slot_count,
         working_set_ready,
     )? {
@@ -122,4 +131,19 @@ fn maximum_transition_chain_glyph_union(
         }
     }
     Ok((maximum_record_count, maximum_glyphs))
+}
+
+fn glyph_union_for_table(
+    table_id: &str,
+    glyphs_by_record: &BTreeMap<DialogueRecordKey, BTreeSet<char>>,
+) -> (usize, BTreeSet<char>) {
+    let records = glyphs_by_record
+        .iter()
+        .filter(|((record_table_id, _), _)| record_table_id == table_id)
+        .collect::<Vec<_>>();
+    let mut glyphs = BTreeSet::new();
+    for (_, record_glyphs) in &records {
+        glyphs.extend(record_glyphs.iter().copied());
+    }
+    (records.len(), glyphs)
 }
