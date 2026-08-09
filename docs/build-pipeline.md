@@ -285,7 +285,7 @@ cargo run -p fc-fire-emblem-patch -- build-mmc5-dialogue-exram-probe \
 
 `validate-main-dialogue-workspace`는 작업 골격을 지원 일본판에서 다시 추출한 값과 대조한다. 원본 결속 필드가 달라지거나, 상태와 `korean` 필드가 모순되거나, 제어 토큰·피연산자·기존 영문·숫자가 추가·삭제·변경되거나, 번역 필드에 일본어가 남으면 실패한다. 이 단계는 한글 문자열을 논리 글리프로 검사할 뿐 코드 배정이나 ROM 쓰기는 하지 않는다.
 
-`extract-battle-dialogue-workspace`는 주 대사와 형식이 다른 전투 대사 28레코드를 `private/dialogue/battle-workspace.json`에 만든다. 포인터 별칭 65개와 정확한 저장 범위 1,152바이트를 다시 검사하고, 4바이트 헤더는 본문 밖 결속 필드로 두며, `EC` 피연산자와 `AB/AC/ED/EE/EF` 제어를 보호 토큰으로 기록한다. 결과는 100줄·일본어 620바이트다. 기존 파일이 있으면 원문과 모든 결속 필드가 같은 번역 줄만 병합하고 달라진 입력은 덮어쓰지 않는다.
+`extract-battle-dialogue-workspace`는 주 대사와 형식이 다른 전투 대사 28레코드를 `private/dialogue/battle-workspace.json`에 만든다. 포인터 별칭 65개와 정확한 저장 범위 1,152바이트를 다시 검사하고, 4바이트 헤더는 본문 밖 결속 필드로 두며, `EC` 피연산자와 `AB/AC/ED/EE/EF` 제어를 보호 토큰으로 기록한다. 결과는 100줄·일본어 620바이트다. 기존 파일이 있으면 원문과 모든 결속 필드가 같은 번역 줄만 병합하고 달라진 입력은 덮어쓰지 않는다. `validate-battle-dialogue-workspace`는 한국어 필드에 일본어가 남거나 동적 선택자·기존 영문·숫자·제어 순서가 바뀌면 실패한다.
 
 ```sh
 cargo run -p fc-fire-emblem-patch -- extract-battle-dialogue-workspace \

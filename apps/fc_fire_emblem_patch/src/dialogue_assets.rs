@@ -27,7 +27,9 @@ mod tests;
 mod workspace;
 
 pub(crate) use glyph_workset::analyze_main_dialogue_glyph_workset;
-pub(crate) use battle_workspace::extract_battle_dialogue_workspace;
+pub(crate) use battle_workspace::{
+    extract_battle_dialogue_workspace, validate_battle_dialogue_workspace,
+};
 use layout_packing::*;
 use markup::*;
 use model::*;

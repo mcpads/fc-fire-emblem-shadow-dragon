@@ -9,6 +9,16 @@ pub(crate) struct BattleDialogueWorkspaceSummary {
     pub(crate) preserved_translation_line_count: usize,
 }
 
+#[derive(Debug)]
+pub(crate) struct BattleDialogueValidationSummary {
+    pub(crate) workspace_sha1: String,
+    pub(crate) record_count: usize,
+    pub(crate) line_count: usize,
+    pub(crate) filled_line_count: usize,
+    pub(crate) complete_line_count: usize,
+    pub(crate) target_glyph_count: usize,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 struct BattleDialogueWorkspace {
     format_version: u8,
@@ -131,6 +141,33 @@ pub(crate) fn extract_battle_dialogue_workspace(
     })
 }
 
+pub(crate) fn validate_battle_dialogue_workspace(
+    source_path: &Path,
+    workspace_path: &Path,
+) -> Result<BattleDialogueValidationSummary> {
+    let rom = Rom::from_path(source_path)?;
+    rom.verify_supported_japanese()?;
+    let workspace_bytes = fs::read(workspace_path)
+        .with_context(|| format!("read {}", workspace_path.display()))?;
+    let workspace: BattleDialogueWorkspace = serde_json::from_slice(&workspace_bytes)
+        .with_context(|| format!("parse {}", workspace_path.display()))?;
+    validate_workspace_binding(rom.data(), &workspace)?;
+    let (filled_line_count, complete_line_count, target_glyph_count) =
+        validate_translation_fields(&workspace)?;
+    Ok(BattleDialogueValidationSummary {
+        workspace_sha1: sha1_hex(&workspace_bytes),
+        record_count: workspace.records.len(),
+        line_count: workspace
+            .records
+            .iter()
+            .map(|record| record.lines.len())
+            .sum(),
+        filled_line_count,
+        complete_line_count,
+        target_glyph_count,
+    })
+}
+
 fn preserve_translations(
     fresh: &mut BattleDialogueWorkspace,
     existing: &BattleDialogueWorkspace,
@@ -144,6 +181,7 @@ fn preserve_translations(
         existing_header == fresh_header,
         "battle workspace translation scope changed"
     );
+    validate_translation_fields(existing)?;
     ensure!(
         existing.records.len() == fresh.records.len(),
         "battle workspace record count changed"
@@ -191,6 +229,93 @@ fn preserve_translations(
         }
     }
     Ok(preserved)
+}
+
+fn validate_workspace_binding(source: &[u8], workspace: &BattleDialogueWorkspace) -> Result<()> {
+    ensure!(
+        workspace.format_version == 1
+            && workspace.source_sha1 == EXPECTED_SOURCE_SHA1
+            && workspace.translate_from == "ja"
+            && workspace.translate_to == "ko"
+            && workspace.preserve_existing_english
+            && workspace.purpose == "private_battle_dialogue_translation_workspace",
+        "battle workspace header changed"
+    );
+    let records = inspect_battle_dialogue_translation_records(source)?;
+    ensure!(
+        workspace.records.len() == records.len(),
+        "battle workspace record count changed"
+    );
+    for (actual, source_record) in workspace.records.iter().zip(&records) {
+        ensure!(
+            actual.id == format!("{}:{:03}", source_record.table_id, source_record.canonical_entry_index)
+                && actual.table_id == source_record.table_id
+                && actual.source_prg_bank == source_record.source_prg_bank
+                && actual.canonical_entry_index == source_record.canonical_entry_index
+                && actual.entry_indices == source_record.entry_indices
+                && actual.pointer_cpu_address_hex == format!("0x{:04X}", source_record.pointer_cpu_address)
+                && actual.pointer_file_offsets_hex == source_record.pointer_file_offsets.iter().map(|offset| format!("0x{offset:05X}")).collect::<Vec<_>>()
+                && actual.file_offset_hex == format!("0x{:05X}", source_record.file_offset)
+                && actual.end_file_offset_exclusive_hex == format!("0x{:05X}", source_record.end_file_offset_exclusive)
+                && actual.source_storage_sha1 == source_record.storage_sha1
+                && actual.header_hex == source_record.header_hex,
+            "battle workspace record binding changed at {}",
+            actual.id
+        );
+        let expected_lines = decode_battle_record_lines(source, source_record)?;
+        ensure!(
+            actual.lines.len() == expected_lines.len(),
+            "battle workspace line count changed at {}",
+            actual.id
+        );
+        for (actual_line, expected_line) in actual.lines.iter().zip(expected_lines) {
+            let mut binding = actual_line.clone();
+            binding.korean.clear();
+            binding.status = TranslationStatus::Untranslated;
+            ensure!(
+                binding == expected_line,
+                "battle workspace source binding changed at {}",
+                actual_line.id
+            );
+        }
+    }
+    Ok(())
+}
+
+fn validate_translation_fields(workspace: &BattleDialogueWorkspace) -> Result<(usize, usize, usize)> {
+    let mut filled = 0;
+    let mut complete = 0;
+    let mut target_glyphs = 0;
+    for line in workspace.records.iter().flat_map(|record| &record.lines) {
+        if line.status == TranslationStatus::Untranslated {
+            ensure!(line.korean.is_empty(), "{} is untranslated but not empty", line.id);
+            continue;
+        }
+        ensure!(!line.korean.is_empty(), "{} is translated but empty", line.id);
+        let source = inspect_markup(&line.source_markup, MarkupRole::Source)
+            .with_context(|| format!("inspect battle source at {}", line.id))?;
+        let target = inspect_markup(&line.korean, MarkupRole::KoreanTarget)
+            .with_context(|| format!("inspect battle target at {}", line.id))?;
+        ensure!(
+            source.protected_items == target.protected_items,
+            "{} changed a control token or existing English/digit literal",
+            line.id
+        );
+        let final_control = source
+            .protected_items
+            .last()
+            .filter(|item| item.starts_with('{'))
+            .context("battle source line has no final control")?;
+        ensure!(
+            line.korean.ends_with(final_control),
+            "{} moved its final control token",
+            line.id
+        );
+        filled += 1;
+        complete += usize::from(line.status == TranslationStatus::Complete);
+        target_glyphs += target.editable_glyph_count;
+    }
+    Ok((filled, complete, target_glyphs))
 }
 
 fn decode_battle_record_lines(
@@ -278,5 +403,41 @@ mod tests {
         assert_eq!(lines[0].japanese_source_byte_count, 1);
         assert_eq!(lines[1].source_markup, "い{AC}{EF}");
         assert_eq!(lines[1].japanese_source_byte_count, 1);
+    }
+
+    #[test]
+    fn battle_translation_validation_rejects_changed_dynamic_tokens() {
+        let workspace = BattleDialogueWorkspace {
+            format_version: 1,
+            source_sha1: EXPECTED_SOURCE_SHA1.to_owned(),
+            translate_from: "ja".to_owned(),
+            translate_to: "ko".to_owned(),
+            preserve_existing_english: true,
+            purpose: "private_battle_dialogue_translation_workspace".to_owned(),
+            records: vec![BattleDialogueWorkspaceRecord {
+                id: "battle-dialogue:000".to_owned(),
+                table_id: "battle-dialogue".to_owned(),
+                source_prg_bank: 4,
+                canonical_entry_index: 0,
+                entry_indices: vec![0],
+                pointer_cpu_address_hex: "0x8000".to_owned(),
+                pointer_file_offsets_hex: vec!["0x00000".to_owned()],
+                file_offset_hex: "0x00000".to_owned(),
+                end_file_offset_exclusive_hex: "0x00001".to_owned(),
+                source_storage_sha1: "storage".to_owned(),
+                header_hex: "08131004".to_owned(),
+                lines: vec![BattleDialogueWorkspaceLine {
+                    id: "battle-dialogue:000:line:00".to_owned(),
+                    index: 0,
+                    source_markup: "{EC:02}はA{ED}".to_owned(),
+                    korean: "{EC:01}은A{ED}".to_owned(),
+                    status: TranslationStatus::NeedsHumanReview,
+                    japanese_source_byte_count: 1,
+                }],
+            }],
+        };
+
+        let error = validate_translation_fields(&workspace).unwrap_err();
+        assert!(error.to_string().contains("changed a control token"));
     }
 }

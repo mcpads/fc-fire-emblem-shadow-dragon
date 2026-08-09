@@ -143,6 +143,12 @@ enum Command {
         #[arg(long, default_value = "private/dialogue/battle-workspace.json")]
         output: PathBuf,
     },
+    /// Validate private battle-dialogue translations without writing a ROM.
+    ValidateBattleDialogueWorkspace {
+        source: PathBuf,
+        #[arg(long, default_value = "private/dialogue/battle-workspace.json")]
+        workspace: PathBuf,
+    },
     /// Validate private translations without encoding or writing a ROM.
     ValidateMainDialogueWorkspace {
         source: PathBuf,
@@ -538,6 +544,19 @@ fn main() -> Result<()> {
                 summary.line_count,
                 summary.japanese_source_byte_count,
                 summary.preserved_translation_line_count
+            );
+        }
+        Command::ValidateBattleDialogueWorkspace { source, workspace } => {
+            let summary = dialogue_assets::validate_battle_dialogue_workspace(&source, &workspace)?;
+            println!("validated {}", workspace.display());
+            println!("workspace SHA-1: {}", summary.workspace_sha1);
+            println!(
+                "battle dialogue translations: {} records, {} lines, {} filled, {} complete, {} target glyphs",
+                summary.record_count,
+                summary.line_count,
+                summary.filled_line_count,
+                summary.complete_line_count,
+                summary.target_glyph_count
             );
         }
         Command::ValidateMainDialogueWorkspace { source, workspace } => {
