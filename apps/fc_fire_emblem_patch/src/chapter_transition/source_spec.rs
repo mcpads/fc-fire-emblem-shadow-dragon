@@ -539,20 +539,6 @@ pub(super) const SOURCE_REGIONS: &[SourceRegionSpec] = &[
         "137f18180b51a86fac7a1f0c6eb9fa4269ec2504",
     ),
     SourceRegionSpec::code_sha1(
-        "select_ending_character_epilogue",
-        0x04,
-        0xA165,
-        0x52,
-        "f45d86c0252e1a4b9194407be8bf1a8e23d40f07",
-    ),
-    SourceRegionSpec::code_sha1(
-        "wait_ending_character_epilogue",
-        0x04,
-        0xA233,
-        0x1F,
-        "d41db20b99824edaff5fbc6ac30157394a6a2648",
-    ),
-    SourceRegionSpec::code_sha1(
         "run_shared_battle_engine_from_sound_test",
         0x07,
         0xAC1E,
@@ -706,7 +692,7 @@ impl SourceRegionSpec {
         }
     }
 
-    const fn code_sha1(
+    pub(super) const fn code_sha1(
         role: &'static str,
         prg_bank: u8,
         cpu_address: u16,

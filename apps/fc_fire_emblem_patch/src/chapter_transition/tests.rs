@@ -246,7 +246,7 @@ fn sound_test_controls_bind_two_runtime_partitioned_downstream_families() {
 
 #[test]
 fn chapter_transition_code_regions_use_typed_rp2a03_decode() {
-    for spec in SOURCE_REGIONS {
+    for spec in source_region_specs() {
         if matches!(spec.kind, RegionKind::Code) {
             match spec.expectation {
                 RegionExpectation::Bytes(bytes) => {

@@ -1,3 +1,4 @@
+mod ending_epilogue;
 mod report;
 mod runtime_routes;
 mod source_binding;
@@ -23,6 +24,13 @@ use runtime_routes::*;
 use source_binding::*;
 use source_spec::*;
 use translation_surfaces::{TranslationSurfaceContracts, bind_translation_surfaces};
+
+fn source_region_specs() -> impl Iterator<Item = SourceRegionSpec> {
+    SOURCE_REGIONS
+        .iter()
+        .chain(ending_epilogue::SOURCE_REGIONS.iter())
+        .copied()
+}
 
 pub struct ChapterTransitionSummary {
     pub report_sha1: String,
@@ -65,9 +73,7 @@ pub fn analyze_chapter_transitions(
 }
 
 fn build_report(rom: &Rom) -> Result<ChapterTransitionReport> {
-    let source_regions = SOURCE_REGIONS
-        .iter()
-        .copied()
+    let source_regions = source_region_specs()
         .map(|spec| bind_source_region(rom, spec))
         .collect::<Result<Vec<_>>>()?;
     let chapter_intro_contexts = bind_chapter_intro_contexts(rom)?;

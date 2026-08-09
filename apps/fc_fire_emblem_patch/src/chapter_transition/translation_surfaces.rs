@@ -21,7 +21,9 @@ use crate::{
 use super::{
     CHAPTER_TITLE_DATA_END_EXCLUSIVE, CHAPTER_TITLE_DIGIT_COUNT,
     CHAPTER_TITLE_POINTER_TABLE_ADDRESS, CHAPTER_TITLE_POINTER_TABLE_BYTES,
-    CHAPTER_TITLE_TERMINATOR, CodeLocation, location, source_file_offset,
+    CHAPTER_TITLE_TERMINATOR, CodeLocation,
+    ending_epilogue::EndingCharacterEpilogueTranslationSurface,
+    ending_epilogue::bind_ending_character_epilogue, location, source_file_offset,
 };
 
 const ENDING_SCROLL_STREAM_ADDRESS: u16 = 0xA826;
@@ -126,32 +128,6 @@ struct EndingChapterRecordTranslationSurface {
 }
 
 #[derive(Debug, Serialize)]
-struct EndingCharacterEpilogueTranslationSurface {
-    screen_role: &'static str,
-    selector_phase: u8,
-    selector_phase_hex: &'static str,
-    visible_dialogue_phase: u8,
-    visible_dialogue_phase_hex: &'static str,
-    table_selector_address: u16,
-    table_selector_address_hex: &'static str,
-    entry_selector_address: u16,
-    entry_selector_address_hex: &'static str,
-    direct_dialogue_table_id: &'static str,
-    routing_dialogue_table_id: &'static str,
-    direct_selector: u8,
-    direct_selector_hex: &'static str,
-    routing_selector: u8,
-    routing_selector_hex: &'static str,
-    dialogue_literal_inventory: TranslationSurfaceLiteralInventory,
-    dialogue_literal_inventory_scope: &'static str,
-    selector_writer: CodeLocation,
-    dialogue_wait_handler: CodeLocation,
-    input_behavior: &'static str,
-    translation_handling: &'static str,
-    unresolved: &'static [&'static str],
-}
-
-#[derive(Debug, Serialize)]
 struct SourceRange {
     prg_bank: u8,
     prg_bank_hex: String,
@@ -183,64 +159,10 @@ pub(super) fn bind_translation_surfaces(rom: &Rom) -> Result<TranslationSurfaceC
             && battle_dialogue.unreferenced_record_count == Some(1),
         "battle-dialogue surface structure changed"
     );
-    let direct_epilogue = dialogue_tables
-        .iter()
-        .find(|table| table.table_id == "epilogue-dialogue")
-        .context("epilogue-dialogue surface binding is absent")?;
-    ensure!(
-        direct_epilogue.directory_selector == Some(0x40)
-            && direct_epilogue.pointer_count == 66
-            && direct_epilogue.proven_record_count == Some(66),
-        "direct epilogue-dialogue surface structure changed"
-    );
-    let routing_epilogue = dialogue_tables
-        .iter()
-        .find(|table| table.table_id == "epilogue-routing-dialogue")
-        .context("epilogue-routing surface binding is absent")?;
-    ensure!(
-        routing_epilogue.directory_selector == Some(0x41)
-            && routing_epilogue.pointer_count == 54
-            && routing_epilogue.proven_record_count == Some(52),
-        "routing epilogue-dialogue surface structure changed"
-    );
-
-    let ending_dialogue_literal_inventory =
-        aggregate_translation_surface_dialogue_literal_inventory(
-            rom.data(),
-            &dialogue_tables,
-            &["epilogue-dialogue", "epilogue-routing-dialogue"],
-        )?;
-
     Ok(TranslationSurfaceContracts {
         battle_animation: bind_battle_animation_translation_surface(rom, &dialogue_tables)?,
         ending_chapter_record_scroll: bind_ending_chapter_record_translation_surface(rom)?,
-        ending_character_epilogue: EndingCharacterEpilogueTranslationSurface {
-            screen_role: "ending_character_epilogue",
-            selector_phase: 0x0F,
-            selector_phase_hex: "0x0F",
-            visible_dialogue_phase: 0x10,
-            visible_dialogue_phase_hex: "0x10",
-            table_selector_address: 0x77F4,
-            table_selector_address_hex: "0x77F4",
-            entry_selector_address: 0x77F1,
-            entry_selector_address_hex: "0x77F1",
-            direct_dialogue_table_id: "epilogue-dialogue",
-            routing_dialogue_table_id: "epilogue-routing-dialogue",
-            direct_selector: 0x40,
-            direct_selector_hex: "0x40",
-            routing_selector: 0x41,
-            routing_selector_hex: "0x41",
-            dialogue_literal_inventory: ending_dialogue_literal_inventory,
-            dialogue_literal_inventory_scope: "all canonical first linear segments in selector tables 0x40 and 0x41; every routing-table transition targets the included direct epilogue table",
-            selector_writer: location(0x04, 0xA17E),
-            dialogue_wait_handler: location(0x04, 0xA233),
-            input_behavior: "automatic; phase 0x0F selects one of the two structurally bounded dialogue tables and phase 0x10 waits for the shared dialogue engine before advancing",
-            translation_handling: "translate Japanese character names and epilogue lines only; preserve original Latin and digit codes",
-            unresolved: &[
-                "complete portrait and CHR-page union across all character entries",
-                "runtime coverage of every direct and routing epilogue entry",
-            ],
-        },
+        ending_character_epilogue: bind_ending_character_epilogue(rom, &dialogue_tables)?,
         dialogue_tables,
         proof_boundary: "the supported Japanese ROM binds the common battle engine to four fixed text tables and the separate battle-dialogue loader, binds the ending record stream and dynamic turn interpolation, and binds the automatic character epilogue to selectors 0x40 and 0x41; only code sets and structural counts are emitted",
     })
