@@ -120,7 +120,7 @@ pub(super) fn chapter_eleven_runtime_map_sample() -> RuntimeMapSample {
 
 pub(super) fn observation_plan() -> ObservationPlan {
     ObservationPlan {
-        next_gate: "validate the save-complete no choice, remaining chapter variants, and failure paths as separate gates",
+        next_gate: "validate remaining chapter variants and failure paths as separate gates",
         allowed_progression: &[
             "inspect current unit and blocker positions before choosing a movement route",
             "use the already verified movement-range acceleration only when its effect is explicit",
@@ -169,16 +169,14 @@ mod tests {
     #[test]
     fn forbids_state_and_coordinate_shortcuts_for_completion_proof() {
         let plan = observation_plan();
-        assert!(
-            plan.forbidden_shortcuts
-                .iter()
-                .any(|rule| rule.contains("coordinates"))
-        );
-        assert!(
-            plan.forbidden_shortcuts
-                .iter()
-                .any(|rule| rule.contains("0x3C"))
-        );
+        assert!(plan
+            .forbidden_shortcuts
+            .iter()
+            .any(|rule| rule.contains("coordinates")));
+        assert!(plan
+            .forbidden_shortcuts
+            .iter()
+            .any(|rule| rule.contains("0x3C")));
         assert!(plan.later_failure_validation.contains("disabled"));
     }
 

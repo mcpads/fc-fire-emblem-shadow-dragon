@@ -188,7 +188,7 @@ pub(super) fn continuous_chapter_eleven_victory_evidence() -> ContinuousVictoryR
         epilogue_page_variants: EPILOGUE_PAGE_VARIANTS,
         screen_sequence: runtime_screen_sequence(),
         continuous_gate_closed: true,
-        proof_limit: "proves the chapter-eleven castle-command through chapter-twelve-intro route with declared progression accelerations; it does not prove baseline difficulty, unaccelerated combat equivalence, alternate save choices, defeat, or unfavorable branches",
+        proof_limit: "proves the chapter-eleven castle-command through chapter-twelve-intro route with declared progression accelerations; alternate save choices are separately observed, but this route does not prove baseline difficulty, unaccelerated combat equivalence, defeat, or unfavorable branches",
     }
 }
 

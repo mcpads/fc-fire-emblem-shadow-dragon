@@ -1,24 +1,26 @@
 {
   "schema": 1,
   "next_observation_gate": {
-    "gate_role": "chapter_transition_alternate_choice_and_failure_variants",
+    "gate_role": "chapter_transition_failure_and_remaining_chapter_variants",
     "gate_kind": "screen_sequence",
     "focus_screen_roles": [
-      "chapter_save_offer",
-      "chapter_save_complete_continue_prompt",
+      "chapter_clear_epilogue_dialogue",
+      "chapter_intro_title_dialogue_composite",
       "game_over"
     ],
     "known_focus": [
-      "the accelerated ordinary-control chapter-eleven route established six chapter-transition screen lifetimes through the chapter-twelve intro",
+      "the accelerated ordinary-control chapter-eleven route established six mainline chapter-transition screen lifetimes through the chapter-twelve intro",
       "the epilogue, NEXT STORY, save offer, save-complete prompt, blackout, and chapter-twelve intro have lifetime-specific CHR pairs",
       "the observed default yes at the save offer performs a persistent save while the next default yes starts continuation",
-      "the save-offer no choice commits selection 02 and bypasses the save-complete prompt through a distinct 1B/1B + 18/18 automatic blackout"
+      "the save-offer no choice commits selection 02 and bypasses the save-complete prompt through a distinct 1B/1B + 18/18 automatic blackout",
+      "the save-complete no choice commits selection 02 at menu depth 03, enters a distinct Japanese power-off notice, and keeps outer state 0E and main state 04",
+      "the terminal notice contains a source-bound up, down, left, right, up, A unlock that opens an observed sound test whose English labels and digits are preserved"
     ],
     "unresolved_focus": [
-      "save-complete no branch and remaining flashing phases",
+      "remaining chapter-specific epilogue, title, portrait, CHR, and flashing variants",
       "baseline defeat and unfavorable routes with victory accelerations disabled or an explicitly adverse intervention"
     ],
-    "next_action": "restore the same-launch checkpoint before the save-complete choice, bind its expected no-choice state change before input, and validate defeat or unfavorable branches separately without victory accelerations"
+    "next_action": "use the per-screen focus gaps to select another chapter-specific transition variant, and validate defeat or unfavorable branches separately without victory accelerations"
   },
   "screens": [
     {
@@ -313,15 +315,54 @@
       "runtime_observed": true,
       "input_behavior": "input_wait",
       "translation_scope": "japanese_only",
-      "temporal_behavior": "the selection cursor and retained map sprites may animate independently",
+      "temporal_behavior": "the selected-no composite remained pixel-stable at eight irregular offsets through 565 input-free frames",
       "known_focus": [
         "left 1C/1C and right 00/18 CHR pairs",
         "portrait, large Japanese save-complete and continue dialogue, yes-or-no window, map, and unit sprites",
+        "main state 04, outer state 0E, and dialogue state 11 own this lifetime",
+        "menu depth 03 selects through active slot 7FF5; Down changed that slot from 01 to 02",
         "the observed default yes choice continues to the next chapter introduction",
-        "main state 04, outer state 0E, and dialogue state 11 own this lifetime"
+        "A on selected no commits result 02 to 05EB and enters dialogue substates 08, 09, and 0A without leaving outer state 0E"
       ],
-      "unresolved_focus": ["cursor phase union", "unobserved no-choice route"],
-      "next_gate": "observe the no-choice route and complete the cursor phase union",
+      "unresolved_focus": ["remaining chapter-specific retained-map variants"],
+      "next_gate": "reuse the source-bound selection contract on another chapter",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "chapter_save_complete_power_off_notice",
+      "surface_family": "chapter_transition",
+      "runtime_observed": true,
+      "input_behavior": "terminal_instruction",
+      "translation_scope": "japanese_only",
+      "temporal_behavior": "the Japanese notice drew automatically through substates 08 and 09, settled at substate 0A by frame 130, and remained pixel-stable through frame 900",
+      "known_focus": [
+        "left 1C/1C and right 00/18 CHR pairs",
+        "portrait, retained map, large Japanese data-loss power-off notice, and completion marker share one lifetime",
+        "outer state 0E and main state 04 remain while dialogue substate 0A owns the settled terminal notice",
+        "source bank 0B compares controller input against 08 04 02 01 08 80 and tracks matched steps at 775B",
+        "runtime up, down, left, right, up, A advanced every matched step and entered the sound test"
+      ],
+      "unresolved_focus": ["remaining chapter-specific retained-map variants"],
+      "next_gate": "preserve the terminal instruction while reusing its screen lifetime on another chapter",
+      "contract_state": "observed_partial"
+    },
+    {
+      "screen_role": "sound_test",
+      "surface_family": "chapter_transition",
+      "runtime_observed": true,
+      "input_behavior": "input_wait",
+      "translation_scope": "preserved_original_only",
+      "temporal_behavior": "substate 0B cleared the prior composition and substate 0C displayed the sound test without further input",
+      "known_focus": [
+        "left 1C/1C and right 00/18 CHR shadow pairs",
+        "black background, original English SOUND TEST MODE and interface labels, and sound-number digits",
+        "the hidden sequence was source-bound before runtime execution"
+      ],
+      "unresolved_focus": [
+        "runtime effects of sound selection and playback controls",
+        "runtime effects and downstream screens of the Start and Select branches"
+      ],
+      "next_gate": "bind sound-test controls before input and keep all English labels and digits unchanged",
       "contract_state": "observed_partial"
     },
     {

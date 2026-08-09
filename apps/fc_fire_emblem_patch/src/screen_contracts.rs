@@ -4,11 +4,11 @@ use std::{
     path::Path,
 };
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    rom::{EXPECTED_SOURCE_SHA1, Rom},
+    rom::{Rom, EXPECTED_SOURCE_SHA1},
     sha1_hex,
 };
 
@@ -144,6 +144,20 @@ pub(crate) const OBSERVED_CHR_PAIRS: &[ObservedChrPair] = &[
         0x00,
         0x18,
     ),
+    pair(
+        "chapter_save_complete_power_off_notice",
+        PatternWindow::Left,
+        0x1C,
+        0x1C,
+    ),
+    pair(
+        "chapter_save_complete_power_off_notice",
+        PatternWindow::Right,
+        0x00,
+        0x18,
+    ),
+    pair("sound_test", PatternWindow::Left, 0x1C, 0x1C),
+    pair("sound_test", PatternWindow::Right, 0x00, 0x18),
     pair(
         "chapter_transition_blackout",
         PatternWindow::Left,
@@ -564,11 +578,11 @@ mod tests {
     fn registry_covers_every_observed_chr_pair() {
         let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
 
-        assert_eq!(report.screen_count, 39);
-        assert_eq!(report.runtime_observed_screen_count, 38);
-        assert_eq!(report.chr_pair_observed_screen_count, 35);
+        assert_eq!(report.screen_count, 41);
+        assert_eq!(report.runtime_observed_screen_count, 40);
+        assert_eq!(report.chr_pair_observed_screen_count, 37);
         assert_eq!(report.mixed_original_latin_screen_count, 18);
-        assert_eq!(report.preserved_original_only_screen_count, 1);
+        assert_eq!(report.preserved_original_only_screen_count, 2);
         assert_eq!(report.page_switch_verified_screen_count, 1);
         assert_eq!(report.mixed_text_page_verified_screen_count, 1);
     }
@@ -590,36 +604,26 @@ mod tests {
             TranslationScope::JapaneseOnly
         );
         assert!(command_menu.next_gate.contains("expected state effect"));
-        assert!(
-            command_menu
-                .unresolved_focus
-                .iter()
-                .any(|focus| focus.contains("remaining 9 command labels"))
-        );
-        assert!(
-            !command_menu
-                .unresolved_focus
-                .iter()
-                .any(|focus| focus.contains("00/19"))
-        );
-        assert!(
-            command_menu
-                .known_focus
-                .iter()
-                .any(|focus| focus.contains("00/19"))
-        );
-        assert!(
-            command_menu
-                .known_focus
-                .iter()
-                .any(|focus| focus.contains("C9C2") && focus.contains("00/15"))
-        );
-        assert!(
-            command_menu
-                .known_focus
-                .iter()
-                .any(|focus| focus.contains("こうげき") && focus.contains("しろ"))
-        );
+        assert!(command_menu
+            .unresolved_focus
+            .iter()
+            .any(|focus| focus.contains("remaining 9 command labels")));
+        assert!(!command_menu
+            .unresolved_focus
+            .iter()
+            .any(|focus| focus.contains("00/19")));
+        assert!(command_menu
+            .known_focus
+            .iter()
+            .any(|focus| focus.contains("00/19")));
+        assert!(command_menu
+            .known_focus
+            .iter()
+            .any(|focus| focus.contains("C9C2") && focus.contains("00/15")));
+        assert!(command_menu
+            .known_focus
+            .iter()
+            .any(|focus| focus.contains("こうげき") && focus.contains("しろ")));
     }
 
     #[test]
@@ -628,35 +632,31 @@ mod tests {
 
         assert_eq!(
             report.next_observation_gate.gate_role,
-            "chapter_transition_alternate_choice_and_failure_variants"
+            "chapter_transition_failure_and_remaining_chapter_variants"
         );
         assert_eq!(
             report.next_observation_gate.gate_kind,
             ObservationGateKind::ScreenSequence
         );
         assert_eq!(report.next_observation_gate.focus_screen_roles.len(), 3);
-        assert!(
-            report
-                .next_observation_gate
-                .focus_screen_roles
-                .iter()
-                .all(|role| report
-                    .screens
-                    .iter()
-                    .any(|screen| &screen.screen_role == role))
-        );
-        assert!(
-            !report
+        assert!(report
+            .next_observation_gate
+            .focus_screen_roles
+            .iter()
+            .all(|role| report
                 .screens
                 .iter()
-                .any(|screen| { screen.screen_role == report.next_observation_gate.gate_role })
-        );
+                .any(|screen| &screen.screen_role == role)));
+        assert!(!report
+            .screens
+            .iter()
+            .any(|screen| { screen.screen_role == report.next_observation_gate.gate_role }));
     }
 
     #[test]
     fn observation_gate_cannot_masquerade_as_a_screen_role() {
         let invalid_registry = REGISTRY_JSON.replacen(
-            "\"gate_role\": \"chapter_transition_alternate_choice_and_failure_variants\"",
+            "\"gate_role\": \"chapter_transition_failure_and_remaining_chapter_variants\"",
             "\"gate_role\": \"title\"",
             1,
         );
@@ -676,20 +676,20 @@ mod tests {
             .filter(|screen| screen.surface_family == "chapter_transition")
             .collect::<Vec<_>>();
 
-        assert_eq!(chapter_screens.len(), 6);
+        assert_eq!(chapter_screens.len(), 8);
         for role in [
             "chapter_clear_epilogue_dialogue",
             "next_story_banner",
             "chapter_save_offer",
             "chapter_save_complete_continue_prompt",
+            "chapter_save_complete_power_off_notice",
+            "sound_test",
             "chapter_transition_blackout",
             "chapter_intro_title_dialogue_composite",
         ] {
-            assert!(
-                chapter_screens
-                    .iter()
-                    .any(|screen| screen.screen_role == role && screen.runtime_observed)
-            );
+            assert!(chapter_screens
+                .iter()
+                .any(|screen| screen.screen_role == role && screen.runtime_observed));
         }
         let next_story = chapter_screens
             .iter()
@@ -699,23 +699,19 @@ mod tests {
             next_story.translation_scope,
             TranslationScope::PreservedOriginalOnly
         );
-        assert!(
-            chapter_screens
-                .iter()
-                .all(|screen| screen.chr_pair_observed)
-        );
+        assert!(chapter_screens
+            .iter()
+            .all(|screen| screen.chr_pair_observed));
         let blackout = chapter_screens
             .iter()
             .find(|screen| screen.screen_role == "chapter_transition_blackout")
             .unwrap();
         assert_eq!(blackout.input_behavior, InputBehavior::Automatic);
         assert_eq!(blackout.translation_scope, TranslationScope::NoText);
-        assert!(
-            blackout
-                .known_focus
-                .iter()
-                .any(|focus| focus.contains("outer state 01") && focus.contains("1B/1B"))
-        );
+        assert!(blackout
+            .known_focus
+            .iter()
+            .any(|focus| focus.contains("outer state 01") && focus.contains("1B/1B")));
         assert!(OBSERVED_CHR_PAIRS.iter().any(|pair| {
             pair.screen_role == "chapter_transition_blackout"
                 && pair.pattern_window == PatternWindow::Left
@@ -726,17 +722,37 @@ mod tests {
             .iter()
             .find(|screen| screen.screen_role == "chapter_save_offer")
             .unwrap();
-        assert!(
-            save_offer
-                .known_focus
-                .iter()
-                .any(|focus| focus.contains("7FF4") && focus.contains("01 to 02"))
+        assert!(save_offer
+            .known_focus
+            .iter()
+            .any(|focus| focus.contains("7FF4") && focus.contains("01 to 02")));
+        assert!(save_offer
+            .unresolved_focus
+            .iter()
+            .all(|focus| !focus.contains("no-choice")));
+        let save_complete = chapter_screens
+            .iter()
+            .find(|screen| screen.screen_role == "chapter_save_complete_continue_prompt")
+            .unwrap();
+        assert!(save_complete
+            .unresolved_focus
+            .iter()
+            .all(|focus| !focus.contains("no-choice")));
+        let power_off_notice = chapter_screens
+            .iter()
+            .find(|screen| screen.screen_role == "chapter_save_complete_power_off_notice")
+            .unwrap();
+        assert_eq!(
+            power_off_notice.input_behavior,
+            InputBehavior::TerminalInstruction
         );
-        assert!(
-            save_offer
-                .unresolved_focus
-                .iter()
-                .all(|focus| !focus.contains("no-choice"))
+        let sound_test = chapter_screens
+            .iter()
+            .find(|screen| screen.screen_role == "sound_test")
+            .unwrap();
+        assert_eq!(
+            sound_test.translation_scope,
+            TranslationScope::PreservedOriginalOnly
         );
         let intro = chapter_screens
             .iter()
@@ -759,11 +775,9 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(item_screens.len(), 7);
-        assert!(
-            item_screens
-                .iter()
-                .all(|screen| screen.screen_role != "item_action_result")
-        );
+        assert!(item_screens
+            .iter()
+            .all(|screen| screen.screen_role != "item_action_result"));
         for role in [
             "item_equip_result",
             "item_use_result",
@@ -771,11 +785,9 @@ mod tests {
             "item_transfer_result",
             "item_discard_result",
         ] {
-            assert!(
-                item_screens
-                    .iter()
-                    .any(|screen| screen.screen_role == role && screen.runtime_observed)
-            );
+            assert!(item_screens
+                .iter()
+                .any(|screen| screen.screen_role == role && screen.runtime_observed));
         }
     }
 

@@ -1,13 +1,13 @@
 use std::{fs, path::Path};
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use serde::Serialize;
 
 use crate::{
     dialogue_inventory::inspect_chapter_intro_contexts,
-    rom::{EXPECTED_SOURCE_SHA1, HEADER_SIZE, Rom},
+    rom::{Rom, EXPECTED_SOURCE_SHA1, HEADER_SIZE},
     sha1_hex,
-    typed_source::{TypedInstructionBinding, decode_rp2a03_sequence},
+    typed_source::{decode_rp2a03_sequence, TypedInstructionBinding},
 };
 
 const PRG_BANK_SIZE: usize = 16 * 1024;
@@ -103,6 +103,46 @@ const ADVANCE_MENU_SELECTION_BYTES: &[u8] = &[
 const COMMIT_MENU_SELECTION_BYTES: &[u8] = &[
     0x20, 0x87, 0xF1, 0xBD, 0xF3, 0x7F, 0xAA, 0xAC, 0xCE, 0x05, 0x88, 0xB9, 0xEE, 0x7F, 0x20, 0x4D,
     0x98, 0x8D, 0xEB, 0x05,
+];
+const OUTER_SCREEN_0E_HANDLER_POINTER_BYTES: &[u8] = &[0x71, 0xB7];
+const DISPATCH_SAVE_COMPLETE_MAIN_STATE_BYTES: &[u8] =
+    &[0x20, 0x88, 0xC2, 0xA5, 0x84, 0x20, 0x4C, 0xC3];
+const SAVE_COMPLETE_MAIN_STATE_POINTERS_BYTES: &[u8] =
+    &[0x83, 0xB7, 0x8D, 0xB7, 0x97, 0xB7, 0xB9, 0xB7, 0xCB, 0xB7];
+const RUN_SAVE_COMPLETE_MAIN_STATE_BYTES: &[u8] = &[
+    0xA9, 0x05, 0x85, 0x44, 0xA9, 0x0B, 0x20, 0xFA, 0xC9, 0xAD, 0xEE, 0x05, 0xD0, 0x14, 0xA9, 0x00,
+    0x8D, 0xCE, 0x05, 0x85, 0x84, 0xA9, 0x02, 0x85, 0x24, 0xA9, 0x01, 0x85, 0x60, 0x85, 0x61, 0x8D,
+    0xE1, 0x05, 0x60,
+];
+const DISPATCH_SAVE_COMPLETE_DIALOGUE_SUBSTATE_BYTES: &[u8] = &[0xAD, 0xEE, 0x05, 0x20, 0x4C, 0xC3];
+const SAVE_COMPLETE_DIALOGUE_SUBSTATE_POINTERS_BYTES: &[u8] = &[
+    0x3D, 0xC7, 0x85, 0x99, 0x33, 0x9A, 0x99, 0x9A, 0xFC, 0x9A, 0x14, 0x9B, 0x2B, 0x9B, 0x35, 0x9B,
+    0x8A, 0x9B, 0x14, 0x9B, 0xA0, 0x9B, 0xCF, 0x9B, 0x17, 0x9C, 0x09, 0x9C, 0xF0, 0x9C, 0x0C, 0x9D,
+];
+const BRANCH_SAVE_COMPLETE_CONTINUE_CHOICE_BYTES: &[u8] = &[
+    0x20, 0x81, 0x9B, 0x20, 0x5C, 0xE6, 0xAD, 0xEB, 0x05, 0xF0, 0x09, 0xC9, 0x02, 0xF0, 0x05, 0xA9,
+    0xFF, 0x8D, 0xEE, 0x05, 0xAD, 0xCE, 0x05, 0xC9, 0x03, 0x90, 0x03, 0x20, 0x6E, 0xE6, 0xEE, 0xEE,
+    0x05, 0x60,
+];
+const OPEN_SAVE_COMPLETE_POWER_OFF_NOTICE_BYTES: &[u8] = &[
+    0x20, 0x81, 0x9B, 0xA9, 0x00, 0x8D, 0xF0, 0x77, 0xA9, 0xB0, 0x8D, 0xF4, 0x77, 0xA9, 0x01, 0x8D,
+    0xF1, 0x77, 0xEE, 0xEE, 0x05, 0x60,
+];
+const WAIT_SAVE_COMPLETE_POWER_OFF_NOTICE_BYTES: &[u8] = &[
+    0xA9, 0x00, 0x85, 0x44, 0xA9, 0x0A, 0x20, 0xFA, 0xC9, 0xAD, 0x09, 0x78, 0xF0, 0x08, 0xA9, 0x00,
+    0x8D, 0x5B, 0x77, 0xEE, 0xEE, 0x05, 0x60,
+];
+const MONITOR_SOUND_TEST_UNLOCK_BYTES: &[u8] = &[
+    0xA9, 0x03, 0x85, 0x44, 0xA9, 0x0A, 0x20, 0xFA, 0xC9, 0xA5, 0x14, 0xF0, 0x17, 0xAE, 0x5B, 0x77,
+    0xDD, 0xC9, 0x9B, 0xD0, 0x0A, 0xE8, 0xE0, 0x06, 0xF0, 0x0B, 0x8E, 0x5B, 0x77, 0xD0, 0x05, 0xA9,
+    0x00, 0x8D, 0x5B, 0x77, 0x60, 0xEE, 0xEE, 0x05, 0x60,
+];
+const SOUND_TEST_UNLOCK_SEQUENCE_BYTES: &[u8] = &[0x08, 0x04, 0x02, 0x01, 0x08, 0x80];
+const ENTER_SOUND_TEST_BYTES: &[u8] = &[
+    0x20, 0x1F, 0xC7, 0x20, 0x3D, 0xC2, 0xA9, 0x9E, 0x85, 0x01, 0xA9, 0x5C, 0x85, 0x00, 0x20, 0xE7,
+    0xC3, 0x20, 0x2D, 0xC7, 0xA5, 0xCD, 0x29, 0xFC, 0x85, 0xCD, 0xA9, 0x00, 0x85, 0xCA, 0x85, 0xCB,
+    0x8D, 0x5C, 0x77, 0x8D, 0x00, 0xB0, 0x8D, 0x00, 0xC0, 0x8D, 0x00, 0xD0, 0x8D, 0x00, 0xE0, 0xEE,
+    0xEE, 0x05, 0x60,
 ];
 
 const SOURCE_REGIONS: &[SourceRegionSpec] = &[
@@ -222,6 +262,73 @@ const SOURCE_REGIONS: &[SourceRegionSpec] = &[
         0x9391,
         COMMIT_MENU_SELECTION_BYTES,
     ),
+    SourceRegionSpec::data(
+        "outer_screen_0e_handler_pointer",
+        0x06,
+        0x8421,
+        OUTER_SCREEN_0E_HANDLER_POINTER_BYTES,
+    ),
+    SourceRegionSpec::code(
+        "dispatch_save_complete_main_state",
+        0x06,
+        0xB771,
+        DISPATCH_SAVE_COMPLETE_MAIN_STATE_BYTES,
+    ),
+    SourceRegionSpec::data(
+        "save_complete_main_state_pointers",
+        0x06,
+        0xB779,
+        SAVE_COMPLETE_MAIN_STATE_POINTERS_BYTES,
+    ),
+    SourceRegionSpec::code(
+        "run_save_complete_main_state",
+        0x06,
+        0xB7CB,
+        RUN_SAVE_COMPLETE_MAIN_STATE_BYTES,
+    ),
+    SourceRegionSpec::code(
+        "dispatch_save_complete_dialogue_substate",
+        0x0B,
+        0x995F,
+        DISPATCH_SAVE_COMPLETE_DIALOGUE_SUBSTATE_BYTES,
+    ),
+    SourceRegionSpec::data(
+        "save_complete_dialogue_substate_pointers",
+        0x0B,
+        0x9965,
+        SAVE_COMPLETE_DIALOGUE_SUBSTATE_POINTERS_BYTES,
+    ),
+    SourceRegionSpec::code(
+        "branch_save_complete_continue_choice",
+        0x0B,
+        0x9B35,
+        BRANCH_SAVE_COMPLETE_CONTINUE_CHOICE_BYTES,
+    ),
+    SourceRegionSpec::code(
+        "open_save_complete_power_off_notice",
+        0x0B,
+        0x9B8A,
+        OPEN_SAVE_COMPLETE_POWER_OFF_NOTICE_BYTES,
+    ),
+    SourceRegionSpec::code(
+        "wait_save_complete_power_off_notice",
+        0x0B,
+        0x9B14,
+        WAIT_SAVE_COMPLETE_POWER_OFF_NOTICE_BYTES,
+    ),
+    SourceRegionSpec::code(
+        "monitor_sound_test_unlock",
+        0x0B,
+        0x9BA0,
+        MONITOR_SOUND_TEST_UNLOCK_BYTES,
+    ),
+    SourceRegionSpec::data(
+        "sound_test_unlock_sequence",
+        0x0B,
+        0x9BC9,
+        SOUND_TEST_UNLOCK_SEQUENCE_BYTES,
+    ),
+    SourceRegionSpec::code("enter_sound_test", 0x0B, 0x9BCF, ENTER_SOUND_TEST_BYTES),
 ];
 
 #[derive(Clone, Copy)]
@@ -276,11 +383,12 @@ struct ChapterTransitionReport {
     schema: u8,
     source_sha1: &'static str,
     scope: Scope,
-    observed_sequence: Vec<TransitionScreen>,
+    observed_screens: Vec<TransitionScreen>,
     chapter_intro_contexts: ChapterIntroContextSummary,
     chapter_titles: ChapterTitleSummary,
     regular_save_reachability: RegularSaveReachability,
     save_offer_no_branch: SaveOfferNoBranchContract,
+    save_complete_no_branch: SaveCompleteNoBranchContract,
     chapter_intro_runtime_samples: Vec<ChapterIntroRuntimeSample>,
     fixed_labels: Vec<FixedLabelBinding>,
     source_regions: Vec<SourceRegionBinding>,
@@ -299,7 +407,8 @@ struct Scope {
 
 #[derive(Debug, Serialize)]
 struct TransitionScreen {
-    sequence_order: u8,
+    route_stage: u8,
+    route_membership: &'static [&'static str],
     screen_role: &'static str,
     entry_condition: &'static str,
     runtime_observed: bool,
@@ -311,6 +420,7 @@ struct TransitionScreen {
     observed_chr_pair: ChrPair,
     temporal_behavior: &'static str,
     input_actions: &'static [InputAction],
+    focus_elements: &'static [&'static str],
     unresolved_focus: &'static [&'static str],
 }
 
@@ -421,6 +531,46 @@ struct SaveOfferNoBranchContract {
 }
 
 #[derive(Debug, Serialize)]
+struct SaveCompleteNoBranchContract {
+    screen_role: &'static str,
+    outer_screen_state_address: u16,
+    outer_screen_state_address_hex: &'static str,
+    outer_screen_state: u8,
+    outer_screen_state_hex: &'static str,
+    main_state_address: u16,
+    main_state_address_hex: &'static str,
+    main_state: u8,
+    main_state_hex: &'static str,
+    dialogue_substate_address: u16,
+    dialogue_substate_address_hex: &'static str,
+    owned_dialogue_substate_sequence: [u8; 4],
+    owned_dialogue_substate_sequence_hex: [&'static str; 4],
+    menu_depth_address: u16,
+    menu_depth_address_hex: &'static str,
+    observed_menu_depth: u8,
+    active_selection_address: u16,
+    active_selection_address_hex: &'static str,
+    default_yes_selection: u8,
+    no_selection: u8,
+    committed_result_address: u16,
+    committed_result_address_hex: &'static str,
+    no_committed_result: u8,
+    next_role: &'static str,
+    notice_chr_pair: ChrPair,
+    notice_draw_sample_offsets_frames: [u16; 8],
+    settled_notice_sample_offsets_frames: [u16; 4],
+    settled_notice_screenshot_sha256: &'static str,
+    hidden_unlock_progress_address: u16,
+    hidden_unlock_progress_address_hex: &'static str,
+    hidden_unlock_input_bytes: [u8; 6],
+    hidden_unlock_inputs: [&'static str; 6],
+    hidden_unlock_next_role: &'static str,
+    sound_test_chr_pair: ChrPair,
+    sound_test_translation_handling: &'static str,
+    runtime_evidence: &'static str,
+}
+
+#[derive(Debug, Serialize)]
 struct ChapterIntroRuntimeSample {
     sample_role: &'static str,
     chapter_number_one_based: u8,
@@ -501,7 +651,7 @@ pub fn analyze_chapter_transitions(
 
     Ok(ChapterTransitionSummary {
         report_sha1,
-        screen_count: report.observed_sequence.len(),
+        screen_count: report.observed_screens.len(),
         chapter_context_count: report.chapter_intro_contexts.unique_context_count,
         chapter_title_count: report.chapter_titles.pointer_count,
         chapter_intro_runtime_sample_count: report.chapter_intro_runtime_samples.len(),
@@ -526,13 +676,14 @@ fn build_report(rom: &Rom) -> Result<ChapterTransitionReport> {
             translation_direction: "Japanese to Korean",
             preserve_existing_english_and_digits: true,
             dialogue_content_emitted: false,
-            proof_boundary: "source-bound chapter context, title, NEXT STORY, save-offer, and regular-save checksum producers plus the runtime-observed chapter-one-to-two sequence, chapter-eleven intro reachability, and continuous accelerated chapter-eleven-victory-to-chapter-twelve-intro route; no dialogue source, translation, or ROM mutation",
+            proof_boundary: "source-bound chapter context, title, NEXT STORY, both save-choice branches, regular-save checksum producers, terminal-notice sound-test unlock, and the runtime-observed chapter-one-to-two sequence, chapter-eleven intro reachability, and continuous accelerated chapter-eleven-victory-to-chapter-twelve-intro route; no dialogue source, translation, or ROM mutation",
         },
-        observed_sequence: transition_screens(),
+        observed_screens: transition_screens(),
         chapter_intro_contexts,
         chapter_titles,
         regular_save_reachability: regular_save_reachability(),
         save_offer_no_branch: save_offer_no_branch_contract(),
+        save_complete_no_branch: save_complete_no_branch_contract(),
         chapter_intro_runtime_samples: chapter_intro_runtime_samples(),
         fixed_labels: vec![
             FixedLabelBinding {
@@ -557,10 +708,10 @@ fn build_report(rom: &Rom) -> Result<ChapterTransitionReport> {
             },
         ],
         source_regions,
-        next_universalization_gate: "chapter_transition_alternate_choice_and_failure_variants",
+        next_universalization_gate: "chapter_transition_failure_and_remaining_chapter_variants",
         unresolved: vec![
             "The chapter-one epilogue and save-complete dialogue use the main dialogue engine, but their dialogue source content is intentionally outside this public report.",
-            "The save-offer no choice is source-bound and runtime-observed; the save-complete no-choice route remains unobserved.",
+            "The save-offer no choice and save-complete no choice are source-bound and runtime-observed; the latter opens a terminal power-off notice with a source-bound sound-test unlock.",
             "The accelerated continuous route establishes reachability but not baseline combat difficulty, defeat, or unfavorable branches.",
             "Chapter-two, chapter-eleven, and chapter-twelve intro samples do not generalize the remaining twenty-two chapters or all title lifetimes.",
         ],
@@ -677,7 +828,8 @@ fn bind_chapter_titles(rom: &Rom) -> Result<ChapterTitleSummary> {
         composer: location(0x0B, 0x88C4),
         selector_address: CHAPTER_INDEX_ADDRESS,
         selector_address_hex: "0x781D",
-        translation_target: "Japanese chapter-title glyphs only; preserve original chapter-number digits",
+        translation_target:
+            "Japanese chapter-title glyphs only; preserve original chapter-number digits",
     })
 }
 
@@ -731,6 +883,47 @@ fn save_offer_no_branch_contract() -> SaveOfferNoBranchContract {
     }
 }
 
+fn save_complete_no_branch_contract() -> SaveCompleteNoBranchContract {
+    SaveCompleteNoBranchContract {
+        screen_role: "chapter_save_complete_continue_prompt",
+        outer_screen_state_address: 0x0024,
+        outer_screen_state_address_hex: "0x0024",
+        outer_screen_state: 0x0E,
+        outer_screen_state_hex: "0x0E",
+        main_state_address: 0x0084,
+        main_state_address_hex: "0x0084",
+        main_state: 0x04,
+        main_state_hex: "0x04",
+        dialogue_substate_address: 0x05EE,
+        dialogue_substate_address_hex: "0x05EE",
+        owned_dialogue_substate_sequence: [0x07, 0x08, 0x09, 0x0A],
+        owned_dialogue_substate_sequence_hex: ["0x07", "0x08", "0x09", "0x0A"],
+        menu_depth_address: 0x05CE,
+        menu_depth_address_hex: "0x05CE",
+        observed_menu_depth: 0x03,
+        active_selection_address: 0x7FF5,
+        active_selection_address_hex: "0x7FF5",
+        default_yes_selection: 0x01,
+        no_selection: 0x02,
+        committed_result_address: 0x05EB,
+        committed_result_address_hex: "0x05EB",
+        no_committed_result: 0x02,
+        next_role: "chapter_save_complete_power_off_notice",
+        notice_chr_pair: chr_pair(0x1C, 0x1C, 0x00, 0x18),
+        notice_draw_sample_offsets_frames: [1, 11, 30, 67, 130, 259, 516, 900],
+        settled_notice_sample_offsets_frames: [130, 259, 516, 900],
+        settled_notice_screenshot_sha256: "c7e16901de2ed4e73c3cc6534e8a478e07ae61630ab7f7b43120f352f7c03ff1",
+        hidden_unlock_progress_address: 0x775B,
+        hidden_unlock_progress_address_hex: "0x775B",
+        hidden_unlock_input_bytes: [0x08, 0x04, 0x02, 0x01, 0x08, 0x80],
+        hidden_unlock_inputs: ["up", "down", "left", "right", "up", "A"],
+        hidden_unlock_next_role: "sound_test",
+        sound_test_chr_pair: chr_pair(0x1C, 0x1C, 0x00, 0x18),
+        sound_test_translation_handling: "preserve original English labels and digits",
+        runtime_evidence: "with menu depth 03, Down changed active selection slot 0x7FF5 from 01 to 02; A committed 02 to 0x05EB and advanced dialogue substates 07->08->09->0A while outer state 0E and main state 04 remained; the Japanese data-loss power-off notice settled by frame 130 and remained pixel-stable through frame 900; the source-bound up, down, left, right, up, A sequence advanced 0x775B and entered substate 0C, where the original-English sound test became visible",
+    }
+}
+
 fn chapter_intro_runtime_samples() -> Vec<ChapterIntroRuntimeSample> {
     vec![
         ChapterIntroRuntimeSample {
@@ -770,7 +963,7 @@ fn chapter_intro_runtime_samples() -> Vec<ChapterIntroRuntimeSample> {
             right_fe_chr_page: 0x18,
             portrait_visible_in_sample: true,
             completion_marker_phase_union_observed: true,
-            proof_limit: "proves the continuous accelerated route and a distinct left CHR pair, not baseline difficulty, unaccelerated combat equivalence, alternate save choices, or failure paths",
+            proof_limit: "proves the continuous accelerated route and a distinct left CHR pair, not baseline difficulty, unaccelerated combat equivalence, defeat, or unfavorable branches",
         },
     ]
 }
@@ -778,7 +971,13 @@ fn chapter_intro_runtime_samples() -> Vec<ChapterIntroRuntimeSample> {
 fn transition_screens() -> Vec<TransitionScreen> {
     vec![
         TransitionScreen {
-            sequence_order: 1,
+            route_stage: 1,
+            route_membership: &[
+                "save_and_continue",
+                "skip_save_and_continue",
+                "save_and_stop",
+                "sound_test_unlock",
+            ],
             screen_role: "chapter_clear_epilogue_dialogue",
             entry_condition: "the chapter objective resolves and the chapter-clear epilogue begins over the retained map",
             runtime_observed: true,
@@ -800,10 +999,22 @@ fn transition_screens() -> Vec<TransitionScreen> {
                 may_cause_persistent_gameplay_mutation: false,
                 next_role: "chapter_clear_epilogue_dialogue or next_story_banner",
             }],
+            focus_elements: &[
+                "page count and terminal page",
+                "portrait presence per page",
+                "completion-marker phase union",
+                "retained-map and CHR variants",
+            ],
             unresolved_focus: &["remaining chapter-specific epilogue page and portrait variants"],
         },
         TransitionScreen {
-            sequence_order: 2,
+            route_stage: 2,
+            route_membership: &[
+                "save_and_continue",
+                "skip_save_and_continue",
+                "save_and_stop",
+                "sound_test_unlock",
+            ],
             screen_role: "next_story_banner",
             entry_condition: "the chapter-clear epilogue dialogue reaches its terminal transition",
             runtime_observed: true,
@@ -824,10 +1035,21 @@ fn transition_screens() -> Vec<TransitionScreen> {
                 may_cause_persistent_gameplay_mutation: false,
                 next_role: "chapter_save_offer",
             }],
+            focus_elements: &[
+                "preserved original English label",
+                "input-wait duration",
+                "retained-map animation",
+            ],
             unresolved_focus: &["remaining chapter-specific retained-map variants"],
         },
         TransitionScreen {
-            sequence_order: 3,
+            route_stage: 3,
+            route_membership: &[
+                "save_and_continue",
+                "skip_save_and_continue",
+                "save_and_stop",
+                "sound_test_unlock",
+            ],
             screen_role: "chapter_save_offer",
             entry_condition: "NEXT STORY is dismissed",
             runtime_observed: true,
@@ -863,10 +1085,17 @@ fn transition_screens() -> Vec<TransitionScreen> {
                     next_role: "chapter_transition_blackout",
                 },
             ],
+            focus_elements: &[
+                "Japanese question and choices",
+                "active selection slot at menu depth 02",
+                "persistent-save boundary on yes",
+                "prompt bypass and blackout variant on no",
+            ],
             unresolved_focus: &["remaining chapter-specific retained-map variants"],
         },
         TransitionScreen {
-            sequence_order: 4,
+            route_stage: 4,
+            route_membership: &["save_and_continue", "save_and_stop", "sound_test_unlock"],
             screen_role: "chapter_save_complete_continue_prompt",
             entry_condition: "the observed chapter-clear save finishes",
             runtime_observed: true,
@@ -882,20 +1111,100 @@ fn transition_screens() -> Vec<TransitionScreen> {
             preserved_original: &[],
             runtime_state: runtime_state(0x0E, "0x0E", 0x04, "0x04", None, Some(0x11)),
             observed_chr_pair: chr_pair(0x1C, 0x1C, 0x00, 0x18),
-            temporal_behavior: "the selection cursor and map sprites may animate independently",
+            temporal_behavior: "the selected-no composite was pixel-stable at eight irregular offsets through 565 input-free frames",
+            input_actions: &[
+                InputAction {
+                    input: "up or down",
+                    immediate_effect: "change the yes or no selection through active slot 0x7FF5",
+                    may_cause_persistent_gameplay_mutation: false,
+                    next_role: "chapter_save_complete_continue_prompt",
+                },
+                InputAction {
+                    input: "A on the observed default yes choice",
+                    immediate_effect: "continue from the completed save into the automatic black transition",
+                    may_cause_persistent_gameplay_mutation: false,
+                    next_role: "chapter_transition_blackout",
+                },
+                InputAction {
+                    input: "A on the observed no choice",
+                    immediate_effect: "close the choice window, draw the data-loss power-off notice, and remain in outer state 0E",
+                    may_cause_persistent_gameplay_mutation: false,
+                    next_role: "chapter_save_complete_power_off_notice",
+                },
+            ],
+            focus_elements: &[
+                "Japanese save-complete dialogue and choices",
+                "active selection slot at menu depth 03",
+                "portrait and retained-map composition",
+                "continue-versus-stop branch ownership",
+            ],
+            unresolved_focus: &["remaining chapter-specific retained-map variants"],
+        },
+        TransitionScreen {
+            route_stage: 5,
+            route_membership: &["save_and_stop", "sound_test_unlock"],
+            screen_role: "chapter_save_complete_power_off_notice",
+            entry_condition: "A commits no on the save-complete continue prompt",
+            runtime_observed: true,
+            input_behavior: "terminal_instruction_with_hidden_unlock",
+            visible_components: &[
+                "retained chapter map and unit sprites",
+                "portrait",
+                "large dialogue window with a Japanese data-loss power-off notice",
+                "completion marker",
+            ],
+            translation_target: "Japanese notice only",
+            preserved_original: &[],
+            runtime_state: runtime_state(0x0E, "0x0E", 0x04, "0x04", None, Some(0x11)),
+            observed_chr_pair: chr_pair(0x1C, 0x1C, 0x00, 0x18),
+            temporal_behavior: "the notice drew automatically through dialogue substates 08 and 09, settled at substate 0A by frame 130, and remained pixel-stable through frame 900",
             input_actions: &[InputAction {
-                input: "A on the observed default yes choice",
-                immediate_effect: "continue from the completed save into the automatic black transition",
+                input: "up, down, left, right, up, A",
+                immediate_effect: "advance the source-bound hidden sequence at 0x775B and enter the sound test after all six inputs match",
                 may_cause_persistent_gameplay_mutation: false,
-                next_role: "chapter_transition_blackout",
+                next_role: "sound_test",
             }],
+            focus_elements: &[
+                "Japanese terminal instruction",
+                "automatic text-draw versus settled wait",
+                "retained portrait and map",
+                "hidden sound-test input sequence",
+            ],
+            unresolved_focus: &["remaining chapter-specific retained-map variants"],
+        },
+        TransitionScreen {
+            route_stage: 6,
+            route_membership: &["sound_test_unlock"],
+            screen_role: "sound_test",
+            entry_condition: "the six-input hidden sequence completes on the power-off notice",
+            runtime_observed: true,
+            input_behavior: "input_wait",
+            visible_components: &[
+                "black background",
+                "original English SOUND TEST MODE label",
+                "original English sound and interface labels",
+                "sound-number digits",
+            ],
+            translation_target: "none",
+            preserved_original: &["all English labels", "digits"],
+            runtime_state: runtime_state(0x0E, "0x0E", 0x04, "0x04", None, None),
+            observed_chr_pair: chr_pair(0x1C, 0x1C, 0x00, 0x18),
+            temporal_behavior: "the hidden sequence entered substate 0B, cleared the old composition, and displayed the sound test at substate 0C without further input",
+            input_actions: &[],
+            focus_elements: &[
+                "preserve every original English label and digit",
+                "sound-number selection and playback controls",
+                "Start and Select debug-viewer branches",
+                "screen exit and re-entry behavior",
+            ],
             unresolved_focus: &[
-                "selection-cursor phase union",
-                "the unobserved no-choice route",
+                "runtime effects of sound selection and playback controls",
+                "runtime effects and downstream screens of the Start and Select branches",
             ],
         },
         TransitionScreen {
-            sequence_order: 5,
+            route_stage: 5,
+            route_membership: &["save_and_continue", "skip_save_and_continue"],
             screen_role: "chapter_transition_blackout",
             entry_condition: "the observed default-yes continue choice leaves the save-complete prompt, or the observed save-offer no choice skips that prompt",
             runtime_observed: true,
@@ -907,13 +1216,20 @@ fn transition_screens() -> Vec<TransitionScreen> {
             observed_chr_pair: chr_pair(0x1A, 0x1A, 0x18, 0x18),
             temporal_behavior: "both observed full-black routes advance without input; the save route used outer state 09 and the no-save route wrote outer state 01",
             input_actions: &[],
+            focus_elements: &[
+                "absence of text",
+                "automatic advance without input",
+                "save and no-save outer-state variants",
+                "CHR lifetime before the next map",
+            ],
             unresolved_focus: &[
                 "remaining chapter-specific transition timing",
                 "the complete outer-state lifetime after the no-save route writes 01",
             ],
         },
         TransitionScreen {
-            sequence_order: 6,
+            route_stage: 6,
+            route_membership: &["save_and_continue", "skip_save_and_continue"],
             screen_role: "chapter_intro_title_dialogue_composite",
             entry_condition: "chapter-clear continuation or a cold load enters a chapter introduction",
             runtime_observed: true,
@@ -936,6 +1252,12 @@ fn transition_screens() -> Vec<TransitionScreen> {
                 may_cause_persistent_gameplay_mutation: false,
                 next_role: "chapter_intro_title_dialogue_composite or the chapter map",
             }],
+            focus_elements: &[
+                "Japanese title and dialogue as separate text owners",
+                "protected chapter-number digits",
+                "portrait presence and completion-marker phases",
+                "title-bar exit relative to the final dialogue page",
+            ],
             unresolved_focus: &[
                 "title-bar exit lifetime relative to the final dialogue page",
                 "chapter-specific map, portrait, and CHR variants after chapter 2",
@@ -1049,7 +1371,7 @@ mod tests {
     }
 
     #[test]
-    fn transition_sequence_separates_each_observed_screen_lifetime() {
+    fn transition_routes_separate_each_observed_screen_lifetime() {
         let screens = transition_screens();
         let roles = screens
             .iter()
@@ -1063,6 +1385,8 @@ mod tests {
                 "next_story_banner",
                 "chapter_save_offer",
                 "chapter_save_complete_continue_prompt",
+                "chapter_save_complete_power_off_notice",
+                "sound_test",
                 "chapter_transition_blackout",
                 "chapter_intro_title_dialogue_composite",
             ]
@@ -1070,12 +1394,13 @@ mod tests {
         assert!(screens.iter().all(|screen| screen.runtime_observed));
         assert_eq!(screens[1].translation_target, "none");
         assert_eq!(screens[1].preserved_original, ["NEXT STORY"]);
-        assert!(
-            screens[2]
-                .input_actions
-                .iter()
-                .any(|action| action.may_cause_persistent_gameplay_mutation)
-        );
+        assert!(screens
+            .iter()
+            .all(|screen| !screen.focus_elements.is_empty()));
+        assert!(screens[2]
+            .input_actions
+            .iter()
+            .any(|action| action.may_cause_persistent_gameplay_mutation));
         assert!(screens[2].input_actions.iter().any(|action| {
             action.input.contains("no choice")
                 && !action.may_cause_persistent_gameplay_mutation
@@ -1090,7 +1415,28 @@ mod tests {
             ],
             [0x1C, 0x1C, 0x00, 0x18]
         );
-        assert_eq!(screens[4].input_behavior, "automatic");
+        let power_off_notice = screens
+            .iter()
+            .find(|screen| screen.screen_role == "chapter_save_complete_power_off_notice")
+            .unwrap();
+        assert!(power_off_notice
+            .input_actions
+            .iter()
+            .any(|action| action.next_role == "sound_test"));
+        let sound_test = screens
+            .iter()
+            .find(|screen| screen.screen_role == "sound_test")
+            .unwrap();
+        assert_eq!(sound_test.translation_target, "none");
+        assert_eq!(
+            sound_test.preserved_original,
+            ["all English labels", "digits"]
+        );
+        let blackout = screens
+            .iter()
+            .find(|screen| screen.screen_role == "chapter_transition_blackout")
+            .unwrap();
+        assert_eq!(blackout.input_behavior, "automatic");
     }
 
     #[test]
@@ -1115,6 +1461,12 @@ mod tests {
         assert_eq!(source_file_offset(0x06, 0xB6F3).unwrap(), 0x1B703);
         assert_eq!(source_file_offset(0x06, 0xB737).unwrap(), 0x1B747);
         assert_eq!(source_file_offset(0x0B, 0x9333).unwrap(), 0x2D343);
+        assert_eq!(source_file_offset(0x06, 0xB771).unwrap(), 0x1B781);
+        assert_eq!(source_file_offset(0x06, 0xB7CB).unwrap(), 0x1B7DB);
+        assert_eq!(source_file_offset(0x0B, 0x995F).unwrap(), 0x2D96F);
+        assert_eq!(source_file_offset(0x0B, 0x9B35).unwrap(), 0x2DB45);
+        assert_eq!(source_file_offset(0x0B, 0x9BA0).unwrap(), 0x2DBB0);
+        assert_eq!(source_file_offset(0x0B, 0x9BCF).unwrap(), 0x2DBDF);
         assert_eq!(
             source_file_offset(0x0F, CHAPTER_TITLE_POINTER_TABLE_ADDRESS).unwrap(),
             0x3EE18
@@ -1144,6 +1496,38 @@ mod tests {
             [0x1B, 0x1B, 0x18, 0x18]
         );
         assert_eq!(contract.stable_sample_offsets_frames.last(), Some(&565));
+    }
+
+    #[test]
+    fn save_complete_no_choice_owns_a_terminal_notice_and_sound_test_unlock() {
+        let contract = save_complete_no_branch_contract();
+
+        assert_eq!(contract.outer_screen_state, 0x0E);
+        assert_eq!(contract.main_state, 0x04);
+        assert_eq!(contract.owned_dialogue_substate_sequence, [7, 8, 9, 10]);
+        assert_eq!(contract.observed_menu_depth, 3);
+        assert_eq!(contract.active_selection_address, 0x7FF5);
+        assert_eq!(contract.no_selection, 2);
+        assert_eq!(contract.no_committed_result, 2);
+        assert_eq!(contract.next_role, "chapter_save_complete_power_off_notice");
+        assert_eq!(
+            contract.hidden_unlock_inputs,
+            ["up", "down", "left", "right", "up", "A"]
+        );
+        assert_eq!(contract.hidden_unlock_next_role, "sound_test");
+        assert_eq!(
+            contract.settled_notice_sample_offsets_frames,
+            [130, 259, 516, 900]
+        );
+        assert_eq!(
+            [
+                contract.sound_test_chr_pair.left_fd,
+                contract.sound_test_chr_pair.left_fe,
+                contract.sound_test_chr_pair.right_fd,
+                contract.sound_test_chr_pair.right_fe,
+            ],
+            [0x1C, 0x1C, 0x00, 0x18]
+        );
     }
 
     #[test]
@@ -1196,11 +1580,9 @@ mod tests {
             ],
             [0x0F, 0x0F, 0x00, 0x18]
         );
-        assert!(
-            chapter_twelve
-                .entry_method
-                .contains("continuous chapter-eleven")
-        );
+        assert!(chapter_twelve
+            .entry_method
+            .contains("continuous chapter-eleven"));
         assert!(chapter_twelve.proof_limit.contains("baseline difficulty"));
         assert!(!regular_save_reachability().natural_progression_claimed);
     }

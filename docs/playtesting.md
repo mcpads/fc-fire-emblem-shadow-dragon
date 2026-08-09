@@ -101,6 +101,18 @@
 
 새 관리 프로세스 실행은 격리된 실행 묶음을 다시 만들기 때문에 이전 실행의 `Saves` 디렉터리를 이어받는 배터리 지속성 시험이 아니다. 프로세스 강제 종료나 새 관리 실행 결과를 위 native power cycle 검증과 혼동하지 않는다.
 
+## 장 완료 뒤 숨은 사운드 테스트
+
+1~24장을 완료한 뒤 첫 저장 질문에서 “예”로 저장하고, 이어지는 계속 질문에서 “아니오”를 고르면 데이터 손실을 막기 위해 전원을 끄라는 일본어 안내에 정착한다. 이 화면에서 다음 순서를 입력하면 사운드 테스트로 들어간다.
+
+```text
+UP, DOWN, LEFT, RIGHT, UP, A
+```
+
+지원 ROM의 뱅크 `0B:$9BA0`은 현재 입력을 `08 04 02 01 08 80`과 비교하고 일치한 단계 수를 `$775B`에 저장한다. 실행에서는 각 입력마다 `$775B=00→05`를 확인했고 마지막 `A` 뒤 `$05EE=0B→0C`를 거쳐 `SOUND TEST MODE` 화면을 열었다. 사운드 테스트의 영문 라벨과 숫자는 원래 영어이므로 번역하지 않는다.
+
+공개된 조작 정보는 위·아래로 번호 선택, `A` 재생, `B` 정지, `START` 전투 애니메이션 테스트, `SELECT` 엔딩 표시다. 이 내부 조작과 하류 화면은 아직 현재 ROM 실행 효과를 소스와 함께 닫지 않았으므로, 검증 중에는 임의로 누르지 않고 각각의 소비처를 먼저 결속한다.
+
 ## 확인된 일본판 치트
 
 지원 ROM의 iNES 헤더를 제외한 CRC32는 `97CAD370`이며 아래 코드가 게시된 일본판과 일치한다. 코드는 ROM 패치나 Game Genie 코드가 아니라 CPU RAM의 `주소:값` 형식이다. Mesen에서는 NES Custom 치트로 등록한다.
@@ -219,5 +231,6 @@
 - [닌텐도 공식 진행·승리 조건](https://www.nintendo.co.jp/wii/vc/vc_fea/vc_fea_04.html)
 - [닌텐도 공식 행동 명령 설명](https://www.nintendo.co.jp/wii/vc/vc_fea/vc_fea_05.html)
 - [1~6장 공략](https://rrpg.jp/fe_ankoku/map_1.html)
+- [일본판 숨은 사운드 테스트](https://rrpg.jp/fe_ankoku/other.html)
 - [일본판 RAM 치트와 CRC32](https://gamehacking.org/?game=29610)
 - [Mesen NES Custom 치트 형식](https://github.com/SourMesen/Mesen2/blob/master/UI/Debugger/Documentation/LuaDocumentation.json)

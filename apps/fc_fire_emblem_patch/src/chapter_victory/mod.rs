@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 
 use crate::{
-    rom::{EXPECTED_SOURCE_SHA1, Rom},
+    rom::{Rom, EXPECTED_SOURCE_SHA1},
     sha1_hex,
 };
 
@@ -104,7 +104,7 @@ fn build_report(rom: &Rom) -> Result<ChapterVictoryReport> {
         continuous_runtime_evidence: runtime_evidence::continuous_chapter_eleven_victory_evidence(),
         observation_plan: screen_flow::observation_plan(),
         unresolved: vec![
-            "The save-offer no choice is source-bound and runtime-observed; the save-complete no-choice route remains unobserved.",
+            "The save-offer and save-complete no choices are source-bound and runtime-observed; the latter opens a terminal power-off notice with a hidden sound-test unlock.",
             "The accelerated route establishes reachability rather than baseline difficulty or unaccelerated combat equivalence.",
             "Defeat and unfavorable-state checks remain separate validation gates with progression cheats disabled or intentionally adverse.",
             "Other chapter-specific victory, epilogue, portrait, CHR, and transition variants remain unobserved.",
