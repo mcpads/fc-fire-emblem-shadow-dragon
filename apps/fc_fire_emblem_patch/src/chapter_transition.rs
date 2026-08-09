@@ -4,9 +4,13 @@ use anyhow::{ensure, Context, Result};
 use serde::Serialize;
 
 use crate::{
-    dialogue_inventory::inspect_chapter_intro_contexts,
+    dialogue_inventory::{
+        inspect_chapter_intro_contexts, inspect_translation_surface_dialogue_tables,
+        TranslationSurfaceDialogueTableBinding,
+    },
     rom::{Rom, EXPECTED_SOURCE_SHA1, HEADER_SIZE},
     sha1_hex,
+    text_inventory::scoped_text_table_budgets,
     typed_source::{decode_rp2a03_sequence, TypedInstructionBinding},
 };
 
@@ -22,6 +26,15 @@ const CHAPTER_TITLE_DATA_END_EXCLUSIVE: usize = 0x3EFC7;
 const CHAPTER_TITLE_TERMINATOR: u8 = 0xED;
 const CHAPTER_TITLE_DIGIT_COUNT: usize = 41;
 const CHAPTER_INTRO_SHARED_PAYLOAD: [u8; 4] = [0x30, 0x10, 0x14, 0x04];
+const ENDING_SCROLL_STREAM_ADDRESS: u16 = 0xA826;
+const ENDING_SCROLL_STREAM_END_EXCLUSIVE_ADDRESS: u16 = 0xACC8;
+const ENDING_SCROLL_RECORD_END: u8 = 0xEF;
+const ENDING_SCROLL_TERMINAL: u8 = 0xEE;
+const ENDING_SCROLL_TURN_INTERPOLATION: u8 = 0xED;
+const ENDING_SCROLL_PRESERVED_RECORD_COUNT: usize = 43;
+const ENDING_SCROLL_CHAPTER_RECORD_COUNT: usize = 25;
+const ENDING_SCROLL_AGGREGATE_RECORD_INDEX: usize = 93;
+const ENDING_SCROLL_TRAILING_BLANK_RECORD_COUNT: usize = 19;
 
 const CHAPTER_TITLE_POINTER_TABLE_BYTES: &[u8] = &[
     0x3A, 0xEE, 0x49, 0xEE, 0x59, 0xEE, 0x67, 0xEE, 0x76, 0xEE, 0x85, 0xEE, 0x94, 0xEE, 0xA3, 0xEE,
@@ -498,6 +511,181 @@ const SOURCE_REGIONS: &[SourceRegionSpec] = &[
         0x9F1B,
         ENDING_SEQUENCE_PHASE_POINTERS_BYTES,
     ),
+    SourceRegionSpec::code_sha1(
+        "initialize_ending_scroll_stream",
+        0x04,
+        0xA3A5,
+        0x3B,
+        "ee45386f98c7ee65cab296e900b5dad9acb4bf0f",
+    ),
+    SourceRegionSpec::code_sha1(
+        "dispatch_ending_scroll_inner_state",
+        0x04,
+        0xA3E0,
+        0x06,
+        "af87f3b42ff75fe77d4f423410e1776a08f2644c",
+    ),
+    SourceRegionSpec::data_sha1(
+        "ending_scroll_inner_state_pointers",
+        0x04,
+        0xA3E6,
+        0x06,
+        "edcaf5913c7895f15e684f65577e95f8f92439e0",
+    ),
+    SourceRegionSpec::code_sha1(
+        "update_ending_scroll_position",
+        0x04,
+        0xA3EC,
+        0x54,
+        "ebdc5cf629d1d977fa5d930eb59bfd5aeea6e88c",
+    ),
+    SourceRegionSpec::code_sha1(
+        "write_ending_scroll_record",
+        0x04,
+        0xA440,
+        0x53,
+        "7b295e6926b702f2755420e0cf767c705277fdd5",
+    ),
+    SourceRegionSpec::code_sha1(
+        "expand_ending_scroll_turn_value",
+        0x04,
+        0xA4A6,
+        0x62,
+        "844d7ea01828e3fbdb516c34a3056ae3b9b535b9",
+    ),
+    SourceRegionSpec::data_sha1(
+        "ending_scroll_records",
+        0x04,
+        0xA826,
+        0x4A2,
+        "137f18180b51a86fac7a1f0c6eb9fa4269ec2504",
+    ),
+    SourceRegionSpec::code_sha1(
+        "select_ending_character_epilogue",
+        0x04,
+        0xA165,
+        0x52,
+        "f45d86c0252e1a4b9194407be8bf1a8e23d40f07",
+    ),
+    SourceRegionSpec::code_sha1(
+        "wait_ending_character_epilogue",
+        0x04,
+        0xA233,
+        0x1F,
+        "d41db20b99824edaff5fbc6ac30157394a6a2648",
+    ),
+    SourceRegionSpec::code_sha1(
+        "run_shared_battle_engine_from_sound_test",
+        0x07,
+        0xAC1E,
+        0x26,
+        "27075559ba7defcd24dc61cd28ebf6e99ff88e7a",
+    ),
+    SourceRegionSpec::data_sha1(
+        "shared_battle_engine_handler_pointer",
+        0x05,
+        0xBFA4,
+        0x02,
+        "da38bd1c14953cb7859c16b635e320a01f76842f",
+    ),
+    SourceRegionSpec::code_sha1(
+        "run_shared_battle_engine",
+        0x05,
+        0x8161,
+        0x38,
+        "b0106e99310617647c8269f280da1b817fb1d0ba",
+    ),
+    SourceRegionSpec::code_sha1(
+        "dispatch_shared_battle_phase",
+        0x05,
+        0x81EC,
+        0x06,
+        "4bf9a98f9cd26d644033b0fb842547b0d813578f",
+    ),
+    SourceRegionSpec::data_sha1(
+        "shared_battle_phase_pointers",
+        0x05,
+        0x81F2,
+        0x40,
+        "bb68fab54876f2528deefa1510bb072c842b589b",
+    ),
+    SourceRegionSpec::code_sha1(
+        "select_battle_unit_name_source",
+        0x05,
+        0x8946,
+        0x64,
+        "59aaa072d60da44b131a9ae1f61610c10fc9284c",
+    ),
+    SourceRegionSpec::code_sha1(
+        "compose_battle_unit_name",
+        0x05,
+        0x89AA,
+        0x2D,
+        "9b44526183e896b7d5c9663e2205f360e0044d94",
+    ),
+    SourceRegionSpec::data_sha1(
+        "battle_unit_name_source_descriptors",
+        0x05,
+        0x8AC8,
+        0x10,
+        "8ada253db8cdc36605d9bb787e7e4249fa609086",
+    ),
+    SourceRegionSpec::code_sha1(
+        "compose_battle_class_name",
+        0x05,
+        0x8A39,
+        0x2B,
+        "8678eda290772b6eb51e3e68c599cfe6d21e8869",
+    ),
+    SourceRegionSpec::code_sha1(
+        "compose_battle_item_name",
+        0x05,
+        0x8A64,
+        0x30,
+        "87c58551a70e5565d6fb4e2ec4a3ff201c938c39",
+    ),
+    SourceRegionSpec::code_sha1(
+        "compose_battle_item_and_dialogue",
+        0x05,
+        0x837F,
+        0x54,
+        "04fe38538773af19195ddf9eb0bedb0932cf9389",
+    ),
+    SourceRegionSpec::code_sha1(
+        "override_battle_dialogue_selector",
+        0x05,
+        0x85A5,
+        0x39,
+        "aa56addfa83a5e303d828650b1753e434b5ce28e",
+    ),
+    SourceRegionSpec::code_sha1(
+        "compose_battle_dialogue",
+        0x05,
+        0x85DE,
+        0xCF,
+        "f81f49a58e82048d10a073e65a55e065ee38989e",
+    ),
+    SourceRegionSpec::code_sha1(
+        "compose_battle_dialogue_continuation_one",
+        0x05,
+        0x86E1,
+        0x44,
+        "2231aad643a5961dd6a6fc5984cf39a0e5f55fab",
+    ),
+    SourceRegionSpec::code_sha1(
+        "compose_battle_dialogue_continuation_two",
+        0x05,
+        0x8725,
+        0x7C,
+        "a9e98ce0c3f855e8fe8662506ad7c63091286917",
+    ),
+    SourceRegionSpec::code_sha1(
+        "compose_battle_class_and_dialogue",
+        0x05,
+        0x8D1E,
+        0x66,
+        "b0fcd473ae534dd95cd660d6ac70d2cf13b1b996",
+    ),
 ];
 
 #[derive(Clone, Copy)]
@@ -507,11 +695,20 @@ enum RegionKind {
 }
 
 #[derive(Clone, Copy)]
+enum RegionExpectation {
+    Bytes(&'static [u8]),
+    Sha1 {
+        byte_count: usize,
+        expected_sha1: &'static str,
+    },
+}
+
+#[derive(Clone, Copy)]
 struct SourceRegionSpec {
     role: &'static str,
     prg_bank: u8,
     cpu_address: u16,
-    bytes: &'static [u8],
+    expectation: RegionExpectation,
     kind: RegionKind,
 }
 
@@ -526,7 +723,26 @@ impl SourceRegionSpec {
             role,
             prg_bank,
             cpu_address,
-            bytes,
+            expectation: RegionExpectation::Bytes(bytes),
+            kind: RegionKind::Code,
+        }
+    }
+
+    const fn code_sha1(
+        role: &'static str,
+        prg_bank: u8,
+        cpu_address: u16,
+        byte_count: usize,
+        expected_sha1: &'static str,
+    ) -> Self {
+        Self {
+            role,
+            prg_bank,
+            cpu_address,
+            expectation: RegionExpectation::Sha1 {
+                byte_count,
+                expected_sha1,
+            },
             kind: RegionKind::Code,
         }
     }
@@ -541,7 +757,26 @@ impl SourceRegionSpec {
             role,
             prg_bank,
             cpu_address,
-            bytes,
+            expectation: RegionExpectation::Bytes(bytes),
+            kind: RegionKind::Data,
+        }
+    }
+
+    const fn data_sha1(
+        role: &'static str,
+        prg_bank: u8,
+        cpu_address: u16,
+        byte_count: usize,
+        expected_sha1: &'static str,
+    ) -> Self {
+        Self {
+            role,
+            prg_bank,
+            cpu_address,
+            expectation: RegionExpectation::Sha1 {
+                byte_count,
+                expected_sha1,
+            },
             kind: RegionKind::Data,
         }
     }
@@ -559,12 +794,128 @@ struct ChapterTransitionReport {
     save_offer_no_branch: SaveOfferNoBranchContract,
     save_complete_no_branch: SaveCompleteNoBranchContract,
     sound_test_controls: SoundTestControlContract,
+    translation_surfaces: TranslationSurfaceContracts,
     chapter_intro_runtime_samples: Vec<ChapterIntroRuntimeSample>,
     fixed_labels: Vec<FixedLabelBinding>,
     source_regions: Vec<SourceRegionBinding>,
     next_universalization_gate: &'static str,
     unresolved: Vec<&'static str>,
     release_eligible: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct TranslationSurfaceContracts {
+    battle_animation: BattleAnimationTranslationSurface,
+    ending_chapter_record_scroll: EndingChapterRecordTranslationSurface,
+    ending_character_epilogue: EndingCharacterEpilogueTranslationSurface,
+    dialogue_tables: Vec<TranslationSurfaceDialogueTableBinding>,
+    proof_boundary: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct BattleAnimationTranslationSurface {
+    screen_role: &'static str,
+    sound_test_outer_phase_address: u16,
+    sound_test_outer_phase_address_hex: &'static str,
+    shared_engine_outer_phase: u8,
+    shared_engine_outer_phase_hex: &'static str,
+    shared_engine_entry: CodeLocation,
+    shared_phase_address: u16,
+    shared_phase_address_hex: &'static str,
+    shared_phase_count: usize,
+    terminal_shared_phase: u8,
+    terminal_shared_phase_hex: &'static str,
+    repeated_outer_phase: u8,
+    repeated_outer_phase_hex: &'static str,
+    fixed_text_tables: Vec<BattleTextTableBinding>,
+    dialogue_table_id: &'static str,
+    dialogue_selector_address: u16,
+    dialogue_selector_address_hex: &'static str,
+    dialogue_table_set_address: u16,
+    dialogue_table_set_address_hex: &'static str,
+    writer_roles: &'static [&'static str],
+    translation_handling: &'static str,
+    unresolved: &'static [&'static str],
+}
+
+#[derive(Debug, Serialize)]
+struct BattleTextTableBinding {
+    table_id: &'static str,
+    table_cpu_address: u16,
+    table_cpu_address_hex: &'static str,
+    pointer_count: usize,
+    unique_string_count: usize,
+    referenced_text_byte_count: usize,
+    unique_text_storage_byte_count: usize,
+    max_entry_byte_count: usize,
+    distinct_source_code_count: usize,
+    writer_role: &'static str,
+    translation_handling: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct EndingChapterRecordTranslationSurface {
+    screen_role: &'static str,
+    ending_phase_address: u16,
+    ending_phase_address_hex: &'static str,
+    ending_phase: u8,
+    ending_phase_hex: &'static str,
+    inner_state_address: u16,
+    inner_state_address_hex: &'static str,
+    stream: SourceRange,
+    stream_sha1: String,
+    record_count: usize,
+    preserved_original_record_count: usize,
+    chapter_record_count: usize,
+    aggregate_record_count: usize,
+    chapter_title_semantic_match_count: usize,
+    protected_original_chapter_digit_byte_count: usize,
+    japanese_literal_byte_count: usize,
+    turn_interpolation_control: u8,
+    turn_interpolation_control_hex: &'static str,
+    chapter_turn_slot_range: &'static str,
+    aggregate_turn_slot: u8,
+    aggregate_turn_slot_hex: &'static str,
+    trailing_blank_record_count: usize,
+    semantic_source_policy: &'static str,
+    translation_handling: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct EndingCharacterEpilogueTranslationSurface {
+    screen_role: &'static str,
+    selector_phase: u8,
+    selector_phase_hex: &'static str,
+    visible_dialogue_phase: u8,
+    visible_dialogue_phase_hex: &'static str,
+    table_selector_address: u16,
+    table_selector_address_hex: &'static str,
+    entry_selector_address: u16,
+    entry_selector_address_hex: &'static str,
+    direct_dialogue_table_id: &'static str,
+    routing_dialogue_table_id: &'static str,
+    direct_selector: u8,
+    direct_selector_hex: &'static str,
+    routing_selector: u8,
+    routing_selector_hex: &'static str,
+    selector_writer: CodeLocation,
+    dialogue_wait_handler: CodeLocation,
+    input_behavior: &'static str,
+    translation_handling: &'static str,
+    unresolved: &'static [&'static str],
+}
+
+#[derive(Debug, Serialize)]
+struct SourceRange {
+    prg_bank: u8,
+    prg_bank_hex: String,
+    cpu_address: u16,
+    cpu_address_hex: String,
+    end_exclusive_cpu_address: u16,
+    end_exclusive_cpu_address_hex: String,
+    file_offset: usize,
+    file_offset_hex: String,
+    byte_count: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -888,6 +1239,7 @@ fn build_report(rom: &Rom) -> Result<ChapterTransitionReport> {
         .collect::<Result<Vec<_>>>()?;
     let chapter_intro_contexts = bind_chapter_intro_contexts(rom)?;
     let chapter_titles = bind_chapter_titles(rom)?;
+    let translation_surfaces = bind_translation_surfaces(rom)?;
 
     Ok(ChapterTransitionReport {
         schema: 1,
@@ -905,6 +1257,7 @@ fn build_report(rom: &Rom) -> Result<ChapterTransitionReport> {
         save_offer_no_branch: save_offer_no_branch_contract(),
         save_complete_no_branch: save_complete_no_branch_contract(),
         sound_test_controls: sound_test_control_contract(),
+        translation_surfaces,
         chapter_intro_runtime_samples: chapter_intro_runtime_samples(),
         fixed_labels: vec![
             FixedLabelBinding {
@@ -929,11 +1282,12 @@ fn build_report(rom: &Rom) -> Result<ChapterTransitionReport> {
             },
         ],
         source_regions,
-        next_universalization_gate: "battle_and_ending_translation_surface_binding",
+        next_universalization_gate: "battle_dialogue_record_boundaries_and_temporal_glyph_union",
         unresolved: vec![
             "The chapter-one epilogue and save-complete dialogue use the main dialogue engine, but their dialogue source content is intentionally outside this public report.",
             "The save-offer no choice and save-complete no choice are source-bound and runtime-observed; the latter opens a terminal power-off notice with a source-bound sound-test unlock.",
-            "Every sound-test control and both downstream state machines are source-bound and runtime-observed; Start reuses the shared battle-animation lifetimes, while Select partitions the automatic ending into preserved opening-and-cast, Japanese chapter-record, preserved staff, Japanese epilogue, and preserved final-signature roles.",
+            "Every sound-test control and both downstream state machines are source-bound and runtime-observed; the shared battle text tables and writers, ending chapter-record stream, turn interpolation, and character-epilogue dialogue tables are now structurally bound without emitting their content.",
+            "The separate battle-dialogue format still lacks proven per-record storage boundaries, and the complete battle CHR, sprite, temporal, defeat, and unfavorable-variant union remains open.",
             "The accelerated continuous route establishes reachability but not baseline combat difficulty, defeat, or unfavorable branches.",
             "Chapter-two, chapter-eleven, and chapter-twelve intro samples do not generalize the remaining twenty-two chapters or all title lifetimes.",
         ],
@@ -1053,6 +1407,361 @@ fn bind_chapter_titles(rom: &Rom) -> Result<ChapterTitleSummary> {
         translation_target:
             "Japanese chapter-title glyphs only; preserve original chapter-number digits",
     })
+}
+
+fn bind_translation_surfaces(rom: &Rom) -> Result<TranslationSurfaceContracts> {
+    let dialogue_tables = inspect_translation_surface_dialogue_tables(rom.data())?;
+    ensure!(
+        dialogue_tables.len() == 3,
+        "translation-surface dialogue table count changed"
+    );
+    let battle_dialogue = dialogue_tables
+        .iter()
+        .find(|table| table.table_id == "battle-dialogue")
+        .context("battle-dialogue surface binding is absent")?;
+    ensure!(
+        battle_dialogue.pointer_count == 65
+            && battle_dialogue.unique_target_count == 28
+            && battle_dialogue.separate_loader_cpu_address == Some(0x8000)
+            && battle_dialogue.proven_record_count.is_none(),
+        "battle-dialogue surface structure changed"
+    );
+    let direct_epilogue = dialogue_tables
+        .iter()
+        .find(|table| table.table_id == "epilogue-dialogue")
+        .context("epilogue-dialogue surface binding is absent")?;
+    ensure!(
+        direct_epilogue.directory_selector == Some(0x40)
+            && direct_epilogue.pointer_count == 66
+            && direct_epilogue.proven_record_count == Some(66),
+        "direct epilogue-dialogue surface structure changed"
+    );
+    let routing_epilogue = dialogue_tables
+        .iter()
+        .find(|table| table.table_id == "epilogue-routing-dialogue")
+        .context("epilogue-routing surface binding is absent")?;
+    ensure!(
+        routing_epilogue.directory_selector == Some(0x41)
+            && routing_epilogue.pointer_count == 54
+            && routing_epilogue.proven_record_count == Some(52),
+        "routing epilogue-dialogue surface structure changed"
+    );
+
+    Ok(TranslationSurfaceContracts {
+        battle_animation: bind_battle_animation_translation_surface(rom)?,
+        ending_chapter_record_scroll: bind_ending_chapter_record_translation_surface(rom)?,
+        ending_character_epilogue: EndingCharacterEpilogueTranslationSurface {
+            screen_role: "ending_character_epilogue",
+            selector_phase: 0x0F,
+            selector_phase_hex: "0x0F",
+            visible_dialogue_phase: 0x10,
+            visible_dialogue_phase_hex: "0x10",
+            table_selector_address: 0x77F4,
+            table_selector_address_hex: "0x77F4",
+            entry_selector_address: 0x77F1,
+            entry_selector_address_hex: "0x77F1",
+            direct_dialogue_table_id: "epilogue-dialogue",
+            routing_dialogue_table_id: "epilogue-routing-dialogue",
+            direct_selector: 0x40,
+            direct_selector_hex: "0x40",
+            routing_selector: 0x41,
+            routing_selector_hex: "0x41",
+            selector_writer: location(0x04, 0xA17E),
+            dialogue_wait_handler: location(0x04, 0xA233),
+            input_behavior: "automatic; phase 0x0F selects one of the two structurally bounded dialogue tables and phase 0x10 waits for the shared dialogue engine before advancing",
+            translation_handling: "translate Japanese character names and epilogue lines only; the structural report emits table identities, counts, ranges, and hashes but no narrative bytes or translations",
+            unresolved: &[
+                "complete portrait and CHR-page union across all character entries",
+                "runtime coverage of every direct and routing epilogue entry",
+            ],
+        },
+        dialogue_tables,
+        proof_boundary: "the supported Japanese ROM binds the common battle engine to four fixed text tables and the separate battle-dialogue loader, binds the ending record stream and dynamic turn interpolation, and binds the automatic character epilogue to selectors 0x40 and 0x41; bulk dialogue content is not emitted",
+    })
+}
+
+fn bind_battle_animation_translation_surface(
+    rom: &Rom,
+) -> Result<BattleAnimationTranslationSurface> {
+    const TABLE_IDS: [&str; 4] = ["unit-names", "enemy-names", "class-names", "item-names"];
+    let budgets = scoped_text_table_budgets(rom.data(), &TABLE_IDS)?;
+    let fixed_text_tables = budgets
+        .into_iter()
+        .map(|budget| {
+            let (table_cpu_address, table_cpu_address_hex, writer_role) = match budget.id {
+                "unit-names" => (0xDE2B, "0xDE2B", "compose_battle_unit_name"),
+                "enemy-names" => (0xDFA4, "0xDFA4", "compose_battle_unit_name"),
+                "class-names" => (0xDA1F, "0xDA1F", "compose_battle_class_name"),
+                "item-names" => (0xDAD5, "0xDAD5", "compose_battle_item_name"),
+                other => return Err(anyhow::anyhow!("unexpected battle text table {other}")),
+            };
+            Ok(BattleTextTableBinding {
+                table_id: budget.id,
+                table_cpu_address,
+                table_cpu_address_hex,
+                pointer_count: budget.pointer_count,
+                unique_string_count: budget.unique_string_count,
+                referenced_text_byte_count: budget.referenced_text_byte_count,
+                unique_text_storage_byte_count: budget.unique_text_storage_byte_count,
+                max_entry_byte_count: budget.max_entry_byte_count,
+                distinct_source_code_count: budget.source_codes.len(),
+                writer_role,
+                translation_handling: "translate Japanese glyph bytes only; preserve original Latin and digit positions",
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    ensure!(
+        fixed_text_tables.len() == TABLE_IDS.len(),
+        "battle fixed-text table coverage changed"
+    );
+
+    Ok(BattleAnimationTranslationSurface {
+        screen_role: "battle_animation",
+        sound_test_outer_phase_address: 0x7730,
+        sound_test_outer_phase_address_hex: "0x7730",
+        shared_engine_outer_phase: 0x05,
+        shared_engine_outer_phase_hex: "0x05",
+        shared_engine_entry: location(0x05, 0x8161),
+        shared_phase_address: 0x047C,
+        shared_phase_address_hex: "0x047C",
+        shared_phase_count: 32,
+        terminal_shared_phase: 0x1F,
+        terminal_shared_phase_hex: "0x1F",
+        repeated_outer_phase: 0x03,
+        repeated_outer_phase_hex: "0x03",
+        fixed_text_tables,
+        dialogue_table_id: "battle-dialogue",
+        dialogue_selector_address: 0x7936,
+        dialogue_selector_address_hex: "0x7936",
+        dialogue_table_set_address: 0x7935,
+        dialogue_table_set_address_hex: "0x7935",
+        writer_roles: &[
+            "select_battle_unit_name_source",
+            "compose_battle_unit_name",
+            "compose_battle_class_name",
+            "compose_battle_item_name",
+            "compose_battle_item_and_dialogue",
+            "override_battle_dialogue_selector",
+            "compose_battle_dialogue",
+            "compose_battle_dialogue_continuation_one",
+            "compose_battle_dialogue_continuation_two",
+            "compose_battle_class_and_dialogue",
+        ],
+        translation_handling: "the debug route reuses the gameplay battle engine and its shared text sources; translate Japanese names, labels, and messages while preserving LV, HIT, EXP, HP bars, percentages, and digits",
+        unresolved: &[
+            "the separate battle-dialogue format has a proven pointer loader but no proven per-record storage boundaries",
+            "complete CHR, sprite, and temporal union across ordinary, debug, defeat, and unfavorable battle variants",
+        ],
+    })
+}
+
+#[derive(Clone, Copy)]
+struct EndingScrollRecord {
+    header: u8,
+    payload_start: usize,
+    payload_end_exclusive: usize,
+}
+
+fn bind_ending_chapter_record_translation_surface(
+    rom: &Rom,
+) -> Result<EndingChapterRecordTranslationSurface> {
+    let stream_file_offset = source_file_offset(0x04, ENDING_SCROLL_STREAM_ADDRESS)?;
+    let stream_end_file_offset =
+        source_file_offset(0x04, ENDING_SCROLL_STREAM_END_EXCLUSIVE_ADDRESS)?;
+    let stream = rom
+        .data()
+        .get(stream_file_offset..stream_end_file_offset)
+        .context("ending scroll stream is outside the ROM")?;
+    ensure!(
+        stream.last() == Some(&ENDING_SCROLL_TERMINAL),
+        "ending scroll stream terminal changed"
+    );
+
+    let mut records = Vec::new();
+    let mut cursor = 0_usize;
+    while cursor < stream.len() {
+        let header = stream[cursor];
+        if header == ENDING_SCROLL_TERMINAL {
+            ensure!(
+                cursor + 1 == stream.len(),
+                "ending scroll has bytes after its terminal"
+            );
+            break;
+        }
+        ensure!(
+            header != 0xEC,
+            "ending scroll reached an unexpected EC terminal"
+        );
+        let payload_start = cursor + 1;
+        let relative_end = stream[payload_start..]
+            .iter()
+            .position(|byte| *byte == ENDING_SCROLL_RECORD_END)
+            .context("ending scroll record has no EF terminator")?;
+        let payload_end_exclusive = payload_start + relative_end;
+        records.push(EndingScrollRecord {
+            header,
+            payload_start,
+            payload_end_exclusive,
+        });
+        cursor = payload_end_exclusive + 1;
+    }
+    ensure!(records.len() == 113, "ending scroll record count changed");
+    ensure!(
+        records[..ENDING_SCROLL_PRESERVED_RECORD_COUNT].iter().all(
+            |record| japanese_literal_count(
+                &stream[record.payload_start..record.payload_end_exclusive]
+            ) == 0
+        ),
+        "preserved ending opening-and-cast records gained Japanese literals"
+    );
+
+    let chapter_title_pointer_file_offset =
+        source_file_offset(0x0F, CHAPTER_TITLE_POINTER_TABLE_ADDRESS)?;
+    let chapter_title_pointers = rom.data()[chapter_title_pointer_file_offset
+        ..chapter_title_pointer_file_offset + CHAPTER_TITLE_POINTER_TABLE_BYTES.len()]
+        .chunks_exact(2)
+        .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
+        .collect::<Vec<_>>();
+
+    let mut protected_original_chapter_digit_byte_count = 0;
+    let mut japanese_literal_byte_count = 0;
+    let mut chapter_title_semantic_match_count = 0;
+    for (chapter_index, chapter_title_pointer) in chapter_title_pointers.iter().enumerate() {
+        let record_index = ENDING_SCROLL_PRESERVED_RECORD_COUNT + chapter_index * 2;
+        let record = records[record_index];
+        ensure!(
+            record.header == 0x00,
+            "ending chapter-record header changed"
+        );
+        let payload = &stream[record.payload_start..record.payload_end_exclusive];
+        let interpolation_offset = payload
+            .iter()
+            .position(|byte| *byte == ENDING_SCROLL_TURN_INTERPOLATION)
+            .with_context(|| {
+                format!("ending chapter record {chapter_index} has no turn interpolation")
+            })?;
+        ensure!(
+            payload.get(interpolation_offset + 1) == Some(&(chapter_index as u8))
+                && !payload[interpolation_offset + 2..].contains(&ENDING_SCROLL_TURN_INTERPOLATION),
+            "ending chapter record {chapter_index} turn slot changed"
+        );
+        protected_original_chapter_digit_byte_count += payload[..interpolation_offset]
+            .iter()
+            .filter(|byte| (0x60..=0x69).contains(*byte))
+            .count();
+        japanese_literal_byte_count += japanese_literal_count(payload);
+
+        let chapter_title_file_offset = source_file_offset(0x0F, *chapter_title_pointer)?;
+        let chapter_title_end = rom.data()
+            [chapter_title_file_offset..CHAPTER_TITLE_DATA_END_EXCLUSIVE]
+            .iter()
+            .position(|byte| *byte == CHAPTER_TITLE_TERMINATOR)
+            .with_context(|| format!("chapter title {chapter_index} has no terminator"))?;
+        let chapter_title =
+            &rom.data()[chapter_title_file_offset..chapter_title_file_offset + chapter_title_end];
+        ensure!(
+            semantic_title_bytes(&payload[..interpolation_offset])
+                == semantic_title_bytes(chapter_title),
+            "ending chapter record {chapter_index} diverges from its chapter-title semantic bytes"
+        );
+        chapter_title_semantic_match_count += 1;
+
+        let spacer = records[record_index + 1];
+        ensure!(
+            stream[spacer.payload_start..spacer.payload_end_exclusive] == [0xFF],
+            "ending chapter-record spacer {chapter_index} changed"
+        );
+    }
+    ensure!(
+        protected_original_chapter_digit_byte_count == CHAPTER_TITLE_DIGIT_COUNT,
+        "ending chapter-record protected digit count changed"
+    );
+
+    let aggregate_record = records[ENDING_SCROLL_AGGREGATE_RECORD_INDEX];
+    let aggregate_payload =
+        &stream[aggregate_record.payload_start..aggregate_record.payload_end_exclusive];
+    let aggregate_interpolation_offset = aggregate_payload
+        .iter()
+        .position(|byte| *byte == ENDING_SCROLL_TURN_INTERPOLATION)
+        .context("ending aggregate record has no turn interpolation")?;
+    ensure!(
+        aggregate_payload.get(aggregate_interpolation_offset + 1) == Some(&0x19),
+        "ending aggregate turn slot changed"
+    );
+    japanese_literal_byte_count += japanese_literal_count(aggregate_payload);
+
+    let trailing_blank_records = &records[ENDING_SCROLL_AGGREGATE_RECORD_INDEX + 1..];
+    ensure!(
+        trailing_blank_records.len() == ENDING_SCROLL_TRAILING_BLANK_RECORD_COUNT
+            && trailing_blank_records.iter().all(|record| {
+                stream[record.payload_start..record.payload_end_exclusive] == [0xFF]
+            }),
+        "ending scroll trailing blank lifetime changed"
+    );
+
+    Ok(EndingChapterRecordTranslationSurface {
+        screen_role: "ending_chapter_record_scroll",
+        ending_phase_address: 0x7731,
+        ending_phase_address_hex: "0x7731",
+        ending_phase: 0x01,
+        ending_phase_hex: "0x01",
+        inner_state_address: 0x7733,
+        inner_state_address_hex: "0x7733",
+        stream: SourceRange {
+            prg_bank: 0x04,
+            prg_bank_hex: "0x04".to_owned(),
+            cpu_address: ENDING_SCROLL_STREAM_ADDRESS,
+            cpu_address_hex: format!("0x{ENDING_SCROLL_STREAM_ADDRESS:04X}"),
+            end_exclusive_cpu_address: ENDING_SCROLL_STREAM_END_EXCLUSIVE_ADDRESS,
+            end_exclusive_cpu_address_hex: format!(
+                "0x{ENDING_SCROLL_STREAM_END_EXCLUSIVE_ADDRESS:04X}"
+            ),
+            file_offset: stream_file_offset,
+            file_offset_hex: format!("0x{stream_file_offset:05X}"),
+            byte_count: stream.len(),
+        },
+        stream_sha1: sha1_hex(stream),
+        record_count: records.len(),
+        preserved_original_record_count: ENDING_SCROLL_PRESERVED_RECORD_COUNT,
+        chapter_record_count: ENDING_SCROLL_CHAPTER_RECORD_COUNT,
+        aggregate_record_count: 1,
+        chapter_title_semantic_match_count,
+        protected_original_chapter_digit_byte_count,
+        japanese_literal_byte_count,
+        turn_interpolation_control: ENDING_SCROLL_TURN_INTERPOLATION,
+        turn_interpolation_control_hex: "0xED",
+        chapter_turn_slot_range: "0x76D2..0x76EA selected by inline indices 0x00..0x18",
+        aggregate_turn_slot: 0x19,
+        aggregate_turn_slot_hex: "0x19",
+        trailing_blank_record_count: trailing_blank_records.len(),
+        semantic_source_policy: "the twenty-five ending rows duplicate the semantic Japanese bytes of the chapter-name table with different layout and turn interpolation; one approved chapter-title translation must drive both physical encodings",
+        translation_handling: "translate Japanese chapter titles and the aggregate/turn labels only; preserve the forty-one chapter-number digits and every runtime-generated turn digit",
+    })
+}
+
+fn semantic_title_bytes(bytes: &[u8]) -> Vec<u8> {
+    bytes
+        .iter()
+        .copied()
+        .filter(|byte| *byte != 0xFF && !(0x60..=0x69).contains(byte))
+        .collect()
+}
+
+fn japanese_literal_count(bytes: &[u8]) -> usize {
+    let mut count = 0;
+    let mut cursor = 0;
+    while cursor < bytes.len() {
+        let byte = bytes[cursor];
+        if byte == ENDING_SCROLL_TURN_INTERPOLATION {
+            cursor += 2;
+            continue;
+        }
+        if byte <= 0x5F || (0x84..=0x8B).contains(&byte) {
+            count += 1;
+        }
+        cursor += 1;
+    }
+    count
 }
 
 fn regular_save_reachability() -> RegularSaveReachability {
@@ -1546,26 +2255,25 @@ fn transition_screens() -> Vec<TransitionScreen> {
                 },
                 InputAction {
                     input: "Start",
-                    immediate_effect: "advance to substate 0D and enter bank-07 handler 03, an unpartitioned six-phase battle-animation test sequence",
+                    immediate_effect: "advance to substate 0D and enter bank-07 handler 03; the outer six phases settle into the automatic shared battle-animation lifetimes",
                     may_cause_persistent_gameplay_mutation: false,
-                    next_role: "battle_animation_test_sequence",
+                    next_role: "battle_animation",
                 },
                 InputAction {
                     input: "Select",
-                    immediate_effect: "advance through substates 0E and 0F into bank-04 handler 04, an unpartitioned thirty-phase ending sequence",
+                    immediate_effect: "advance through substates 0E and 0F into bank-04 handler 04; the automatic ending begins with the preserved opening-and-cast scroll",
                     may_cause_persistent_gameplay_mutation: false,
-                    next_role: "ending_sequence",
+                    next_role: "ending_opening_and_cast_scroll",
                 },
             ],
             focus_elements: &[
                 "preserve every original English label and digit",
-                "source-bound sound-number selection and event controls",
-                "Start and Select downstream state-machine entries",
-                "screen exit and re-entry behavior",
+                "runtime-observed sound-number selection and transient event writes",
+                "Start's repeating shared battle lifetimes",
+                "Select's automatic preserved and Japanese ending lifetimes through terminal blinking",
             ],
             unresolved_focus: &[
-                "runtime effects of the source-bound sound selection and event writes",
-                "visible screen lifetimes inside the six-phase battle-animation test and thirty-phase ending sequence",
+                "battle-dialogue record storage boundaries and the complete battle and ending temporal glyph, portrait, sprite, defeat, and unfavorable-variant union",
             ],
         },
         TransitionScreen {
@@ -1661,14 +2369,27 @@ const fn chr_pair(left_fd: u8, left_fe: u8, right_fd: u8, right_fe: u8) -> ChrPa
 
 fn bind_source_region(rom: &Rom, spec: SourceRegionSpec) -> Result<SourceRegionBinding> {
     let file_offset = source_file_offset(spec.prg_bank, spec.cpu_address)?;
+    let byte_count = match spec.expectation {
+        RegionExpectation::Bytes(bytes) => bytes.len(),
+        RegionExpectation::Sha1 { byte_count, .. } => byte_count,
+    };
     let end = file_offset
-        .checked_add(spec.bytes.len())
+        .checked_add(byte_count)
         .context("chapter-transition source region overflow")?;
     let actual = rom
         .data()
         .get(file_offset..end)
         .with_context(|| format!("{} source region is outside the ROM", spec.role))?;
-    ensure!(actual == spec.bytes, "{} source bytes changed", spec.role);
+    match spec.expectation {
+        RegionExpectation::Bytes(bytes) => {
+            ensure!(actual == bytes, "{} source bytes changed", spec.role)
+        }
+        RegionExpectation::Sha1 { expected_sha1, .. } => ensure!(
+            sha1_hex(actual) == expected_sha1,
+            "{} source-region SHA-1 changed",
+            spec.role
+        ),
+    }
     let typed_instructions = match spec.kind {
         RegionKind::Code => decode_rp2a03_sequence(actual, spec.cpu_address, spec.role)?,
         RegionKind::Data => Vec::new(),
@@ -1686,7 +2407,7 @@ fn bind_source_region(rom: &Rom, spec: SourceRegionSpec) -> Result<SourceRegionB
         cpu_address_hex: format!("0x{:04X}", spec.cpu_address),
         file_offset,
         file_offset_hex: format!("0x{file_offset:05X}"),
-        byte_count: spec.bytes.len(),
+        byte_count,
         source_sha1: sha1_hex(actual),
         typed_instructions,
     })
@@ -1962,13 +2683,29 @@ mod tests {
     fn chapter_transition_code_regions_use_typed_rp2a03_decode() {
         for spec in SOURCE_REGIONS {
             if matches!(spec.kind, RegionKind::Code) {
-                let instructions =
-                    decode_rp2a03_sequence(spec.bytes, spec.cpu_address, spec.role).unwrap();
-                assert!(
-                    !instructions.is_empty(),
-                    "{} has no instructions",
-                    spec.role
-                );
+                match spec.expectation {
+                    RegionExpectation::Bytes(bytes) => {
+                        let instructions =
+                            decode_rp2a03_sequence(bytes, spec.cpu_address, spec.role).unwrap();
+                        assert!(
+                            !instructions.is_empty(),
+                            "{} has no instructions",
+                            spec.role
+                        );
+                    }
+                    RegionExpectation::Sha1 {
+                        byte_count,
+                        expected_sha1,
+                    } => {
+                        assert!(byte_count != 0, "{} has an empty code range", spec.role);
+                        assert_eq!(
+                            expected_sha1.len(),
+                            40,
+                            "{} has no SHA-1 expectation",
+                            spec.role
+                        );
+                    }
+                }
             }
         }
     }

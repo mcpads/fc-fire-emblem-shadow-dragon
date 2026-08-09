@@ -745,7 +745,7 @@ mod tests {
 
         assert_eq!(
             report.next_observation_gate.gate_role,
-            "battle_and_ending_translation_surface_binding"
+            "battle_dialogue_record_boundaries_and_temporal_glyph_union"
         );
         assert_eq!(
             report.next_observation_gate.gate_kind,
@@ -776,7 +776,7 @@ mod tests {
     #[test]
     fn observation_gate_cannot_masquerade_as_a_screen_role() {
         let invalid_registry = REGISTRY_JSON.replacen(
-            "\"gate_role\": \"battle_and_ending_translation_surface_binding\"",
+            "\"gate_role\": \"battle_dialogue_record_boundaries_and_temporal_glyph_union\"",
             "\"gate_role\": \"title\"",
             1,
         );

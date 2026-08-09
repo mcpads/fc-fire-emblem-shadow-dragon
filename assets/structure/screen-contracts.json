@@ -1,7 +1,7 @@
 {
   "schema": 2,
   "next_observation_gate": {
-    "gate_role": "battle_and_ending_translation_surface_binding",
+    "gate_role": "battle_dialogue_record_boundaries_and_temporal_glyph_union",
     "gate_kind": "screen_sequence",
     "focus_screen_roles": [
       "battle_animation",
@@ -12,14 +12,15 @@
       "all six sound-test controls now have source and runtime evidence; Up and Down change the selector while A and B emit transient sound-event writes",
       "Start automatically reuses shared battle-animation lifetimes instead of exposing one screen per outer source phase",
       "Select automatically reaches preserved-English story and credits, Japanese chapter records and character epilogues, and a blinking preserved final signature without further input",
+      "the shared battle engine is source-bound to the unit, enemy, class, item, and battle-dialogue sources; the ending record stream and both epilogue dialogue tables are also structurally bound",
       "visible lifetimes, not source phase counts or single-frame captures, define the screen roles"
     ],
     "unresolved_focus": [
-      "source writers, source tables, and glyph unions for the Japanese battle messages and labels",
-      "source writers and structural boundaries for Japanese chapter records and character epilogues",
-      "temporal union checks that retain English, Roman names, digits, portraits, sprites, and the blinking final signature"
+      "per-record storage boundaries for the separate battle-dialogue format",
+      "complete temporal glyph, portrait, sprite, defeat, and unfavorable-variant unions",
+      "temporal union checks that retain English, digits, portraits, sprites, and the blinking final signature"
     ],
-    "next_action": "bind each Japanese-bearing battle and ending lifetime to its source writer and text structure, then size Hangul page coverage while preserving every observed English, Roman-name, digit, portrait, sprite, and blinking phase"
+    "next_action": "prove battle-dialogue record storage boundaries and collect complete temporal glyph, portrait, sprite, defeat, and unfavorable-variant unions before sizing Hangul page coverage"
   },
   "unpartitioned_surface_families": [],
   "screens": [
@@ -243,14 +244,15 @@
         "the source-bound Start route enters substate 0D and reveals transition blank, one- and two-unit panels, forecast, strike, damage, critical, defeat, EXP, and subsequent battle-pair lifetimes without further input",
         "Japanese unit names, weapons, forecast labels, strike messages, damage messages, critical messages, and result messages share the battle surface",
         "original LV, HIT, EXP, HP bars, percentages, damage values, and other digits remain preservation targets",
+        "bank 05 shared phase state 047C has 32 handlers and binds the visible route to unit, enemy, class, item, and bank 04 battle-dialogue sources",
         "six outer test phases do not equal six visible screens; the visible sequence is owned by the shared inner battle engine"
       ],
       "unresolved_focus": [
-        "source writers and text structures for every observed Japanese label and message lifetime",
+        "per-record storage boundaries for the separate battle-dialogue format",
         "complete CHR, sprite, and animation-phase union across ordinary and debug battle pairs",
         "defeat and unfavorable battle variants needed by the final regression route"
       ],
-      "next_gate": "bind the observed unit-panel, forecast, strike, damage, critical, defeat, and EXP lifetimes to their shared source writers before budgeting Hangul pages",
+      "next_gate": "bind the battle-dialogue records and complete the temporal glyph, sprite, defeat, and unfavorable-variant union before budgeting Hangul pages",
       "contract_state": "observed_partial"
     },
     {
@@ -386,9 +388,10 @@
       "known_focus": [
         "left 1C/1C and right 00/00 CHR shadow pairs",
         "original English story text, CAST label, and Roman character names are preservation targets",
+        "source records 0 through 42 of the A826..ACC8 shared stream are the preserved-original prefix; record 43 begins the Japanese chapter rows",
         "irregular samples from offsets 171 through 6500 cover text emergence, full paragraphs, and early and late cast names"
       ],
-      "unresolved_focus": ["complete English scroll-phase glyph union and transition into the chapter records"],
+      "unresolved_focus": ["complete English scroll-phase glyph union"],
       "next_gate": "retain as a preserved-original temporal regression surface",
       "contract_state": "observed_partial"
     },
@@ -402,13 +405,13 @@
       "known_focus": [
         "left 1C/1C and right 00/00 CHR shadow pairs",
         "Japanese chapter titles and the Japanese turn unit are translation targets while chapter and turn digits remain preserved",
+        "the bound A826..ACC8 stream has 113 records: 43 preserved records, 25 chapter rows with matching chapter-title semantic bytes and dynamic turn slots 00..18, one aggregate row using slot 19, and 19 trailing blanks",
         "offsets 8000, 10000, and 12500 cover early, middle, and late chapter records"
       ],
       "unresolved_focus": [
-        "source writer and table boundaries for Japanese chapter records without emitting bulk narrative content",
         "complete record-list glyph union and transition into staff credits"
       ],
-      "next_gate": "bind the Japanese chapter-record writer and structure while preserving chapter and turn digits",
+      "next_gate": "measure the complete record-list glyph union while preserving all chapter and runtime turn digits",
       "contract_state": "observed_partial"
     },
     {
@@ -437,13 +440,14 @@
       "known_focus": [
         "observed left CHR shadow pairs include 1D/1D, 10/10, and 13/13 with right 00/00",
         "portrait, Japanese character name, and Japanese epilogue lines change as one automatic lifetime",
+        "phase 0F selects structurally bounded dialogue tables 40 and 41; phase 10 waits for their shared dialogue consumer and advances automatically",
         "offsets 18000, 18251, 18703, and 19037 visibly cover distinct characters and portrait-page changes"
       ],
       "unresolved_focus": [
-        "source pointer, writer, portrait, and temporal union for every character epilogue",
-        "complete epilogue content and translations remain outside this structural screen contract"
+        "complete portrait and CHR-page union across all character epilogues",
+        "runtime coverage of every direct and routing epilogue entry; content and translations remain outside this structural screen contract"
       ],
-      "next_gate": "bind reusable epilogue pointer and writer structure without folding bulk narrative work into the screen contract",
+      "next_gate": "complete the portrait and CHR-page union without folding bulk narrative work into the screen contract",
       "contract_state": "observed_partial"
     },
     {

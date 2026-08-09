@@ -583,6 +583,25 @@ pub(crate) struct ShopDialogueTableBinding {
 }
 
 #[derive(Debug, Serialize)]
+pub(crate) struct TranslationSurfaceDialogueTableBinding {
+    pub(crate) table_id: &'static str,
+    pub(crate) source_prg_bank: u8,
+    pub(crate) source_prg_bank_hex: String,
+    pub(crate) pointer_table_cpu_address: u16,
+    pub(crate) pointer_table_cpu_address_hex: String,
+    pub(crate) pointer_table_sha1: String,
+    pub(crate) pointer_count: usize,
+    pub(crate) unique_target_count: usize,
+    pub(crate) consumer_binding_status: &'static str,
+    pub(crate) directory_selector: Option<u8>,
+    pub(crate) directory_selector_hex: Option<String>,
+    pub(crate) separate_loader_cpu_address: Option<u16>,
+    pub(crate) separate_loader_cpu_address_hex: Option<String>,
+    pub(crate) proven_record_count: Option<usize>,
+    pub(crate) unique_record_storage_byte_count: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
 struct DialogueStructureReport {
     schema_version: u8,
     scope: ReportScope,
@@ -1238,6 +1257,69 @@ pub(crate) fn inspect_shop_dialogue_table(source: &[u8]) -> Result<ShopDialogueT
         first_entry_pointer_cpu_address: first_entry.pointer_cpu_address,
         first_entry_pointer_cpu_address_hex: first_entry.pointer_cpu_address_hex.clone(),
     })
+}
+
+pub(crate) fn inspect_translation_surface_dialogue_tables(
+    source: &[u8],
+) -> Result<Vec<TranslationSurfaceDialogueTableBinding>> {
+    const TABLE_IDS: [&str; 3] = [
+        "battle-dialogue",
+        "epilogue-dialogue",
+        "epilogue-routing-dialogue",
+    ];
+
+    TABLE_IDS
+        .into_iter()
+        .map(|table_id| {
+            let spec = DIALOGUE_TABLE_SPECS
+                .iter()
+                .find(|spec| spec.id == table_id)
+                .with_context(|| format!("translation-surface dialogue table {table_id} is absent"))?;
+            let report = extract_dialogue_table(source, spec)?;
+            let directory_selector = report
+                .directory_binding
+                .as_ref()
+                .map(|directory| directory.selector);
+            let directory_selector_hex = report
+                .directory_binding
+                .as_ref()
+                .map(|directory| directory.selector_hex.clone());
+            let separate_loader_cpu_address = report
+                .separate_consumer_binding
+                .as_ref()
+                .map(|consumer| consumer.loader_cpu_address);
+            let separate_loader_cpu_address_hex = report
+                .separate_consumer_binding
+                .as_ref()
+                .map(|consumer| consumer.loader_cpu_address_hex.clone());
+            let proven_record_count = report
+                .main_record_storage_summary
+                .as_ref()
+                .map(|summary| summary.unique_record_count);
+            let unique_record_storage_byte_count = report
+                .main_record_storage_summary
+                .as_ref()
+                .map(|summary| summary.unique_storage_byte_count);
+
+            Ok(TranslationSurfaceDialogueTableBinding {
+                table_id: report.id,
+                source_prg_bank: report.source_prg_bank,
+                source_prg_bank_hex: report.source_prg_bank_hex,
+                pointer_table_cpu_address: report.pointer_table_cpu_address,
+                pointer_table_cpu_address_hex: report.pointer_table_cpu_address_hex,
+                pointer_table_sha1: report.pointer_table_sha1,
+                pointer_count: report.pointer_count,
+                unique_target_count: report.unique_target_count,
+                consumer_binding_status: report.consumer_binding_status,
+                directory_selector,
+                directory_selector_hex,
+                separate_loader_cpu_address,
+                separate_loader_cpu_address_hex,
+                proven_record_count,
+                unique_record_storage_byte_count,
+            })
+        })
+        .collect()
 }
 
 fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
