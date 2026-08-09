@@ -143,6 +143,14 @@ enum Command {
         #[arg(long, default_value = "private/dialogue/main-workspace.json")]
         workspace: PathBuf,
     },
+    /// Count reviewed Korean glyphs without emitting dialogue or glyph characters.
+    AnalyzeMainDialogueGlyphWorkset {
+        source: PathBuf,
+        #[arg(long, default_value = "private/dialogue/main-workspace.json")]
+        workspace: PathBuf,
+        #[arg(long, default_value = "out/main-dialogue-glyph-workset.json")]
+        report: PathBuf,
+    },
     /// Plan variable-length main-dialogue storage without encoding or writing a ROM.
     PlanMainDialogueReinsertion {
         source: PathBuf,
@@ -509,6 +517,24 @@ fn main() -> Result<()> {
                 summary.filled_line_count,
                 summary.complete_line_count,
                 summary.target_glyph_count
+            );
+        }
+        Command::AnalyzeMainDialogueGlyphWorkset {
+            source,
+            workspace,
+            report,
+        } => {
+            let summary =
+                dialogue_assets::analyze_main_dialogue_glyph_workset(&source, &workspace, &report)?;
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "main dialogue glyph workset: {} filled lines, {} complete lines, {} filled unique glyphs, {} approved unique glyphs, ready: {}",
+                summary.filled_line_count,
+                summary.complete_line_count,
+                summary.filled_unique_glyph_count,
+                summary.approved_unique_glyph_count,
+                summary.working_set_ready
             );
         }
         Command::PlanMainDialogueReinsertion {

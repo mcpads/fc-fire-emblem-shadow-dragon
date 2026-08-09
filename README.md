@@ -12,7 +12,7 @@
 
 설정 항목 `サウンド`, `アニメーション`, `ウエイトタイマー`를 각각 `사운드`, `애니메이션`, `대기시간`으로 바꾸는 페이지 전환 PoC와, 부대 목록 머리말 `なまえ`를 `이름`으로 바꾸는 혼합 문자 PoC를 제공한다. 설정과 부대 목록은 각각 화면별 두 한글 페이지를 사용하며, Mesen에서 두 경로 모두 `A → B → A` 선택과 화면 이탈 뒤 원본 CHR 복구를 확인했다. 부대 목록의 페이지별 한글 107자는 합집합 212자를 이루고, 한글 `이름`과 원본 `LV`·`HP`·숫자·일본어 유닛명을 함께 보존한다. 이로써 동적 글꼴 공급 관문 G3를 통과했지만 아직 정식 패치나 배포 후보는 아니다.
 
-매퍼 변환은 MMC2식 CHR 래치와 MMC3식 PRG·SRAM을 함께 제공하는 mapper 165를 채택했다. 무번역 프로브는 원본 CHR을 보존한 채 재배치하고, 관측한 FD/FE 쌍용 변형 페이지 1개를 자동 생성한다. 타이틀·자동 병종 설명·1장 인트로 대화·전투·게임 오버·중단 저장과 재개·1장 완료 저장·콜드 로드·2장 전환 표본이 원본과 동등해 G2를 통과했다. 화면 계약 보고서는 실제 화면 역할 45개를 모두 실행 관측했고 42개는 CHR 쌍까지 결속했다. 실제 이동·턴 종료·전투와 `しろ` 선택으로 11장 종료 대사, 원본 영어 `NEXT STORY`, 저장 제안, 저장 완료, 검은 자동 전환, 12장 도입까지 연속 관측했다. 사운드 테스트 공용 전투 11개, 자동 엔딩 18개, 턴 경계 게임 오버 12개, 적 선공 정규 전투 11개, 플레이어 선공 정규 전투 10개 시간 표본으로 패배와 전투 경로 극성을 닫았다. 인물 후일담은 112개 보이는 엔트리의 560개 불규칙 표본과 선택자 이벤트로 13개 CHR 쌍 및 직접·라우팅 제어 흐름을 닫았다. 다음 구현 관문은 검토된 번역문의 실제 한글 글리프 작업 집합 계산이다. 아직 정식 패치나 배포 후보는 아니다.
+매퍼 변환은 MMC2식 CHR 래치와 MMC3식 PRG·SRAM을 함께 제공하는 mapper 165를 채택했다. 무번역 프로브는 원본 CHR을 보존한 채 재배치하고, 관측한 FD/FE 쌍용 변형 페이지 1개를 자동 생성한다. 타이틀·자동 병종 설명·1장 인트로 대화·전투·게임 오버·중단 저장과 재개·1장 완료 저장·콜드 로드·2장 전환 표본이 원본과 동등해 G2를 통과했다. 화면 계약 보고서는 실제 화면 역할 45개를 모두 실행 관측했고 42개는 CHR 쌍까지 결속했다. 실제 이동·턴 종료·전투와 `しろ` 선택으로 11장 종료 대사, 원본 영어 `NEXT STORY`, 저장 제안, 저장 완료, 검은 자동 전환, 12장 도입까지 연속 관측했다. 사운드 테스트 공용 전투 11개, 자동 엔딩 18개, 턴 경계 게임 오버 12개, 적 선공 정규 전투 11개, 플레이어 선공 정규 전투 10개 시간 표본으로 패배와 전투 경로 극성을 닫았다. 인물 후일담은 112개 보이는 엔트리의 560개 불규칙 표본과 선택자 이벤트로 13개 CHR 쌍 및 직접·라우팅 제어 흐름을 닫았다. 검토 상태별 실제 한글 글리프 집합을 내용 비공개 집계로 계산하는 관문도 만들었지만, 현재 2,732줄은 모두 미번역이라 최종 집합과 한 페이지 수용 여부는 아직 판정하지 않는다. 다음 관문은 검토된 한국어 번역 입력을 축적해 이 집합을 확정하는 것이다. 아직 정식 패치나 배포 후보는 아니다.
 
 ```sh
 cargo run -p fc-fire-emblem-patch -- verify-source "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
@@ -27,6 +27,7 @@ cargo run -p fc-fire-emblem-patch -- analyze-item-flow "roms/Fire Emblem - Ankok
 cargo run -p fc-fire-emblem-patch -- extract-main-dialogue-source "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- extract-main-dialogue-workspace "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- validate-main-dialogue-workspace "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
+cargo run -p fc-fire-emblem-patch -- analyze-main-dialogue-glyph-workset "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- plan-main-dialogue-reinsertion "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- verify-main-dialogue-source-roundtrip "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- build-options-poc "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
