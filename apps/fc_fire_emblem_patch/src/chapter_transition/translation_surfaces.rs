@@ -39,6 +39,6 @@ pub(super) fn bind_translation_surfaces(rom: &Rom) -> Result<TranslationSurfaceC
         ending_chapter_record_scroll: bind_ending_chapter_record_translation_surface(rom)?,
         ending_character_epilogue: bind_ending_character_epilogue(rom, &dialogue_tables)?,
         dialogue_tables,
-        proof_boundary: "the supported Japanese ROM binds the common battle engine to four fixed text tables and the separate battle-dialogue loader, binds the ending record stream and dynamic turn interpolation, and binds the automatic character epilogue to selectors 0x40 and 0x41; only code sets and structural counts are emitted",
+        proof_boundary: "the supported Japanese ROM binds the common battle engine to five fixed text tables, twenty-two short message templates, one inline forecast label, and the separate battle-dialogue loader; it also binds the ending record stream and automatic character epilogue selectors 0x40 and 0x41; only code sets and structural counts are emitted",
     })
 }

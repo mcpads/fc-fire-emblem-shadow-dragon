@@ -40,6 +40,10 @@ pub(super) struct BattleAnimationTranslationSurface {
     dialogue_selector_address_hex: &'static str,
     dialogue_table_set_address: u16,
     dialogue_table_set_address_hex: &'static str,
+    message_template_pointer_count: usize,
+    message_template_data_byte_count: usize,
+    message_template_loader: CodeLocation,
+    forecast_label: CodeLocation,
     writer_roles: &'static [&'static str],
     translation_handling: &'static str,
     unresolved: &'static [&'static str],
@@ -88,7 +92,13 @@ pub(super) fn bind_battle_animation_translation_surface(
         "battle-dialogue surface structure changed"
     );
 
-    const TABLE_IDS: [&str; 4] = ["unit-names", "enemy-names", "class-names", "item-names"];
+    const TABLE_IDS: [&str; 5] = [
+        "unit-names",
+        "enemy-names",
+        "class-names",
+        "item-names",
+        "terrain-names",
+    ];
     let budgets = scoped_text_table_budgets(rom.data(), &TABLE_IDS)?;
     let mut fixed_text_code_union = BTreeSet::new();
     let fixed_text_tables = budgets
@@ -99,6 +109,7 @@ pub(super) fn bind_battle_animation_translation_surface(
                 "enemy-names" => (0xDFA4, "0xDFA4", "compose_battle_unit_name"),
                 "class-names" => (0xDA1F, "0xDA1F", "compose_battle_class_name"),
                 "item-names" => (0xDAD5, "0xDAD5", "compose_battle_item_name"),
+                "terrain-names" => (0xE5F1, "0xE5F1", "compose_battle_terrain_name"),
                 other => return Err(anyhow::anyhow!("unexpected battle text table {other}")),
             };
             fixed_text_code_union.extend(budget.source_codes.iter().copied());
@@ -152,6 +163,10 @@ pub(super) fn bind_battle_animation_translation_surface(
         dialogue_selector_address_hex: "0x7936",
         dialogue_table_set_address: 0x7935,
         dialogue_table_set_address_hex: "0x7935",
+        message_template_pointer_count: 22,
+        message_template_data_byte_count: 0x10B,
+        message_template_loader: location(0x07, 0x82DC),
+        forecast_label: location(0x05, 0x96B6),
         writer_roles: &[
             "select_battle_unit_name_source",
             "compose_battle_unit_name",
@@ -163,6 +178,8 @@ pub(super) fn bind_battle_animation_translation_surface(
             "compose_battle_dialogue_continuation_one",
             "compose_battle_dialogue_continuation_two",
             "compose_battle_class_and_dialogue",
+            "compose_battle_terrain_name",
+            "select_battle_message_template",
         ],
         translation_handling: "the debug route reuses the gameplay battle engine and its shared text sources; translate Japanese names, labels, and messages while preserving LV, HIT, EXP, HP bars, percentages, and digits",
         unresolved: &[
