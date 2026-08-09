@@ -287,6 +287,8 @@ cargo run -p fc-fire-emblem-patch -- build-mmc5-dialogue-exram-probe \
 
 `extract-battle-dialogue-workspace`는 주 대사와 형식이 다른 전투 대사 28레코드를 `private/dialogue/battle-workspace.json`에 만든다. 포인터 별칭 65개와 정확한 저장 범위 1,152바이트를 다시 검사하고, 4바이트 헤더는 본문 밖 결속 필드로 두며, `EC` 피연산자와 `AB/AC/ED/EE/EF` 제어를 보호 토큰으로 기록한다. 결과는 100줄·일본어 620바이트다. 기존 파일이 있으면 원문과 모든 결속 필드가 같은 번역 줄만 병합하고 달라진 입력은 덮어쓰지 않는다. `validate-battle-dialogue-workspace`는 한국어 필드에 일본어가 남거나 동적 선택자·기존 영문·숫자·제어 순서가 바뀌면 실패한다.
 
+`import-battle-dialogue-draft`는 비공개 TSV의 `line_id<TAB>korean_markup`을 작업공간에 병합한다. TSV는 일본어가 있는 줄을 빠짐없이 정확히 한 번씩 포함해야 하고, 병합 결과가 보호 토큰 검증을 통과해야만 작업공간을 원자적으로 교체한다. 현재 일본어 포함 70줄을 모두 `needs_human_review` 초벌로 채웠으며 제어 전용 30줄은 원문 상태를 유지한다.
+
 ```sh
 cargo run -p fc-fire-emblem-patch -- extract-battle-dialogue-workspace \
   'roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes'

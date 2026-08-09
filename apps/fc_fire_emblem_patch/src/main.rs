@@ -149,6 +149,13 @@ enum Command {
         #[arg(long, default_value = "private/dialogue/battle-workspace.json")]
         workspace: PathBuf,
     },
+    /// Import a complete private first-pass battle-dialogue TSV.
+    ImportBattleDialogueDraft {
+        #[arg(long, default_value = "private/dialogue/battle-workspace.json")]
+        workspace: PathBuf,
+        #[arg(long, default_value = "private/dialogue/battle-draft.tsv")]
+        draft: PathBuf,
+    },
     /// Validate private translations without encoding or writing a ROM.
     ValidateMainDialogueWorkspace {
         source: PathBuf,
@@ -557,6 +564,15 @@ fn main() -> Result<()> {
                 summary.filled_line_count,
                 summary.complete_line_count,
                 summary.target_glyph_count
+            );
+        }
+        Command::ImportBattleDialogueDraft { workspace, draft } => {
+            let summary = dialogue_assets::import_battle_dialogue_draft(&workspace, &draft)?;
+            println!("updated {}", workspace.display());
+            println!("workspace SHA-1: {}", summary.workspace_sha1);
+            println!(
+                "imported {} battle dialogue draft lines",
+                summary.imported_line_count
             );
         }
         Command::ValidateMainDialogueWorkspace { source, workspace } => {

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use super::*;
 
 #[derive(Debug)]
@@ -17,6 +19,12 @@ pub(crate) struct BattleDialogueValidationSummary {
     pub(crate) filled_line_count: usize,
     pub(crate) complete_line_count: usize,
     pub(crate) target_glyph_count: usize,
+}
+
+#[derive(Debug)]
+pub(crate) struct BattleDialogueDraftImportSummary {
+    pub(crate) workspace_sha1: String,
+    pub(crate) imported_line_count: usize,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -165,6 +173,63 @@ pub(crate) fn validate_battle_dialogue_workspace(
         filled_line_count,
         complete_line_count,
         target_glyph_count,
+    })
+}
+
+pub(crate) fn import_battle_dialogue_draft(
+    workspace_path: &Path,
+    draft_path: &Path,
+) -> Result<BattleDialogueDraftImportSummary> {
+    let workspace_bytes = fs::read(workspace_path)
+        .with_context(|| format!("read {}", workspace_path.display()))?;
+    let mut workspace: BattleDialogueWorkspace = serde_json::from_slice(&workspace_bytes)
+        .with_context(|| format!("parse {}", workspace_path.display()))?;
+    let draft = fs::read_to_string(draft_path)
+        .with_context(|| format!("read {}", draft_path.display()))?;
+    let mut translations = BTreeMap::new();
+    for (line_number, row) in draft.lines().enumerate() {
+        if row.is_empty() || row.starts_with('#') {
+            continue;
+        }
+        let (id, korean) = row.split_once('\t').with_context(|| {
+            format!("draft line {} has no tab separator", line_number + 1)
+        })?;
+        ensure!(!korean.is_empty(), "draft translation {id} is empty");
+        ensure!(
+            translations.insert(id.to_owned(), korean.to_owned()).is_none(),
+            "draft contains duplicate line {id}"
+        );
+    }
+    let expected_ids = workspace
+        .records
+        .iter()
+        .flat_map(|record| &record.lines)
+        .filter(|line| line.japanese_source_byte_count > 0)
+        .map(|line| line.id.clone())
+        .collect::<BTreeSet<_>>();
+    let actual_ids = translations.keys().cloned().collect::<BTreeSet<_>>();
+    ensure!(
+        actual_ids == expected_ids,
+        "battle draft must cover every Japanese-bearing line exactly once"
+    );
+    for line in workspace
+        .records
+        .iter_mut()
+        .flat_map(|record| &mut record.lines)
+    {
+        if let Some(korean) = translations.get(&line.id) {
+            line.korean.clone_from(korean);
+            line.status = TranslationStatus::NeedsHumanReview;
+        }
+    }
+    validate_translation_fields(&workspace)?;
+    let mut output = serde_json::to_vec_pretty(&workspace)
+        .context("serialize imported battle-dialogue workspace")?;
+    output.push(b'\n');
+    write_file_atomically(workspace_path, &output)?;
+    Ok(BattleDialogueDraftImportSummary {
+        workspace_sha1: sha1_hex(&output),
+        imported_line_count: translations.len(),
     })
 }
 
