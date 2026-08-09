@@ -1,0 +1,710 @@
+use super::*;
+
+pub(super) const PRG_BANK_SIZE: usize = 16 * 1024;
+pub(super) const FIXED_BANK_CPU_BASE: u16 = 0xC000;
+pub(super) const FIXED_BANK_FILE_OFFSET: usize = HEADER_SIZE + PRG_SIZE - PRG_BANK_SIZE;
+pub(super) const PRG_FILE_END: usize = HEADER_SIZE + PRG_SIZE;
+pub(super) const CHR_TILE_BYTES: usize = 16;
+pub(super) const FIRST_FONT_PAGE_BYTES: usize = 4 * 1024;
+pub(super) const MAX_ENTRY_BYTES: usize = 256;
+pub(super) const COMPOSITE_SEGMENT_SEPARATOR_CODE: u8 = 0xED;
+pub(super) const COMPOSITE_END_CODE: u8 = 0xEF;
+pub(super) const COMPOSITE_OVERLAY_BLANK_CODE: u8 = 0xFF;
+pub(super) const DIALOGUE_LINE_END_CODE: u8 = 0xED;
+pub(super) const DIALOGUE_STAGE_WIDTH_MASK: u8 = 0x1F;
+pub(super) const DIALOGUE_TWO_PLANE_HEADER_FLAG: u8 = 0x40;
+pub(super) const DIALOGUE_LINE_BUFFER_ADDRESSES: [u16; 6] =
+    [0x7832, 0x7852, 0x7872, 0x7892, 0x78B2, 0x78D2];
+pub(crate) const DIALOGUE_SCRIPT_CONTROL_CODES: [u8; 15] = [
+    0xEA, 0xE0, 0xE9, 0xE3, 0xE2, 0xE1, 0xDF, 0xEF, 0xE7, 0xE4, 0xE6, 0xEE, 0xEB, 0xED, 0xEC,
+];
+
+pub(super) struct TextTableSpec {
+    pub(super) id: &'static str,
+    pub(super) role: &'static str,
+    pub(super) table_file_offset: usize,
+    pub(super) pointer_count: usize,
+    pub(super) terminator: u8,
+    pub(super) consumer_file_offset: usize,
+    pub(super) consumer_bytes: [u8; 10],
+    pub(super) transfer: TextTransferSpec,
+    pub(super) protected_positions: &'static [ProtectedPosition],
+}
+
+pub(super) struct TextTransferSpec {
+    pub(super) source_pointer: &'static str,
+    pub(super) destination: &'static str,
+    pub(super) recognized_stop_codes: &'static [u8],
+    pub(super) destination_end_code: u8,
+    pub(super) destination_end_origin: &'static str,
+    pub(super) explicit_copy_byte_limit: Option<usize>,
+    pub(super) code_regions: &'static [TransferCodeSpec],
+}
+
+pub(super) struct TransferCodeSpec {
+    pub(super) role: &'static str,
+    pub(super) file_offset: usize,
+    pub(super) bytes: &'static [u8],
+}
+
+pub(super) struct ProtectedPosition {
+    pub(super) entry_index: usize,
+    pub(super) byte_offset: usize,
+    pub(super) code: u8,
+    pub(super) glyph: &'static str,
+}
+
+pub(crate) struct DialogueControlSpec {
+    pub(crate) code: u8,
+    pub(crate) current_pointer_advance_bytes: usize,
+    pub(crate) inline_operand_byte_count: usize,
+    pub(crate) transition_target_byte_count: usize,
+    pub(super) line_effect: &'static str,
+    pub(super) output_effect: &'static str,
+    pub(super) state_effect: &'static str,
+    pub(super) operand_contract: &'static str,
+}
+
+pub(super) const COMPOSITE_TEXT_LAYOUT_CODES: [u8; 2] = [0x0F, 0x1F];
+
+pub(crate) const DIALOGUE_CONTROL_SPECS: [DialogueControlSpec; 15] = [
+    DialogueControlSpec {
+        code: 0xEA,
+        current_pointer_advance_bytes: 1,
+        inline_operand_byte_count: 0,
+        transition_target_byte_count: 0,
+        line_effect: "continue_current_line",
+        output_effect: "replace_two_reserved_prefix_cells_with_9E_AB",
+        state_effect: "none",
+        operand_contract: "none",
+    },
+    DialogueControlSpec {
+        code: 0xE0,
+        current_pointer_advance_bytes: 1,
+        inline_operand_byte_count: 0,
+        transition_target_byte_count: 0,
+        line_effect: "continue_current_line",
+        output_effect: "none",
+        state_effect: "increment_0x7811",
+        operand_contract: "none",
+    },
+    DialogueControlSpec {
+        code: 0xE9,
+        current_pointer_advance_bytes: 2,
+        inline_operand_byte_count: 1,
+        transition_target_byte_count: 0,
+        line_effect: "continue_current_line",
+        output_effect: "none",
+        state_effect: "store_operand_in_0x77FF",
+        operand_contract: "any_byte",
+    },
+    DialogueControlSpec {
+        code: 0xE3,
+        current_pointer_advance_bytes: 1,
+        inline_operand_byte_count: 0,
+        transition_target_byte_count: 0,
+        line_effect: "continue_current_line",
+        output_effect: "none",
+        state_effect: "increment_0x780E",
+        operand_contract: "none",
+    },
+    DialogueControlSpec {
+        code: 0xE2,
+        current_pointer_advance_bytes: 1,
+        inline_operand_byte_count: 0,
+        transition_target_byte_count: 0,
+        line_effect: "continue_current_line",
+        output_effect: "none",
+        state_effect: "increment_0x780F",
+        operand_contract: "none",
+    },
+    DialogueControlSpec {
+        code: 0xE1,
+        current_pointer_advance_bytes: 2,
+        inline_operand_byte_count: 1,
+        transition_target_byte_count: 0,
+        line_effect: "continue_current_line",
+        output_effect: "none",
+        state_effect: "store_operand_in_0x7810",
+        operand_contract: "any_byte",
+    },
+    DialogueControlSpec {
+        code: 0xDF,
+        current_pointer_advance_bytes: 2,
+        inline_operand_byte_count: 1,
+        transition_target_byte_count: 0,
+        line_effect: "continue_current_line",
+        output_effect: "none",
+        state_effect: "select_0x06F0_slot_and_bit_from_operand_nibbles_when_0x767A_is_zero",
+        operand_contract: "high_nibble_selects_slot; low_nibble_indexes_8_byte_bit_table",
+    },
+    DialogueControlSpec {
+        code: 0xEF,
+        current_pointer_advance_bytes: 1,
+        inline_operand_byte_count: 0,
+        transition_target_byte_count: 0,
+        line_effect: "finish_current_line_with_0xED",
+        output_effect: "none",
+        state_effect: "increment_0x7802",
+        operand_contract: "none",
+    },
+    DialogueControlSpec {
+        code: 0xE7,
+        current_pointer_advance_bytes: 1,
+        inline_operand_byte_count: 0,
+        transition_target_byte_count: 0,
+        line_effect: "finish_current_line_with_0xED",
+        output_effect: "none",
+        state_effect: "increment_0x7808",
+        operand_contract: "none",
+    },
+    DialogueControlSpec {
+        code: 0xE4,
+        current_pointer_advance_bytes: 1,
+        inline_operand_byte_count: 0,
+        transition_target_byte_count: 2,
+        line_effect: "finish_current_line_with_0xED",
+        output_effect: "none",
+        state_effect: "increment_0x780B_and_0x7806; copy_two_transition_target_bytes_to_0x780D_and_0x780C",
+        operand_contract: "two_transition_target_bytes_are_read_without_current_pointer_advance",
+    },
+    DialogueControlSpec {
+        code: 0xE6,
+        current_pointer_advance_bytes: 1,
+        inline_operand_byte_count: 0,
+        transition_target_byte_count: 2,
+        line_effect: "finish_current_line_with_0xED",
+        output_effect: "none",
+        state_effect: "increment_0x780A_and_0x7804; copy_two_transition_target_bytes_to_0x780D_and_0x780C",
+        operand_contract: "two_transition_target_bytes_are_read_without_current_pointer_advance",
+    },
+    DialogueControlSpec {
+        code: 0xEE,
+        current_pointer_advance_bytes: 1,
+        inline_operand_byte_count: 0,
+        transition_target_byte_count: 0,
+        line_effect: "finish_current_line_with_0xED",
+        output_effect: "none",
+        state_effect: "increment_0x7804",
+        operand_contract: "none",
+    },
+    DialogueControlSpec {
+        code: 0xEB,
+        current_pointer_advance_bytes: 1,
+        inline_operand_byte_count: 0,
+        transition_target_byte_count: 0,
+        line_effect: "finish_current_line_with_0xED",
+        output_effect: "none",
+        state_effect: "increment_0x7805_and_0x7806",
+        operand_contract: "none",
+    },
+    DialogueControlSpec {
+        code: 0xED,
+        current_pointer_advance_bytes: 1,
+        inline_operand_byte_count: 0,
+        transition_target_byte_count: 0,
+        line_effect: "finish_current_line_with_0xED",
+        output_effect: "none",
+        state_effect: "increment_0x7806",
+        operand_contract: "none",
+    },
+    DialogueControlSpec {
+        code: 0xEC,
+        current_pointer_advance_bytes: 2,
+        inline_operand_byte_count: 1,
+        transition_target_byte_count: 0,
+        line_effect: "continue_current_line",
+        output_effect: "append_selected_sram_string_excluding_0xEF",
+        state_effect: "none",
+        operand_contract: "operand_0_through_3_selects_one_of_four_sram_strings",
+    },
+];
+
+pub(super) const COMPOSITE_TEXT_LAYOUT_CODE_REGIONS: [TransferCodeSpec; 3] = [
+    TransferCodeSpec {
+        role: "first_pass_decrement_before_append",
+        file_offset: 0x2CF59,
+        bytes: &[
+            0xAD, 0x50, 0x04, 0x48, 0x20, 0xA9, 0x8F, 0xA5, 0x06, 0xC9, 0xEF, 0xF0, 0x3B, 0xC9,
+            0xED, 0xF0, 0x0D, 0xC9, 0x0F, 0xF0, 0x08, 0xC9, 0x1F, 0xF0, 0x04, 0xA9, 0xFF, 0xD0,
+            0x01, 0xCA, 0x20, 0x9B, 0x8F, 0xA5, 0x06, 0xC9, 0xED, 0xD0, 0xDD,
+        ],
+    },
+    TransferCodeSpec {
+        role: "second_pass_skip_combining_codes",
+        file_offset: 0x2CF84,
+        bytes: &[
+            0x20, 0xA9, 0x8F, 0xA5, 0x06, 0xC9, 0xED, 0xF0, 0x08, 0xC9, 0x0F, 0xF0, 0xF3, 0xC9,
+            0x1F, 0xF0, 0xEF, 0x20, 0x9B, 0x8F, 0xA5, 0x06, 0xC9, 0xED, 0xD0, 0xE6, 0x4C, 0x49,
+            0x8F,
+        ],
+    },
+    TransferCodeSpec {
+        role: "append_and_advance_output_cell",
+        file_offset: 0x2CFAB,
+        bytes: &[
+            0x9D, 0x11, 0x03, 0xE8, 0xE0, 0xFF, 0x90, 0x05, 0xA9, 0xEF, 0x9D, 0x10, 0x03, 0x60,
+        ],
+    },
+];
+
+pub(super) const COMPOSITE_TEXT_CONSUMER_CODE_REGIONS: [TransferCodeSpec; 3] = [
+    TransferCodeSpec {
+        role: "invoke_two_output_stages",
+        file_offset: 0x2D618,
+        bytes: &[
+            0x20, 0x1C, 0x96, 0xEE, 0xD4, 0x05, 0x20, 0x1C, 0x96, 0x20, 0x01, 0x97, 0xEE, 0xD4,
+            0x05, 0xA9, 0x01, 0x85, 0x21, 0x60,
+        ],
+    },
+    TransferCodeSpec {
+        role: "bind_composite_output_pointer",
+        file_offset: 0x2D62C,
+        bytes: &[0xA9, 0x11, 0x85, 0x06, 0xA9, 0x03, 0x85, 0x07],
+    },
+    TransferCodeSpec {
+        role: "consume_with_shared_cursor_and_blank_separator",
+        file_offset: 0x2D6F7,
+        bytes: &[
+            0xAC, 0x10, 0x03, 0xB1, 0x06, 0xC9, 0xED, 0xD0, 0x04, 0xE6, 0x0A, 0xA9, 0xFF, 0xC8,
+            0x8C, 0x10, 0x03, 0x9D, 0x01, 0x07, 0xE8, 0xC6, 0x05, 0xD0, 0xDF, 0x60,
+        ],
+    },
+];
+
+pub(super) const COMPOSITE_TEXT_PPU_CODE_REGIONS: [TransferCodeSpec; 6] = [
+    TransferCodeSpec {
+        role: "bind_stage_buffer_and_invoke_serializer",
+        file_offset: 0x2D6A9,
+        bytes: &[
+            0xA9, 0x00, 0x85, 0x02, 0xA9, 0x07, 0x85, 0x03, 0xAD, 0xCF, 0x05, 0x09, 0x20, 0x8D,
+            0x00, 0x07, 0x20, 0x4E, 0xC8, 0xA9, 0x00, 0x85, 0x21, 0x60,
+        ],
+    },
+    TransferCodeSpec {
+        role: "read_stage_descriptor",
+        file_offset: 0x3C85E,
+        bytes: &[
+            0xA0, 0x00, 0xB1, 0x02, 0x29, 0x1F, 0x85, 0x05, 0xB1, 0x02, 0x20, 0x99, 0xC3, 0x85,
+            0x04, 0xAE, 0x80, 0x07,
+        ],
+    },
+    TransferCodeSpec {
+        role: "serialize_stage_payload",
+        file_offset: 0x3C88F,
+        bytes: &[
+            0xA5, 0x01, 0x20, 0xA2, 0xC4, 0xA5, 0x00, 0x20, 0xA2, 0xC4, 0xA5, 0x06, 0x20, 0xA2,
+            0xC4, 0xC8, 0xB1, 0x02, 0x20, 0xA2, 0xC4, 0xC6, 0x06, 0xD0, 0xF6,
+        ],
+    },
+    TransferCodeSpec {
+        role: "append_ppu_command_byte",
+        file_offset: 0x3C4B2,
+        bytes: &[
+            0x9D, 0x81, 0x07, 0xE8, 0xE0, 0x5F, 0x90, 0x0A, 0xAE, 0x80, 0x07, 0xA9, 0x00, 0x9D,
+            0x81, 0x07, 0x68, 0x68, 0x60,
+        ],
+    },
+    TransferCodeSpec {
+        role: "flush_ready_ppu_command_queue",
+        file_offset: 0x3C3B5,
+        bytes: &[
+            0xA5, 0x21, 0xF0, 0x15, 0xA9, 0x81, 0x85, 0x00, 0xA9, 0x07, 0x85, 0x01, 0x20, 0xE7,
+            0xC3, 0xA9, 0x00, 0x8D, 0x80, 0x07, 0x8D, 0x81, 0x07, 0x85, 0x21, 0x60,
+        ],
+    },
+    TransferCodeSpec {
+        role: "write_queued_codes_to_ppu",
+        file_offset: 0x3C3CF,
+        bytes: &[
+            0x8D, 0x06, 0x20, 0xC8, 0xB1, 0x00, 0x8D, 0x06, 0x20, 0xC8, 0xB1, 0x00, 0x0A, 0x20,
+            0xF3, 0xC3, 0x0A, 0xB1, 0x00, 0x29, 0x3F, 0xAA, 0x90, 0x01, 0xC8, 0xB0, 0x01, 0xC8,
+            0xB1, 0x00, 0x8D, 0x07, 0x20, 0xCA, 0xD0, 0xF5, 0xC8, 0x20, 0x78, 0xC3, 0xAE, 0x02,
+            0x20, 0xA0, 0x00, 0xB1, 0x00, 0xD0, 0xCF, 0x4C, 0x6A, 0xC3,
+        ],
+    },
+];
+
+pub(super) const COMPOSITE_PLANE_PACKING_CODE_REGIONS: [TransferCodeSpec; 4] = [
+    TransferCodeSpec {
+        role: "first_parser_call_then_pack",
+        file_offset: 0x2C147,
+        bytes: &[0x20, 0x39, 0x8F, 0x4C, 0x63, 0x81],
+    },
+    TransferCodeSpec {
+        role: "find_separator_and_prepare_overlapping_copy",
+        file_offset: 0x2C173,
+        bytes: &[
+            0xA2, 0x00, 0xE8, 0xBD, 0x11, 0x03, 0xC9, 0xED, 0xD0, 0xF8, 0x86, 0x04, 0x8A, 0x38,
+            0x69, 0x11, 0x85, 0x00, 0x85, 0x02, 0xC6, 0x02, 0xA9, 0x03, 0x85, 0x01, 0x85, 0x03,
+            0xA9, 0x00, 0x85, 0x05, 0x20, 0x09, 0xC2, 0x60,
+        ],
+    },
+    TransferCodeSpec {
+        role: "second_parser_call_then_pack",
+        file_offset: 0x2CB8A,
+        bytes: &[0x20, 0x39, 0x8F, 0x4C, 0x63, 0x81],
+    },
+    TransferCodeSpec {
+        role: "copy_base_plane_over_separator",
+        file_offset: 0x3C219,
+        bytes: &[
+            0xA0, 0x00, 0xA6, 0x04, 0xF0, 0x02, 0xE6, 0x05, 0xB1, 0x00, 0x91, 0x02, 0xC8, 0xD0,
+            0x04, 0xE6, 0x01, 0xE6, 0x03, 0xC6, 0x04, 0xD0, 0xF1, 0xC6, 0x05, 0xD0, 0xED, 0x60,
+        ],
+    },
+];
+
+pub(super) const DIALOGUE_SCRIPT_CODE_REGIONS: [TransferCodeSpec; 10] = [
+    TransferCodeSpec {
+        role: "initialize_sram_line_buffer",
+        file_offset: 0x281FA,
+        bytes: &[
+            0x20, 0x68, 0x86, 0xA9, 0x00, 0x8D, 0xFA, 0x77, 0x8D, 0x07, 0x78, 0x20, 0x3A, 0x83,
+            0x20, 0x48, 0x83, 0xA0, 0x00, 0xA9, 0xFF, 0x91, 0x06, 0xC8, 0x91, 0x06, 0xC8, 0x8C,
+            0xFB, 0x77,
+        ],
+    },
+    TransferCodeSpec {
+        role: "dispatch_script_controls",
+        file_offset: 0x28218,
+        bytes: &[
+            0xAC, 0xFA, 0x77, 0x20, 0x9C, 0xE6, 0xAD, 0x34, 0x79, 0xC9, 0xEA, 0xD0, 0x10, 0xA0,
+            0x00, 0xA9, 0x9E, 0x91, 0x06, 0xC8, 0xA9, 0xAB, 0x91, 0x06, 0xEE, 0xFA, 0x77, 0xD0,
+            0xE3, 0xC9, 0xE0, 0xD0, 0x08, 0xEE, 0x11, 0x78, 0xEE, 0xFA, 0x77, 0xD0, 0xD7, 0xC9,
+            0xE9, 0xD0, 0x05, 0x20, 0x2E, 0x83, 0xD0, 0xCE, 0xC9, 0xE3, 0xD0, 0x08, 0xEE, 0x0E,
+            0x78, 0xEE, 0xFA, 0x77, 0xD0, 0xC2, 0xC9, 0xE2, 0xD0, 0x08, 0xEE, 0x0F, 0x78, 0xEE,
+            0xFA, 0x77, 0xD0, 0xB6, 0xC9, 0xE1, 0xD0, 0x0D, 0xC8, 0x20, 0x9C, 0xE6, 0x8D, 0x10,
+            0x78, 0xC8, 0x8C, 0xFA, 0x77, 0xD0, 0xA5, 0xC9, 0xDF, 0xD0, 0x06, 0x20, 0x1F, 0x83,
+            0x4C, 0x08, 0x82, 0xC9, 0xEF, 0xF0, 0x33, 0xC9, 0xE7, 0xF0, 0x34, 0xC9, 0xE4, 0xF0,
+            0x35, 0xC9, 0xE6, 0xF0, 0x45, 0xC9, 0xEE, 0xF0, 0x52, 0xC9, 0xEB, 0xF0, 0x53, 0xC9,
+            0xED, 0xF0, 0x52, 0xC9, 0xEC, 0xD0, 0x03, 0x4C, 0x64, 0x83,
+        ],
+    },
+    TransferCodeSpec {
+        role: "copy_literal_script_byte_to_line",
+        file_offset: 0x282A0,
+        bytes: &[
+            0xAC, 0xFA, 0x77, 0x20, 0x9C, 0xE6, 0xAC, 0xFB, 0x77, 0x91, 0x06, 0xEE, 0xFA, 0x77,
+            0xEE, 0xFB, 0x77, 0x4C, 0x08, 0x82,
+        ],
+    },
+    TransferCodeSpec {
+        role: "finish_line_controls_and_two_byte_transition_target",
+        file_offset: 0x282B4,
+        bytes: &[
+            0xEE, 0x02, 0x78, 0xD0, 0x35, 0xEE, 0x08, 0x78, 0xD0, 0x30, 0xEE, 0x0B, 0x78, 0xC8,
+            0x20, 0x9C, 0xE6, 0x8D, 0x0D, 0x78, 0xC8, 0x20, 0x9C, 0xE6, 0x8D, 0x0C, 0x78, 0x4C,
+            0xDB, 0x82, 0xEE, 0x0A, 0x78, 0xC8, 0x20, 0x9C, 0xE6, 0x8D, 0x0D, 0x78, 0xC8, 0x20,
+            0x9C, 0xE6, 0x8D, 0x0C, 0x78, 0xEE, 0x04, 0x78, 0xD0, 0x06, 0xEE, 0x05, 0x78, 0xEE,
+            0x06, 0x78,
+        ],
+    },
+    TransferCodeSpec {
+        role: "finish_line_with_terminator",
+        file_offset: 0x282EE,
+        bytes: &[
+            0xEE, 0xFA, 0x77, 0xA9, 0xED, 0xAC, 0xFB, 0x77, 0x91, 0x06, 0xAE, 0xF0, 0x77, 0xAD,
+            0xFA, 0x77, 0x18, 0x7D, 0x12, 0x78, 0x9D, 0x12, 0x78, 0x90, 0x03, 0xFE, 0x14, 0x78,
+            0xA9, 0x00, 0x85, 0x2C, 0xA9, 0x01, 0x8D, 0xFC, 0x77, 0xAD, 0xFF, 0x77, 0x85, 0x2D,
+            0xEE, 0xF7, 0x77, 0x60,
+        ],
+    },
+    TransferCodeSpec {
+        role: "read_banked_script_byte_and_restore_dialogue_bank",
+        file_offset: 0x3E6AC,
+        bytes: &[
+            0xAD, 0xF2, 0x77, 0xF0, 0x03, 0x8D, 0x00, 0xA0, 0xB1, 0x76, 0x8D, 0x34, 0x79, 0xA9,
+            0x0A, 0x8D, 0x00, 0xA0, 0xAD, 0x34, 0x79, 0x60,
+        ],
+    },
+    TransferCodeSpec {
+        role: "apply_packed_state_bit_operand",
+        file_offset: 0x2832F,
+        bytes: &[
+            0xC8, 0x20, 0x9C, 0xE6, 0x85, 0x02, 0xC8, 0x8C, 0xFA, 0x77, 0xA5, 0x02, 0x4C, 0x9F,
+            0xF1,
+        ],
+    },
+    TransferCodeSpec {
+        role: "store_progress_delay_operand",
+        file_offset: 0x2833E,
+        bytes: &[
+            0xC8, 0x20, 0x9C, 0xE6, 0x8D, 0xFF, 0x77, 0xC8, 0x8C, 0xFA, 0x77, 0x60,
+        ],
+    },
+    TransferCodeSpec {
+        role: "bind_sram_line_buffer_by_slot",
+        file_offset: 0x28358,
+        bytes: &[
+            0xAD, 0xF8, 0x77, 0x0A, 0xA8, 0xB9, 0x58, 0x83, 0x85, 0x06, 0xB9, 0x59, 0x83, 0x85,
+            0x07, 0x60, 0x32, 0x78, 0x52, 0x78, 0x72, 0x78, 0x92, 0x78, 0xB2, 0x78, 0xD2, 0x78,
+        ],
+    },
+    TransferCodeSpec {
+        role: "append_selected_sram_string",
+        file_offset: 0x28374,
+        bytes: &[
+            0xC8, 0x20, 0x9C, 0xE6, 0xC8, 0x8C, 0xFA, 0x77, 0x0A, 0xA8, 0xB9, 0x97, 0x83, 0x85,
+            0x08, 0xC8, 0xB9, 0x97, 0x83, 0x85, 0x09, 0xA0, 0x00, 0x8C, 0xFE, 0x77, 0xAC, 0xFE,
+            0x77, 0xB1, 0x08, 0xC9, 0xEF, 0xF0, 0x0D, 0xAC, 0xFB, 0x77, 0x91, 0x06, 0xEE, 0xFB,
+            0x77, 0xEE, 0xFE, 0x77, 0xD0, 0xEA, 0x4C, 0x08, 0x82, 0xF2, 0x78, 0x02, 0x79, 0x12,
+            0x79, 0x22, 0x79,
+        ],
+    },
+];
+
+pub(super) const DIALOGUE_PACKED_STATE_BIT_CODE_REGIONS: [TransferCodeSpec; 1] =
+    [TransferCodeSpec {
+        role: "select_sram_state_slot_and_bit",
+        file_offset: 0x3F1AF,
+        bytes: &[
+            0xAE, 0x7A, 0x76, 0xD0, 0x12, 0x48, 0x29, 0x0F, 0xAA, 0x68, 0x29, 0xF0, 0x4A, 0x4A,
+            0x4A, 0x4A, 0xA8, 0xBD, 0xB7, 0xF1, 0x99, 0xF0, 0x06, 0x60, 0x01, 0x02, 0x04, 0x08,
+            0x10, 0x20, 0x40, 0x80,
+        ],
+    }];
+
+pub(super) const DIALOGUE_RENDERER_CODE_REGIONS: [TransferCodeSpec; 4] = [
+    TransferCodeSpec {
+        role: "initialize_progressive_two_plane_line",
+        file_offset: 0x283CA,
+        bytes: &[
+            0x20, 0x48, 0x83, 0xA2, 0x00, 0xA0, 0x00, 0x8C, 0xFD, 0x77, 0x8C, 0x07, 0x78,
+        ],
+    },
+    TransferCodeSpec {
+        role: "emit_combining_overlay_plane",
+        file_offset: 0x283D7,
+        bytes: &[
+            0xB1, 0x06, 0xC9, 0x0F, 0xF0, 0x0F, 0xC9, 0x1F, 0xF0, 0x0B, 0xC9, 0xED, 0xF0, 0x17,
+            0xA9, 0xFF, 0xEE, 0xFD, 0x77, 0xD0, 0x01, 0xCA, 0x9D, 0x11, 0x03, 0xE8, 0xC8, 0xAD,
+            0xFD, 0x77, 0xCD, 0xFC, 0x77, 0x90, 0xDD, 0xF0, 0xDB, 0xAD, 0x1A, 0x78, 0x38, 0xED,
+            0xFD, 0x77, 0xF0, 0x0C, 0x90, 0x0A, 0xA8, 0xA9, 0xFF, 0x9D, 0x11, 0x03, 0xE8, 0x88,
+            0xD0, 0xF9,
+        ],
+    },
+    TransferCodeSpec {
+        role: "emit_base_plane",
+        file_offset: 0x28411,
+        bytes: &[
+            0xA0, 0x00, 0x8C, 0xFD, 0x77, 0xB1, 0x06, 0xC9, 0x0F, 0xF0, 0x0D, 0xC9, 0x1F, 0xF0,
+            0x09, 0xC9, 0xED, 0xD0, 0x08, 0xEE, 0x07, 0x78, 0xD0, 0x13, 0xC8, 0xD0, 0xEA, 0xEE,
+            0xFD, 0x77, 0x9D, 0x11, 0x03, 0xE8, 0xC8, 0xAD, 0xFD, 0x77, 0xCD, 0xFC, 0x77, 0xD0,
+            0xDA, 0xAD, 0x1A, 0x78, 0x38, 0xED, 0xFD, 0x77, 0xF0, 0x0E, 0x90, 0x0C, 0xA8, 0xA9,
+            0xFF, 0x9D, 0x11, 0x03, 0xE8, 0x88, 0xD0, 0xF9, 0xF0, 0x03, 0xEE, 0x07, 0x78,
+        ],
+    },
+    TransferCodeSpec {
+        role: "serialize_two_plane_line_to_ppu_queue",
+        file_offset: 0x28456,
+        bytes: &[
+            0xAD, 0x16, 0x78, 0x85, 0x00, 0xAD, 0x17, 0x78, 0x85, 0x01, 0xAE, 0xF8, 0x77, 0xF0,
+            0x09, 0x20, 0x1C, 0xC8, 0x20, 0x1C, 0xC8, 0xCA, 0xD0, 0xF7, 0xA6, 0x00, 0xA4, 0x01,
+            0xAD, 0x1A, 0x78, 0x29, 0x1F, 0x09, 0x40, 0x8D, 0x10, 0x03, 0x20, 0x42, 0xC8, 0xAD,
+            0x07, 0x78, 0xF0, 0x03, 0xEE, 0xF7, 0x77, 0xEE, 0xFC, 0x77, 0x60,
+        ],
+    },
+];
+
+pub(super) const TEXT_TABLE_SPECS: [TextTableSpec; 7] = [
+    TextTableSpec {
+        id: "class-names",
+        role: "class names",
+        table_file_offset: 0x3DA2F,
+        pointer_count: 0x17,
+        terminator: 0xEF,
+        consumer_file_offset: 0x14D63,
+        consumer_bytes: [0xBD, 0x1F, 0xDA, 0x85, 0x00, 0xBD, 0x20, 0xDA, 0x85, 0x01],
+        transfer: TextTransferSpec {
+            source_pointer: "0x00/0x01",
+            destination: "0x7A2B,Y",
+            recognized_stop_codes: &[0xEF],
+            destination_end_code: 0xEF,
+            destination_end_origin: "copied_source_terminator",
+            explicit_copy_byte_limit: None,
+            code_regions: &[TransferCodeSpec {
+                role: "copy_loop",
+                file_offset: 0x14D6D,
+                bytes: &[
+                    0xA0, 0x00, 0xB1, 0x00, 0x99, 0x2B, 0x7A, 0xC8, 0xC9, 0xEF, 0xD0, 0xF6,
+                ],
+            }],
+        },
+        protected_positions: &[],
+    },
+    TextTableSpec {
+        id: "item-names",
+        role: "item names",
+        table_file_offset: 0x3DAE5,
+        pointer_count: 0x5B,
+        terminator: 0xEF,
+        consumer_file_offset: 0x0DC63,
+        consumer_bytes: [0xB9, 0xD5, 0xDA, 0x85, 0x00, 0xB9, 0xD6, 0xDA, 0x85, 0x01],
+        transfer: TextTransferSpec {
+            source_pointer: "0x00/0x01",
+            destination: "0x78F2,Y",
+            recognized_stop_codes: &[0xEF],
+            destination_end_code: 0xEF,
+            destination_end_origin: "copied_source_terminator",
+            explicit_copy_byte_limit: Some(16),
+            code_regions: &[TransferCodeSpec {
+                role: "bounded_copy_loop",
+                file_offset: 0x0DC6D,
+                bytes: &[
+                    0xA0, 0x00, 0xB1, 0x00, 0x99, 0xF2, 0x78, 0xC9, 0xEF, 0xF0, 0x05, 0xC8, 0xC0,
+                    0x10, 0xD0, 0xF2, 0x60,
+                ],
+            }],
+        },
+        protected_positions: &[ProtectedPosition {
+            entry_index: 60,
+            byte_offset: 1,
+            code: 0x9B,
+            glyph: ".",
+        }],
+    },
+    TextTableSpec {
+        id: "unit-names",
+        role: "playable unit names",
+        table_file_offset: 0x3DE3B,
+        pointer_count: 0x34,
+        terminator: 0xEF,
+        consumer_file_offset: 0x19B48,
+        consumer_bytes: [0xB9, 0x2B, 0xDE, 0x85, 0x00, 0xB9, 0x2C, 0xDE, 0x85, 0x01],
+        transfer: TextTransferSpec {
+            source_pointer: "0x00/0x01",
+            destination: "(0x02/0x03),Y",
+            recognized_stop_codes: &[0xEF],
+            destination_end_code: 0xEF,
+            destination_end_origin: "copied_source_terminator",
+            explicit_copy_byte_limit: None,
+            code_regions: &[TransferCodeSpec {
+                role: "copy_loop",
+                file_offset: 0x19B52,
+                bytes: &[
+                    0xA0, 0x00, 0xB1, 0x00, 0x91, 0x02, 0xC8, 0xC9, 0xEF, 0xD0, 0xF7, 0x60,
+                ],
+            }],
+        },
+        protected_positions: &[],
+    },
+    TextTableSpec {
+        id: "enemy-names",
+        role: "enemy names",
+        table_file_offset: 0x3DFB4,
+        pointer_count: 0x44,
+        terminator: 0xEF,
+        consumer_file_offset: 0x2CEAA,
+        consumer_bytes: [0xB9, 0xA4, 0xDF, 0x85, 0x00, 0xB9, 0xA5, 0xDF, 0x85, 0x01],
+        transfer: TextTransferSpec {
+            source_pointer: "0x00/0x01",
+            destination: "0x0451,X",
+            recognized_stop_codes: &[0xED, 0xEF],
+            destination_end_code: 0xED,
+            destination_end_origin: "synthesized_segment_separator",
+            explicit_copy_byte_limit: None,
+            code_regions: &[
+                TransferCodeSpec {
+                    role: "call_shared_copy_and_append_separator",
+                    file_offset: 0x2CEC0,
+                    bytes: &[0x20, 0xFA, 0x8E, 0xA9, 0xED, 0x9D, 0x51, 0x04, 0xE8, 0x60],
+                },
+                TransferCodeSpec {
+                    role: "shared_copy_loop",
+                    file_offset: 0x2CF0A,
+                    bytes: &[
+                        0xA0, 0x00, 0xB1, 0x00, 0xC9, 0xEF, 0xF0, 0x0B, 0x9D, 0x51, 0x04, 0xE8,
+                        0xC9, 0xED, 0xF0, 0x03, 0xC8, 0xD0, 0xEF, 0x60,
+                    ],
+                },
+            ],
+        },
+        protected_positions: &[],
+    },
+    TextTableSpec {
+        id: "terrain-names",
+        role: "terrain names",
+        table_file_offset: 0x3E601,
+        pointer_count: 0x0F,
+        terminator: 0xEF,
+        consumer_file_offset: 0x1C497,
+        consumer_bytes: [0xB9, 0xF1, 0xE5, 0x85, 0x08, 0xB9, 0xF2, 0xE5, 0x85, 0x09],
+        transfer: TextTransferSpec {
+            source_pointer: "0x08/0x09",
+            destination: "0x7953,X",
+            recognized_stop_codes: &[0xEF],
+            destination_end_code: 0xEF,
+            destination_end_origin: "copied_source_terminator",
+            explicit_copy_byte_limit: None,
+            code_regions: &[TransferCodeSpec {
+                role: "copy_loop",
+                file_offset: 0x1C2DC,
+                bytes: &[
+                    0xA0, 0x00, 0xB1, 0x08, 0x9D, 0x53, 0x79, 0xC9, 0xEF, 0xF0, 0x04, 0xE8, 0xC8,
+                    0xD0, 0xF3, 0x60,
+                ],
+            }],
+        },
+        protected_positions: &[],
+    },
+    TextTableSpec {
+        id: "location-names",
+        role: "location names",
+        table_file_offset: 0x3EFC7,
+        pointer_count: 0x18,
+        terminator: 0xED,
+        consumer_file_offset: 0x121D0,
+        consumer_bytes: [0xB9, 0xB7, 0xEF, 0x85, 0x04, 0xB9, 0xB8, 0xEF, 0x85, 0x05],
+        transfer: TextTransferSpec {
+            source_pointer: "0x04/0x05",
+            destination: "0x7902,Y",
+            recognized_stop_codes: &[0xED],
+            destination_end_code: 0xEF,
+            destination_end_origin: "synthesized_buffer_terminator",
+            explicit_copy_byte_limit: None,
+            code_regions: &[TransferCodeSpec {
+                role: "copy_and_normalize_terminator",
+                file_offset: 0x121DA,
+                bytes: &[
+                    0xA0, 0x00, 0xB1, 0x04, 0xC9, 0xED, 0xF0, 0x06, 0x99, 0x02, 0x79, 0xC8, 0xD0,
+                    0xF4, 0xA9, 0xEF, 0x99, 0x02, 0x79, 0x60,
+                ],
+            }],
+        },
+        protected_positions: &[],
+    },
+    TextTableSpec {
+        id: "chapter-names",
+        role: "chapter names",
+        table_file_offset: 0x3EE18,
+        pointer_count: 0x19,
+        terminator: 0xED,
+        consumer_file_offset: 0x2CEF2,
+        consumer_bytes: [0xB9, 0x08, 0xEE, 0x85, 0x00, 0xB9, 0x09, 0xEE, 0x85, 0x01],
+        transfer: TextTransferSpec {
+            source_pointer: "0x00/0x01",
+            destination: "0x0451,X",
+            recognized_stop_codes: &[0xED, 0xEF],
+            destination_end_code: 0xED,
+            destination_end_origin: "copied_source_terminator",
+            explicit_copy_byte_limit: None,
+            code_regions: &[
+                TransferCodeSpec {
+                    role: "branch_to_shared_copy_loop",
+                    file_offset: 0x2CEFC,
+                    bytes: &[0xD0, 0x0C],
+                },
+                TransferCodeSpec {
+                    role: "shared_copy_loop",
+                    file_offset: 0x2CF0A,
+                    bytes: &[
+                        0xA0, 0x00, 0xB1, 0x00, 0xC9, 0xEF, 0xF0, 0x0B, 0x9D, 0x51, 0x04, 0xE8,
+                        0xC9, 0xED, 0xF0, 0x03, 0xC8, 0xD0, 0xEF, 0x60,
+                    ],
+                },
+            ],
+        },
+        protected_positions: &[],
+    },
+];
