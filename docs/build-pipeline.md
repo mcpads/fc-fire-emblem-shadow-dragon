@@ -297,7 +297,12 @@ cargo run -p fc-fire-emblem-patch -- extract-battle-dialogue-workspace \
 
 cargo run -p fc-fire-emblem-patch -- plan-battle-dialogue-reinsertion \
   'roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes'
+
+cargo run -p fc-fire-emblem-patch -- build-battle-dialogue-probe \
+  'roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes'
 ```
+
+`build-battle-dialogue-probe`는 mapper 165 동등성 기반에 전체 전투 초벌 28레코드를 배치하고 65개 포인터를 새 주소로 바꾼다. 정렬한 한글·문장부호 150개를 활성 코드에 결정적으로 배정해 원본 첫 글꼴 페이지의 mapper 165 위치에 공급한다. 모든 레코드·포인터와 글리프는 Expected Write이며 출력에서 레코드 바이트·포인터 목적지와 미참조 16바이트 레코드의 SHA-1을 다시 확인한다. 현재 ROM SHA-1은 `39ecf11236ea6025d29876048df3b209c33b3cfe`, 보고서 SHA-1은 `b68e0c104138b248f2af59de3ee153b09e9f5863`이다. 이 전역 글꼴 교체는 전체 전투 번역의 저장·인코딩 통합을 검증하는 비배포 프로브이며 전투 화면 수명 선택과 콜드 실행 표시는 별도 관문이다.
 
 `analyze-main-dialogue-glyph-workset`은 이 검증을 통과한 작업 골격에서 채워진 줄과 `complete`로 승인된 줄의 한글 집합을 따로 센다. 공개 보고서는 상태별 줄 수, 글리프 수, 정렬 집합 SHA-1과 활성 슬롯 210칸 비교만 기록하고 대사, 글리프 문자, 줄 ID와 입력 경로를 기록하지 않는다. 모든 2,812줄이 `complete`일 때만 승인 집합을 최종 작업 집합으로 인정하고 단일 페이지 수용 여부를 판정한다. 현재 의미 있는 일본어 2,541줄은 `needs_human_review`, 완료 줄은 0개다. 채워진 집합은 고유 한글 698자이고 한 줄 고유 한글은 최대 14자다. 명시적인 `E4`/`E6` 대사 전이 사슬은 최대 174자로 활성 슬롯 210칸에 들어간다. 실행 관측으로 결속한 화면 수명은 남아 있는 원본 활성 코드와 동시에 보이는 대사 레코드의 한글 합집합을 더해 별도로 검사한다.
 

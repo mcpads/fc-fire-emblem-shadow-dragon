@@ -164,6 +164,16 @@ enum Command {
         #[arg(long, default_value = "private/dialogue/battle-layout.json")]
         report: PathBuf,
     },
+    /// Build every translated battle-dialogue record as a mapper 165 development probe.
+    BuildBattleDialogueProbe {
+        source: PathBuf,
+        #[arg(long, default_value = "private/dialogue/battle-workspace.json")]
+        workspace: PathBuf,
+        #[arg(long, default_value = "out/battle-dialogue-probe.nes")]
+        output: PathBuf,
+        #[arg(long, default_value = "out/battle-dialogue-probe.json")]
+        report: PathBuf,
+    },
     /// Validate private translations without encoding or writing a ROM.
     ValidateMainDialogueWorkspace {
         source: PathBuf,
@@ -603,6 +613,28 @@ fn main() -> Result<()> {
                 summary.translated_record_storage_byte_count,
                 summary.preserved_storage_byte_count,
                 summary.remaining_storage_byte_count
+            );
+        }
+        Command::BuildBattleDialogueProbe {
+            source,
+            workspace,
+            output,
+            report,
+        } => {
+            let summary = mapper165::battle_dialogue_probe::build_battle_dialogue_probe(
+                &source, &workspace, &output, &report,
+            )?;
+            println!("wrote {}", output.display());
+            println!("output SHA-1: {}", summary.output_sha1);
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "battle dialogue probe: {} records, {} translated lines, {} pointer writes, {} unique glyphs, {} tracked writes",
+                summary.record_count,
+                summary.translated_line_count,
+                summary.pointer_write_count,
+                summary.unique_glyph_count,
+                summary.tracked_write_count
             );
         }
         Command::ValidateMainDialogueWorkspace { source, workspace } => {

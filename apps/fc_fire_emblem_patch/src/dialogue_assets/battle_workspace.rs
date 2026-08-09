@@ -2,10 +2,12 @@ use std::collections::BTreeMap;
 
 use super::*;
 
+mod build_plan;
 mod layout;
 #[cfg(test)]
 mod layout_tests;
 
+pub(crate) use build_plan::{EncodedBattleDialogueRecord, plan_battle_dialogue_records};
 pub(crate) use layout::plan_battle_dialogue_reinsertion;
 
 #[derive(Debug)]

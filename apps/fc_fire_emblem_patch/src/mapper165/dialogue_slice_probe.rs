@@ -1,20 +1,21 @@
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{fs, path::Path};
 
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
     dialogue_assets::{MainDialogueSlicePlan, plan_main_dialogue_slice},
-    font::{load_dalmoori, rasterize_glyph},
-    font_slots::{FONT_PAGE_SIZE, FONT_TILE_SIZE, active_hangul_codes},
-    rom::{CHR_FILE_OFFSET, EXPECTED_SOURCE_SHA1, Rom},
+    rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
     tracked::TrackedImage,
 };
 
-use super::{OUTPUT_MAPPER, assemble_mapper165_parity_bytes};
-
-const SOURCE_FONT_PHYSICAL_PAGE: usize = 2;
+use super::{
+    OUTPUT_MAPPER, assemble_mapper165_parity_bytes,
+    dialogue_probe_font::{
+        SOURCE_FONT_PHYSICAL_PAGE, assign_glyph_codes, assignment_sha1, install_font_glyphs,
+    },
+};
 
 #[derive(Debug, Serialize)]
 struct DialogueSliceProbeReport {
@@ -60,18 +61,7 @@ pub(crate) fn build_dialogue_slice_probe(
     source_rom.verify_supported_japanese()?;
     let plan = plan_main_dialogue_slice(&source_rom, workspace_path, record_id)?;
     let glyphs = plan.unique_glyphs();
-    let active_codes = active_hangul_codes();
-    ensure!(
-        glyphs.len() <= active_codes.len(),
-        "dialogue slice needs {} glyphs but the active page owns only {} slots",
-        glyphs.len(),
-        active_codes.len()
-    );
-    let assignments = glyphs
-        .iter()
-        .copied()
-        .zip(active_codes)
-        .collect::<BTreeMap<_, _>>();
+    let assignments = assign_glyph_codes(&glyphs)?;
     let encoded_record = plan.encoded_bytes(&assignments)?;
 
     let parity_base = assemble_mapper165_parity_bytes(&source_rom)?;
@@ -157,38 +147,6 @@ fn install_record(
     )
 }
 
-fn install_font_glyphs(
-    image: &mut TrackedImage,
-    parity_base: &[u8],
-    assignments: &BTreeMap<char, u8>,
-) -> Result<()> {
-    let font = load_dalmoori()?;
-    let page_start = CHR_FILE_OFFSET + SOURCE_FONT_PHYSICAL_PAGE * FONT_PAGE_SIZE;
-    for (character, code) in assignments {
-        let offset = page_start + usize::from(*code) * FONT_TILE_SIZE;
-        let expected = parity_base
-            .get(offset..offset + FONT_TILE_SIZE)
-            .context("dialogue slice font tile is outside the parity base")?;
-        let replacement = rasterize_glyph(&font, *character)?;
-        image.write_expected(
-            format!("mapper 165 dialogue slice glyph code {code:02X}"),
-            offset,
-            expected,
-            &replacement,
-        )?;
-    }
-    Ok(())
-}
-
-fn assignment_sha1(assignments: &BTreeMap<char, u8>) -> String {
-    let mut bytes = Vec::new();
-    for (character, code) in assignments {
-        bytes.extend_from_slice(character.to_string().as_bytes());
-        bytes.push(*code);
-    }
-    sha1_hex(&bytes)
-}
-
 fn write_file(path: &Path, data: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -199,6 +157,8 @@ fn write_file(path: &Path, data: &[u8]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
 
     #[test]

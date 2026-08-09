@@ -29,8 +29,9 @@ mod workspace;
 
 pub(crate) use glyph_workset::analyze_main_dialogue_glyph_workset;
 pub(crate) use battle_workspace::{
-    extract_battle_dialogue_workspace, import_battle_dialogue_draft,
+    EncodedBattleDialogueRecord, extract_battle_dialogue_workspace, import_battle_dialogue_draft,
     plan_battle_dialogue_reinsertion, validate_battle_dialogue_workspace,
+    plan_battle_dialogue_records,
 };
 use layout_packing::*;
 use markup::*;

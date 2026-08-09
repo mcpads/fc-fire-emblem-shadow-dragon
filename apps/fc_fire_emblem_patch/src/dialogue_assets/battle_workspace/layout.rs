@@ -43,95 +43,45 @@ pub(crate) fn plan_battle_dialogue_reinsertion(
     report_path: &Path,
 ) -> Result<BattleDialogueLayoutSummary> {
     let rom = Rom::from_path(source_path)?;
-    rom.verify_supported_japanese()?;
-    let workspace_bytes = fs::read(workspace_path)
-        .with_context(|| format!("read {}", workspace_path.display()))?;
-    let workspace: BattleDialogueWorkspace = serde_json::from_slice(&workspace_bytes)
-        .with_context(|| format!("parse {}", workspace_path.display()))?;
-    validate_workspace_binding(rom.data(), &workspace)?;
-    validate_translation_fields(&workspace)?;
-    let source_records = inspect_battle_dialogue_translation_records(rom.data())?;
-    let physical = inspect_battle_dialogue_physical_layout(rom.data())?;
-    ensure!(
-        source_records.len() == workspace.records.len(),
-        "battle layout lost workspace records"
-    );
-
-    let record_sizes = workspace
+    let plan = plan_battle_dialogue_records(&rom, workspace_path)?;
+    let records = plan
         .records
         .iter()
-        .map(|record| {
-            record.lines.iter().try_fold(4usize, |total, line| {
-                let line_size = if line.status == TranslationStatus::Untranslated {
-                    source_markup_byte_count(&line.source_markup)?
-                } else {
-                    encode_korean_markup(&line.korean)?.len()
-                };
-                total.checked_add(line_size).context("battle record size overflow")
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let translated_record_storage_byte_count = record_sizes.iter().sum::<usize>();
-    let preserved_storage_byte_count = physical.preserved_unreferenced_end_file_offset_exclusive
-        - physical.preserved_unreferenced_file_offset;
-    let segments = [
-        (
-            physical.data_file_start,
-            physical.preserved_unreferenced_file_offset,
-        ),
-        (
-            physical.preserved_unreferenced_end_file_offset_exclusive,
-            physical.data_file_end_exclusive,
-        ),
-    ];
-    let placements = pack_record_sizes(&record_sizes, &segments)?;
-    let mut records = Vec::new();
-    for ((source_record, planned_size), cursor) in source_records
-        .iter()
-        .zip(record_sizes)
-        .zip(placements)
-    {
-        let planned_pointer = switchable_file_to_cpu(source_record.source_prg_bank, cursor)?;
-        records.push(BattleRecordLayoutReport {
-            canonical_entry_index: source_record.canonical_entry_index,
-            entry_indices: source_record.entry_indices.clone(),
-            pointer_file_offsets_hex: source_record
+        .map(|record| BattleRecordLayoutReport {
+            canonical_entry_index: record.canonical_entry_index,
+            entry_indices: record.entry_indices.clone(),
+            pointer_file_offsets_hex: record
                 .pointer_file_offsets
                 .iter()
                 .map(|offset| format!("0x{offset:05X}"))
                 .collect(),
-            planned_pointer_cpu_address_hex: format!("0x{planned_pointer:04X}"),
-            planned_file_offset_hex: format!("0x{cursor:05X}"),
-            planned_storage_byte_count: planned_size,
-        });
-    }
-    let capacity_byte_count = physical.data_file_end_exclusive - physical.data_file_start;
-    let remaining_storage_byte_count = capacity_byte_count
-        - translated_record_storage_byte_count
-        - preserved_storage_byte_count;
-    let translation_input_complete = workspace
-        .records
-        .iter()
-        .flat_map(|record| &record.lines)
-        .filter(|line| line.japanese_source_byte_count > 0)
-        .all(|line| line.status != TranslationStatus::Untranslated);
+            planned_pointer_cpu_address_hex: format!(
+                "0x{:04X}",
+                record.planned_pointer_cpu_address
+            ),
+            planned_file_offset_hex: format!("0x{:05X}", record.planned_file_offset),
+            planned_storage_byte_count: record.storage_byte_count(),
+        })
+        .collect::<Vec<_>>();
     let pointer_write_count = records
         .iter()
         .map(|record| record.pointer_file_offsets_hex.len())
         .sum();
+    let preserved_storage_byte_count = plan.preserved_unreferenced_end_file_offset_exclusive
+        - plan.preserved_unreferenced_file_offset;
     let report = BattleDialogueLayoutReport {
         schema: 1,
         source_sha1: EXPECTED_SOURCE_SHA1,
-        workspace_sha1: sha1_hex(&workspace_bytes),
+        workspace_sha1: plan.workspace_sha1,
         dialogue_content_emitted: false,
         glyph_characters_emitted: false,
-        capacity_byte_count,
-        translated_record_storage_byte_count,
+        capacity_byte_count: plan.capacity_byte_count,
+        translated_record_storage_byte_count: plan.translated_record_storage_byte_count,
         preserved_unreferenced_storage_byte_count: preserved_storage_byte_count,
-        remaining_storage_byte_count,
-        preserved_unreferenced_storage_sha1: physical.preserved_unreferenced_storage_sha1,
+        remaining_storage_byte_count: plan.remaining_storage_byte_count,
+        preserved_unreferenced_storage_sha1: plan.preserved_unreferenced_storage_sha1,
         records,
-        translation_input_complete,
+        translation_input_complete: true,
         release_eligible: false,
     };
     let mut report_bytes =
@@ -142,9 +92,9 @@ pub(crate) fn plan_battle_dialogue_reinsertion(
         report_sha1: sha1_hex(&report_bytes),
         record_count: report.records.len(),
         pointer_write_count,
-        translated_record_storage_byte_count,
+        translated_record_storage_byte_count: plan.translated_record_storage_byte_count,
         preserved_storage_byte_count,
-        remaining_storage_byte_count,
+        remaining_storage_byte_count: plan.remaining_storage_byte_count,
     })
 }
 
