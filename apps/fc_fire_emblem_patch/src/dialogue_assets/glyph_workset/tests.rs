@@ -81,6 +81,42 @@ fn transition_chain_capacity_uses_the_union_of_every_record() {
     assert!(!report.capacity.filled_transition_chains_fit_one_page_so_far);
 }
 
+#[test]
+fn observed_shop_lifetime_counts_retained_source_slots_and_both_dialogue_records() {
+    let first_glyphs = (0..97)
+        .map(|index| char::from_u32(0xAC00 + index).unwrap())
+        .collect::<String>();
+    let second_glyphs = (97..194)
+        .map(|index| char::from_u32(0xAC00 + index).unwrap())
+        .collect::<String>();
+    let workspace = workspace_with_records(vec![
+        record("shop-and-item-dialogue", 0, &format!("{first_glyphs}{{EF}}")),
+        record("shop-and-item-dialogue", 1, &format!("{second_glyphs}{{E7}}")),
+    ]);
+
+    let report =
+        build_glyph_workset_report(&workspace, &empty_graph(), "workspace-sha1".to_owned())
+            .unwrap();
+
+    let lifetime = &report.observed_screen_lifetimes[0];
+    assert_eq!(lifetime.source_record_count, 2);
+    assert_eq!(lifetime.filled_unique_glyph_count, 194);
+    assert_eq!(lifetime.preserved_active_source_code_count, 17);
+    assert_eq!(lifetime.filled_slot_demand, 211);
+    assert!(!lifetime.filled_set_fits_one_page_so_far);
+    assert_eq!(lifetime.approved_slot_demand, Some(211));
+    assert_eq!(lifetime.approved_set_fits_one_page, Some(false));
+    assert!(!report
+        .capacity
+        .filled_observed_screen_lifetimes_fit_one_page_so_far);
+    assert_eq!(
+        report
+            .capacity
+            .approved_observed_screen_lifetimes_fit_one_page,
+        Some(false)
+    );
+}
+
 fn workspace_with_lines(lines: Vec<WorkspaceLine>) -> MainDialogueWorkspace {
     workspace_with_records(vec![WorkspaceRecord {
         id: "record".to_owned(),

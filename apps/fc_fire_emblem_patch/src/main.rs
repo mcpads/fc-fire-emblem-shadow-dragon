@@ -545,13 +545,15 @@ fn main() -> Result<()> {
             println!("wrote {}", report.display());
             println!("report SHA-1: {}", summary.report_sha1);
             println!(
-                "main dialogue glyph workset: {} filled lines, {} complete lines, {} filled unique glyphs, {} approved unique glyphs, max transition chain {} glyphs, chains fit one page: {}, ready: {}",
+                "main dialogue glyph workset: {} filled lines, {} complete lines, {} filled unique glyphs, {} approved unique glyphs, max transition chain {} glyphs, chains fit one page: {}, max observed screen lifetime {} slots, observed lifetimes fit one page: {}, ready: {}",
                 summary.filled_line_count,
                 summary.complete_line_count,
                 summary.filled_unique_glyph_count,
                 summary.approved_unique_glyph_count,
                 summary.max_transition_chain_unique_glyph_count,
                 summary.filled_transition_chains_fit_one_page,
+                summary.max_observed_screen_lifetime_slot_demand,
+                summary.filled_observed_screen_lifetimes_fit_one_page,
                 summary.working_set_ready
             );
         }

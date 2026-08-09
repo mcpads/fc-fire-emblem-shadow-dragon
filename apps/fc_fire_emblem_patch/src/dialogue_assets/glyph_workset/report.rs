@@ -17,9 +17,23 @@ pub(super) struct MainDialogueGlyphWorksetReport {
     pub(super) max_line_unique_glyph_count: usize,
     pub(super) max_record_unique_glyph_count: usize,
     pub(super) max_transition_chain_unique_glyph_count: usize,
+    pub(super) observed_screen_lifetimes: Vec<ObservedScreenLifetimeReport>,
     pub(super) capacity: GlyphCapacityReport,
     pub(super) unresolved: Vec<&'static str>,
     pub(super) release_eligible: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct ObservedScreenLifetimeReport {
+    pub(super) screen_role: &'static str,
+    pub(super) source_record_count: usize,
+    pub(super) filled_unique_glyph_count: usize,
+    pub(super) preserved_active_source_code_count: usize,
+    pub(super) filled_slot_demand: usize,
+    pub(super) filled_set_fits_one_page_so_far: bool,
+    pub(super) approved_unique_glyph_count: usize,
+    pub(super) approved_slot_demand: Option<usize>,
+    pub(super) approved_set_fits_one_page: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -78,7 +92,9 @@ pub(super) struct GlyphCapacityReport {
     pub(super) working_set_ready: bool,
     pub(super) filled_set_fits_one_page_so_far: bool,
     pub(super) filled_transition_chains_fit_one_page_so_far: bool,
+    pub(super) filled_observed_screen_lifetimes_fit_one_page_so_far: bool,
     pub(super) approved_single_page_fit: Option<bool>,
     pub(super) approved_transition_chains_fit_one_page: Option<bool>,
+    pub(super) approved_observed_screen_lifetimes_fit_one_page: Option<bool>,
     pub(super) final_page_plan_eligible: bool,
 }
