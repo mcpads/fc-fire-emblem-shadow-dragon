@@ -5,6 +5,8 @@ mod ending_scroll;
 mod ending_source;
 mod report;
 mod runtime_routes;
+mod save_routes;
+mod sound_test_routes;
 mod sound_test_source;
 mod source_binding;
 mod source_spec;
@@ -27,6 +29,8 @@ use crate::{
 
 use report::*;
 use runtime_routes::*;
+use save_routes::*;
+use sound_test_routes::*;
 use source_binding::*;
 use source_spec::*;
 use translation_surfaces::{TranslationSurfaceContracts, bind_translation_surfaces};
