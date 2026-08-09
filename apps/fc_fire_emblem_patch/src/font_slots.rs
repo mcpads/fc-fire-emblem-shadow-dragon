@@ -4,10 +4,10 @@ pub(crate) const FONT_PAGE_SIZE: usize = 4 * 1024;
 pub(crate) const FONT_TILE_SIZE: usize = 16;
 pub(crate) const FONT_CODE_COUNT: usize = FONT_PAGE_SIZE / FONT_TILE_SIZE;
 
-pub(crate) const PRESERVED_DISPLAY_CODES: [u8; 38] = [
+pub(crate) const PRESERVED_DISPLAY_CODES: [u8; 39] = [
     0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F,
     0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F,
-    0x80, 0x81, 0x82, 0x83, 0x8D, 0x9B,
+    0x80, 0x81, 0x82, 0x83, 0x8D, 0x9B, 0x9D,
 ];
 pub(crate) const TEXT_CONTROL_CODES: [u8; 2] = [0xED, 0xEF];
 pub(crate) const LATCH_TRIGGER_CODES: [u8; 2] = [0xFD, 0xFE];
@@ -50,10 +50,10 @@ mod tests {
         let reserved = reserved_font_codes();
         let active = active_hangul_codes();
 
-        assert_eq!(protected.len(), 42);
-        assert_eq!(reserved.len(), 45);
+        assert_eq!(protected.len(), 43);
+        assert_eq!(reserved.len(), 46);
         assert_eq!(active.len(), ACTIVE_HANGUL_SLOT_COUNT);
-        assert_eq!(ACTIVE_HANGUL_SLOT_COUNT, 211);
+        assert_eq!(ACTIVE_HANGUL_SLOT_COUNT, 210);
         assert!(active.iter().all(|code| !reserved.contains(code)));
         assert_eq!(reserved.len() + active.len(), FONT_CODE_COUNT);
     }

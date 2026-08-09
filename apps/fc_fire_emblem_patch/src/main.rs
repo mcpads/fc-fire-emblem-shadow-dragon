@@ -24,6 +24,7 @@ mod roster_localization;
 mod rp2a03;
 mod screen_contracts;
 mod shop_flow;
+mod source_literals;
 mod static_analysis;
 mod temporal_surface;
 mod text_inventory;

@@ -9,6 +9,8 @@ pub(crate) const JAPANESE_TEXT_GLYPHS: [&str; 0x60] = [
 
 pub(crate) const SMALL_KANA_GLYPHS: [&str; 8] = ["ゃ", "っ", "ゅ", "ょ", "ャ", "ッ", "ュ", "ョ"];
 pub(crate) const SMALL_KATAKANA_VOWEL_GLYPHS: [&str; 5] = ["ァ", "ィ", "ゥ", "ェ", "ォ"];
+pub(crate) const JAPANESE_PUNCTUATION_GLYPHS: [(u8, &str); 3] =
+    [(0x8E, "。"), (0xAB, "「"), (0xAC, "」")];
 
 pub(crate) fn is_japanese_text_code(code: u8) -> bool {
     japanese_text_glyph(code).is_some()
@@ -17,9 +19,22 @@ pub(crate) fn is_japanese_text_code(code: u8) -> bool {
 pub(crate) fn japanese_text_glyph(code: u8) -> Option<&'static str> {
     JAPANESE_TEXT_GLYPHS
         .get(usize::from(code))
-        .or_else(|| SMALL_KANA_GLYPHS.get(usize::from(code.checked_sub(0x84)?)))
-        .or_else(|| SMALL_KATAKANA_VOWEL_GLYPHS.get(usize::from(code.checked_sub(0xA6)?)))
         .copied()
+        .or_else(|| {
+            SMALL_KANA_GLYPHS
+                .get(usize::from(code.checked_sub(0x84)?))
+                .copied()
+        })
+        .or_else(|| {
+            SMALL_KATAKANA_VOWEL_GLYPHS
+                .get(usize::from(code.checked_sub(0xA6)?))
+                .copied()
+        })
+        .or_else(|| {
+            JAPANESE_PUNCTUATION_GLYPHS
+                .iter()
+                .find_map(|(candidate, glyph)| (*candidate == code).then_some(*glyph))
+        })
 }
 
 #[cfg(test)]
@@ -50,7 +65,9 @@ mod tests {
         assert_eq!(japanese_text_glyph(0xA9), Some("ェ"));
         assert_eq!(japanese_text_glyph(0xAA), Some("ォ"));
         assert!(japanese_text_glyph(0xA5).is_none());
-        assert!(japanese_text_glyph(0xAB).is_none());
+        assert_eq!(japanese_text_glyph(0x8E), Some("。"));
+        assert_eq!(japanese_text_glyph(0xAB), Some("「"));
+        assert_eq!(japanese_text_glyph(0xAC), Some("」"));
         assert!(japanese_text_glyph(0x83).is_none());
     }
 

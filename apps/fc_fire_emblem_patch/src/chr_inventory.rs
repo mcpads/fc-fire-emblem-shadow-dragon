@@ -1080,13 +1080,13 @@ mod tests {
         let ceiling = calculate_active_slot_ceiling(&slots).unwrap();
 
         assert_eq!(ceiling.total_font_code_count, 256);
-        assert_eq!(ceiling.confirmed_protected_code_count, 42);
+        assert_eq!(ceiling.confirmed_protected_code_count, 43);
         assert_eq!(
             ceiling.provisional_layout_reserved_codes,
             [0x0F, 0x1F, 0xFF]
         );
-        assert_eq!(ceiling.current_reserved_code_count, 45);
-        assert_eq!(ceiling.current_hangul_slot_ceiling, 211);
+        assert_eq!(ceiling.current_reserved_code_count, 46);
+        assert_eq!(ceiling.current_hangul_slot_ceiling, 210);
     }
 
     #[test]

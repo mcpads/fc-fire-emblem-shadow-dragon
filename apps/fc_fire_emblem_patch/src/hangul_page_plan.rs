@@ -587,7 +587,7 @@ mod tests {
         )
         .unwrap_err()
         .to_string();
-        assert!(error.contains("only 211 slots are active"));
+        assert!(error.contains("only 210 slots are active"));
     }
 
     #[test]

@@ -229,11 +229,11 @@ mod tests {
         assert_eq!(report.dynamic_pointer_count, 4);
         assert_eq!(report.dynamic_unique_string_count, 2);
         assert_eq!(report.dynamic_distinct_source_code_count, 5);
-        assert_eq!(report.dynamic_japanese_source_code_count, 2);
-        assert_eq!(report.additional_preserved_unresolved_codes, [0xA5, 0xAB]);
+        assert_eq!(report.dynamic_japanese_source_code_count, 3);
+        assert_eq!(report.additional_preserved_unresolved_codes, [0xA5]);
         assert_eq!(
             report.provisional_unit_ui_family_hangul_slot_ceiling,
-            ACTIVE_HANGUL_SLOT_COUNT - 2
+            ACTIVE_HANGUL_SLOT_COUNT - 1
         );
         assert_eq!(report.target_korean_glyph_count, None);
         assert_eq!(

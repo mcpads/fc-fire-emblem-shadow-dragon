@@ -11,6 +11,9 @@ use crate::{
     japanese_encoding::is_japanese_text_code,
     rom::{EXPECTED_SOURCE_SHA1, HEADER_SIZE, PRG_SIZE, Rom},
     sha1_hex,
+    source_literals::{
+        TranslationSurfaceLiteralInventory, classify_translation_surface_literal_codes,
+    },
     text_inventory::{DIALOGUE_CONTROL_SPECS, DIALOGUE_SCRIPT_CONTROL_CODES},
     typed_source::decode_rp2a03_sequence,
 };
@@ -705,6 +708,9 @@ pub(crate) struct TranslationSurfaceDialogueTableBinding {
     pub(crate) proven_record_count: Option<usize>,
     pub(crate) unique_record_storage_byte_count: Option<usize>,
     pub(crate) unreferenced_record_count: Option<usize>,
+    pub(crate) literal_inventory: TranslationSurfaceLiteralInventory,
+    #[serde(skip)]
+    literal_file_offsets: BTreeSet<usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -916,6 +922,8 @@ struct BattleDialogueRecordStorageReport {
     header_hex: String,
     dynamic_selector_values: Vec<u8>,
     control_counts: Vec<ControlUsageReport>,
+    #[serde(skip)]
+    literal_file_offsets: Vec<usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1502,6 +1510,8 @@ pub(crate) fn inspect_translation_surface_dialogue_tables(
                 .battle_record_storage_summary
                 .as_ref()
                 .map(|summary| summary.unreferenced_record_count);
+            let (literal_inventory, literal_file_offsets) =
+                translation_surface_literal_inventory(source, &report)?;
 
             Ok(TranslationSurfaceDialogueTableBinding {
                 table_id: report.id,
@@ -1520,9 +1530,96 @@ pub(crate) fn inspect_translation_surface_dialogue_tables(
                 proven_record_count,
                 unique_record_storage_byte_count,
                 unreferenced_record_count,
+                literal_inventory,
+                literal_file_offsets,
             })
         })
         .collect()
+}
+
+fn translation_surface_literal_inventory(
+    source: &[u8],
+    report: &DialogueTableReport,
+) -> Result<(TranslationSurfaceLiteralInventory, BTreeSet<usize>)> {
+    let literal_file_offsets = report
+        .entries
+        .iter()
+        .filter(|entry| {
+            entry.target_kind == "script_entry_start" && is_canonical_dialogue_entry(entry)
+        })
+        .map(|entry| {
+            if report.id == BATTLE_DIALOGUE_TABLE_ID {
+                entry
+                    .battle_record_storage
+                    .as_ref()
+                    .context("canonical battle-dialogue entry has no literal boundaries")
+                    .map(|record| record.literal_file_offsets.clone())
+            } else {
+                entry
+                    .main_linear_segment
+                    .as_ref()
+                    .context("canonical epilogue entry has no literal boundaries")
+                    .map(|segment| {
+                        segment
+                            .lines
+                            .iter()
+                            .flat_map(|line| line.literal_file_offsets.iter().copied())
+                            .collect()
+                    })
+            }
+        })
+        .collect::<Result<Vec<Vec<usize>>>>()?
+        .into_iter()
+        .flatten()
+        .collect::<BTreeSet<_>>();
+
+    let inventory = literal_inventory_from_file_offsets(source, &literal_file_offsets, report.id)?;
+    Ok((inventory, literal_file_offsets))
+}
+
+pub(crate) fn aggregate_translation_surface_dialogue_literal_inventory(
+    source: &[u8],
+    tables: &[TranslationSurfaceDialogueTableBinding],
+    requested_table_ids: &[&str],
+) -> Result<TranslationSurfaceLiteralInventory> {
+    let mut seen_table_ids = BTreeSet::new();
+    let mut literal_file_offsets = BTreeSet::new();
+    let mut source_offset_count = 0;
+    for table_id in requested_table_ids {
+        ensure!(
+            seen_table_ids.insert(*table_id),
+            "duplicate translation-surface dialogue table id {table_id}"
+        );
+        let table = tables
+            .iter()
+            .find(|table| table.table_id == *table_id)
+            .with_context(|| format!("translation-surface dialogue table {table_id} is absent"))?;
+        source_offset_count += table.literal_file_offsets.len();
+        literal_file_offsets.extend(table.literal_file_offsets.iter().copied());
+    }
+    ensure!(
+        source_offset_count == literal_file_offsets.len(),
+        "translation-surface dialogue tables overlap literal storage"
+    );
+
+    literal_inventory_from_file_offsets(source, &literal_file_offsets, "dialogue-table aggregate")
+}
+
+fn literal_inventory_from_file_offsets(
+    source: &[u8],
+    literal_file_offsets: &BTreeSet<usize>,
+    inventory_role: &str,
+) -> Result<TranslationSurfaceLiteralInventory> {
+    let codes = literal_file_offsets
+        .iter()
+        .map(|file_offset| {
+            source
+                .get(*file_offset)
+                .copied()
+                .context("translation-surface literal offset is outside the source")
+        })
+        .collect::<Result<Vec<_>>>()?;
+    classify_translation_surface_literal_codes(codes, inventory_role)
 }
 
 fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
@@ -2675,6 +2772,7 @@ fn scan_battle_dialogue_record(
     let mut cursor = header_end;
     let mut dynamic_selector_values = Vec::new();
     let mut control_count_map = BTreeMap::new();
+    let mut literal_file_offsets = Vec::new();
     loop {
         ensure!(
             cursor < scan_end_exclusive,
@@ -2701,6 +2799,9 @@ fn scan_battle_dialogue_record(
             cursor = selector_offset + 1;
             continue;
         }
+        if !BATTLE_DIALOGUE_CONTROL_CODES.contains(&byte) {
+            literal_file_offsets.push(cursor);
+        }
         cursor += 1;
         if byte == BATTLE_DIALOGUE_END_CONTROL {
             break;
@@ -2720,6 +2821,7 @@ fn scan_battle_dialogue_record(
         header_hex: header.iter().map(|byte| format!("{byte:02X}")).collect(),
         dynamic_selector_values,
         control_counts: control_usage_reports(control_count_map, &BATTLE_DIALOGUE_CONTROL_CODES),
+        literal_file_offsets,
     })
 }
 
@@ -4472,6 +4574,7 @@ mod tests {
         assert_eq!(record.storage_byte_count, 9);
         assert_eq!(record.end_file_offset_exclusive, 9);
         assert_eq!(record.dynamic_selector_values, [3]);
+        assert_eq!(record.literal_file_offsets, [4]);
         assert_eq!(
             record
                 .control_counts
