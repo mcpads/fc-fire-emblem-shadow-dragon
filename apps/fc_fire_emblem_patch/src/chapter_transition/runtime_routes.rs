@@ -1,4 +1,4 @@
-use super::*;
+use super::{ending_source::ENDING_SEQUENCE_PHASE_POINTERS_BYTES, *};
 
 pub(super) fn regular_save_reachability() -> RegularSaveReachability {
     RegularSaveReachability {
