@@ -1,7 +1,10 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::Result;
 
+use crate::dialogue_inventory::MainDialogueGraphReport;
+#[cfg(test)]
+use crate::dialogue_inventory::MainDialogueTransitionEdgeReport;
 use crate::font_slots::active_hangul_codes;
 
 use super::*;
@@ -21,6 +24,8 @@ pub(crate) struct MainDialogueGlyphWorksetSummary {
     pub complete_line_count: usize,
     pub filled_unique_glyph_count: usize,
     pub approved_unique_glyph_count: usize,
+    pub max_transition_chain_unique_glyph_count: usize,
+    pub filled_transition_chains_fit_one_page: bool,
     pub working_set_ready: bool,
 }
 
@@ -39,7 +44,8 @@ pub(crate) fn analyze_main_dialogue_glyph_workset(
     validate_workspace_binding(&workspace, &expected)?;
     validate_workspace_translations(&workspace)?;
 
-    let report = build_glyph_workset_report(&workspace, sha1_hex(&workspace_bytes))?;
+    let graph = inspect_main_dialogue_graph(rom.data())?;
+    let report = build_glyph_workset_report(&workspace, &graph, sha1_hex(&workspace_bytes))?;
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize main-dialogue glyph workset")?;
     report_bytes.push(b'\n');
@@ -52,12 +58,17 @@ pub(crate) fn analyze_main_dialogue_glyph_workset(
         complete_line_count: report.status_counts.complete,
         filled_unique_glyph_count: report.filled_glyphs.unique_count,
         approved_unique_glyph_count: report.approved_glyphs.unique_count,
+        max_transition_chain_unique_glyph_count: report.max_transition_chain_unique_glyph_count,
+        filled_transition_chains_fit_one_page: report
+            .capacity
+            .filled_transition_chains_fit_one_page_so_far,
         working_set_ready: report.capacity.working_set_ready,
     })
 }
 
 fn build_glyph_workset_report(
     workspace: &MainDialogueWorkspace,
+    graph: &MainDialogueGraphReport,
     workspace_sha1: String,
 ) -> Result<MainDialogueGlyphWorksetReport> {
     let mut status_counts = GlyphWorksetStatusCounts::default();
@@ -66,9 +77,12 @@ fn build_glyph_workset_report(
     let mut target_glyph_occurrence_count = 0;
     let mut max_line_unique_glyph_count = 0;
     let mut max_record_unique_glyph_count = 0;
+    let mut filled_glyphs_by_record = BTreeMap::new();
+    let mut approved_glyphs_by_record = BTreeMap::new();
 
     for record in &workspace.records {
         let mut record_glyphs = BTreeSet::new();
+        let mut approved_record_glyphs = BTreeSet::new();
         for line in &record.lines {
             status_counts.add(line.status);
             if line.status == TranslationStatus::Untranslated {
@@ -87,18 +101,35 @@ fn build_glyph_workset_report(
             record_glyphs.extend(line_unique_glyphs.iter().copied());
             filled_glyphs.extend(line_unique_glyphs.iter().copied());
             if line.status == TranslationStatus::Complete {
-                approved_glyphs.extend(line_unique_glyphs);
+                approved_glyphs.extend(line_unique_glyphs.iter().copied());
+                approved_record_glyphs.extend(line_unique_glyphs);
             }
         }
         max_record_unique_glyph_count = max_record_unique_glyph_count.max(record_glyphs.len());
+        let key = (record.table_id.clone(), record.canonical_entry_index);
+        ensure!(
+            filled_glyphs_by_record
+                .insert(key.clone(), record_glyphs)
+                .is_none(),
+            "duplicate main-dialogue workspace record {}:{}",
+            record.table_id,
+            record.canonical_entry_index
+        );
+        approved_glyphs_by_record.insert(key, approved_record_glyphs);
     }
 
     let line_count = status_counts.total();
     let active_slot_count = active_hangul_codes().len();
+    let max_transition_chain_unique_glyph_count =
+        max_transition_chain_glyph_count(graph, &filled_glyphs_by_record)?;
+    let max_approved_transition_chain_unique_glyph_count =
+        max_transition_chain_glyph_count(graph, &approved_glyphs_by_record)?;
     let translation_input_complete = line_count > 0 && status_counts.complete == line_count;
     let working_set_ready = translation_input_complete;
     let approved_single_page_fit =
         working_set_ready.then_some(approved_glyphs.len() <= active_slot_count);
+    let approved_transition_chains_fit_one_page = working_set_ready
+        .then_some(max_approved_transition_chain_unique_glyph_count <= active_slot_count);
     let unresolved = if working_set_ready {
         vec![
             "screen-lifetime and line-width checks remain separate from the glyph working-set count",
@@ -130,17 +161,99 @@ fn build_glyph_workset_report(
         approved_glyphs: glyph_set_report(&approved_glyphs),
         max_line_unique_glyph_count,
         max_record_unique_glyph_count,
+        max_transition_chain_unique_glyph_count,
         capacity: GlyphCapacityReport {
             active_slot_count,
             translation_input_complete,
             working_set_ready,
             filled_set_fits_one_page_so_far: filled_glyphs.len() <= active_slot_count,
+            filled_transition_chains_fit_one_page_so_far: max_transition_chain_unique_glyph_count
+                <= active_slot_count,
             approved_single_page_fit,
+            approved_transition_chains_fit_one_page,
             final_page_plan_eligible: working_set_ready,
         },
         unresolved,
         release_eligible: false,
     })
+}
+
+type DialogueRecordKey = (String, usize);
+
+fn max_transition_chain_glyph_count(
+    graph: &MainDialogueGraphReport,
+    glyphs_by_record: &BTreeMap<DialogueRecordKey, BTreeSet<char>>,
+) -> Result<usize> {
+    let mut next_record = BTreeMap::new();
+    let mut target_records = BTreeSet::new();
+    for edge in &graph.transition_edges {
+        let source = (
+            edge.source_table_id.to_owned(),
+            edge.source_canonical_entry_index,
+        );
+        let target = (
+            edge.target_table_id.to_owned(),
+            edge.target_canonical_entry_index,
+        );
+        ensure!(
+            glyphs_by_record.contains_key(&source),
+            "main-dialogue transition source {}:{} is missing from the workspace",
+            edge.source_table_id,
+            edge.source_canonical_entry_index
+        );
+        ensure!(
+            glyphs_by_record.contains_key(&target),
+            "main-dialogue transition target {}:{} is missing from the workspace",
+            edge.target_table_id,
+            edge.target_canonical_entry_index
+        );
+        ensure!(
+            next_record.insert(source.clone(), target.clone()).is_none(),
+            "main-dialogue record {}:{} has multiple transition targets",
+            source.0,
+            source.1
+        );
+        target_records.insert(target);
+    }
+
+    let roots = glyphs_by_record
+        .keys()
+        .filter(|key| !target_records.contains(*key))
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut reached_records = BTreeSet::new();
+    let mut max_unique_glyph_count = 0;
+    for root in roots {
+        let mut current = root;
+        let mut chain_records = BTreeSet::new();
+        let mut chain_glyphs = BTreeSet::new();
+        loop {
+            ensure!(
+                chain_records.insert(current.clone()),
+                "main-dialogue transition chain contains a cycle at {}:{}",
+                current.0,
+                current.1
+            );
+            reached_records.insert(current.clone());
+            chain_glyphs.extend(
+                glyphs_by_record
+                    .get(&current)
+                    .context("main-dialogue transition chain lost a workspace record")?
+                    .iter()
+                    .copied(),
+            );
+            let Some(next) = next_record.get(&current) else {
+                break;
+            };
+            current = next.clone();
+        }
+        max_unique_glyph_count = max_unique_glyph_count.max(chain_glyphs.len());
+    }
+    ensure!(
+        reached_records.len() == glyphs_by_record.len(),
+        "main-dialogue transition graph has records unreachable from any root"
+    );
+    Ok(max_unique_glyph_count)
 }
 
 fn glyph_set_report(glyphs: &BTreeSet<char>) -> GlyphSetReport {

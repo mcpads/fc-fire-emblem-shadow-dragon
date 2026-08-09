@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     dialogue_inventory::{
-        MainDialogueStorageLine, MainDialogueStorageRecord, inspect_main_dialogue_storage,
-        switchable_file_to_cpu,
+        MainDialogueStorageLine, MainDialogueStorageRecord, inspect_main_dialogue_graph,
+        inspect_main_dialogue_storage, switchable_file_to_cpu,
     },
     japanese_encoding::{is_japanese_text_code, japanese_text_glyph},
     rom::{EXPECTED_SOURCE_SHA1, Rom},

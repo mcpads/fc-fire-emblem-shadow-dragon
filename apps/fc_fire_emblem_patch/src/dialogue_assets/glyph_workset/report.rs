@@ -16,6 +16,7 @@ pub(super) struct MainDialogueGlyphWorksetReport {
     pub(super) approved_glyphs: GlyphSetReport,
     pub(super) max_line_unique_glyph_count: usize,
     pub(super) max_record_unique_glyph_count: usize,
+    pub(super) max_transition_chain_unique_glyph_count: usize,
     pub(super) capacity: GlyphCapacityReport,
     pub(super) unresolved: Vec<&'static str>,
     pub(super) release_eligible: bool,
@@ -76,6 +77,8 @@ pub(super) struct GlyphCapacityReport {
     pub(super) translation_input_complete: bool,
     pub(super) working_set_ready: bool,
     pub(super) filled_set_fits_one_page_so_far: bool,
+    pub(super) filled_transition_chains_fit_one_page_so_far: bool,
     pub(super) approved_single_page_fit: Option<bool>,
+    pub(super) approved_transition_chains_fit_one_page: Option<bool>,
     pub(super) final_page_plan_eligible: bool,
 }

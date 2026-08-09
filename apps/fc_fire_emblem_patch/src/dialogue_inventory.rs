@@ -81,6 +81,10 @@ pub fn analyze_dialogue_structure(
     })
 }
 
+pub(crate) fn inspect_main_dialogue_graph(source: &[u8]) -> Result<MainDialogueGraphReport> {
+    Ok(build_report(source)?.main_dialogue_graph)
+}
+
 pub(crate) fn inspect_chapter_intro_contexts(
     source: &[u8],
 ) -> Result<Vec<ChapterIntroContextBinding>> {
