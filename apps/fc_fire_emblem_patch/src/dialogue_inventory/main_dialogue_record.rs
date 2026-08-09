@@ -55,6 +55,32 @@ pub(super) fn inspect_main_record_prefix(
     })
 }
 
+pub(super) fn inspect_main_transition_prefix_byte_count(
+    source: &[u8],
+    entry_file_offset: usize,
+    bank_end: usize,
+    table_id: &str,
+    entry_index: usize,
+) -> Result<usize> {
+    ensure!(
+        entry_file_offset < bank_end,
+        "{table_id} transition target {entry_index} begins outside its source bank"
+    );
+    let prefix_byte_count = if source[entry_file_offset] == OPTIONAL_E8_PREFIX_CODE {
+        OPTIONAL_PREFIX_BYTE_COUNT
+    } else {
+        0
+    };
+    let first_line_file_offset = entry_file_offset
+        .checked_add(prefix_byte_count)
+        .context("main transition target prefix range overflow")?;
+    ensure!(
+        first_line_file_offset < bank_end,
+        "{table_id} transition target {entry_index} first line begins outside its source bank"
+    );
+    Ok(prefix_byte_count)
+}
+
 pub(super) fn scan_main_line(
     source: &[u8],
     line_file_offset: usize,

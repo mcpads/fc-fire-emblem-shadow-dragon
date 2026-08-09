@@ -1,7 +1,7 @@
 use super::*;
 
-pub(super) const SOURCE_ASSET_FORMAT_VERSION: u8 = 2;
-pub(super) const WORKSPACE_FORMAT_VERSION: u8 = 2;
+pub(super) const SOURCE_ASSET_FORMAT_VERSION: u8 = 3;
+pub(super) const WORKSPACE_FORMAT_VERSION: u8 = 3;
 
 #[derive(Debug)]
 pub struct DialogueSourceAssetSummary {

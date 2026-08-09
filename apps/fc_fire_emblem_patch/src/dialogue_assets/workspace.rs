@@ -136,8 +136,8 @@ pub(super) fn build_workspace(source: &[u8]) -> Result<MainDialogueWorkspace> {
         "main dialogue workspace must contain exactly 504 canonical records"
     );
     ensure!(
-        line_count == 2_732,
-        "main dialogue workspace must contain exactly 2732 source lines"
+        line_count == 2_812,
+        "main dialogue workspace must contain exactly 2812 source lines, found {line_count}"
     );
     ensure!(
         safe_japanese_offsets.len() == inspection.safe_japanese_translation_source_byte_count,

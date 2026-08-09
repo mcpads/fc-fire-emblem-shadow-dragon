@@ -242,6 +242,40 @@ fn locates_the_first_line_after_only_declared_record_prefixes() {
 }
 
 #[test]
+fn locates_transition_targets_without_a_direct_record_header() {
+    let mut source = synthetic_source();
+    let bank_end = switchable_bank_file_start(SYNTHETIC_BANK) + PRG_BANK_SIZE;
+    let e8_target_file_offset = SYNTHETIC_DATA_START;
+    source[e8_target_file_offset] = OPTIONAL_E8_PREFIX_CODE;
+
+    assert_eq!(
+        inspect_main_transition_prefix_byte_count(
+            &source,
+            e8_target_file_offset,
+            bank_end,
+            "synthetic-dialogue",
+            0,
+        )
+        .unwrap(),
+        OPTIONAL_PREFIX_BYTE_COUNT
+    );
+
+    let plain_target_file_offset = e8_target_file_offset + 0x40;
+    source[plain_target_file_offset] = 0xED;
+    assert_eq!(
+        inspect_main_transition_prefix_byte_count(
+            &source,
+            plain_target_file_offset,
+            bank_end,
+            "synthetic-dialogue",
+            1,
+        )
+        .unwrap(),
+        0
+    );
+}
+
+#[test]
 fn scans_a_first_line_without_emitting_its_source_bytes() {
     let mut source = synthetic_source();
     let line_file_offset = SYNTHETIC_DATA_START;

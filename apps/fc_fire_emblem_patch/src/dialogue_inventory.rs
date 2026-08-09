@@ -2,6 +2,7 @@ mod battle_dialogue;
 mod main_dialogue_graph;
 mod main_dialogue_record;
 mod main_dialogue_state;
+mod main_dialogue_translation_view;
 mod report;
 mod source_binding;
 mod source_spec;
@@ -12,6 +13,10 @@ use battle_dialogue::*;
 use main_dialogue_graph::*;
 use main_dialogue_record::*;
 use main_dialogue_state::*;
+pub(crate) use main_dialogue_translation_view::inspect_main_dialogue_storage;
+use main_dialogue_translation_view::{
+    build_main_dialogue_storage_records, safe_main_dialogue_japanese_literal_offsets,
+};
 pub(crate) use report::*;
 pub(crate) use source_binding::switchable_file_to_cpu;
 use source_binding::{
@@ -73,85 +78,6 @@ pub fn analyze_dialogue_structure(
         pointer_count: report.summary.pointer_count,
         unique_target_count: report.summary.unique_target_count,
         alias_group_count: report.summary.alias_group_count,
-    })
-}
-
-pub(crate) fn inspect_main_dialogue_storage(
-    source: &[u8],
-) -> Result<MainDialogueStorageInspection> {
-    let report = build_report(source)?;
-    let records = report
-        .tables
-        .iter()
-        .filter(|table| table.directory_binding.is_some())
-        .flat_map(|table| {
-            table
-                .entries
-                .iter()
-                .filter(|entry| {
-                    entry.target_kind == "script_entry_start" && is_canonical_dialogue_entry(entry)
-                })
-                .map(move |entry| (table, entry))
-        })
-        .map(|(table, entry)| {
-            let storage = entry.main_record_storage.as_ref().with_context(|| {
-                format!(
-                    "{} canonical entry {} has no record-storage range",
-                    table.id, entry.index
-                )
-            })?;
-            let literal_file_offsets = entry
-                .main_linear_segment
-                .as_ref()
-                .context("canonical main dialogue entry has no linear segment")?
-                .lines
-                .iter()
-                .flat_map(|line| line.literal_file_offsets.iter().copied())
-                .collect();
-            let lines = entry
-                .main_linear_segment
-                .as_ref()
-                .context("canonical main dialogue entry has no linear segment")?
-                .lines
-                .iter()
-                .map(|line| MainDialogueStorageLine {
-                    file_offset: line.file_offset,
-                    storage_byte_count: line.storage_byte_count,
-                    storage_sha1: line.storage_sha1.clone(),
-                    line_end_control: line.line_end_control,
-                    literal_file_offsets: line.literal_file_offsets.clone(),
-                })
-                .collect();
-            Ok(MainDialogueStorageRecord {
-                table_id: table.id,
-                source_prg_bank: table.source_prg_bank,
-                canonical_entry_index: canonical_dialogue_entry_index(entry),
-                entry_indices: dialogue_entry_indices(entry),
-                pointer_file_offsets: dialogue_entry_indices(entry)
-                    .iter()
-                    .map(|index| table.pointer_table_file_offset + index * 2)
-                    .collect(),
-                pointer_cpu_address: entry.pointer_cpu_address,
-                file_offset: storage.file_offset,
-                end_file_offset_exclusive: storage.end_file_offset_exclusive,
-                storage_byte_count: storage.storage_byte_count,
-                storage_sha1: storage.storage_sha1.clone(),
-                prefix_byte_count: storage.prefix_byte_count,
-                boundary_control: storage.boundary_control,
-                literal_file_offsets,
-                lines,
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-    ensure!(
-        records.len() == report.summary.main_record_count,
-        "main dialogue storage record export lost coverage"
-    );
-    Ok(MainDialogueStorageInspection {
-        records,
-        safe_japanese_translation_source_byte_count: report
-            .summary
-            .main_safe_japanese_translation_source_byte_count,
     })
 }
 
@@ -418,6 +344,20 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
         .map(|spec| extract_dialogue_table(source, spec))
         .collect::<Result<Vec<_>>>()?;
     let main_dialogue_graph = build_main_dialogue_graph(&tables)?;
+    let main_translation_records =
+        build_main_dialogue_storage_records(source, &tables, &main_dialogue_graph)?;
+    let main_translation_view_line_count = main_translation_records
+        .iter()
+        .map(|record| record.lines.len())
+        .sum();
+    let main_translation_view_safe_japanese_source_byte_count =
+        safe_main_dialogue_japanese_literal_offsets(source, &main_translation_records)?.len();
+    let main_transition_target_record_count = main_dialogue_graph
+        .transition_edges
+        .iter()
+        .map(|edge| (edge.target_table_id, edge.target_canonical_entry_index))
+        .collect::<BTreeSet<_>>()
+        .len();
     let main_literal_storage_summary = summarize_main_literal_storage(source, &tables)?;
     let main_first_line_count = tables
         .iter()
@@ -610,6 +550,9 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
             .literal_structural_conflict_storage_byte_count,
         main_safe_japanese_translation_source_byte_count: main_literal_storage_summary
             .safe_japanese_translation_source_byte_count,
+        main_translation_view_line_count,
+        main_translation_view_safe_japanese_source_byte_count,
+        main_transition_target_record_count,
         main_linear_segment_boundary_control_counts,
         main_linear_segment_transition_count,
         main_record_count,
@@ -632,12 +575,12 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
     };
 
     Ok(DialogueStructureReport {
-        schema_version: 11,
+        schema_version: 12,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             translation_direction: "ja_to_ko",
             preserve_existing_english: true,
-            proof_boundary: "exact pointer-table ranges, switchable-bank target mapping, aliases, all nine consumer roots, the selector-41 epilogue-routing use, the main dialogue record-prefix state path, every main entry's bounded consumed storage range and measured shared storage, the separate battle state machine and all EF-terminated battle record ranges, Japanese 00-5F and 84-8B literal classification with 60-83 Latin preservation, all explicit E4/E6 graph edges, the E7 caller-handoff contract, and eleven confirmed direct outer dispatch bindings; no dialogue bytes or translations are emitted",
+            proof_boundary: "exact pointer-table ranges, switchable-bank target mapping, aliases, all nine consumer roots, the selector-41 epilogue-routing use, direct-entry and E4/E6 transition-target prefix paths, every main entry's bounded consumed storage range and measured shared storage, the separate battle state machine and all EF-terminated battle record ranges, Japanese 00-5F and 84-8B literal classification with 60-83 Latin preservation, all explicit E4/E6 graph edges, the E7 caller-handoff contract, and eleven confirmed direct outer dispatch bindings; no dialogue bytes or translations are emitted",
         },
         summary,
         main_dialogue_state_machine,
@@ -647,7 +590,7 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
         unknowns: vec![
             "All directory-bound script entries and all twenty-eight pointer-referenced battle records have bounded consumed storage ranges; main records may share bytes, while battle records are disjoint and one additional unreferenced structural record remains preserved but not admitted as a translation target.",
             "Battle record boundaries, required battle-route polarity, and the character-epilogue temporal variant union are proven; final Hangul page budgeting still requires the reviewed Korean glyph working set.",
-            "The E5, fixed four-byte, and E8 record prefix, each initial linear segment, all E4/E6 graph edges, and the E7 caller handoff are confirmed, but caller-specific outcomes after the handoff remain unresolved.",
+            "Direct entries consume optional E5, a fixed four-byte header, and optional E8. E4/E6 transition targets instead consume only an optional E8 before decoding; all 139 target reparses preserve the previously bounded storage end, graph boundary, and graph destination.",
             "Eleven direct outer dispatch bindings reuse four observer handlers across twenty-two state slots; indirect bindings are not excluded, and bank 04:A20F has no confirmed direct dispatch binding.",
             "Ten of the eighteen main dialogue state handlers remain structurally named but semantically unresolved.",
             "Role labels began as external map candidates and do not prove every entry's gameplay context.",
