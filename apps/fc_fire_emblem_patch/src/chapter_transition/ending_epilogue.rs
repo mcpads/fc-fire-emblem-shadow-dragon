@@ -13,8 +13,9 @@ use crate::{
 use super::{
     CodeLocation, SourceRegionSpec, location,
     unit_record_history::{
-        INACTIVE_ACTION_VALUE, ROSTER_ACTION_OFFSET, ROSTER_BUFFER_ADDRESS, ROSTER_IDENTITY_OFFSET,
-        ROSTER_LOCATION_OFFSET, ROSTER_RECORD_CAPACITY, ROSTER_RECORD_STRIDE,
+        INACTIVE_ACTION_VALUE, ROSTER_ACTION_OFFSET, ROSTER_BUFFER_ADDRESS,
+        ROSTER_BUFFER_ADDRESS_HEX, ROSTER_IDENTITY_OFFSET, ROSTER_LOCATION_OFFSET,
+        ROSTER_RECORD_CAPACITY, ROSTER_RECORD_STRIDE,
     },
 };
 
@@ -238,7 +239,7 @@ pub(super) fn bind_ending_character_epilogue(
             candidate_count: CANDIDATE_COUNT,
             scan_order: "phase 0x0F decrements 0x773B before classification, so candidate ids run from 0x35 down through 0x01",
             roster_buffer_address: ROSTER_BUFFER_ADDRESS,
-            roster_buffer_address_hex: "0x906A",
+            roster_buffer_address_hex: ROSTER_BUFFER_ADDRESS_HEX,
             roster_record_capacity: ROSTER_RECORD_CAPACITY,
             roster_record_stride: ROSTER_RECORD_STRIDE,
             roster_record_stride_hex: "0x1B",

@@ -2,7 +2,8 @@ use serde::Serialize;
 
 use super::{CodeLocation, SourceRegionSpec, location};
 
-pub(super) const ROSTER_BUFFER_ADDRESS: u16 = 0x906A;
+pub(super) const ROSTER_BUFFER_ADDRESS: u16 = 0x6A90;
+pub(super) const ROSTER_BUFFER_ADDRESS_HEX: &str = "0x6A90";
 pub(super) const ROSTER_RECORD_CAPACITY: usize = 54;
 pub(super) const ROSTER_RECORD_STRIDE: u8 = 0x1B;
 pub(super) const ROSTER_IDENTITY_OFFSET: u8 = 0x00;
@@ -66,7 +67,7 @@ pub(super) fn unit_record_history_contract() -> UnitRecordHistoryContract {
         current_chapter_address: 0x7674,
         current_chapter_address_hex: "0x7674",
         roster_buffer_address: ROSTER_BUFFER_ADDRESS,
-        roster_buffer_address_hex: "0x906A",
+        roster_buffer_address_hex: ROSTER_BUFFER_ADDRESS_HEX,
         roster_record_capacity: ROSTER_RECORD_CAPACITY,
         roster_record_stride: ROSTER_RECORD_STRIDE,
         roster_record_stride_hex: "0x1B",
@@ -95,6 +96,11 @@ mod tests {
         let contract = unit_record_history_contract();
 
         assert_eq!(contract.roster_buffer_address, ROSTER_BUFFER_ADDRESS);
+        assert_eq!(
+            contract.roster_buffer_address_hex,
+            ROSTER_BUFFER_ADDRESS_HEX
+        );
+        assert_eq!(ROSTER_BUFFER_ADDRESS.to_le_bytes(), [0x90, 0x6A]);
         assert_eq!(contract.roster_record_capacity, ROSTER_RECORD_CAPACITY);
         assert_eq!(contract.roster_record_stride, ROSTER_RECORD_STRIDE);
         assert_eq!(contract.action_offset, ROSTER_ACTION_OFFSET);
