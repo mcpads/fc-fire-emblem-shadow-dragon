@@ -12,6 +12,7 @@ use crate::{
     rom::{EXPECTED_SOURCE_SHA1, HEADER_SIZE, PRG_SIZE, Rom},
     sha1_hex,
     text_inventory::{DIALOGUE_CONTROL_SPECS, DIALOGUE_SCRIPT_CONTROL_CODES},
+    typed_source::decode_rp2a03_sequence,
 };
 
 const PRG_BANK_SIZE: usize = 16 * 1024;
@@ -399,6 +400,110 @@ const BATTLE_DIALOGUE_CONSUMER: SeparateConsumerSpec = SeparateConsumerSpec {
     destination_pointer: "0x76/0x77",
 };
 
+const BATTLE_DIALOGUE_TABLE_ID: &str = "battle-dialogue";
+const BATTLE_DIALOGUE_PRG_BANK: u8 = 0x04;
+const BATTLE_DIALOGUE_STATE_ADDRESS: u16 = 0x7937;
+const BATTLE_DIALOGUE_DISPATCHER_CPU_ADDRESS: u16 = 0x8031;
+const BATTLE_DIALOGUE_HANDLER_TABLE_CPU_ADDRESS: u16 = 0x8037;
+const BATTLE_DIALOGUE_STATE_HANDLERS: [u16; 9] = [
+    0xC73D, 0x8063, 0x80C2, 0x8237, 0x827D, 0x83B8, 0x8309, 0x8369, 0x8049,
+];
+const BATTLE_DIALOGUE_STATE_ROLES: [&str; 9] = [
+    "no_op",
+    "consume_fixed_four_byte_header",
+    "decode_record_body",
+    "publish_decoded_row",
+    "advance_or_finish_record",
+    "wait_for_published_rows",
+    "initialize_publish_buffers",
+    "publish_next_row",
+    "initialize_record_state",
+];
+const BATTLE_DIALOGUE_DATA_END_EXCLUSIVE_CPU_ADDRESS: u16 = 0x896D;
+const BATTLE_DIALOGUE_FIXED_HEADER_BYTE_COUNT: usize = 4;
+const BATTLE_DIALOGUE_END_CONTROL: u8 = 0xEF;
+const BATTLE_DIALOGUE_DYNAMIC_CONTROL: u8 = 0xEC;
+const BATTLE_DIALOGUE_DYNAMIC_SELECTOR_MAX: u8 = 3;
+const BATTLE_DIALOGUE_CONTROL_CODES: [u8; 6] = [0xAB, 0xAC, 0xEC, 0xED, 0xEE, 0xEF];
+const BATTLE_DIALOGUE_REFERENCED_HEADERS: [[u8; 4]; 2] =
+    [[0x08, 0x13, 0x10, 0x04], [0x08, 0x12, 0x10, 0x04]];
+const BATTLE_DIALOGUE_PHYSICAL_HEADERS: [[u8; 4]; 3] = [
+    [0x08, 0x13, 0x10, 0x04],
+    [0x08, 0x12, 0x10, 0x04],
+    [0x08, 0x13, 0x10, 0x03],
+];
+
+#[derive(Clone, Copy)]
+struct BattleDialogueCodeRegionSpec {
+    role: &'static str,
+    cpu_address: u16,
+    byte_count: usize,
+    expected_sha1: &'static str,
+}
+
+const BATTLE_DIALOGUE_CODE_REGIONS: [BattleDialogueCodeRegionSpec; 10] = [
+    BattleDialogueCodeRegionSpec {
+        role: "resolve_battle_dialogue_pointer",
+        cpu_address: 0x8000,
+        byte_count: 0x2D,
+        expected_sha1: "0c97c4fb8cd2c09f0c8ababe521154ba1ce5665a",
+    },
+    BattleDialogueCodeRegionSpec {
+        role: "dispatch_battle_dialogue_state",
+        cpu_address: 0x8031,
+        byte_count: 0x06,
+        expected_sha1: "4b0ccb33e0ec85c5b884f5d709cfb16270d7f23b",
+    },
+    BattleDialogueCodeRegionSpec {
+        role: "initialize_battle_dialogue_record",
+        cpu_address: 0x8049,
+        byte_count: 0x1A,
+        expected_sha1: "f4e53298f80aa2030355cccb8552d4d1fd61dba0",
+    },
+    BattleDialogueCodeRegionSpec {
+        role: "consume_battle_dialogue_header",
+        cpu_address: 0x8063,
+        byte_count: 0x5F,
+        expected_sha1: "80254a37725d891f523b692d59442d88e312c954",
+    },
+    BattleDialogueCodeRegionSpec {
+        role: "decode_battle_dialogue_record_body",
+        cpu_address: 0x80C2,
+        byte_count: 0x104,
+        expected_sha1: "890f33d0d6fe77f5326540ed949bbf2a29852d36",
+    },
+    BattleDialogueCodeRegionSpec {
+        role: "expand_battle_dialogue_dynamic_value",
+        cpu_address: 0x81C6,
+        byte_count: 0x60,
+        expected_sha1: "dbabf7222f10c6a99d3006f70aac4158155e9863",
+    },
+    BattleDialogueCodeRegionSpec {
+        role: "advance_battle_dialogue_source_pointer",
+        cpu_address: 0x822E,
+        byte_count: 0x09,
+        expected_sha1: "1beb5f51a8a6c2fcec271bd4fd4611fc72460eb1",
+    },
+    BattleDialogueCodeRegionSpec {
+        role: "publish_battle_dialogue_row",
+        cpu_address: 0x8237,
+        byte_count: 0x46,
+        expected_sha1: "8e579c652aab0b97bd12f80a672779a9cff70d9e",
+    },
+    BattleDialogueCodeRegionSpec {
+        role: "advance_or_finish_battle_dialogue_record",
+        cpu_address: 0x827D,
+        byte_count: 0x34,
+        expected_sha1: "f880ea430f0131545c93bdc1c15852bfb147a481",
+    },
+    BattleDialogueCodeRegionSpec {
+        role: "bind_battle_dialogue_source_read_pointer",
+        cpu_address: 0x83F2,
+        byte_count: 0x17,
+        expected_sha1: "e81790a878c29f94167fb8efae78a4ef35c176b2",
+    },
+];
+
 // Initial candidate locations came from the pinned Basilisk map. Every table,
 // including later directory discoveries, is admitted only after its ranges,
 // roots, selector evidence when declared, and pointers validate against the
@@ -599,6 +704,7 @@ pub(crate) struct TranslationSurfaceDialogueTableBinding {
     pub(crate) separate_loader_cpu_address_hex: Option<String>,
     pub(crate) proven_record_count: Option<usize>,
     pub(crate) unique_record_storage_byte_count: Option<usize>,
+    pub(crate) unreferenced_record_count: Option<usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -607,6 +713,7 @@ struct DialogueStructureReport {
     scope: ReportScope,
     summary: ReportSummary,
     main_dialogue_state_machine: MainDialogueStateMachineReport,
+    battle_dialogue_state_machine: BattleDialogueStateMachineReport,
     main_dialogue_graph: MainDialogueGraphReport,
     tables: Vec<DialogueTableReport>,
     unknowns: Vec<&'static str>,
@@ -657,6 +764,10 @@ struct ReportSummary {
     main_record_overlapping_pair_count: usize,
     max_main_record_overlap_depth: usize,
     max_main_record_storage_byte_count: usize,
+    battle_pointer_referenced_record_count: usize,
+    battle_unreferenced_record_count: usize,
+    battle_pointer_referenced_storage_byte_count: usize,
+    battle_physical_record_storage_byte_count: usize,
     alias_group_count: usize,
     aliased_entry_count: usize,
 }
@@ -685,6 +796,7 @@ struct DialogueTableReport {
     main_first_line_summary: Option<MainFirstLineSummary>,
     main_linear_segment_summary: Option<MainLinearSegmentSummary>,
     main_record_storage_summary: Option<MainRecordStorageSummary>,
+    battle_record_storage_summary: Option<BattleDialogueRecordStorageSummary>,
     data_file_start: usize,
     data_file_start_hex: String,
     directory_binding: Option<DirectoryBindingReport>,
@@ -755,6 +867,80 @@ struct DialogueEntryReport {
     main_first_line: Option<MainLineReport>,
     main_linear_segment: Option<MainLinearSegmentReport>,
     main_record_storage: Option<MainRecordStorageReport>,
+    battle_record_storage: Option<BattleDialogueRecordStorageReport>,
+}
+
+#[derive(Debug, Serialize)]
+struct BattleDialogueStateMachineReport {
+    prg_bank: u8,
+    prg_bank_hex: String,
+    state_address: u16,
+    state_address_hex: String,
+    dispatcher_cpu_address: u16,
+    dispatcher_cpu_address_hex: String,
+    handler_table_cpu_address: u16,
+    handler_table_cpu_address_hex: String,
+    handler_table_sha1: String,
+    handler_count: usize,
+    handlers: Vec<DialogueStateHandlerReport>,
+    fixed_record_header_byte_count: usize,
+    record_end_control: u8,
+    record_end_control_hex: String,
+    dynamic_value_control: u8,
+    dynamic_value_control_hex: String,
+    dynamic_selector_operand_byte_count: usize,
+    dynamic_selector_max: u8,
+    code_regions: Vec<BattleDialogueCodeRegionReport>,
+}
+
+#[derive(Debug, Serialize)]
+struct BattleDialogueCodeRegionReport {
+    role: &'static str,
+    cpu_address: u16,
+    cpu_address_hex: String,
+    file_offset: usize,
+    file_offset_hex: String,
+    byte_count: usize,
+    code_sha1: String,
+    typed_instruction_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct BattleDialogueRecordStorageReport {
+    file_offset: usize,
+    file_offset_hex: String,
+    end_file_offset_exclusive: usize,
+    end_file_offset_exclusive_hex: String,
+    storage_byte_count: usize,
+    storage_sha1: String,
+    header_hex: String,
+    dynamic_selector_values: Vec<u8>,
+    control_counts: Vec<ControlUsageReport>,
+}
+
+#[derive(Debug, Serialize)]
+struct BattleDialogueRecordStorageSummary {
+    pointer_referenced_record_count: usize,
+    unreferenced_record_count: usize,
+    consumed_storage_byte_count: usize,
+    unique_storage_byte_count: usize,
+    shared_storage_byte_count: usize,
+    overlapping_record_pair_count: usize,
+    max_overlap_depth: usize,
+    max_storage_byte_count: usize,
+    physical_record_count: usize,
+    physical_record_storage_byte_count: usize,
+    physical_data_file_end_exclusive: usize,
+    physical_data_file_end_exclusive_hex: String,
+    header_counts: Vec<BattleDialogueHeaderCount>,
+    physical_control_counts: Vec<ControlUsageReport>,
+    unreferenced_records: Vec<BattleDialogueRecordStorageReport>,
+}
+
+#[derive(Debug, Serialize)]
+struct BattleDialogueHeaderCount {
+    header_hex: String,
+    count: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -1295,11 +1481,27 @@ pub(crate) fn inspect_translation_surface_dialogue_tables(
             let proven_record_count = report
                 .main_record_storage_summary
                 .as_ref()
-                .map(|summary| summary.unique_record_count);
+                .map(|summary| summary.unique_record_count)
+                .or_else(|| {
+                    report
+                        .battle_record_storage_summary
+                        .as_ref()
+                        .map(|summary| summary.pointer_referenced_record_count)
+                });
             let unique_record_storage_byte_count = report
                 .main_record_storage_summary
                 .as_ref()
-                .map(|summary| summary.unique_storage_byte_count);
+                .map(|summary| summary.unique_storage_byte_count)
+                .or_else(|| {
+                    report
+                        .battle_record_storage_summary
+                        .as_ref()
+                        .map(|summary| summary.unique_storage_byte_count)
+                });
+            let unreferenced_record_count = report
+                .battle_record_storage_summary
+                .as_ref()
+                .map(|summary| summary.unreferenced_record_count);
 
             Ok(TranslationSurfaceDialogueTableBinding {
                 table_id: report.id,
@@ -1317,6 +1519,7 @@ pub(crate) fn inspect_translation_surface_dialogue_tables(
                 separate_loader_cpu_address_hex,
                 proven_record_count,
                 unique_record_storage_byte_count,
+                unreferenced_record_count,
             })
         })
         .collect()
@@ -1324,6 +1527,7 @@ pub(crate) fn inspect_translation_surface_dialogue_tables(
 
 fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
     let main_dialogue_state_machine = build_main_dialogue_state_machine(source)?;
+    let battle_dialogue_state_machine = build_battle_dialogue_state_machine(source)?;
     let tables = DIALOGUE_TABLE_SPECS
         .iter()
         .map(|spec| extract_dialogue_table(source, spec))
@@ -1455,6 +1659,18 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
         main_record_count == main_unique_script_entry_count,
         "main record-storage coverage does not match the directory-bound script entries"
     );
+    let battle_record_storage_summary = tables
+        .iter()
+        .find(|table| table.id == BATTLE_DIALOGUE_TABLE_ID)
+        .and_then(|table| table.battle_record_storage_summary.as_ref())
+        .context("battle-dialogue table has no record-storage summary")?;
+    let battle_pointer_referenced_record_count =
+        battle_record_storage_summary.pointer_referenced_record_count;
+    let battle_unreferenced_record_count = battle_record_storage_summary.unreferenced_record_count;
+    let battle_pointer_referenced_storage_byte_count =
+        battle_record_storage_summary.unique_storage_byte_count;
+    let battle_physical_record_storage_byte_count =
+        battle_record_storage_summary.physical_record_storage_byte_count;
     let summary = ReportSummary {
         table_count: tables.len(),
         directory_bound_table_count: tables
@@ -1522,30 +1738,163 @@ fn build_report(source: &[u8]) -> Result<DialogueStructureReport> {
             .overlapping_record_pair_count,
         max_main_record_overlap_depth: main_record_storage_summary.max_overlap_depth,
         max_main_record_storage_byte_count: main_record_storage_summary.max_storage_byte_count,
+        battle_pointer_referenced_record_count,
+        battle_unreferenced_record_count,
+        battle_pointer_referenced_storage_byte_count,
+        battle_physical_record_storage_byte_count,
         alias_group_count: tables.iter().map(|table| table.alias_group_count).sum(),
         aliased_entry_count: tables.iter().map(|table| table.aliased_entry_count).sum(),
     };
 
     Ok(DialogueStructureReport {
-        schema_version: 10,
+        schema_version: 11,
         scope: ReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             translation_direction: "ja_to_ko",
             preserve_existing_english: true,
-            proof_boundary: "exact pointer-table ranges, switchable-bank target mapping, aliases, all nine consumer roots, the selector-41 epilogue-routing use, the main dialogue record-prefix state path, every main entry's bounded consumed storage range and measured shared storage, Japanese 00-5F and 84-8B literal classification with 60-83 Latin preservation, all explicit E4/E6 graph edges, the E7 caller-handoff contract, and eleven confirmed direct outer dispatch bindings; no dialogue bytes or translations are emitted",
+            proof_boundary: "exact pointer-table ranges, switchable-bank target mapping, aliases, all nine consumer roots, the selector-41 epilogue-routing use, the main dialogue record-prefix state path, every main entry's bounded consumed storage range and measured shared storage, the separate battle state machine and all EF-terminated battle record ranges, Japanese 00-5F and 84-8B literal classification with 60-83 Latin preservation, all explicit E4/E6 graph edges, the E7 caller-handoff contract, and eleven confirmed direct outer dispatch bindings; no dialogue bytes or translations are emitted",
         },
         summary,
         main_dialogue_state_machine,
+        battle_dialogue_state_machine,
         main_dialogue_graph,
         tables,
         unknowns: vec![
-            "All directory-bound script entries have bounded consumed storage ranges through their first EF, E7, E4, or E6 boundary, but some ranges share source bytes and cannot be treated as independent rewrite units; the separate battle-dialogue format still has no proven record ranges.",
+            "All directory-bound script entries and all twenty-eight pointer-referenced battle records have bounded consumed storage ranges; main records may share bytes, while battle records are disjoint and one additional unreferenced structural record remains preserved but not admitted as a translation target.",
+            "Battle record boundaries are proven, but the complete temporal glyph, portrait, sprite, defeat, and unfavorable-variant union remains open before Hangul page budgeting.",
             "The E5, fixed four-byte, and E8 record prefix, each initial linear segment, all E4/E6 graph edges, and the E7 caller handoff are confirmed, but caller-specific outcomes after the handoff remain unresolved.",
             "Eleven direct outer dispatch bindings reuse four observer handlers across twenty-two state slots; indirect bindings are not excluded, and bank 04:A20F has no confirmed direct dispatch binding.",
             "Ten of the eighteen main dialogue state handlers remain structurally named but semantically unresolved.",
             "Role labels began as external map candidates and do not prove every entry's gameplay context.",
             "Existing English and numeric content remains protected and is not a translation target.",
         ],
+    })
+}
+
+fn build_battle_dialogue_state_machine(source: &[u8]) -> Result<BattleDialogueStateMachineReport> {
+    let dispatcher_file_offset = switchable_cpu_to_file_offset(
+        BATTLE_DIALOGUE_PRG_BANK,
+        BATTLE_DIALOGUE_DISPATCHER_CPU_ADDRESS,
+    )?;
+    let dispatcher_code = [0xAD, 0x37, 0x79, 0x20, 0x4C, 0xC3];
+    ensure!(
+        source.get(dispatcher_file_offset..dispatcher_file_offset + dispatcher_code.len())
+            == Some(dispatcher_code.as_slice()),
+        "battle-dialogue state dispatcher changed"
+    );
+
+    let handler_table_file_offset = switchable_cpu_to_file_offset(
+        BATTLE_DIALOGUE_PRG_BANK,
+        BATTLE_DIALOGUE_HANDLER_TABLE_CPU_ADDRESS,
+    )?;
+    let handler_table_byte_count = BATTLE_DIALOGUE_STATE_HANDLERS.len() * 2;
+    let handler_table_bytes = source
+        .get(handler_table_file_offset..handler_table_file_offset + handler_table_byte_count)
+        .context("battle-dialogue handler table is outside the source")?;
+    let actual_handlers = handler_table_bytes
+        .chunks_exact(2)
+        .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
+        .collect::<Vec<_>>();
+    ensure!(
+        actual_handlers == BATTLE_DIALOGUE_STATE_HANDLERS,
+        "battle-dialogue state handler table changed"
+    );
+    ensure!(
+        sha1_hex(handler_table_bytes) == "b8ed5c6682275d2f8adae45bc0e6375979e48ef2",
+        "battle-dialogue state handler table SHA-1 changed"
+    );
+
+    let mut indices_by_handler: BTreeMap<u16, Vec<usize>> = BTreeMap::new();
+    for (state, handler) in BATTLE_DIALOGUE_STATE_HANDLERS.iter().copied().enumerate() {
+        indices_by_handler.entry(handler).or_default().push(state);
+    }
+    let handlers = BATTLE_DIALOGUE_STATE_HANDLERS
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(state, cpu_address)| {
+            let file_offset = if cpu_address >= FIXED_CPU_START {
+                fixed_cpu_to_file_offset(cpu_address)?
+            } else {
+                switchable_cpu_to_file_offset(BATTLE_DIALOGUE_PRG_BANK, cpu_address)?
+            };
+            Ok(DialogueStateHandlerReport {
+                state,
+                cpu_address,
+                cpu_address_hex: format!("0x{cpu_address:04X}"),
+                file_offset,
+                file_offset_hex: format!("0x{file_offset:05X}"),
+                structural_role: BATTLE_DIALOGUE_STATE_ROLES[state],
+                alias_state_indices: indices_by_handler[&cpu_address]
+                    .iter()
+                    .copied()
+                    .filter(|other| *other != state)
+                    .collect(),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let no_op_file_offset = fixed_cpu_to_file_offset(BATTLE_DIALOGUE_STATE_HANDLERS[0])?;
+    ensure!(
+        source.get(no_op_file_offset) == Some(&0x60),
+        "battle-dialogue no-op handler changed"
+    );
+
+    let code_regions = BATTLE_DIALOGUE_CODE_REGIONS
+        .iter()
+        .map(|region| {
+            let file_offset =
+                switchable_cpu_to_file_offset(BATTLE_DIALOGUE_PRG_BANK, region.cpu_address)?;
+            let end = file_offset
+                .checked_add(region.byte_count)
+                .context("battle-dialogue code range overflow")?;
+            let bytes = source.get(file_offset..end).with_context(|| {
+                format!("battle-dialogue code {} is outside source", region.role)
+            })?;
+            ensure!(
+                sha1_hex(bytes) == region.expected_sha1,
+                "battle-dialogue code {} changed",
+                region.role
+            );
+            let typed_instructions =
+                decode_rp2a03_sequence(bytes, region.cpu_address, region.role)?;
+            ensure!(
+                !typed_instructions.is_empty(),
+                "battle-dialogue code {} has no typed instructions",
+                region.role
+            );
+            Ok(BattleDialogueCodeRegionReport {
+                role: region.role,
+                cpu_address: region.cpu_address,
+                cpu_address_hex: format!("0x{:04X}", region.cpu_address),
+                file_offset,
+                file_offset_hex: format!("0x{file_offset:05X}"),
+                byte_count: bytes.len(),
+                code_sha1: sha1_hex(bytes),
+                typed_instruction_count: typed_instructions.len(),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(BattleDialogueStateMachineReport {
+        prg_bank: BATTLE_DIALOGUE_PRG_BANK,
+        prg_bank_hex: format!("0x{BATTLE_DIALOGUE_PRG_BANK:02X}"),
+        state_address: BATTLE_DIALOGUE_STATE_ADDRESS,
+        state_address_hex: format!("0x{BATTLE_DIALOGUE_STATE_ADDRESS:04X}"),
+        dispatcher_cpu_address: BATTLE_DIALOGUE_DISPATCHER_CPU_ADDRESS,
+        dispatcher_cpu_address_hex: format!("0x{BATTLE_DIALOGUE_DISPATCHER_CPU_ADDRESS:04X}"),
+        handler_table_cpu_address: BATTLE_DIALOGUE_HANDLER_TABLE_CPU_ADDRESS,
+        handler_table_cpu_address_hex: format!("0x{BATTLE_DIALOGUE_HANDLER_TABLE_CPU_ADDRESS:04X}"),
+        handler_table_sha1: sha1_hex(handler_table_bytes),
+        handler_count: handlers.len(),
+        handlers,
+        fixed_record_header_byte_count: BATTLE_DIALOGUE_FIXED_HEADER_BYTE_COUNT,
+        record_end_control: BATTLE_DIALOGUE_END_CONTROL,
+        record_end_control_hex: format!("{BATTLE_DIALOGUE_END_CONTROL:02X}"),
+        dynamic_value_control: BATTLE_DIALOGUE_DYNAMIC_CONTROL,
+        dynamic_value_control_hex: format!("{BATTLE_DIALOGUE_DYNAMIC_CONTROL:02X}"),
+        dynamic_selector_operand_byte_count: 1,
+        dynamic_selector_max: BATTLE_DIALOGUE_DYNAMIC_SELECTOR_MAX,
+        code_regions,
     })
 }
 
@@ -1984,6 +2333,7 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
                 main_first_line: None,
                 main_linear_segment: None,
                 main_record_storage: None,
+                battle_record_storage: None,
             });
             continue;
         }
@@ -2036,6 +2386,18 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
                 spec.id
             ),
         };
+        let battle_record_storage = (spec.id == BATTLE_DIALOGUE_TABLE_ID)
+            .then(|| {
+                scan_battle_dialogue_record(
+                    source,
+                    file_offset,
+                    bank_end,
+                    &BATTLE_DIALOGUE_REFERENCED_HEADERS,
+                    spec.id,
+                    index,
+                )
+            })
+            .transpose()?;
         entries.push(DialogueEntryReport {
             index,
             pointer_cpu_address: pointer,
@@ -2049,6 +2411,7 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
             main_first_line,
             main_linear_segment,
             main_record_storage,
+            battle_record_storage,
         });
     }
     ensure!(
@@ -2230,6 +2593,16 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
     } else {
         None
     };
+    let battle_record_storage_summary = if spec.id == BATTLE_DIALOGUE_TABLE_ID {
+        Some(summarize_battle_dialogue_storage(
+            source,
+            &entries,
+            &indices_by_pointer,
+            spec.data_file_start,
+        )?)
+    } else {
+        None
+    };
 
     Ok(DialogueTableReport {
         id: spec.id,
@@ -2254,6 +2627,7 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
         main_first_line_summary,
         main_linear_segment_summary,
         main_record_storage_summary,
+        battle_record_storage_summary,
         data_file_start: spec.data_file_start,
         data_file_start_hex: format!("0x{:05X}", spec.data_file_start),
         directory_binding,
@@ -2266,6 +2640,221 @@ fn extract_dialogue_table(source: &[u8], spec: &DialogueTableSpec) -> Result<Dia
             "unresolved"
         },
         entries,
+    })
+}
+
+fn scan_battle_dialogue_record(
+    source: &[u8],
+    record_file_offset: usize,
+    scan_end_exclusive: usize,
+    allowed_headers: &[[u8; BATTLE_DIALOGUE_FIXED_HEADER_BYTE_COUNT]],
+    table_id: &str,
+    entry_index: usize,
+) -> Result<BattleDialogueRecordStorageReport> {
+    ensure!(
+        scan_end_exclusive <= source.len(),
+        "{table_id} entry {entry_index} battle scan end is outside source"
+    );
+    let header_end = record_file_offset
+        .checked_add(BATTLE_DIALOGUE_FIXED_HEADER_BYTE_COUNT)
+        .context("battle-dialogue header range overflow")?;
+    ensure!(
+        header_end <= scan_end_exclusive,
+        "{table_id} entry {entry_index} has a truncated battle record header"
+    );
+    let header: [u8; BATTLE_DIALOGUE_FIXED_HEADER_BYTE_COUNT] = source
+        .get(record_file_offset..header_end)
+        .context("battle-dialogue header is outside source")?
+        .try_into()
+        .expect("battle-dialogue header slice length is fixed");
+    ensure!(
+        allowed_headers.contains(&header),
+        "{table_id} entry {entry_index} has an unrecognized battle record header"
+    );
+
+    let mut cursor = header_end;
+    let mut dynamic_selector_values = Vec::new();
+    let mut control_count_map = BTreeMap::new();
+    loop {
+        ensure!(
+            cursor < scan_end_exclusive,
+            "{table_id} entry {entry_index} has no EF battle record terminator"
+        );
+        let byte = source[cursor];
+        if BATTLE_DIALOGUE_CONTROL_CODES.contains(&byte) {
+            *control_count_map.entry(byte).or_insert(0) += 1;
+        }
+        if byte == BATTLE_DIALOGUE_DYNAMIC_CONTROL {
+            let selector_offset = cursor
+                .checked_add(1)
+                .context("battle-dialogue dynamic selector offset overflow")?;
+            ensure!(
+                selector_offset < scan_end_exclusive,
+                "{table_id} entry {entry_index} has a truncated EC selector"
+            );
+            let selector = source[selector_offset];
+            ensure!(
+                selector <= BATTLE_DIALOGUE_DYNAMIC_SELECTOR_MAX,
+                "{table_id} entry {entry_index} has out-of-range EC selector {selector:02X}"
+            );
+            dynamic_selector_values.push(selector);
+            cursor = selector_offset + 1;
+            continue;
+        }
+        cursor += 1;
+        if byte == BATTLE_DIALOGUE_END_CONTROL {
+            break;
+        }
+    }
+
+    let storage = source
+        .get(record_file_offset..cursor)
+        .context("battle-dialogue record storage is outside source")?;
+    Ok(BattleDialogueRecordStorageReport {
+        file_offset: record_file_offset,
+        file_offset_hex: format!("0x{record_file_offset:05X}"),
+        end_file_offset_exclusive: cursor,
+        end_file_offset_exclusive_hex: format!("0x{cursor:05X}"),
+        storage_byte_count: storage.len(),
+        storage_sha1: sha1_hex(storage),
+        header_hex: header.iter().map(|byte| format!("{byte:02X}")).collect(),
+        dynamic_selector_values,
+        control_counts: control_usage_reports(control_count_map, &BATTLE_DIALOGUE_CONTROL_CODES),
+    })
+}
+
+fn summarize_battle_dialogue_storage(
+    source: &[u8],
+    entries: &[DialogueEntryReport],
+    indices_by_pointer: &BTreeMap<u16, Vec<usize>>,
+    data_file_start: usize,
+) -> Result<BattleDialogueRecordStorageSummary> {
+    let referenced_records = entries
+        .iter()
+        .filter(|entry| indices_by_pointer[&entry.pointer_cpu_address][0] == entry.index)
+        .map(|entry| {
+            entry
+                .battle_record_storage
+                .as_ref()
+                .context("canonical battle-dialogue entry has no record-storage range")
+        })
+        .collect::<Result<Vec<_>>>()?;
+    ensure!(
+        referenced_records.len() == 28,
+        "battle-dialogue pointer-referenced record count changed"
+    );
+    let referenced_ranges = referenced_records
+        .iter()
+        .map(|record| MainRecordStorageRange {
+            start: record.file_offset,
+            end_exclusive: record.end_file_offset_exclusive,
+        })
+        .collect::<Vec<_>>();
+    let referenced_summary = summarize_main_record_storage(&referenced_ranges)?;
+    ensure!(
+        referenced_summary.consumed_storage_byte_count == 1152
+            && referenced_summary.unique_storage_byte_count == 1152
+            && referenced_summary.shared_storage_byte_count == 0
+            && referenced_summary.overlapping_record_pair_count == 0
+            && referenced_summary.max_overlap_depth == 1
+            && referenced_summary.max_storage_byte_count == 210,
+        "battle-dialogue referenced storage topology changed"
+    );
+
+    let physical_data_file_end_exclusive = switchable_cpu_to_file_offset(
+        BATTLE_DIALOGUE_PRG_BANK,
+        BATTLE_DIALOGUE_DATA_END_EXCLUSIVE_CPU_ADDRESS,
+    )?;
+    ensure!(
+        data_file_start < physical_data_file_end_exclusive,
+        "battle-dialogue physical data region is empty"
+    );
+    let mut physical_records = Vec::new();
+    let mut cursor = data_file_start;
+    while cursor < physical_data_file_end_exclusive {
+        let record = scan_battle_dialogue_record(
+            source,
+            cursor,
+            physical_data_file_end_exclusive,
+            &BATTLE_DIALOGUE_PHYSICAL_HEADERS,
+            BATTLE_DIALOGUE_TABLE_ID,
+            physical_records.len(),
+        )?;
+        ensure!(
+            record.end_file_offset_exclusive > cursor,
+            "battle-dialogue physical scanner did not advance"
+        );
+        cursor = record.end_file_offset_exclusive;
+        physical_records.push(record);
+    }
+    ensure!(
+        cursor == physical_data_file_end_exclusive,
+        "battle-dialogue physical records do not end at the code boundary"
+    );
+
+    let referenced_start_offsets = referenced_records
+        .iter()
+        .map(|record| record.file_offset)
+        .collect::<BTreeSet<_>>();
+    let physical_start_offsets = physical_records
+        .iter()
+        .map(|record| record.file_offset)
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        referenced_start_offsets.is_subset(&physical_start_offsets),
+        "battle-dialogue pointer targets do not all begin physical records"
+    );
+    let unreferenced_records = physical_records
+        .iter()
+        .filter(|record| !referenced_start_offsets.contains(&record.file_offset))
+        .cloned()
+        .collect::<Vec<_>>();
+    ensure!(
+        physical_records.len() == 29 && unreferenced_records.len() == 1,
+        "battle-dialogue physical or unreferenced record count changed"
+    );
+
+    let mut header_count_map = BTreeMap::new();
+    let mut control_count_map = BTreeMap::new();
+    for record in &physical_records {
+        *header_count_map
+            .entry(record.header_hex.clone())
+            .or_insert(0) += 1;
+        for usage in &record.control_counts {
+            *control_count_map.entry(usage.code).or_insert(0) += usage.count;
+        }
+    }
+    let physical_record_storage_byte_count = physical_records
+        .iter()
+        .map(|record| record.storage_byte_count)
+        .sum();
+    ensure!(
+        physical_record_storage_byte_count == 1168,
+        "battle-dialogue physical storage byte count changed"
+    );
+
+    Ok(BattleDialogueRecordStorageSummary {
+        pointer_referenced_record_count: referenced_summary.unique_record_count,
+        unreferenced_record_count: unreferenced_records.len(),
+        consumed_storage_byte_count: referenced_summary.consumed_storage_byte_count,
+        unique_storage_byte_count: referenced_summary.unique_storage_byte_count,
+        shared_storage_byte_count: referenced_summary.shared_storage_byte_count,
+        overlapping_record_pair_count: referenced_summary.overlapping_record_pair_count,
+        max_overlap_depth: referenced_summary.max_overlap_depth,
+        max_storage_byte_count: referenced_summary.max_storage_byte_count,
+        physical_record_count: physical_records.len(),
+        physical_record_storage_byte_count,
+        physical_data_file_end_exclusive,
+        physical_data_file_end_exclusive_hex: format!("0x{physical_data_file_end_exclusive:05X}"),
+        header_counts: header_count_map
+            .into_iter()
+            .map(|(header_hex, count)| BattleDialogueHeaderCount { header_hex, count })
+            .collect(),
+        physical_control_counts: control_usage_reports(
+            control_count_map,
+            &BATTLE_DIALOGUE_CONTROL_CODES,
+        ),
+        unreferenced_records,
     })
 }
 
@@ -3862,5 +4451,52 @@ mod tests {
             .to_string();
 
         assert!(error.contains("separate pointer-table root changed"));
+    }
+
+    #[test]
+    fn battle_record_scanner_uses_ec_operand_width_and_first_ef_boundary() {
+        let source = [
+            0x08, 0x13, 0x10, 0x04, 0x01, 0xEC, 0x03, 0xED, 0xEF, 0x08, 0x13, 0x10, 0x04,
+        ];
+
+        let record = scan_battle_dialogue_record(
+            &source,
+            0,
+            source.len(),
+            &BATTLE_DIALOGUE_REFERENCED_HEADERS,
+            BATTLE_DIALOGUE_TABLE_ID,
+            0,
+        )
+        .unwrap();
+
+        assert_eq!(record.storage_byte_count, 9);
+        assert_eq!(record.end_file_offset_exclusive, 9);
+        assert_eq!(record.dynamic_selector_values, [3]);
+        assert_eq!(
+            record
+                .control_counts
+                .iter()
+                .map(|usage| (usage.code, usage.count))
+                .collect::<Vec<_>>(),
+            [(0xEC, 1), (0xED, 1), (0xEF, 1)]
+        );
+    }
+
+    #[test]
+    fn battle_record_scanner_rejects_an_out_of_range_dynamic_selector() {
+        let source = [0x08, 0x13, 0x10, 0x04, 0xEC, 0x04, 0xEF];
+
+        let error = scan_battle_dialogue_record(
+            &source,
+            0,
+            source.len(),
+            &BATTLE_DIALOGUE_REFERENCED_HEADERS,
+            BATTLE_DIALOGUE_TABLE_ID,
+            0,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("out-of-range EC selector 04"));
     }
 }

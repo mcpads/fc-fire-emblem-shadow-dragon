@@ -1,7 +1,7 @@
 {
   "schema": 2,
   "next_observation_gate": {
-    "gate_role": "battle_dialogue_record_boundaries_and_temporal_glyph_union",
+    "gate_role": "battle_and_ending_temporal_glyph_variant_union",
     "gate_kind": "screen_sequence",
     "focus_screen_roles": [
       "battle_animation",
@@ -13,14 +13,14 @@
       "Start automatically reuses shared battle-animation lifetimes instead of exposing one screen per outer source phase",
       "Select automatically reaches preserved-English story and credits, Japanese chapter records and character epilogues, and a blinking preserved final signature without further input",
       "the shared battle engine is source-bound to the unit, enemy, class, item, and battle-dialogue sources; the ending record stream and both epilogue dialogue tables are also structurally bound",
+      "the separate battle state machine bounds 28 pointer-referenced EF-terminated records over 1,152 disjoint bytes; one additional 16-byte structural record has no table reference and remains preserved",
       "visible lifetimes, not source phase counts or single-frame captures, define the screen roles"
     ],
     "unresolved_focus": [
-      "per-record storage boundaries for the separate battle-dialogue format",
       "complete temporal glyph, portrait, sprite, defeat, and unfavorable-variant unions",
       "temporal union checks that retain English, digits, portraits, sprites, and the blinking final signature"
     ],
-    "next_action": "prove battle-dialogue record storage boundaries and collect complete temporal glyph, portrait, sprite, defeat, and unfavorable-variant unions before sizing Hangul page coverage"
+    "next_action": "collect complete temporal glyph, portrait, sprite, defeat, and unfavorable-variant unions before sizing Hangul page coverage"
   },
   "unpartitioned_surface_families": [],
   "screens": [
@@ -245,14 +245,15 @@
         "Japanese unit names, weapons, forecast labels, strike messages, damage messages, critical messages, and result messages share the battle surface",
         "original LV, HIT, EXP, HP bars, percentages, damage values, and other digits remain preservation targets",
         "bank 05 shared phase state 047C has 32 handlers and binds the visible route to unit, enemy, class, item, and bank 04 battle-dialogue sources",
+        "bank 04 battle state 7937 has nine handlers; EC consumes one selector byte 00..03, EF ends each of 28 pointer-referenced records, and their 1,152 storage bytes are disjoint",
+        "one additional 16-byte EF-terminated structural record has no pointer-table reference and remains unchanged rather than being admitted as a translation target",
         "six outer test phases do not equal six visible screens; the visible sequence is owned by the shared inner battle engine"
       ],
       "unresolved_focus": [
-        "per-record storage boundaries for the separate battle-dialogue format",
         "complete CHR, sprite, and animation-phase union across ordinary and debug battle pairs",
         "defeat and unfavorable battle variants needed by the final regression route"
       ],
-      "next_gate": "bind the battle-dialogue records and complete the temporal glyph, sprite, defeat, and unfavorable-variant union before budgeting Hangul pages",
+      "next_gate": "complete the temporal glyph, sprite, defeat, and unfavorable-variant union before budgeting Hangul pages",
       "contract_state": "observed_partial"
     },
     {

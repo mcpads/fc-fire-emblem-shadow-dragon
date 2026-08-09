@@ -1282,12 +1282,13 @@ fn build_report(rom: &Rom) -> Result<ChapterTransitionReport> {
             },
         ],
         source_regions,
-        next_universalization_gate: "battle_dialogue_record_boundaries_and_temporal_glyph_union",
+        next_universalization_gate: "battle_and_ending_temporal_glyph_variant_union",
         unresolved: vec![
             "The chapter-one epilogue and save-complete dialogue use the main dialogue engine, but their dialogue source content is intentionally outside this public report.",
             "The save-offer no choice and save-complete no choice are source-bound and runtime-observed; the latter opens a terminal power-off notice with a source-bound sound-test unlock.",
             "Every sound-test control and both downstream state machines are source-bound and runtime-observed; the shared battle text tables and writers, ending chapter-record stream, turn interpolation, and character-epilogue dialogue tables are now structurally bound without emitting their content.",
-            "The separate battle-dialogue format still lacks proven per-record storage boundaries, and the complete battle CHR, sprite, temporal, defeat, and unfavorable-variant union remains open.",
+            "The separate battle-dialogue state machine now bounds twenty-eight pointer-referenced EF-terminated records and one unreferenced structural record; the latter remains preserved and is not admitted as a translation target.",
+            "The complete battle and ending CHR, glyph, portrait, sprite, temporal, defeat, and unfavorable-variant union remains open.",
             "The accelerated continuous route establishes reachability but not baseline combat difficulty, defeat, or unfavorable branches.",
             "Chapter-two, chapter-eleven, and chapter-twelve intro samples do not generalize the remaining twenty-two chapters or all title lifetimes.",
         ],
@@ -1423,7 +1424,9 @@ fn bind_translation_surfaces(rom: &Rom) -> Result<TranslationSurfaceContracts> {
         battle_dialogue.pointer_count == 65
             && battle_dialogue.unique_target_count == 28
             && battle_dialogue.separate_loader_cpu_address == Some(0x8000)
-            && battle_dialogue.proven_record_count.is_none(),
+            && battle_dialogue.proven_record_count == Some(28)
+            && battle_dialogue.unique_record_storage_byte_count == Some(1152)
+            && battle_dialogue.unreferenced_record_count == Some(1),
         "battle-dialogue surface structure changed"
     );
     let direct_epilogue = dialogue_tables
@@ -1549,7 +1552,6 @@ fn bind_battle_animation_translation_surface(
         ],
         translation_handling: "the debug route reuses the gameplay battle engine and its shared text sources; translate Japanese names, labels, and messages while preserving LV, HIT, EXP, HP bars, percentages, and digits",
         unresolved: &[
-            "the separate battle-dialogue format has a proven pointer loader but no proven per-record storage boundaries",
             "complete CHR, sprite, and temporal union across ordinary, debug, defeat, and unfavorable battle variants",
         ],
     })
@@ -2273,7 +2275,7 @@ fn transition_screens() -> Vec<TransitionScreen> {
                 "Select's automatic preserved and Japanese ending lifetimes through terminal blinking",
             ],
             unresolved_focus: &[
-                "battle-dialogue record storage boundaries and the complete battle and ending temporal glyph, portrait, sprite, defeat, and unfavorable-variant union",
+                "the complete battle and ending temporal glyph, portrait, sprite, defeat, and unfavorable-variant union",
             ],
         },
         TransitionScreen {
