@@ -26,7 +26,7 @@ use super::{
         PAGE_ROUTINE_ADDRESS as OPTIONS_PAGE_ROUTINE_ADDRESS,
         PAGE_ROUTINE_END as OPTIONS_PAGE_ROUTINE_END, ROW_HOOK_ADDRESS as OPTIONS_ROW_HOOK_ADDRESS,
         ROW_HOOK_LEN as OPTIONS_ROW_HOOK_LEN, ROW_PRG_BANK as OPTIONS_ROW_PRG_BANK,
-        build_page_routine as build_options_page_routine,
+        build_page_routine_with_fallback as build_options_page_routine_with_fallback,
         row_calculation as options_row_calculation, row_hook as options_row_hook,
     },
     roster_page::{
@@ -230,7 +230,11 @@ pub(crate) fn build_mapper165_hangul_page_probe(
         "mapper 165 parity base CHR size changed"
     );
 
-    let options_routine = build_options_page_routine(page_a_register, page_b_register)?;
+    let options_routine = build_options_page_routine_with_fallback(
+        page_a_register,
+        page_b_register,
+        ROSTER_PAGE_ROUTINE_ADDRESS,
+    )?;
     ensure!(
         OPTIONS_PAGE_ROUTINE_ADDRESS as usize + options_routine.len()
             == OPTIONS_PAGE_ROUTINE_END as usize,

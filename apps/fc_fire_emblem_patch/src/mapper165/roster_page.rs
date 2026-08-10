@@ -16,12 +16,20 @@ pub(super) const OWNER_CONSTRUCTOR_SIGNATURE: [u8; 18] = [
 pub(super) const HEADER_CALL_ADDRESS: u16 = 0x89F2;
 pub(super) const HEADER_RESOURCE_ID: u8 = 0x2B;
 pub(super) const CENTRAL_RIGHT_FD_SELECTOR_CALL_ADDRESS: u16 = 0xC9C2;
+pub(super) const CENTRAL_RIGHT_FE_COMPANION_FD_REFRESH_CALL_ADDRESS: u16 = 0xFABB;
 pub(super) const PAGE_ROUTINE_ADDRESS: u16 = 0xFB80;
 pub(super) const PAGE_ROUTINE_END: u16 = 0xFBD4;
 
 pub(super) fn central_right_fd_selector_call(target: u16) -> Result<Vec<u8>> {
     assemble_at(
         CENTRAL_RIGHT_FD_SELECTOR_CALL_ADDRESS,
+        &[Instruction::JsrAbsolute(target)],
+    )
+}
+
+pub(super) fn central_right_fe_companion_fd_refresh_call(target: u16) -> Result<Vec<u8>> {
+    assemble_at(
+        CENTRAL_RIGHT_FE_COMPANION_FD_REFRESH_CALL_ADDRESS,
         &[Instruction::JsrAbsolute(target)],
     )
 }
@@ -107,6 +115,19 @@ mod tests {
         );
         assert_eq!(
             central_right_fd_selector_call(PAGE_ROUTINE_ADDRESS).unwrap(),
+            [0x20, 0x80, 0xFB]
+        );
+    }
+
+    #[test]
+    fn companion_fd_refresh_can_enter_the_same_lifetime_selector_chain() {
+        assert_eq!(
+            central_right_fe_companion_fd_refresh_call(SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS)
+                .unwrap(),
+            [0x20, 0xC0, 0xFA]
+        );
+        assert_eq!(
+            central_right_fe_companion_fd_refresh_call(PAGE_ROUTINE_ADDRESS).unwrap(),
             [0x20, 0x80, 0xFB]
         );
     }

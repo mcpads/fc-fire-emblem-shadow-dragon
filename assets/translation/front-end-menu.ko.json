@@ -1,0 +1,93 @@
+{
+  "format_version": 1,
+  "source_sha1": "0179c550d424e0397496078789e7b116601d120c",
+  "translate_from": "ja",
+  "translate_to": "ko",
+  "preserve_existing_english_and_digits": true,
+  "entries": [
+    {
+      "id": "front-end-menu:new-game",
+      "fixed_string_index": 63,
+      "pointer_cpu_address_hex": "0x9206",
+      "source_file_offset_hex": "0x2D216",
+      "source_storage_byte_count": 7,
+      "source_bytes_hex": "0A 01 0B 87 05 28 ED",
+      "source_sha1": "e6d1ac4a6ca357e69a1e37f3ccecbd515c0ab426",
+      "japanese_markup": "さいしょから",
+      "korean_markup": "처음부터",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "front-end-menu:continue",
+      "fixed_string_index": 64,
+      "pointer_cpu_address_hex": "0x920D",
+      "source_file_offset_hex": "0x2D21D",
+      "source_storage_byte_count": 8,
+      "source_bytes_hex": "12 12 0F 06 2E 0C 2A ED",
+      "source_sha1": "c3c96fbc1cdbc04117d414c99e3b088b16bfc227",
+      "japanese_markup": "つつ゛きをする",
+      "korean_markup": "이어하기",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "front-end-menu:load",
+      "fixed_string_index": 65,
+      "pointer_cpu_address_hex": "0x9215",
+      "source_file_offset_hex": "0x2D225",
+      "source_storage_byte_count": 7,
+      "source_bytes_hex": "5C 3F 44 0F 0C 2A ED",
+      "source_sha1": "cbf38e0e89693e2a2049cad2b7e579031c5e4412",
+      "japanese_markup": "ロート゛する",
+      "korean_markup": "불러오기",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "front-end-menu:record-1",
+      "fixed_string_index": 66,
+      "pointer_cpu_address_hex": "0x921C",
+      "source_file_offset_hex": "0x2D22C",
+      "source_storage_byte_count": 10,
+      "source_bytes_hex": "06 2C 07 61 8D 76 6A 79 FF EF",
+      "source_sha1": "88bd52788ad09c3f7452ccc5ae234f398262544c",
+      "japanese_markup": "きろく1{8D}MAP{FF}",
+      "korean_markup": "기록1{8D}MAP{FF}",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "front-end-menu:record-2",
+      "fixed_string_index": 67,
+      "pointer_cpu_address_hex": "0x9226",
+      "source_file_offset_hex": "0x2D236",
+      "source_storage_byte_count": 10,
+      "source_bytes_hex": "06 2C 07 62 8D 76 6A 79 FF EF",
+      "source_sha1": "c9935245671d59451f850ba9d6dd5a2f79e05857",
+      "japanese_markup": "きろく2{8D}MAP{FF}",
+      "korean_markup": "기록2{8D}MAP{FF}",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "front-end-menu:copy-record",
+      "fixed_string_index": 68,
+      "pointer_cpu_address_hex": "0x9230",
+      "source_file_offset_hex": "0x2D240",
+      "source_storage_byte_count": 8,
+      "source_bytes_hex": "06 2C 07 2E 02 12 0C ED",
+      "source_sha1": "2549bb8b992ab3960985d5b9e1ad6d7df5feb113",
+      "japanese_markup": "きろくをうつす",
+      "korean_markup": "기록옮기기",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "front-end-menu:delete-record",
+      "fixed_string_index": 69,
+      "pointer_cpu_address_hex": "0x9238",
+      "source_file_offset_hex": "0x2D248",
+      "source_storage_byte_count": 7,
+      "source_bytes_hex": "06 2C 07 2E 08 0C ED",
+      "source_sha1": "bd7507bbd63dd1dda6e8a51a1af60bc430b191df",
+      "japanese_markup": "きろくをけす",
+      "korean_markup": "기록지우기",
+      "status": "needs_human_review"
+    }
+  ]
+}

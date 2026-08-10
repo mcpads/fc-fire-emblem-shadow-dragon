@@ -2,8 +2,6 @@ use anyhow::Result;
 
 use crate::rp2a03::{Instruction, assemble_at};
 
-use super::SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS;
-
 pub(super) const ROW_PRG_BANK: u8 = 0x0B;
 pub(super) const ROW_HOOK_ADDRESS: u16 = 0x93B7;
 pub(super) const ROW_HOOK_LEN: usize = 11;
@@ -32,7 +30,11 @@ pub(super) fn row_hook() -> Result<Vec<u8>> {
     assemble_at(ROW_HOOK_ADDRESS, &instructions)
 }
 
-pub(super) fn build_page_routine(page_a_register: u8, page_b_register: u8) -> Result<Vec<u8>> {
+pub(super) fn build_page_routine_with_fallback(
+    page_a_register: u8,
+    page_b_register: u8,
+    fallback_target: u16,
+) -> Result<Vec<u8>> {
     const PAGE_B_ADDRESS: u16 = 0xFB55;
     const WRITE_MAPPER_ADDRESS: u16 = 0xFB57;
     const FALLBACK_ADDRESS: u16 = 0xFB63;
@@ -75,7 +77,7 @@ pub(super) fn build_page_routine(page_a_register: u8, page_b_register: u8) -> Re
             Instruction::StaAbsolute(0x8001),
             Instruction::Plp,
             Instruction::Rts,
-            Instruction::JsrAbsolute(SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS),
+            Instruction::JsrAbsolute(fallback_target),
             Instruction::Plp,
             Instruction::Rts,
         ],
@@ -104,7 +106,12 @@ mod tests {
 
     #[test]
     fn page_routine_fits_its_proven_cave_and_has_a_pair_aware_fallback() {
-        let routine = build_page_routine(PAGE_A_REGISTER, PAGE_B_REGISTER).unwrap();
+        let routine = build_page_routine_with_fallback(
+            PAGE_A_REGISTER,
+            PAGE_B_REGISTER,
+            super::super::SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
+        )
+        .unwrap();
 
         assert_eq!(routine.len(), 0x48);
         assert_eq!(
@@ -115,5 +122,19 @@ mod tests {
         assert!(routine.windows(2).any(|bytes| bytes == [0xA9, 0x8C]));
         assert!(routine.windows(3).any(|bytes| bytes == [0x20, 0xC0, 0xFA]));
         assert_eq!(&routine[..11], row_calculation().unwrap());
+    }
+
+    #[test]
+    fn non_options_rows_can_continue_through_another_screen_lifetime_selector() {
+        let routine = build_page_routine_with_fallback(
+            PAGE_A_REGISTER,
+            PAGE_B_REGISTER,
+            super::super::roster_page::PAGE_ROUTINE_ADDRESS,
+        )
+        .unwrap();
+
+        assert_eq!(routine.len(), 0x48);
+        assert!(routine.windows(3).any(|bytes| bytes == [0x20, 0x80, 0xFB]));
+        assert!(!routine.windows(3).any(|bytes| bytes == [0x20, 0xC0, 0xFA]));
     }
 }

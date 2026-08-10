@@ -7,6 +7,7 @@ mod dialogue_inventory;
 mod epilogue_variant_evidence;
 mod font;
 mod font_slots;
+mod front_end_menu;
 mod hangul_page_plan;
 mod item_flow;
 mod japanese_encoding;
@@ -70,6 +71,12 @@ enum Command {
     ExtractFixedTextWorkspace {
         source: PathBuf,
         #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
+        output: PathBuf,
+    },
+    /// Create the small public workspace for the front-end menu label family.
+    ExtractFrontEndMenuWorkspace {
+        source: PathBuf,
+        #[arg(long, default_value = "assets/translation/front-end-menu.ko.json")]
         output: PathBuf,
     },
     /// Measure translated battle names, classes, items, and messages without emitting text.
@@ -391,6 +398,8 @@ enum Command {
         main_dialogue_workspace: PathBuf,
         #[arg(long, default_value = "assets/translation/chapter-titles.ko.json")]
         chapter_title_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/front-end-menu.ko.json")]
+        front_end_menu_localization: PathBuf,
         #[arg(
             long,
             default_value = "evidence/private/dialogue-lifetime/chapter-1-intro-screen.json"
@@ -401,6 +410,8 @@ enum Command {
             default_value = "evidence/private/cumulative-chapter2/chapter-2-intro-screen.json"
         )]
         chapter_two_intro_evidence: PathBuf,
+        #[arg(long, default_value = "evidence/private/front-end-menu/manifest.json")]
+        front_end_menu_evidence: PathBuf,
         #[arg(long, default_value = "out/cumulative-stages")]
         stage_directory: PathBuf,
         #[arg(long, default_value = "out/fire-emblem-fe1-korean-patch.nes")]
@@ -578,6 +589,15 @@ fn main() -> Result<()> {
                 summary.entry_count,
                 summary.japanese_entry_count,
                 summary.preserved_translation_count
+            );
+        }
+        Command::ExtractFrontEndMenuWorkspace { source, output } => {
+            let summary = front_end_menu::extract_front_end_menu_workspace(&source, &output)?;
+            println!("wrote {}", output.display());
+            println!("workspace SHA-1: {}", summary.workspace_sha1);
+            println!(
+                "front-end menu: {} entries, {} translations preserved",
+                summary.entry_count, summary.preserved_translation_count
             );
         }
         Command::AnalyzeBattleTextWorkset {
@@ -1197,8 +1217,10 @@ fn main() -> Result<()> {
             roster_localization,
             main_dialogue_workspace,
             chapter_title_localization,
+            front_end_menu_localization,
             chapter_one_intro_evidence,
             chapter_two_intro_evidence,
+            front_end_menu_evidence,
             stage_directory,
             output,
             report,
@@ -1210,8 +1232,10 @@ fn main() -> Result<()> {
                     roster_localization_path: &roster_localization,
                     main_dialogue_workspace_path: &main_dialogue_workspace,
                     chapter_title_localization_path: &chapter_title_localization,
+                    front_end_menu_localization_path: &front_end_menu_localization,
                     chapter_one_intro_evidence_path: &chapter_one_intro_evidence,
                     chapter_two_intro_evidence_path: &chapter_two_intro_evidence,
+                    front_end_menu_evidence_path: &front_end_menu_evidence,
                     stage_directory: &stage_directory,
                     output_path: &output,
                     report_path: &report,

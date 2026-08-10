@@ -374,11 +374,12 @@ cargo run -p fc-fire-emblem-patch -- build-battle-cache-upload-probe \
 
 ## 누적 한글 패치 빌드
 
-`build-kr-patch`는 이전 개발 ROM을 입력으로 받지 않고, 지원 일본판 원본에서 모든 단계를 결정적으로 다시 만든다. 첫 단계는 mapper 165 설정·부대 목록 페이지와 선택자를 만들고, 둘째 단계는 1장 제목과 도입부 전이 사슬 4레코드·18줄, 물리 CHR 페이지 `38`, mapper 값 `98`을 추가한다. 셋째 단계는 2장 제목과 도입부 1레코드·11줄, 물리 페이지 `40`, mapper 값 `A0`을 더하고 부대 목록 뒤 대사 선택자를 장 문맥 `00/01` 공용 선택기로 교체한다. 선택기는 typed RP2A03으로 조립되며 원본에서 직접 전이가 없고 전부 `FF`인 `FBD4..FC20`에 정확히 들어간다. 제목은 소스 포인터·원본 저장 길이에 다시 결속하고 대사와 같은 장별 글리프 배정을 쓴다. `{EA}` 대사 제어가 소스 바이트와 별도로 런타임에 출력하는 `9E AB`도 보존 집합에 넣어 원본 `※` 표식이 한글 글리프로 바뀌지 않게 한다.
+`build-kr-patch`는 이전 개발 ROM을 입력으로 받지 않고, 지원 일본판 원본에서 모든 단계를 결정적으로 다시 만든다. 첫 단계는 mapper 165 설정·부대 목록 페이지와 선택자를 만들고, 둘째 단계는 1장 제목과 도입부 전이 사슬 4레코드·18줄, 물리 CHR 페이지 `38`, mapper 값 `98`을 추가한다. 셋째 단계는 2장 제목과 도입부 1레코드·11줄, 물리 페이지 `40`, mapper 값 `A0`을 더한다. 넷째 단계는 시작·기록 메뉴 7개와 물리 페이지 `42`, mapper 값 `A8`을 추가한다. typed RP2A03 선택자들은 부대 목록, 시작 메뉴, 장 대사를 순서대로 판정하고 불일치하면 원래 쌍 인식 선택기로 돌아간다. 공용 행 조립 훅의 옵션 불일치와 중앙 FE 동반 FD 갱신도 같은 체인으로 보내 후속 원본 선택이 한글 페이지를 덮지 않게 한다. 제목은 소스 포인터·원본 저장 길이에 다시 결속하고 대사와 같은 장별 글리프 배정을 쓴다. `{EA}` 대사 제어가 런타임에 출력하는 `9E AB`도 보존 집합에 넣어 원본 `※` 표식을 유지한다.
 
 ```sh
 cargo run -p fc-fire-emblem-patch -- extract-chapter-title-workspace "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
+cargo run -p fc-fire-emblem-patch -- extract-front-end-menu-workspace "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- build-kr-patch "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 ```
 
-장 제목 작업공간은 `assets/translation/chapter-titles.ko.json`이며 25개 원문 결속과 원본 숫자 보존을 검사한다. 현재 25개 모두 초벌이 있고 1·2장 도입 제목만 설치했으며, 엔딩 장 기록이 가진 별도 물리 사본은 아직 설치하지 않았다. 중간 단계는 무시되는 `out/cumulative-stages/`, 최종 개발 ROM은 `out/fire-emblem-fe1-korean-patch.nes`, 공개 가능한 내용 없는 구조 보고서는 `out/kr-patch-build.json`에 쓴다. 현재 ROM SHA-1은 `cebcfa310206df05525d0d2e5a08a4c24ff97af0`, 보고서 SHA-1은 `fbe0b0b0ee957e926605f84a12146d63470a72ca`다. 보고서는 번역 입력 전체 504레코드·2,541채움 줄과 실제 설치 5레코드·29줄·수명별 글리프 페이지, 장 제목 작업공간 25개·설치 2개를 구분한다. 최종 CHR은 21뱅크이고 원본과 앞 단계 페이지를 그대로 보존하며 추적 쓰기 13개를 검증한다.
+장 제목 작업공간은 `assets/translation/chapter-titles.ko.json`, 작은 공개 메뉴 작업공간은 `assets/translation/front-end-menu.ko.json`이다. 전자는 25개 원문 결속과 원본 숫자를, 후자는 7개 고정 문자열과 기존 `MAP`·숫자를 검사한다. 현재 장 제목은 1·2장 도입 사본만 설치했고 엔딩의 별도 물리 사본은 아직 설치하지 않았다. 중간 단계는 무시되는 `out/cumulative-stages/`, 최종 개발 ROM은 `out/fire-emblem-fe1-korean-patch.nes`, 내용 없는 구조 보고서는 `out/kr-patch-build.json`에 쓴다. 현재 ROM SHA-1은 `9d9b4b39ac96c528ef544cc28cb1c3bbc9c1d120`, 보고서 SHA-1은 `7d1299e23220b4efe6043de7782c79f0ed504f28`다. 보고서는 전체 대사 입력과 실제 설치 5레코드·29줄, 장 제목 25개·설치 2개, 메뉴 7개를 구분한다. 최종 CHR은 22뱅크이고 원본과 앞 단계 페이지를 그대로 보존하며 추적 쓰기 24개를 검증한다.

@@ -24,6 +24,7 @@ mod dialogue_lifetime_page;
 mod dialogue_probe_font;
 pub(crate) mod dialogue_slice_probe;
 pub(crate) mod direct_chr_pairs;
+mod front_end_page;
 pub(crate) mod hangul_page_probe;
 mod options_page;
 mod roster_page;
