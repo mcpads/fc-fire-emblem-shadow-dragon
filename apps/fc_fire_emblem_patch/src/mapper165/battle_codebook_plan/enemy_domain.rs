@@ -16,6 +16,7 @@ use source_records::{
 
 pub(super) struct EnemyBattleDomain {
     pub(super) participant_glyph_sets: Vec<BTreeSet<char>>,
+    pub(super) enemy_name_source_indices: BTreeSet<usize>,
     pub(super) binding: EnemyBattleDomainBinding,
 }
 
@@ -94,9 +95,11 @@ pub(super) fn bind_enemy_battle_domain(
         .iter()
         .flat_map(|candidate| [candidate.identity, candidate.class_id, candidate.item_id])
         .collect::<Vec<_>>();
+    let unique_enemy_name_entry_count = name_indices.len();
 
     Ok(EnemyBattleDomain {
         participant_glyph_sets,
+        enemy_name_source_indices: name_indices,
         binding: EnemyBattleDomainBinding {
             chapter_count: CHAPTER_COUNT,
             compact_record_byte_count: ENEMY_RECORD_BYTE_COUNT,
@@ -114,7 +117,7 @@ pub(super) fn bind_enemy_battle_domain(
             reinforcement_selector: source.reinforcement_selector,
             reinforcement_record_builder: source.reinforcement_record_builder,
             combined_record_count: records.len(),
-            unique_enemy_name_entry_count: name_indices.len(),
+            unique_enemy_name_entry_count,
             unique_enemy_class_entry_count: class_indices.len(),
             unique_enemy_item_entry_count: item_indices.len(),
             participant_candidate_count: candidates.len(),

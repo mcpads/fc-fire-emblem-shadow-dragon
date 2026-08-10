@@ -52,6 +52,7 @@ const EQUIP_NECESSARY_CONDITION_FRAGMENT: [u8; 8] =
 
 pub(super) struct BattleItemDomain {
     pub(super) equip_candidate_item_glyph_sets: Vec<BTreeSet<char>>,
+    pub(super) equip_candidate_item_source_indices: BTreeSet<usize>,
     pub(super) enemy_class_item_pairs: BTreeSet<(u8, u8)>,
     pub(super) player_participant_glyph_sets: Vec<BTreeSet<char>>,
     pub(super) binding: BattleItemDomainBinding,
@@ -279,15 +280,17 @@ pub(super) fn bind_battle_item_domain(
         player_participant_glyph_sets,
     } = plan_battle_item_glyph_sets(fixed, &candidate_source_indices, &player_loadouts)?;
     let player_participant_candidate_count = player_participant_glyph_sets.len();
+    let candidate_item_entry_count = candidate_source_indices.len();
 
     Ok(BattleItemDomain {
         equip_candidate_item_glyph_sets: glyph_sets,
+        equip_candidate_item_source_indices: candidate_source_indices,
         enemy_class_item_pairs,
         player_participant_glyph_sets,
         binding: BattleItemDomainBinding {
             total_item_entry_count: ITEM_ENTRY_COUNT,
-            candidate_item_entry_count: candidate_source_indices.len(),
-            excluded_item_entry_count: ITEM_ENTRY_COUNT - candidate_source_indices.len(),
+            candidate_item_entry_count,
+            excluded_item_entry_count: ITEM_ENTRY_COUNT - candidate_item_entry_count,
             item_id_to_source_index: "item_id < 0x40 maps to item_id - 1; item_id >= 0x40 maps to 0x44",
             equip_necessary_condition: "item ID is nonzero and item action flags bit 0x01 is clear",
             candidate_source_index_sha1,

@@ -18,12 +18,14 @@ use crate::{
 
 use super::battle_combination_probe::GAMEPLAY_BATTLE_PRESERVED_ACTIVE_CODES;
 
+mod composition;
 mod conflict_graph;
 mod enemy_domain;
 mod item_domain;
 mod physical_assignment;
 mod runtime_inputs;
 
+use composition::{BattleCacheCompositionPlan, plan_cache_composition};
 use conflict_graph::{BattleGlyphFamilies, plan_stable_coloring};
 use enemy_domain::{EnemyBattleDomain, EnemyBattleDomainBinding, bind_enemy_battle_domain};
 use item_domain::{BattleItemDomain, BattleItemDomainBinding, bind_battle_item_domain};
@@ -42,6 +44,7 @@ struct BattleCodebookModel {
     dialogue_record_count: usize,
     player_participant_candidate_count: usize,
     enemy_participant_candidate_count: usize,
+    composition: BattleCacheCompositionPlan,
     item_domain: BattleItemDomainBinding,
     enemy_domain: EnemyBattleDomainBinding,
 }
@@ -95,6 +98,7 @@ struct BattleCodebookPlanReport {
     item_domain: BattleItemDomainBinding,
     enemy_domain: EnemyBattleDomainBinding,
     runtime_inputs: BattleRuntimeInputBinding,
+    composition: BattleCacheCompositionPlan,
     stable_assignment_fits_active_slot_ceiling: bool,
     stable_assignment_fits_chapter_one_safe_codes: bool,
     model_active_slot_infeasibility_proven: bool,
@@ -138,6 +142,7 @@ pub(crate) fn analyze_battle_codebook_plan(
         dialogue_record_count,
         player_participant_candidate_count,
         enemy_participant_candidate_count,
+        composition,
         item_domain,
         enemy_domain,
     } = model;
@@ -160,7 +165,7 @@ pub(crate) fn analyze_battle_codebook_plan(
     let fixed_workspace_sha1 = sha1_hex(&fs::read(fixed_workspace_path)?);
     let dialogue_workspace_sha1 = sha1_hex(&fs::read(dialogue_workspace_path)?);
     let report = BattleCodebookPlanReport {
-        schema: 1,
+        schema: 2,
         source_sha1: EXPECTED_SOURCE_SHA1,
         fixed_workspace_sha1,
         dialogue_workspace_sha1,
@@ -198,6 +203,7 @@ pub(crate) fn analyze_battle_codebook_plan(
         item_domain,
         enemy_domain,
         runtime_inputs,
+        composition,
         stable_assignment_fits_active_slot_ceiling: coloring.color_count
             <= ACTIVE_HANGUL_SLOT_COUNT,
         stable_assignment_fits_chapter_one_safe_codes: coloring.color_count
@@ -259,12 +265,14 @@ fn plan_battle_codebook_model(
     let player_classes = entry_glyph_sets(fixed, "class-names");
     let BattleItemDomain {
         equip_candidate_item_glyph_sets: player_items,
+        equip_candidate_item_source_indices,
         enemy_class_item_pairs,
         player_participant_glyph_sets: player_participants,
         binding: item_domain,
     } = bind_battle_item_domain(rom, fixed)?;
     let EnemyBattleDomain {
         participant_glyph_sets: enemy_participants,
+        enemy_name_source_indices,
         binding: enemy_domain,
     } = bind_enemy_battle_domain(rom, fixed, &enemy_class_item_pairs)?;
     let terrains = entry_glyph_sets(fixed, "terrain-names");
@@ -305,6 +313,16 @@ fn plan_battle_codebook_model(
         },
         ACTIVE_HANGUL_SLOT_COUNT,
     )?;
+    let composition = plan_cache_composition(
+        fixed,
+        dialogue,
+        &coloring,
+        &equip_candidate_item_source_indices,
+        &enemy_name_source_indices,
+        player_participants.len(),
+        enemy_participants.len(),
+        terrain_entry_count,
+    )?;
     Ok(BattleCodebookModel {
         message_template_entry_count: message_templates.len(),
         unit_name_entry_count: player_names.len(),
@@ -316,6 +334,7 @@ fn plan_battle_codebook_model(
         player_participant_candidate_count: player_participants.len(),
         enemy_participant_candidate_count: enemy_participants.len(),
         coloring,
+        composition,
         item_domain,
         enemy_domain,
     })
@@ -336,7 +355,7 @@ mod tests {
     #[test]
     fn report_does_not_emit_translation_content_or_private_paths() {
         let report = BattleCodebookPlanReport {
-            schema: 1,
+            schema: 2,
             source_sha1: EXPECTED_SOURCE_SHA1,
             fixed_workspace_sha1: "fixed".to_owned(),
             dialogue_workspace_sha1: "dialogue".to_owned(),
@@ -374,6 +393,7 @@ mod tests {
             item_domain: item_domain::test_binding(),
             enemy_domain: enemy_domain::test_binding(),
             runtime_inputs: runtime_inputs::test_binding(),
+            composition: composition::test_plan(),
             stable_assignment_fits_active_slot_ceiling: true,
             stable_assignment_fits_chapter_one_safe_codes: true,
             model_active_slot_infeasibility_proven: false,
