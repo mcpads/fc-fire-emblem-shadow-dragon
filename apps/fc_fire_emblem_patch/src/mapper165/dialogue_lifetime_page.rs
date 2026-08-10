@@ -66,6 +66,7 @@ pub(super) struct DialogueLifetimePagePlan {
     pub(super) preserved_source_active_code_count: usize,
     pub(super) preserved_active_code_count: usize,
     pub(super) page_sha1: String,
+    pub(super) physical_chr_page: u8,
     pub(super) mapper_register: u8,
 }
 
@@ -75,6 +76,7 @@ pub(super) fn plan_dialogue_lifetime_page(
     target_record_id: &str,
     glyphs: &BTreeSet<char>,
     preserved_source_codes: &BTreeSet<u8>,
+    physical_chr_page: u8,
 ) -> Result<DialogueLifetimePagePlan> {
     let (manifest_sha1, temporal_sample_count, unique_nametable_count, screen_codes) =
         load_screen_codes(manifest_path, target_record_id)?;
@@ -98,8 +100,8 @@ pub(super) fn plan_dialogue_lifetime_page(
         "mapper 165 parity CHR is not 4 KiB page aligned"
     );
     ensure!(
-        parity_rom.chr().len() / FONT_PAGE_SIZE == usize::from(FIRST_EXTENSION_CHR_PAGE),
-        "dialogue extension no longer begins at the first free physical CHR page"
+        parity_rom.chr().len() / FONT_PAGE_SIZE == usize::from(physical_chr_page),
+        "dialogue extension physical CHR page does not follow the cumulative base"
     );
     let source_start = SOURCE_FONT_PHYSICAL_PAGE * FONT_PAGE_SIZE;
     let source_end = source_start + EXTENSION_PAGE_COUNT * FONT_PAGE_SIZE;
@@ -109,7 +111,7 @@ pub(super) fn plan_dialogue_lifetime_page(
         .context("dialogue source font page pair is outside parity CHR")?;
     let mut page_pack = build_font_page(&source_pair[..FONT_PAGE_SIZE], &assignments)?;
     page_pack.extend_from_slice(&source_pair[FONT_PAGE_SIZE..]);
-    let mapper_register = encode_chr_page_register(PHYSICAL_CHR_PAGE)?;
+    let mapper_register = encode_chr_page_register(physical_chr_page)?;
 
     Ok(DialogueLifetimePagePlan {
         assignments,
@@ -121,6 +123,7 @@ pub(super) fn plan_dialogue_lifetime_page(
         preserved_screen_active_code_count: preserved_screen_active_codes.len(),
         preserved_source_active_code_count: preserved_source_active_codes.len(),
         preserved_active_code_count: preserved_active_codes.len(),
+        physical_chr_page,
         mapper_register,
     })
 }
@@ -256,37 +259,51 @@ pub(super) fn central_right_fd_selector_call(target: u16) -> Result<Vec<u8>> {
 }
 
 pub(super) fn build_page_routine(mapper_register: u8) -> Result<Vec<u8>> {
-    const FALLBACK_ADDRESS: u16 = 0xFB63;
+    build_page_routine_at(
+        PAGE_ROUTINE_ADDRESS,
+        mapper_register,
+        SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
+    )
+}
+
+pub(super) fn build_page_routine_at(
+    routine_address: u16,
+    mapper_register: u8,
+    fallback_target: u16,
+) -> Result<Vec<u8>> {
+    let fallback_address = routine_address
+        .checked_add(0x43)
+        .context("dialogue page selector fallback address overflow")?;
 
     assemble_at(
-        PAGE_ROUTINE_ADDRESS,
+        routine_address,
         &[
             Instruction::Php,
             Instruction::Pha,
             Instruction::LdaZeroPage(0x24),
             Instruction::CmpImmediate(0x0B),
-            Instruction::BneAbsolute(FALLBACK_ADDRESS),
+            Instruction::BneAbsolute(fallback_address),
             Instruction::LdaZeroPage(0x84),
             Instruction::CmpImmediate(0x00),
-            Instruction::BneAbsolute(FALLBACK_ADDRESS),
+            Instruction::BneAbsolute(fallback_address),
             Instruction::LdaZeroPage(0x59),
             Instruction::CmpImmediate(0x1A),
-            Instruction::BneAbsolute(FALLBACK_ADDRESS),
+            Instruction::BneAbsolute(fallback_address),
             Instruction::LdaZeroPage(0x5A),
             Instruction::CmpImmediate(0x1A),
-            Instruction::BneAbsolute(FALLBACK_ADDRESS),
+            Instruction::BneAbsolute(fallback_address),
             Instruction::LdaZeroPage(0x5B),
             Instruction::CmpImmediate(0x00),
-            Instruction::BneAbsolute(FALLBACK_ADDRESS),
+            Instruction::BneAbsolute(fallback_address),
             Instruction::LdaZeroPage(0x5C),
             Instruction::CmpImmediate(0x18),
-            Instruction::BneAbsolute(FALLBACK_ADDRESS),
+            Instruction::BneAbsolute(fallback_address),
             Instruction::LdaAbsolute(0x77F7),
             Instruction::CmpImmediate(0x03),
-            Instruction::BneAbsolute(FALLBACK_ADDRESS),
+            Instruction::BneAbsolute(fallback_address),
             Instruction::LdaAbsolute(0x781D),
             Instruction::CmpImmediate(0x00),
-            Instruction::BneAbsolute(FALLBACK_ADDRESS),
+            Instruction::BneAbsolute(fallback_address),
             Instruction::LdaImmediate(mapper_register),
             Instruction::Pha,
             Instruction::LdaImmediate(2),
@@ -298,7 +315,7 @@ pub(super) fn build_page_routine(mapper_register: u8) -> Result<Vec<u8>> {
             Instruction::Rts,
             Instruction::Pla,
             Instruction::Plp,
-            Instruction::JmpAbsolute(SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS),
+            Instruction::JmpAbsolute(fallback_target),
         ],
     )
 }
@@ -330,6 +347,18 @@ mod tests {
                 .windows(5)
                 .any(|bytes| bytes == [0xAD, 0x1D, 0x78, 0xC9, 0x00])
         );
+    }
+
+    #[test]
+    fn selector_can_move_without_changing_its_size_or_fallback_contract() {
+        let routine = build_page_routine_at(0xFBD8, 0x98, 0xFAC0).unwrap();
+
+        assert_eq!(
+            routine.len(),
+            usize::from(PAGE_ROUTINE_END - PAGE_ROUTINE_ADDRESS)
+        );
+        assert_eq!(&routine[routine.len() - 3..], &[0x4C, 0xC0, 0xFA]);
+        assert!(routine.windows(2).any(|bytes| bytes == [0xA9, 0x98]));
     }
 
     #[test]

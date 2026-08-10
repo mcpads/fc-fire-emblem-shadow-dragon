@@ -77,8 +77,9 @@ pub(crate) fn plan_main_dialogue_slice(
         workspace_record
             .lines
             .iter()
-            .all(|line| line.status != TranslationStatus::Untranslated),
-        "main dialogue slice record {record_id} has untranslated lines"
+            .all(|line| line.status != TranslationStatus::Untranslated
+                || line.japanese_source_byte_count == 0),
+        "main dialogue slice record {record_id} has untranslated Japanese lines"
     );
     ensure!(
         workspace_record
@@ -100,9 +101,14 @@ pub(crate) fn plan_main_dialogue_slice(
         "main dialogue slice record {record_id} shares source storage with another record"
     );
     let logical = build_logical_dialogue_record(rom.data(), source_record, workspace_record)?;
+    let expected_translated_line_count = workspace_record
+        .lines
+        .iter()
+        .filter(|line| line.status != TranslationStatus::Untranslated)
+        .count();
     ensure!(
-        logical.translated_line_count == workspace_record.lines.len(),
-        "main dialogue slice record {record_id} is not fully translated"
+        logical.translated_line_count == expected_translated_line_count,
+        "main dialogue slice record {record_id} translated-line count changed"
     );
     ensure!(
         logical.bytes.len() <= logical.source_storage_byte_count,

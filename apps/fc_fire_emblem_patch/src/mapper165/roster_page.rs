@@ -27,6 +27,18 @@ pub(super) fn central_right_fd_selector_call(target: u16) -> Result<Vec<u8>> {
 }
 
 pub(super) fn build_page_routine(page_a_register: u8, page_b_register: u8) -> Result<Vec<u8>> {
+    build_page_routine_with_fallback(
+        page_a_register,
+        page_b_register,
+        SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
+    )
+}
+
+pub(super) fn build_page_routine_with_fallback(
+    page_a_register: u8,
+    page_b_register: u8,
+    fallback_target: u16,
+) -> Result<Vec<u8>> {
     const PAGE_A_ADDRESS: u16 = 0xFBBC;
     const PAGE_B_ADDRESS: u16 = 0xFBC0;
     const WRITE_MAPPER_ADDRESS: u16 = 0xFBC2;
@@ -78,7 +90,7 @@ pub(super) fn build_page_routine(page_a_register: u8, page_b_register: u8) -> Re
             Instruction::Rts,
             Instruction::Pla,
             Instruction::Plp,
-            Instruction::JmpAbsolute(SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS),
+            Instruction::JmpAbsolute(fallback_target),
         ],
     )
 }
@@ -111,6 +123,14 @@ mod tests {
         assert!(routine.windows(2).any(|bytes| bytes == [0xA9, 0x90]));
         assert!(routine.windows(2).any(|bytes| bytes == [0xA9, 0x94]));
         assert_eq!(&routine[routine.len() - 3..], &[0x4C, 0xC0, 0xFA]);
+    }
+
+    #[test]
+    fn fallback_can_chain_to_another_screen_lifetime_selector() {
+        let routine =
+            build_page_routine_with_fallback(PAGE_REGISTERS[0], PAGE_REGISTERS[1], 0xFBD8).unwrap();
+
+        assert_eq!(&routine[routine.len() - 3..], &[0x4C, 0xD8, 0xFB]);
     }
 
     #[test]

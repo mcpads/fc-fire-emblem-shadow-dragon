@@ -99,6 +99,7 @@ pub(crate) fn build_dialogue_slice_probe(
         record_id,
         &glyphs,
         &plan.preserved_source_codes,
+        PHYSICAL_CHR_PAGE,
     )?;
     let encoded_record = plan.encoded_bytes(&lifetime_page.assignments)?;
     let routine = build_page_routine(lifetime_page.mapper_register)?;
@@ -186,7 +187,7 @@ pub(crate) fn build_dialogue_slice_probe(
         screen_evidence_manifest_sha1: lifetime_page.manifest_sha1,
         temporal_sample_count: lifetime_page.temporal_sample_count,
         unique_nametable_count: lifetime_page.unique_nametable_count,
-        font_physical_page: PHYSICAL_CHR_PAGE,
+        font_physical_page: lifetime_page.physical_chr_page,
         font_mapper_register: lifetime_page.mapper_register,
         font_page_sha1: lifetime_page.page_sha1,
         font_page_pack_sha1: sha1_hex(&lifetime_page.page_pack),

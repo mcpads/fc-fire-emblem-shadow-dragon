@@ -374,6 +374,27 @@ enum Command {
         #[arg(long, default_value = "out/mapper165-hangul-page-probe.json")]
         report: PathBuf,
     },
+    /// Build the cumulative mapper 165 Korean patch lineage from the supported source.
+    BuildKrPatch {
+        source: PathBuf,
+        #[arg(long, default_value = "assets/translation/options.ko.json")]
+        options_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/roster.ko.json")]
+        roster_localization: PathBuf,
+        #[arg(long, default_value = "private/dialogue/main-workspace.json")]
+        main_dialogue_workspace: PathBuf,
+        #[arg(
+            long,
+            default_value = "evidence/private/dialogue-lifetime/chapter-1-intro-screen.json"
+        )]
+        chapter_one_intro_evidence: PathBuf,
+        #[arg(long, default_value = "out/cumulative-stages")]
+        stage_directory: PathBuf,
+        #[arg(long, default_value = "out/fire-emblem-fe1-korean-patch.nes")]
+        output: PathBuf,
+        #[arg(long, default_value = "out/kr-patch-build.json")]
+        report: PathBuf,
+    },
     /// Build one reviewed main-dialogue record as an end-to-end mapper 165 development probe.
     BuildMainDialogueSliceProbe {
         source: PathBuf,
@@ -1145,6 +1166,41 @@ fn main() -> Result<()> {
             println!("options page pack SHA-1: {}", summary.page_pack_sha1);
             println!("roster page pack SHA-1: {}", summary.roster_page_pack_sha1);
             println!("tracked ROM writes: {}", summary.tracked_write_count);
+        }
+        Command::BuildKrPatch {
+            source,
+            options_localization,
+            roster_localization,
+            main_dialogue_workspace,
+            chapter_one_intro_evidence,
+            stage_directory,
+            output,
+            report,
+        } => {
+            let summary = mapper165::cumulative_patch::build_cumulative_patch(
+                mapper165::cumulative_patch::CumulativePatchInputs {
+                    source_path: &source,
+                    options_localization_path: &options_localization,
+                    roster_localization_path: &roster_localization,
+                    main_dialogue_workspace_path: &main_dialogue_workspace,
+                    chapter_one_intro_evidence_path: &chapter_one_intro_evidence,
+                    stage_directory: &stage_directory,
+                    output_path: &output,
+                    report_path: &report,
+                },
+            )?;
+            println!("wrote {}", output.display());
+            println!("output SHA-1: {}", summary.output_sha1);
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "cumulative patch: {} stages, {} installed dialogue records, {} installed translated lines, {} unique glyphs, {} tracked writes",
+                summary.stage_count,
+                summary.installed_dialogue_record_count,
+                summary.installed_dialogue_line_count,
+                summary.unique_glyph_count,
+                summary.tracked_write_count
+            );
         }
         Command::BuildMainDialogueSliceProbe {
             source,
