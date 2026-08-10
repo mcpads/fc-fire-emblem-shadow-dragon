@@ -31,6 +31,7 @@ const SOURCE_NMI_INPUT_SCAN: u16 = 0xC2D9;
 const SOURCE_NMI_SCROLL_RESTORE: u16 = 0xC36A;
 const BATTLE_TRANSITION_HOOK: u16 = 0xFAF3;
 const UPLOAD_FONT_PAGE: u16 = 0xFB20;
+const GAMEPLAY_BATTLE_CACHE_MATCH_PREDICATE: u16 = 0xFC21;
 const BATTLE_RIGHT_FD_SELECTOR: u16 = 0xFC50;
 const BATTLE_CENTRAL_RIGHT_FD_SELECTOR: u16 = 0xFC80;
 const BATTLE_RIGHT_FE_SELECTOR: u16 = 0xFCC4;
@@ -43,6 +44,11 @@ const BATTLE_ACTIVE_FLAG: u16 = 0x047D;
 const CACHE_UPLOADED_MARKER: u8 = 0x80;
 const MAIN_STATE: u8 = 0x84;
 const BATTLE_MAIN_STATE: u8 = 0x16;
+const ENEMY_INITIATED_BATTLE_MAIN_STATE: u8 = 0x32;
+const BATTLE_RECORD_ONE: u16 = 0x76F4;
+const BATTLE_RECORD_TWO: u16 = 0x7715;
+const CAIN_RECORD_IDENTITY: u8 = 0x04;
+const GARUDA_SOLDIER_RECORD_IDENTITY: u8 = 0x85;
 const PPU_MASK_SHADOW: u8 = 0xCC;
 const UPLOAD_RENDER_MASK: u8 = 0x06;
 const PPU_CONTROL_SHADOW: u16 = 0x00CD;
@@ -60,6 +66,9 @@ struct BattleCacheUploadProbeReport {
     prg_size: usize,
     chr_size: usize,
     combination_role: &'static str,
+    gameplay_battle_main_states: [u8; 2],
+    cache_participant_record_identities: [u8; 2],
+    participant_pair_gated: bool,
     preserved_active_code_count: usize,
     codebook_glyph_count: usize,
     codebook_assignment_sha1: String,
@@ -218,7 +227,10 @@ pub(crate) fn build_battle_cache_upload_probe(
         output_mapper: output_rom.mapper(),
         prg_size: output_rom.prg().len(),
         chr_size: output_rom.chr().len(),
-        combination_role: "chapter-one favorable gameplay battle",
+        combination_role: "chapter-one Cain and Garuda soldier gameplay battle pair",
+        gameplay_battle_main_states: [BATTLE_MAIN_STATE, ENEMY_INITIATED_BATTLE_MAIN_STATE],
+        cache_participant_record_identities: [CAIN_RECORD_IDENTITY, GARUDA_SOLDIER_RECORD_IDENTITY],
+        participant_pair_gated: true,
         preserved_active_code_count: combination.preserved_active_code_count,
         codebook_glyph_count: combination.glyph_count,
         codebook_assignment_sha1: combination.codebook_assignment_sha1,
@@ -248,7 +260,7 @@ pub(crate) fn build_battle_cache_upload_probe(
         glyph_characters_emitted: false,
         runtime_verified: false,
         release_eligible: false,
-        next_gate: "exercise every visible favorable, unfavorable, defeat, and selector-driven battle text lifetime with the one-shot cache path",
+        next_gate: "replace the participant-pair probe key with a generated full battle signature before broadening cache coverage; keep defeat dialogue on its separate screen path",
     };
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize battle cache upload report")?;
@@ -428,15 +440,14 @@ fn build_runtime_routines() -> Result<Vec<RuntimeRoutine>> {
                 BATTLE_TRANSITION_HOOK,
                 &[
                     Instruction::JsrAbsolute(SOURCE_NMI_INPUT_SCAN),
-                    Instruction::LdaZeroPage(MAIN_STATE),
-                    Instruction::CmpImmediate(BATTLE_MAIN_STATE),
-                    Instruction::BneAbsolute(BATTLE_TRANSITION_HOOK + 28),
+                    Instruction::JsrAbsolute(GAMEPLAY_BATTLE_CACHE_MATCH_PREDICATE),
+                    Instruction::BneAbsolute(BATTLE_TRANSITION_HOOK + 27),
                     Instruction::LdaAbsolute(BATTLE_ACTIVE_FLAG),
                     Instruction::AndImmediate(CACHE_UPLOADED_MARKER),
-                    Instruction::BneAbsolute(BATTLE_TRANSITION_HOOK + 28),
+                    Instruction::BneAbsolute(BATTLE_TRANSITION_HOOK + 27),
                     Instruction::LdaZeroPage(PPU_MASK_SHADOW),
                     Instruction::CmpImmediate(UPLOAD_RENDER_MASK),
-                    Instruction::BneAbsolute(BATTLE_TRANSITION_HOOK + 28),
+                    Instruction::BneAbsolute(BATTLE_TRANSITION_HOOK + 27),
                     Instruction::JsrAbsolute(UPLOAD_FONT_PAGE),
                     Instruction::JsrAbsolute(SOURCE_NMI_SCROLL_RESTORE),
                     Instruction::Rts,
@@ -447,6 +458,11 @@ fn build_runtime_routines() -> Result<Vec<RuntimeRoutine>> {
             role: "4 KiB CHR-RAM upload",
             address: UPLOAD_FONT_PAGE,
             bytes: upload_font_page_routine()?,
+        },
+        RuntimeRoutine {
+            role: "gameplay battle-cache match predicate",
+            address: GAMEPLAY_BATTLE_CACHE_MATCH_PREDICATE,
+            bytes: gameplay_battle_cache_match_predicate()?,
         },
         RuntimeRoutine {
             role: "battle-aware direct right FD selection",
@@ -464,6 +480,33 @@ fn build_runtime_routines() -> Result<Vec<RuntimeRoutine>> {
             bytes: battle_right_chr_selector(BATTLE_RIGHT_FE_SELECTOR, 4)?,
         },
     ])
+}
+
+fn gameplay_battle_cache_match_predicate() -> Result<Vec<u8>> {
+    let pair = GAMEPLAY_BATTLE_CACHE_MATCH_PREDICATE + 10;
+    let cain_first = GAMEPLAY_BATTLE_CACHE_MATCH_PREDICATE + 27;
+    let mismatch = GAMEPLAY_BATTLE_CACHE_MATCH_PREDICATE + 32;
+    assemble_at(
+        GAMEPLAY_BATTLE_CACHE_MATCH_PREDICATE,
+        &[
+            Instruction::LdaZeroPage(MAIN_STATE),
+            Instruction::CmpImmediate(BATTLE_MAIN_STATE),
+            Instruction::BeqAbsolute(pair),
+            Instruction::CmpImmediate(ENEMY_INITIATED_BATTLE_MAIN_STATE),
+            Instruction::BneAbsolute(mismatch),
+            Instruction::LdaAbsolute(BATTLE_RECORD_ONE),
+            Instruction::CmpImmediate(CAIN_RECORD_IDENTITY),
+            Instruction::BeqAbsolute(cain_first),
+            Instruction::CmpImmediate(GARUDA_SOLDIER_RECORD_IDENTITY),
+            Instruction::BneAbsolute(mismatch),
+            Instruction::LdaAbsolute(BATTLE_RECORD_TWO),
+            Instruction::CmpImmediate(CAIN_RECORD_IDENTITY),
+            Instruction::Rts,
+            Instruction::LdaAbsolute(BATTLE_RECORD_TWO),
+            Instruction::CmpImmediate(GARUDA_SOLDIER_RECORD_IDENTITY),
+            Instruction::Rts,
+        ],
+    )
 }
 
 fn upload_font_page_routine() -> Result<Vec<u8>> {
@@ -571,15 +614,14 @@ fn battle_right_fd_selector() -> Result<Vec<u8>> {
 }
 
 fn battle_right_chr_selector(address: u16, mapper_register: u8) -> Result<Vec<u8>> {
-    let natural = address + 19;
-    let write = address + 28;
+    let natural = address + 18;
+    let write = address + 27;
     assemble_at(
         address,
         &[
             Instruction::Php,
             Instruction::Pha,
-            Instruction::LdaZeroPage(MAIN_STATE),
-            Instruction::CmpImmediate(BATTLE_MAIN_STATE),
+            Instruction::JsrAbsolute(GAMEPLAY_BATTLE_CACHE_MATCH_PREDICATE),
             Instruction::BneAbsolute(natural),
             Instruction::Pla,
             Instruction::Pha,
@@ -607,14 +649,13 @@ fn battle_right_chr_selector(address: u16, mapper_register: u8) -> Result<Vec<u8
 }
 
 fn battle_central_right_fd_selector() -> Result<Vec<u8>> {
-    let natural = BATTLE_CENTRAL_RIGHT_FD_SELECTOR + 27;
+    let natural = BATTLE_CENTRAL_RIGHT_FD_SELECTOR + 26;
     assemble_at(
         BATTLE_CENTRAL_RIGHT_FD_SELECTOR,
         &[
             Instruction::Php,
             Instruction::Pha,
-            Instruction::LdaZeroPage(MAIN_STATE),
-            Instruction::CmpImmediate(BATTLE_MAIN_STATE),
+            Instruction::JsrAbsolute(GAMEPLAY_BATTLE_CACHE_MATCH_PREDICATE),
             Instruction::BneAbsolute(natural),
             Instruction::Pla,
             Instruction::Pha,
@@ -723,13 +764,55 @@ mod tests {
                 .windows(4)
                 .any(|bytes| bytes == [0xA5, PPU_MASK_SHADOW, 0xC9, UPLOAD_RENDER_MASK])
         );
-        assert!(dispatch.starts_with(&[0x20, 0xD9, 0xC2, 0xA5, MAIN_STATE]));
+        assert!(dispatch.starts_with(&[0x20, 0xD9, 0xC2, 0x20, 0x21, 0xFC, 0xD0, 0x13,]));
         assert!(
             dispatch.windows(7).any(|bytes| {
                 bytes == [0xAD, 0x7D, 0x04, 0x29, CACHE_UPLOADED_MARKER, 0xD0, 0x0C]
             })
         );
         assert!(dispatch.ends_with(&[0x20, 0x6A, 0xC3, 0x60]));
+    }
+
+    #[test]
+    fn gameplay_battle_cache_match_requires_state_and_unordered_participant_pair() {
+        assert_eq!(
+            gameplay_battle_cache_match_predicate().unwrap(),
+            [
+                0xA5,
+                MAIN_STATE,
+                0xC9,
+                BATTLE_MAIN_STATE,
+                0xF0,
+                0x04,
+                0xC9,
+                ENEMY_INITIATED_BATTLE_MAIN_STATE,
+                0xD0,
+                0x16,
+                0xAD,
+                0xF4,
+                0x76,
+                0xC9,
+                CAIN_RECORD_IDENTITY,
+                0xF0,
+                0x0A,
+                0xC9,
+                GARUDA_SOLDIER_RECORD_IDENTITY,
+                0xD0,
+                0x0B,
+                0xAD,
+                0x15,
+                0x77,
+                0xC9,
+                CAIN_RECORD_IDENTITY,
+                0x60,
+                0xAD,
+                0x15,
+                0x77,
+                0xC9,
+                GARUDA_SOLDIER_RECORD_IDENTITY,
+                0x60,
+            ]
+        );
     }
 
     #[test]
@@ -743,7 +826,13 @@ mod tests {
             output_mapper: OUTPUT_MAPPER,
             prg_size: EXPANDED_PRG_SIZE,
             chr_size: 0,
-            combination_role: "battle",
+            combination_role: "battle pair",
+            gameplay_battle_main_states: [BATTLE_MAIN_STATE, ENEMY_INITIATED_BATTLE_MAIN_STATE],
+            cache_participant_record_identities: [
+                CAIN_RECORD_IDENTITY,
+                GARUDA_SOLDIER_RECORD_IDENTITY,
+            ],
+            participant_pair_gated: true,
             preserved_active_code_count: 119,
             codebook_glyph_count: 1,
             codebook_assignment_sha1: "assignment".to_owned(),
@@ -767,8 +856,8 @@ mod tests {
             battle_zero_right_page_uses_chr_ram: true,
             non_battle_right_pages_use_natural_selection: true,
             original_chr_preserved: true,
-            runtime_routine_count: 5,
-            runtime_tracked_write_count: 10,
+            runtime_routine_count: 6,
+            runtime_tracked_write_count: 11,
             translation_text_emitted: false,
             glyph_characters_emitted: false,
             runtime_verified: false,
