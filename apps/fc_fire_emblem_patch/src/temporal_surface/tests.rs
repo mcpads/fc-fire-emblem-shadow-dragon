@@ -138,3 +138,32 @@ fn producer_frame_deltas_must_match_declared_exact_steps() {
     .to_string();
     assert!(error.contains("exact-step delta"));
 }
+
+#[test]
+fn battle_runtime_input_projects_selector_62_before_the_late_write() {
+    let mut files = CaptureFiles {
+        screenshot: b"\x89PNG\r\n\x1A\n".to_vec(),
+        state: Vec::new(),
+        internal_ram: vec![0; INTERNAL_RAM_BYTE_COUNT],
+        prg_ram: vec![0; PRG_RAM_BYTE_COUNT],
+        nametable: vec![0; NAMETABLE_BYTE_COUNT],
+        oam: vec![0xFF; OAM_BYTE_COUNT],
+        palette: vec![0; PALETTE_BYTE_COUNT],
+    };
+    files.internal_ram[0x0304..0x0308].copy_from_slice(&[0x04, 0x85, 0x01, 0x08]);
+    files.internal_ram[0x0320..0x0324].copy_from_slice(&[0x0B, 0x1A, 0x00, 0x0B]);
+    for address in [0x0334, 0x0479, 0x0335] {
+        files.internal_ram[address] = 1;
+    }
+
+    let input = observed_battle_runtime_input(&files).unwrap();
+
+    assert_eq!(input.observed_dialogue_selector, 0);
+    assert_eq!(input.projected_dialogue_selector, 0x3E);
+    assert!(input.selector_62_predicate_matched);
+
+    files.internal_ram[0x05DF] = 1;
+    let input = observed_battle_runtime_input(&files).unwrap();
+    assert_eq!(input.projected_dialogue_selector, 0);
+    assert!(!input.selector_62_predicate_matched);
+}

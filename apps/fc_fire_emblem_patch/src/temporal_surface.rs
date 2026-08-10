@@ -8,6 +8,7 @@ use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    font_slots::active_hangul_codes,
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
 };
@@ -21,7 +22,7 @@ use capture_state::{ChrPairReport, parse_capture_state};
 use route_analysis::*;
 
 const MANIFEST_SCHEMA: u8 = 1;
-const REPORT_SCHEMA: u8 = 1;
+const REPORT_SCHEMA: u8 = 2;
 const NAMETABLE_BYTE_COUNT: usize = 0x800;
 const NAMETABLE_PAGE_BYTE_COUNT: usize = 0x400;
 const NAMETABLE_TILE_BYTE_COUNT: usize = 0x3C0;
@@ -31,6 +32,7 @@ const INTERNAL_RAM_BYTE_COUNT: usize = 0x800;
 const PRG_RAM_BYTE_COUNT: usize = 0x2000;
 const VISIBLE_SPRITE_Y_MAX: u8 = 0xEE;
 const MIN_IRREGULAR_SAMPLE_COUNT: usize = 4;
+const BATTLE_CACHE_PATTERN_ADDRESS: u16 = 0x1000;
 
 const REQUIRED_ROUTE_ROLES: [&str; 5] = [
     "sound_test_shared_battle",
@@ -202,6 +204,8 @@ struct SampleReport {
     right_latch: u8,
     background_enabled: bool,
     sprites_enabled: bool,
+    background_pattern_address_hex: String,
+    sprite_pattern_address_hex: String,
     visible_sprite_count: usize,
     memory_expectation_count: usize,
 }
@@ -221,6 +225,30 @@ pub struct TemporalSurfaceSummary {
     pub sample_count: usize,
     pub chr_pair_count: usize,
     pub required_route_coverage_complete: bool,
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) struct ObservedBattleRuntimeInput {
+    pub(crate) participant_record_identities: [u8; 2],
+    pub(crate) class_record_identities: [u8; 2],
+    pub(crate) item_source_indices: [u8; 2],
+    pub(crate) terrain_source_indices: [u8; 2],
+    pub(crate) observed_dialogue_selector: u8,
+    pub(crate) projected_dialogue_selector: u8,
+    pub(crate) selector_62_predicate_matched: bool,
+}
+
+pub(crate) struct ObservedBattleTemporalSample {
+    pub(crate) route_role: String,
+    pub(crate) active_tile_codes: BTreeSet<u8>,
+    pub(crate) nametable_constrains_cache: bool,
+    pub(crate) visible_oam_constrains_cache: bool,
+    pub(crate) runtime_input: ObservedBattleRuntimeInput,
+}
+
+pub(crate) struct ObservedBattleTemporalEvidence {
+    pub(crate) manifest_sha1: String,
+    pub(crate) samples: Vec<ObservedBattleTemporalSample>,
 }
 
 struct CaptureFiles {
@@ -274,6 +302,98 @@ pub fn analyze_temporal_surfaces(
         sample_count: report.summary.sample_count,
         chr_pair_count: report.summary.chr_pair_count,
         required_route_coverage_complete: report.summary.required_route_coverage_complete,
+    })
+}
+
+pub(crate) fn load_observed_battle_temporal_evidence(
+    source_path: &Path,
+    manifest_path: &Path,
+) -> Result<ObservedBattleTemporalEvidence> {
+    let rom = Rom::from_path(source_path)?;
+    rom.verify_supported_japanese()?;
+    let manifest_bytes =
+        fs::read(manifest_path).with_context(|| format!("read {}", manifest_path.display()))?;
+    let manifest: TemporalSurfaceManifest = serde_json::from_slice(&manifest_bytes)
+        .with_context(|| format!("parse {}", manifest_path.display()))?;
+    let manifest_root = manifest_path.parent().unwrap_or_else(|| Path::new("."));
+    build_report(&manifest, &sha1_hex(&manifest_bytes), manifest_root)?;
+
+    let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
+    let mut samples = Vec::new();
+    for route in &manifest.routes {
+        for sample in &route.samples {
+            if sample.screen_role != "battle_animation" {
+                continue;
+            }
+            let capture_dir = resolve_capture_dir(manifest_root, &sample.capture_dir)?;
+            let files = read_capture_files(&capture_dir)?;
+            validate_memory_expectations(sample, &files)?;
+            let state = parse_capture_state(&files.state)?;
+            let nametable_constrains_cache = state.background_enabled
+                && state.background_pattern_address == BATTLE_CACHE_PATTERN_ADDRESS;
+            let visible_oam_constrains_cache = state.sprites_enabled
+                && state.sprite_pattern_address == BATTLE_CACHE_PATTERN_ADDRESS;
+            let nametable_codes = nametable_constrains_cache
+                .then(|| nametable_tile_codes_for(&files.nametable))
+                .into_iter()
+                .flatten();
+            let visible_oam_codes = visible_oam_constrains_cache
+                .then(|| visible_sprite_tile_codes_for(&files.oam).0)
+                .into_iter()
+                .flatten();
+            let active_tile_codes = nametable_codes
+                .chain(visible_oam_codes)
+                .filter(|code| active_codes.contains(code))
+                .collect::<BTreeSet<_>>();
+            samples.push(ObservedBattleTemporalSample {
+                route_role: route.route_role.clone(),
+                active_tile_codes,
+                nametable_constrains_cache,
+                visible_oam_constrains_cache,
+                runtime_input: observed_battle_runtime_input(&files)?,
+            });
+        }
+    }
+    ensure!(
+        !samples.is_empty(),
+        "temporal evidence contains no battle-animation samples"
+    );
+    Ok(ObservedBattleTemporalEvidence {
+        manifest_sha1: sha1_hex(&manifest_bytes),
+        samples,
+    })
+}
+
+fn observed_battle_runtime_input(files: &CaptureFiles) -> Result<ObservedBattleRuntimeInput> {
+    let pair = |address: usize, role: &str| {
+        files
+            .internal_ram
+            .get(address..address + 2)
+            .map(|bytes| [bytes[0], bytes[1]])
+            .with_context(|| format!("observed battle {role} is outside internal RAM"))
+    };
+    let observed_dialogue_selector = files
+        .prg_ram
+        .get(0x7936 - MemoryRegion::PrgRam.base_address())
+        .copied()
+        .context("observed battle dialogue selector is outside PRG RAM")?;
+    let selector_62_predicate_matched = [0x0334, 0x0479, 0x0335]
+        .into_iter()
+        .all(|address| files.internal_ram[address] != 0)
+        && files.internal_ram[0x05DF] == 0;
+    let projected_dialogue_selector = if selector_62_predicate_matched {
+        0x3E
+    } else {
+        observed_dialogue_selector
+    };
+    Ok(ObservedBattleRuntimeInput {
+        participant_record_identities: pair(0x0304, "participant identities")?,
+        class_record_identities: pair(0x0306, "class identities")?,
+        item_source_indices: pair(0x0320, "item source indices")?,
+        terrain_source_indices: pair(0x0322, "terrain source indices")?,
+        observed_dialogue_selector,
+        projected_dialogue_selector,
+        selector_62_predicate_matched,
     })
 }
 

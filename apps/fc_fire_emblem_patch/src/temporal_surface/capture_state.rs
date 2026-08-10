@@ -22,6 +22,8 @@ pub(crate) struct CaptureState {
     pub(crate) right_latch: u8,
     pub(crate) background_enabled: bool,
     pub(crate) sprites_enabled: bool,
+    pub(crate) background_pattern_address: u16,
+    pub(crate) sprite_pattern_address: u16,
 }
 
 pub(crate) fn parse_capture_state(bytes: &[u8]) -> Result<CaptureState> {
@@ -73,6 +75,15 @@ pub(crate) fn parse_capture_state(bytes: &[u8]) -> Result<CaptureState> {
         )
     };
 
+    let pattern_address = |key: &str| -> Result<u16> {
+        let address = u16::try_from(unsigned(key)?)
+            .with_context(|| format!("producer state {key} does not fit a PPU address"))?;
+        ensure!(
+            matches!(address, 0x0000 | 0x1000),
+            "producer state {key} is not a pattern-table base"
+        );
+        Ok(address)
+    };
     Ok(CaptureState {
         producer_frame_count: unsigned("frameCount")?,
         chr_pair,
@@ -80,6 +91,8 @@ pub(crate) fn parse_capture_state(bytes: &[u8]) -> Result<CaptureState> {
         right_latch,
         background_enabled: boolean("ppu.mask.backgroundEnabled")?,
         sprites_enabled: boolean("ppu.mask.spritesEnabled")?,
+        background_pattern_address: pattern_address("ppu.control.backgroundPatternAddr")?,
+        sprite_pattern_address: pattern_address("ppu.control.spritePatternAddr")?,
     })
 }
 
@@ -125,7 +138,9 @@ mod tests {
             "mapper.leftLatch": 0,
             "mapper.rightLatch": 1,
             "ppu.mask.backgroundEnabled": true,
-            "ppu.mask.spritesEnabled": false
+            "ppu.mask.spritesEnabled": false,
+            "ppu.control.backgroundPatternAddr": 0x1000,
+            "ppu.control.spritePatternAddr": 0x0000
         });
 
         let parsed = parse_capture_state(&serde_json::to_vec(&state).unwrap()).unwrap();
@@ -143,6 +158,8 @@ mod tests {
         assert_eq!((parsed.left_latch, parsed.right_latch), (0, 1));
         assert!(parsed.background_enabled);
         assert!(!parsed.sprites_enabled);
+        assert_eq!(parsed.background_pattern_address, 0x1000);
+        assert_eq!(parsed.sprite_pattern_address, 0x0000);
     }
 
     #[test]
@@ -157,7 +174,9 @@ mod tests {
             "mapper.chrLatch[0]": true,
             "mapper.chrLatch[1]": false,
             "ppu.mask.backgroundEnabled": true,
-            "ppu.mask.spritesEnabled": true
+            "ppu.mask.spritesEnabled": true,
+            "ppu.control.backgroundPatternAddr": 0x1000,
+            "ppu.control.spritePatternAddr": 0x0000
         });
 
         let parsed = parse_capture_state(&serde_json::to_vec(&state).unwrap()).unwrap();
@@ -175,5 +194,7 @@ mod tests {
         assert_eq!((parsed.left_latch, parsed.right_latch), (1, 0));
         assert!(parsed.background_enabled);
         assert!(parsed.sprites_enabled);
+        assert_eq!(parsed.background_pattern_address, 0x1000);
+        assert_eq!(parsed.sprite_pattern_address, 0x0000);
     }
 }

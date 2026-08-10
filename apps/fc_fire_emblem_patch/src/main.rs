@@ -92,6 +92,21 @@ enum Command {
         #[arg(long, default_value = "out/battle-codebook-plan.json")]
         report: PathBuf,
     },
+    /// Bind observed battle-animation tile protection to runtime recipe selections.
+    AnalyzeBattleSurfaceConstraints {
+        source: PathBuf,
+        #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
+        fixed_workspace: PathBuf,
+        #[arg(long, default_value = "private/dialogue/battle-workspace.json")]
+        dialogue_workspace: PathBuf,
+        #[arg(
+            long,
+            default_value = "evidence/private/temporal-surfaces/manifest.json"
+        )]
+        temporal_manifest: PathBuf,
+        #[arg(long, default_value = "out/battle-surface-constraints.json")]
+        report: PathBuf,
+    },
     /// Expand mapper 165 PRG and embed the translated battle glyph atlas.
     BuildBattleTextCacheBase {
         source: PathBuf,
@@ -522,6 +537,30 @@ fn main() -> Result<()> {
                 summary.constructed_clique_glyph_count,
                 summary.stable_color_count,
                 summary.chapter_one_safe_code_count
+            );
+        }
+        Command::AnalyzeBattleSurfaceConstraints {
+            source,
+            fixed_workspace,
+            dialogue_workspace,
+            temporal_manifest,
+            report,
+        } => {
+            let summary = mapper165::battle_codebook_plan::surface_constraints::analyze_battle_surface_constraints(
+                &source,
+                &fixed_workspace,
+                &dialogue_workspace,
+                &temporal_manifest,
+                &report,
+            )?;
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "battle surface constraints: {} samples, {} runtime tuples, {:?} constrained colors, physical assignment {:?}",
+                summary.sample_count,
+                summary.runtime_tuple_count,
+                summary.constrained_color_count,
+                summary.physical_assignment_sha1
             );
         }
         Command::BuildBattleTextCacheBase {

@@ -14,7 +14,7 @@ use super::conflict_graph::StableColoringPlan;
 
 mod blob;
 
-use blob::{RecipeCatalog, RecipePair, RecipeRole};
+use blob::{RecipeCatalog, RecipePair, RecipeRole, select_runtime_recipes};
 
 const SOURCE_PRG_BYTE_COUNT: usize = 256 * 1024;
 const EXPANDED_PRG_BYTE_COUNT: usize = 512 * 1024;
@@ -65,6 +65,62 @@ pub(in crate::mapper165) struct BattleCacheCompositionMaterial {
     pub(super) plan: BattleCacheCompositionPlan,
     pub(in crate::mapper165) atlas_glyphs: Vec<char>,
     pub(in crate::mapper165) recipe_blob: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(in crate::mapper165) struct BattleRuntimeRecipeInput {
+    pub(in crate::mapper165) participant_record_identities: [u8; 2],
+    pub(in crate::mapper165) class_record_identities: [u8; 2],
+    pub(in crate::mapper165) item_source_indices: [u8; 2],
+    pub(in crate::mapper165) terrain_source_indices: [u8; 2],
+    pub(in crate::mapper165) dialogue_selector: u8,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(in crate::mapper165) struct BattleRuntimeGlyphOverlay {
+    pub(in crate::mapper165) abstract_color: u8,
+    pub(in crate::mapper165) atlas_index: u16,
+}
+
+pub(in crate::mapper165) struct BattleRuntimeRecipeSelection {
+    pub(in crate::mapper165) recipe_offsets: Vec<u16>,
+    pub(in crate::mapper165) overlays: Vec<BattleRuntimeGlyphOverlay>,
+    pub(in crate::mapper165) glyphs: BTreeSet<char>,
+}
+
+impl BattleCacheCompositionMaterial {
+    pub(in crate::mapper165) fn select_runtime_recipes(
+        &self,
+        input: BattleRuntimeRecipeInput,
+    ) -> Result<BattleRuntimeRecipeSelection> {
+        let encoded = select_runtime_recipes(&self.recipe_blob, input)?;
+        let glyphs = encoded
+            .overlays
+            .iter()
+            .map(|pair| {
+                self.atlas_glyphs
+                    .get(usize::from(pair.atlas_index))
+                    .copied()
+                    .context("battle runtime recipe references a missing atlas glyph")
+            })
+            .collect::<Result<BTreeSet<_>>>()?;
+        ensure!(
+            glyphs.len() == encoded.overlays.len(),
+            "battle runtime recipe selects two atlas glyphs for one abstract color"
+        );
+        Ok(BattleRuntimeRecipeSelection {
+            recipe_offsets: encoded.recipe_offsets,
+            overlays: encoded
+                .overlays
+                .into_iter()
+                .map(|pair| BattleRuntimeGlyphOverlay {
+                    abstract_color: pair.color,
+                    atlas_index: pair.atlas_index,
+                })
+                .collect(),
+            glyphs,
+        })
+    }
 }
 
 pub(super) fn plan_cache_composition(

@@ -4,6 +4,8 @@ use anyhow::{Context, Result, ensure};
 
 use crate::sha1_hex;
 
+use super::BattleRuntimeRecipeInput;
+
 const MAGIC: &[u8; 4] = b"FBRC";
 const FORMAT: u8 = 1;
 const HEADER_BYTE_COUNT: usize = 32;
@@ -49,6 +51,11 @@ pub(super) struct EncodedRecipeCatalog {
     pub(super) maximum_glyph_count: usize,
     pub(super) missing_directory_entry_count: usize,
     pub(super) sha1: String,
+}
+
+pub(super) struct EncodedRuntimeRecipeSelection {
+    pub(super) recipe_offsets: Vec<u16>,
+    pub(super) overlays: Vec<RecipePair>,
 }
 
 impl RecipeCatalog {
@@ -229,6 +236,145 @@ impl RecipeCatalog {
     }
 }
 
+pub(super) fn select_runtime_recipes(
+    bytes: &[u8],
+    input: BattleRuntimeRecipeInput,
+) -> Result<EncodedRuntimeRecipeSelection> {
+    let layout = validate_blob(bytes)?;
+    let mut recipe_offsets = Vec::with_capacity(10);
+    recipe_offsets.push(read_u16(bytes, 14));
+    for identity in input.participant_record_identities {
+        let source_index = usize::from(
+            (identity & 0x7F)
+                .checked_sub(1)
+                .context("battle participant recipe identity is zero")?,
+        );
+        let role = if identity & 0x80 == 0 {
+            RecipeRole::UnitName
+        } else {
+            RecipeRole::EnemyName
+        };
+        recipe_offsets.push(layout.read_recipe_offset(bytes, role, source_index)?);
+    }
+    for identity in input.class_record_identities {
+        let source_index = usize::from(
+            identity
+                .checked_sub(1)
+                .context("battle class recipe identity is zero")?,
+        );
+        recipe_offsets.push(layout.read_recipe_offset(bytes, RecipeRole::Class, source_index)?);
+    }
+    for source_index in input.item_source_indices {
+        recipe_offsets.push(layout.read_recipe_offset(
+            bytes,
+            RecipeRole::Item,
+            usize::from(source_index),
+        )?);
+    }
+    for source_index in input.terrain_source_indices {
+        recipe_offsets.push(layout.read_recipe_offset(
+            bytes,
+            RecipeRole::Terrain,
+            usize::from(source_index),
+        )?);
+    }
+    recipe_offsets.push(layout.read_recipe_offset(
+        bytes,
+        RecipeRole::Dialogue,
+        usize::from(input.dialogue_selector),
+    )?);
+
+    ensure!(
+        recipe_offsets.len() == 10,
+        "battle runtime selection lost a recipe family"
+    );
+    let abstract_color_count = bytes[5];
+    let atlas_tile_count = read_u16(bytes, 6);
+    let mut color_atlas_indices = BTreeMap::<u8, u16>::new();
+    for recipe_offset in &recipe_offsets {
+        ensure!(
+            *recipe_offset != MISSING_RECIPE_OFFSET,
+            "battle runtime input selects a missing recipe"
+        );
+        let offset = usize::from(*recipe_offset);
+        ensure!(
+            offset >= layout.payload_offset && offset < bytes.len(),
+            "battle runtime recipe offset is outside the payload region"
+        );
+        let pair_count = usize::from(bytes[offset]);
+        let end = offset
+            .checked_add(1 + pair_count * 3)
+            .context("battle runtime recipe payload range overflow")?;
+        ensure!(
+            end <= bytes.len(),
+            "battle runtime recipe payload is truncated"
+        );
+        for pair_bytes in bytes[offset + 1..end].chunks_exact(3) {
+            let pair = RecipePair {
+                color: pair_bytes[0],
+                atlas_index: u16::from_le_bytes([pair_bytes[1], pair_bytes[2]]),
+            };
+            ensure!(
+                pair.color < abstract_color_count,
+                "battle runtime recipe color exceeds the blob header"
+            );
+            ensure!(
+                pair.atlas_index < atlas_tile_count,
+                "battle runtime recipe atlas index exceeds the blob header"
+            );
+            if let Some(previous) = color_atlas_indices.insert(pair.color, pair.atlas_index) {
+                ensure!(
+                    previous == pair.atlas_index,
+                    "battle runtime recipes assign two glyphs to abstract color {}",
+                    pair.color
+                );
+            }
+        }
+    }
+    Ok(EncodedRuntimeRecipeSelection {
+        recipe_offsets,
+        overlays: color_atlas_indices
+            .into_iter()
+            .map(|(color, atlas_index)| RecipePair { color, atlas_index })
+            .collect(),
+    })
+}
+
+fn validate_blob(bytes: &[u8]) -> Result<DirectoryLayout> {
+    ensure!(
+        bytes.len() >= HEADER_BYTE_COUNT,
+        "battle recipe blob is shorter than its header"
+    );
+    ensure!(&bytes[..4] == MAGIC, "battle recipe blob magic changed");
+    ensure!(bytes[4] == FORMAT, "battle recipe blob format changed");
+    ensure!(
+        usize::from(read_u16(bytes, 8)) == bytes.len(),
+        "battle recipe blob total byte count changed"
+    );
+    ensure!(bytes[30] == 3, "battle recipe pair stride changed");
+    let layout = DirectoryLayout::new()?;
+    for (header_offset, actual) in [
+        (16, layout.unit),
+        (18, layout.enemy),
+        (20, layout.class),
+        (22, layout.item),
+        (24, layout.terrain),
+        (26, layout.dialogue),
+        (28, layout.payload_offset),
+    ] {
+        ensure!(
+            usize::from(read_u16(bytes, header_offset)) == actual,
+            "battle recipe blob directory layout changed"
+        );
+    }
+    let common_offset = usize::from(read_u16(bytes, 14));
+    ensure!(
+        common_offset >= layout.payload_offset && common_offset < bytes.len(),
+        "battle common recipe offset is outside the payload region"
+    );
+    Ok(layout)
+}
+
 struct DirectoryLayout {
     unit: usize,
     enemy: usize,
@@ -281,6 +427,33 @@ impl DirectoryLayout {
             role as u8
         );
         write_u16(bytes, start + source_index * 2, recipe_offset)
+    }
+
+    fn read_recipe_offset(
+        &self,
+        bytes: &[u8],
+        role: RecipeRole,
+        source_index: usize,
+    ) -> Result<u16> {
+        let (start, count) = self.directory(role)?;
+        ensure!(
+            source_index < count,
+            "battle recipe role {} source {source_index} exceeds directory count {count}",
+            role as u8
+        );
+        Ok(read_u16(bytes, start + source_index * 2))
+    }
+
+    fn directory(&self, role: RecipeRole) -> Result<(usize, usize)> {
+        Ok(match role {
+            RecipeRole::Common => anyhow::bail!("the common recipe has no directory"),
+            RecipeRole::UnitName => (self.unit, UNIT_DIRECTORY_COUNT),
+            RecipeRole::EnemyName => (self.enemy, ENEMY_DIRECTORY_COUNT),
+            RecipeRole::Class => (self.class, CLASS_DIRECTORY_COUNT),
+            RecipeRole::Item => (self.item, ITEM_DIRECTORY_COUNT),
+            RecipeRole::Terrain => (self.terrain, TERRAIN_DIRECTORY_COUNT),
+            RecipeRole::Dialogue => (self.dialogue, DIALOGUE_DIRECTORY_COUNT),
+        })
     }
 
     fn all_directory_offsets(&self) -> impl Iterator<Item = usize> + '_ {
@@ -401,5 +574,56 @@ mod tests {
         }
 
         assert!(catalog.encode(1, 1).is_err());
+    }
+
+    #[test]
+    fn runtime_selection_resolves_all_ten_recipe_families() {
+        let mut catalog = RecipeCatalog::default();
+        for (role, source_index, color) in [
+            (RecipeRole::Common, 0, 0),
+            (RecipeRole::UnitName, 0, 1),
+            (RecipeRole::EnemyName, 0, 2),
+            (RecipeRole::Class, 0, 3),
+            (RecipeRole::Item, 0, 4),
+            (RecipeRole::Terrain, 0, 5),
+            (RecipeRole::Dialogue, 0, 6),
+        ] {
+            catalog
+                .add(
+                    role,
+                    source_index,
+                    vec![RecipePair {
+                        color,
+                        atlas_index: u16::from(color),
+                    }],
+                )
+                .unwrap();
+        }
+        for selector in 0..DIALOGUE_DIRECTORY_COUNT {
+            catalog.add_dialogue_alias(selector, 0).unwrap();
+        }
+        let encoded = catalog.encode(7, 7).unwrap();
+        let selection = select_runtime_recipes(
+            &encoded.bytes,
+            BattleRuntimeRecipeInput {
+                participant_record_identities: [1, 0x81],
+                class_record_identities: [1, 1],
+                item_source_indices: [0, 0],
+                terrain_source_indices: [0, 0],
+                dialogue_selector: 0,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(selection.recipe_offsets.len(), 10);
+        assert_eq!(selection.overlays.len(), 7);
+        assert_eq!(
+            selection
+                .overlays
+                .iter()
+                .map(|pair| pair.color)
+                .collect::<Vec<_>>(),
+            (0..7).collect::<Vec<_>>()
+        );
     }
 }

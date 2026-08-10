@@ -24,6 +24,7 @@ mod enemy_domain;
 mod item_domain;
 mod physical_assignment;
 mod runtime_inputs;
+pub(crate) mod surface_constraints;
 
 use composition::{
     BattleCacheCompositionMaterial, BattleCacheCompositionPlan, plan_cache_composition,

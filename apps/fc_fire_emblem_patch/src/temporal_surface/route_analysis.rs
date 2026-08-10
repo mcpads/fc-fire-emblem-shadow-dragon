@@ -154,6 +154,8 @@ pub(super) fn analyze_route(route: &RouteInput, manifest_root: &Path) -> Result<
             right_latch: state.right_latch,
             background_enabled: state.background_enabled,
             sprites_enabled: state.sprites_enabled,
+            background_pattern_address_hex: format!("0x{:04X}", state.background_pattern_address),
+            sprite_pattern_address_hex: format!("0x{:04X}", state.sprite_pattern_address),
             visible_sprite_count,
             memory_expectation_count: sample.expected_memory.len(),
         });
