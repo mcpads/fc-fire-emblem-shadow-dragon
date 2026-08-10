@@ -13,6 +13,7 @@ pub(super) struct CumulativePatchReport {
     pub(super) chapter_titles: CumulativeChapterTitleReport,
     pub(super) main_dialogue: CumulativeDialogueReport,
     pub(super) front_end_menu: CumulativeFrontEndMenuReport,
+    pub(super) playable_unit_names: CumulativeUnitNameReport,
     pub(super) selector_chain: Vec<SelectorChainReport>,
     pub(super) original_chr_preserved: bool,
     pub(super) tracked_write_count: usize,
@@ -21,6 +22,30 @@ pub(super) struct CumulativePatchReport {
     pub(super) runtime_verified: bool,
     pub(super) unresolved: Vec<&'static str>,
     pub(super) release_eligible: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct CumulativeUnitNameReport {
+    pub(super) workspace_sha1: String,
+    pub(super) workspace_entry_count: usize,
+    pub(super) unique_glyph_count: usize,
+    pub(super) roster_projection_byte_count: usize,
+    pub(super) unit_ui_projection_byte_count: usize,
+    pub(super) roster_assignment_sha1: String,
+    pub(super) unit_ui_assignment_sha1: String,
+    pub(super) roster_page_pack_sha1: String,
+    pub(super) unit_ui_page_pack_sha1: String,
+    pub(super) unit_ui_font_physical_page: u8,
+    pub(super) unit_ui_font_mapper_register: u8,
+    pub(super) screen_evidence_manifest_sha1: String,
+    pub(super) temporal_sample_count: usize,
+    pub(super) unique_nametable_count: usize,
+    pub(super) preserved_unit_ui_code_count: usize,
+    pub(super) roster_projection_installed: bool,
+    pub(super) unit_summary_projection_installed: bool,
+    pub(super) source_battle_and_ending_table_preserved: bool,
+    pub(super) runtime_bound_to_build: bool,
+    pub(super) review_complete: bool,
 }
 
 #[derive(Debug, Serialize)]

@@ -33,6 +33,7 @@ mod temporal_surface;
 mod text_inventory;
 mod tracked;
 mod typed_source;
+mod unit_names;
 mod unit_ui_text;
 
 use std::path::PathBuf;
@@ -77,6 +78,12 @@ enum Command {
     ExtractFrontEndMenuWorkspace {
         source: PathBuf,
         #[arg(long, default_value = "assets/translation/front-end-menu.ko.json")]
+        output: PathBuf,
+    },
+    /// Create the small public workspace for playable-unit names.
+    ExtractUnitNameWorkspace {
+        source: PathBuf,
+        #[arg(long, default_value = "assets/translation/unit-names.ko.json")]
         output: PathBuf,
     },
     /// Measure translated battle names, classes, items, and messages without emitting text.
@@ -400,6 +407,8 @@ enum Command {
         chapter_title_localization: PathBuf,
         #[arg(long, default_value = "assets/translation/front-end-menu.ko.json")]
         front_end_menu_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/unit-names.ko.json")]
+        unit_name_localization: PathBuf,
         #[arg(
             long,
             default_value = "evidence/private/dialogue-lifetime/chapter-1-intro-screen.json"
@@ -412,6 +421,11 @@ enum Command {
         chapter_two_intro_evidence: PathBuf,
         #[arg(long, default_value = "evidence/private/front-end-menu/manifest.json")]
         front_end_menu_evidence: PathBuf,
+        #[arg(
+            long,
+            default_value = "evidence/private/unit-status-contract/unit-name-manifest.json"
+        )]
+        unit_name_evidence: PathBuf,
         #[arg(long, default_value = "out/cumulative-stages")]
         stage_directory: PathBuf,
         #[arg(long, default_value = "out/fire-emblem-fe1-korean-patch.nes")]
@@ -598,6 +612,17 @@ fn main() -> Result<()> {
             println!(
                 "front-end menu: {} entries, {} translations preserved",
                 summary.entry_count, summary.preserved_translation_count
+            );
+        }
+        Command::ExtractUnitNameWorkspace { source, output } => {
+            let summary = text_inventory::extract_unit_name_workspace(&source, &output)?;
+            println!("wrote {}", output.display());
+            println!("workspace SHA-1: {}", summary.workspace_sha1);
+            println!(
+                "unit names: {} entries, {} Japanese entries, {} translations preserved",
+                summary.entry_count,
+                summary.japanese_entry_count,
+                summary.preserved_translation_count
             );
         }
         Command::AnalyzeBattleTextWorkset {
@@ -1218,9 +1243,11 @@ fn main() -> Result<()> {
             main_dialogue_workspace,
             chapter_title_localization,
             front_end_menu_localization,
+            unit_name_localization,
             chapter_one_intro_evidence,
             chapter_two_intro_evidence,
             front_end_menu_evidence,
+            unit_name_evidence,
             stage_directory,
             output,
             report,
@@ -1233,9 +1260,11 @@ fn main() -> Result<()> {
                     main_dialogue_workspace_path: &main_dialogue_workspace,
                     chapter_title_localization_path: &chapter_title_localization,
                     front_end_menu_localization_path: &front_end_menu_localization,
+                    unit_name_localization_path: &unit_name_localization,
                     chapter_one_intro_evidence_path: &chapter_one_intro_evidence,
                     chapter_two_intro_evidence_path: &chapter_two_intro_evidence,
                     front_end_menu_evidence_path: &front_end_menu_evidence,
+                    unit_name_evidence_path: &unit_name_evidence,
                     stage_directory: &stage_directory,
                     output_path: &output,
                     report_path: &report,

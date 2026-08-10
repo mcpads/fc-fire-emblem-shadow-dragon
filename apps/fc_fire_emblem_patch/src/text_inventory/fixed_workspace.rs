@@ -15,7 +15,7 @@ use crate::{
     rom::{EXPECTED_SOURCE_SHA1, Rom},
 };
 
-const TABLE_IDS: [&str; 5] = [
+const BATTLE_TABLE_IDS: [&str; 5] = [
     "class-names",
     "item-names",
     "unit-names",
@@ -101,6 +101,8 @@ impl FixedTextPlannedEntry {
 
 #[derive(Clone, Debug)]
 pub(crate) struct FixedTextPlan {
+    pub(crate) workspace_sha1: String,
+    pub(crate) review_complete: bool,
     pub(crate) entries: Vec<FixedTextPlannedEntry>,
 }
 
@@ -156,12 +158,31 @@ impl FixedTextPlan {
 }
 
 pub(crate) fn plan_fixed_text(rom: &Rom, workspace_path: &Path) -> Result<FixedTextPlan> {
+    plan_workspace(rom, workspace_path, &BATTLE_TABLE_IDS, true, 272)
+}
+
+pub(crate) fn plan_unit_name_text(rom: &Rom, workspace_path: &Path) -> Result<FixedTextPlan> {
+    plan_workspace(rom, workspace_path, &["unit-names"], false, 52)
+}
+
+fn plan_workspace(
+    rom: &Rom,
+    workspace_path: &Path,
+    table_ids: &[&str],
+    include_battle_message_templates: bool,
+    expected_entry_count: usize,
+) -> Result<FixedTextPlan> {
     rom.verify_supported_japanese()?;
     let bytes =
         fs::read(workspace_path).with_context(|| format!("read {}", workspace_path.display()))?;
     let workspace: FixedTextWorkspace = serde_json::from_slice(&bytes)
         .with_context(|| format!("parse {}", workspace_path.display()))?;
-    let fresh = build_workspace(rom.data())?;
+    let fresh = build_workspace(
+        rom.data(),
+        table_ids,
+        include_battle_message_templates,
+        expected_entry_count,
+    )?;
     ensure!(
         workspace.entries.len() == fresh.entries.len(),
         "fixed text workspace entry count changed"
@@ -187,6 +208,10 @@ pub(crate) fn plan_fixed_text(rom: &Rom, workspace_path: &Path) -> Result<FixedT
             entry.id
         );
     }
+    let review_complete = workspace
+        .entries
+        .iter()
+        .all(|entry| entry.status == "complete");
     let entries = workspace
         .entries
         .iter()
@@ -221,16 +246,42 @@ pub(crate) fn plan_fixed_text(rom: &Rom, workspace_path: &Path) -> Result<FixedT
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    Ok(FixedTextPlan { entries })
+    Ok(FixedTextPlan {
+        workspace_sha1: sha1_hex(&bytes),
+        review_complete,
+        entries,
+    })
 }
 
 pub(crate) fn extract_fixed_text_workspace(
     source_path: &Path,
     workspace_path: &Path,
 ) -> Result<FixedTextWorkspaceSummary> {
+    extract_workspace(source_path, workspace_path, &BATTLE_TABLE_IDS, true, 272)
+}
+
+pub(crate) fn extract_unit_name_workspace(
+    source_path: &Path,
+    workspace_path: &Path,
+) -> Result<FixedTextWorkspaceSummary> {
+    extract_workspace(source_path, workspace_path, &["unit-names"], false, 52)
+}
+
+fn extract_workspace(
+    source_path: &Path,
+    workspace_path: &Path,
+    table_ids: &[&str],
+    include_battle_message_templates: bool,
+    expected_entry_count: usize,
+) -> Result<FixedTextWorkspaceSummary> {
     let rom = Rom::from_path(source_path)?;
     rom.verify_supported_japanese()?;
-    let mut fresh = build_workspace(rom.data())?;
+    let mut fresh = build_workspace(
+        rom.data(),
+        table_ids,
+        include_battle_message_templates,
+        expected_entry_count,
+    )?;
     let preserved_translation_count = if workspace_path.exists() {
         let bytes = fs::read(workspace_path)
             .with_context(|| format!("read {}", workspace_path.display()))?;
@@ -260,9 +311,14 @@ pub(crate) fn extract_fixed_text_workspace(
     })
 }
 
-fn build_workspace(source: &[u8]) -> Result<FixedTextWorkspace> {
+fn build_workspace(
+    source: &[u8],
+    table_ids: &[&str],
+    include_battle_message_templates: bool,
+    expected_entry_count: usize,
+) -> Result<FixedTextWorkspace> {
     let mut entries = Vec::new();
-    for spec in requested_text_table_specs(&TABLE_IDS)? {
+    for spec in requested_text_table_specs(table_ids)? {
         let table = extract_table(source, spec)?;
         for entry in &table.entries {
             if entry
@@ -292,29 +348,31 @@ fn build_workspace(source: &[u8]) -> Result<FixedTextWorkspace> {
             });
         }
     }
-    for template in extract_battle_message_templates(source)? {
-        entries.push(FixedTextEntry {
-            id: format!("battle-message-templates:{:03}", template.index),
-            table_id: "battle-message-templates".to_owned(),
-            source_index: template.index,
-            alias_indices: vec![template.index],
-            pointer_cpu_address_hex: format!("0x{:04X}", template.pointer_cpu_address),
-            source_file_offset_hex: Some(format!("0x{:05X}", template.file_offset)),
-            source_bytes_hex: template
-                .raw_bytes
-                .iter()
-                .map(|byte| format!("{byte:02X}"))
-                .collect::<Vec<_>>()
-                .join(" "),
-            source_sha1: sha1_hex(&template.raw_bytes),
-            japanese_markup: decode_source_markup(&template.raw_bytes),
-            korean_markup: String::new(),
-            status: "untranslated".to_owned(),
-        });
+    if include_battle_message_templates {
+        for template in extract_battle_message_templates(source)? {
+            entries.push(FixedTextEntry {
+                id: format!("battle-message-templates:{:03}", template.index),
+                table_id: "battle-message-templates".to_owned(),
+                source_index: template.index,
+                alias_indices: vec![template.index],
+                pointer_cpu_address_hex: format!("0x{:04X}", template.pointer_cpu_address),
+                source_file_offset_hex: Some(format!("0x{:05X}", template.file_offset)),
+                source_bytes_hex: template
+                    .raw_bytes
+                    .iter()
+                    .map(|byte| format!("{byte:02X}"))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                source_sha1: sha1_hex(&template.raw_bytes),
+                japanese_markup: decode_source_markup(&template.raw_bytes),
+                korean_markup: String::new(),
+                status: "untranslated".to_owned(),
+            });
+        }
     }
     ensure!(
-        entries.len() == 272,
-        "battle fixed-text unique entry count changed"
+        entries.len() == expected_entry_count,
+        "fixed-text workspace entry count changed"
     );
     Ok(FixedTextWorkspace {
         format_version: 1,

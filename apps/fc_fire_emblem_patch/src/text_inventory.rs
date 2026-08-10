@@ -24,8 +24,9 @@ mod tests;
 
 use dialogue_path::*;
 pub(crate) use fixed_workspace::{
-    FixedTextLogicalByte, FixedTextPlan, encode_target_markup, extract_fixed_text_workspace,
-    is_japanese_character, plan_fixed_text,
+    FixedTextLogicalByte, FixedTextPlan, FixedTextPlannedEntry, encode_target_markup,
+    extract_fixed_text_workspace, extract_unit_name_workspace, is_japanese_character,
+    plan_fixed_text, plan_unit_name_text,
 };
 pub use report::TextInventorySummary;
 use report::*;

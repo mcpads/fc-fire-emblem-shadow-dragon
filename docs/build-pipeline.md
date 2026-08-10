@@ -374,12 +374,13 @@ cargo run -p fc-fire-emblem-patch -- build-battle-cache-upload-probe \
 
 ## 누적 한글 패치 빌드
 
-`build-kr-patch`는 이전 개발 ROM을 입력으로 받지 않고, 지원 일본판 원본에서 모든 단계를 결정적으로 다시 만든다. 첫 단계는 mapper 165 설정·부대 목록 페이지와 선택자를 만들고, 둘째 단계는 1장 제목과 도입부 전이 사슬 4레코드·18줄, 물리 CHR 페이지 `38`, mapper 값 `98`을 추가한다. 셋째 단계는 2장 제목과 도입부 1레코드·11줄, 물리 페이지 `40`, mapper 값 `A0`을 더한다. 넷째 단계는 시작·기록 메뉴 7개와 물리 페이지 `42`, mapper 값 `A8`을 추가한다. typed RP2A03 선택자들은 부대 목록, 시작 메뉴, 장 대사를 순서대로 판정하고 불일치하면 원래 쌍 인식 선택기로 돌아간다. 공용 행 조립 훅의 옵션 불일치와 중앙 FE 동반 FD 갱신도 같은 체인으로 보내 후속 원본 선택이 한글 페이지를 덮지 않게 한다. 제목은 소스 포인터·원본 저장 길이에 다시 결속하고 대사와 같은 장별 글리프 배정을 쓴다. `{EA}` 대사 제어가 런타임에 출력하는 `9E AB`도 보존 집합에 넣어 원본 `※` 표식을 유지한다.
+`build-kr-patch`는 이전 개발 ROM을 입력으로 받지 않고, 지원 일본판 원본에서 모든 단계를 결정적으로 다시 만든다. 첫 단계는 mapper 165 설정·부대 목록 페이지와 선택자를 만들고, 둘째 단계는 1장 제목과 도입부 전이 사슬 4레코드·18줄, 물리 CHR 페이지 `38`, mapper 값 `98`을 추가한다. 셋째 단계는 2장 제목과 도입부 1레코드·11줄, 물리 페이지 `40`, mapper 값 `A0`을 더한다. 넷째 단계는 시작·기록 메뉴 7개와 물리 페이지 `42`, mapper 값 `A8`을 추가한다. 다섯째 단계는 아군명 52개를 부대 목록과 맵 유닛 UI의 서로 다른 코드북으로 투영하고, 물리 페이지 `44/45`와 mapper 값 `B0`을 추가한다. typed RP2A03 선택자들은 부대 목록, 유닛 요약·상태, 시작 메뉴, 장 대사를 순서대로 판정하고 불일치하면 원래 쌍 인식 선택기로 돌아간다.
 
 ```sh
 cargo run -p fc-fire-emblem-patch -- extract-chapter-title-workspace "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- extract-front-end-menu-workspace "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
+cargo run -p fc-fire-emblem-patch -- extract-unit-name-workspace "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- build-kr-patch "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 ```
 
-장 제목 작업공간은 `assets/translation/chapter-titles.ko.json`, 작은 공개 메뉴 작업공간은 `assets/translation/front-end-menu.ko.json`이다. 전자는 25개 원문 결속과 원본 숫자를, 후자는 7개 고정 문자열과 기존 `MAP`·숫자를 검사한다. 현재 장 제목은 1·2장 도입 사본만 설치했고 엔딩의 별도 물리 사본은 아직 설치하지 않았다. 중간 단계는 무시되는 `out/cumulative-stages/`, 최종 개발 ROM은 `out/fire-emblem-fe1-korean-patch.nes`, 내용 없는 구조 보고서는 `out/kr-patch-build.json`에 쓴다. 현재 ROM SHA-1은 `9d9b4b39ac96c528ef544cc28cb1c3bbc9c1d120`, 보고서 SHA-1은 `7d1299e23220b4efe6043de7782c79f0ed504f28`다. 보고서는 전체 대사 입력과 실제 설치 5레코드·29줄, 장 제목 25개·설치 2개, 메뉴 7개를 구분한다. 최종 CHR은 22뱅크이고 원본과 앞 단계 페이지를 그대로 보존하며 추적 쓰기 24개를 검증한다.
+장 제목 작업공간은 25개, 작은 메뉴 작업공간은 7개, 아군명 작업공간은 52개 원문 인덱스에 각각 결속한다. 아군명 번역은 한 의미 자산에서 소비자별 바이트 투영을 만들기 때문에 부대 목록과 유닛 UI의 물리 코드가 달라도 번역은 중복하지 않는다. 포인터 선택기는 합성 상태 `$02`에서 부대 목록 표, `$04`에서 유닛 UI 표를 쓰고 나머지는 고정 뱅크 `$DE2B`의 원본 표로 돌아간다. 따라서 전투·엔딩 소비자는 자체 글꼴 수명이 설치되기 전까지 일본어 원본을 유지한다. 현재 ROM SHA-1은 `97bc9be510a0a69c54ea725324f23b809a618a0b`, 보고서 SHA-1은 `ab3ae75b756634ab488aa1812269b78b2ecea29f`다. 최종 CHR은 23뱅크이고 추적 쓰기 34개를 검증한다.

@@ -13,6 +13,7 @@ use crate::{
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
     tracked::TrackedImage,
+    unit_names::plan_unit_names,
 };
 
 use super::{
@@ -30,6 +31,7 @@ use super::{
 mod chapter_page_selector;
 mod front_end_stage;
 mod report;
+mod unit_name_stage;
 mod verify;
 
 use chapter_page_selector::{ChapterPageSequence, build_chapter_page_selector};
@@ -37,14 +39,16 @@ use front_end_stage::install_front_end_stage;
 use report::{
     CumulativeChapterTitleReport, CumulativeDialogueLifetimeReport, CumulativeDialogueReport,
     CumulativeFrontEndMenuReport, CumulativePatchReport, CumulativeStageReport,
-    SelectorChainReport,
+    CumulativeUnitNameReport, SelectorChainReport,
 };
+use unit_name_stage::install_unit_name_stage;
 use verify::{install_chapter_title, install_dialogue_record, verify_cumulative_output};
 
 const UI_STAGE_ROM_NAME: &str = "mapper165-ui.nes";
 const UI_STAGE_REPORT_NAME: &str = "mapper165-ui.json";
 const CHAPTER_ONE_STAGE_ROM_NAME: &str = "chapter1-intro.nes";
 const FRONT_END_STAGE_ROM_NAME: &str = "front-end-menu.nes";
+const UNIT_NAME_STAGE_ROM_NAME: &str = "unit-names.nes";
 const DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFBD4;
 const DIALOGUE_SELECTOR_CAVE_END: u16 = 0xFC20;
 const CHAPTER_ONE_DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFBD8;
@@ -77,9 +81,11 @@ pub(crate) struct CumulativePatchInputs<'a> {
     pub(crate) main_dialogue_workspace_path: &'a Path,
     pub(crate) chapter_title_localization_path: &'a Path,
     pub(crate) front_end_menu_localization_path: &'a Path,
+    pub(crate) unit_name_localization_path: &'a Path,
     pub(crate) chapter_one_intro_evidence_path: &'a Path,
     pub(crate) chapter_two_intro_evidence_path: &'a Path,
     pub(crate) front_end_menu_evidence_path: &'a Path,
+    pub(crate) unit_name_evidence_path: &'a Path,
     pub(crate) stage_directory: &'a Path,
     pub(crate) output_path: &'a Path,
     pub(crate) report_path: &'a Path,
@@ -108,6 +114,7 @@ pub(crate) fn build_cumulative_patch(
         front_end_menu_plan.entries.len() == 7,
         "cumulative front-end menu scope no longer has seven entries"
     );
+    let unit_name_plan = plan_unit_names(&source_rom, inputs.unit_name_localization_path)?;
 
     let ui_stage_rom_path = inputs.stage_directory.join(UI_STAGE_ROM_NAME);
     let ui_stage_report_path = inputs.stage_directory.join(UI_STAGE_REPORT_NAME);
@@ -432,9 +439,22 @@ pub(crate) fn build_cumulative_patch(
         &inputs.stage_directory.join(FRONT_END_STAGE_ROM_NAME),
         &front_end_stage.output,
     )?;
-    let output = front_end_stage.output;
+    let unit_name_stage = install_unit_name_stage(
+        &front_end_stage.output,
+        &source_rom,
+        &unit_name_plan,
+        inputs.roster_localization_path,
+        inputs.unit_name_evidence_path,
+    )?;
+    write_file(
+        &inputs.stage_directory.join(UNIT_NAME_STAGE_ROM_NAME),
+        &unit_name_stage.output,
+    )?;
+    let output = unit_name_stage.output;
     let output_rom = Rom::parse(output.clone()).context("parse cumulative Korean patch")?;
-    let tracked_write_count = tracked_write_count + front_end_stage.tracked_write_count;
+    let tracked_write_count = tracked_write_count
+        + front_end_stage.tracked_write_count
+        + unit_name_stage.tracked_write_count;
 
     let translated_line_count = chapter_one_plans
         .iter()
@@ -454,12 +474,18 @@ pub(crate) fn build_cumulative_patch(
     let installed_record_count = chapter_one_plans.len() + chapter_two_plans.len();
     let installed_dialogue_glyph_slot_count =
         chapter_one_page.assignments.len() + chapter_two_page.assignments.len();
-    let installed_glyph_slot_count =
-        installed_dialogue_glyph_slot_count + front_end_stage.page.assignments.len();
+    let installed_glyph_slot_count = installed_dialogue_glyph_slot_count
+        + front_end_stage.page.assignments.len()
+        + unit_name_stage.page.roster_assignments.len()
+        + unit_name_stage.page.unit_ui_assignments.len();
     let output_sha1 = sha1_hex(&output);
     ensure!(
-        output_sha1 == front_end_stage.output_sha1,
-        "front-end stage output hash changed before publication"
+        output_sha1 == unit_name_stage.output_sha1,
+        "unit-name stage output hash changed before publication"
+    );
+    ensure!(
+        sha1_hex(&front_end_stage.output) == front_end_stage.output_sha1,
+        "front-end stage output hash changed before unit-name installation"
     );
     let chapter_two_output_sha1 = sha1_hex(&chapter_two_output);
     let stages = vec![
@@ -480,7 +506,12 @@ pub(crate) fn build_cumulative_patch(
         },
         CumulativeStageReport {
             role: "front_end_menu",
-            output_sha1: output_sha1.clone(),
+            output_sha1: front_end_stage.output_sha1.clone(),
+            report_sha1: None,
+        },
+        CumulativeStageReport {
+            role: "playable_unit_names_for_roster_and_unit_ui",
+            output_sha1: unit_name_stage.output_sha1.clone(),
             report_sha1: None,
         },
     ];
@@ -571,10 +602,40 @@ pub(crate) fn build_cumulative_patch(
             runtime_variants_bound_to_build: false,
             review_complete: front_end_menu_plan.review_complete,
         },
+        playable_unit_names: CumulativeUnitNameReport {
+            workspace_sha1: unit_name_plan.workspace_sha1.clone(),
+            workspace_entry_count: unit_name_plan.entries.len(),
+            unique_glyph_count: unit_name_plan.unique_glyphs().len(),
+            roster_projection_byte_count: unit_name_stage.tables.roster.pointer_table.len()
+                + unit_name_stage.tables.roster.strings.len(),
+            unit_ui_projection_byte_count: unit_name_stage.tables.unit_ui.pointer_table.len()
+                + unit_name_stage.tables.unit_ui.strings.len(),
+            roster_assignment_sha1: assignment_sha1(&unit_name_stage.page.roster_assignments),
+            unit_ui_assignment_sha1: assignment_sha1(&unit_name_stage.page.unit_ui_assignments),
+            roster_page_pack_sha1: unit_name_stage.page.roster_page_pack_sha1.clone(),
+            unit_ui_page_pack_sha1: unit_name_stage.page.unit_ui_page_pack_sha1.clone(),
+            unit_ui_font_physical_page: unit_name_stage.page.unit_ui_physical_page,
+            unit_ui_font_mapper_register: unit_name_stage.page.unit_ui_mapper_register,
+            screen_evidence_manifest_sha1: unit_name_stage.page.evidence_manifest_sha1.clone(),
+            temporal_sample_count: unit_name_stage.page.temporal_sample_count,
+            unique_nametable_count: unit_name_stage.page.unique_nametable_count,
+            preserved_unit_ui_code_count: unit_name_stage.page.preserved_unit_ui_code_count,
+            roster_projection_installed: true,
+            unit_summary_projection_installed: true,
+            source_battle_and_ending_table_preserved: true,
+            runtime_bound_to_build: false,
+            review_complete: unit_name_plan.review_complete,
+        },
         selector_chain: vec![
             SelectorChainReport {
                 role: "unit_roster",
                 cpu_address: format!("0x{ROSTER_SELECTOR_ADDRESS:04X}"),
+                fallback_role: "unit_summary_and_status",
+                admitted_chapter_indices: Vec::new(),
+            },
+            SelectorChainReport {
+                role: "unit_summary_and_status",
+                cpu_address: format!("0x{:04X}", super::unit_name_page::PAGE_ROUTINE_ADDRESS),
                 fallback_role: "front_end_menu",
                 admitted_chapter_indices: Vec::new(),
             },
@@ -595,14 +656,18 @@ pub(crate) fn build_cumulative_patch(
         tracked_write_count,
         translation_input_complete: dialogue_workspace.translation_input_complete
             && chapter_title_plan.translated_entry_count == chapter_title_plan.entry_count
-            && front_end_menu_plan.entries.len() == 7,
+            && front_end_menu_plan.entries.len() == 7
+            && unit_name_plan.entries.len() == 52,
         review_complete: dialogue_workspace.review_complete
             && chapter_title_plan.review_complete
-            && front_end_menu_plan.review_complete,
+            && front_end_menu_plan.review_complete
+            && unit_name_plan.review_complete,
         runtime_verified: false,
         unresolved: vec![
             "The translated Chapter 1 and Chapter 2 title bars need cold-route runtime regression together with every installed dialogue page and natural map restoration.",
             "Private observations passed the installed no-save and valid-save front-end variants, but installed runtime evidence is not yet build-bound and the suspend-data variant is unverified.",
+            "Playable-unit names are installed only for the roster and map unit-summary/status consumers; battle and ending consumers intentionally retain the source table until their own font lifetimes are installed.",
+            "The translated playable-unit name pages still need build-bound cold runtime evidence across roster, unit summary, unit status, and their exit paths.",
             "The remaining main-dialogue screen lifetimes and translated non-dialogue surfaces are not yet installed in this cumulative lineage.",
             "The ending scroll owns a separate physical copy of all chapter titles; that duplicate consumer is not installed by this intro-title stage.",
             "Human translation review is incomplete, so this output is a development build rather than a release candidate.",
@@ -724,6 +789,10 @@ mod tests {
         assert_eq!(
             directory.join(FRONT_END_STAGE_ROM_NAME),
             PathBuf::from("out/cumulative-stages/front-end-menu.nes")
+        );
+        assert_eq!(
+            directory.join(UNIT_NAME_STAGE_ROM_NAME),
+            PathBuf::from("out/cumulative-stages/unit-names.nes")
         );
     }
 }

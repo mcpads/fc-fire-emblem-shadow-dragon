@@ -185,6 +185,16 @@ impl RosterLocalization {
     }
 }
 
+impl ValidatedRosterLocalization {
+    pub(crate) fn glyph_assignments(&self) -> BTreeMap<u8, char> {
+        self.characters_by_code.clone()
+    }
+}
+
+pub(crate) fn roster_visible_codes() -> BTreeSet<u8> {
+    ROSTER_VISIBLE_FD_CODES.into_iter().collect()
+}
+
 pub(crate) fn build_roster_page_pair(
     source_font_page: &[u8],
     localization: &ValidatedRosterLocalization,

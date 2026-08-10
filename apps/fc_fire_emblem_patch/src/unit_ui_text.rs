@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::{fs, path::Path};
 
 use anyhow::{Context, Result, ensure};
@@ -165,6 +166,30 @@ pub fn analyze_unit_ui_text(source_path: &Path, report_path: &Path) -> Result<Un
         provisional_hangul_slot_ceiling: report.glyph_budget.provisional_hangul_slot_ceiling(),
         single_family_page_fit: report.glyph_budget.single_family_page_fit(),
     })
+}
+
+pub(crate) fn preserved_codes_for_unit_name_projection(source: &[u8]) -> Result<BTreeSet<u8>> {
+    validate_code_regions(&source[HEADER_SIZE..HEADER_SIZE + PRG_SIZE])?;
+    validate_fixed_labels(
+        &source[HEADER_SIZE..HEADER_SIZE + PRG_SIZE],
+        SUMMARY_AND_STATUS_LABEL_SPECS
+            .iter()
+            .chain(command_menu::COMMAND_LABEL_SPECS),
+    )?;
+    let mut preserved = crate::text_inventory::scoped_text_table_budgets(
+        source,
+        &["class-names", "item-names", "enemy-names"],
+    )?
+    .into_iter()
+    .flat_map(|table| table.source_codes)
+    .collect::<BTreeSet<_>>();
+    preserved.extend(
+        SUMMARY_AND_STATUS_LABEL_SPECS
+            .iter()
+            .chain(command_menu::COMMAND_LABEL_SPECS)
+            .flat_map(|label| label.expected.iter().copied()),
+    );
+    Ok(preserved)
 }
 
 fn build_report(
