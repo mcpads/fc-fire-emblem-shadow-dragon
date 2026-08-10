@@ -10,7 +10,7 @@ use crate::{
     static_analysis::find_absolute_write_candidates,
     tracked::TrackedImage,
 };
-mod battle_cache_signature;
+mod battle_cache_coverage;
 pub(crate) mod battle_cache_upload_probe;
 pub(crate) mod battle_combination_probe;
 pub(crate) mod battle_dialogue_probe;

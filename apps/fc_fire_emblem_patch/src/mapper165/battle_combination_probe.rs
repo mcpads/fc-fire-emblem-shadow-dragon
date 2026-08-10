@@ -14,7 +14,7 @@ use crate::{
 
 use super::{
     OUTPUT_MAPPER, assemble_mapper165_parity_bytes,
-    battle_cache_signature::BattleTextSignature,
+    battle_cache_coverage::BattleTextCoverage,
     dialogue_probe_font::{
         SOURCE_FONT_PHYSICAL_PAGE, assign_glyph_codes_excluding, assignment_sha1,
         install_font_glyphs,
@@ -27,7 +27,7 @@ pub(super) struct GameplayBattleCombinationImage {
     pub(super) fixed_workspace_sha1: String,
     pub(super) dialogue_workspace_sha1: String,
     pub(super) codebook_assignment_sha1: String,
-    pub(super) text_signature: BattleTextSignature,
+    pub(super) text_coverage: BattleTextCoverage,
     pub(super) glyph_count: usize,
     pub(super) preserved_active_code_count: usize,
     pub(super) tracked_writes: Vec<crate::tracked::WriteReport>,
@@ -286,7 +286,7 @@ pub(super) fn assemble_gameplay_battle_combination(
         fixed_workspace_sha1: sha1_hex(&fs::read(fixed_workspace_path)?),
         dialogue_workspace_sha1: sha1_hex(&fs::read(dialogue_workspace_path)?),
         codebook_assignment_sha1: assignment_sha1(&assignments),
-        text_signature: BattleTextSignature::from_source_indices(
+        text_coverage: BattleTextCoverage::from_source_indices(
             PLAYER_NAME_SOURCE_INDEX,
             ENEMY_NAME_SOURCE_INDEX,
             CLASS_SOURCE_INDICES,

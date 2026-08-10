@@ -15,8 +15,9 @@ use crate::{
 
 use super::{
     OUTPUT_MAPPER,
-    battle_cache_signature::{
-        ENEMY_INITIATED_STATE, PLAYER_INITIATED_STATE, PREDICATE_ADDRESS, build_predicate,
+    battle_cache_coverage::{
+        ENEMY_INITIATED_STATE, FIELD_PREDICATE_ADDRESS, PLAYER_INITIATED_STATE, PREDICATE_ADDRESS,
+        build_field_predicate, build_participant_predicate,
     },
     battle_combination_probe::{
         GameplayBattleCombinationImage, assemble_gameplay_battle_combination,
@@ -37,6 +38,7 @@ const UPLOAD_FONT_PAGE: u16 = 0xFB20;
 const BATTLE_RIGHT_FD_SELECTOR: u16 = 0xFC50;
 const BATTLE_CENTRAL_RIGHT_FD_SELECTOR: u16 = 0xFC80;
 const BATTLE_RIGHT_FE_SELECTOR: u16 = 0xFCC4;
+const FIXED_CAVE_DATA_BOUNDARY: u16 = 0xFFA0;
 const SOURCE_RIGHT_FD_SELECTOR: u16 = 0xFA80;
 const SOURCE_RIGHT_FE_SELECTOR: u16 = 0xFAA0;
 const SOURCE_PAIR_AWARE_RIGHT_FD_SELECTOR: u16 = 0xFAC0;
@@ -64,6 +66,10 @@ struct BattleCacheUploadProbeReport {
     gameplay_battle_main_states: [u8; 2],
     cache_participant_record_identities: [u8; 2],
     participant_pair_gated: bool,
+    cache_class_record_identities: [u8; 2],
+    cache_item_record_identities: [u8; 2],
+    cache_terrain_source_indices: [u8; 2],
+    text_coverage_gated: bool,
     preserved_active_code_count: usize,
     codebook_glyph_count: usize,
     codebook_assignment_sha1: String,
@@ -124,7 +130,7 @@ pub(crate) fn build_battle_cache_upload_probe(
     let cache_page = combination_cache_page(&combination)?;
     let base = expand_combination_with_cache(&combination, &cache_page)?;
     let base_rom = Rom::parse(base.clone()).context("parse battle cache upload base")?;
-    let routines = build_runtime_routines(&combination.text_signature)?;
+    let routines = build_runtime_routines(&combination.text_coverage)?;
     verify_runtime_caves(&combination.parity, &routines)?;
     verify_battle_active_flag_contract(&combination.parity)?;
     let mut image = TrackedImage::new(base.clone());
@@ -225,9 +231,13 @@ pub(crate) fn build_battle_cache_upload_probe(
         combination_role: "chapter-one Cain and Garuda soldier gameplay battle pair",
         gameplay_battle_main_states: [PLAYER_INITIATED_STATE, ENEMY_INITIATED_STATE],
         cache_participant_record_identities: combination
-            .text_signature
+            .text_coverage
             .participant_record_identities,
         participant_pair_gated: true,
+        cache_class_record_identities: combination.text_coverage.class_record_identities,
+        cache_item_record_identities: combination.text_coverage.item_record_identities,
+        cache_terrain_source_indices: combination.text_coverage.terrain_source_indices,
+        text_coverage_gated: true,
         preserved_active_code_count: combination.preserved_active_code_count,
         codebook_glyph_count: combination.glyph_count,
         codebook_assignment_sha1: combination.codebook_assignment_sha1,
@@ -257,7 +267,7 @@ pub(crate) fn build_battle_cache_upload_probe(
         glyph_characters_emitted: false,
         runtime_verified: false,
         release_eligible: false,
-        next_gate: "replace the participant-pair probe key with a generated full battle signature before broadening cache coverage; keep defeat dialogue on its separate screen path",
+        next_gate: "prove selector 62 dialogue on its natural consumer path, then build a multi-cache catalog with stable cross-page glyph codes; keep defeat dialogue on its separate screen path",
     };
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize battle cache upload report")?;
@@ -324,6 +334,11 @@ fn verify_runtime_caves(parity: &[u8], routines: &[RuntimeRoutine]) -> Result<()
             .address
             .checked_add(u16::try_from(routine.bytes.len())?)
             .context("battle cache runtime routine range overflow")?;
+        ensure!(
+            end_address <= FIXED_CAVE_DATA_BOUNDARY,
+            "battle cache {} routine reaches fixed-bank data",
+            routine.role
+        );
         let start = original_fixed_bank_file_offset(routine.address)?;
         let end = original_fixed_bank_file_offset(end_address)?;
         ensure!(
@@ -429,7 +444,7 @@ fn verify_switchable_bytes(
 }
 
 fn build_runtime_routines(
-    text_signature: &super::battle_cache_signature::BattleTextSignature,
+    text_coverage: &super::battle_cache_coverage::BattleTextCoverage,
 ) -> Result<Vec<RuntimeRoutine>> {
     Ok(vec![
         RuntimeRoutine {
@@ -461,7 +476,7 @@ fn build_runtime_routines(
         RuntimeRoutine {
             role: "gameplay battle-cache match predicate",
             address: PREDICATE_ADDRESS,
-            bytes: build_predicate(text_signature)?,
+            bytes: build_participant_predicate(text_coverage)?,
         },
         RuntimeRoutine {
             role: "battle-aware direct right FD selection",
@@ -477,6 +492,11 @@ fn build_runtime_routines(
             role: "battle-aware right FE selection",
             address: BATTLE_RIGHT_FE_SELECTOR,
             bytes: battle_right_chr_selector(BATTLE_RIGHT_FE_SELECTOR, 4)?,
+        },
+        RuntimeRoutine {
+            role: "battle text-coverage field predicate",
+            address: FIELD_PREDICATE_ADDRESS,
+            bytes: build_field_predicate(text_coverage)?,
         },
     ])
 }
@@ -686,8 +706,8 @@ fn write_file(path: &Path, data: &[u8]) -> Result<()> {
 mod tests {
     use super::*;
 
-    fn test_signature() -> super::super::battle_cache_signature::BattleTextSignature {
-        super::super::battle_cache_signature::BattleTextSignature::from_source_indices(
+    fn test_coverage() -> super::super::battle_cache_coverage::BattleTextCoverage {
+        super::super::battle_cache_coverage::BattleTextCoverage::from_source_indices(
             3,
             4,
             [0, 7],
@@ -699,12 +719,12 @@ mod tests {
 
     #[test]
     fn upload_and_selector_routines_stay_inside_their_declared_cave() {
-        let routines = build_runtime_routines(&test_signature()).unwrap();
+        let routines = build_runtime_routines(&test_coverage()).unwrap();
         for pair in routines.windows(2) {
             assert!(pair[0].address as usize + pair[0].bytes.len() <= pair[1].address as usize);
         }
         let last = routines.last().unwrap();
-        assert!(last.address as usize + last.bytes.len() <= 0xFCEF);
+        assert!(last.address as usize + last.bytes.len() <= FIXED_CAVE_DATA_BOUNDARY as usize);
     }
 
     #[test]
@@ -740,7 +760,7 @@ mod tests {
 
     #[test]
     fn transition_dispatch_requires_the_observed_render_disabled_window() {
-        let dispatch = build_runtime_routines(&test_signature())
+        let dispatch = build_runtime_routines(&test_coverage())
             .unwrap()
             .remove(0)
             .bytes;
@@ -772,8 +792,12 @@ mod tests {
             chr_size: 0,
             combination_role: "battle pair",
             gameplay_battle_main_states: [PLAYER_INITIATED_STATE, ENEMY_INITIATED_STATE],
-            cache_participant_record_identities: test_signature().participant_record_identities,
+            cache_participant_record_identities: test_coverage().participant_record_identities,
             participant_pair_gated: true,
+            cache_class_record_identities: test_coverage().class_record_identities,
+            cache_item_record_identities: test_coverage().item_record_identities,
+            cache_terrain_source_indices: test_coverage().terrain_source_indices,
+            text_coverage_gated: true,
             preserved_active_code_count: 119,
             codebook_glyph_count: 1,
             codebook_assignment_sha1: "assignment".to_owned(),
@@ -797,8 +821,8 @@ mod tests {
             battle_zero_right_page_uses_chr_ram: true,
             non_battle_right_pages_use_natural_selection: true,
             original_chr_preserved: true,
-            runtime_routine_count: 6,
-            runtime_tracked_write_count: 11,
+            runtime_routine_count: 7,
+            runtime_tracked_write_count: 12,
             translation_text_emitted: false,
             glyph_characters_emitted: false,
             runtime_verified: false,
