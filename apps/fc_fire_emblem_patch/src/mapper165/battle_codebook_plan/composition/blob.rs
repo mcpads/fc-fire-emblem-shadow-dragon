@@ -56,6 +56,7 @@ pub(super) struct EncodedRecipeCatalog {
 pub(super) struct EncodedRuntimeRecipeSelection {
     pub(super) recipe_offsets: Vec<u16>,
     pub(super) overlays: Vec<RecipePair>,
+    pub(super) glyph_reference_count: usize,
 }
 
 impl RecipeCatalog {
@@ -291,6 +292,7 @@ pub(super) fn select_runtime_recipes(
     let abstract_color_count = bytes[5];
     let atlas_tile_count = read_u16(bytes, 6);
     let mut color_atlas_indices = BTreeMap::<u8, u16>::new();
+    let mut glyph_reference_count = 0;
     for recipe_offset in &recipe_offsets {
         ensure!(
             *recipe_offset != MISSING_RECIPE_OFFSET,
@@ -302,6 +304,7 @@ pub(super) fn select_runtime_recipes(
             "battle runtime recipe offset is outside the payload region"
         );
         let pair_count = usize::from(bytes[offset]);
+        glyph_reference_count += pair_count;
         let end = offset
             .checked_add(1 + pair_count * 3)
             .context("battle runtime recipe payload range overflow")?;
@@ -337,6 +340,7 @@ pub(super) fn select_runtime_recipes(
             .into_iter()
             .map(|(color, atlas_index)| RecipePair { color, atlas_index })
             .collect(),
+        glyph_reference_count,
     })
 }
 

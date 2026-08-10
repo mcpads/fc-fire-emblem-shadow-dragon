@@ -88,6 +88,70 @@ pub(in crate::mapper165) struct BattleRuntimeRecipeSelection {
     pub(in crate::mapper165) glyphs: BTreeSet<char>,
 }
 
+pub(in crate::mapper165) struct BattleRuntimeRecipeStats {
+    pub(in crate::mapper165) recipe_count: usize,
+    pub(in crate::mapper165) unique_overlay_count: usize,
+    pub(in crate::mapper165) glyph_reference_count: usize,
+    pub(in crate::mapper165) recipe_offsets: Vec<u16>,
+}
+
+pub(in crate::mapper165) fn inspect_runtime_recipe_input(
+    recipe_blob: &[u8],
+    input: BattleRuntimeRecipeInput,
+) -> Result<BattleRuntimeRecipeStats> {
+    let selection = select_runtime_recipes(recipe_blob, input)?;
+    Ok(BattleRuntimeRecipeStats {
+        recipe_count: selection.recipe_offsets.len(),
+        unique_overlay_count: selection.overlays.len(),
+        glyph_reference_count: selection.glyph_reference_count,
+        recipe_offsets: selection.recipe_offsets,
+    })
+}
+
+pub(in crate::mapper165) fn compose_runtime_font_page(
+    source_page: &[u8],
+    glyph_atlas: &[u8],
+    physical_codes: &[u8],
+    recipe_blob: &[u8],
+    input: BattleRuntimeRecipeInput,
+) -> Result<Vec<u8>> {
+    ensure!(
+        source_page.len() == FONT_PAGE_SIZE,
+        "battle runtime source page is not 4 KiB"
+    );
+    ensure!(
+        glyph_atlas.len().is_multiple_of(FONT_TILE_SIZE),
+        "battle runtime glyph atlas is not tile-aligned"
+    );
+    let selection = select_runtime_recipes(recipe_blob, input)?;
+    let mut page = source_page.to_vec();
+    for overlay in selection.overlays {
+        let physical_code = physical_codes
+            .get(usize::from(overlay.color))
+            .copied()
+            .context("battle runtime recipe color is absent from the physical code table")?;
+        let atlas_start = usize::from(overlay.atlas_index)
+            .checked_mul(FONT_TILE_SIZE)
+            .context("battle runtime atlas tile offset overflow")?;
+        let atlas_end = atlas_start
+            .checked_add(FONT_TILE_SIZE)
+            .context("battle runtime atlas tile range overflow")?;
+        let tile = glyph_atlas
+            .get(atlas_start..atlas_end)
+            .context("battle runtime recipe references a missing atlas tile")?;
+        let page_start = usize::from(physical_code)
+            .checked_mul(FONT_TILE_SIZE)
+            .context("battle runtime page tile offset overflow")?;
+        let page_end = page_start
+            .checked_add(FONT_TILE_SIZE)
+            .context("battle runtime page tile range overflow")?;
+        page.get_mut(page_start..page_end)
+            .context("battle runtime physical code exceeds the font page")?
+            .copy_from_slice(tile);
+    }
+    Ok(page)
+}
+
 impl BattleCacheCompositionMaterial {
     pub(in crate::mapper165) fn includes_fixed_entry(
         &self,

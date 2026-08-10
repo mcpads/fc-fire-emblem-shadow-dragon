@@ -19,6 +19,8 @@ pub enum Instruction {
     StaAbsoluteX(u16),
     StaIndirectY(u8),
     AslAccumulator,
+    AslZeroPage(u8),
+    RolZeroPage(u8),
     LsrAccumulator,
     AndImmediate(u8),
     AdcImmediate(u8),
@@ -31,6 +33,7 @@ pub enum Instruction {
     IncAbsolute(u16),
     DecAbsolute(u16),
     Inx,
+    Dex,
     Iny,
     Tax,
     Txa,
@@ -65,6 +68,7 @@ impl Instruction {
             | Self::Pla
             | Self::Plp
             | Self::Inx
+            | Self::Dex
             | Self::Iny
             | Self::Tax
             | Self::Txa
@@ -83,6 +87,8 @@ impl Instruction {
             | Self::StaZeroPage(_)
             | Self::StyZeroPage(_)
             | Self::StaIndirectY(_)
+            | Self::AslZeroPage(_)
+            | Self::RolZeroPage(_)
             | Self::AndImmediate(_)
             | Self::AdcImmediate(_)
             | Self::AdcZeroPage(_)
@@ -133,6 +139,8 @@ impl Instruction {
                 Operand::Byte(address),
             ),
             Self::AslAccumulator => implied(Mnemonic::Asl, AddressingMode::Accumulator),
+            Self::AslZeroPage(address) => zero_page(Mnemonic::Asl, address),
+            Self::RolZeroPage(address) => zero_page(Mnemonic::Rol, address),
             Self::LsrAccumulator => implied(Mnemonic::Lsr, AddressingMode::Accumulator),
             Self::AndImmediate(value) => immediate(Mnemonic::And, value),
             Self::AdcImmediate(value) => immediate(Mnemonic::Adc, value),
@@ -145,6 +153,7 @@ impl Instruction {
             Self::IncAbsolute(address) => absolute(Mnemonic::Inc, address),
             Self::DecAbsolute(address) => absolute(Mnemonic::Dec, address),
             Self::Inx => implied(Mnemonic::Inx, AddressingMode::Implied),
+            Self::Dex => implied(Mnemonic::Dex, AddressingMode::Implied),
             Self::Iny => implied(Mnemonic::Iny, AddressingMode::Implied),
             Self::Tax => implied(Mnemonic::Tax, AddressingMode::Implied),
             Self::Txa => implied(Mnemonic::Txa, AddressingMode::Implied),
@@ -264,6 +273,8 @@ mod tests {
                 Instruction::StaAbsoluteX(0x5C00),
                 Instruction::StaIndirectY(0x00),
                 Instruction::AslAccumulator,
+                Instruction::AslZeroPage(0x02),
+                Instruction::RolZeroPage(0x03),
                 Instruction::LsrAccumulator,
                 Instruction::AndImmediate(0x3F),
                 Instruction::AdcImmediate(0x20),
@@ -275,6 +286,7 @@ mod tests {
                 Instruction::IncAbsolute(0x67F4),
                 Instruction::DecAbsolute(0x67FC),
                 Instruction::Inx,
+                Instruction::Dex,
                 Instruction::Tax,
                 Instruction::Txa,
                 Instruction::Tay,
@@ -305,10 +317,11 @@ mod tests {
             [
                 0xA9, 0x9F, 0xA5, 0x5B, 0xAD, 0xF0, 0x67, 0xBD, 0x00, 0xFB, 0xA2, 0x00, 0xA0, 0x00,
                 0xBC, 0x03, 0x01, 0x85, 0x29, 0x84, 0x21, 0x8D, 0x17, 0x51, 0x9D, 0x00, 0x5C, 0x91,
-                0x00, 0x0A, 0x4A, 0x29, 0x3F, 0x69, 0x20, 0x65, 0x01, 0xE9, 0x10, 0xC9, 0x18, 0xE0,
-                0x20, 0xC0, 0x02, 0xEE, 0xF4, 0x67, 0xCE, 0xFC, 0x67, 0xE8, 0xAA, 0x8A, 0xA8, 0x98,
-                0xBA, 0x09, 0x80, 0x05, 0x52, 0x18, 0x38, 0x48, 0x08, 0x68, 0x28, 0x20, 0x30, 0xFB,
-                0xF0, 0xB8, 0x90, 0xB6, 0xB0, 0xB4, 0xD0, 0xB2, 0x4C, 0x75, 0xC0, 0x60, 0xEA,
+                0x00, 0x0A, 0x06, 0x02, 0x26, 0x03, 0x4A, 0x29, 0x3F, 0x69, 0x20, 0x65, 0x01, 0xE9,
+                0x10, 0xC9, 0x18, 0xE0, 0x20, 0xC0, 0x02, 0xEE, 0xF4, 0x67, 0xCE, 0xFC, 0x67, 0xE8,
+                0xCA, 0xAA, 0x8A, 0xA8, 0x98, 0xBA, 0x09, 0x80, 0x05, 0x52, 0x18, 0x38, 0x48, 0x08,
+                0x68, 0x28, 0x20, 0x30, 0xFB, 0xF0, 0xB3, 0x90, 0xB1, 0xB0, 0xAF, 0xD0, 0xAD, 0x4C,
+                0x75, 0xC0, 0x60, 0xEA,
             ]
         );
     }

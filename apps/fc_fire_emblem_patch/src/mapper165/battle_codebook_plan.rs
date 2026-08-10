@@ -26,7 +26,10 @@ mod physical_assignment;
 mod runtime_inputs;
 pub(crate) mod surface_constraints;
 
-pub(in crate::mapper165) use composition::BattleCacheCompositionMaterial;
+pub(in crate::mapper165) use composition::{
+    BattleCacheCompositionMaterial, BattleRuntimeRecipeInput, compose_runtime_font_page,
+    inspect_runtime_recipe_input,
+};
 use composition::{BattleCacheCompositionPlan, plan_cache_composition};
 use conflict_graph::{BattleGlyphFamilies, plan_stable_coloring};
 use enemy_domain::{EnemyBattleDomain, EnemyBattleDomainBinding, bind_enemy_battle_domain};

@@ -136,6 +136,36 @@ enum Command {
         #[arg(long, default_value = "out/battle-text-runtime-base.json")]
         report: PathBuf,
     },
+    /// Compose observed battle recipes into CHR RAM behind an exact runtime-tuple gate.
+    BuildBattleCompositionLoaderProbe {
+        source: PathBuf,
+        #[arg(
+            long,
+            default_value = "evidence/private/temporal-surfaces/manifest.json"
+        )]
+        temporal_manifest: PathBuf,
+        #[arg(long, default_value = "out/battle-text-runtime-base.nes")]
+        base: PathBuf,
+        #[arg(long, default_value = "out/battle-text-runtime-base.json")]
+        base_report: PathBuf,
+        #[arg(long, default_value = "out/battle-composition-loader-probe.nes")]
+        output: PathBuf,
+        #[arg(long, default_value = "out/battle-composition-loader-probe.json")]
+        report: PathBuf,
+    },
+    /// Compare a composition-return CHR-RAM snapshot with an independent recipe rebuild.
+    VerifyBattleCompositionRuntime {
+        #[arg(long, default_value = "out/battle-composition-loader-probe.nes")]
+        rom: PathBuf,
+        event: PathBuf,
+        #[arg(long, default_value_t = 62)]
+        dialogue_selector: u8,
+        #[arg(
+            long,
+            default_value = "out/battle-composition-runtime-verification.json"
+        )]
+        report: PathBuf,
+    },
     /// Build one proven battle combination with fixed text and dialogue sharing a codebook.
     BuildBattleCombinationProbe {
         source: PathBuf,
@@ -626,6 +656,56 @@ fn main() -> Result<()> {
                 summary.fixed_entry_count,
                 summary.dialogue_record_count,
                 summary.tracked_write_count
+            );
+        }
+        Command::BuildBattleCompositionLoaderProbe {
+            source,
+            temporal_manifest,
+            base,
+            base_report,
+            output,
+            report,
+        } => {
+            let summary =
+                mapper165::battle_composition_loader_probe::build_battle_composition_loader_probe(
+                    &source,
+                    &temporal_manifest,
+                    &base,
+                    &base_report,
+                    &output,
+                    &report,
+                )?;
+            println!("wrote {}", output.display());
+            println!("output SHA-1: {}", summary.output_sha1);
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "battle composition loader: {} admitted tuples, at most {} observed PPU data writes, {} runtime bytes",
+                summary.admitted_runtime_tuple_count,
+                summary.maximum_observed_ppu_write_count,
+                summary.runtime_routine_byte_count
+            );
+        }
+        Command::VerifyBattleCompositionRuntime {
+            rom,
+            event,
+            dialogue_selector,
+            report,
+        } => {
+            let summary =
+                mapper165::battle_composition_runtime_verify::verify_battle_composition_runtime(
+                    &rom,
+                    &event,
+                    dialogue_selector,
+                    &report,
+                )?;
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "battle runtime composition: expected {}, actual {}, {} differing bytes across {} tiles",
+                summary.expected_chr_ram_sha1,
+                summary.actual_chr_ram_sha1,
+                summary.differing_byte_count,
+                summary.differing_tile_count
             );
         }
         Command::BuildBattleCombinationProbe {
