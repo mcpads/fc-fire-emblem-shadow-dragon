@@ -6,7 +6,9 @@ use std::{
 
 use anyhow::{Context, Result, ensure};
 
-use crate::{rom::Rom, sha1_hex};
+#[cfg(test)]
+use crate::dialogue_inventory::MainDialogueTransitionEdgeReport;
+use crate::{dialogue_inventory::MainDialogueGraphReport, rom::Rom, sha1_hex};
 
 use super::*;
 
@@ -16,6 +18,8 @@ pub(crate) struct MainDialogueSlicePlan {
     pub(crate) source_file_offset: usize,
     pub(crate) source_storage_byte_count: usize,
     pub(crate) translated_line_count: usize,
+    pub(crate) transition_chain_record_count: usize,
+    pub(crate) preserved_source_codes: BTreeSet<u8>,
     logical_bytes: Vec<LogicalDialogueByte>,
 }
 
@@ -106,6 +110,18 @@ pub(crate) fn plan_main_dialogue_slice(
         logical.bytes.len(),
         logical.source_storage_byte_count
     );
+    let (transition_chain_record_count, mut preserved_source_codes) =
+        collect_followup_literal_codes(
+            rom.data(),
+            &source_records,
+            &inspect_main_dialogue_graph(rom.data())?,
+            &workspace_record.table_id,
+            workspace_record.canonical_entry_index,
+        )?;
+    preserved_source_codes.extend(logical.bytes.iter().filter_map(|byte| match byte {
+        LogicalDialogueByte::Encoded(value) => Some(*value),
+        LogicalDialogueByte::TargetGlyph(_) => None,
+    }));
 
     Ok(MainDialogueSlicePlan {
         workspace_sha1: sha1_hex(&workspace_bytes),
@@ -113,8 +129,76 @@ pub(crate) fn plan_main_dialogue_slice(
         source_file_offset: logical.source_file_offset,
         source_storage_byte_count: logical.source_storage_byte_count,
         translated_line_count: logical.translated_line_count,
+        transition_chain_record_count,
+        preserved_source_codes,
         logical_bytes: logical.bytes,
     })
+}
+
+fn collect_followup_literal_codes(
+    source: &[u8],
+    records: &[MainDialogueStorageRecord],
+    graph: &MainDialogueGraphReport,
+    start_table_id: &str,
+    start_canonical_entry_index: usize,
+) -> Result<(usize, BTreeSet<u8>)> {
+    let records_by_key = records
+        .iter()
+        .map(|record| {
+            (
+                (record.table_id.to_owned(), record.canonical_entry_index),
+                record,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let next_record = graph
+        .transition_edges
+        .iter()
+        .map(|edge| {
+            (
+                (
+                    edge.source_table_id.to_owned(),
+                    edge.source_canonical_entry_index,
+                ),
+                (
+                    edge.target_table_id.to_owned(),
+                    edge.target_canonical_entry_index,
+                ),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let start = (start_table_id.to_owned(), start_canonical_entry_index);
+    ensure!(
+        records_by_key.contains_key(&start),
+        "main dialogue slice start record is missing from storage"
+    );
+
+    let mut current = start.clone();
+    let mut visited = BTreeSet::new();
+    let mut preserved_codes = BTreeSet::new();
+    loop {
+        ensure!(
+            visited.insert(current.clone()),
+            "main dialogue slice transition chain contains a cycle"
+        );
+        if current != start {
+            let record = records_by_key
+                .get(&current)
+                .context("main dialogue slice transition target is missing from storage")?;
+            for offset in &record.literal_file_offsets {
+                preserved_codes.insert(
+                    *source
+                        .get(*offset)
+                        .context("main dialogue followup literal is outside the source")?,
+                );
+            }
+        }
+        let Some(next) = next_record.get(&current) else {
+            break;
+        };
+        current = next.clone();
+    }
+    Ok((visited.len(), preserved_codes))
 }
 
 #[cfg(test)]
@@ -129,6 +213,8 @@ mod tests {
             source_file_offset: 0,
             source_storage_byte_count: 3,
             translated_line_count: 1,
+            transition_chain_record_count: 1,
+            preserved_source_codes: BTreeSet::new(),
             logical_bytes: vec![
                 LogicalDialogueByte::TargetGlyph('한'),
                 LogicalDialogueByte::Encoded(0xED),
@@ -138,5 +224,72 @@ mod tests {
         let assignments = BTreeMap::from([('한', 0x01)]);
         assert_eq!(plan.encoded_bytes(&assignments).unwrap(), [0x01, 0xED]);
         assert!(plan.encoded_bytes(&BTreeMap::new()).is_err());
+    }
+
+    #[test]
+    fn preserves_followup_literals_but_not_replaced_start_literals() {
+        let source = [0x11, 0x22, 0x33, 0x44];
+        let records = vec![
+            storage_record("chapter-intro-dialogue", 0, vec![0, 1]),
+            storage_record("chapter-intro-dialogue", 2, vec![2, 3]),
+        ];
+        let graph = MainDialogueGraphReport {
+            node_count: 2,
+            transition_edge_count: 1,
+            terminal_reachable_node_count: 2,
+            caller_handoff_boundary_reachable_node_count: 0,
+            max_transition_edge_count_to_boundary: 1,
+            cycle_count: 0,
+            unresolved_node_count: 0,
+            transition_edges: vec![MainDialogueTransitionEdgeReport {
+                source_table_id: "chapter-intro-dialogue",
+                source_canonical_entry_index: 0,
+                source_entry_indices: vec![0],
+                source_pointer_cpu_address: 0x8000,
+                source_pointer_cpu_address_hex: "0x8000".to_owned(),
+                source_file_offset: 0,
+                source_file_offset_hex: "0x00000".to_owned(),
+                control: 0xE6,
+                control_hex: "E6".to_owned(),
+                target_table_id: "chapter-intro-dialogue",
+                target_entry_index: 2,
+                target_canonical_entry_index: 2,
+                target_pointer_cpu_address: 0x8002,
+                target_pointer_cpu_address_hex: "0x8002".to_owned(),
+                target_file_offset: 2,
+                target_file_offset_hex: "0x00002".to_owned(),
+            }],
+        };
+
+        let (record_count, codes) =
+            collect_followup_literal_codes(&source, &records, &graph, "chapter-intro-dialogue", 0)
+                .unwrap();
+
+        assert_eq!(record_count, 2);
+        assert_eq!(codes, BTreeSet::from([0x33, 0x44]));
+    }
+
+    fn storage_record(
+        table_id: &'static str,
+        canonical_entry_index: usize,
+        literal_file_offsets: Vec<usize>,
+    ) -> MainDialogueStorageRecord {
+        let file_offset = literal_file_offsets[0];
+        MainDialogueStorageRecord {
+            table_id,
+            source_prg_bank: 0,
+            canonical_entry_index,
+            entry_indices: vec![canonical_entry_index],
+            pointer_file_offsets: Vec::new(),
+            pointer_cpu_address: 0x8000 + u16::try_from(file_offset).unwrap(),
+            file_offset,
+            end_file_offset_exclusive: literal_file_offsets.last().unwrap() + 1,
+            storage_byte_count: literal_file_offsets.len(),
+            storage_sha1: "storage".to_owned(),
+            prefix_byte_count: 0,
+            boundary_control: 0xEF,
+            literal_file_offsets,
+            lines: Vec::new(),
+        }
     }
 }

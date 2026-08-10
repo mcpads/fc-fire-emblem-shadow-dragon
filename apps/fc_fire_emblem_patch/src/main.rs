@@ -379,6 +379,11 @@ enum Command {
         source: PathBuf,
         #[arg(long, default_value = "private/dialogue/main-workspace.json")]
         workspace: PathBuf,
+        #[arg(
+            long,
+            default_value = "evidence/private/dialogue-lifetime/chapter-1-intro-screen.json"
+        )]
+        screen_evidence: PathBuf,
         #[arg(long, default_value = "chapter-intro-dialogue:000")]
         record_id: String,
         #[arg(
@@ -1139,23 +1144,31 @@ fn main() -> Result<()> {
         Command::BuildMainDialogueSliceProbe {
             source,
             workspace,
+            screen_evidence,
             record_id,
             output,
             report,
         } => {
             let summary = mapper165::dialogue_slice_probe::build_dialogue_slice_probe(
-                &source, &workspace, &record_id, &output, &report,
+                &source,
+                &workspace,
+                &screen_evidence,
+                &record_id,
+                &output,
+                &report,
             )?;
             println!("wrote {}", output.display());
             println!("output SHA-1: {}", summary.output_sha1);
             println!("wrote {}", report.display());
             println!("report SHA-1: {}", summary.report_sha1);
             println!(
-                "dialogue slice: {} lines, {} unique glyphs, {} planned bytes, {} bytes remaining, {} tracked writes",
+                "dialogue slice: {} lines, {} unique glyphs, {} planned bytes, {} bytes remaining, {} preserved active codes, {} temporal samples, {} tracked writes",
                 summary.translated_line_count,
                 summary.unique_glyph_count,
                 summary.planned_storage_byte_count,
                 summary.remaining_storage_byte_count,
+                summary.preserved_active_code_count,
+                summary.temporal_sample_count,
                 summary.tracked_write_count
             );
         }

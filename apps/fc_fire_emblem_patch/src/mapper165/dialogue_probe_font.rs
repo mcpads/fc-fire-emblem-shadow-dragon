@@ -61,6 +61,23 @@ pub(super) fn install_font_glyphs(
     Ok(())
 }
 
+pub(super) fn build_font_page(
+    source_page: &[u8],
+    assignments: &BTreeMap<char, u8>,
+) -> Result<Vec<u8>> {
+    ensure!(
+        source_page.len() == FONT_PAGE_SIZE,
+        "dialogue font source page must be exactly 4 KiB"
+    );
+    let font = load_dalmoori()?;
+    let mut page = source_page.to_vec();
+    for (character, code) in assignments {
+        let offset = usize::from(*code) * FONT_TILE_SIZE;
+        page[offset..offset + FONT_TILE_SIZE].copy_from_slice(&rasterize_glyph(&font, *character)?);
+    }
+    Ok(page)
+}
+
 pub(super) fn assignment_sha1(assignments: &BTreeMap<char, u8>) -> String {
     let mut bytes = Vec::new();
     for (character, code) in assignments {
@@ -96,5 +113,26 @@ mod tests {
         let error = assign_glyph_codes_excluding(&glyphs, &excluded).unwrap_err();
 
         assert!(error.to_string().contains("owns only 209 slots"));
+    }
+
+    #[test]
+    fn page_builder_preserves_every_unassigned_tile() {
+        let source_page = (0..FONT_PAGE_SIZE)
+            .map(|index| u8::try_from(index % 251).unwrap())
+            .collect::<Vec<_>>();
+        let assignments = BTreeMap::from([('한', 0x01)]);
+
+        let page = build_font_page(&source_page, &assignments).unwrap();
+
+        assert_eq!(page.len(), source_page.len());
+        assert_ne!(
+            &page[FONT_TILE_SIZE..2 * FONT_TILE_SIZE],
+            &source_page[FONT_TILE_SIZE..2 * FONT_TILE_SIZE]
+        );
+        assert_eq!(&page[..FONT_TILE_SIZE], &source_page[..FONT_TILE_SIZE]);
+        assert_eq!(
+            &page[2 * FONT_TILE_SIZE..],
+            &source_page[2 * FONT_TILE_SIZE..]
+        );
     }
 }
