@@ -29,6 +29,13 @@ pub(super) struct StableColoringPlan {
     pub(super) active_ceiling_search_limit_reached: bool,
     pub(super) active_ceiling_assignment_found: bool,
     pub(super) model_chromatic_number_proven: bool,
+    glyph_colors: BTreeMap<char, usize>,
+}
+
+impl StableColoringPlan {
+    pub(super) fn glyph_colors(&self) -> &BTreeMap<char, usize> {
+        &self.glyph_colors
+    }
 }
 
 pub(super) fn plan_stable_coloring(
@@ -65,6 +72,12 @@ pub(super) fn plan_stable_coloring(
         initial_strategy
     };
     let assignment_sha1 = assignment_sha1(&graph.glyphs, &colors)?;
+    let glyph_colors = graph
+        .glyphs
+        .iter()
+        .copied()
+        .zip(colors.iter().copied())
+        .collect();
     Ok(StableColoringPlan {
         glyph_count: graph.glyphs.len(),
         conflict_edge_count: graph.edge_count(),
@@ -76,6 +89,7 @@ pub(super) fn plan_stable_coloring(
         active_ceiling_search_limit_reached: ceiling_search.node_limit_reached,
         active_ceiling_assignment_found,
         model_chromatic_number_proven,
+        glyph_colors,
     })
 }
 

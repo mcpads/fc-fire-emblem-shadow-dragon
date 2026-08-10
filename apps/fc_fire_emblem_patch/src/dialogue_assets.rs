@@ -28,8 +28,8 @@ mod tests;
 mod workspace;
 
 pub(crate) use battle_workspace::{
-    EncodedBattleDialogueRecord, extract_battle_dialogue_workspace, import_battle_dialogue_draft,
-    plan_battle_dialogue_records, plan_battle_dialogue_reinsertion,
+    BattleDialogueReinsertionPlan, EncodedBattleDialogueRecord, extract_battle_dialogue_workspace,
+    import_battle_dialogue_draft, plan_battle_dialogue_records, plan_battle_dialogue_reinsertion,
     validate_battle_dialogue_workspace,
 };
 pub(crate) use glyph_workset::analyze_main_dialogue_glyph_workset;

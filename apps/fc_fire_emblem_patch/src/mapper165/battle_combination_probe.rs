@@ -15,10 +15,8 @@ use crate::{
 use super::{
     OUTPUT_MAPPER, assemble_mapper165_parity_bytes,
     battle_cache_coverage::BattleTextCoverage,
-    dialogue_probe_font::{
-        SOURCE_FONT_PHYSICAL_PAGE, assign_glyph_codes_excluding, assignment_sha1,
-        install_font_glyphs,
-    },
+    battle_codebook_plan::{ScreenCodeConstraint, plan_constrained_battle_codebook},
+    dialogue_probe_font::{SOURCE_FONT_PHYSICAL_PAGE, install_font_glyphs},
 };
 
 pub(super) struct GameplayBattleCombinationImage {
@@ -26,7 +24,12 @@ pub(super) struct GameplayBattleCombinationImage {
     pub(super) parity: Vec<u8>,
     pub(super) fixed_workspace_sha1: String,
     pub(super) dialogue_workspace_sha1: String,
-    pub(super) codebook_assignment_sha1: String,
+    pub(super) physical_codebook_assignment_sha1: String,
+    pub(super) cache_glyph_assignment_sha1: String,
+    pub(super) abstract_codebook_assignment_sha1: String,
+    pub(super) stable_color_count: usize,
+    pub(super) constrained_screen_count: usize,
+    pub(super) constrained_color_count: usize,
     pub(super) text_coverage: BattleTextCoverage,
     pub(super) glyph_count: usize,
     pub(super) preserved_active_code_count: usize,
@@ -78,14 +81,20 @@ struct BattleCombinationProbeReport {
     dialogue_selector: usize,
     preserved_active_code_count: usize,
     codebook_glyph_count: usize,
-    codebook_assignment_sha1: String,
+    physical_codebook_assignment_sha1: String,
+    cache_glyph_assignment_sha1: String,
+    abstract_codebook_assignment_sha1: String,
+    stable_color_count: usize,
+    constrained_screen_count: usize,
+    constrained_color_count: usize,
     font_physical_page: usize,
     tracked_write_count: usize,
     fixed_strings_reencoded: bool,
     message_templates_reencoded: bool,
     forecast_label_reencoded: bool,
     dialogue_record_reencoded: bool,
-    shared_local_codebook: bool,
+    stable_cross_cache_codebook: bool,
+    physical_assignment_catalog_complete: bool,
     translation_text_emitted: bool,
     glyph_characters_emitted: bool,
     runtime_verified: bool,
@@ -120,7 +129,7 @@ pub(crate) fn build_gameplay_battle_combination_probe(
     );
     let output_sha1 = sha1_hex(&output);
     let report = BattleCombinationProbeReport {
-        schema: 1,
+        schema: 2,
         source_sha1: EXPECTED_SOURCE_SHA1,
         fixed_workspace_sha1: assembled.fixed_workspace_sha1,
         dialogue_workspace_sha1: assembled.dialogue_workspace_sha1,
@@ -133,19 +142,25 @@ pub(crate) fn build_gameplay_battle_combination_probe(
         dialogue_selector: GAMEPLAY_DIALOGUE_SELECTOR,
         preserved_active_code_count: GAMEPLAY_BATTLE_PRESERVED_ACTIVE_CODES.len(),
         codebook_glyph_count: assembled.glyph_count,
-        codebook_assignment_sha1: assembled.codebook_assignment_sha1,
+        physical_codebook_assignment_sha1: assembled.physical_codebook_assignment_sha1,
+        cache_glyph_assignment_sha1: assembled.cache_glyph_assignment_sha1,
+        abstract_codebook_assignment_sha1: assembled.abstract_codebook_assignment_sha1,
+        stable_color_count: assembled.stable_color_count,
+        constrained_screen_count: assembled.constrained_screen_count,
+        constrained_color_count: assembled.constrained_color_count,
         font_physical_page: SOURCE_FONT_PHYSICAL_PAGE,
         tracked_write_count: assembled.tracked_writes.len(),
         fixed_strings_reencoded: true,
         message_templates_reencoded: true,
         forecast_label_reencoded: true,
         dialogue_record_reencoded: true,
-        shared_local_codebook: true,
+        stable_cross_cache_codebook: true,
+        physical_assignment_catalog_complete: false,
         translation_text_emitted: false,
         glyph_characters_emitted: false,
         runtime_verified: false,
         release_eligible: false,
-        next_gate: "cold-load the mapper165 gameplay battle entry and run through names, classes, items, terrain, attack templates, damage, and selector 62 dialogue without text glitches",
+        next_gate: "add every cache page protection constraint to the physical assignment, then cold-load the mapper165 gameplay battle entry and verify the complete temporal text sequence",
     };
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize battle combination probe report")?;
@@ -209,7 +224,32 @@ pub(super) fn assemble_gameplay_battle_combination(
     let preserved_active_codes = GAMEPLAY_BATTLE_PRESERVED_ACTIVE_CODES
         .into_iter()
         .collect::<BTreeSet<_>>();
-    let assignments = assign_glyph_codes_excluding(&glyphs, &preserved_active_codes)?;
+    let codebook = plan_constrained_battle_codebook(
+        &source_rom,
+        &fixed_plan,
+        &dialogue_plan,
+        &[ScreenCodeConstraint {
+            glyphs: glyphs.clone(),
+            preserved_active_codes: preserved_active_codes.clone(),
+        }],
+    )?;
+    let assignments = glyphs
+        .iter()
+        .map(|glyph| {
+            codebook
+                .glyph_codes
+                .get(glyph)
+                .copied()
+                .map(|code| (*glyph, code))
+                .with_context(|| format!("stable battle codebook lost glyph {glyph:?}"))
+        })
+        .collect::<Result<std::collections::BTreeMap<_, _>>>()?;
+    ensure!(
+        assignments
+            .values()
+            .all(|code| !preserved_active_codes.contains(code)),
+        "stable battle codebook overwrites a preserved chapter-one tile"
+    );
 
     let parity = assemble_mapper165_parity_bytes(&source_rom)?;
     let mut image = TrackedImage::new(parity.clone());
@@ -285,7 +325,12 @@ pub(super) fn assemble_gameplay_battle_combination(
         parity,
         fixed_workspace_sha1: sha1_hex(&fs::read(fixed_workspace_path)?),
         dialogue_workspace_sha1: sha1_hex(&fs::read(dialogue_workspace_path)?),
-        codebook_assignment_sha1: assignment_sha1(&assignments),
+        physical_codebook_assignment_sha1: codebook.physical_assignment_sha1,
+        cache_glyph_assignment_sha1: super::dialogue_probe_font::assignment_sha1(&assignments),
+        abstract_codebook_assignment_sha1: codebook.abstract_assignment_sha1,
+        stable_color_count: codebook.stable_color_count,
+        constrained_screen_count: codebook.constrained_screen_count,
+        constrained_color_count: codebook.constrained_color_count,
         text_coverage: BattleTextCoverage::from_source_indices(
             PLAYER_NAME_SOURCE_INDEX,
             ENEMY_NAME_SOURCE_INDEX,
@@ -314,7 +359,7 @@ mod tests {
     #[test]
     fn report_does_not_emit_translation_content_or_private_paths() {
         let report = BattleCombinationProbeReport {
-            schema: 1,
+            schema: 2,
             source_sha1: EXPECTED_SOURCE_SHA1,
             fixed_workspace_sha1: "fixed".to_owned(),
             dialogue_workspace_sha1: "dialogue".to_owned(),
@@ -327,14 +372,20 @@ mod tests {
             dialogue_selector: GAMEPLAY_DIALOGUE_SELECTOR,
             preserved_active_code_count: GAMEPLAY_BATTLE_PRESERVED_ACTIVE_CODES.len(),
             codebook_glyph_count: 12,
-            codebook_assignment_sha1: "assignment".to_owned(),
+            physical_codebook_assignment_sha1: "physical".to_owned(),
+            cache_glyph_assignment_sha1: "cache".to_owned(),
+            abstract_codebook_assignment_sha1: "abstract".to_owned(),
+            stable_color_count: 12,
+            constrained_screen_count: 1,
+            constrained_color_count: 12,
             font_physical_page: SOURCE_FONT_PHYSICAL_PAGE,
             tracked_write_count: 5,
             fixed_strings_reencoded: true,
             message_templates_reencoded: true,
             forecast_label_reencoded: true,
             dialogue_record_reencoded: true,
-            shared_local_codebook: true,
+            stable_cross_cache_codebook: true,
+            physical_assignment_catalog_complete: false,
             translation_text_emitted: false,
             glyph_characters_emitted: false,
             runtime_verified: false,

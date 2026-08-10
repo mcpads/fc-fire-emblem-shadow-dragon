@@ -72,7 +72,13 @@ struct BattleCacheUploadProbeReport {
     text_coverage_gated: bool,
     preserved_active_code_count: usize,
     codebook_glyph_count: usize,
-    codebook_assignment_sha1: String,
+    physical_codebook_assignment_sha1: String,
+    cache_glyph_assignment_sha1: String,
+    abstract_codebook_assignment_sha1: String,
+    stable_color_count: usize,
+    constrained_screen_count: usize,
+    constrained_color_count: usize,
+    physical_assignment_catalog_complete: bool,
     cache_mmc3_page: u8,
     cache_page_byte_count: usize,
     cache_page_sha1: String,
@@ -220,7 +226,7 @@ pub(crate) fn build_battle_cache_upload_probe(
 
     let output_sha1 = sha1_hex(&output);
     let report = BattleCacheUploadProbeReport {
-        schema: 1,
+        schema: 2,
         source_sha1: EXPECTED_SOURCE_SHA1,
         fixed_workspace_sha1: combination.fixed_workspace_sha1,
         dialogue_workspace_sha1: combination.dialogue_workspace_sha1,
@@ -240,7 +246,13 @@ pub(crate) fn build_battle_cache_upload_probe(
         text_coverage_gated: true,
         preserved_active_code_count: combination.preserved_active_code_count,
         codebook_glyph_count: combination.glyph_count,
-        codebook_assignment_sha1: combination.codebook_assignment_sha1,
+        physical_codebook_assignment_sha1: combination.physical_codebook_assignment_sha1,
+        cache_glyph_assignment_sha1: combination.cache_glyph_assignment_sha1,
+        abstract_codebook_assignment_sha1: combination.abstract_codebook_assignment_sha1,
+        stable_color_count: combination.stable_color_count,
+        constrained_screen_count: combination.constrained_screen_count,
+        constrained_color_count: combination.constrained_color_count,
+        physical_assignment_catalog_complete: false,
         cache_mmc3_page: CACHE_MMC3_PAGE,
         cache_page_byte_count: cache_page.len(),
         cache_page_sha1: sha1_hex(&cache_page),
@@ -267,7 +279,7 @@ pub(crate) fn build_battle_cache_upload_probe(
         glyph_characters_emitted: false,
         runtime_verified: false,
         release_eligible: false,
-        next_gate: "prove selector 62 dialogue on its natural consumer path, then build a multi-cache catalog with stable cross-page glyph codes; keep defeat dialogue on its separate screen path",
+        next_gate: "enumerate the cache catalog and accumulate every page protection constraint into the physical code assignment; selector 62 and defeat remain separate runtime proof gates",
     };
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize battle cache upload report")?;
@@ -782,7 +794,7 @@ mod tests {
     #[test]
     fn report_does_not_emit_translation_content_or_private_paths() {
         let report = BattleCacheUploadProbeReport {
-            schema: 1,
+            schema: 2,
             source_sha1: EXPECTED_SOURCE_SHA1,
             fixed_workspace_sha1: "fixed".to_owned(),
             dialogue_workspace_sha1: "dialogue".to_owned(),
@@ -800,7 +812,13 @@ mod tests {
             text_coverage_gated: true,
             preserved_active_code_count: 119,
             codebook_glyph_count: 1,
-            codebook_assignment_sha1: "assignment".to_owned(),
+            physical_codebook_assignment_sha1: "physical".to_owned(),
+            cache_glyph_assignment_sha1: "cache".to_owned(),
+            abstract_codebook_assignment_sha1: "abstract".to_owned(),
+            stable_color_count: 1,
+            constrained_screen_count: 1,
+            constrained_color_count: 1,
+            physical_assignment_catalog_complete: false,
             cache_mmc3_page: CACHE_MMC3_PAGE,
             cache_page_byte_count: FONT_PAGE_SIZE,
             cache_page_sha1: "page".to_owned(),
