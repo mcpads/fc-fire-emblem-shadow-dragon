@@ -12,6 +12,7 @@ use crate::{
 };
 mod battle_cache_coverage;
 pub(crate) mod battle_cache_upload_probe;
+pub(crate) mod battle_codebook_plan;
 pub(crate) mod battle_combination_probe;
 pub(crate) mod battle_dialogue_probe;
 pub(crate) mod battle_text_cache_probe;

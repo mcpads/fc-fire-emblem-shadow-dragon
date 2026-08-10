@@ -313,6 +313,9 @@ cargo run -p fc-fire-emblem-patch -- extract-fixed-text-workspace \
 cargo run -p fc-fire-emblem-patch -- analyze-battle-text-workset \
   'roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes'
 
+cargo run -p fc-fire-emblem-patch -- analyze-battle-codebook-plan \
+  'roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes'
+
 cargo run -p fc-fire-emblem-patch -- build-battle-combination-probe \
   'roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes'
 
@@ -321,6 +324,8 @@ cargo run -p fc-fire-emblem-patch -- build-battle-cache-upload-probe \
 ```
 
 `analyze-battle-text-workset`은 270개 고정 번역을 글리프당 한 바이트 논리열로 만들고 각 문자열이 원래 소유 길이 안에 드는지 검사한 뒤, 전투 대사와 예측창 라벨을 합친 수치만 공개한다. 고정 251글리프와 대사 153글리프의 전체 합집합은 319글리프로 정적 한 페이지에 들어가지 않는다. 대사 한 레코드, 양측 이름·병종·아이템·지형, 메시지 템플릿 하나와 예측 라벨의 보수적 조합 상한은 112/210이다. 보고서 SHA-1은 `2e397df7b774bde2377caf88b9441380d1bc2cad`이며 글리프 문자·원문·번역문은 싣지 않는다.
+
+`analyze-battle-codebook-plan`은 캐시 페이지가 달라도 같은 글리프가 같은 바이트 코드를 쓰는 전역 배정이 가능한지 공존 그래프로 검사한다. 모든 전투 메시지 템플릿과 예측 라벨은 공용 기반으로, 아군명·적군명·전투 대사는 각 하나, 병종·장비·지형은 각 둘을 한 캐시 수명으로 둔다. 실제 결속 전 단계이므로 두 칸짜리 가족에서는 어떤 두 항목도 짝이 될 수 있다고 과대근사한다. 전체 319글리프의 충돌 간선은 48,881개이며, 명시적으로 구성한 클리크 하한 233이 활성 슬롯 210을 넘고 결정적 색칠 상한은 252다. 따라서 이 보수 모델 안에서는 단일 전역 코드북이 불가능하다. 이는 실제 전투 조합 그래프의 불가능성을 아직 뜻하지 않으며, 다음에는 유닛·병종·장비·대사 결속으로 간선을 줄인다. 그 뒤에도 하한이 넘으면 캐시별 글꼴 페이지와 같은 코드북으로 인코딩한 텍스트 복사본을 함께 선택한다. 현재 1장 표본의 보호 코드 119개를 뺀 91칸은 전체 전투의 일반 상한으로 승격하지 않는다. 보고서 SHA-1은 `ab9c62d821b67c24a9620c455e44ce4b59dc86dc`이며 글리프 문자·원문·번역문을 싣지 않는다.
 
 `build-battle-text-cache-base`는 mapper 165 패리티 이미지를 512 KiB PRG로 확장하고 추가 PRG의 첫 MMC3 8 KiB 페이지 `20`부터 정렬한 319개 글리프의 5,104바이트 타일 아틀라스를 넣는다. 원래 256 KiB PRG 접두부와 활성 고정 뱅크, CHR은 보존한다. 현재 ROM SHA-1은 `b53876225eb9d67ef4725cacade6d12c34723324`, 보고서 SHA-1은 `f842a1b0902fe1e3c6f5e3982aff1741caed6b9c`이다. 이 기반은 아직 아틀라스를 읽거나 CHR-RAM을 선택하지 않으며 배포 후보가 아니다.
 

@@ -82,6 +82,16 @@ enum Command {
         #[arg(long, default_value = "out/battle-text-workset.json")]
         report: PathBuf,
     },
+    /// Test whether all battle glyphs can keep stable byte codes across cache pages.
+    AnalyzeBattleCodebookPlan {
+        source: PathBuf,
+        #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
+        fixed_workspace: PathBuf,
+        #[arg(long, default_value = "private/dialogue/battle-workspace.json")]
+        dialogue_workspace: PathBuf,
+        #[arg(long, default_value = "out/battle-codebook-plan.json")]
+        report: PathBuf,
+    },
     /// Expand mapper 165 PRG and embed the translated battle glyph atlas.
     BuildBattleTextCacheBase {
         source: PathBuf,
@@ -489,6 +499,29 @@ fn main() -> Result<()> {
                 summary.dialogue_glyph_count,
                 summary.union_glyph_count,
                 summary.conservative_combination_upper_bound
+            );
+        }
+        Command::AnalyzeBattleCodebookPlan {
+            source,
+            fixed_workspace,
+            dialogue_workspace,
+            report,
+        } => {
+            let summary = mapper165::battle_codebook_plan::analyze_battle_codebook_plan(
+                &source,
+                &fixed_workspace,
+                &dialogue_workspace,
+                &report,
+            )?;
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "battle stable codebook: {} glyphs, {} conflicts, clique lower bound {}, coloring upper bound {}, {} chapter-one-safe codes",
+                summary.glyph_count,
+                summary.conflict_edge_count,
+                summary.constructed_clique_glyph_count,
+                summary.stable_color_count,
+                summary.chapter_one_safe_code_count
             );
         }
         Command::BuildBattleTextCacheBase {
