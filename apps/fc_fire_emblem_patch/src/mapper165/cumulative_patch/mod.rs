@@ -6,7 +6,8 @@ use crate::{
     chapter_transition::plan_chapter_titles,
     class_profile::plan_class_profiles,
     dialogue_assets::{
-        MainDialogueSlicePlan, plan_main_dialogue_slice, validate_main_dialogue_workspace,
+        MainDialogueBundlePlan, MainDialogueSlicePlan, plan_main_dialogue_bundle,
+        plan_main_dialogue_slice, validate_main_dialogue_workspace,
     },
     font_slots::FONT_PAGE_SIZE,
     front_end_menu::plan_front_end_menu,
@@ -27,6 +28,10 @@ use super::{
         build_page_routine as build_roster_selector,
         build_page_routine_with_fallback as build_chained_roster_selector,
     },
+    shop_dialogue_page::{
+        PAGE_ROUTINE_ADDRESS as SHOP_DIALOGUE_SELECTOR_ADDRESS,
+        RECORD_IDS as SHOP_DIALOGUE_RECORD_IDS, SCREEN_ROLE as SHOP_DIALOGUE_SCREEN_ROLE,
+    },
 };
 
 mod chapter_page_selector;
@@ -34,6 +39,8 @@ mod class_profile_runtime;
 mod class_profile_stage;
 mod front_end_stage;
 mod report;
+mod shop_dialogue_runtime;
+mod shop_dialogue_stage;
 mod unit_name_stage;
 mod verify;
 
@@ -46,6 +53,8 @@ use report::{
     CumulativeDialogueReport, CumulativeFrontEndMenuReport, CumulativePatchReport,
     CumulativeStageReport, CumulativeUnitNameReport, SelectorChainReport,
 };
+use shop_dialogue_runtime::verify_shop_dialogue_runtime_evidence;
+use shop_dialogue_stage::install_shop_dialogue_stage;
 use unit_name_stage::install_unit_name_stage;
 use verify::{install_chapter_title, install_dialogue_record, verify_cumulative_output};
 
@@ -55,6 +64,7 @@ const CHAPTER_ONE_STAGE_ROM_NAME: &str = "chapter1-intro.nes";
 const FRONT_END_STAGE_ROM_NAME: &str = "front-end-menu.nes";
 const UNIT_NAME_STAGE_ROM_NAME: &str = "unit-names.nes";
 const CLASS_PROFILE_STAGE_ROM_NAME: &str = "class-profiles.nes";
+const SHOP_DIALOGUE_STAGE_ROM_NAME: &str = "weapon-shop-dialogue.nes";
 const DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFBD4;
 const DIALOGUE_SELECTOR_CAVE_END: u16 = 0xFC20;
 const CHAPTER_ONE_DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFBD8;
@@ -95,6 +105,8 @@ pub(crate) struct CumulativePatchInputs<'a> {
     pub(crate) unit_name_evidence_path: &'a Path,
     pub(crate) class_profile_evidence_path: &'a Path,
     pub(crate) class_profile_runtime_evidence_path: &'a Path,
+    pub(crate) shop_dialogue_evidence_path: &'a Path,
+    pub(crate) shop_dialogue_runtime_evidence_path: &'a Path,
     pub(crate) stage_directory: &'a Path,
     pub(crate) output_path: &'a Path,
     pub(crate) report_path: &'a Path,
@@ -126,6 +138,23 @@ pub(crate) fn build_cumulative_patch(
     let unit_name_plan = plan_unit_names(&source_rom, inputs.unit_name_localization_path)?;
     let class_profile_plan =
         plan_class_profiles(&source_rom, inputs.class_profile_localization_path)?;
+    let shop_dialogue_plan = plan_main_dialogue_bundle(
+        &source_rom,
+        inputs.main_dialogue_workspace_path,
+        &SHOP_DIALOGUE_RECORD_IDS,
+    )?;
+    ensure!(
+        shop_dialogue_plan.workspace_sha1 == dialogue_workspace.workspace_sha1,
+        "weapon-shop dialogue plans no longer match the validated workspace"
+    );
+    ensure!(
+        shop_dialogue_plan
+            .record_ids
+            .iter()
+            .map(String::as_str)
+            .eq(SHOP_DIALOGUE_RECORD_IDS),
+        "weapon-shop dialogue plan order changed"
+    );
 
     let ui_stage_rom_path = inputs.stage_directory.join(UI_STAGE_ROM_NAME);
     let ui_stage_report_path = inputs.stage_directory.join(UI_STAGE_REPORT_NAME);
@@ -471,31 +500,48 @@ pub(crate) fn build_cumulative_patch(
         &inputs.stage_directory.join(CLASS_PROFILE_STAGE_ROM_NAME),
         &class_profile_stage.output,
     )?;
-    let output = class_profile_stage.output;
+    let shop_dialogue_stage = install_shop_dialogue_stage(
+        &class_profile_stage.output,
+        &source_rom,
+        &shop_dialogue_plan,
+        unit_name_stage.page.unit_ui_mapper_register,
+        inputs.shop_dialogue_evidence_path,
+    )?;
+    write_file(
+        &inputs.stage_directory.join(SHOP_DIALOGUE_STAGE_ROM_NAME),
+        &shop_dialogue_stage.output,
+    )?;
+    let output = shop_dialogue_stage.output;
     let output_rom = Rom::parse(output.clone()).context("parse cumulative Korean patch")?;
     let tracked_write_count = tracked_write_count
         + front_end_stage.tracked_write_count
         + unit_name_stage.tracked_write_count
-        + class_profile_stage.tracked_write_count;
+        + class_profile_stage.tracked_write_count
+        + shop_dialogue_stage.tracked_write_count;
 
     let translated_line_count = chapter_one_plans
         .iter()
         .chain(&chapter_two_plans)
         .map(|plan| plan.translated_line_count)
-        .sum::<usize>();
+        .sum::<usize>()
+        + shop_dialogue_plan.translated_line_count;
     let source_storage_byte_count = chapter_one_plans
         .iter()
         .chain(&chapter_two_plans)
         .map(|plan| plan.source_storage_byte_count)
-        .sum::<usize>();
+        .sum::<usize>()
+        + shop_dialogue_plan.source_record_storage_byte_count;
     let planned_storage_byte_count = chapter_one_encoded_records
         .iter()
         .chain(&chapter_two_encoded_records)
         .map(Vec::len)
-        .sum::<usize>();
-    let installed_record_count = chapter_one_plans.len() + chapter_two_plans.len();
-    let installed_dialogue_glyph_slot_count =
-        chapter_one_page.assignments.len() + chapter_two_page.assignments.len();
+        .sum::<usize>()
+        + shop_dialogue_plan.planned_record_storage_byte_count;
+    let installed_record_count =
+        chapter_one_plans.len() + chapter_two_plans.len() + shop_dialogue_plan.record_ids.len();
+    let installed_dialogue_glyph_slot_count = chapter_one_page.assignments.len()
+        + chapter_two_page.assignments.len()
+        + shop_dialogue_stage.page.assignments.len();
     let installed_glyph_slot_count = installed_dialogue_glyph_slot_count
         + front_end_stage.page.assignments.len()
         + unit_name_stage.page.roster_assignments.len()
@@ -503,9 +549,14 @@ pub(crate) fn build_cumulative_patch(
         + class_profile_stage.page.assignments[0].len()
         + class_profile_stage.page.assignments[1].len();
     let output_sha1 = sha1_hex(&output);
+    let shop_dialogue_runtime = verify_shop_dialogue_runtime_evidence(
+        inputs.shop_dialogue_runtime_evidence_path,
+        &output_sha1,
+        shop_dialogue_stage.page.mapper_register,
+    )?;
     let class_profile_runtime = verify_class_profile_runtime_evidence(
         inputs.class_profile_runtime_evidence_path,
-        &output_sha1,
+        &class_profile_stage.output_sha1,
         class_profile_stage.page.mapper_registers[1],
     )?;
     ensure!(
@@ -517,8 +568,8 @@ pub(crate) fn build_cumulative_patch(
         "front-end stage output hash changed before unit-name installation"
     );
     ensure!(
-        output_sha1 == class_profile_stage.output_sha1,
-        "class-profile stage output hash changed before publication"
+        output_sha1 == shop_dialogue_stage.output_sha1,
+        "weapon-shop stage output hash changed before publication"
     );
     let chapter_two_output_sha1 = sha1_hex(&chapter_two_output);
     let stages = vec![
@@ -550,6 +601,11 @@ pub(crate) fn build_cumulative_patch(
         CumulativeStageReport {
             role: "automatic_class_profile_titles_and_descriptions",
             output_sha1: class_profile_stage.output_sha1.clone(),
+            report_sha1: None,
+        },
+        CumulativeStageReport {
+            role: "weapon_shop_dialogue_branches",
+            output_sha1: shop_dialogue_stage.output_sha1.clone(),
             report_sha1: None,
         },
     ];
@@ -601,6 +657,11 @@ pub(crate) fn build_cumulative_patch(
                     &chapter_two_plans,
                     &chapter_two_encoded_records,
                     &chapter_two_page,
+                ),
+                shop_dialogue_lifetime_report(
+                    &shop_dialogue_plan,
+                    &shop_dialogue_stage.page,
+                    &shop_dialogue_runtime,
                 ),
             ],
         },
@@ -719,6 +780,12 @@ pub(crate) fn build_cumulative_patch(
             SelectorChainReport {
                 role: "unit_summary_and_status",
                 cpu_address: format!("0x{:04X}", super::unit_name_page::PAGE_ROUTINE_ADDRESS),
+                fallback_role: "weapon_shop_dialogue",
+                admitted_chapter_indices: Vec::new(),
+            },
+            SelectorChainReport {
+                role: "weapon_shop_dialogue",
+                cpu_address: format!("0x{SHOP_DIALOGUE_SELECTOR_ADDRESS:04X}"),
                 fallback_role: "front_end_menu",
                 admitted_chapter_indices: Vec::new(),
             },
@@ -753,6 +820,8 @@ pub(crate) fn build_cumulative_patch(
             "Private observations passed the installed no-save and valid-save front-end variants, but installed runtime evidence is not yet build-bound and the suspend-data variant is unverified.",
             "Playable-unit names are installed only for the roster and map unit-summary/status consumers; battle and ending consumers intentionally retain the source table until their own font lifetimes are installed.",
             "The translated playable-unit name pages still need build-bound cold runtime evidence across roster, unit summary, unit status, and their exit paths.",
+            "The eight weapon-shop dialogue branches are installed, while the shared Japanese item-name and yes/no consumers remain explicit translation targets for their own consumer-specific projections.",
+            "The installed weapon-shop decline route is exact-output-bound through its continue prompt, exit message, and map restoration; item selection, purchase, and every preflight branch still need exact-output runtime evidence.",
             "The remaining main-dialogue screen lifetimes and translated non-dialogue surfaces are not yet installed in this cumulative lineage.",
             "The ending scroll owns a separate physical copy of all chapter titles; that duplicate consumer is not installed by this intro-title stage.",
             "Human translation review is incomplete, so this output is a development build rather than a release candidate.",
@@ -815,6 +884,43 @@ fn dialogue_lifetime_report(
         font_mapper_register: page.mapper_register,
         font_page_sha1: page.page_sha1.clone(),
         font_page_pack_sha1: sha1_hex(&page.page_pack),
+        runtime_evidence_manifest_sha1: None,
+        runtime_sample_count: 0,
+        runtime_unique_image_count: 0,
+        runtime_bound_to_build: false,
+    }
+}
+
+fn shop_dialogue_lifetime_report(
+    plan: &MainDialogueBundlePlan,
+    page: &super::shop_dialogue_page::ShopDialoguePagePlan,
+    runtime: &shop_dialogue_runtime::ShopDialogueRuntimeEvidence,
+) -> CumulativeDialogueLifetimeReport {
+    CumulativeDialogueLifetimeReport {
+        screen_role: SHOP_DIALOGUE_SCREEN_ROLE,
+        chapter_index: CHAPTER_ONE_INDEX,
+        screen_evidence_manifest_sha1: page.manifest_sha1.clone(),
+        installed_record_count: plan.record_ids.len(),
+        installed_translated_line_count: plan.translated_line_count,
+        source_storage_byte_count: plan.source_record_storage_byte_count,
+        planned_storage_byte_count: plan.planned_record_storage_byte_count,
+        remaining_storage_byte_count: plan.source_record_storage_byte_count
+            - plan.planned_record_storage_byte_count,
+        unique_glyph_count: page.assignments.len(),
+        glyph_assignment_sha1: assignment_sha1(&page.assignments),
+        preserved_screen_active_code_count: page.preserved_screen_active_code_count,
+        preserved_source_active_code_count: page.preserved_source_active_code_count,
+        preserved_active_code_count: page.preserved_active_code_count,
+        temporal_sample_count: page.sample_count,
+        unique_nametable_count: page.unique_nametable_count,
+        font_physical_page: page.physical_chr_page,
+        font_mapper_register: page.mapper_register,
+        font_page_sha1: page.page_sha1.clone(),
+        font_page_pack_sha1: sha1_hex(&page.page_pack),
+        runtime_evidence_manifest_sha1: Some(runtime.manifest_sha1.clone()),
+        runtime_sample_count: runtime.sample_count,
+        runtime_unique_image_count: runtime.unique_image_count,
+        runtime_bound_to_build: true,
     }
 }
 

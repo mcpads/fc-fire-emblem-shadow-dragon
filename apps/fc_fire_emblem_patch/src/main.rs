@@ -445,6 +445,13 @@ enum Command {
             default_value = "evidence/private/class-profile-installed/manifest.json"
         )]
         class_profile_runtime_evidence: PathBuf,
+        #[arg(long, default_value = "private/runtime/shop-dialogue-screen.json")]
+        shop_dialogue_evidence: PathBuf,
+        #[arg(
+            long,
+            default_value = "evidence/private/shop-dialogue-installed/manifest.json"
+        )]
+        shop_dialogue_runtime_evidence: PathBuf,
         #[arg(long, default_value = "out/cumulative-stages")]
         stage_directory: PathBuf,
         #[arg(long, default_value = "out/fire-emblem-fe1-korean-patch.nes")]
@@ -1281,6 +1288,8 @@ fn main() -> Result<()> {
             unit_name_evidence,
             class_profile_evidence,
             class_profile_runtime_evidence,
+            shop_dialogue_evidence,
+            shop_dialogue_runtime_evidence,
             stage_directory,
             output,
             report,
@@ -1301,6 +1310,8 @@ fn main() -> Result<()> {
                     unit_name_evidence_path: &unit_name_evidence,
                     class_profile_evidence_path: &class_profile_evidence,
                     class_profile_runtime_evidence_path: &class_profile_runtime_evidence,
+                    shop_dialogue_evidence_path: &shop_dialogue_evidence,
+                    shop_dialogue_runtime_evidence_path: &shop_dialogue_runtime_evidence,
                     stage_directory: &stage_directory,
                     output_path: &output,
                     report_path: &report,

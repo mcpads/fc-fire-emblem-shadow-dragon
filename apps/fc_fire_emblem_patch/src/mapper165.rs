@@ -30,6 +30,7 @@ pub(crate) mod hangul_page_probe;
 mod options_page;
 mod roster_page;
 mod runtime;
+mod shop_dialogue_page;
 #[cfg(test)]
 mod tests;
 pub(crate) mod trigger_planes;

@@ -161,6 +161,10 @@ pub(super) struct CumulativeDialogueLifetimeReport {
     pub(super) font_mapper_register: u8,
     pub(super) font_page_sha1: String,
     pub(super) font_page_pack_sha1: String,
+    pub(super) runtime_evidence_manifest_sha1: Option<String>,
+    pub(super) runtime_sample_count: usize,
+    pub(super) runtime_unique_image_count: usize,
+    pub(super) runtime_bound_to_build: bool,
 }
 
 #[derive(Debug, Serialize)]
