@@ -593,7 +593,7 @@ pub(super) const TEXT_TABLE_SPECS: [TextTableSpec; 7] = [
         id: "enemy-names",
         role: "enemy names",
         table_file_offset: 0x3DFB4,
-        pointer_count: 0x44,
+        pointer_count: 0x45,
         terminator: 0xEF,
         consumer_file_offset: 0x2CEAA,
         consumer_bytes: [0xB9, 0xA4, 0xDF, 0x85, 0x00, 0xB9, 0xA5, 0xDF, 0x85, 0x01],

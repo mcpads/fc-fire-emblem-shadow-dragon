@@ -12,21 +12,10 @@ const ACTIVE_CEILING_SEARCH_NODE_LIMIT: usize = 5_000_000;
 
 pub(super) struct BattleGlyphFamilies {
     pub(super) base: BTreeSet<char>,
-    pub(super) unit_names: Vec<BTreeSet<char>>,
-    pub(super) enemy_names: Vec<BTreeSet<char>>,
-    pub(super) classes: Vec<BTreeSet<char>>,
-    pub(super) items: Vec<BTreeSet<char>>,
+    pub(super) player_participants: Vec<BTreeSet<char>>,
+    pub(super) enemy_participants: Vec<BTreeSet<char>>,
     pub(super) terrains: Vec<BTreeSet<char>>,
     pub(super) dialogue_records: Vec<BTreeSet<char>>,
-}
-
-pub(super) struct FamilyEntryCounts {
-    pub(super) unit_names: usize,
-    pub(super) enemy_names: usize,
-    pub(super) classes: usize,
-    pub(super) items: usize,
-    pub(super) terrains: usize,
-    pub(super) dialogue_records: usize,
 }
 
 pub(super) struct StableColoringPlan {
@@ -40,7 +29,6 @@ pub(super) struct StableColoringPlan {
     pub(super) active_ceiling_search_limit_reached: bool,
     pub(super) active_ceiling_assignment_found: bool,
     pub(super) model_chromatic_number_proven: bool,
-    pub(super) family_entry_counts: FamilyEntryCounts,
 }
 
 pub(super) fn plan_stable_coloring(
@@ -88,44 +76,29 @@ pub(super) fn plan_stable_coloring(
         active_ceiling_search_limit_reached: ceiling_search.node_limit_reached,
         active_ceiling_assignment_found,
         model_chromatic_number_proven,
-        family_entry_counts: FamilyEntryCounts {
-            unit_names: families.unit_names.len(),
-            enemy_names: families.enemy_names.len(),
-            classes: families.classes.len(),
-            items: families.items.len(),
-            terrains: families.terrains.len(),
-            dialogue_records: families.dialogue_records.len(),
-        },
     })
 }
 
 fn constructed_clique(families: &BattleGlyphFamilies) -> BTreeSet<char> {
-    let always_present = families
+    let mut clique = families
         .base
         .iter()
         .copied()
-        .chain(union(&families.classes))
-        .chain(union(&families.items))
         .chain(union(&families.terrains))
         .collect::<BTreeSet<_>>();
-    let mut largest = always_present.clone();
-    for unit_name in &families.unit_names {
-        for enemy_name in &families.enemy_names {
-            for dialogue in &families.dialogue_records {
-                let candidate = always_present
-                    .iter()
-                    .chain(unit_name)
-                    .chain(enemy_name)
-                    .chain(dialogue)
-                    .copied()
-                    .collect::<BTreeSet<_>>();
-                if candidate.len() > largest.len() {
-                    largest = candidate;
-                }
-            }
+    for entries in [
+        &families.player_participants,
+        &families.enemy_participants,
+        &families.dialogue_records,
+    ] {
+        if let Some(entry) = entries
+            .iter()
+            .max_by_key(|entry| entry.difference(&clique).count())
+        {
+            clique.extend(entry);
         }
     }
-    largest
+    clique
 }
 
 struct ConflictGraph {
@@ -150,38 +123,35 @@ impl ConflictGraph {
         };
         graph.add_clique(&families.base);
         for entries in [
-            &families.unit_names,
-            &families.enemy_names,
+            &families.player_participants,
+            &families.enemy_participants,
             &families.dialogue_records,
         ] {
             for entry in entries {
                 graph.add_clique(entry);
             }
         }
-        let unit_names = union(&families.unit_names);
-        let enemy_names = union(&families.enemy_names);
-        let classes = union(&families.classes);
-        let items = union(&families.items);
+        let player_participants = union(&families.player_participants);
+        let enemy_participants = union(&families.enemy_participants);
         let terrains = union(&families.terrains);
         let dialogue = union(&families.dialogue_records);
-        graph.add_clique(&classes);
-        graph.add_clique(&items);
         graph.add_clique(&terrains);
-        let fixed_families = [&unit_names, &enemy_names, &classes, &items, &terrains];
-        for left in 0..fixed_families.len() {
-            for right in left + 1..fixed_families.len() {
-                graph.add_cross(fixed_families[left], fixed_families[right]);
-            }
-        }
-        let non_base = fixed_families
+        graph.add_cross(&player_participants, &enemy_participants);
+        let visible_participants = player_participants
             .iter()
-            .flat_map(|glyphs| glyphs.iter().copied())
-            .chain(dialogue.iter().copied())
+            .chain(&enemy_participants)
+            .copied()
+            .collect::<BTreeSet<_>>();
+        graph.add_cross(&terrains, &visible_participants);
+        let non_base = visible_participants
+            .iter()
+            .chain(&terrains)
+            .chain(&dialogue)
+            .copied()
             .collect::<BTreeSet<_>>();
         graph.add_cross(&families.base, &non_base);
-        for fixed in fixed_families {
-            graph.add_cross(&dialogue, fixed);
-        }
+        graph.add_cross(&dialogue, &visible_participants);
+        graph.add_cross(&dialogue, &terrains);
         graph
     }
 
@@ -314,10 +284,8 @@ fn all_glyphs(families: &BattleGlyphFamilies) -> BTreeSet<char> {
         .copied()
         .chain(
             [
-                &families.unit_names,
-                &families.enemy_names,
-                &families.classes,
-                &families.items,
+                &families.player_participants,
+                &families.enemy_participants,
                 &families.terrains,
                 &families.dialogue_records,
             ]

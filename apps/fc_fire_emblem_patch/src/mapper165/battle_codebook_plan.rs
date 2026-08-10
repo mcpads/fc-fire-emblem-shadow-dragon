@@ -15,11 +15,13 @@ use crate::{
 use super::battle_combination_probe::GAMEPLAY_BATTLE_PRESERVED_ACTIVE_CODES;
 
 mod conflict_graph;
+mod enemy_domain;
 mod item_domain;
 mod runtime_inputs;
 
 use conflict_graph::{BattleGlyphFamilies, plan_stable_coloring};
-use item_domain::{BattleItemDomainBinding, bind_battle_item_domain};
+use enemy_domain::{EnemyBattleDomain, EnemyBattleDomainBinding, bind_enemy_battle_domain};
+use item_domain::{BattleItemDomain, BattleItemDomainBinding, bind_battle_item_domain};
 use runtime_inputs::{BattleRuntimeInputBinding, bind_battle_runtime_inputs};
 
 #[derive(Debug, Serialize)]
@@ -36,6 +38,8 @@ struct BattleCodebookPlanReport {
     item_entry_count: usize,
     terrain_entry_count: usize,
     dialogue_record_count: usize,
+    player_participant_candidate_count: usize,
+    enemy_participant_candidate_count: usize,
     player_names_per_cache: usize,
     enemy_names_per_cache: usize,
     classes_per_cache: usize,
@@ -58,6 +62,7 @@ struct BattleCodebookPlanReport {
     chapter_one_preserved_active_code_count: usize,
     chapter_one_safe_target_code_count: usize,
     item_domain: BattleItemDomainBinding,
+    enemy_domain: EnemyBattleDomainBinding,
     runtime_inputs: BattleRuntimeInputBinding,
     stable_assignment_fits_active_slot_ceiling: bool,
     stable_assignment_fits_chapter_one_safe_codes: bool,
@@ -91,18 +96,27 @@ pub(crate) fn analyze_battle_codebook_plan(
     let fixed = plan_fixed_text(&rom, fixed_workspace_path)?;
     let dialogue = plan_battle_dialogue_records(&rom, dialogue_workspace_path)?;
     let message_templates = entry_glyph_sets(&fixed, "battle-message-templates");
-    let unit_names = entry_glyph_sets(&fixed, "unit-names");
+    let player_names = entry_glyph_sets(&fixed, "unit-names");
     let enemy_names = entry_glyph_sets(&fixed, "enemy-names");
-    let classes = entry_glyph_sets(&fixed, "class-names");
-    let item_domain = bind_battle_item_domain(&rom, &fixed)?;
-    let items = item_domain.glyph_sets;
+    let player_classes = entry_glyph_sets(&fixed, "class-names");
+    let BattleItemDomain {
+        equip_candidate_item_glyph_sets: player_items,
+        enemy_class_item_pairs,
+        player_participant_glyph_sets: player_participants,
+        binding: item_domain,
+    } = bind_battle_item_domain(&rom, &fixed)?;
+    let EnemyBattleDomain {
+        participant_glyph_sets: enemy_participants,
+        binding: enemy_domain,
+    } = bind_enemy_battle_domain(&rom, &fixed, &enemy_class_item_pairs)?;
     let terrains = entry_glyph_sets(&fixed, "terrain-names");
     for (role, entries) in [
         ("battle message", &message_templates),
-        ("unit name", &unit_names),
+        ("unit name", &player_names),
         ("enemy name", &enemy_names),
-        ("class", &classes),
-        ("item", &items),
+        ("class", &player_classes),
+        ("item", &player_items),
+        ("enemy participant", &enemy_participants),
         ("terrain", &terrains),
     ] {
         ensure!(!entries.is_empty(), "battle codebook has no {role} entries");
@@ -125,10 +139,8 @@ pub(crate) fn analyze_battle_codebook_plan(
     let coloring = plan_stable_coloring(
         &BattleGlyphFamilies {
             base,
-            unit_names,
-            enemy_names,
-            classes,
-            items,
+            player_participants: player_participants.clone(),
+            enemy_participants: enemy_participants.clone(),
             terrains,
             dialogue_records,
         },
@@ -151,14 +163,16 @@ pub(crate) fn analyze_battle_codebook_plan(
         source_sha1: EXPECTED_SOURCE_SHA1,
         fixed_workspace_sha1,
         dialogue_workspace_sha1,
-        cooccurrence_model: "source-constrained battle-cache family coverage with equip-eligible item superset",
+        cooccurrence_model: "side-aware gameplay battle coverage with source-bound item eligibility and enemy record domains",
         message_template_entry_count: message_templates.len(),
-        unit_name_entry_count: coloring.family_entry_counts.unit_names,
-        enemy_name_entry_count: coloring.family_entry_counts.enemy_names,
-        class_entry_count: coloring.family_entry_counts.classes,
-        item_entry_count: coloring.family_entry_counts.items,
-        terrain_entry_count: coloring.family_entry_counts.terrains,
-        dialogue_record_count: coloring.family_entry_counts.dialogue_records,
+        unit_name_entry_count: player_names.len(),
+        enemy_name_entry_count: enemy_names.len(),
+        class_entry_count: player_classes.len(),
+        item_entry_count: player_items.len(),
+        terrain_entry_count: entry_glyph_sets(&fixed, "terrain-names").len(),
+        dialogue_record_count: dialogue.records.len(),
+        player_participant_candidate_count: player_participants.len(),
+        enemy_participant_candidate_count: enemy_participants.len(),
         player_names_per_cache: 1,
         enemy_names_per_cache: 1,
         classes_per_cache: 2,
@@ -180,7 +194,8 @@ pub(crate) fn analyze_battle_codebook_plan(
         active_slot_count: ACTIVE_HANGUL_SLOT_COUNT,
         chapter_one_preserved_active_code_count: protected.len(),
         chapter_one_safe_target_code_count: chapter_one_safe_code_count,
-        item_domain: item_domain.binding,
+        item_domain,
+        enemy_domain,
         runtime_inputs,
         stable_assignment_fits_active_slot_ceiling: coloring.color_count
             <= ACTIVE_HANGUL_SLOT_COUNT,
@@ -194,7 +209,7 @@ pub(crate) fn analyze_battle_codebook_plan(
         glyph_characters_emitted: false,
         translation_text_emitted: false,
         release_eligible: false,
-        next_gate: "bind class and item pair reachability before choosing between a constrained stable codebook and cache-owned encoded text selection",
+        next_gate: "bind enemy class and equipped-item mutation paths plus terrain-pair reachability before freezing the stable assignment",
     };
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize battle codebook plan")?;
@@ -236,11 +251,13 @@ mod tests {
             cooccurrence_model: "family coverage",
             message_template_entry_count: 22,
             unit_name_entry_count: 52,
-            enemy_name_entry_count: 68,
+            enemy_name_entry_count: 69,
             class_entry_count: 22,
             item_entry_count: 64,
             terrain_entry_count: 15,
             dialogue_record_count: 28,
+            player_participant_candidate_count: 100,
+            enemy_participant_candidate_count: 100,
             player_names_per_cache: 1,
             enemy_names_per_cache: 1,
             classes_per_cache: 2,
@@ -263,6 +280,7 @@ mod tests {
             chapter_one_preserved_active_code_count: 119,
             chapter_one_safe_target_code_count: 91,
             item_domain: item_domain::test_binding(),
+            enemy_domain: enemy_domain::test_binding(),
             runtime_inputs: runtime_inputs::test_binding(),
             stable_assignment_fits_active_slot_ceiling: true,
             stable_assignment_fits_chapter_one_safe_codes: true,

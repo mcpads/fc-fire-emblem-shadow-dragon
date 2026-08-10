@@ -68,6 +68,7 @@ pub(crate) struct FixedTextPlannedEntry {
     pub(crate) id: String,
     pub(crate) table_id: String,
     pub(crate) source_index: usize,
+    pub(crate) alias_indices: Vec<usize>,
     pub(crate) file_offset: usize,
     pub(crate) source_storage_byte_count: usize,
     pub(crate) logical_bytes: Vec<FixedTextLogicalByte>,
@@ -104,6 +105,18 @@ pub(crate) struct FixedTextPlan {
 }
 
 impl FixedTextPlan {
+    pub(crate) fn entry_for_source_index(
+        &self,
+        table_id: &str,
+        source_index: usize,
+    ) -> Option<&FixedTextPlannedEntry> {
+        self.entries.iter().find(|entry| {
+            entry.table_id == table_id
+                && (entry.source_index == source_index
+                    || entry.alias_indices.contains(&source_index))
+        })
+    }
+
     pub(crate) fn unique_glyphs(&self) -> BTreeSet<char> {
         self.entries
             .iter()
@@ -201,6 +214,7 @@ pub(crate) fn plan_fixed_text(rom: &Rom, workspace_path: &Path) -> Result<FixedT
                 id: entry.id.clone(),
                 table_id: entry.table_id.clone(),
                 source_index: entry.source_index,
+                alias_indices: entry.alias_indices.clone(),
                 file_offset,
                 source_storage_byte_count: source_len,
                 logical_bytes,
@@ -299,7 +313,7 @@ fn build_workspace(source: &[u8]) -> Result<FixedTextWorkspace> {
         });
     }
     ensure!(
-        entries.len() == 270,
+        entries.len() == 271,
         "battle fixed-text unique entry count changed"
     );
     Ok(FixedTextWorkspace {

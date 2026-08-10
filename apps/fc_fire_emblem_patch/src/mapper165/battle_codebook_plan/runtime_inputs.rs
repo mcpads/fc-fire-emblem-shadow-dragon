@@ -27,8 +27,8 @@ pub(super) struct BattleRuntimeInputBinding {
     first_record_to_second_slot_copy: SourceRoutineBinding,
     second_slot_to_first_record_copy: SourceRoutineBinding,
     equipped_item_mutator: SourceRoutineBinding,
-    sound_test_record_builder: SourceRoutineBinding,
-    sound_test_builder_is_gameplay_catalog: bool,
+    reinforcement_record_builder: SourceRoutineBinding,
+    reinforcement_builder_is_gameplay_producer: bool,
     dialogue_selector_62: DialogueSelectorBinding,
     static_chapter_table_catalog_sufficient: bool,
     actual_combination_graph_bound: bool,
@@ -89,12 +89,12 @@ const SECOND_TO_FIRST_COPY: RoutineSpec = RoutineSpec {
     byte_count: 0x0E,
     expected_sha1: "bf20608ed771c44cacc37e57aa7bc72b81e50e4b",
 };
-const SOUND_TEST_RECORD_BUILDER: RoutineSpec = RoutineSpec {
-    role: "build_sound_test_battle_record_from_compact_source",
+const REINFORCEMENT_RECORD_BUILDER: RoutineSpec = RoutineSpec {
+    role: "initialize_enemy_unit_from_reinforcement_record",
     prg_bank: 0x03,
     cpu_address: 0x9271,
-    byte_count: 0xC9,
-    expected_sha1: "94baf5701a7ca9862a137ee873c96047be0dad9f",
+    byte_count: 0xB9,
+    expected_sha1: "65f06ab741b8c5d2f75ba433742059517d2aae12",
 };
 const EQUIPPED_ITEM_MUTATOR: RoutineSpec = RoutineSpec {
     role: "swap_selected_item_to_equipped_slot",
@@ -130,7 +130,7 @@ pub(super) fn bind_battle_runtime_inputs(rom: &Rom) -> Result<BattleRuntimeInput
     let first_record_to_second_slot_copy = bind_routine(rom, FIRST_TO_SECOND_COPY)?;
     let second_slot_to_first_record_copy = bind_routine(rom, SECOND_TO_FIRST_COPY)?;
     let equipped_item_mutator = bind_routine(rom, EQUIPPED_ITEM_MUTATOR)?;
-    let sound_test_record_builder = bind_routine(rom, SOUND_TEST_RECORD_BUILDER)?;
+    let reinforcement_record_builder = bind_routine(rom, REINFORCEMENT_RECORD_BUILDER)?;
     let selector_source = source_slice(rom, DIALOGUE_SELECTOR_ROUTINE)?;
     ensure!(
         selector_source
@@ -167,8 +167,8 @@ pub(super) fn bind_battle_runtime_inputs(rom: &Rom) -> Result<BattleRuntimeInput
         first_record_to_second_slot_copy,
         second_slot_to_first_record_copy,
         equipped_item_mutator,
-        sound_test_record_builder,
-        sound_test_builder_is_gameplay_catalog: false,
+        reinforcement_record_builder,
+        reinforcement_builder_is_gameplay_producer: true,
         dialogue_selector_62: DialogueSelectorBinding {
             selector_address: 0x7936,
             selector_value: 0x3E,
@@ -183,7 +183,7 @@ pub(super) fn bind_battle_runtime_inputs(rom: &Rom) -> Result<BattleRuntimeInput
         },
         static_chapter_table_catalog_sufficient: false,
         actual_combination_graph_bound: false,
-        binding_conclusion: "gameplay battle inputs are copied from mutable live unit records, while selector 62 also depends on live control state; use these runtime indices to select cache-owned encoded text instead of treating the sound-test builder or static chapter tables as a complete catalog",
+        binding_conclusion: "gameplay battle inputs are copied from mutable live unit records; initial and reinforcement tables constrain the enemy source domain, but player equipment and selector 62 still depend on live state",
     })
 }
 
@@ -255,8 +255,8 @@ pub(super) fn test_binding() -> BattleRuntimeInputBinding {
         first_record_to_second_slot_copy: routine("first to second"),
         second_slot_to_first_record_copy: routine("second to first"),
         equipped_item_mutator: routine("equip selected item"),
-        sound_test_record_builder: routine("sound test"),
-        sound_test_builder_is_gameplay_catalog: false,
+        reinforcement_record_builder: routine("reinforcement builder"),
+        reinforcement_builder_is_gameplay_producer: true,
         dialogue_selector_62: DialogueSelectorBinding {
             selector_address: 0x7936,
             selector_value: 0x3E,
@@ -280,10 +280,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn runtime_binding_keeps_sound_test_and_gameplay_sources_distinct() {
+    fn runtime_binding_identifies_the_reinforcement_builder_as_gameplay() {
         let binding = test_binding();
 
-        assert!(!binding.sound_test_builder_is_gameplay_catalog);
+        assert!(binding.reinforcement_builder_is_gameplay_producer);
         assert!(!binding.static_chapter_table_catalog_sufficient);
         assert_eq!(binding.battle_record_byte_count, 0x1B);
         assert_eq!(binding.dialogue_selector_62.selector_value, 0x3E);

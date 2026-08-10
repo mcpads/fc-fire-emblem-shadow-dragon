@@ -11,6 +11,15 @@ use crate::{
     typed_source::decode_rp2a03_sequence,
 };
 
+mod eligibility_tables;
+mod participant_glyphs;
+
+use eligibility_tables::{
+    bank_six_slice, eligible_player_loadouts, equip_candidate_source_indices,
+    item_family_class_lists,
+};
+use participant_glyphs::{BattleItemGlyphSets, plan_battle_item_glyph_sets};
+
 const PRG_BANK_SIZE: usize = 16 * 1024;
 const SWITCHABLE_CPU_START: u16 = 0x8000;
 const ITEM_ENTRY_COUNT: usize = 0x5B;
@@ -21,11 +30,29 @@ const ITEM_ELIGIBILITY_SHA1: &str = "9557d82d7b1984b51602540018b8666c07c07aec";
 const ITEM_ACTION_FLAGS_CPU_ADDRESS: u16 = 0xD9C3;
 const ITEM_ACTION_FLAGS_SHA1: &str = "17c5bdab2181218617fdc1d7f1f6866ce437eea5";
 const CANDIDATE_SOURCE_INDEX_SHA1: &str = "7ffca0f4fbd9825518e8cdd10791188510936958";
+const ITEM_REQUIREMENTS_CPU_ADDRESS: u16 = 0xD6B3;
+const ITEM_REQUIREMENTS_SHA1: &str = "a1c2dc64c53fe2597acd90795c5ef48e8a2efaf9";
+const ITEM_FAMILY_THRESHOLD_CPU_ADDRESS: u16 = 0xA3D1;
+const ITEM_FAMILY_THRESHOLD_COUNT: usize = 9;
+const ITEM_FAMILY_THRESHOLD_SHA1: &str = "cba6fceb7629df0f1aec73ca9083cc7a8a515760";
+const ITEM_FAMILY_CLASS_POINTER_CPU_ADDRESS: u16 = 0xA3DA;
+const ITEM_FAMILY_CLASS_POINTER_SHA1: &str = "e226ab95ae307032a9e53e77416dee18b26493b3";
+const ITEM_FAMILY_CLASS_LIST_SHA1: &str = "ac08ce27ad7437447ce687b509936d84bee89aa3";
+const CLASS_ITEM_PAIR_COUNT: usize = 377;
+const CLASS_ITEM_PAIR_SHA1: &str = "726faa7d3509b14da54337d1741c906143c27773";
+const PLAYER_LOADOUT_SHA1: &str = "5f2cae5fa5afed57f0274b433a27116e1d129634";
+const IDENTITY_RESTRICTED_LOADOUT_COUNT: usize = 184;
+const UNRESTRICTED_LOADOUT_COUNT: usize = 193;
+const ENEMY_CLASS_ITEM_PAIR_SHA1: &str = "9dbd65cdd40128abae6e818dc100f5b196b093cc";
+const CLASS_SOURCE_ENTRY_COUNT: usize = 23;
+const UNIT_SOURCE_ENTRY_COUNT: usize = 52;
 const EQUIP_NECESSARY_CONDITION_FRAGMENT: [u8; 8] =
     [0xCA, 0xBD, 0xC3, 0xD9, 0x29, 0x01, 0xD0, 0x4A];
 
 pub(super) struct BattleItemDomain {
-    pub(super) glyph_sets: Vec<BTreeSet<char>>,
+    pub(super) equip_candidate_item_glyph_sets: Vec<BTreeSet<char>>,
+    pub(super) enemy_class_item_pairs: BTreeSet<(u8, u8)>,
+    pub(super) player_participant_glyph_sets: Vec<BTreeSet<char>>,
     pub(super) binding: BattleItemDomainBinding,
 }
 
@@ -39,8 +66,22 @@ pub(super) struct BattleItemDomainBinding {
     candidate_source_index_sha1: String,
     eligibility_routine: ItemEligibilityRoutineBinding,
     item_action_flags: ItemActionFlagsBinding,
+    item_requirements: ItemTableBinding,
+    item_family_thresholds: ItemTableBinding,
+    item_family_class_pointers: ItemTableBinding,
+    item_family_class_list_sha1: String,
+    class_item_pair_count: usize,
+    class_item_pair_sha1: String,
+    player_loadout_sha1: String,
+    identity_restricted_loadout_count: usize,
+    unrestricted_loadout_count: usize,
+    enemy_class_item_pair_sha1: String,
+    player_participant_candidate_count: usize,
     candidate_set_is_necessary_condition_superset: bool,
-    weapon_level_and_class_checks_modeled: bool,
+    class_family_checks_modeled: bool,
+    weapon_level_thresholds_modeled: bool,
+    identity_restrictions_modeled: bool,
+    identity_restricted_item_classes_conservative: bool,
     actual_equipped_item_reachability_proven: bool,
 }
 
@@ -61,6 +102,15 @@ struct ItemActionFlagsBinding {
     byte_count: usize,
     source_sha1: String,
     equip_rejection_mask: u8,
+}
+
+#[derive(Debug, Serialize)]
+struct ItemTableBinding {
+    role: &'static str,
+    prg_bank: u8,
+    cpu_address: u16,
+    byte_count: usize,
+    source_sha1: String,
 }
 
 pub(super) fn bind_battle_item_domain(
@@ -110,36 +160,128 @@ pub(super) fn bind_battle_item_domain(
         "item equip candidate indices changed: expected {CANDIDATE_SOURCE_INDEX_SHA1}, found {candidate_source_index_sha1}"
     );
 
-    let item_entries = fixed
-        .entries
-        .iter()
-        .filter(|entry| entry.table_id == "item-names")
-        .collect::<Vec<_>>();
+    let requirements_offset = fixed_bank_file_offset(ITEM_REQUIREMENTS_CPU_ADDRESS)?;
+    let requirements = rom
+        .data()
+        .get(requirements_offset..requirements_offset + ITEM_ENTRY_COUNT)
+        .context("item requirements table is outside the ROM")?;
+    let requirements_sha1 = sha1_hex(requirements);
     ensure!(
-        item_entries.len() == ITEM_ENTRY_COUNT,
-        "fixed-text item entry count does not match the action-flags table"
+        requirements_sha1 == ITEM_REQUIREMENTS_SHA1,
+        "item requirements changed: expected {ITEM_REQUIREMENTS_SHA1}, found {requirements_sha1}"
     );
-    for (expected_source_index, entry) in item_entries.iter().enumerate() {
-        ensure!(
-            entry.source_index == expected_source_index,
-            "fixed-text item source indices are not contiguous at {expected_source_index}"
-        );
-    }
+    let family_thresholds = bank_six_slice(
+        rom,
+        ITEM_FAMILY_THRESHOLD_CPU_ADDRESS,
+        ITEM_FAMILY_THRESHOLD_COUNT,
+        "item family thresholds",
+    )?;
+    let family_thresholds_sha1 = sha1_hex(family_thresholds);
+    ensure!(
+        family_thresholds_sha1 == ITEM_FAMILY_THRESHOLD_SHA1,
+        "item family thresholds changed: expected {ITEM_FAMILY_THRESHOLD_SHA1}, found {family_thresholds_sha1}"
+    );
+    let family_pointer_bytes = bank_six_slice(
+        rom,
+        ITEM_FAMILY_CLASS_POINTER_CPU_ADDRESS,
+        ITEM_FAMILY_THRESHOLD_COUNT * 2,
+        "item family class pointers",
+    )?;
+    let family_pointer_sha1 = sha1_hex(family_pointer_bytes);
+    ensure!(
+        family_pointer_sha1 == ITEM_FAMILY_CLASS_POINTER_SHA1,
+        "item family class pointers changed: expected {ITEM_FAMILY_CLASS_POINTER_SHA1}, found {family_pointer_sha1}"
+    );
+    let family_class_lists = item_family_class_lists(rom, family_pointer_bytes)?;
+    let family_list_bytes = family_class_lists
+        .iter()
+        .flat_map(|classes| classes.iter().copied().chain([0xEF]))
+        .collect::<Vec<_>>();
+    let family_class_list_sha1 = sha1_hex(&family_list_bytes);
+    ensure!(
+        family_class_list_sha1 == ITEM_FAMILY_CLASS_LIST_SHA1,
+        "item family class lists changed: expected {ITEM_FAMILY_CLASS_LIST_SHA1}, found {family_class_list_sha1}"
+    );
+    let player_loadouts =
+        eligible_player_loadouts(flags, requirements, family_thresholds, &family_class_lists)?;
+    ensure!(
+        player_loadouts.len() == CLASS_ITEM_PAIR_COUNT,
+        "player loadout count changed: expected {CLASS_ITEM_PAIR_COUNT}, found {}",
+        player_loadouts.len()
+    );
+    let player_loadout_bytes = player_loadouts
+        .iter()
+        .flat_map(|loadout| [loadout.required_identity, loadout.class_id, loadout.item_id])
+        .collect::<Vec<_>>();
+    let player_loadout_sha1 = sha1_hex(&player_loadout_bytes);
+    ensure!(
+        player_loadout_sha1 == PLAYER_LOADOUT_SHA1,
+        "player loadouts changed: expected {PLAYER_LOADOUT_SHA1}, found {player_loadout_sha1}"
+    );
+    let identity_restricted_loadout_count = player_loadouts
+        .iter()
+        .filter(|loadout| loadout.required_identity != 0)
+        .count();
+    let unrestricted_loadout_count = player_loadouts.len() - identity_restricted_loadout_count;
+    ensure!(
+        identity_restricted_loadout_count == IDENTITY_RESTRICTED_LOADOUT_COUNT,
+        "identity-restricted player loadout count changed"
+    );
+    ensure!(
+        unrestricted_loadout_count == UNRESTRICTED_LOADOUT_COUNT,
+        "unrestricted player loadout count changed"
+    );
+
+    let class_item_pairs = player_loadouts
+        .iter()
+        .map(|loadout| (loadout.class_id, loadout.item_id))
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        class_item_pairs.len() == CLASS_ITEM_PAIR_COUNT,
+        "class-item pair count changed: expected {CLASS_ITEM_PAIR_COUNT}, found {}",
+        class_item_pairs.len()
+    );
+    let pair_bytes = class_item_pairs
+        .iter()
+        .flat_map(|(class_id, item_id)| [*class_id, *item_id])
+        .collect::<Vec<_>>();
+    let class_item_pair_sha1 = sha1_hex(&pair_bytes);
+    ensure!(
+        class_item_pair_sha1 == CLASS_ITEM_PAIR_SHA1,
+        "class-item pairs changed: expected {CLASS_ITEM_PAIR_SHA1}, found {class_item_pair_sha1}"
+    );
+    let enemy_class_item_pairs = player_loadouts
+        .iter()
+        .filter(|loadout| loadout.required_identity == 0)
+        .map(|loadout| (loadout.class_id, loadout.item_id))
+        .collect::<BTreeSet<_>>();
+    let enemy_pair_bytes = enemy_class_item_pairs
+        .iter()
+        .flat_map(|(class_id, item_id)| [*class_id, *item_id])
+        .collect::<Vec<_>>();
+    let enemy_class_item_pair_sha1 = sha1_hex(&enemy_pair_bytes);
+    ensure!(
+        enemy_class_item_pairs.len() == UNRESTRICTED_LOADOUT_COUNT,
+        "enemy class-item pair count changed"
+    );
+    ensure!(
+        enemy_class_item_pair_sha1 == ENEMY_CLASS_ITEM_PAIR_SHA1,
+        "enemy class-item pairs changed: expected {ENEMY_CLASS_ITEM_PAIR_SHA1}, found {enemy_class_item_pair_sha1}"
+    );
+
     let candidate_source_indices = candidate_source_indices
         .into_iter()
         .collect::<BTreeSet<_>>();
-    let glyph_sets = item_entries
-        .into_iter()
-        .filter(|entry| candidate_source_indices.contains(&entry.source_index))
-        .map(|entry| entry.unique_glyphs())
-        .collect::<Vec<_>>();
-    ensure!(
-        glyph_sets.len() == candidate_source_indices.len(),
-        "battle item domain lost a candidate translation entry"
-    );
+    let BattleItemGlyphSets {
+        item_glyph_sets: glyph_sets,
+        player_participant_glyph_sets,
+    } = plan_battle_item_glyph_sets(fixed, &candidate_source_indices, &player_loadouts)?;
+    let player_participant_candidate_count = player_participant_glyph_sets.len();
 
     Ok(BattleItemDomain {
-        glyph_sets,
+        equip_candidate_item_glyph_sets: glyph_sets,
+        enemy_class_item_pairs,
+        player_participant_glyph_sets,
         binding: BattleItemDomainBinding {
             total_item_entry_count: ITEM_ENTRY_COUNT,
             candidate_item_entry_count: candidate_source_indices.len(),
@@ -162,8 +304,40 @@ pub(super) fn bind_battle_item_domain(
                 source_sha1: flags_sha1,
                 equip_rejection_mask: 0x01,
             },
+            item_requirements: ItemTableBinding {
+                role: "item_weapon_level_or_identity_requirement",
+                prg_bank: 0x0F,
+                cpu_address: ITEM_REQUIREMENTS_CPU_ADDRESS,
+                byte_count: ITEM_ENTRY_COUNT,
+                source_sha1: requirements_sha1,
+            },
+            item_family_thresholds: ItemTableBinding {
+                role: "item_family_upper_bounds",
+                prg_bank: ITEM_ELIGIBILITY_PRG_BANK,
+                cpu_address: ITEM_FAMILY_THRESHOLD_CPU_ADDRESS,
+                byte_count: ITEM_FAMILY_THRESHOLD_COUNT,
+                source_sha1: family_thresholds_sha1,
+            },
+            item_family_class_pointers: ItemTableBinding {
+                role: "item_family_allowed_class_pointers",
+                prg_bank: ITEM_ELIGIBILITY_PRG_BANK,
+                cpu_address: ITEM_FAMILY_CLASS_POINTER_CPU_ADDRESS,
+                byte_count: ITEM_FAMILY_THRESHOLD_COUNT * 2,
+                source_sha1: family_pointer_sha1,
+            },
+            item_family_class_list_sha1: family_class_list_sha1,
+            class_item_pair_count: CLASS_ITEM_PAIR_COUNT,
+            class_item_pair_sha1,
+            player_loadout_sha1,
+            identity_restricted_loadout_count,
+            unrestricted_loadout_count,
+            enemy_class_item_pair_sha1,
+            player_participant_candidate_count,
             candidate_set_is_necessary_condition_superset: true,
-            weapon_level_and_class_checks_modeled: false,
+            class_family_checks_modeled: true,
+            weapon_level_thresholds_modeled: false,
+            identity_restrictions_modeled: true,
+            identity_restricted_item_classes_conservative: true,
             actual_equipped_item_reachability_proven: false,
         },
     })
@@ -176,14 +350,6 @@ fn eligibility_source(rom: &Rom) -> Result<&[u8]> {
     rom.data()
         .get(file_offset..file_offset + ITEM_ELIGIBILITY_BYTE_COUNT)
         .context("item eligibility routine is outside the ROM")
-}
-
-fn equip_candidate_source_indices(flags: &[u8]) -> Vec<usize> {
-    flags
-        .iter()
-        .enumerate()
-        .filter_map(|(source_index, flags)| (flags & 0x01 == 0).then_some(source_index))
-        .collect()
 }
 
 #[cfg(test)]
@@ -210,8 +376,41 @@ pub(super) fn test_binding() -> BattleItemDomainBinding {
             source_sha1: "flags".to_owned(),
             equip_rejection_mask: 1,
         },
+        item_requirements: ItemTableBinding {
+            role: "requirements",
+            prg_bank: 15,
+            cpu_address: ITEM_REQUIREMENTS_CPU_ADDRESS,
+            byte_count: ITEM_ENTRY_COUNT,
+            source_sha1: "requirements".to_owned(),
+        },
+        item_family_thresholds: ItemTableBinding {
+            role: "thresholds",
+            prg_bank: 6,
+            cpu_address: ITEM_FAMILY_THRESHOLD_CPU_ADDRESS,
+            byte_count: ITEM_FAMILY_THRESHOLD_COUNT,
+            source_sha1: "thresholds".to_owned(),
+        },
+        item_family_class_pointers: ItemTableBinding {
+            role: "class pointers",
+            prg_bank: 6,
+            cpu_address: ITEM_FAMILY_CLASS_POINTER_CPU_ADDRESS,
+            byte_count: ITEM_FAMILY_THRESHOLD_COUNT * 2,
+            source_sha1: "pointers".to_owned(),
+        },
+        item_family_class_list_sha1: "lists".to_owned(),
+        class_item_pair_count: CLASS_ITEM_PAIR_COUNT,
+        class_item_pair_sha1: "pairs".to_owned(),
+        player_loadout_sha1: "loadouts".to_owned(),
+        identity_restricted_loadout_count: IDENTITY_RESTRICTED_LOADOUT_COUNT,
+        unrestricted_loadout_count: UNRESTRICTED_LOADOUT_COUNT,
+        enemy_class_item_pair_sha1: "enemy pairs".to_owned(),
+        player_participant_candidate_count: UNRESTRICTED_LOADOUT_COUNT * UNIT_SOURCE_ENTRY_COUNT
+            + IDENTITY_RESTRICTED_LOADOUT_COUNT,
         candidate_set_is_necessary_condition_superset: true,
-        weapon_level_and_class_checks_modeled: false,
+        class_family_checks_modeled: true,
+        weapon_level_thresholds_modeled: false,
+        identity_restrictions_modeled: true,
+        identity_restricted_item_classes_conservative: true,
         actual_equipped_item_reachability_proven: false,
     }
 }
@@ -227,7 +426,8 @@ mod tests {
         assert_eq!(candidates, vec![0, 2]);
         let binding = test_binding();
         assert!(binding.candidate_set_is_necessary_condition_superset);
-        assert!(!binding.weapon_level_and_class_checks_modeled);
+        assert!(binding.class_family_checks_modeled);
+        assert!(!binding.weapon_level_thresholds_modeled);
         assert!(!binding.actual_equipped_item_reachability_proven);
     }
 }
