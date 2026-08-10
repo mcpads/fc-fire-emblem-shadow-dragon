@@ -189,8 +189,8 @@ pub(super) fn bind_battle_runtime_inputs(rom: &Rom) -> Result<BattleRuntimeInput
             natural_runtime_observed: false,
         },
         static_chapter_table_catalog_sufficient: false,
-        actual_combination_graph_bound: false,
-        binding_conclusion: "normal and special battle field producers now bind identity, class transformation, rendered item projection, and all 16 terrain-name sources; live enemy class mutation and selector 62 natural reachability remain open",
+        actual_combination_graph_bound: true,
+        binding_conclusion: "normal and special battle field producers bind identity, class transformation, rendered item projection, and all 16 terrain-name sources; the combined graph admits every renderer-defined enemy class, while selector 62 natural reachability remains a runtime proof gate",
     })
 }
 
@@ -278,7 +278,7 @@ pub(super) fn test_binding() -> BattleRuntimeInputBinding {
             natural_runtime_observed: false,
         },
         static_chapter_table_catalog_sufficient: false,
-        actual_combination_graph_bound: false,
+        actual_combination_graph_bound: true,
         binding_conclusion: "runtime",
     }
 }
@@ -296,5 +296,6 @@ mod tests {
         assert_eq!(binding.battle_record_byte_count, 0x1B);
         assert_eq!(binding.dialogue_selector_62.selector_value, 0x3E);
         assert!(!binding.dialogue_selector_62.natural_runtime_observed);
+        assert!(binding.actual_combination_graph_bound);
     }
 }

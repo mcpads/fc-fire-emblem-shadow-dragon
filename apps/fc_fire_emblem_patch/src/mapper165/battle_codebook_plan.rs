@@ -146,6 +146,12 @@ pub(crate) fn analyze_battle_codebook_plan(
         },
         ACTIVE_HANGUL_SLOT_COUNT,
     )?;
+    ensure!(
+        coloring.color_count <= ACTIVE_HANGUL_SLOT_COUNT,
+        "renderer-complete battle codebook needs {} colors but only {} active slots exist",
+        coloring.color_count,
+        ACTIVE_HANGUL_SLOT_COUNT
+    );
     let protected = GAMEPLAY_BATTLE_PRESERVED_ACTIVE_CODES
         .into_iter()
         .collect::<BTreeSet<_>>();
@@ -163,7 +169,7 @@ pub(crate) fn analyze_battle_codebook_plan(
         source_sha1: EXPECTED_SOURCE_SHA1,
         fixed_workspace_sha1,
         dialogue_workspace_sha1,
-        cooccurrence_model: "side-aware gameplay battle coverage with source-bound item eligibility and enemy record domains",
+        cooccurrence_model: "side-aware gameplay battle upper bound with source-bound item eligibility, enemy identities and items, plus every renderer-defined enemy class",
         message_template_entry_count: message_templates.len(),
         unit_name_entry_count: player_names.len(),
         enemy_name_entry_count: enemy_names.len(),
@@ -203,13 +209,13 @@ pub(crate) fn analyze_battle_codebook_plan(
             <= chapter_one_safe_code_count,
         model_active_slot_infeasibility_proven: coloring.constructed_clique_glyph_count
             > ACTIVE_HANGUL_SLOT_COUNT,
-        actual_battle_combination_graph_bound: false,
+        actual_battle_combination_graph_bound: true,
         chapter_one_protected_set_generalized: false,
-        runtime_catalog_bound: false,
+        runtime_catalog_bound: true,
         glyph_characters_emitted: false,
         translation_text_emitted: false,
         release_eligible: false,
-        next_gate: "close live enemy class mutation writes before freezing the stable assignment; selector 62 natural reachability remains a runtime proof gate",
+        next_gate: "freeze the 210-color stable assignment and connect it to cache selection; selector 62 natural reachability remains a runtime proof gate",
     };
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize battle codebook plan")?;

@@ -43,6 +43,11 @@ pub(super) struct EnemyBattleDomainBinding {
     participant_candidate_count: usize,
     participant_candidate_sha1: String,
     initial_and_reinforcement_sources_bound: bool,
+    renderer_class_id_count: usize,
+    source_record_class_restrictions_used: bool,
+    enemy_class_write_sites_enumerated: bool,
+    renderer_complete_class_upper_bound: bool,
+    participant_candidates_are_necessary_condition_superset: bool,
     item_candidates_filtered_by_runtime_eligibility: bool,
     item_slot_mutation_bound: bool,
     enemy_class_mutation_bound: bool,
@@ -63,7 +68,12 @@ pub(super) fn bind_enemy_battle_domain(
 ) -> Result<EnemyBattleDomain> {
     let source = bind_enemy_source_domain(rom)?;
     let records = source.records;
-    let candidates = participant_candidates(&records, eligible_enemy_class_item_pairs)?;
+    let renderer_class_ids = renderer_class_ids(fixed)?;
+    let candidates = participant_candidates(
+        &records,
+        eligible_enemy_class_item_pairs,
+        &renderer_class_ids,
+    )?;
 
     let mut name_indices = BTreeSet::new();
     let mut class_indices = BTreeSet::new();
@@ -110,9 +120,14 @@ pub(super) fn bind_enemy_battle_domain(
             participant_candidate_count: candidates.len(),
             participant_candidate_sha1: sha1_hex(&candidate_bytes),
             initial_and_reinforcement_sources_bound: true,
+            renderer_class_id_count: renderer_class_ids.len(),
+            source_record_class_restrictions_used: false,
+            enemy_class_write_sites_enumerated: false,
+            renderer_complete_class_upper_bound: true,
+            participant_candidates_are_necessary_condition_superset: true,
             item_candidates_filtered_by_runtime_eligibility: true,
             item_slot_mutation_bound: true,
-            enemy_class_mutation_bound: false,
+            enemy_class_mutation_bound: true,
             actual_enemy_battle_reachability_proven: false,
         },
     })
@@ -121,37 +136,59 @@ pub(super) fn bind_enemy_battle_domain(
 fn participant_candidates(
     records: &[EnemyRecord],
     eligible_enemy_class_item_pairs: &BTreeSet<(u8, u8)>,
+    renderer_class_ids: &BTreeSet<u8>,
 ) -> Result<BTreeSet<ParticipantCandidate>> {
     let mut candidates = BTreeSet::new();
     for record in records {
         let identity = record.bytes[0];
-        let class_id = record.bytes[1];
         enemy_name_source_index(identity)?;
-        one_based_source_index(class_id, "enemy class")?;
-        let items = [record.bytes[3], record.bytes[4]]
-            .into_iter()
-            .filter(|item| {
-                *item != 0 && eligible_enemy_class_item_pairs.contains(&(class_id, *item))
-            })
-            .collect::<BTreeSet<_>>();
-        if items.is_empty() {
-            candidates.insert(ParticipantCandidate {
-                identity,
-                class_id,
-                item_id: 0,
-            });
-        } else {
-            for item_id in items {
-                battle_item_source_index(item_id)?;
+        for class_id in renderer_class_ids {
+            let items = [record.bytes[3], record.bytes[4]]
+                .into_iter()
+                .filter(|item| {
+                    *item != 0 && eligible_enemy_class_item_pairs.contains(&(*class_id, *item))
+                })
+                .collect::<BTreeSet<_>>();
+            if items.is_empty() {
                 candidates.insert(ParticipantCandidate {
                     identity,
-                    class_id,
-                    item_id,
+                    class_id: *class_id,
+                    item_id: 0,
                 });
+            } else {
+                for item_id in &items {
+                    battle_item_source_index(*item_id)?;
+                    candidates.insert(ParticipantCandidate {
+                        identity,
+                        class_id: *class_id,
+                        item_id: *item_id,
+                    });
+                }
             }
         }
     }
     Ok(candidates)
+}
+
+fn renderer_class_ids(fixed: &FixedTextPlan) -> Result<BTreeSet<u8>> {
+    let source_indices = fixed
+        .entries
+        .iter()
+        .filter(|entry| entry.table_id == "class-names")
+        .flat_map(|entry| {
+            std::iter::once(entry.source_index).chain(entry.alias_indices.iter().copied())
+        })
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        source_indices == (0..24).collect(),
+        "class-name renderer source indices are no longer contiguous from 0 through 23"
+    );
+    source_indices
+        .into_iter()
+        .map(|source_index| {
+            u8::try_from(source_index + 1).context("class identity exceeds report encoding")
+        })
+        .collect()
 }
 
 fn participant_glyphs(
@@ -222,9 +259,14 @@ pub(super) fn test_binding() -> EnemyBattleDomainBinding {
         participant_candidate_count: 1,
         participant_candidate_sha1: "candidates".to_owned(),
         initial_and_reinforcement_sources_bound: true,
+        renderer_class_id_count: 24,
+        source_record_class_restrictions_used: false,
+        enemy_class_write_sites_enumerated: false,
+        renderer_complete_class_upper_bound: true,
+        participant_candidates_are_necessary_condition_superset: true,
         item_candidates_filtered_by_runtime_eligibility: true,
         item_slot_mutation_bound: true,
-        enemy_class_mutation_bound: false,
+        enemy_class_mutation_bound: true,
         actual_enemy_battle_reachability_proven: false,
     }
 }
@@ -234,13 +276,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn participant_candidates_keep_both_nonzero_item_slots() {
+    fn participant_candidates_cover_all_renderer_classes_and_eligible_source_items() {
         let records = [EnemyRecord {
             bytes: [0xC5, 10, 1, 1, 6, 13, 11, 60, 0, 13, 11],
         }];
 
         let eligible_pairs = [(10, 1), (10, 6)].into_iter().collect();
-        let candidates = participant_candidates(&records, &eligible_pairs).unwrap();
+        let class_ids = (1..=24).collect();
+        let candidates = participant_candidates(&records, &eligible_pairs, &class_ids).unwrap();
 
         assert!(candidates.contains(&ParticipantCandidate {
             identity: 0xC5,
@@ -252,6 +295,17 @@ mod tests {
             class_id: 10,
             item_id: 6,
         }));
+        assert!(candidates.contains(&ParticipantCandidate {
+            identity: 0xC5,
+            class_id: 1,
+            item_id: 0,
+        }));
+        assert!(candidates.contains(&ParticipantCandidate {
+            identity: 0xC5,
+            class_id: 24,
+            item_id: 0,
+        }));
+        assert_eq!(candidates.len(), 25);
         assert_eq!(enemy_name_source_index(0xC5).unwrap(), 68);
     }
 }
