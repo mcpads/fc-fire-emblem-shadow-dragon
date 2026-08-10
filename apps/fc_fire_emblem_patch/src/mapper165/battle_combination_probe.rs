@@ -15,9 +15,21 @@ use crate::{
 use super::{
     OUTPUT_MAPPER, assemble_mapper165_parity_bytes,
     dialogue_probe_font::{
-        SOURCE_FONT_PHYSICAL_PAGE, assign_glyph_codes, assignment_sha1, install_font_glyphs,
+        SOURCE_FONT_PHYSICAL_PAGE, assign_glyph_codes_excluding, assignment_sha1,
+        install_font_glyphs,
     },
 };
+
+pub(super) struct GameplayBattleCombinationImage {
+    pub(super) data: Vec<u8>,
+    pub(super) parity: Vec<u8>,
+    pub(super) fixed_workspace_sha1: String,
+    pub(super) dialogue_workspace_sha1: String,
+    pub(super) codebook_assignment_sha1: String,
+    pub(super) glyph_count: usize,
+    pub(super) preserved_active_code_count: usize,
+    pub(super) tracked_writes: Vec<crate::tracked::WriteReport>,
+}
 
 const GAMEPLAY_DIALOGUE_SELECTOR: usize = 62;
 const GAMEPLAY_FIXED_SELECTIONS: [(&str, usize); 8] = [
@@ -33,6 +45,16 @@ const GAMEPLAY_FIXED_SELECTIONS: [(&str, usize); 8] = [
 const FORECAST_LABEL_FILE_OFFSET: usize = 0x156C6;
 const FORECAST_LABEL_SOURCE: [u8; 10] =
     [0x22, 0x4D, 0x06, 0x11, 0x08, 0x01, 0x09, 0x02, 0x05, 0x00];
+const GAMEPLAY_BATTLE_PRESERVED_ACTIVE_CODES: [u8; 119] = [
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0B, 0x0C, 0x0E, 0x10, 0x11, 0x12,
+    0x13, 0x15, 0x16, 0x19, 0x1A, 0x1C, 0x1D, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,
+    0x29, 0x2D, 0x2E, 0x2F, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x3B, 0x3D, 0x3E,
+    0x3F, 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x4D, 0x4E, 0x4F, 0x50, 0x51, 0x52, 0x53,
+    0x54, 0x5A, 0x5D, 0x5E, 0x5F, 0x8C, 0x8E, 0x8F, 0x9C, 0x9E, 0x9F, 0xAC, 0xAD, 0xAE, 0xAF, 0xBC,
+    0xBD, 0xBE, 0xBF, 0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xCB, 0xCD, 0xCE, 0xD0, 0xD1,
+    0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0xDA, 0xDB, 0xE0, 0xE2, 0xE3, 0xE4, 0xF3, 0xF5,
+    0xF6, 0xF7, 0xF8, 0xF9, 0xFA, 0xFB, 0xFC,
+];
 
 #[derive(Debug, Serialize)]
 struct BattleCombinationProbeReport {
@@ -47,6 +69,7 @@ struct BattleCombinationProbeReport {
     fixed_visible_reference_count: usize,
     message_template_count: usize,
     dialogue_selector: usize,
+    preserved_active_code_count: usize,
     codebook_glyph_count: usize,
     codebook_assignment_sha1: String,
     font_physical_page: usize,
@@ -77,6 +100,64 @@ pub(crate) fn build_gameplay_battle_combination_probe(
     output_path: &Path,
     report_path: &Path,
 ) -> Result<BattleCombinationProbeSummary> {
+    let assembled = assemble_gameplay_battle_combination(
+        source_path,
+        fixed_workspace_path,
+        dialogue_workspace_path,
+    )?;
+    let output = assembled.data;
+    let output_rom = Rom::parse(output.clone()).context("parse battle combination probe")?;
+    ensure!(
+        output_rom.mapper() == OUTPUT_MAPPER,
+        "battle combination probe mapper changed"
+    );
+    let output_sha1 = sha1_hex(&output);
+    let report = BattleCombinationProbeReport {
+        schema: 1,
+        source_sha1: EXPECTED_SOURCE_SHA1,
+        fixed_workspace_sha1: assembled.fixed_workspace_sha1,
+        dialogue_workspace_sha1: assembled.dialogue_workspace_sha1,
+        output_sha1: output_sha1.clone(),
+        output_mapper: output_rom.mapper(),
+        combination_role: "chapter-one favorable gameplay battle",
+        fixed_unique_entry_count: GAMEPLAY_FIXED_SELECTIONS.len(),
+        fixed_visible_reference_count: GAMEPLAY_FIXED_SELECTIONS.len(),
+        message_template_count: 22,
+        dialogue_selector: GAMEPLAY_DIALOGUE_SELECTOR,
+        preserved_active_code_count: GAMEPLAY_BATTLE_PRESERVED_ACTIVE_CODES.len(),
+        codebook_glyph_count: assembled.glyph_count,
+        codebook_assignment_sha1: assembled.codebook_assignment_sha1,
+        font_physical_page: SOURCE_FONT_PHYSICAL_PAGE,
+        tracked_write_count: assembled.tracked_writes.len(),
+        fixed_strings_reencoded: true,
+        message_templates_reencoded: true,
+        forecast_label_reencoded: true,
+        dialogue_record_reencoded: true,
+        shared_local_codebook: true,
+        translation_text_emitted: false,
+        glyph_characters_emitted: false,
+        runtime_verified: false,
+        release_eligible: false,
+        next_gate: "cold-load the mapper165 gameplay battle entry and run through names, classes, items, terrain, attack templates, damage, and selector 62 dialogue without text glitches",
+    };
+    let mut report_bytes =
+        serde_json::to_vec_pretty(&report).context("serialize battle combination probe report")?;
+    report_bytes.push(b'\n');
+    write_file(output_path, &output)?;
+    write_file(report_path, &report_bytes)?;
+    Ok(BattleCombinationProbeSummary {
+        output_sha1,
+        report_sha1: sha1_hex(&report_bytes),
+        glyph_count: assembled.glyph_count,
+        tracked_write_count: assembled.tracked_writes.len(),
+    })
+}
+
+pub(super) fn assemble_gameplay_battle_combination(
+    source_path: &Path,
+    fixed_workspace_path: &Path,
+    dialogue_workspace_path: &Path,
+) -> Result<GameplayBattleCombinationImage> {
     let source_rom = Rom::from_path(source_path)?;
     source_rom.verify_supported_japanese()?;
     let fixed_plan = plan_fixed_text(&source_rom, fixed_workspace_path)?;
@@ -118,7 +199,10 @@ pub(crate) fn build_gameplay_battle_combination_probe(
         .chain(selected_dialogue.unique_glyphs())
         .chain(FORECAST_LABEL_GLYPHS)
         .collect::<BTreeSet<_>>();
-    let assignments = assign_glyph_codes(&glyphs)?;
+    let preserved_active_codes = GAMEPLAY_BATTLE_PRESERVED_ACTIVE_CODES
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    let assignments = assign_glyph_codes_excluding(&glyphs, &preserved_active_codes)?;
 
     let parity = assemble_mapper165_parity_bytes(&source_rom)?;
     let mut image = TrackedImage::new(parity.clone());
@@ -187,51 +271,17 @@ pub(crate) fn build_gameplay_battle_combination_probe(
     )?;
     install_font_glyphs(&mut image, &parity, &assignments)?;
     image.verify_all_changes_tracked(&parity)?;
-    let tracked_write_count = image.writes().len();
+    let tracked_writes = image.writes().to_vec();
     let output = image.into_data();
-    let output_rom = Rom::parse(output.clone()).context("parse battle combination probe")?;
-    ensure!(
-        output_rom.mapper() == OUTPUT_MAPPER,
-        "battle combination probe mapper changed"
-    );
-    let output_sha1 = sha1_hex(&output);
-    let report = BattleCombinationProbeReport {
-        schema: 1,
-        source_sha1: EXPECTED_SOURCE_SHA1,
+    Ok(GameplayBattleCombinationImage {
+        data: output,
+        parity,
         fixed_workspace_sha1: sha1_hex(&fs::read(fixed_workspace_path)?),
         dialogue_workspace_sha1: sha1_hex(&fs::read(dialogue_workspace_path)?),
-        output_sha1: output_sha1.clone(),
-        output_mapper: output_rom.mapper(),
-        combination_role: "chapter-one favorable gameplay battle",
-        fixed_unique_entry_count: GAMEPLAY_FIXED_SELECTIONS.len(),
-        fixed_visible_reference_count: GAMEPLAY_FIXED_SELECTIONS.len(),
-        message_template_count: message_templates.len(),
-        dialogue_selector: GAMEPLAY_DIALOGUE_SELECTOR,
-        codebook_glyph_count: assignments.len(),
         codebook_assignment_sha1: assignment_sha1(&assignments),
-        font_physical_page: SOURCE_FONT_PHYSICAL_PAGE,
-        tracked_write_count,
-        fixed_strings_reencoded: true,
-        message_templates_reencoded: true,
-        forecast_label_reencoded: true,
-        dialogue_record_reencoded: true,
-        shared_local_codebook: true,
-        translation_text_emitted: false,
-        glyph_characters_emitted: false,
-        runtime_verified: false,
-        release_eligible: false,
-        next_gate: "cold-load the mapper165 gameplay battle entry and run through names, classes, items, terrain, attack templates, damage, and selector 62 dialogue without text glitches",
-    };
-    let mut report_bytes =
-        serde_json::to_vec_pretty(&report).context("serialize battle combination probe report")?;
-    report_bytes.push(b'\n');
-    write_file(output_path, &output)?;
-    write_file(report_path, &report_bytes)?;
-    Ok(BattleCombinationProbeSummary {
-        output_sha1,
-        report_sha1: sha1_hex(&report_bytes),
         glyph_count: assignments.len(),
-        tracked_write_count,
+        preserved_active_code_count: GAMEPLAY_BATTLE_PRESERVED_ACTIVE_CODES.len(),
+        tracked_writes,
     })
 }
 
@@ -261,6 +311,7 @@ mod tests {
             fixed_visible_reference_count: 8,
             message_template_count: 22,
             dialogue_selector: GAMEPLAY_DIALOGUE_SELECTOR,
+            preserved_active_code_count: GAMEPLAY_BATTLE_PRESERVED_ACTIVE_CODES.len(),
             codebook_glyph_count: 12,
             codebook_assignment_sha1: "assignment".to_owned(),
             font_physical_page: SOURCE_FONT_PHYSICAL_PAGE,

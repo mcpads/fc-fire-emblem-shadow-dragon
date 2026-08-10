@@ -13,14 +13,29 @@ use crate::{
 pub(super) const SOURCE_FONT_PHYSICAL_PAGE: usize = 2;
 
 pub(super) fn assign_glyph_codes(glyphs: &BTreeSet<char>) -> Result<BTreeMap<char, u8>> {
-    let active_codes = active_hangul_codes();
+    assign_glyph_codes_excluding(glyphs, &BTreeSet::new())
+}
+
+pub(super) fn assign_glyph_codes_excluding(
+    glyphs: &BTreeSet<char>,
+    preserved_active_codes: &BTreeSet<u8>,
+) -> Result<BTreeMap<char, u8>> {
+    let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
     ensure!(
-        glyphs.len() <= active_codes.len(),
-        "dialogue probe needs {} glyphs but the active page owns only {} slots",
-        glyphs.len(),
-        active_codes.len()
+        preserved_active_codes.is_subset(&active_codes),
+        "preserved screen codes include a reserved font code"
     );
-    Ok(glyphs.iter().copied().zip(active_codes).collect())
+    let available_codes = active_codes
+        .difference(preserved_active_codes)
+        .copied()
+        .collect::<Vec<_>>();
+    ensure!(
+        glyphs.len() <= available_codes.len(),
+        "dialogue probe needs {} glyphs but the screen-safe page owns only {} slots",
+        glyphs.len(),
+        available_codes.len()
+    );
+    Ok(glyphs.iter().copied().zip(available_codes).collect())
 }
 
 pub(super) fn install_font_glyphs(
@@ -53,4 +68,33 @@ pub(super) fn assignment_sha1(assignments: &BTreeMap<char, u8>) -> String {
         bytes.push(*code);
     }
     sha1_hex(&bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn excluded_codes_are_never_assigned_to_glyphs() {
+        let glyphs = ['가', '나', '다'].into_iter().collect();
+        let excluded = [0x00, 0x03, 0x3B].into_iter().collect();
+
+        let assignments = assign_glyph_codes_excluding(&glyphs, &excluded).unwrap();
+
+        assert_eq!(assignments.len(), glyphs.len());
+        assert!(assignments.values().all(|code| !excluded.contains(code)));
+    }
+
+    #[test]
+    fn excluded_codes_reduce_the_available_capacity() {
+        let active_codes = active_hangul_codes();
+        let excluded = [active_codes[0]].into_iter().collect();
+        let glyphs = (0..active_codes.len())
+            .map(|index| char::from_u32(0xAC00 + u32::try_from(index).unwrap()).unwrap())
+            .collect();
+
+        let error = assign_glyph_codes_excluding(&glyphs, &excluded).unwrap_err();
+
+        assert!(error.to_string().contains("owns only 209 slots"));
+    }
 }

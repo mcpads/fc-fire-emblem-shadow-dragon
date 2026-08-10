@@ -315,13 +315,20 @@ cargo run -p fc-fire-emblem-patch -- analyze-battle-text-workset \
 
 cargo run -p fc-fire-emblem-patch -- build-battle-combination-probe \
   'roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes'
+
+cargo run -p fc-fire-emblem-patch -- build-battle-cache-upload-probe \
+  'roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes'
 ```
 
 `analyze-battle-text-workset`은 270개 고정 번역을 글리프당 한 바이트 논리열로 만들고 각 문자열이 원래 소유 길이 안에 드는지 검사한 뒤, 전투 대사와 예측창 라벨을 합친 수치만 공개한다. 고정 251글리프와 대사 153글리프의 전체 합집합은 319글리프로 정적 한 페이지에 들어가지 않는다. 대사 한 레코드, 양측 이름·병종·아이템·지형, 메시지 템플릿 하나와 예측 라벨의 보수적 조합 상한은 112/210이다. 보고서 SHA-1은 `2e397df7b774bde2377caf88b9441380d1bc2cad`이며 글리프 문자·원문·번역문은 싣지 않는다.
 
 `build-battle-text-cache-base`는 mapper 165 패리티 이미지를 512 KiB PRG로 확장하고 추가 PRG의 첫 MMC3 8 KiB 페이지 `20`부터 정렬한 319개 글리프의 5,104바이트 타일 아틀라스를 넣는다. 원래 256 KiB PRG 접두부와 활성 고정 뱅크, CHR은 보존한다. 현재 ROM SHA-1은 `b53876225eb9d67ef4725cacade6d12c34723324`, 보고서 SHA-1은 `f842a1b0902fe1e3c6f5e3982aff1741caed6b9c`이다. 이 기반은 아직 아틀라스를 읽거나 CHR-RAM을 선택하지 않으며 배포 후보가 아니다.
 
-`build-battle-combination-probe`는 1장 유리 전투에서 실제로 함께 쓰는 이름·병종·무기·지형, 예측 라벨, 전투 메시지 템플릿 22개와 대사 후보 하나를 86글리프 공용 코드북으로 다시 인코딩한다. 118개 변경은 모두 Expected Write다. 콜드 실행은 이름·예측·공격·동적 피해 문구와 자동 지도 복귀를 통과했지만, 이 자연 경로에서 대사 selector 62는 관측되지 않았다. ROM SHA-1은 `d7c82e2f03450293fb85696a83287d6b419b9d95`, 보고서 SHA-1은 `8a0ac402e96fe6895d8dd505af2d85a54bcc6348`이다. 이는 한 조합의 실행 증거이며 전체 동적 캐시 구현이나 배포 후보가 아니다.
+`build-battle-combination-probe`는 1장 유리 전투에서 실제로 함께 쓰는 이름·병종·무기·지형, 예측 라벨, 전투 메시지 템플릿 22개와 대사 후보 하나를 86글리프 공용 코드북으로 다시 인코딩한다. 네임테이블과 가시 OAM의 활성 코드 119개를 원본 그대로 보존하므로 남은 91칸에 이 코드북이 들어간다. 118개 변경은 모두 Expected Write다. 콜드 실행은 이름·예측·공격·동적 피해 문구와 자동 지도 복귀를 통과했지만, 이 자연 경로에서 대사 selector 62는 관측되지 않았다. ROM SHA-1은 `26213e5f265a24437452cb1c50d25e8d26ee5b33`, 보고서 SHA-1은 `8c0f5c4f24b98b752fed94235722b3915b419f85`이다. 이는 한 조합의 실행 증거이며 전체 동적 캐시 구현이나 배포 후보가 아니다.
+
+`build-battle-cache-upload-probe`는 위 조합의 4 KiB 완성 페이지를 확장 PRG의 MMC3 페이지 `20`에 저장한다. 전투 주 상태 `16`, 전투 위상 `00`, 렌더 마스크 그림자 `06`이 함께 성립하는 NMI의 `$C191`에서만 업로드를 시작한다. 루틴은 `$2002`로 주소 래치를 초기화하고 PPU 증가 방향을 순차 쓰기로 고정하며, 업로드 동안 NMI를 끈 뒤 보류 VBlank를 지우고 원래 PRG 뱅크와 스크롤 복구로 돌아간다. 전투 중 원래 오른쪽 페이지가 `00`일 때만 FD/FE 선택기를 CHR-RAM으로 보내고 다른 화면과 전투 이탈 뒤에는 자연 선택을 유지한다. 설치 코드는 원본 CHR을 바꾸지 않으며 5개 typed RP2A03 루틴과 Expected Write 10개를 검사한다.
+
+실행에서는 각 업로드 직후 CHR-RAM 4,096바이트가 PRG 원천과 전부 일치했고, 전투 이탈 뒤 프레임 934에 오른쪽 FD/FE가 자연 `19/19`로 돌아갔다. 다만 같은 안전 창이 이어지는 프레임 2·4·6·8·10에 업로드가 다섯 번 반복되어 전투 진행 시점이 늦어졌다. 그러므로 보고서의 `runtime_verified`와 `release_eligible`은 계속 `false`이며, 다음 관문은 전투마다 한 번만 소비하는 상태를 증명하는 것이다. ROM SHA-1은 `09f1f7f5ae765c9abe6d63618796ece238d93af4`, 보고서 SHA-1은 `b27cc098127273a25f58d7e8bb13e81f68c9c2dd`이다.
 
 `analyze-main-dialogue-glyph-workset`은 이 검증을 통과한 작업 골격에서 채워진 줄과 `complete`로 승인된 줄의 한글 집합을 따로 센다. 공개 보고서는 상태별 줄 수, 글리프 수, 정렬 집합 SHA-1과 활성 슬롯 210칸 비교만 기록하고 대사, 글리프 문자, 줄 ID와 입력 경로를 기록하지 않는다. 모든 2,812줄이 `complete`일 때만 승인 집합을 최종 작업 집합으로 인정하고 단일 페이지 수용 여부를 판정한다. 현재 의미 있는 일본어 2,541줄은 `needs_human_review`, 완료 줄은 0개다. 채워진 집합은 고유 한글 698자이고 한 줄 고유 한글은 최대 14자다. 명시적인 `E4`/`E6` 대사 전이 사슬은 최대 174자로 활성 슬롯 210칸에 들어간다. 실행 관측으로 결속한 화면 수명은 남아 있는 원본 활성 코드와 동시에 보이는 대사 레코드의 한글 합집합을 더해 별도로 검사한다.
 

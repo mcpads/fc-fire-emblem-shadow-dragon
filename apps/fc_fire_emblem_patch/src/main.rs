@@ -106,6 +106,18 @@ enum Command {
         #[arg(long, default_value = "out/battle-combination-probe.json")]
         report: PathBuf,
     },
+    /// Upload one proven battle codebook into mapper 165 CHR RAM at the battle transition.
+    BuildBattleCacheUploadProbe {
+        source: PathBuf,
+        #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
+        fixed_workspace: PathBuf,
+        #[arg(long, default_value = "private/dialogue/battle-workspace.json")]
+        dialogue_workspace: PathBuf,
+        #[arg(long, default_value = "out/battle-cache-upload-probe.nes")]
+        output: PathBuf,
+        #[arg(long, default_value = "out/battle-cache-upload-probe.json")]
+        report: PathBuf,
+    },
     /// Inventory dialogue entry tables without emitting source dialogue bytes.
     AnalyzeDialogueStructure {
         source: PathBuf,
@@ -522,6 +534,28 @@ fn main() -> Result<()> {
             println!(
                 "gameplay battle combination: {} glyphs, {} tracked writes",
                 summary.glyph_count, summary.tracked_write_count
+            );
+        }
+        Command::BuildBattleCacheUploadProbe {
+            source,
+            fixed_workspace,
+            dialogue_workspace,
+            output,
+            report,
+        } => {
+            let summary = mapper165::battle_cache_upload_probe::build_battle_cache_upload_probe(
+                &source,
+                &fixed_workspace,
+                &dialogue_workspace,
+                &output,
+                &report,
+            )?;
+            println!("wrote {}", output.display());
+            println!("output SHA-1: {}", summary.output_sha1);
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "battle cache upload: {} glyphs, {} runtime writes",
+                summary.glyph_count, summary.runtime_tracked_write_count
             );
         }
         Command::AnalyzeDialogueStructure { source, report } => {
