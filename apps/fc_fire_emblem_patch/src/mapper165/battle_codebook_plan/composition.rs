@@ -7,15 +7,19 @@ use crate::{
     battle_text_workset::FORECAST_LABEL_GLYPHS,
     dialogue_assets::BattleDialogueReinsertionPlan,
     font_slots::{FONT_PAGE_SIZE, FONT_TILE_SIZE},
-    sha1_hex,
     text_inventory::FixedTextPlan,
 };
 
 use super::conflict_graph::StableColoringPlan;
 
+mod blob;
+
+use blob::{RecipeCatalog, RecipePair, RecipeRole};
+
 const SOURCE_PRG_BYTE_COUNT: usize = 256 * 1024;
 const EXPANDED_PRG_BYTE_COUNT: usize = 512 * 1024;
 const ACTIVE_FIXED_BANK_BYTE_COUNT: usize = 16 * 1024;
+const MMC3_PRG_PAGE_BYTE_COUNT: usize = 8 * 1024;
 
 #[derive(Debug, Serialize)]
 pub(super) struct BattleCacheCompositionPlan {
@@ -33,6 +37,9 @@ pub(super) struct BattleCacheCompositionPlan {
     maximum_recipe_glyph_count: usize,
     maximum_runtime_recipe_count: usize,
     abstract_recipe_sha1: String,
+    recipe_blob_byte_count: usize,
+    unique_recipe_payload_count: usize,
+    missing_directory_entry_count: usize,
     glyph_atlas_tile_count: usize,
     glyph_atlas_byte_count: usize,
     source_page_copy_byte_count: usize,
@@ -54,6 +61,12 @@ pub(super) struct BattleCacheCompositionPlan {
     runtime_verified: bool,
 }
 
+pub(in crate::mapper165) struct BattleCacheCompositionMaterial {
+    pub(super) plan: BattleCacheCompositionPlan,
+    pub(in crate::mapper165) atlas_glyphs: Vec<char>,
+    pub(in crate::mapper165) recipe_blob: Vec<u8>,
+}
+
 pub(super) fn plan_cache_composition(
     fixed: &FixedTextPlan,
     dialogue: &BattleDialogueReinsertionPlan,
@@ -63,7 +76,7 @@ pub(super) fn plan_cache_composition(
     player_participant_candidate_count: usize,
     enemy_participant_candidate_count: usize,
     terrain_entry_count: usize,
-) -> Result<BattleCacheCompositionPlan> {
+) -> Result<BattleCacheCompositionMaterial> {
     ensure!(
         coloring.color_count <= u8::MAX.into(),
         "battle abstract color exceeds one-byte recipe encoding"
@@ -92,9 +105,13 @@ pub(super) fn plan_cache_composition(
     recipes.add(
         RecipeRole::Common,
         0,
-        &common_glyphs,
-        coloring,
-        &atlas_indices,
+        recipe_pairs(
+            &common_glyphs,
+            coloring,
+            &atlas_indices,
+            RecipeRole::Common,
+            0,
+        )?,
     )?;
 
     add_fixed_range(
@@ -131,9 +148,13 @@ pub(super) fn plan_cache_composition(
         recipes.add(
             RecipeRole::Item,
             *source_index,
-            &entry.unique_glyphs(),
-            coloring,
-            &atlas_indices,
+            recipe_pairs(
+                &entry.unique_glyphs(),
+                coloring,
+                &atlas_indices,
+                RecipeRole::Item,
+                *source_index,
+            )?,
         )?;
     }
     add_fixed_range(
@@ -147,26 +168,20 @@ pub(super) fn plan_cache_composition(
     )?;
 
     let mut dialogue_selector_count = 0;
-    let mut selector_bytes = Vec::new();
     for record in &dialogue.records {
         recipes.add(
             RecipeRole::Dialogue,
             record.canonical_entry_index,
-            &record.unique_glyphs(),
-            coloring,
-            &atlas_indices,
+            recipe_pairs(
+                &record.unique_glyphs(),
+                coloring,
+                &atlas_indices,
+                RecipeRole::Dialogue,
+                record.canonical_entry_index,
+            )?,
         )?;
         for selector in &record.entry_indices {
-            selector_bytes.extend_from_slice(
-                &u16::try_from(*selector)
-                    .context("battle dialogue selector exceeds recipe encoding")?
-                    .to_le_bytes(),
-            );
-            selector_bytes.extend_from_slice(
-                &u16::try_from(record.canonical_entry_index)
-                    .context("battle canonical selector exceeds recipe encoding")?
-                    .to_le_bytes(),
-            );
+            recipes.add_dialogue_alias(*selector, record.canonical_entry_index)?;
             dialogue_selector_count += 1;
         }
     }
@@ -174,7 +189,7 @@ pub(super) fn plan_cache_composition(
         dialogue_selector_count == 65,
         "battle composition recipe directory lost dialogue selectors"
     );
-    recipes.bytes.extend_from_slice(&selector_bytes);
+    let encoded_recipes = recipes.encode(coloring.color_count, coloring.glyph_count)?;
 
     let modeled_participant_pair_count = u64::try_from(player_participant_candidate_count)?
         .checked_mul(u64::try_from(enemy_participant_candidate_count)?)
@@ -201,12 +216,20 @@ pub(super) fn plan_cache_composition(
     let expanded_material_capacity = EXPANDED_PRG_BYTE_COUNT
         .checked_sub(SOURCE_PRG_BYTE_COUNT + ACTIVE_FIXED_BANK_BYTE_COUNT)
         .context("expanded battle material capacity underflow")?;
+    ensure!(
+        glyph_atlas_byte_count <= MMC3_PRG_PAGE_BYTE_COUNT,
+        "battle glyph atlas exceeds one material PRG page"
+    );
+    ensure!(
+        FONT_PAGE_SIZE + encoded_recipes.bytes.len() <= MMC3_PRG_PAGE_BYTE_COUNT,
+        "battle source page and recipes exceed one material PRG page"
+    );
     let maximum_full_pages_after_base_material = expanded_material_capacity
-        .checked_sub(FONT_PAGE_SIZE + glyph_atlas_byte_count)
+        .checked_sub(2 * MMC3_PRG_PAGE_BYTE_COUNT)
         .context("battle base material exceeds expanded PRG capacity")?
         / FONT_PAGE_SIZE;
 
-    Ok(BattleCacheCompositionPlan {
+    let plan = BattleCacheCompositionPlan {
         strategy: "rebuild one CHR-RAM page from the original source page and selected glyph recipes at battle entry",
         common_recipe_count: 1,
         unit_name_recipe_count: 52,
@@ -216,11 +239,14 @@ pub(super) fn plan_cache_composition(
         terrain_recipe_count: terrain_entry_count,
         dialogue_recipe_count: dialogue.records.len(),
         dialogue_selector_count,
-        total_recipe_count: recipes.recipe_count,
-        total_recipe_glyph_reference_count: recipes.glyph_reference_count,
-        maximum_recipe_glyph_count: recipes.maximum_glyph_count,
+        total_recipe_count: encoded_recipes.logical_recipe_count,
+        total_recipe_glyph_reference_count: encoded_recipes.glyph_reference_count,
+        maximum_recipe_glyph_count: encoded_recipes.maximum_glyph_count,
         maximum_runtime_recipe_count: 10,
-        abstract_recipe_sha1: sha1_hex(&recipes.bytes),
+        abstract_recipe_sha1: encoded_recipes.sha1.clone(),
+        recipe_blob_byte_count: encoded_recipes.bytes.len(),
+        unique_recipe_payload_count: encoded_recipes.unique_payload_count,
+        missing_directory_entry_count: encoded_recipes.missing_directory_entry_count,
         glyph_atlas_tile_count: coloring.glyph_count,
         glyph_atlas_byte_count,
         source_page_copy_byte_count: FONT_PAGE_SIZE,
@@ -241,6 +267,11 @@ pub(super) fn plan_cache_composition(
         physical_assignment_complete: false,
         runtime_loader_implemented: false,
         runtime_verified: false,
+    };
+    Ok(BattleCacheCompositionMaterial {
+        plan,
+        atlas_glyphs: coloring.glyph_colors().keys().copied().collect(),
+        recipe_blob: encoded_recipes.bytes,
     })
 }
 
@@ -280,32 +311,49 @@ fn add_fixed_indices(
         recipes.add(
             role,
             source_index,
-            &entry.unique_glyphs(),
-            coloring,
-            atlas_indices,
+            recipe_pairs(
+                &entry.unique_glyphs(),
+                coloring,
+                atlas_indices,
+                role,
+                source_index,
+            )?,
         )?;
     }
     Ok(())
 }
 
-#[derive(Clone, Copy)]
-#[repr(u8)]
-enum RecipeRole {
-    Common = 0,
-    UnitName = 1,
-    EnemyName = 2,
-    Class = 3,
-    Item = 4,
-    Terrain = 5,
-    Dialogue = 6,
-}
-
-#[derive(Default)]
-struct RecipeCatalog {
-    bytes: Vec<u8>,
-    recipe_count: usize,
-    glyph_reference_count: usize,
-    maximum_glyph_count: usize,
+fn recipe_pairs(
+    glyphs: &BTreeSet<char>,
+    coloring: &StableColoringPlan,
+    atlas_indices: &BTreeMap<char, u16>,
+    role: RecipeRole,
+    source_index: usize,
+) -> Result<Vec<RecipePair>> {
+    glyphs
+        .iter()
+        .map(|glyph| {
+            Ok(RecipePair {
+                color: u8::try_from(
+                    coloring
+                        .glyph_colors()
+                        .get(glyph)
+                        .copied()
+                        .with_context(|| {
+                            format!(
+                                "battle recipe role {} source {source_index} contains an uncolored glyph {glyph:?}",
+                                role as u8
+                            )
+                        })?,
+                )
+                .context("battle recipe color exceeds encoding")?,
+                atlas_index: atlas_indices
+                    .get(glyph)
+                    .copied()
+                    .context("battle recipe glyph is absent from the atlas")?,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -325,6 +373,9 @@ pub(super) fn test_plan() -> BattleCacheCompositionPlan {
         maximum_recipe_glyph_count: 1,
         maximum_runtime_recipe_count: 7,
         abstract_recipe_sha1: "recipe".to_owned(),
+        recipe_blob_byte_count: 1,
+        unique_recipe_payload_count: 1,
+        missing_directory_entry_count: 0,
         glyph_atlas_tile_count: 1,
         glyph_atlas_byte_count: FONT_TILE_SIZE,
         source_page_copy_byte_count: FONT_PAGE_SIZE,
@@ -344,57 +395,6 @@ pub(super) fn test_plan() -> BattleCacheCompositionPlan {
         physical_assignment_complete: false,
         runtime_loader_implemented: false,
         runtime_verified: false,
-    }
-}
-
-impl RecipeCatalog {
-    fn add(
-        &mut self,
-        role: RecipeRole,
-        source_index: usize,
-        glyphs: &BTreeSet<char>,
-        coloring: &StableColoringPlan,
-        atlas_indices: &BTreeMap<char, u16>,
-    ) -> Result<()> {
-        self.bytes.push(role as u8);
-        self.bytes.extend_from_slice(
-            &u16::try_from(source_index)
-                .context("battle recipe source index exceeds encoding")?
-                .to_le_bytes(),
-        );
-        self.bytes.extend_from_slice(
-            &u16::try_from(glyphs.len())
-                .context("battle recipe glyph count exceeds encoding")?
-                .to_le_bytes(),
-        );
-        for glyph in glyphs {
-            self.bytes.push(
-                u8::try_from(
-                    coloring
-                        .glyph_colors()
-                        .get(glyph)
-                        .copied()
-                        .with_context(|| {
-                            format!(
-                                "battle recipe role {} source {source_index} contains an uncolored glyph {glyph:?}",
-                                role as u8
-                            )
-                        })?,
-                )
-                    .context("battle recipe color exceeds encoding")?,
-            );
-            self.bytes.extend_from_slice(
-                &atlas_indices
-                    .get(glyph)
-                    .copied()
-                    .context("battle recipe glyph is absent from the atlas")?
-                    .to_le_bytes(),
-            );
-        }
-        self.recipe_count += 1;
-        self.glyph_reference_count += glyphs.len();
-        self.maximum_glyph_count = self.maximum_glyph_count.max(glyphs.len());
-        Ok(())
     }
 }
 
@@ -431,17 +431,27 @@ mod tests {
             .add(
                 RecipeRole::Common,
                 0,
-                &"가나".chars().collect(),
-                &coloring,
-                &atlas_indices,
+                recipe_pairs(
+                    &"가나".chars().collect(),
+                    &coloring,
+                    &atlas_indices,
+                    RecipeRole::Common,
+                    0,
+                )
+                .unwrap(),
             )
             .unwrap();
 
-        assert_eq!(catalog.recipe_count, 1);
-        assert_eq!(catalog.glyph_reference_count, 2);
-        assert_eq!(catalog.bytes.len(), 11);
+        for selector in 0..65 {
+            catalog.add_dialogue_alias(selector, 0).unwrap();
+        }
+        catalog.add(RecipeRole::Dialogue, 0, Vec::new()).unwrap();
+        let encoded = catalog.encode(2, 2).unwrap();
+
+        assert_eq!(encoded.logical_recipe_count, 2);
+        assert_eq!(encoded.glyph_reference_count, 2);
         assert!(
-            !catalog
+            !encoded
                 .bytes
                 .windows(3)
                 .any(|bytes| bytes == "가".as_bytes())

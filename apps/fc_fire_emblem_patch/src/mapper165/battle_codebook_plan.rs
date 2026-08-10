@@ -25,7 +25,9 @@ mod item_domain;
 mod physical_assignment;
 mod runtime_inputs;
 
-use composition::{BattleCacheCompositionPlan, plan_cache_composition};
+use composition::{
+    BattleCacheCompositionMaterial, BattleCacheCompositionPlan, plan_cache_composition,
+};
 use conflict_graph::{BattleGlyphFamilies, plan_stable_coloring};
 use enemy_domain::{EnemyBattleDomain, EnemyBattleDomainBinding, bind_enemy_battle_domain};
 use item_domain::{BattleItemDomain, BattleItemDomainBinding, bind_battle_item_domain};
@@ -44,7 +46,7 @@ struct BattleCodebookModel {
     dialogue_record_count: usize,
     player_participant_candidate_count: usize,
     enemy_participant_candidate_count: usize,
-    composition: BattleCacheCompositionPlan,
+    composition: BattleCacheCompositionMaterial,
     item_domain: BattleItemDomainBinding,
     enemy_domain: EnemyBattleDomainBinding,
 }
@@ -203,7 +205,7 @@ pub(crate) fn analyze_battle_codebook_plan(
         item_domain,
         enemy_domain,
         runtime_inputs,
-        composition,
+        composition: composition.plan,
         stable_assignment_fits_active_slot_ceiling: coloring.color_count
             <= ACTIVE_HANGUL_SLOT_COUNT,
         stable_assignment_fits_chapter_one_safe_codes: coloring.color_count
@@ -252,6 +254,14 @@ pub(super) fn plan_constrained_battle_codebook(
         constrained_screen_count: physical.constrained_screen_count,
         constrained_color_count: physical.constrained_color_count,
     })
+}
+
+pub(super) fn plan_battle_cache_composition_material(
+    rom: &Rom,
+    fixed: &FixedTextPlan,
+    dialogue: &BattleDialogueReinsertionPlan,
+) -> Result<BattleCacheCompositionMaterial> {
+    Ok(plan_battle_codebook_model(rom, fixed, dialogue)?.composition)
 }
 
 fn plan_battle_codebook_model(

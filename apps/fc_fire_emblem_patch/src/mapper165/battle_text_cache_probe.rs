@@ -1,24 +1,33 @@
-use std::{collections::BTreeSet, fs, path::Path};
+use std::{fs, path::Path};
 
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
-    battle_text_workset::FORECAST_LABEL_GLYPHS,
     dialogue_assets::plan_battle_dialogue_records,
     font::{load_dalmoori, rasterize_glyph},
+    font_slots::FONT_PAGE_SIZE,
     rom::{EXPECTED_SOURCE_SHA1, HEADER_SIZE, Rom},
     sha1_hex,
     text_inventory::plan_fixed_text,
 };
 
-use super::{OUTPUT_MAPPER, assemble_mapper165_parity_bytes};
+use super::{
+    OUTPUT_MAPPER, assemble_mapper165_parity_bytes,
+    battle_codebook_plan::plan_battle_cache_composition_material,
+    dialogue_probe_font::SOURCE_FONT_PHYSICAL_PAGE,
+};
 
 const EXPANDED_PRG_SIZE: usize = 512 * 1024;
 const FIXED_BANK_SIZE: usize = 16 * 1024;
 const GLYPH_ATLAS_PRG_OFFSET: usize = 256 * 1024;
 const GLYPH_TILE_SIZE: usize = 16;
 const GLYPH_ATLAS_MMC3_PAGE: u8 = 0x20;
+const MATERIAL_MMC3_PAGE_SIZE: usize = 8 * 1024;
+const SOURCE_PAGE_PRG_OFFSET: usize = GLYPH_ATLAS_PRG_OFFSET + MATERIAL_MMC3_PAGE_SIZE;
+const SOURCE_PAGE_MMC3_PAGE: u8 = 0x21;
+const RECIPE_BLOB_PRG_OFFSET: usize = SOURCE_PAGE_PRG_OFFSET + FONT_PAGE_SIZE;
+const RECIPE_BLOB_MMC3_PAGE: u8 = SOURCE_PAGE_MMC3_PAGE;
 
 #[derive(Debug, Serialize)]
 struct BattleTextCacheBaseReport {
@@ -34,12 +43,20 @@ struct BattleTextCacheBaseReport {
     glyph_atlas_byte_count: usize,
     glyph_atlas_sha1: String,
     glyph_atlas_mmc3_page: u8,
+    source_page_byte_count: usize,
+    source_page_sha1: String,
+    source_page_mmc3_page: u8,
+    recipe_blob_byte_count: usize,
+    recipe_blob_sha1: String,
+    recipe_blob_mmc3_page: u8,
+    material_page_count: usize,
     original_prg_prefix_preserved: bool,
     active_fixed_bank_duplicate_sha1: String,
     chr_sha1: String,
     glyph_characters_emitted: bool,
     translation_text_emitted: bool,
     runtime_cache_installed: bool,
+    runtime_recipe_loader_installed: bool,
     release_eligible: bool,
     next_gate: &'static str,
 }
@@ -62,21 +79,30 @@ pub(crate) fn build_battle_text_cache_base(
     source_rom.verify_supported_japanese()?;
     let fixed = plan_fixed_text(&source_rom, fixed_workspace_path)?;
     let dialogue = plan_battle_dialogue_records(&source_rom, dialogue_workspace_path)?;
-    let glyphs = fixed
-        .unique_glyphs()
-        .union(&dialogue.unique_glyphs())
-        .copied()
-        .chain(FORECAST_LABEL_GLYPHS)
-        .collect::<BTreeSet<_>>();
-    let glyph_atlas = rasterize_atlas(&glyphs)?;
+    let material = plan_battle_cache_composition_material(&source_rom, &fixed, &dialogue)?;
+    let glyph_atlas = rasterize_atlas(&material.atlas_glyphs)?;
     ensure!(
-        glyph_atlas.len() <= 8 * 1024,
+        glyph_atlas.len() <= MATERIAL_MMC3_PAGE_SIZE,
         "battle glyph atlas exceeds one MMC3 PRG page"
+    );
+    ensure!(
+        material.recipe_blob.len() <= MATERIAL_MMC3_PAGE_SIZE,
+        "battle recipe blob exceeds one MMC3 PRG page"
     );
 
     let parity = assemble_mapper165_parity_bytes(&source_rom)?;
     let parity_rom = Rom::parse(parity).context("parse mapper 165 battle cache base")?;
-    let output = expand_prg_with_atlas(&parity_rom, &glyph_atlas)?;
+    let source_page_start = SOURCE_FONT_PHYSICAL_PAGE * FONT_PAGE_SIZE;
+    let source_page = parity_rom
+        .chr()
+        .get(source_page_start..source_page_start + FONT_PAGE_SIZE)
+        .context("battle source page is outside mapper parity CHR")?;
+    let output = expand_prg_with_material(
+        &parity_rom,
+        &glyph_atlas,
+        source_page,
+        &material.recipe_blob,
+    )?;
     let output_rom = Rom::parse(output.clone()).context("parse expanded battle cache base")?;
     ensure!(
         output_rom.mapper() == OUTPUT_MAPPER,
@@ -102,7 +128,7 @@ pub(crate) fn build_battle_text_cache_base(
     );
     let output_sha1 = sha1_hex(&output);
     let report = BattleTextCacheBaseReport {
-        schema: 1,
+        schema: 2,
         source_sha1: EXPECTED_SOURCE_SHA1,
         fixed_workspace_sha1: sha1_hex(&fs::read(fixed_workspace_path)?),
         dialogue_workspace_sha1: sha1_hex(&fs::read(dialogue_workspace_path)?),
@@ -110,18 +136,26 @@ pub(crate) fn build_battle_text_cache_base(
         output_mapper: output_rom.mapper(),
         prg_size: output_rom.prg().len(),
         chr_size: output_rom.chr().len(),
-        glyph_count: glyphs.len(),
+        glyph_count: material.atlas_glyphs.len(),
         glyph_atlas_byte_count: glyph_atlas.len(),
         glyph_atlas_sha1: sha1_hex(&glyph_atlas),
         glyph_atlas_mmc3_page: GLYPH_ATLAS_MMC3_PAGE,
+        source_page_byte_count: source_page.len(),
+        source_page_sha1: sha1_hex(source_page),
+        source_page_mmc3_page: SOURCE_PAGE_MMC3_PAGE,
+        recipe_blob_byte_count: material.recipe_blob.len(),
+        recipe_blob_sha1: sha1_hex(&material.recipe_blob),
+        recipe_blob_mmc3_page: RECIPE_BLOB_MMC3_PAGE,
+        material_page_count: 2,
         original_prg_prefix_preserved: true,
         active_fixed_bank_duplicate_sha1: sha1_hex(active_fixed),
         chr_sha1: sha1_hex(output_rom.chr()),
         glyph_characters_emitted: false,
         translation_text_emitted: false,
         runtime_cache_installed: false,
+        runtime_recipe_loader_installed: false,
         release_eligible: false,
-        next_gate: "bind a battle-transition upload window, copy selected atlas tiles into mapper 165 CHR RAM, and restore the original PRG bank",
+        next_gate: "implement the transition loader that restores the source page and applies selected recipes before choosing CHR RAM",
     };
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize battle cache base report")?;
@@ -131,12 +165,12 @@ pub(crate) fn build_battle_text_cache_base(
     Ok(BattleTextCacheBaseSummary {
         output_sha1,
         report_sha1: sha1_hex(&report_bytes),
-        glyph_count: glyphs.len(),
+        glyph_count: material.atlas_glyphs.len(),
         glyph_atlas_byte_count: glyph_atlas.len(),
     })
 }
 
-fn rasterize_atlas(glyphs: &BTreeSet<char>) -> Result<Vec<u8>> {
+fn rasterize_atlas(glyphs: &[char]) -> Result<Vec<u8>> {
     let font = load_dalmoori()?;
     glyphs.iter().try_fold(
         Vec::with_capacity(glyphs.len() * GLYPH_TILE_SIZE),
@@ -147,7 +181,12 @@ fn rasterize_atlas(glyphs: &BTreeSet<char>) -> Result<Vec<u8>> {
     )
 }
 
-fn expand_prg_with_atlas(parity_rom: &Rom, atlas: &[u8]) -> Result<Vec<u8>> {
+fn expand_prg_with_material(
+    parity_rom: &Rom,
+    atlas: &[u8],
+    source_page: &[u8],
+    recipe_blob: &[u8],
+) -> Result<Vec<u8>> {
     ensure!(
         parity_rom.prg().len() == 256 * 1024,
         "mapper parity PRG size changed"
@@ -160,6 +199,20 @@ fn expand_prg_with_atlas(parity_rom: &Rom, atlas: &[u8]) -> Result<Vec<u8>> {
         .checked_add(atlas.len())
         .context("glyph atlas range overflow")?;
     expanded_prg[GLYPH_ATLAS_PRG_OFFSET..atlas_end].copy_from_slice(atlas);
+    ensure!(
+        source_page.len() == FONT_PAGE_SIZE,
+        "battle source material is not one 4 KiB page"
+    );
+    expanded_prg[SOURCE_PAGE_PRG_OFFSET..SOURCE_PAGE_PRG_OFFSET + source_page.len()]
+        .copy_from_slice(source_page);
+    let recipe_end = RECIPE_BLOB_PRG_OFFSET
+        .checked_add(recipe_blob.len())
+        .context("battle recipe material range overflow")?;
+    ensure!(
+        recipe_end <= SOURCE_PAGE_PRG_OFFSET + MATERIAL_MMC3_PAGE_SIZE,
+        "battle source page and recipe material exceed their shared MMC3 page"
+    );
+    expanded_prg[RECIPE_BLOB_PRG_OFFSET..recipe_end].copy_from_slice(recipe_blob);
     let source_fixed_start = parity_rom.prg().len() - FIXED_BANK_SIZE;
     expanded_prg[EXPANDED_PRG_SIZE - FIXED_BANK_SIZE..]
         .copy_from_slice(&parity_rom.prg()[source_fixed_start..]);
@@ -182,7 +235,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn expanded_prg_places_the_atlas_before_a_duplicate_fixed_bank() {
+    fn expanded_prg_places_two_material_pages_before_a_duplicate_fixed_bank() {
         let mut image = vec![0; HEADER_SIZE + 256 * 1024];
         image[..4].copy_from_slice(b"NES\x1A");
         image[4] = 0x10;
@@ -190,11 +243,28 @@ mod tests {
         image[7] = 0xA0;
         image[HEADER_SIZE + 256 * 1024 - FIXED_BANK_SIZE..].fill(0xA5);
         let rom = Rom::parse(image).unwrap();
-        let output = expand_prg_with_atlas(&rom, &[1, 2, 3]).unwrap();
+        let source_page = vec![2; FONT_PAGE_SIZE];
+        let output = expand_prg_with_material(&rom, &[1, 2, 3], &source_page, &[4, 5]).unwrap();
         let expanded = Rom::parse(output).unwrap();
+        assert_eq!(GLYPH_ATLAS_MMC3_PAGE + 1, SOURCE_PAGE_MMC3_PAGE);
+        assert_eq!(SOURCE_PAGE_MMC3_PAGE, RECIPE_BLOB_MMC3_PAGE);
         assert_eq!(
             &expanded.prg()[GLYPH_ATLAS_PRG_OFFSET..GLYPH_ATLAS_PRG_OFFSET + 3],
             &[1, 2, 3]
+        );
+        assert_eq!(
+            &expanded.prg()[SOURCE_PAGE_PRG_OFFSET..SOURCE_PAGE_PRG_OFFSET + FONT_PAGE_SIZE],
+            source_page
+        );
+        assert_eq!(
+            &expanded.prg()[RECIPE_BLOB_PRG_OFFSET..RECIPE_BLOB_PRG_OFFSET + 2],
+            &[4, 5]
+        );
+        assert!(
+            expanded.prg()
+                [RECIPE_BLOB_PRG_OFFSET + 2..SOURCE_PAGE_PRG_OFFSET + MATERIAL_MMC3_PAGE_SIZE]
+                .iter()
+                .all(|byte| *byte == 0xFF)
         );
         assert!(
             expanded.prg()[EXPANDED_PRG_SIZE - FIXED_BANK_SIZE..]
