@@ -16,8 +16,7 @@ use crate::{
 use super::{
     OUTPUT_MAPPER,
     battle_cache_signature::{
-        CAIN_RECORD_IDENTITY, ENEMY_INITIATED_STATE, GARUDA_SOLDIER_RECORD_IDENTITY,
-        PLAYER_INITIATED_STATE, PREDICATE_ADDRESS, build_predicate,
+        ENEMY_INITIATED_STATE, PLAYER_INITIATED_STATE, PREDICATE_ADDRESS, build_predicate,
     },
     battle_combination_probe::{
         GameplayBattleCombinationImage, assemble_gameplay_battle_combination,
@@ -125,7 +124,7 @@ pub(crate) fn build_battle_cache_upload_probe(
     let cache_page = combination_cache_page(&combination)?;
     let base = expand_combination_with_cache(&combination, &cache_page)?;
     let base_rom = Rom::parse(base.clone()).context("parse battle cache upload base")?;
-    let routines = build_runtime_routines()?;
+    let routines = build_runtime_routines(&combination.text_signature)?;
     verify_runtime_caves(&combination.parity, &routines)?;
     verify_battle_active_flag_contract(&combination.parity)?;
     let mut image = TrackedImage::new(base.clone());
@@ -225,7 +224,9 @@ pub(crate) fn build_battle_cache_upload_probe(
         chr_size: output_rom.chr().len(),
         combination_role: "chapter-one Cain and Garuda soldier gameplay battle pair",
         gameplay_battle_main_states: [PLAYER_INITIATED_STATE, ENEMY_INITIATED_STATE],
-        cache_participant_record_identities: [CAIN_RECORD_IDENTITY, GARUDA_SOLDIER_RECORD_IDENTITY],
+        cache_participant_record_identities: combination
+            .text_signature
+            .participant_record_identities,
         participant_pair_gated: true,
         preserved_active_code_count: combination.preserved_active_code_count,
         codebook_glyph_count: combination.glyph_count,
@@ -427,7 +428,9 @@ fn verify_switchable_bytes(
     Ok(())
 }
 
-fn build_runtime_routines() -> Result<Vec<RuntimeRoutine>> {
+fn build_runtime_routines(
+    text_signature: &super::battle_cache_signature::BattleTextSignature,
+) -> Result<Vec<RuntimeRoutine>> {
     Ok(vec![
         RuntimeRoutine {
             role: "NMI post-mask dispatch",
@@ -458,7 +461,7 @@ fn build_runtime_routines() -> Result<Vec<RuntimeRoutine>> {
         RuntimeRoutine {
             role: "gameplay battle-cache match predicate",
             address: PREDICATE_ADDRESS,
-            bytes: build_predicate()?,
+            bytes: build_predicate(text_signature)?,
         },
         RuntimeRoutine {
             role: "battle-aware direct right FD selection",
@@ -683,9 +686,20 @@ fn write_file(path: &Path, data: &[u8]) -> Result<()> {
 mod tests {
     use super::*;
 
+    fn test_signature() -> super::super::battle_cache_signature::BattleTextSignature {
+        super::super::battle_cache_signature::BattleTextSignature::from_source_indices(
+            3,
+            4,
+            [0, 7],
+            [11, 26],
+            [0, 11],
+        )
+        .unwrap()
+    }
+
     #[test]
     fn upload_and_selector_routines_stay_inside_their_declared_cave() {
-        let routines = build_runtime_routines().unwrap();
+        let routines = build_runtime_routines(&test_signature()).unwrap();
         for pair in routines.windows(2) {
             assert!(pair[0].address as usize + pair[0].bytes.len() <= pair[1].address as usize);
         }
@@ -726,7 +740,10 @@ mod tests {
 
     #[test]
     fn transition_dispatch_requires_the_observed_render_disabled_window() {
-        let dispatch = build_runtime_routines().unwrap().remove(0).bytes;
+        let dispatch = build_runtime_routines(&test_signature())
+            .unwrap()
+            .remove(0)
+            .bytes;
 
         assert!(
             dispatch
@@ -755,10 +772,7 @@ mod tests {
             chr_size: 0,
             combination_role: "battle pair",
             gameplay_battle_main_states: [PLAYER_INITIATED_STATE, ENEMY_INITIATED_STATE],
-            cache_participant_record_identities: [
-                CAIN_RECORD_IDENTITY,
-                GARUDA_SOLDIER_RECORD_IDENTITY,
-            ],
+            cache_participant_record_identities: test_signature().participant_record_identities,
             participant_pair_gated: true,
             preserved_active_code_count: 119,
             codebook_glyph_count: 1,

@@ -14,6 +14,7 @@ use crate::{
 
 use super::{
     OUTPUT_MAPPER, assemble_mapper165_parity_bytes,
+    battle_cache_signature::BattleTextSignature,
     dialogue_probe_font::{
         SOURCE_FONT_PHYSICAL_PAGE, assign_glyph_codes_excluding, assignment_sha1,
         install_font_glyphs,
@@ -26,21 +27,27 @@ pub(super) struct GameplayBattleCombinationImage {
     pub(super) fixed_workspace_sha1: String,
     pub(super) dialogue_workspace_sha1: String,
     pub(super) codebook_assignment_sha1: String,
+    pub(super) text_signature: BattleTextSignature,
     pub(super) glyph_count: usize,
     pub(super) preserved_active_code_count: usize,
     pub(super) tracked_writes: Vec<crate::tracked::WriteReport>,
 }
 
 const GAMEPLAY_DIALOGUE_SELECTOR: usize = 62;
+const ENEMY_NAME_SOURCE_INDEX: usize = 4;
+const PLAYER_NAME_SOURCE_INDEX: usize = 3;
+const CLASS_SOURCE_INDICES: [usize; 2] = [0, 7];
+const ITEM_SOURCE_INDICES: [usize; 2] = [11, 26];
+const TERRAIN_SOURCE_INDICES: [usize; 2] = [0, 11];
 const GAMEPLAY_FIXED_SELECTIONS: [(&str, usize); 8] = [
-    ("enemy-names", 4),
-    ("unit-names", 3),
-    ("class-names", 0),
-    ("class-names", 7),
-    ("item-names", 11),
-    ("item-names", 26),
-    ("terrain-names", 0),
-    ("terrain-names", 11),
+    ("enemy-names", ENEMY_NAME_SOURCE_INDEX),
+    ("unit-names", PLAYER_NAME_SOURCE_INDEX),
+    ("class-names", CLASS_SOURCE_INDICES[0]),
+    ("class-names", CLASS_SOURCE_INDICES[1]),
+    ("item-names", ITEM_SOURCE_INDICES[0]),
+    ("item-names", ITEM_SOURCE_INDICES[1]),
+    ("terrain-names", TERRAIN_SOURCE_INDICES[0]),
+    ("terrain-names", TERRAIN_SOURCE_INDICES[1]),
 ];
 const FORECAST_LABEL_FILE_OFFSET: usize = 0x156C6;
 const FORECAST_LABEL_SOURCE: [u8; 10] =
@@ -279,6 +286,13 @@ pub(super) fn assemble_gameplay_battle_combination(
         fixed_workspace_sha1: sha1_hex(&fs::read(fixed_workspace_path)?),
         dialogue_workspace_sha1: sha1_hex(&fs::read(dialogue_workspace_path)?),
         codebook_assignment_sha1: assignment_sha1(&assignments),
+        text_signature: BattleTextSignature::from_source_indices(
+            PLAYER_NAME_SOURCE_INDEX,
+            ENEMY_NAME_SOURCE_INDEX,
+            CLASS_SOURCE_INDICES,
+            ITEM_SOURCE_INDICES,
+            TERRAIN_SOURCE_INDICES,
+        )?,
         glyph_count: assignments.len(),
         preserved_active_code_count: GAMEPLAY_BATTLE_PRESERVED_ACTIVE_CODES.len(),
         tracked_writes,
