@@ -4,6 +4,7 @@ use anyhow::{Context, Result, ensure};
 
 use crate::{
     chapter_transition::plan_chapter_titles,
+    class_profile::plan_class_profiles,
     dialogue_assets::{
         MainDialogueSlicePlan, plan_main_dialogue_slice, validate_main_dialogue_workspace,
     },
@@ -29,17 +30,21 @@ use super::{
 };
 
 mod chapter_page_selector;
+mod class_profile_runtime;
+mod class_profile_stage;
 mod front_end_stage;
 mod report;
 mod unit_name_stage;
 mod verify;
 
 use chapter_page_selector::{ChapterPageSequence, build_chapter_page_selector};
+use class_profile_runtime::verify_class_profile_runtime_evidence;
+use class_profile_stage::install_class_profile_stage;
 use front_end_stage::install_front_end_stage;
 use report::{
-    CumulativeChapterTitleReport, CumulativeDialogueLifetimeReport, CumulativeDialogueReport,
-    CumulativeFrontEndMenuReport, CumulativePatchReport, CumulativeStageReport,
-    CumulativeUnitNameReport, SelectorChainReport,
+    CumulativeChapterTitleReport, CumulativeClassProfileReport, CumulativeDialogueLifetimeReport,
+    CumulativeDialogueReport, CumulativeFrontEndMenuReport, CumulativePatchReport,
+    CumulativeStageReport, CumulativeUnitNameReport, SelectorChainReport,
 };
 use unit_name_stage::install_unit_name_stage;
 use verify::{install_chapter_title, install_dialogue_record, verify_cumulative_output};
@@ -49,6 +54,7 @@ const UI_STAGE_REPORT_NAME: &str = "mapper165-ui.json";
 const CHAPTER_ONE_STAGE_ROM_NAME: &str = "chapter1-intro.nes";
 const FRONT_END_STAGE_ROM_NAME: &str = "front-end-menu.nes";
 const UNIT_NAME_STAGE_ROM_NAME: &str = "unit-names.nes";
+const CLASS_PROFILE_STAGE_ROM_NAME: &str = "class-profiles.nes";
 const DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFBD4;
 const DIALOGUE_SELECTOR_CAVE_END: u16 = 0xFC20;
 const CHAPTER_ONE_DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFBD8;
@@ -82,10 +88,13 @@ pub(crate) struct CumulativePatchInputs<'a> {
     pub(crate) chapter_title_localization_path: &'a Path,
     pub(crate) front_end_menu_localization_path: &'a Path,
     pub(crate) unit_name_localization_path: &'a Path,
+    pub(crate) class_profile_localization_path: &'a Path,
     pub(crate) chapter_one_intro_evidence_path: &'a Path,
     pub(crate) chapter_two_intro_evidence_path: &'a Path,
     pub(crate) front_end_menu_evidence_path: &'a Path,
     pub(crate) unit_name_evidence_path: &'a Path,
+    pub(crate) class_profile_evidence_path: &'a Path,
+    pub(crate) class_profile_runtime_evidence_path: &'a Path,
     pub(crate) stage_directory: &'a Path,
     pub(crate) output_path: &'a Path,
     pub(crate) report_path: &'a Path,
@@ -115,6 +124,8 @@ pub(crate) fn build_cumulative_patch(
         "cumulative front-end menu scope no longer has seven entries"
     );
     let unit_name_plan = plan_unit_names(&source_rom, inputs.unit_name_localization_path)?;
+    let class_profile_plan =
+        plan_class_profiles(&source_rom, inputs.class_profile_localization_path)?;
 
     let ui_stage_rom_path = inputs.stage_directory.join(UI_STAGE_ROM_NAME);
     let ui_stage_report_path = inputs.stage_directory.join(UI_STAGE_REPORT_NAME);
@@ -450,11 +461,22 @@ pub(crate) fn build_cumulative_patch(
         &inputs.stage_directory.join(UNIT_NAME_STAGE_ROM_NAME),
         &unit_name_stage.output,
     )?;
-    let output = unit_name_stage.output;
+    let class_profile_stage = install_class_profile_stage(
+        &unit_name_stage.output,
+        &source_rom,
+        &class_profile_plan,
+        inputs.class_profile_evidence_path,
+    )?;
+    write_file(
+        &inputs.stage_directory.join(CLASS_PROFILE_STAGE_ROM_NAME),
+        &class_profile_stage.output,
+    )?;
+    let output = class_profile_stage.output;
     let output_rom = Rom::parse(output.clone()).context("parse cumulative Korean patch")?;
     let tracked_write_count = tracked_write_count
         + front_end_stage.tracked_write_count
-        + unit_name_stage.tracked_write_count;
+        + unit_name_stage.tracked_write_count
+        + class_profile_stage.tracked_write_count;
 
     let translated_line_count = chapter_one_plans
         .iter()
@@ -477,15 +499,26 @@ pub(crate) fn build_cumulative_patch(
     let installed_glyph_slot_count = installed_dialogue_glyph_slot_count
         + front_end_stage.page.assignments.len()
         + unit_name_stage.page.roster_assignments.len()
-        + unit_name_stage.page.unit_ui_assignments.len();
+        + unit_name_stage.page.unit_ui_assignments.len()
+        + class_profile_stage.page.assignments[0].len()
+        + class_profile_stage.page.assignments[1].len();
     let output_sha1 = sha1_hex(&output);
+    let class_profile_runtime = verify_class_profile_runtime_evidence(
+        inputs.class_profile_runtime_evidence_path,
+        &output_sha1,
+        class_profile_stage.page.mapper_registers[1],
+    )?;
     ensure!(
-        output_sha1 == unit_name_stage.output_sha1,
-        "unit-name stage output hash changed before publication"
+        sha1_hex(&unit_name_stage.output) == unit_name_stage.output_sha1,
+        "unit-name stage output hash changed before class-profile installation"
     );
     ensure!(
         sha1_hex(&front_end_stage.output) == front_end_stage.output_sha1,
         "front-end stage output hash changed before unit-name installation"
+    );
+    ensure!(
+        output_sha1 == class_profile_stage.output_sha1,
+        "class-profile stage output hash changed before publication"
     );
     let chapter_two_output_sha1 = sha1_hex(&chapter_two_output);
     let stages = vec![
@@ -512,6 +545,11 @@ pub(crate) fn build_cumulative_patch(
         CumulativeStageReport {
             role: "playable_unit_names_for_roster_and_unit_ui",
             output_sha1: unit_name_stage.output_sha1.clone(),
+            report_sha1: None,
+        },
+        CumulativeStageReport {
+            role: "automatic_class_profile_titles_and_descriptions",
+            output_sha1: class_profile_stage.output_sha1.clone(),
             report_sha1: None,
         },
     ];
@@ -626,6 +664,51 @@ pub(crate) fn build_cumulative_patch(
             runtime_bound_to_build: false,
             review_complete: unit_name_plan.review_complete,
         },
+        automatic_class_profiles: CumulativeClassProfileReport {
+            workspace_sha1: class_profile_plan.workspace_sha1.clone(),
+            workspace_entry_count: class_profile_plan.entries.len(),
+            installed_entry_count: class_profile_plan.entries.len(),
+            installed_description_line_count: class_profile_plan.description_line_count(),
+            installed_source_storage_byte_count: class_profile_plan
+                .entries
+                .iter()
+                .map(|entry| {
+                    entry.title_source_storage_byte_count
+                        + entry.description_source_storage_byte_count
+                })
+                .sum(),
+            installed_output_storage_byte_count: class_profile_stage
+                .encoded_titles
+                .iter()
+                .chain(&class_profile_stage.encoded_descriptions)
+                .map(Vec::len)
+                .sum(),
+            total_unique_glyph_count: class_profile_plan.unique_glyphs().len(),
+            page_unique_glyph_counts: [
+                class_profile_stage.page.assignments[0].len(),
+                class_profile_stage.page.assignments[1].len(),
+            ],
+            glyph_assignment_sha1s: [
+                assignment_sha1(&class_profile_stage.page.assignments[0]),
+                assignment_sha1(&class_profile_stage.page.assignments[1]),
+            ],
+            font_physical_pages: class_profile_stage.page.physical_pages,
+            font_mapper_registers: class_profile_stage.page.mapper_registers,
+            font_page_sha1s: class_profile_stage.page.page_sha1s.clone(),
+            font_page_pack_sha1: sha1_hex(&class_profile_stage.page.page_pack),
+            screen_evidence_manifest_sha1: class_profile_stage.page.evidence_manifest_sha1.clone(),
+            temporal_sample_count: class_profile_stage.page.temporal_sample_count,
+            unique_image_count: class_profile_stage.page.unique_image_count,
+            runtime_evidence_manifest_sha1: class_profile_runtime.manifest_sha1.clone(),
+            runtime_sample_count: class_profile_runtime.sample_count,
+            runtime_unique_image_count: class_profile_runtime.unique_image_count,
+            visible_code_count: class_profile_stage.page.visible_code_count,
+            preserved_active_code_count: class_profile_stage.page.preserved_active_code_count,
+            original_english_digits_and_ui_preserved: true,
+            profile_index_page_selector_installed: true,
+            runtime_bound_to_build: true,
+            review_complete: class_profile_plan.review_complete,
+        },
         selector_chain: vec![
             SelectorChainReport {
                 role: "unit_roster",
@@ -657,11 +740,13 @@ pub(crate) fn build_cumulative_patch(
         translation_input_complete: dialogue_workspace.translation_input_complete
             && chapter_title_plan.translated_entry_count == chapter_title_plan.entry_count
             && front_end_menu_plan.entries.len() == 7
-            && unit_name_plan.entries.len() == 52,
+            && unit_name_plan.entries.len() == 52
+            && class_profile_plan.entries.len() == 22,
         review_complete: dialogue_workspace.review_complete
             && chapter_title_plan.review_complete
             && front_end_menu_plan.review_complete
-            && unit_name_plan.review_complete,
+            && unit_name_plan.review_complete
+            && class_profile_plan.review_complete,
         runtime_verified: false,
         unresolved: vec![
             "The translated Chapter 1 and Chapter 2 title bars need cold-route runtime regression together with every installed dialogue page and natural map restoration.",
@@ -793,6 +878,10 @@ mod tests {
         assert_eq!(
             directory.join(UNIT_NAME_STAGE_ROM_NAME),
             PathBuf::from("out/cumulative-stages/unit-names.nes")
+        );
+        assert_eq!(
+            directory.join(CLASS_PROFILE_STAGE_ROM_NAME),
+            PathBuf::from("out/cumulative-stages/class-profiles.nes")
         );
     }
 }

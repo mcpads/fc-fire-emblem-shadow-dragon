@@ -1,0 +1,621 @@
+{
+  "format_version": 1,
+  "source_sha1": "0179c550d424e0397496078789e7b116601d120c",
+  "translate_from": "ja",
+  "translate_to": "ko",
+  "preserve_existing_english_and_digits": true,
+  "entries": [
+    {
+      "id": "class-profile:00",
+      "profile_index": 0,
+      "title_pointer_cpu_address_hex": "0x8CC4",
+      "title_source_file_offset_hex": "0x34CD4",
+      "title_source_storage_byte_count": 17,
+      "title_source_bytes_hex": "3E 3B 30 5A FF 45 31 44 FF BD 7C 9B 45 31 44 BE ED",
+      "title_source_sha1": "69e901dff51a386bfa24882bf4b51d89695f90d3",
+      "japanese_title_markup": "ソシアル{FF}ナイト{FF}{BD}S.ナイト{BE}",
+      "korean_title_markup": "소셜{FF}나이트{FF}{BD}S.나이트{BE}",
+      "description_pointer_cpu_address_hex": "0x8DF8",
+      "description_source_file_offset_hex": "0x34E08",
+      "description_source_storage_byte_count": 87,
+      "description_source_bytes_hex": "27 2C 01 2E 20 14 85 10 02 20 2E FF 0B 0F 0A 0F 01 16 00 25 12 29 ED 01 14 0F 02 29 87 07 16 FF 0C 07 0F 2B 2A 8F ED 09 02 08 0F 06 8E 0B 86 1B 0F 29 87 07 8E 3C 4B 1F 3F 44 0F 16 FF 24 85 14 24 ED 4A 0F 58 5F 3C 19 14 2B 10 FF 56 46 89 44 13 0F 00 2A 8F ED EF",
+      "description_source_sha1": "197855a7016d4993cea953e40a266c835a75bc00",
+      "japanese_description_lines": [
+        "よろいをまとったうまを{FF}し゛さ゛いにあやつり",
+        "いと゛うりょくに{FF}すく゛れる。",
+        "こうけ゛き、しゅひ゛りょく、スヒ゜ート゛に{FF}もっとも",
+        "ハ゛ランスのとれた{FF}ユニットて゛ある。"
+      ],
+      "korean_description_lines": [
+        "갑옷을{FF}입힌{FF}말을{FF}자유자재로{FF}다루며",
+        "이동력이{FF}뛰어나다{8F}",
+        "공격력{8E}{FF}수비력{8E}{FF}속도가{FF}가장",
+        "균형{FF}잡힌{FF}유닛이다{8F}"
+      ],
+      "status": "needs_human_review"
+    },
+    {
+      "id": "class-profile:01",
+      "profile_index": 1,
+      "title_pointer_cpu_address_hex": "0x8CD5",
+      "title_source_file_offset_hex": "0x34CE5",
+      "title_source_storage_byte_count": 17,
+      "title_source_bytes_hex": "30 3F 50 3F FF 45 31 44 FF BD 6A 9B 45 31 44 BE ED",
+      "title_source_sha1": "32e1ba4c22e07782dd2e009fb63f014ff73aead3",
+      "japanese_title_markup": "アーマー{FF}ナイト{FF}{BD}A.ナイト{BE}",
+      "korean_title_markup": "아머{FF}나이트{FF}{BD}A.나이트{BE}",
+      "description_pointer_cpu_address_hex": "0x8E4F",
+      "description_source_file_offset_hex": "0x34E5F",
+      "description_source_storage_byte_count": 75,
+      "description_source_bytes_hex": "04 24 01 27 2C 01 13 0F FF 21 2E 05 10 23 13 01 2A 10 23 FF 0B 86 1B 0F 29 87 07 ED 16 0C 07 0F 2B 2A 8F ED 0B 05 0B FF 0E 19 1C 0F 2F 02 09 0F 06 05 0F 04 24 07 FF 0C 1A 0F 25 0A ED 01 14 0F 02 29 87 07 16 04 14 2A 8F ED EF",
+      "description_source_sha1": "b6360b83187f0b6b49f638415447dc9ce6d6efb4",
+      "japanese_description_lines": [
+        "おもいよろいて゛{FF}みをかためているため{FF}しゅひ゛りょく",
+        "にすく゛れる。",
+        "しかし{FF}そのふ゛んうこ゛きか゛おもく{FF}すは゛やさ",
+        "いと゛うりょくにおとる。"
+      ],
+      "korean_description_lines": [
+        "무거운{FF}갑옷으로{FF}몸을{FF}굳혀{FF}수비력이",
+        "뛰어나다{8F}",
+        "하지만{FF}그만큼{FF}움직임이{FF}무거워{FF}속도와",
+        "이동력이{FF}낮다{8F}"
+      ],
+      "status": "needs_human_review"
+    },
+    {
+      "id": "class-profile:02",
+      "profile_index": 2,
+      "title_pointer_cpu_address_hex": "0x8CE6",
+      "title_source_file_offset_hex": "0x34CF6",
+      "title_source_storage_byte_count": 19,
+      "title_source_bytes_hex": "4D 1F 35 0F 3A 3C FF 45 31 44 FF BD 79 9B 45 31 44 BE ED",
+      "title_source_sha1": "39d16dfe64deb399f9cc2b01847fa5bf2d69d87d",
+      "japanese_title_markup": "ヘ゜カ゛サス{FF}ナイト{FF}{BD}P.ナイト{BE}",
+      "korean_title_markup": "페가수스{FF}나이트{FF}{BD}P.나이트{BE}",
+      "description_pointer_cpu_address_hex": "0x8E9A",
+      "description_source_file_offset_hex": "0x34EAA",
+      "description_source_storage_byte_count": 57,
+      "description_source_bytes_hex": "4D 1F 35 0F 3A 3C 16 19 85 10 FF 06 0B 13 0F FF 01 14 0F 02 29 87 07 8E ED 0C 1A 0F 25 0A 16 FF 0C 07 0F 2B 2A 8F ED 26 21 19 FF 09 02 08 0F 06 16 1A FF 27 2D 01 8F ED EF",
+      "description_source_sha1": "c38e95cde64ff191c3faaad87a5484c8f8a31b0a",
+      "japanese_description_lines": [
+        "ヘ゜カ゛サスにのった{FF}きして゛{FF}いと゛うりょく、",
+        "すは゛やさに{FF}すく゛れる。",
+        "ゆみの{FF}こうけ゛きには{FF}よわい。"
+      ],
+      "korean_description_lines": [
+        "페가수스를{FF}탄{FF}기사로{FF}이동력{8E}",
+        "속도가{FF}뛰어나다{8F}",
+        "활{FF}공격에{FF}약하다{8F}"
+      ],
+      "status": "needs_human_review"
+    },
+    {
+      "id": "class-profile:03",
+      "profile_index": 3,
+      "title_pointer_cpu_address_hex": "0x8CF9",
+      "title_source_file_offset_hex": "0x34D09",
+      "title_source_storage_byte_count": 13,
+      "title_source_bytes_hex": "FF FF FF FF FF 4A 1F 58 43 0F A7 5F ED",
+      "title_source_sha1": "c8bb213c42d150543515dd5250d1e0b9a1509c0a",
+      "japanese_title_markup": "{FF}{FF}{FF}{FF}{FF}ハ゜ラテ゛ィン",
+      "korean_title_markup": "{FF}{FF}{FF}{FF}{FF}팔라딘",
+      "description_pointer_cpu_address_hex": "0x8ED3",
+      "description_source_file_offset_hex": "0x34EE3",
+      "description_source_storage_byte_count": 76,
+      "description_source_bytes_hex": "08 01 08 2F 2E 12 2F 10 0F FF 7C 9B 45 31 44 05 0F FF 4A 1F 58 43 0F A7 5F 16 ED 0B 87 02 05 07 0C 2A 8F ED 0C 1D 0F 13 19 FF 19 02 29 87 07 16 04 01 13 FF 7C 9B 45 31 44 27 29 ED 1B 14 20 2D 29 FF 0C 07 0F 2B 13 01 2A 8F ED EF",
+      "description_source_sha1": "1e2c1b95aab2f47ddb1f7278aa1acd7e77892ec9",
+      "japanese_description_lines": [
+        "けいけんをつんた゛{FF}S.ナイトか゛{FF}ハ゜ラテ゛ィンに",
+        "しょうかくする。",
+        "すへ゛ての{FF}のうりょくにおいて{FF}S.ナイトより",
+        "ひとまわり{FF}すく゛れている。"
+      ],
+      "korean_description_lines": [
+        "경험을{FF}쌓은{FF}S.나이트가{FF}팔라딘으로",
+        "승급한다{8F}",
+        "모든{FF}능력이{FF}S.나이트보다",
+        "한층{FF}뛰어나다{8F}"
+      ],
+      "status": "needs_human_review"
+    },
+    {
+      "id": "class-profile:04",
+      "profile_index": 4,
+      "title_pointer_cpu_address_hex": "0x8D06",
+      "title_source_file_offset_hex": "0x34D16",
+      "title_source_storage_byte_count": 19,
+      "title_source_bytes_hex": "44 0F 58 39 0F 5F FF 45 31 44 FF BD 6D 9B 45 31 44 BE ED",
+      "title_source_sha1": "0872f984d5971d604c4a06b5b7569c9628f97916",
+      "japanese_title_markup": "ト゛ラコ゛ン{FF}ナイト{FF}{BD}D.ナイト{BE}",
+      "korean_title_markup": "드래곤{FF}나이트{FF}{BD}D.나이트{BE}",
+      "description_pointer_cpu_address_hex": "0x8F1F",
+      "description_source_file_offset_hex": "0x34F2F",
+      "description_source_storage_byte_count": 79,
+      "description_source_bytes_hex": "08 01 08 2F 2E 12 2F 10 0F 79 45 31 44 05 0F FF 4D 1F 35 0F 3A 3C 05 28 ED 1B 29 86 02 16 FF 19 29 05 03 10 24 19 13 0F FF 26 21 01 05 0F 01 19 FF 1C 0F 06 16 ED 10 01 0B 13 1A FF 00 85 14 02 13 06 15 FF 12 27 0A 2E FF 1E 09 2A 8F ED EF",
+      "description_source_sha1": "7a96898fc542b12b1c0a24b1f3fd44216de37ea2",
+      "japanese_description_lines": [
+        "けいけんをつんた゛Pナイトか゛{FF}ヘ゜カ゛サスから",
+        "ひりゅうに{FF}のりかえたものて゛{FF}ゆみいか゛いの{FF}ふ゛きに",
+        "たいしては{FF}あっとうてきな{FF}つよさを{FF}ほこる。"
+      ],
+      "korean_description_lines": [
+        "경험을{FF}쌓은{FF}P나이트가{FF}페가수스에서",
+        "비룡으로{FF}갈아탄{FF}병종으로{FF}활{FF}이외{FF}무기에",
+        "압도적인{FF}강함을{FF}자랑한다{8F}"
+      ],
+      "status": "needs_human_review"
+    },
+    {
+      "id": "class-profile:05",
+      "profile_index": 5,
+      "title_pointer_cpu_address_hex": "0x8D19",
+      "title_source_file_offset_hex": "0x34D29",
+      "title_source_storage_byte_count": 10,
+      "title_source_bytes_hex": "FF FF FF FF FF 27 02 1D 01 ED",
+      "title_source_sha1": "1b5ecb6144f121033a0a9dec26d456b50ef6c7d4",
+      "japanese_title_markup": "{FF}{FF}{FF}{FF}{FF}ようへい",
+      "korean_title_markup": "{FF}{FF}{FF}{FF}{FF}용병",
+      "description_pointer_cpu_address_hex": "0x8F6E",
+      "description_source_file_offset_hex": "0x34F7E",
+      "description_source_storage_byte_count": 73,
+      "description_source_bytes_hex": "27 02 1D 01 8E 27 02 0B 0F 2F 1E 0F 02 15 14 0F 2E FF 0B 09 0F 14 14 0C 2A ED 0D 2F 14 02 19 FF 4C 1F 5C 8F ED 2D 0A 0F 8E 0C 1A 0F 25 0A 16 0C 07 0F 2B FF 1B 85 0A 12 19 01 11 08 0F 06 2E ED 14 07 01 14 0C 2A 8F ED EF",
+      "description_source_sha1": "611d47f335b842f8fe20af6cd1edee27127c9250",
+      "japanese_description_lines": [
+        "ようへい、ようし゛んほ゛うなと゛を{FF}しこ゛ととする",
+        "せんとうの{FF}フ゜ロ。",
+        "わさ゛、すは゛やさにすく゛れ{FF}ひっさつのいちけ゛きを",
+        "とくいとする。"
+      ],
+      "korean_description_lines": [
+        "용병{8E}{FF}호위{FF}등을{FF}업으로{FF}삼는",
+        "전투의{FF}프로{8F}",
+        "기술{8E}{FF}속도가{FF}뛰어나며{FF}필살의{FF}일격을",
+        "특기다{8F}"
+      ],
+      "status": "needs_human_review"
+    },
+    {
+      "id": "class-profile:06",
+      "profile_index": 6,
+      "title_pointer_cpu_address_hex": "0x8D23",
+      "title_source_file_offset_hex": "0x34D33",
+      "title_source_storage_byte_count": 9,
+      "title_source_bytes_hex": "FF FF FF FF FF 0D 2F 0B ED",
+      "title_source_sha1": "af38eb2b6d5a7892229be98f5513eb95db0feab7",
+      "japanese_title_markup": "{FF}{FF}{FF}{FF}{FF}せんし",
+      "korean_title_markup": "{FF}{FF}{FF}{FF}{FF}전사",
+      "description_pointer_cpu_address_hex": "0x8FB7",
+      "description_source_file_offset_hex": "0x34FC7",
+      "description_source_storage_byte_count": 61,
+      "description_source_bytes_hex": "1D 2F 06 87 02 19 07 16 19 FF 1C 0F 0E 0F 07 1D 01 13 0F FF 04 19 2E ED 24 11 01 13 10 10 05 02 8F ED 11 05 28 1A FF 12 27 01 05 0F FF 0B 86 1B 0F 29 87 07 05 0F FF 27 2D 01 8F ED EF",
+      "description_source_sha1": "b5c796193cad96ea9aa1a4276b45ba9df9c0d5d3",
+      "japanese_description_lines": [
+        "へんきょうのくにの{FF}ふ゛そ゛くへいて゛{FF}おのを",
+        "もちいてたたかう。",
+        "ちからは{FF}つよいか゛{FF}しゅひ゛りょくか゛{FF}よわい。"
+      ],
+      "korean_description_lines": [
+        "변경{FF}국가의{FF}부족병으로{FF}도끼를",
+        "사용해{FF}싸운다{8F}",
+        "힘은{FF}강하지만{FF}수비력이{FF}낮다{8F}"
+      ],
+      "status": "needs_human_review"
+    },
+    {
+      "id": "class-profile:07",
+      "profile_index": 7,
+      "title_pointer_cpu_address_hex": "0x8D2C",
+      "title_source_file_offset_hex": "0x34D3C",
+      "title_source_storage_byte_count": 11,
+      "title_source_bytes_hex": "FF FF FF FF FF 05 01 0E 0F 07 ED",
+      "title_source_sha1": "4668f86a4a100b7e77f0cf98accc0781eb01f8d3",
+      "japanese_title_markup": "{FF}{FF}{FF}{FF}{FF}かいそ゛く",
+      "korean_title_markup": "{FF}{FF}{FF}{FF}{FF}해적",
+      "description_pointer_cpu_address_hex": "0x8FF4",
+      "description_source_file_offset_hex": "0x35004",
+      "description_source_storage_byte_count": 50,
+      "description_source_bytes_hex": "0D 2F 0B 14 FF 04 15 0B 0F 07 FF 04 19 2E FF 12 05 02 8F ED ED 05 01 0E 0F 07 10 0F 08 05 0F FF 02 21 19 02 03 2E FF 01 14 0F 02 13 0F 06 2A 8F ED EF",
+      "description_source_sha1": "d98eaa7bbb3f1fe2913e2c72d833dfd29010afbe",
+      "japanese_description_lines": [
+        "せんしと{FF}おなし゛く{FF}おのを{FF}つかう。",
+        "",
+        "かいそ゛くた゛けか゛{FF}うみのうえを{FF}いと゛うて゛きる。"
+      ],
+      "korean_description_lines": [
+        "전사처럼{FF}도끼를{FF}쓴다{8F}",
+        "",
+        "해적만{FF}바다{FF}위를{FF}이동할{FF}수{FF}있다{8F}"
+      ],
+      "status": "needs_human_review"
+    },
+    {
+      "id": "class-profile:08",
+      "profile_index": 8,
+      "title_pointer_cpu_address_hex": "0x8D37",
+      "title_source_file_offset_hex": "0x34D47",
+      "title_source_storage_byte_count": 11,
+      "title_source_bytes_hex": "FF FF FF FF FF 14 02 0E 0F 07 ED",
+      "title_source_sha1": "f46852c4ab0dcad32371c7059da73fffb0fadd6d",
+      "japanese_title_markup": "{FF}{FF}{FF}{FF}{FF}とうそ゛く",
+      "korean_title_markup": "{FF}{FF}{FF}{FF}{FF}도적",
+      "description_pointer_cpu_address_hex": "0x9026",
+      "description_source_file_offset_hex": "0x35036",
+      "description_source_storage_byte_count": 64,
+      "description_source_bytes_hex": "14 14 02 2E 07 2F 13 0F FF 22 28 15 14 0F 2E FF 1A 05 01 0C 2A 8F ED 0D 2F 14 02 29 87 07 1A FF 14 1E 0F 0B 01 05 0F FF 10 05 28 1A 0F 09 2E ED 00 08 2A 19 02 29 87 07 05 0F FF 00 2A 8F ED EF",
+      "description_source_sha1": "f6804349310b2c2d480db3e254c5ebed92eddc0d",
+      "japanese_description_lines": [
+        "ととうをくんて゛{FF}むらなと゛を{FF}はかいする。",
+        "せんとうりょくは{FF}とほ゛しいか゛{FF}たからは゛こを",
+        "あけるのうりょくか゛{FF}ある。"
+      ],
+      "korean_description_lines": [
+        "떼를{FF}지어{FF}마을{FF}등을{FF}파괴한다{8F}",
+        "전투력은{FF}낮지만{FF}보물{FF}상자를",
+        "열{FF}수{FF}있다{8F}"
+      ],
+      "status": "needs_human_review"
+    },
+    {
+      "id": "class-profile:09",
+      "profile_index": 9,
+      "title_pointer_cpu_address_hex": "0x8D42",
+      "title_source_file_offset_hex": "0x34D52",
+      "title_source_storage_byte_count": 10,
+      "title_source_bytes_hex": "FF FF FF FF FF 26 02 0B 84 ED",
+      "title_source_sha1": "74c483173a0ea8a1bcaf1f407aa2df29385797ea",
+      "japanese_title_markup": "{FF}{FF}{FF}{FF}{FF}ゆうしゃ",
+      "korean_title_markup": "{FF}{FF}{FF}{FF}{FF}용사",
+      "description_pointer_cpu_address_hex": "0x9066",
+      "description_source_file_offset_hex": "0x35076",
+      "description_source_storage_byte_count": 78,
+      "description_source_bytes_hex": "08 2F 19 23 01 0B 86 13 0F FF 0C 1A 0F 25 01 02 09 0F 06 14 ED 01 11 08 0F 06 1B 85 0A 12 19 2D 0A 0F 2E FF 24 12 8F ED 26 02 0B 86 02 15 FF 27 02 1D 01 05 0F FF 23 01 0D 01 2E FF 03 13 ED 26 02 0B 84 14 15 2A 09 14 24 00 2A 8F ED EF",
+      "description_source_sha1": "b8af4b620e42f072cd44620f53798878dfb4e66f",
+      "japanese_description_lines": [
+        "けんのめいしゅて゛{FF}すは゛やいうこ゛きと",
+        "いちけ゛きひっさつのわさ゛を{FF}もつ。",
+        "ゆうしゅうな{FF}ようへいか゛{FF}めいせいを{FF}えて",
+        "ゆうしゃとなることもある。"
+      ],
+      "korean_description_lines": [
+        "검의{FF}명수로{FF}빠른{FF}움직임과",
+        "필살의{FF}기술을{FF}지녔다{8F}",
+        "뛰어난{FF}용병이{FF}명성을{FF}얻어",
+        "용사가{FF}되기도{FF}한다{8F}"
+      ],
+      "status": "needs_human_review"
+    },
+    {
+      "id": "class-profile:10",
+      "profile_index": 10,
+      "title_pointer_cpu_address_hex": "0x8D4C",
+      "title_source_file_offset_hex": "0x34D5C",
+      "title_source_storage_byte_count": 11,
+      "title_source_bytes_hex": "FF FF FF FF FF 30 3F 41 88 3F ED",
+      "title_source_sha1": "80242bd52423a15f65fc70a2ed3767a0c19568d4",
+      "japanese_title_markup": "{FF}{FF}{FF}{FF}{FF}アーチャー",
+      "korean_title_markup": "{FF}{FF}{FF}{FF}{FF}아처",
+      "description_pointer_cpu_address_hex": "0x90B4",
+      "description_source_file_offset_hex": "0x350C4",
+      "description_source_storage_byte_count": 64,
+      "description_source_bytes_hex": "27 2C 01 2E FF 20 14 85 10 FF 26 21 1D 01 13 0F FF 0B 86 1B 0F 29 87 07 05 0F ED 10 05 01 8F ED 10 10 0F FF 02 09 0F 06 05 0F 16 1C 0F 01 10 23 FF 06 14 0F 02 29 87 07 16 FF 04 14 2A 8F ED EF",
+      "description_source_sha1": "f35127ac9fb67862000286fe0d7403c5ab9fe1df",
+      "japanese_description_lines": [
+        "よろいを{FF}まとった{FF}ゆみへいて゛{FF}しゅひ゛りょくか゛",
+        "たかい。",
+        "たた゛{FF}うこ゛きか゛にふ゛いため{FF}きと゛うりょくに{FF}おとる。"
+      ],
+      "korean_description_lines": [
+        "갑옷을{FF}입은{FF}궁병으로{FF}수비력이",
+        "높다{8F}",
+        "하지만{FF}움직임이{FF}둔해{FF}이동력이{FF}낮다{8F}"
+      ],
+      "status": "needs_human_review"
+    },
+    {
+      "id": "class-profile:11",
+      "profile_index": 11,
+      "title_pointer_cpu_address_hex": "0x8D57",
+      "title_source_file_offset_hex": "0x34D67",
+      "title_source_storage_byte_count": 10,
+      "title_source_bytes_hex": "FF FF FF FF FF 4A 5F 40 3F ED",
+      "title_source_sha1": "73409512310b6effaa8ba5749fc39888aa82eb5c",
+      "japanese_title_markup": "{FF}{FF}{FF}{FF}{FF}ハンター",
+      "korean_title_markup": "{FF}{FF}{FF}{FF}{FF}헌터",
+      "description_pointer_cpu_address_hex": "0x90F4",
+      "description_source_file_offset_hex": "0x35104",
+      "description_source_storage_byte_count": 68,
+      "description_source_bytes_hex": "08 01 0E 02 1B 0F 19 FF 26 21 1D 01 13 0F FF 24 29 25 FF 25 20 13 0F 19 ED 10 10 05 01 2E FF 14 07 01 14 0C 2A 8F ED 11 05 28 1A FF 12 27 01 05 0F FF 0B 86 1B 0F 29 87 07 05 0F FF 14 1E 0F 0B 01 8F ED EF",
+      "description_source_sha1": "19436ed306e309341b6a1e2b6a651173cf3665ba",
+      "japanese_description_lines": [
+        "けいそうひ゛の{FF}ゆみへいて゛{FF}もりや{FF}やまて゛の",
+        "たたかいを{FF}とくいとする。",
+        "ちからは{FF}つよいか゛{FF}しゅひ゛りょくか゛{FF}とほ゛しい。"
+      ],
+      "korean_description_lines": [
+        "경장{FF}궁병으로{FF}숲과{FF}산에서의",
+        "전투가{FF}특기다{8F}",
+        "힘은{FF}강하지만{FF}수비력이{FF}낮다{8F}"
+      ],
+      "status": "needs_human_review"
+    },
+    {
+      "id": "class-profile:12",
+      "profile_index": 12,
+      "title_pointer_cpu_address_hex": "0x8D61",
+      "title_source_file_offset_hex": "0x34D71",
+      "title_source_storage_byte_count": 11,
+      "title_source_bytes_hex": "FF FF FF FF FF 3B 8A 3F 40 3F ED",
+      "title_source_sha1": "67acd2a42ff4ec1c3d817fe29e760a0bc3b50c1a",
+      "japanese_title_markup": "{FF}{FF}{FF}{FF}{FF}シューター",
+      "korean_title_markup": "{FF}{FF}{FF}{FF}{FF}슈터",
+      "description_pointer_cpu_address_hex": "0x9138",
+      "description_source_file_offset_hex": "0x35148",
+      "description_source_storage_byte_count": 87,
+      "description_source_bytes_hex": "14 02 0D 06 06 25 FF 14 0F 06 86 02 15 14 0F FF 14 07 0B 86 15 0B 03 2F 1C 0F 06 2E ED 12 05 02 FF 56 46 89 44 8F ED 10 05 01 0B 86 1B 0F 29 87 07 14 FF 06 87 10 0F 01 15 FF 1A 05 01 29 87 07 2E ED 00 2D 0D 24 12 05 0F FF 02 09 0F 06 1A FF 16 1C 0F 01 8F ED EF",
+      "description_source_sha1": "371e111e8f1a0697a13adf29a59854d78a522904",
+      "japanese_description_lines": [
+        "とうせききや{FF}と゛きゅうなと゛{FF}とくしゅなしえんふ゛きを",
+        "つかう{FF}ユニット。",
+        "たかいしゅひ゛りょくと{FF}きょた゛いな{FF}はかいりょくを",
+        "あわせもつか゛{FF}うこ゛きは{FF}にふ゛い。"
+      ],
+      "korean_description_lines": [
+        "투석기와{FF}노포{FF}같은{FF}특수{FF}지원{FF}무기를",
+        "쓰는{FF}유닛{8F}",
+        "높은{FF}수비력과{FF}막강한{FF}파괴력을",
+        "겸비했지만{FF}움직임은{FF}둔하다{8F}"
+      ],
+      "status": "needs_human_review"
+    },
+    {
+      "id": "class-profile:13",
+      "profile_index": 13,
+      "title_pointer_cpu_address_hex": "0x8D6C",
+      "title_source_file_offset_hex": "0x34D7C",
+      "title_source_storage_byte_count": 11,
+      "title_source_bytes_hex": "FF FF FF FF FF 4E 3F 3C 53 5F ED",
+      "title_source_sha1": "034daa51f017a3fc5180156873d5c9dfba9487e2",
+      "japanese_title_markup": "{FF}{FF}{FF}{FF}{FF}ホースメン",
+      "korean_title_markup": "{FF}{FF}{FF}{FF}{FF}호스맨",
+      "description_pointer_cpu_address_hex": "0x918F",
+      "description_source_file_offset_hex": "0x3519F",
+      "description_source_storage_byte_count": 69,
+      "description_source_bytes_hex": "06 1A 0F 0B 0F 87 02 13 0F FF 26 21 2E 12 05 02 10 23 FF 0C 1A 0F 25 0A 14 ED 01 14 0F 02 29 87 07 05 0F 10 05 01 8F ED 01 11 08 0F 06 29 10 0F 12 2E FF 14 07 01 14 0C 2A FF 56 46 89 44 13 0F 00 2A 8F ED EF",
+      "description_source_sha1": "244e59a1ea74d25a98b8ab8625b714071075d3ac",
+      "japanese_description_lines": [
+        "きは゛し゛ょうて゛{FF}ゆみをつかうため{FF}すは゛やさと",
+        "いと゛うりょくか゛たかい。",
+        "いちけ゛きりた゛つを{FF}とくいとする{FF}ユニットて゛ある。"
+      ],
+      "korean_description_lines": [
+        "기마{FF}상태로{FF}활을{FF}써{FF}속도와",
+        "이동력이{FF}높다{8F}",
+        "치고{FF}빠지는{FF}전법이{FF}특기인{FF}유닛이다{8F}"
+      ],
+      "status": "needs_human_review"
+    },
+    {
+      "id": "class-profile:14",
+      "profile_index": 14,
+      "title_pointer_cpu_address_hex": "0x8D77",
+      "title_source_file_offset_hex": "0x34D87",
+      "title_source_storage_byte_count": 12,
+      "title_source_bytes_hex": "FF FF FF FF FF 3C 45 31 4A 1F 3F ED",
+      "title_source_sha1": "d1b1abe00603cfb2c88fecd66666779074770ba1",
+      "japanese_title_markup": "{FF}{FF}{FF}{FF}{FF}スナイハ゜ー",
+      "korean_title_markup": "{FF}{FF}{FF}{FF}{FF}스나이퍼",
+      "description_pointer_cpu_address_hex": "0x91D4",
+      "description_source_file_offset_hex": "0x351E4",
+      "description_source_storage_byte_count": 60,
+      "description_source_bytes_hex": "08 01 08 2F 2E 12 2F 10 0F 30 3F 41 88 3F 05 0F FF 0B 87 02 05 07 0C 2A 8F ED 26 21 2E FF 00 12 05 02 09 14 16 05 08 13 1A FF 0A 01 06 87 02 19 ED 56 46 89 44 13 0F 00 2A 8F ED EF",
+      "description_source_sha1": "447e26e531613fff80c18dcdf56eed89d532768c",
+      "japanese_description_lines": [
+        "けいけんをつんた゛アーチャーか゛{FF}しょうかくする。",
+        "ゆみを{FF}あつかうことにかけては{FF}さいきょうの",
+        "ユニットて゛ある。"
+      ],
+      "korean_description_lines": [
+        "경험을{FF}쌓은{FF}아처가{FF}승급한다{8F}",
+        "활을{FF}다루는{FF}데는{FF}최강의",
+        "유닛이다{8F}"
+      ],
+      "status": "needs_human_review"
+    },
+    {
+      "id": "class-profile:15",
+      "profile_index": 15,
+      "title_pointer_cpu_address_hex": "0x8D83",
+      "title_source_file_offset_hex": "0x34D93",
+      "title_source_storage_byte_count": 11,
+      "title_source_bytes_hex": "FF FF FF FF FF 39 50 5F 44 0F ED",
+      "title_source_sha1": "6cae874b73193366d9f6ce4ca37c44e264bdfd25",
+      "japanese_title_markup": "{FF}{FF}{FF}{FF}{FF}コマント゛",
+      "korean_title_markup": "{FF}{FF}{FF}{FF}{FF}코만도",
+      "description_pointer_cpu_address_hex": "0x9210",
+      "description_source_file_offset_hex": "0x35220",
+      "description_source_storage_byte_count": 58,
+      "description_source_bytes_hex": "0D 2F 14 02 29 87 07 1A FF 14 1E 0F 0B 01 05 0F FF 1E 05 19 15 05 20 16 24 ED 1D 2F 0B 2F 13 0F 06 2A 14 01 02 FF 14 07 0B 86 15 19 02 29 87 07 2E ED 24 85 13 01 2A 8F ED EF",
+      "description_source_sha1": "d01460253181f8be4fbec82692856e43c8363c3e",
+      "japanese_description_lines": [
+        "せんとうりょくは{FF}とほ゛しいか゛{FF}ほかのなかまにも",
+        "へんしんて゛きるという{FF}とくしゅなのうりょくを",
+        "もっている。"
+      ],
+      "korean_description_lines": [
+        "전투력은{FF}낮지만{FF}다른{FF}동료로도",
+        "변신할{FF}수{FF}있는{FF}특수{FF}능력을",
+        "지녔다{8F}"
+      ],
+      "status": "needs_human_review"
+    },
+    {
+      "id": "class-profile:16",
+      "profile_index": 16,
+      "title_pointer_cpu_address_hex": "0x8D8E",
+      "title_source_file_offset_hex": "0x34D9E",
+      "title_source_storage_byte_count": 11,
+      "title_source_bytes_hex": "FF FF FF FF FF 50 52 37 3F 44 ED",
+      "title_source_sha1": "fa41a839b4438ae4111b6b0376a7a28bbcbc79fa",
+      "japanese_title_markup": "{FF}{FF}{FF}{FF}{FF}マムクート",
+      "korean_title_markup": "{FF}{FF}{FF}{FF}{FF}맘쿠트",
+      "description_pointer_cpu_address_hex": "0x924A",
+      "description_source_file_offset_hex": "0x3525A",
+      "description_source_storage_byte_count": 77,
+      "description_source_bytes_hex": "44 0F 58 39 0F 5F 16 FF 1D 2F 0B 2F 0C 2A 14 01 2D 2B 2A FF 13 0F 2F 0D 12 19 ED 0B 86 0E 0F 07 13 0F FF 05 12 13 1A FF 0E 19 06 87 02 10 0F 01 15 11 05 28 13 0F ED 0D 05 01 2E FF 0D 01 1C 07 0B 10 14 FF 12 10 03 28 2B 2A 8F ED EF",
+      "description_source_sha1": "abd83bfb5dde16c5ff89bac53d9e492d35d938c5",
+      "japanese_description_lines": [
+        "ト゛ラコ゛ンに{FF}へんしんするといわれる{FF}て゛んせつの",
+        "しゅそ゛くて゛{FF}かつては{FF}そのきょうた゛いなちからて゛",
+        "せかいを{FF}せいふくしたと{FF}つたえられる。"
+      ],
+      "korean_description_lines": [
+        "드래곤으로{FF}변신한다고{FF}전해지는",
+        "전설의{FF}종족으로{FF}한때{FF}그{FF}강대한{FF}힘으로",
+        "세계를{FF}정복했다고{FF}한다{8F}"
+      ],
+      "status": "needs_human_review"
+    },
+    {
+      "id": "class-profile:17",
+      "profile_index": 17,
+      "title_pointer_cpu_address_hex": "0x8D99",
+      "title_source_file_offset_hex": "0x34DA9",
+      "title_source_storage_byte_count": 11,
+      "title_source_bytes_hex": "FF FF FF FF FF 20 14 0F 02 0B ED",
+      "title_source_sha1": "0940a97a92c91cd3e10b9adeac27d9f319e3ea58",
+      "japanese_title_markup": "{FF}{FF}{FF}{FF}{FF}まと゛うし",
+      "korean_title_markup": "{FF}{FF}{FF}{FF}{FF}마도사",
+      "description_pointer_cpu_address_hex": "0x9297",
+      "description_source_file_offset_hex": "0x352A7",
+      "description_source_storage_byte_count": 67,
+      "description_source_bytes_hex": "20 14 0F 02 0B 87 2E 24 11 01 13 FF 05 07 0B 86 19 09 02 08 0F 06 20 1E 02 2E ED 12 05 02 8F ED 1E 0F 02 06 0F 87 29 87 07 19 FF 10 05 01 56 46 89 44 16 10 01 0B 13 ED 26 02 09 02 13 0F 00 2A 8F ED EF",
+      "description_source_sha1": "35b4216a93f717e14446774b839948a4029ae61e",
+      "japanese_description_lines": [
+        "まと゛うしょをもちいて{FF}かくしゅのこうけ゛きまほうを",
+        "つかう。",
+        "ほ゛うき゛ょりょくの{FF}たかいユニットにたいして",
+        "ゆうこうて゛ある。"
+      ],
+      "korean_description_lines": [
+        "마도서를{FF}사용해{FF}여러{FF}공격{FF}마법을",
+        "쓴다{8F}",
+        "수비력이{FF}높은{FF}유닛에게",
+        "효과적이다{8F}"
+      ],
+      "status": "needs_human_review"
+    },
+    {
+      "id": "class-profile:18",
+      "profile_index": 18,
+      "title_pointer_cpu_address_hex": "0x8DA4",
+      "title_source_file_offset_hex": "0x34DB4",
+      "title_source_storage_byte_count": 10,
+      "title_source_bytes_hex": "FF FF FF FF FF 0E 02 29 87 ED",
+      "title_source_sha1": "06ec108925a6555e038b058445f6c6e2f96c5ce2",
+      "japanese_title_markup": "{FF}{FF}{FF}{FF}{FF}そうりょ",
+      "korean_title_markup": "{FF}{FF}{FF}{FF}{FF}승려",
+      "description_pointer_cpu_address_hex": "0x92DA",
+      "description_source_file_offset_hex": "0x352EA",
+      "description_source_storage_byte_count": 61,
+      "description_source_bytes_hex": "12 03 2E FF 24 11 01 13 FF 05 01 1C 07 8E 1E 0F 02 06 0F 87 08 01 19 ED 0B 0F 86 24 2F 2E FF 14 15 03 FF 21 05 10 2E FF 10 0C 08 2A 8F ED 09 02 08 0F 06 1A FF 13 0F 06 15 01 8F ED EF",
+      "description_source_sha1": "dca759efc78b73372e5299c5a1ace912014b0758",
+      "japanese_description_lines": [
+        "つえを{FF}もちいて{FF}かいふく、ほ゛うき゛ょけいの",
+        "し゛ゅもんを{FF}となえ{FF}みかたを{FF}たすける。",
+        "こうけ゛きは{FF}て゛きない。"
+      ],
+      "korean_description_lines": [
+        "지팡이로{FF}회복{8E}{FF}방어{FF}계열",
+        "주문을{FF}외워{FF}아군을{FF}돕는다{8F}",
+        "공격은{FF}할{FF}수{FF}없다{8F}"
+      ],
+      "status": "needs_human_review"
+    },
+    {
+      "id": "class-profile:19",
+      "profile_index": 19,
+      "title_pointer_cpu_address_hex": "0x8DAE",
+      "title_source_file_offset_hex": "0x34DBE",
+      "title_source_storage_byte_count": 9,
+      "title_source_bytes_hex": "FF FF FF FF FF 0B 0A 01 ED",
+      "title_source_sha1": "dea43429b4e46638fe7b7567eb7c806c2821fd8e",
+      "japanese_title_markup": "{FF}{FF}{FF}{FF}{FF}しさい",
+      "korean_title_markup": "{FF}{FF}{FF}{FF}{FF}사제",
+      "description_pointer_cpu_address_hex": "0x9317",
+      "description_source_file_offset_hex": "0x35327",
+      "description_source_storage_byte_count": 56,
+      "description_source_bytes_hex": "08 01 08 2F 2E 12 2F 10 0F FF 20 14 0F 02 0B 25 FF 0E 02 29 87 05 0F ED 0B 87 02 05 07 0C 2A 8F ED 20 14 0F 02 0B 87 8E 12 03 FF 14 24 16 FF 12 05 01 09 15 0C 8F ED EF",
+      "description_source_sha1": "d2658eec94139be7a55e8cac0c654f9397e184da",
+      "japanese_description_lines": [
+        "けいけんをつんた゛{FF}まと゛うしや{FF}そうりょか゛",
+        "しょうかくする。",
+        "まと゛うしょ、つえ{FF}ともに{FF}つかいこなす。"
+      ],
+      "korean_description_lines": [
+        "경험을{FF}쌓은{FF}마도사나{FF}승려가",
+        "승급한다{8F}",
+        "마도서{8E}{FF}지팡이를{FF}모두{FF}다룬다{8F}"
+      ],
+      "status": "needs_human_review"
+    },
+    {
+      "id": "class-profile:20",
+      "profile_index": 20,
+      "title_pointer_cpu_address_hex": "0x8DB7",
+      "title_source_file_offset_hex": "0x34DC7",
+      "title_source_storage_byte_count": 10,
+      "title_source_bytes_hex": "FF FF FF FF FF 5C 3F 44 0F ED",
+      "title_source_sha1": "c2976b61edf0cc1ea2b3829d4f7666ca0fc0cdfd",
+      "japanese_title_markup": "{FF}{FF}{FF}{FF}{FF}ロート゛",
+      "korean_title_markup": "{FF}{FF}{FF}{FF}{FF}로드",
+      "description_pointer_cpu_address_hex": "0x934F",
+      "description_source_file_offset_hex": "0x3535F",
+      "description_source_storage_byte_count": 75,
+      "description_source_bytes_hex": "44 0F 5A 3F 30 16 27 85 13 FF 07 16 2E 04 2D 2B 10 FF 30 59 43 A7 30 04 02 0B 0F ED 50 5A 3C 8F ED 4C 1F 5B 31 55 3F 19 FF 53 31 5F 56 46 89 44 14 0B 13 FF 24 85 14 24 ED 10 0F 01 0B 0F 15 FF 1A 10 28 06 2E FF 0C 2A 8F ED EF",
+      "description_source_sha1": "8bf0a6113e335cc866ae1f494a072023c32e18bf",
+      "japanese_description_lines": [
+        "ト゛ルーアによって{FF}くにをおわれた{FF}アリティアおうし゛",
+        "マルス。",
+        "フ゜レイヤーの{FF}メインユニットとして{FF}もっとも",
+        "た゛いし゛な{FF}はたらきを{FF}する。"
+      ],
+      "korean_description_lines": [
+        "돌루아에게{FF}나라를{FF}빼앗긴{FF}아리티아{FF}왕자",
+        "마르스{8F}",
+        "플레이어의{FF}메인{FF}유닛으로{FF}가장",
+        "중요한{FF}역할을{FF}맡는다{8F}"
+      ],
+      "status": "needs_human_review"
+    },
+    {
+      "id": "class-profile:21",
+      "profile_index": 21,
+      "title_pointer_cpu_address_hex": "0x8DC1",
+      "title_source_file_offset_hex": "0x34DD1",
+      "title_source_storage_byte_count": 11,
+      "title_source_bytes_hex": "FF FF FF FF 0B 87 02 07 0F 2F ED",
+      "title_source_sha1": "6a92c4dcc9ac905b6f4b96c79722393f6cc82dd2",
+      "japanese_title_markup": "{FF}{FF}{FF}{FF}しょうく゛ん",
+      "korean_title_markup": "{FF}{FF}{FF}{FF}장군",
+      "description_pointer_cpu_address_hex": "0x939A",
+      "description_source_file_offset_hex": "0x353AA",
+      "description_source_storage_byte_count": 68,
+      "description_source_bytes_hex": "44 0F 5A 3F 30 13 01 09 07 05 28 FF 1A 08 2F 0A 2B 10 FF 06 0B 10 0F 2F 19 ED 0B 2B 01 05 2F 8F ED 06 2D 23 13 10 05 01 FF 09 02 08 0F 06 29 87 07 14 FF 0B 86 1B 0F 29 87 07 2E ED 24 85 13 01 2A 8F ED EF",
+      "description_source_sha1": "82d5f08da0c77dfa2c23fe976462dcf22e4c6d33",
+      "japanese_description_lines": [
+        "ト゛ルーアていこくから{FF}はけんされた{FF}きした゛んの",
+        "しれいかん。",
+        "きわめてたかい{FF}こうけ゛きりょくと{FF}しゅひ゛りょくを",
+        "もっている。"
+      ],
+      "korean_description_lines": [
+        "돌루아{FF}제국에서{FF}파견된{FF}기사단의",
+        "지휘관{8F}",
+        "매우{FF}높은{FF}공격력과{FF}수비력을",
+        "지녔다{8F}"
+      ],
+      "status": "needs_human_review"
+    }
+  ]
+}

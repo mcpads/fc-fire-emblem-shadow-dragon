@@ -23,7 +23,7 @@ pub(super) fn validate_translation_markup(line: &WorkspaceLine) -> Result<usize>
     Ok(target.editable_glyph_count)
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum MarkupRole {
     Source,
     KoreanTarget,
@@ -50,6 +50,10 @@ pub(super) fn inspect_markup(markup: &str, role: MarkupRole) -> Result<MarkupIns
                 !token[1..token.len() - 1].contains(['{', '}']),
                 "markup token contains a nested brace"
             );
+            if role == MarkupRole::KoreanTarget && is_target_punctuation_token(token) {
+                editable_glyph_count += 1;
+                continue;
+            }
             protected_items.push(token.to_owned());
             continue;
         }
@@ -88,6 +92,10 @@ pub(super) fn inspect_markup(markup: &str, role: MarkupRole) -> Result<MarkupIns
         protected_items,
         editable_glyph_count,
     })
+}
+
+fn is_target_punctuation_token(token: &str) -> bool {
+    matches!(token, "{PUNCT:8E}" | "{PUNCT:8F}")
 }
 
 pub(super) fn is_japanese_markup_character(character: char) -> bool {
@@ -247,6 +255,14 @@ pub(super) fn decode_protected_token(token: &str) -> Result<Vec<u8>> {
     }
     if matches!(body, "AB" | "AC") {
         return Ok(vec![decode_hex_byte(body)?]);
+    }
+    if let Some(punctuation) = body.strip_prefix("PUNCT:") {
+        let code = decode_hex_byte(punctuation)?;
+        ensure!(
+            matches!(code, 0x8E | 0x8F),
+            "target punctuation code must be 8E or 8F"
+        );
+        return Ok(vec![code]);
     }
     if let Some(literal) = body.strip_prefix("LIT:") {
         return Ok(vec![decode_hex_byte(literal)?]);

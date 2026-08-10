@@ -203,6 +203,22 @@ fn encodes_target_glyphs_as_logical_bytes_and_preserves_source_codes() {
 }
 
 #[test]
+fn encodes_source_punctuation_as_editable_korean_target_punctuation() {
+    let line = workspace_line("あ、。{EF}", "한{PUNCT:8E}{PUNCT:8F}{EF}");
+
+    assert_eq!(validate_translation_markup(&line).unwrap(), 3);
+    assert_eq!(
+        encode_korean_markup("한{PUNCT:8E}{PUNCT:8F}{EF}").unwrap(),
+        vec![
+            LogicalDialogueByte::TargetGlyph('한'),
+            LogicalDialogueByte::Encoded(0x8E),
+            LogicalDialogueByte::Encoded(0x8F),
+            LogicalDialogueByte::Encoded(0xEF),
+        ]
+    );
+}
+
+#[test]
 fn packs_shared_suffixes_once_and_splits_changed_records() {
     let whole = logical_record("whole", &[0x10, 0x20, 0x30]);
     let shared_tail = logical_record("tail", &[0x20, 0x30]);

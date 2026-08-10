@@ -14,6 +14,7 @@ pub(super) struct CumulativePatchReport {
     pub(super) main_dialogue: CumulativeDialogueReport,
     pub(super) front_end_menu: CumulativeFrontEndMenuReport,
     pub(super) playable_unit_names: CumulativeUnitNameReport,
+    pub(super) automatic_class_profiles: CumulativeClassProfileReport,
     pub(super) selector_chain: Vec<SelectorChainReport>,
     pub(super) original_chr_preserved: bool,
     pub(super) tracked_write_count: usize,
@@ -22,6 +23,35 @@ pub(super) struct CumulativePatchReport {
     pub(super) runtime_verified: bool,
     pub(super) unresolved: Vec<&'static str>,
     pub(super) release_eligible: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct CumulativeClassProfileReport {
+    pub(super) workspace_sha1: String,
+    pub(super) workspace_entry_count: usize,
+    pub(super) installed_entry_count: usize,
+    pub(super) installed_description_line_count: usize,
+    pub(super) installed_source_storage_byte_count: usize,
+    pub(super) installed_output_storage_byte_count: usize,
+    pub(super) total_unique_glyph_count: usize,
+    pub(super) page_unique_glyph_counts: [usize; 2],
+    pub(super) glyph_assignment_sha1s: [String; 2],
+    pub(super) font_physical_pages: [u8; 2],
+    pub(super) font_mapper_registers: [u8; 2],
+    pub(super) font_page_sha1s: [String; 2],
+    pub(super) font_page_pack_sha1: String,
+    pub(super) screen_evidence_manifest_sha1: String,
+    pub(super) temporal_sample_count: usize,
+    pub(super) unique_image_count: usize,
+    pub(super) runtime_evidence_manifest_sha1: String,
+    pub(super) runtime_sample_count: usize,
+    pub(super) runtime_unique_image_count: usize,
+    pub(super) visible_code_count: usize,
+    pub(super) preserved_active_code_count: usize,
+    pub(super) original_english_digits_and_ui_preserved: bool,
+    pub(super) profile_index_page_selector_installed: bool,
+    pub(super) runtime_bound_to_build: bool,
+    pub(super) review_complete: bool,
 }
 
 #[derive(Debug, Serialize)]

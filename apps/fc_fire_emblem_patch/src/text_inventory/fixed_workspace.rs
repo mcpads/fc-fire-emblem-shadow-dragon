@@ -468,7 +468,7 @@ fn validate_translation(entry: &FixedTextEntry) -> Result<()> {
     Ok(())
 }
 
-fn decode_source_markup(raw: &[u8]) -> String {
+pub(crate) fn decode_source_markup(raw: &[u8]) -> String {
     raw.iter()
         .map(|code| {
             japanese_text_glyph(*code)

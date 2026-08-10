@@ -16,6 +16,22 @@ fn preserves_a_translation_when_its_stable_line_and_source_match() {
 }
 
 #[test]
+fn preserves_a_translation_across_the_source_punctuation_decode_correction() {
+    let mut fresh = workspace("あ、。{EF}", "", TranslationStatus::Untranslated);
+    let existing = workspace(
+        "あ。{LIT:8F}{EF}",
+        "한{LIT:8F}{EF}",
+        TranslationStatus::NeedsHumanReview,
+    );
+
+    let preserved = preserve_workspace_translations(&mut fresh, &existing).unwrap();
+
+    assert_eq!(preserved, 1);
+    assert_eq!(fresh.records[0].lines[0].source_markup, "あ、。{EF}");
+    assert_eq!(fresh.records[0].lines[0].korean, "한{PUNCT:8F}{EF}");
+}
+
+#[test]
 fn refuses_to_replace_a_workspace_when_a_translated_source_changed() {
     let mut fresh = workspace("い{EF}", "", TranslationStatus::Untranslated);
     let before = fresh.clone();

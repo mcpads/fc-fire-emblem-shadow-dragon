@@ -19,6 +19,7 @@ pub(crate) mod battle_composition_runtime_verify;
 pub(crate) mod battle_dialogue_probe;
 pub(crate) mod battle_text_cache_probe;
 pub(crate) mod battle_text_runtime_base;
+mod class_profile_page;
 pub(crate) mod cumulative_patch;
 mod dialogue_lifetime_page;
 mod dialogue_probe_font;

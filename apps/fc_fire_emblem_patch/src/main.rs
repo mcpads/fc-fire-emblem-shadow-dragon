@@ -2,6 +2,7 @@ mod battle_text_workset;
 mod chapter_transition;
 mod chapter_victory;
 mod chr_inventory;
+mod class_profile;
 mod dialogue_assets;
 mod dialogue_inventory;
 mod epilogue_variant_evidence;
@@ -48,6 +49,9 @@ struct Cli {
     command: Command,
 }
 
+// clap constructs one command payload at process startup; boxing individual path fields would
+// complicate argument plumbing without reducing a persistent runtime allocation.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Verify that a ROM is the exact supported Japanese source revision.
@@ -84,6 +88,12 @@ enum Command {
     ExtractUnitNameWorkspace {
         source: PathBuf,
         #[arg(long, default_value = "assets/translation/unit-names.ko.json")]
+        output: PathBuf,
+    },
+    /// Create the source-bound workspace for all automatic class profiles.
+    ExtractClassProfileWorkspace {
+        source: PathBuf,
+        #[arg(long, default_value = "assets/translation/class-profiles.ko.json")]
         output: PathBuf,
     },
     /// Measure translated battle names, classes, items, and messages without emitting text.
@@ -409,6 +419,8 @@ enum Command {
         front_end_menu_localization: PathBuf,
         #[arg(long, default_value = "assets/translation/unit-names.ko.json")]
         unit_name_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/class-profiles.ko.json")]
+        class_profile_localization: PathBuf,
         #[arg(
             long,
             default_value = "evidence/private/dialogue-lifetime/chapter-1-intro-screen.json"
@@ -426,6 +438,13 @@ enum Command {
             default_value = "evidence/private/unit-status-contract/unit-name-manifest.json"
         )]
         unit_name_evidence: PathBuf,
+        #[arg(long, default_value = "evidence/private/class-profile-manifest.json")]
+        class_profile_evidence: PathBuf,
+        #[arg(
+            long,
+            default_value = "evidence/private/class-profile-installed/manifest.json"
+        )]
+        class_profile_runtime_evidence: PathBuf,
         #[arg(long, default_value = "out/cumulative-stages")]
         stage_directory: PathBuf,
         #[arg(long, default_value = "out/fire-emblem-fe1-korean-patch.nes")]
@@ -622,6 +641,17 @@ fn main() -> Result<()> {
                 "unit names: {} entries, {} Japanese entries, {} translations preserved",
                 summary.entry_count,
                 summary.japanese_entry_count,
+                summary.preserved_translation_count
+            );
+        }
+        Command::ExtractClassProfileWorkspace { source, output } => {
+            let summary = class_profile::extract_class_profile_workspace(&source, &output)?;
+            println!("wrote {}", output.display());
+            println!("workspace SHA-1: {}", summary.workspace_sha1);
+            println!(
+                "class profiles: {} entries, {} description lines, {} translations preserved",
+                summary.entry_count,
+                summary.description_line_count,
                 summary.preserved_translation_count
             );
         }
@@ -1244,10 +1274,13 @@ fn main() -> Result<()> {
             chapter_title_localization,
             front_end_menu_localization,
             unit_name_localization,
+            class_profile_localization,
             chapter_one_intro_evidence,
             chapter_two_intro_evidence,
             front_end_menu_evidence,
             unit_name_evidence,
+            class_profile_evidence,
+            class_profile_runtime_evidence,
             stage_directory,
             output,
             report,
@@ -1261,10 +1294,13 @@ fn main() -> Result<()> {
                     chapter_title_localization_path: &chapter_title_localization,
                     front_end_menu_localization_path: &front_end_menu_localization,
                     unit_name_localization_path: &unit_name_localization,
+                    class_profile_localization_path: &class_profile_localization,
                     chapter_one_intro_evidence_path: &chapter_one_intro_evidence,
                     chapter_two_intro_evidence_path: &chapter_two_intro_evidence,
                     front_end_menu_evidence_path: &front_end_menu_evidence,
                     unit_name_evidence_path: &unit_name_evidence,
+                    class_profile_evidence_path: &class_profile_evidence,
+                    class_profile_runtime_evidence_path: &class_profile_runtime_evidence,
                     stage_directory: &stage_directory,
                     output_path: &output,
                     report_path: &report,

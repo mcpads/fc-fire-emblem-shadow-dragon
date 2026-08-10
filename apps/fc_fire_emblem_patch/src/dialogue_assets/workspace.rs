@@ -125,12 +125,21 @@ pub(super) fn preserve_workspace_translations(
             if existing_line.status == TranslationStatus::Untranslated {
                 continue;
             }
+            let punctuation_decode_corrected = existing_line.source_markup != line.source_markup
+                && source_markup_matches_current_punctuation_decode(
+                    &existing_line.source_markup,
+                    &line.source_markup,
+                );
             ensure!(
-                existing_line.source_markup == line.source_markup,
+                existing_line.source_markup == line.source_markup || punctuation_decode_corrected,
                 "translated source changed at {}; refusing to overwrite the existing workspace",
                 line.id
             );
-            line.korean.clone_from(&existing_line.korean);
+            line.korean = if punctuation_decode_corrected {
+                existing_line.korean.replace("{LIT:8F}", "{PUNCT:8F}")
+            } else {
+                existing_line.korean.clone()
+            };
             line.status = existing_line.status;
             preserved_count += 1;
         }
@@ -148,6 +157,13 @@ pub(super) fn preserve_workspace_translations(
     validate_workspace_translations(&merged)?;
     *fresh = merged;
     Ok(preserved_count)
+}
+
+fn source_markup_matches_current_punctuation_decode(existing: &str, current: &str) -> bool {
+    if existing == current {
+        return true;
+    }
+    existing.replace('。', "、").replace("{LIT:8F}", "。") == current
 }
 
 pub(super) fn build_workspace(source: &[u8]) -> Result<MainDialogueWorkspace> {
