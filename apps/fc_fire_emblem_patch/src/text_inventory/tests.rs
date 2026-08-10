@@ -57,6 +57,14 @@ fn resolves_requested_tables_in_caller_order() {
 }
 
 #[test]
+fn includes_transformed_class_alias_and_stone_wall_terrain_pointers() {
+    let specs = requested_text_table_specs(&["class-names", "terrain-names"]).unwrap();
+
+    assert_eq!(specs[0].pointer_count, 24);
+    assert_eq!(specs[1].pointer_count, 16);
+}
+
+#[test]
 fn rejects_unknown_or_duplicate_requested_tables() {
     let unknown = requested_text_table_specs(&["missing-names"])
         .err()

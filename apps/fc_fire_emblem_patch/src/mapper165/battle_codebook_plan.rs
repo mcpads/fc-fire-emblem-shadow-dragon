@@ -209,7 +209,7 @@ pub(crate) fn analyze_battle_codebook_plan(
         glyph_characters_emitted: false,
         translation_text_emitted: false,
         release_eligible: false,
-        next_gate: "bind enemy class and equipped-item mutation paths plus terrain-pair reachability before freezing the stable assignment",
+        next_gate: "close live enemy class mutation writes before freezing the stable assignment; selector 62 natural reachability remains a runtime proof gate",
     };
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize battle codebook plan")?;

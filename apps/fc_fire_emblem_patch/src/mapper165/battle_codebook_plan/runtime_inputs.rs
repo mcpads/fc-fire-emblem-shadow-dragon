@@ -7,6 +7,10 @@ use crate::{
     typed_source::decode_rp2a03_sequence,
 };
 
+mod field_producers;
+
+use field_producers::{BattleFieldProducerBinding, bind_battle_field_producers};
+
 const PRG_BANK_SIZE: usize = 16 * 1024;
 const SWITCHABLE_CPU_START: u16 = 0x8000;
 const SWITCHABLE_CPU_END_EXCLUSIVE: u16 = 0xC000;
@@ -28,6 +32,7 @@ pub(super) struct BattleRuntimeInputBinding {
     second_slot_to_first_record_copy: SourceRoutineBinding,
     equipped_item_mutator: SourceRoutineBinding,
     reinforcement_record_builder: SourceRoutineBinding,
+    field_producers: BattleFieldProducerBinding,
     reinforcement_builder_is_gameplay_producer: bool,
     dialogue_selector_62: DialogueSelectorBinding,
     static_chapter_table_catalog_sufficient: bool,
@@ -131,6 +136,7 @@ pub(super) fn bind_battle_runtime_inputs(rom: &Rom) -> Result<BattleRuntimeInput
     let second_slot_to_first_record_copy = bind_routine(rom, SECOND_TO_FIRST_COPY)?;
     let equipped_item_mutator = bind_routine(rom, EQUIPPED_ITEM_MUTATOR)?;
     let reinforcement_record_builder = bind_routine(rom, REINFORCEMENT_RECORD_BUILDER)?;
+    let field_producers = bind_battle_field_producers(rom)?;
     let selector_source = source_slice(rom, DIALOGUE_SELECTOR_ROUTINE)?;
     ensure!(
         selector_source
@@ -168,6 +174,7 @@ pub(super) fn bind_battle_runtime_inputs(rom: &Rom) -> Result<BattleRuntimeInput
         second_slot_to_first_record_copy,
         equipped_item_mutator,
         reinforcement_record_builder,
+        field_producers,
         reinforcement_builder_is_gameplay_producer: true,
         dialogue_selector_62: DialogueSelectorBinding {
             selector_address: 0x7936,
@@ -183,7 +190,7 @@ pub(super) fn bind_battle_runtime_inputs(rom: &Rom) -> Result<BattleRuntimeInput
         },
         static_chapter_table_catalog_sufficient: false,
         actual_combination_graph_bound: false,
-        binding_conclusion: "gameplay battle inputs are copied from mutable live unit records; initial and reinforcement tables constrain the enemy source domain, but player equipment and selector 62 still depend on live state",
+        binding_conclusion: "normal and special battle field producers now bind identity, class transformation, rendered item projection, and all 16 terrain-name sources; live enemy class mutation and selector 62 natural reachability remain open",
     })
 }
 
@@ -256,6 +263,7 @@ pub(super) fn test_binding() -> BattleRuntimeInputBinding {
         second_slot_to_first_record_copy: routine("second to first"),
         equipped_item_mutator: routine("equip selected item"),
         reinforcement_record_builder: routine("reinforcement builder"),
+        field_producers: field_producers::test_binding(),
         reinforcement_builder_is_gameplay_producer: true,
         dialogue_selector_62: DialogueSelectorBinding {
             selector_address: 0x7936,

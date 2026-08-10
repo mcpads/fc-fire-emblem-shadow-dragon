@@ -122,12 +122,28 @@ pub(super) fn eligible_player_loadouts(
     Ok(loadouts)
 }
 
-pub(super) fn equip_candidate_source_indices(flags: &[u8]) -> Vec<usize> {
-    flags
+pub(in crate::mapper165::battle_codebook_plan) fn battle_item_source_index(
+    item_id: u8,
+) -> Result<usize> {
+    ensure!(item_id != 0, "battle item identity is zero");
+    Ok(if item_id < 0x40 {
+        usize::from(item_id - 1)
+    } else {
+        0x44
+    })
+}
+
+pub(super) fn equip_candidate_source_indices(flags: &[u8]) -> Result<Vec<usize>> {
+    let source_indices = flags
         .iter()
         .enumerate()
-        .filter_map(|(source_index, flags)| (flags & 0x01 == 0).then_some(source_index))
-        .collect()
+        .filter(|(_, flags)| *flags & 0x01 == 0)
+        .map(|(source_index, _)| {
+            let item_id = u8::try_from(source_index + 1).context("item identity overflow")?;
+            battle_item_source_index(item_id)
+        })
+        .collect::<Result<BTreeSet<_>>>()?;
+    Ok(source_indices.into_iter().collect())
 }
 
 #[cfg(test)]
@@ -161,5 +177,14 @@ mod tests {
             class_id: 1,
             item_id: 4,
         }));
+    }
+
+    #[test]
+    fn battle_item_projection_collapses_high_identities_to_the_breath_name() {
+        assert_eq!(battle_item_source_index(1).unwrap(), 0);
+        assert_eq!(battle_item_source_index(0x3F).unwrap(), 0x3E);
+        assert_eq!(battle_item_source_index(0x40).unwrap(), 0x44);
+        assert_eq!(battle_item_source_index(0x5B).unwrap(), 0x44);
+        assert!(battle_item_source_index(0).is_err());
     }
 }

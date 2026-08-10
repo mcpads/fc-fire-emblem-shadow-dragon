@@ -6,7 +6,8 @@ use crate::text_inventory::FixedTextPlan;
 
 use super::{
     IDENTITY_RESTRICTED_LOADOUT_COUNT, ITEM_ENTRY_COUNT, UNIT_SOURCE_ENTRY_COUNT,
-    UNRESTRICTED_LOADOUT_COUNT, eligibility_tables::PlayerLoadoutCandidate,
+    UNRESTRICTED_LOADOUT_COUNT,
+    eligibility_tables::{PlayerLoadoutCandidate, battle_item_source_index},
 };
 
 pub(super) struct BattleItemGlyphSets {
@@ -63,7 +64,7 @@ pub(super) fn plan_battle_item_glyph_sets(
     let mut player_participant_glyph_sets = Vec::new();
     for loadout in player_loadouts {
         let class_source_index = usize::from(loadout.class_id) - 1;
-        let item_source_index = usize::from(loadout.item_id) - 1;
+        let item_source_index = battle_item_source_index(loadout.item_id)?;
         let mut loadout_glyphs = fixed
             .entry_for_source_index("class-names", class_source_index)
             .with_context(|| format!("missing class translation for source {class_source_index}"))?

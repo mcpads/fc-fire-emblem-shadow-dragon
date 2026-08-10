@@ -5,6 +5,8 @@ use serde::Serialize;
 
 use crate::{rom::Rom, sha1_hex, text_inventory::FixedTextPlan};
 
+use super::item_domain::battle_item_source_index;
+
 mod source_records;
 
 use source_records::{
@@ -70,7 +72,7 @@ pub(super) fn bind_enemy_battle_domain(
         name_indices.insert(enemy_name_source_index(candidate.identity)?);
         class_indices.insert(one_based_source_index(candidate.class_id, "enemy class")?);
         if candidate.item_id != 0 {
-            item_indices.insert(one_based_source_index(candidate.item_id, "enemy item")?);
+            item_indices.insert(battle_item_source_index(candidate.item_id)?);
         }
     }
 
@@ -94,7 +96,7 @@ pub(super) fn bind_enemy_battle_domain(
             second_item_offset: 4,
             enemy_identity_to_name_source_index: "(identity AND 0x7F) - 1",
             class_id_to_source_index: "class_id - 1",
-            item_id_to_source_index: "item_id - 1",
+            item_id_to_source_index: "item_id < 0x40 maps to item_id - 1; item_id >= 0x40 maps to 0x44",
             initial_records: source.initial_records,
             reinforcement_records: source.reinforcement_records,
             initial_loader: source.initial_loader,
@@ -109,7 +111,7 @@ pub(super) fn bind_enemy_battle_domain(
             participant_candidate_sha1: sha1_hex(&candidate_bytes),
             initial_and_reinforcement_sources_bound: true,
             item_candidates_filtered_by_runtime_eligibility: true,
-            item_slot_mutation_bound: false,
+            item_slot_mutation_bound: true,
             enemy_class_mutation_bound: false,
             actual_enemy_battle_reachability_proven: false,
         },
@@ -140,7 +142,7 @@ fn participant_candidates(
             });
         } else {
             for item_id in items {
-                one_based_source_index(item_id, "enemy item")?;
+                battle_item_source_index(item_id)?;
                 candidates.insert(ParticipantCandidate {
                     identity,
                     class_id,
@@ -170,12 +172,10 @@ fn participant_glyphs(
             .unique_glyphs(),
     );
     if candidate.item_id != 0 {
+        let item_source_index = battle_item_source_index(candidate.item_id)?;
         glyphs.extend(
             fixed
-                .entry_for_source_index(
-                    "item-names",
-                    one_based_source_index(candidate.item_id, "enemy item")?,
-                )
+                .entry_for_source_index("item-names", item_source_index)
                 .context("missing fixed enemy-item translation")?
                 .unique_glyphs(),
         );
@@ -223,7 +223,7 @@ pub(super) fn test_binding() -> EnemyBattleDomainBinding {
         participant_candidate_sha1: "candidates".to_owned(),
         initial_and_reinforcement_sources_bound: true,
         item_candidates_filtered_by_runtime_eligibility: true,
-        item_slot_mutation_bound: false,
+        item_slot_mutation_bound: true,
         enemy_class_mutation_bound: false,
         actual_enemy_battle_reachability_proven: false,
     }

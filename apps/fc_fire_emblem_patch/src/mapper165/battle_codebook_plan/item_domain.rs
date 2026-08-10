@@ -14,6 +14,7 @@ use crate::{
 mod eligibility_tables;
 mod participant_glyphs;
 
+pub(super) use eligibility_tables::battle_item_source_index;
 use eligibility_tables::{
     bank_six_slice, eligible_player_loadouts, equip_candidate_source_indices,
     item_family_class_lists,
@@ -82,6 +83,7 @@ pub(super) struct BattleItemDomainBinding {
     weapon_level_thresholds_modeled: bool,
     identity_restrictions_modeled: bool,
     identity_restricted_item_classes_conservative: bool,
+    battle_item_projection_bound: bool,
     actual_equipped_item_reachability_proven: bool,
 }
 
@@ -145,7 +147,7 @@ pub(super) fn bind_battle_item_domain(
         flags_sha1 == ITEM_ACTION_FLAGS_SHA1,
         "item action flags changed: expected {ITEM_ACTION_FLAGS_SHA1}, found {flags_sha1}"
     );
-    let candidate_source_indices = equip_candidate_source_indices(flags);
+    let candidate_source_indices = equip_candidate_source_indices(flags)?;
     ensure!(
         candidate_source_indices.len() == 64,
         "item equip necessary-condition candidate count changed"
@@ -286,7 +288,7 @@ pub(super) fn bind_battle_item_domain(
             total_item_entry_count: ITEM_ENTRY_COUNT,
             candidate_item_entry_count: candidate_source_indices.len(),
             excluded_item_entry_count: ITEM_ENTRY_COUNT - candidate_source_indices.len(),
-            item_id_to_source_index: "item_id - 1",
+            item_id_to_source_index: "item_id < 0x40 maps to item_id - 1; item_id >= 0x40 maps to 0x44",
             equip_necessary_condition: "item ID is nonzero and item action flags bit 0x01 is clear",
             candidate_source_index_sha1,
             eligibility_routine: ItemEligibilityRoutineBinding {
@@ -338,6 +340,7 @@ pub(super) fn bind_battle_item_domain(
             weapon_level_thresholds_modeled: false,
             identity_restrictions_modeled: true,
             identity_restricted_item_classes_conservative: true,
+            battle_item_projection_bound: true,
             actual_equipped_item_reachability_proven: false,
         },
     })
@@ -358,7 +361,7 @@ pub(super) fn test_binding() -> BattleItemDomainBinding {
         total_item_entry_count: ITEM_ENTRY_COUNT,
         candidate_item_entry_count: 64,
         excluded_item_entry_count: 27,
-        item_id_to_source_index: "item_id - 1",
+        item_id_to_source_index: "item_id < 0x40 maps to item_id - 1; item_id >= 0x40 maps to 0x44",
         equip_necessary_condition: "flags bit 0 clear",
         candidate_source_index_sha1: "indices".to_owned(),
         eligibility_routine: ItemEligibilityRoutineBinding {
@@ -411,6 +414,7 @@ pub(super) fn test_binding() -> BattleItemDomainBinding {
         weapon_level_thresholds_modeled: false,
         identity_restrictions_modeled: true,
         identity_restricted_item_classes_conservative: true,
+        battle_item_projection_bound: true,
         actual_equipped_item_reachability_proven: false,
     }
 }
@@ -421,12 +425,13 @@ mod tests {
 
     #[test]
     fn action_flag_bit_zero_is_only_a_necessary_equip_filter() {
-        let candidates = equip_candidate_source_indices(&[0x00, 0x01, 0x40, 0x41]);
+        let candidates = equip_candidate_source_indices(&[0x00, 0x01, 0x40, 0x41]).unwrap();
 
         assert_eq!(candidates, vec![0, 2]);
         let binding = test_binding();
         assert!(binding.candidate_set_is_necessary_condition_superset);
         assert!(binding.class_family_checks_modeled);
+        assert!(binding.battle_item_projection_bound);
         assert!(!binding.weapon_level_thresholds_modeled);
         assert!(!binding.actual_equipped_item_reachability_proven);
     }

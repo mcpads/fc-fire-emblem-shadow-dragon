@@ -313,7 +313,7 @@ fn build_workspace(source: &[u8]) -> Result<FixedTextWorkspace> {
         });
     }
     ensure!(
-        entries.len() == 271,
+        entries.len() == 272,
         "battle fixed-text unique entry count changed"
     );
     Ok(FixedTextWorkspace {
@@ -353,7 +353,10 @@ fn preserve_translations(
             ensure!(
                 old.table_id == entry.table_id
                     && old.source_index == entry.source_index
-                    && old.alias_indices == entry.alias_indices
+                    && old
+                        .alias_indices
+                        .iter()
+                        .all(|alias| entry.alias_indices.contains(alias))
                     && old.pointer_cpu_address_hex == entry.pointer_cpu_address_hex
                     && old.source_file_offset_hex == entry.source_file_offset_hex
                     && old.source_bytes_hex == entry.source_bytes_hex
@@ -497,5 +500,47 @@ mod tests {
     fn target_markup_rejects_japanese_and_malformed_tokens() {
         assert!(encode_target_markup("ゆみ").is_err());
         assert!(encode_target_markup("활{F}").is_err());
+    }
+
+    #[test]
+    fn preserves_translation_when_a_proven_source_alias_is_added() {
+        let old = FixedTextEntry {
+            id: "class-names:016".to_owned(),
+            table_id: "class-names".to_owned(),
+            source_index: 16,
+            alias_indices: vec![22],
+            pointer_cpu_address_hex: "0xDAAE".to_owned(),
+            source_file_offset_hex: None,
+            source_bytes_hex: "50 52 37 3F 44".to_owned(),
+            source_sha1: "source".to_owned(),
+            japanese_markup: "マムクート".to_owned(),
+            korean_markup: "맘쿠트".to_owned(),
+            status: "needs_human_review".to_owned(),
+        };
+        let mut fresh = FixedTextWorkspace {
+            format_version: 1,
+            source_sha1: EXPECTED_SOURCE_SHA1.to_owned(),
+            translate_from: "ja".to_owned(),
+            translate_to: "ko".to_owned(),
+            preserve_existing_english: true,
+            entries: vec![FixedTextEntry {
+                alias_indices: vec![22, 23],
+                korean_markup: String::new(),
+                status: "untranslated".to_owned(),
+                ..old.clone()
+            }],
+        };
+        let existing = FixedTextWorkspace {
+            format_version: fresh.format_version,
+            source_sha1: fresh.source_sha1.clone(),
+            translate_from: fresh.translate_from.clone(),
+            translate_to: fresh.translate_to.clone(),
+            preserve_existing_english: true,
+            entries: vec![old],
+        };
+
+        assert_eq!(preserve_translations(&mut fresh, &existing).unwrap(), 1);
+        assert_eq!(fresh.entries[0].korean_markup, "맘쿠트");
+        assert_eq!(fresh.entries[0].status, "needs_human_review");
     }
 }
