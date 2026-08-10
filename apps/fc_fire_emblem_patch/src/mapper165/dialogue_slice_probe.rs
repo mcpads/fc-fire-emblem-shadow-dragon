@@ -96,6 +96,7 @@ pub(crate) fn build_dialogue_slice_probe(
     let lifetime_page = plan_dialogue_lifetime_page(
         &parity_rom,
         screen_evidence_path,
+        SCREEN_ROLE,
         record_id,
         &glyphs,
         &plan.preserved_source_codes,

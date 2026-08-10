@@ -73,13 +73,14 @@ pub(super) struct DialogueLifetimePagePlan {
 pub(super) fn plan_dialogue_lifetime_page(
     parity_rom: &Rom,
     manifest_path: &Path,
+    screen_role: &str,
     target_record_id: &str,
     glyphs: &BTreeSet<char>,
     preserved_source_codes: &BTreeSet<u8>,
     physical_chr_page: u8,
 ) -> Result<DialogueLifetimePagePlan> {
     let (manifest_sha1, temporal_sample_count, unique_nametable_count, screen_codes) =
-        load_screen_codes(manifest_path, target_record_id)?;
+        load_screen_codes(manifest_path, screen_role, target_record_id)?;
     let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
     let preserved_screen_active_codes = screen_codes
         .intersection(&active_codes)
@@ -130,6 +131,7 @@ pub(super) fn plan_dialogue_lifetime_page(
 
 fn load_screen_codes(
     manifest_path: &Path,
+    screen_role: &str,
     target_record_id: &str,
 ) -> Result<(String, usize, usize, BTreeSet<u8>)> {
     let manifest_bytes = fs::read(manifest_path)
@@ -141,7 +143,7 @@ fn load_screen_codes(
         "unsupported dialogue screen evidence format"
     );
     ensure!(
-        manifest.screen_role == SCREEN_ROLE,
+        manifest.screen_role == screen_role,
         "dialogue screen evidence role changed"
     );
     ensure!(

@@ -12,6 +12,9 @@ use crate::{dialogue_inventory::MainDialogueGraphReport, rom::Rom, sha1_hex};
 
 use super::*;
 
+const DIALOGUE_PREFIX_CONTROL_CODE: u8 = 0xEA;
+const DIALOGUE_PREFIX_OUTPUT_CODES: [u8; 2] = [0x9E, 0xAB];
+
 pub(crate) struct MainDialogueSlicePlan {
     pub(crate) workspace_sha1: String,
     pub(crate) record_id: String,
@@ -88,7 +91,6 @@ pub(crate) fn plan_main_dialogue_slice(
             .all(|line| !line.requires_relocation),
         "main dialogue slice record {record_id} requires a relocation contract"
     );
-
     let source_record = &source_records[record_index];
     let source_start = source_record.file_offset;
     let source_end = source_record.end_file_offset_exclusive;
@@ -128,6 +130,7 @@ pub(crate) fn plan_main_dialogue_slice(
         LogicalDialogueByte::Encoded(value) => Some(*value),
         LogicalDialogueByte::TargetGlyph(_) => None,
     }));
+    preserved_source_codes.extend(runtime_generated_literal_codes(&logical.bytes));
 
     Ok(MainDialogueSlicePlan {
         workspace_sha1: sha1_hex(&workspace_bytes),
@@ -139,6 +142,19 @@ pub(crate) fn plan_main_dialogue_slice(
         preserved_source_codes,
         logical_bytes: logical.bytes,
     })
+}
+
+fn runtime_generated_literal_codes(bytes: &[LogicalDialogueByte]) -> BTreeSet<u8> {
+    let mut codes = BTreeSet::new();
+    if bytes.iter().any(|byte| {
+        matches!(
+            byte,
+            LogicalDialogueByte::Encoded(DIALOGUE_PREFIX_CONTROL_CODE)
+        )
+    }) {
+        codes.extend(DIALOGUE_PREFIX_OUTPUT_CODES);
+    }
+    codes
 }
 
 fn collect_followup_literal_codes(
@@ -273,6 +289,23 @@ mod tests {
 
         assert_eq!(record_count, 2);
         assert_eq!(codes, BTreeSet::from([0x33, 0x44]));
+    }
+
+    #[test]
+    fn preserves_runtime_prefix_glyphs_emitted_by_dialogue_control() {
+        let bytes = vec![
+            LogicalDialogueByte::Encoded(0xE9),
+            LogicalDialogueByte::Encoded(0x03),
+            LogicalDialogueByte::Encoded(DIALOGUE_PREFIX_CONTROL_CODE),
+            LogicalDialogueByte::TargetGlyph('한'),
+            LogicalDialogueByte::Encoded(0xED),
+        ];
+
+        assert_eq!(
+            runtime_generated_literal_codes(&bytes),
+            BTreeSet::from(DIALOGUE_PREFIX_OUTPUT_CODES)
+        );
+        assert!(runtime_generated_literal_codes(&bytes[..2]).is_empty());
     }
 
     fn storage_record(

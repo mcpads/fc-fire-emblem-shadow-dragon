@@ -12,6 +12,7 @@ mod source_binding;
 mod source_spec;
 #[cfg(test)]
 mod tests;
+mod title_localization;
 mod translation_surfaces;
 mod unit_record_history;
 
@@ -33,6 +34,9 @@ use save_routes::*;
 use sound_test_routes::*;
 use source_binding::*;
 use source_spec::*;
+pub(crate) use title_localization::{
+    ChapterTitlePlannedEntry, extract_chapter_title_workspace, plan_chapter_titles,
+};
 use translation_surfaces::{TranslationSurfaceContracts, bind_translation_surfaces};
 
 fn source_region_specs() -> impl Iterator<Item = SourceRegionSpec> {

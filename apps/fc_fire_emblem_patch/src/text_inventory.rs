@@ -23,7 +23,10 @@ mod table_analysis;
 mod tests;
 
 use dialogue_path::*;
-pub(crate) use fixed_workspace::{FixedTextPlan, extract_fixed_text_workspace, plan_fixed_text};
+pub(crate) use fixed_workspace::{
+    FixedTextLogicalByte, FixedTextPlan, encode_target_markup, extract_fixed_text_workspace,
+    is_japanese_character, plan_fixed_text,
+};
 pub use report::TextInventorySummary;
 use report::*;
 use source_spec::*;
@@ -364,7 +367,7 @@ fn prg_file_location(file_offset: usize) -> Result<(usize, u16)> {
     Ok((prg_bank, cpu_base + offset_in_bank as u16))
 }
 
-fn protected_alphanumeric_glyph(code: u8) -> Option<&'static str> {
+pub(crate) fn protected_alphanumeric_glyph(code: u8) -> Option<&'static str> {
     const DIGITS: [&str; 10] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
     const UPPERCASE: [&str; 26] = [
         "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R",

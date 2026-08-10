@@ -1,13 +1,14 @@
 use anyhow::{Context, Result, ensure};
 
 use crate::{
+    chapter_transition::ChapterTitlePlannedEntry,
     dialogue_assets::MainDialogueSlicePlan,
     mmc5_prg::fixed_bank_file_offset,
     rom::{PRG_SIZE, Rom},
     tracked::TrackedImage,
 };
 
-use super::{DIALOGUE_SELECTOR_ADDRESS, OUTPUT_MAPPER, ROSTER_SELECTOR_ADDRESS};
+use super::{OUTPUT_MAPPER, ROSTER_SELECTOR_ADDRESS};
 
 pub(super) fn install_dialogue_record(
     image: &mut TrackedImage,
@@ -30,13 +31,39 @@ pub(super) fn install_dialogue_record(
     )
 }
 
+pub(super) fn install_chapter_title(
+    image: &mut TrackedImage,
+    base: &[u8],
+    plan: &ChapterTitlePlannedEntry,
+    encoded_title: &[u8],
+) -> Result<()> {
+    ensure!(
+        encoded_title.len() == plan.source_storage_byte_count,
+        "cumulative chapter title changed its owned storage size"
+    );
+    let end = plan
+        .file_offset
+        .checked_add(encoded_title.len())
+        .context("cumulative chapter-title range overflow")?;
+    let expected = base
+        .get(plan.file_offset..end)
+        .context("cumulative chapter title is outside the stage")?;
+    image.write_expected(
+        format!("cumulative chapter title {}", plan.id),
+        plan.file_offset,
+        expected,
+        encoded_title,
+    )
+}
+
 pub(super) fn verify_cumulative_output(
     ui_stage_rom: &Rom,
     output_rom: &Rom,
     page_pack: &[u8],
-    plans: &[MainDialogueSlicePlan],
-    encoded_records: &[Vec<u8>],
+    record_groups: &[(&[MainDialogueSlicePlan], &[Vec<u8>])],
+    chapter_titles: &[(&ChapterTitlePlannedEntry, &[u8])],
     roster_selector: &[u8],
+    dialogue_selector_address: u16,
     dialogue_selector: &[u8],
 ) -> Result<()> {
     ensure!(
@@ -59,13 +86,27 @@ pub(super) fn verify_cumulative_output(
         output_rom.chr()[ui_stage_rom.chr().len()..] == *page_pack,
         "cumulative dialogue stage appended different page bytes"
     );
-    for (plan, encoded_record) in plans.iter().zip(encoded_records) {
+    for (plans, encoded_records) in record_groups {
         ensure!(
-            output_rom.data()
-                [plan.source_file_offset..plan.source_file_offset + encoded_record.len()]
-                == *encoded_record,
-            "cumulative output record {} changed",
-            plan.record_id
+            plans.len() == encoded_records.len(),
+            "cumulative dialogue verification lost an encoded record"
+        );
+        for (plan, encoded_record) in plans.iter().zip(*encoded_records) {
+            ensure!(
+                output_rom.data()
+                    [plan.source_file_offset..plan.source_file_offset + encoded_record.len()]
+                    == *encoded_record,
+                "cumulative output record {} changed",
+                plan.record_id
+            );
+        }
+    }
+    for (plan, encoded_title) in chapter_titles {
+        ensure!(
+            output_rom.data()[plan.file_offset..plan.file_offset + encoded_title.len()]
+                == **encoded_title,
+            "cumulative output chapter title {} changed",
+            plan.id
         );
     }
     let roster_selector_offset = fixed_bank_file_offset(ROSTER_SELECTOR_ADDRESS)?;
@@ -74,7 +115,7 @@ pub(super) fn verify_cumulative_output(
             == *roster_selector,
         "cumulative roster selector chain changed"
     );
-    let dialogue_selector_offset = fixed_bank_file_offset(DIALOGUE_SELECTOR_ADDRESS)?;
+    let dialogue_selector_offset = fixed_bank_file_offset(dialogue_selector_address)?;
     ensure!(
         output_rom.data()
             [dialogue_selector_offset..dialogue_selector_offset + dialogue_selector.len()]

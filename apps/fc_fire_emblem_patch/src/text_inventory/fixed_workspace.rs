@@ -422,14 +422,14 @@ fn decode_source_markup(raw: &[u8]) -> String {
         .collect()
 }
 
-fn is_japanese_character(character: char) -> bool {
+pub(crate) fn is_japanese_character(character: char) -> bool {
     ('\u{3040}'..='\u{30ff}').contains(&character)
         || character == '。'
         || character == '「'
         || character == '」'
 }
 
-fn encode_target_markup(markup: &str) -> Result<Vec<FixedTextLogicalByte>> {
+pub(crate) fn encode_target_markup(markup: &str) -> Result<Vec<FixedTextLogicalByte>> {
     let chars = markup.chars().collect::<Vec<_>>();
     let mut output = Vec::new();
     let mut index = 0;

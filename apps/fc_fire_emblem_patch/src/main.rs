@@ -208,6 +208,12 @@ enum Command {
         #[arg(long, default_value = "out/chapter-transitions.json")]
         report: PathBuf,
     },
+    /// Create a source-bound workspace for all twenty-five Japanese chapter titles.
+    ExtractChapterTitleWorkspace {
+        source: PathBuf,
+        #[arg(long, default_value = "assets/translation/chapter-titles.ko.json")]
+        output: PathBuf,
+    },
     /// Aggregate private frozen-frame dumps into battle and ending temporal unions.
     AnalyzeTemporalSurfaces {
         source: PathBuf,
@@ -383,11 +389,18 @@ enum Command {
         roster_localization: PathBuf,
         #[arg(long, default_value = "private/dialogue/main-workspace.json")]
         main_dialogue_workspace: PathBuf,
+        #[arg(long, default_value = "assets/translation/chapter-titles.ko.json")]
+        chapter_title_localization: PathBuf,
         #[arg(
             long,
             default_value = "evidence/private/dialogue-lifetime/chapter-1-intro-screen.json"
         )]
         chapter_one_intro_evidence: PathBuf,
+        #[arg(
+            long,
+            default_value = "evidence/private/cumulative-chapter2/chapter-2-intro-screen.json"
+        )]
+        chapter_two_intro_evidence: PathBuf,
         #[arg(long, default_value = "out/cumulative-stages")]
         stage_directory: PathBuf,
         #[arg(long, default_value = "out/fire-emblem-fe1-korean-patch.nes")]
@@ -817,6 +830,17 @@ fn main() -> Result<()> {
                 summary.next_observation_gate_role
             );
         }
+        Command::ExtractChapterTitleWorkspace { source, output } => {
+            let summary = chapter_transition::extract_chapter_title_workspace(&source, &output)?;
+            println!("wrote {}", output.display());
+            println!("workspace SHA-1: {}", summary.workspace_sha1);
+            println!(
+                "chapter titles: {} entries, {} Japanese-bearing, {} translations preserved",
+                summary.entry_count,
+                summary.japanese_entry_count,
+                summary.preserved_translation_count
+            );
+        }
         Command::AnalyzeTemporalSurfaces {
             source,
             manifest,
@@ -1172,7 +1196,9 @@ fn main() -> Result<()> {
             options_localization,
             roster_localization,
             main_dialogue_workspace,
+            chapter_title_localization,
             chapter_one_intro_evidence,
+            chapter_two_intro_evidence,
             stage_directory,
             output,
             report,
@@ -1183,7 +1209,9 @@ fn main() -> Result<()> {
                     options_localization_path: &options_localization,
                     roster_localization_path: &roster_localization,
                     main_dialogue_workspace_path: &main_dialogue_workspace,
+                    chapter_title_localization_path: &chapter_title_localization,
                     chapter_one_intro_evidence_path: &chapter_one_intro_evidence,
+                    chapter_two_intro_evidence_path: &chapter_two_intro_evidence,
                     stage_directory: &stage_directory,
                     output_path: &output,
                     report_path: &report,
@@ -1194,11 +1222,12 @@ fn main() -> Result<()> {
             println!("wrote {}", report.display());
             println!("report SHA-1: {}", summary.report_sha1);
             println!(
-                "cumulative patch: {} stages, {} installed dialogue records, {} installed translated lines, {} unique glyphs, {} tracked writes",
+                "cumulative patch: {} stages, {} installed chapter titles, {} installed dialogue records, {} installed translated lines, {} installed glyph slots, {} tracked writes",
                 summary.stage_count,
+                summary.installed_chapter_title_count,
                 summary.installed_dialogue_record_count,
                 summary.installed_dialogue_line_count,
-                summary.unique_glyph_count,
+                summary.installed_glyph_slot_count,
                 summary.tracked_write_count
             );
         }

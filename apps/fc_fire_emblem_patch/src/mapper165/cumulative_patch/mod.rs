@@ -3,6 +3,7 @@ use std::{collections::BTreeSet, fs, path::Path};
 use anyhow::{Context, Result, ensure};
 
 use crate::{
+    chapter_transition::plan_chapter_titles,
     dialogue_assets::{
         MainDialogueSlicePlan, plan_main_dialogue_slice, validate_main_dialogue_workspace,
     },
@@ -25,18 +26,27 @@ use super::{
     },
 };
 
+mod chapter_page_selector;
 mod report;
 mod verify;
 
+use chapter_page_selector::{ChapterPageSequence, build_chapter_page_selector};
 use report::{
-    CumulativeDialogueReport, CumulativePatchReport, CumulativeStageReport, SelectorChainReport,
+    CumulativeChapterTitleReport, CumulativeDialogueLifetimeReport, CumulativeDialogueReport,
+    CumulativePatchReport, CumulativeStageReport, SelectorChainReport,
 };
-use verify::{install_dialogue_record, verify_cumulative_output};
+use verify::{install_chapter_title, install_dialogue_record, verify_cumulative_output};
 
 const UI_STAGE_ROM_NAME: &str = "mapper165-ui.nes";
 const UI_STAGE_REPORT_NAME: &str = "mapper165-ui.json";
-const DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFBD8;
-const DIALOGUE_SELECTOR_END: u16 = 0xFC20;
+const CHAPTER_ONE_STAGE_ROM_NAME: &str = "chapter1-intro.nes";
+const DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFBD4;
+const DIALOGUE_SELECTOR_CAVE_END: u16 = 0xFC20;
+const CHAPTER_ONE_DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFBD8;
+const CHAPTER_ONE_INDEX: u8 = 0;
+const CHAPTER_TWO_INDEX: u8 = 1;
+const CHAPTER_TWO_SCREEN_ROLE: &str = "chapter_2_intro_dialogue";
+const CHAPTER_TWO_INTRO_RECORD_ID: &str = "chapter-intro-dialogue:005";
 const CHAPTER_ONE_INTRO_RECORD_IDS: [&str; 4] = [
     "chapter-intro-dialogue:000",
     "chapter-intro-dialogue:002",
@@ -50,7 +60,8 @@ pub(crate) struct CumulativePatchSummary {
     pub(crate) stage_count: usize,
     pub(crate) installed_dialogue_record_count: usize,
     pub(crate) installed_dialogue_line_count: usize,
-    pub(crate) unique_glyph_count: usize,
+    pub(crate) installed_chapter_title_count: usize,
+    pub(crate) installed_glyph_slot_count: usize,
     pub(crate) tracked_write_count: usize,
 }
 
@@ -59,7 +70,9 @@ pub(crate) struct CumulativePatchInputs<'a> {
     pub(crate) options_localization_path: &'a Path,
     pub(crate) roster_localization_path: &'a Path,
     pub(crate) main_dialogue_workspace_path: &'a Path,
+    pub(crate) chapter_title_localization_path: &'a Path,
     pub(crate) chapter_one_intro_evidence_path: &'a Path,
+    pub(crate) chapter_two_intro_evidence_path: &'a Path,
     pub(crate) stage_directory: &'a Path,
     pub(crate) output_path: &'a Path,
     pub(crate) report_path: &'a Path,
@@ -75,6 +88,12 @@ pub(crate) fn build_cumulative_patch(
     ensure!(
         dialogue_workspace.translation_input_complete,
         "cumulative build requires complete Japanese-to-Korean dialogue input"
+    );
+    let chapter_title_plan =
+        plan_chapter_titles(&source_rom, inputs.chapter_title_localization_path)?;
+    ensure!(
+        chapter_title_plan.translated_entry_count == chapter_title_plan.entry_count,
+        "cumulative build requires complete Japanese-to-Korean chapter-title input"
     );
 
     let ui_stage_rom_path = inputs.stage_directory.join(UI_STAGE_ROM_NAME);
@@ -103,67 +122,74 @@ pub(crate) fn build_cumulative_patch(
         "cumulative UI stage CHR bank count changed"
     );
 
-    let plans = CHAPTER_ONE_INTRO_RECORD_IDS
+    let chapter_one_plans = CHAPTER_ONE_INTRO_RECORD_IDS
         .iter()
         .map(|record_id| {
             plan_main_dialogue_slice(&source_rom, inputs.main_dialogue_workspace_path, record_id)
         })
         .collect::<Result<Vec<_>>>()?;
     ensure!(
-        plans[0].transition_chain_record_count == plans.len(),
+        chapter_one_plans[0].transition_chain_record_count == chapter_one_plans.len(),
         "Chapter 1 intro cumulative record set no longer covers its transition chain"
     );
     ensure!(
-        plans
+        chapter_one_plans
             .windows(2)
             .all(|pair| pair[0].workspace_sha1 == pair[1].workspace_sha1),
         "cumulative dialogue plans came from different workspaces"
     );
     ensure!(
-        plans[0].workspace_sha1 == dialogue_workspace.workspace_sha1,
+        chapter_one_plans[0].workspace_sha1 == dialogue_workspace.workspace_sha1,
         "cumulative dialogue plan no longer matches the validated workspace"
     );
-    let glyphs = plans
+    let chapter_one_title = chapter_title_plan.entry(CHAPTER_ONE_INDEX)?.clone();
+    let mut chapter_one_glyphs = chapter_one_plans
         .iter()
         .flat_map(MainDialogueSlicePlan::unique_glyphs)
         .collect::<BTreeSet<_>>();
-    let preserved_source_codes = plans
+    chapter_one_glyphs.extend(chapter_one_title.unique_glyphs());
+    let chapter_one_preserved_source_codes = chapter_one_plans
         .iter()
         .flat_map(|plan| plan.preserved_source_codes.iter().copied())
         .collect::<BTreeSet<_>>();
-    let physical_chr_page = u8::try_from(ui_stage_rom.chr().len() / FONT_PAGE_SIZE)
-        .context("cumulative dialogue physical CHR page does not fit u8")?;
+    let chapter_one_physical_chr_page = u8::try_from(ui_stage_rom.chr().len() / FONT_PAGE_SIZE)
+        .context("Chapter 1 cumulative dialogue physical CHR page does not fit u8")?;
     ensure!(
-        physical_chr_page == 38 && physical_chr_page.is_multiple_of(2),
-        "cumulative dialogue page no longer begins at physical CHR page 38"
+        chapter_one_physical_chr_page == 38 && chapter_one_physical_chr_page.is_multiple_of(2),
+        "Chapter 1 cumulative dialogue page no longer begins at physical CHR page 38"
     );
-    let lifetime_page = plan_dialogue_lifetime_page(
+    let chapter_one_page = plan_dialogue_lifetime_page(
         &ui_stage_rom,
         inputs.chapter_one_intro_evidence_path,
+        SCREEN_ROLE,
         CHAPTER_ONE_INTRO_RECORD_IDS[0],
-        &glyphs,
-        &preserved_source_codes,
-        physical_chr_page,
+        &chapter_one_glyphs,
+        &chapter_one_preserved_source_codes,
+        chapter_one_physical_chr_page,
     )?;
-    let encoded_records = plans
+    let chapter_one_encoded_records = chapter_one_plans
         .iter()
-        .map(|plan| plan.encoded_bytes(&lifetime_page.assignments))
+        .map(|plan| plan.encoded_bytes(&chapter_one_page.assignments))
         .collect::<Result<Vec<_>>>()?;
+    let chapter_one_encoded_title =
+        chapter_one_title.encoded_storage_bytes(&chapter_one_page.assignments)?;
 
-    let dialogue_selector = build_page_routine_at(
-        DIALOGUE_SELECTOR_ADDRESS,
-        lifetime_page.mapper_register,
+    let chapter_one_selector = build_page_routine_at(
+        CHAPTER_ONE_DIALOGUE_SELECTOR_ADDRESS,
+        chapter_one_page.mapper_register,
         SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
     )?;
-    ensure!(
-        DIALOGUE_SELECTOR_ADDRESS as usize + dialogue_selector.len()
-            == DIALOGUE_SELECTOR_END as usize,
-        "cumulative dialogue selector size changed"
-    );
     let dialogue_selector_offset = fixed_bank_file_offset(DIALOGUE_SELECTOR_ADDRESS)?;
+    let chapter_one_dialogue_selector_offset =
+        fixed_bank_file_offset(CHAPTER_ONE_DIALOGUE_SELECTOR_ADDRESS)?;
+    let selector_cave_byte_count = usize::from(
+        DIALOGUE_SELECTOR_CAVE_END
+            .checked_sub(DIALOGUE_SELECTOR_ADDRESS)
+            .context("cumulative dialogue selector cave range underflow")?,
+    );
     ensure!(
         ui_stage_bytes
-            [dialogue_selector_offset..dialogue_selector_offset + dialogue_selector.len()]
+            [dialogue_selector_offset..dialogue_selector_offset + selector_cave_byte_count]
             .iter()
             .all(|byte| *byte == 0xFF),
         "cumulative dialogue selector cave is no longer all FF"
@@ -172,75 +198,250 @@ pub(crate) fn build_cumulative_patch(
         count_direct_transfers_to_range(
             source_rom.prg(),
             DIALOGUE_SELECTOR_ADDRESS,
-            DIALOGUE_SELECTOR_END,
+            DIALOGUE_SELECTOR_CAVE_END,
         )? == 0,
         "cumulative dialogue selector cave has pre-existing direct transfers"
     );
 
     let source_roster_selector =
         build_roster_selector(ROSTER_PAGE_REGISTERS[0], ROSTER_PAGE_REGISTERS[1])?;
+    let chapter_one_roster_selector = build_chained_roster_selector(
+        ROSTER_PAGE_REGISTERS[0],
+        ROSTER_PAGE_REGISTERS[1],
+        CHAPTER_ONE_DIALOGUE_SELECTOR_ADDRESS,
+    )?;
+    ensure!(
+        source_roster_selector.len() == chapter_one_roster_selector.len(),
+        "cumulative roster selector chaining changed routine size"
+    );
     let cumulative_roster_selector = build_chained_roster_selector(
         ROSTER_PAGE_REGISTERS[0],
         ROSTER_PAGE_REGISTERS[1],
         DIALOGUE_SELECTOR_ADDRESS,
     )?;
-    ensure!(
-        source_roster_selector.len() == cumulative_roster_selector.len(),
-        "cumulative roster selector chaining changed routine size"
-    );
 
-    let mut expanded_base = ui_stage_bytes.clone();
-    expanded_base.extend_from_slice(&lifetime_page.page_pack);
+    let mut chapter_one_expanded_base = ui_stage_bytes.clone();
+    chapter_one_expanded_base.extend_from_slice(&chapter_one_page.page_pack);
     ensure!(
-        expanded_base.len() == ui_stage_bytes.len() + 2 * FONT_PAGE_SIZE,
-        "cumulative dialogue stage must append one 8 KiB CHR bank"
+        chapter_one_expanded_base.len() == ui_stage_bytes.len() + 2 * FONT_PAGE_SIZE,
+        "Chapter 1 cumulative dialogue stage must append one 8 KiB CHR bank"
     );
-    let mut image = TrackedImage::new(expanded_base.clone());
-    image.write_expected(
+    let mut chapter_one_image = TrackedImage::new(chapter_one_expanded_base.clone());
+    chapter_one_image.write_expected(
         "expand cumulative mapper 165 CHR from 19 to 20 banks",
         5,
         &[19],
         &[20],
     )?;
-    for (plan, encoded_record) in plans.iter().zip(&encoded_records) {
-        install_dialogue_record(&mut image, &ui_stage_bytes, plan, encoded_record)?;
+    for (plan, encoded_record) in chapter_one_plans.iter().zip(&chapter_one_encoded_records) {
+        install_dialogue_record(
+            &mut chapter_one_image,
+            &ui_stage_bytes,
+            plan,
+            encoded_record,
+        )?;
     }
-    image.write_expected(
+    install_chapter_title(
+        &mut chapter_one_image,
+        &ui_stage_bytes,
+        &chapter_one_title,
+        &chapter_one_encoded_title,
+    )?;
+    chapter_one_image.write_expected(
         "chain roster selector to Chapter 1 intro selector",
         fixed_bank_file_offset(ROSTER_SELECTOR_ADDRESS)?,
         &source_roster_selector,
-        &cumulative_roster_selector,
+        &chapter_one_roster_selector,
+    )?;
+    chapter_one_image.write_expected(
+        "Chapter 1 intro cumulative dialogue selector",
+        chapter_one_dialogue_selector_offset,
+        &vec![0xFF; chapter_one_selector.len()],
+        &chapter_one_selector,
+    )?;
+    chapter_one_image.verify_all_changes_tracked(&chapter_one_expanded_base)?;
+    let chapter_one_tracked_write_count = chapter_one_image.writes().len();
+    let chapter_one_output = chapter_one_image.into_data();
+    let chapter_one_output_sha1 = sha1_hex(&chapter_one_output);
+    let chapter_one_output_rom =
+        Rom::parse(chapter_one_output.clone()).context("parse Chapter 1 cumulative stage")?;
+    verify_cumulative_output(
+        &ui_stage_rom,
+        &chapter_one_output_rom,
+        &chapter_one_page.page_pack,
+        &[(&chapter_one_plans[..], &chapter_one_encoded_records[..])],
+        &[(&chapter_one_title, &chapter_one_encoded_title)],
+        &chapter_one_roster_selector,
+        CHAPTER_ONE_DIALOGUE_SELECTOR_ADDRESS,
+        &chapter_one_selector,
+    )?;
+    write_file(
+        &inputs.stage_directory.join(CHAPTER_ONE_STAGE_ROM_NAME),
+        &chapter_one_output,
+    )?;
+
+    let chapter_two_plans = vec![plan_main_dialogue_slice(
+        &source_rom,
+        inputs.main_dialogue_workspace_path,
+        CHAPTER_TWO_INTRO_RECORD_ID,
+    )?];
+    ensure!(
+        chapter_two_plans[0].transition_chain_record_count == chapter_two_plans.len(),
+        "Chapter 2 intro record no longer covers its transition chain"
+    );
+    ensure!(
+        chapter_two_plans[0].workspace_sha1 == dialogue_workspace.workspace_sha1,
+        "Chapter 2 dialogue plan no longer matches the validated workspace"
+    );
+    let chapter_two_title = chapter_title_plan.entry(CHAPTER_TWO_INDEX)?.clone();
+    let mut chapter_two_glyphs = chapter_two_plans
+        .iter()
+        .flat_map(MainDialogueSlicePlan::unique_glyphs)
+        .collect::<BTreeSet<_>>();
+    chapter_two_glyphs.extend(chapter_two_title.unique_glyphs());
+    let chapter_two_preserved_source_codes = chapter_two_plans
+        .iter()
+        .flat_map(|plan| plan.preserved_source_codes.iter().copied())
+        .collect::<BTreeSet<_>>();
+    let chapter_two_physical_chr_page =
+        u8::try_from(chapter_one_output_rom.chr().len() / FONT_PAGE_SIZE)
+            .context("Chapter 2 cumulative dialogue physical CHR page does not fit u8")?;
+    ensure!(
+        chapter_two_physical_chr_page == 40 && chapter_two_physical_chr_page.is_multiple_of(2),
+        "Chapter 2 cumulative dialogue page no longer begins at physical CHR page 40"
+    );
+    let chapter_two_page = plan_dialogue_lifetime_page(
+        &chapter_one_output_rom,
+        inputs.chapter_two_intro_evidence_path,
+        CHAPTER_TWO_SCREEN_ROLE,
+        CHAPTER_TWO_INTRO_RECORD_ID,
+        &chapter_two_glyphs,
+        &chapter_two_preserved_source_codes,
+        chapter_two_physical_chr_page,
+    )?;
+    let chapter_two_encoded_records = chapter_two_plans
+        .iter()
+        .map(|plan| plan.encoded_bytes(&chapter_two_page.assignments))
+        .collect::<Result<Vec<_>>>()?;
+    let chapter_two_encoded_title =
+        chapter_two_title.encoded_storage_bytes(&chapter_two_page.assignments)?;
+    let dialogue_selector = build_chapter_page_selector(
+        DIALOGUE_SELECTOR_ADDRESS,
+        ChapterPageSequence {
+            admitted_chapter_count: 2,
+            first_mapper_register: chapter_one_page.mapper_register,
+        },
+        SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
+    )?;
+    ensure!(
+        chapter_one_page
+            .mapper_register
+            .checked_add(8)
+            .is_some_and(|expected| expected == chapter_two_page.mapper_register),
+        "cumulative chapter font pages are no longer contiguous"
+    );
+    ensure!(
+        dialogue_selector.len() <= selector_cave_byte_count,
+        "cumulative chapter selector no longer fits its checked FF cave"
+    );
+
+    let mut expanded_base = chapter_one_output.clone();
+    expanded_base.extend_from_slice(&chapter_two_page.page_pack);
+    ensure!(
+        expanded_base.len() == chapter_one_output.len() + 2 * FONT_PAGE_SIZE,
+        "Chapter 2 cumulative dialogue stage must append one 8 KiB CHR bank"
+    );
+    let mut image = TrackedImage::new(expanded_base.clone());
+    image.write_expected(
+        "expand cumulative mapper 165 CHR from 20 to 21 banks",
+        5,
+        &[20],
+        &[21],
+    )?;
+    for (plan, encoded_record) in chapter_two_plans.iter().zip(&chapter_two_encoded_records) {
+        install_dialogue_record(&mut image, &chapter_one_output, plan, encoded_record)?;
+    }
+    install_chapter_title(
+        &mut image,
+        &chapter_one_output,
+        &chapter_two_title,
+        &chapter_two_encoded_title,
     )?;
     image.write_expected(
-        "Chapter 1 intro cumulative dialogue selector",
+        "move roster fallback to cumulative chapter selector",
+        fixed_bank_file_offset(ROSTER_SELECTOR_ADDRESS)?,
+        &chapter_one_roster_selector,
+        &cumulative_roster_selector,
+    )?;
+    let mut expected_selector = vec![0xFF; dialogue_selector.len()];
+    let chapter_one_selector_start =
+        usize::from(CHAPTER_ONE_DIALOGUE_SELECTOR_ADDRESS - DIALOGUE_SELECTOR_ADDRESS);
+    expected_selector[chapter_one_selector_start..].copy_from_slice(&chapter_one_selector);
+    image.write_expected(
+        "extend cumulative chapter intro selector through Chapter 2",
         dialogue_selector_offset,
-        &vec![0xFF; dialogue_selector.len()],
+        &expected_selector,
         &dialogue_selector,
     )?;
     image.verify_all_changes_tracked(&expanded_base)?;
-    let tracked_write_count = image.writes().len();
+    let tracked_write_count = chapter_one_tracked_write_count + image.writes().len();
     let output = image.into_data();
     let output_rom = Rom::parse(output.clone()).context("parse cumulative Korean patch")?;
+    let mut appended_page_packs = chapter_one_page.page_pack.clone();
+    appended_page_packs.extend_from_slice(&chapter_two_page.page_pack);
     verify_cumulative_output(
         &ui_stage_rom,
         &output_rom,
-        &lifetime_page.page_pack,
-        &plans,
-        &encoded_records,
+        &appended_page_packs,
+        &[
+            (&chapter_one_plans[..], &chapter_one_encoded_records[..]),
+            (&chapter_two_plans[..], &chapter_two_encoded_records[..]),
+        ],
+        &[
+            (&chapter_one_title, &chapter_one_encoded_title),
+            (&chapter_two_title, &chapter_two_encoded_title),
+        ],
         &cumulative_roster_selector,
+        DIALOGUE_SELECTOR_ADDRESS,
         &dialogue_selector,
     )?;
 
-    let translated_line_count = plans
+    let translated_line_count = chapter_one_plans
         .iter()
+        .chain(&chapter_two_plans)
         .map(|plan| plan.translated_line_count)
         .sum::<usize>();
-    let source_storage_byte_count = plans
+    let source_storage_byte_count = chapter_one_plans
         .iter()
+        .chain(&chapter_two_plans)
         .map(|plan| plan.source_storage_byte_count)
         .sum::<usize>();
-    let planned_storage_byte_count = encoded_records.iter().map(Vec::len).sum::<usize>();
+    let planned_storage_byte_count = chapter_one_encoded_records
+        .iter()
+        .chain(&chapter_two_encoded_records)
+        .map(Vec::len)
+        .sum::<usize>();
+    let installed_record_count = chapter_one_plans.len() + chapter_two_plans.len();
+    let installed_glyph_slot_count =
+        chapter_one_page.assignments.len() + chapter_two_page.assignments.len();
     let output_sha1 = sha1_hex(&output);
+    let stages = vec![
+        CumulativeStageReport {
+            role: "mapper165_options_and_roster",
+            output_sha1: ui_stage.output_sha1,
+            report_sha1: Some(ui_stage.report_sha1),
+        },
+        CumulativeStageReport {
+            role: "chapter_1_intro_title_and_dialogue_transition_chain",
+            output_sha1: chapter_one_output_sha1,
+            report_sha1: None,
+        },
+        CumulativeStageReport {
+            role: "chapter_2_intro_title_and_dialogue",
+            output_sha1: output_sha1.clone(),
+            report_sha1: None,
+        },
+    ];
     let report = CumulativePatchReport {
         schema: 1,
         source_sha1: EXPECTED_SOURCE_SHA1,
@@ -248,62 +449,74 @@ pub(crate) fn build_cumulative_patch(
         output_mapper: output_rom.mapper(),
         prg_size: output_rom.prg().len(),
         chr_size: output_rom.chr().len(),
-        stage_count: 2,
-        stages: vec![
-            CumulativeStageReport {
-                role: "mapper165_options_and_roster",
-                output_sha1: ui_stage.output_sha1,
-                report_sha1: Some(ui_stage.report_sha1),
-            },
-            CumulativeStageReport {
-                role: "chapter_1_intro_dialogue_transition_chain",
-                output_sha1: output_sha1.clone(),
-                report_sha1: None,
-            },
-        ],
+        stage_count: stages.len(),
+        stages,
+        chapter_titles: CumulativeChapterTitleReport {
+            workspace_sha1: chapter_title_plan.workspace_sha1.clone(),
+            workspace_entry_count: chapter_title_plan.entry_count,
+            translated_entry_count: chapter_title_plan.translated_entry_count,
+            installed_entry_count: 2,
+            installed_chapter_indices: vec![CHAPTER_ONE_INDEX, CHAPTER_TWO_INDEX],
+            installed_source_storage_byte_count: chapter_one_title.source_storage_byte_count
+                + chapter_two_title.source_storage_byte_count,
+            installed_output_storage_byte_count: chapter_one_encoded_title.len()
+                + chapter_two_encoded_title.len(),
+            original_digits_preserved: true,
+            intro_title_table_installed: true,
+            ending_scroll_duplicate_installed: false,
+            review_complete: chapter_title_plan.review_complete,
+        },
         main_dialogue: CumulativeDialogueReport {
-            screen_role: SCREEN_ROLE,
-            workspace_sha1: plans[0].workspace_sha1.clone(),
+            workspace_sha1: chapter_one_plans[0].workspace_sha1.clone(),
             workspace_record_count: dialogue_workspace.record_count,
             workspace_filled_line_count: dialogue_workspace.filled_line_count,
-            screen_evidence_manifest_sha1: lifetime_page.manifest_sha1,
-            installed_record_count: plans.len(),
+            installed_record_count,
             installed_translated_line_count: translated_line_count,
+            installed_shared_page_glyph_slot_count: installed_glyph_slot_count,
             source_storage_byte_count,
             planned_storage_byte_count,
             remaining_storage_byte_count: source_storage_byte_count - planned_storage_byte_count,
-            unique_glyph_count: lifetime_page.assignments.len(),
-            glyph_assignment_sha1: assignment_sha1(&lifetime_page.assignments),
-            preserved_screen_active_code_count: lifetime_page.preserved_screen_active_code_count,
-            preserved_source_active_code_count: lifetime_page.preserved_source_active_code_count,
-            preserved_active_code_count: lifetime_page.preserved_active_code_count,
-            temporal_sample_count: lifetime_page.temporal_sample_count,
-            unique_nametable_count: lifetime_page.unique_nametable_count,
-            font_physical_page: lifetime_page.physical_chr_page,
-            font_mapper_register: lifetime_page.mapper_register,
-            font_page_sha1: lifetime_page.page_sha1,
-            font_page_pack_sha1: sha1_hex(&lifetime_page.page_pack),
+            lifetimes: vec![
+                dialogue_lifetime_report(
+                    SCREEN_ROLE,
+                    CHAPTER_ONE_INDEX,
+                    &chapter_one_plans,
+                    &chapter_one_encoded_records,
+                    &chapter_one_page,
+                ),
+                dialogue_lifetime_report(
+                    CHAPTER_TWO_SCREEN_ROLE,
+                    CHAPTER_TWO_INDEX,
+                    &chapter_two_plans,
+                    &chapter_two_encoded_records,
+                    &chapter_two_page,
+                ),
+            ],
         },
         selector_chain: vec![
             SelectorChainReport {
                 role: "unit_roster",
                 cpu_address: format!("0x{ROSTER_SELECTOR_ADDRESS:04X}"),
-                fallback_role: "chapter_1_intro_dialogue",
+                fallback_role: "chapter_intro_dialogue",
+                admitted_chapter_indices: Vec::new(),
             },
             SelectorChainReport {
-                role: "chapter_1_intro_dialogue",
+                role: "chapter_intro_dialogue",
                 cpu_address: format!("0x{DIALOGUE_SELECTOR_ADDRESS:04X}"),
                 fallback_role: "original_pair_aware_selector",
+                admitted_chapter_indices: vec![CHAPTER_ONE_INDEX, CHAPTER_TWO_INDEX],
             },
         ],
         original_chr_preserved: true,
         tracked_write_count,
-        translation_input_complete: dialogue_workspace.translation_input_complete,
-        review_complete: dialogue_workspace.review_complete,
+        translation_input_complete: dialogue_workspace.translation_input_complete
+            && chapter_title_plan.translated_entry_count == chapter_title_plan.entry_count,
+        review_complete: dialogue_workspace.review_complete && chapter_title_plan.review_complete,
         runtime_verified: false,
         unresolved: vec![
-            "The cumulative static build needs a cold runtime regression across title, options, roster, every Chapter 1 intro dialogue page, and natural map restoration.",
+            "The translated Chapter 1 and Chapter 2 title bars need cold-route runtime regression together with every installed dialogue page and natural map restoration.",
             "The remaining main-dialogue screen lifetimes and translated non-dialogue surfaces are not yet installed in this cumulative lineage.",
+            "The ending scroll owns a separate physical copy of all chapter titles; that duplicate consumer is not installed by this intro-title stage.",
             "Human translation review is incomplete, so this output is a development build rather than a release candidate.",
         ],
         release_eligible: false,
@@ -319,11 +532,52 @@ pub(crate) fn build_cumulative_patch(
         output_sha1,
         report_sha1,
         stage_count: report.stage_count,
-        installed_dialogue_record_count: plans.len(),
+        installed_dialogue_record_count: installed_record_count,
         installed_dialogue_line_count: translated_line_count,
-        unique_glyph_count: lifetime_page.assignments.len(),
+        installed_chapter_title_count: 2,
+        installed_glyph_slot_count,
         tracked_write_count,
     })
+}
+
+fn dialogue_lifetime_report(
+    screen_role: &'static str,
+    chapter_index: u8,
+    plans: &[MainDialogueSlicePlan],
+    encoded_records: &[Vec<u8>],
+    page: &super::dialogue_lifetime_page::DialogueLifetimePagePlan,
+) -> CumulativeDialogueLifetimeReport {
+    let installed_translated_line_count = plans
+        .iter()
+        .map(|plan| plan.translated_line_count)
+        .sum::<usize>();
+    let source_storage_byte_count = plans
+        .iter()
+        .map(|plan| plan.source_storage_byte_count)
+        .sum::<usize>();
+    let planned_storage_byte_count = encoded_records.iter().map(Vec::len).sum::<usize>();
+
+    CumulativeDialogueLifetimeReport {
+        screen_role,
+        chapter_index,
+        screen_evidence_manifest_sha1: page.manifest_sha1.clone(),
+        installed_record_count: plans.len(),
+        installed_translated_line_count,
+        source_storage_byte_count,
+        planned_storage_byte_count,
+        remaining_storage_byte_count: source_storage_byte_count - planned_storage_byte_count,
+        unique_glyph_count: page.assignments.len(),
+        glyph_assignment_sha1: assignment_sha1(&page.assignments),
+        preserved_screen_active_code_count: page.preserved_screen_active_code_count,
+        preserved_source_active_code_count: page.preserved_source_active_code_count,
+        preserved_active_code_count: page.preserved_active_code_count,
+        temporal_sample_count: page.temporal_sample_count,
+        unique_nametable_count: page.unique_nametable_count,
+        font_physical_page: page.physical_chr_page,
+        font_mapper_register: page.mapper_register,
+        font_page_sha1: page.page_sha1.clone(),
+        font_page_pack_sha1: sha1_hex(&page.page_pack),
+    }
 }
 
 fn write_file(path: &Path, data: &[u8]) -> Result<()> {
@@ -344,9 +598,12 @@ mod tests {
     fn cumulative_selector_addresses_do_not_overlap() {
         let roster_selector =
             build_roster_selector(ROSTER_PAGE_REGISTERS[0], ROSTER_PAGE_REGISTERS[1]).unwrap();
-        let dialogue_selector = build_page_routine_at(
+        let dialogue_selector = build_chapter_page_selector(
             DIALOGUE_SELECTOR_ADDRESS,
-            0x98,
+            ChapterPageSequence {
+                admitted_chapter_count: 2,
+                first_mapper_register: 0x98,
+            },
             SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
         )
         .unwrap();
@@ -355,9 +612,9 @@ mod tests {
             usize::from(ROSTER_SELECTOR_ADDRESS) + roster_selector.len()
                 <= usize::from(DIALOGUE_SELECTOR_ADDRESS)
         );
-        assert_eq!(
-            usize::from(DIALOGUE_SELECTOR_ADDRESS) + dialogue_selector.len(),
-            usize::from(DIALOGUE_SELECTOR_END)
+        assert!(
+            usize::from(DIALOGUE_SELECTOR_ADDRESS) + dialogue_selector.len()
+                <= usize::from(DIALOGUE_SELECTOR_CAVE_END)
         );
     }
 
@@ -371,6 +628,10 @@ mod tests {
         assert_eq!(
             directory.join(UI_STAGE_REPORT_NAME),
             PathBuf::from("out/cumulative-stages/mapper165-ui.json")
+        );
+        assert_eq!(
+            directory.join(CHAPTER_ONE_STAGE_ROM_NAME),
+            PathBuf::from("out/cumulative-stages/chapter1-intro.nes")
         );
     }
 }
