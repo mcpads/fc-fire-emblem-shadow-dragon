@@ -49,6 +49,11 @@ struct BattleCodebookPlanReport {
     constructed_clique_glyph_count: usize,
     stable_color_count: usize,
     stable_assignment_sha1: String,
+    coloring_strategy: &'static str,
+    active_ceiling_search_node_count: usize,
+    active_ceiling_search_limit_reached: bool,
+    active_ceiling_assignment_found: bool,
+    model_chromatic_number_proven: bool,
     active_slot_count: usize,
     chapter_one_preserved_active_code_count: usize,
     chapter_one_safe_target_code_count: usize,
@@ -117,15 +122,18 @@ pub(crate) fn analyze_battle_codebook_plan(
         !dialogue_records.is_empty(),
         "battle codebook has no dialogue records"
     );
-    let coloring = plan_stable_coloring(&BattleGlyphFamilies {
-        base,
-        unit_names,
-        enemy_names,
-        classes,
-        items,
-        terrains,
-        dialogue_records,
-    })?;
+    let coloring = plan_stable_coloring(
+        &BattleGlyphFamilies {
+            base,
+            unit_names,
+            enemy_names,
+            classes,
+            items,
+            terrains,
+            dialogue_records,
+        },
+        ACTIVE_HANGUL_SLOT_COUNT,
+    )?;
     let protected = GAMEPLAY_BATTLE_PRESERVED_ACTIVE_CODES
         .into_iter()
         .collect::<BTreeSet<_>>();
@@ -164,6 +172,11 @@ pub(crate) fn analyze_battle_codebook_plan(
         constructed_clique_glyph_count: coloring.constructed_clique_glyph_count,
         stable_color_count: coloring.color_count,
         stable_assignment_sha1: coloring.assignment_sha1,
+        coloring_strategy: coloring.coloring_strategy,
+        active_ceiling_search_node_count: coloring.active_ceiling_search_node_count,
+        active_ceiling_search_limit_reached: coloring.active_ceiling_search_limit_reached,
+        active_ceiling_assignment_found: coloring.active_ceiling_assignment_found,
+        model_chromatic_number_proven: coloring.model_chromatic_number_proven,
         active_slot_count: ACTIVE_HANGUL_SLOT_COUNT,
         chapter_one_preserved_active_code_count: protected.len(),
         chapter_one_safe_target_code_count: chapter_one_safe_code_count,
@@ -241,6 +254,11 @@ mod tests {
             constructed_clique_glyph_count: 1,
             stable_color_count: 1,
             stable_assignment_sha1: "assignment".to_owned(),
+            coloring_strategy: "test",
+            active_ceiling_search_node_count: 1,
+            active_ceiling_search_limit_reached: false,
+            active_ceiling_assignment_found: true,
+            model_chromatic_number_proven: true,
             active_slot_count: ACTIVE_HANGUL_SLOT_COUNT,
             chapter_one_preserved_active_code_count: 119,
             chapter_one_safe_target_code_count: 91,

@@ -4,6 +4,12 @@ use anyhow::{Context, Result, ensure};
 
 use crate::sha1_hex;
 
+mod ceiling_search;
+
+use ceiling_search::search_coloring;
+
+const ACTIVE_CEILING_SEARCH_NODE_LIMIT: usize = 5_000_000;
+
 pub(super) struct BattleGlyphFamilies {
     pub(super) base: BTreeSet<char>,
     pub(super) unit_names: Vec<BTreeSet<char>>,
@@ -29,20 +35,47 @@ pub(super) struct StableColoringPlan {
     pub(super) constructed_clique_glyph_count: usize,
     pub(super) color_count: usize,
     pub(super) assignment_sha1: String,
+    pub(super) coloring_strategy: &'static str,
+    pub(super) active_ceiling_search_node_count: usize,
+    pub(super) active_ceiling_search_limit_reached: bool,
+    pub(super) active_ceiling_assignment_found: bool,
+    pub(super) model_chromatic_number_proven: bool,
     pub(super) family_entry_counts: FamilyEntryCounts,
 }
 
-pub(super) fn plan_stable_coloring(families: &BattleGlyphFamilies) -> Result<StableColoringPlan> {
+pub(super) fn plan_stable_coloring(
+    families: &BattleGlyphFamilies,
+    active_color_ceiling: usize,
+) -> Result<StableColoringPlan> {
     let graph = ConflictGraph::from_families(families);
-    let colors = graph.color_deterministically();
-    graph.verify_coloring(&colors)?;
-    let constructed_clique = constructed_clique(families);
+    let greedy_colors = graph.color_deterministically();
+    graph.verify_coloring(&greedy_colors)?;
+    let constructed_clique = graph.extend_clique(&constructed_clique(families));
     graph.verify_clique(&constructed_clique)?;
+    let ceiling_search = search_coloring(
+        &graph,
+        &constructed_clique,
+        active_color_ceiling,
+        ACTIVE_CEILING_SEARCH_NODE_LIMIT,
+    );
+    let active_ceiling_assignment_found = ceiling_search.colors.is_some();
+    let (colors, initial_strategy) = if let Some(colors) = ceiling_search.colors {
+        graph.verify_coloring(&colors)?;
+        (colors, "clique-seeded bounded ceiling search")
+    } else {
+        (greedy_colors, "deterministic DSATUR upper bound")
+    };
     let color_count = colors
         .iter()
         .copied()
         .max()
         .map_or(0, |maximum| maximum + 1);
+    let model_chromatic_number_proven = color_count == constructed_clique.len();
+    let coloring_strategy = if model_chromatic_number_proven {
+        "deterministic DSATUR matched constructed clique"
+    } else {
+        initial_strategy
+    };
     let assignment_sha1 = assignment_sha1(&graph.glyphs, &colors)?;
     Ok(StableColoringPlan {
         glyph_count: graph.glyphs.len(),
@@ -50,6 +83,11 @@ pub(super) fn plan_stable_coloring(families: &BattleGlyphFamilies) -> Result<Sta
         constructed_clique_glyph_count: constructed_clique.len(),
         color_count,
         assignment_sha1,
+        coloring_strategy,
+        active_ceiling_search_node_count: ceiling_search.visited_node_count,
+        active_ceiling_search_limit_reached: ceiling_search.node_limit_reached,
+        active_ceiling_assignment_found,
+        model_chromatic_number_proven,
         family_entry_counts: FamilyEntryCounts {
             unit_names: families.unit_names.len(),
             enemy_names: families.enemy_names.len(),
@@ -178,6 +216,23 @@ impl ConflictGraph {
         self.neighbors.iter().map(BTreeSet::len).sum::<usize>() / 2
     }
 
+    fn extend_clique(&self, seed: &BTreeSet<char>) -> BTreeSet<char> {
+        let mut clique = seed.clone();
+        for glyph in &self.glyphs {
+            if clique.contains(glyph) {
+                continue;
+            }
+            let vertex = self.indices[glyph];
+            if clique
+                .iter()
+                .all(|member| self.neighbors[vertex].contains(&self.indices[member]))
+            {
+                clique.insert(*glyph);
+            }
+        }
+        clique
+    }
+
     fn color_deterministically(&self) -> Vec<usize> {
         let mut colors = vec![None; self.glyphs.len()];
         while colors.iter().any(Option::is_none) {
@@ -291,51 +346,4 @@ fn assignment_sha1(glyphs: &[char], colors: &[usize]) -> Result<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn set(glyphs: &str) -> BTreeSet<char> {
-        glyphs.chars().collect()
-    }
-
-    #[test]
-    fn alternatives_can_share_a_color_but_one_cache_family_cannot() {
-        let families = BattleGlyphFamilies {
-            base: set("가"),
-            unit_names: vec![set("나"), set("다")],
-            enemy_names: vec![set("라")],
-            classes: vec![set("마"), set("바")],
-            items: vec![set("사")],
-            terrains: vec![set("아")],
-            dialogue_records: vec![set("자"), set("차")],
-        };
-        let graph = ConflictGraph::from_families(&families);
-        let colors = graph.color_deterministically();
-        graph.verify_coloring(&colors).unwrap();
-
-        assert_eq!(colors[graph.indices[&'나']], colors[graph.indices[&'다']]);
-        assert_eq!(colors[graph.indices[&'자']], colors[graph.indices[&'차']]);
-        assert_ne!(colors[graph.indices[&'마']], colors[graph.indices[&'바']]);
-        assert_ne!(colors[graph.indices[&'나']], colors[graph.indices[&'라']]);
-    }
-
-    #[test]
-    fn deterministic_plan_reports_no_glyph_content() {
-        let families = BattleGlyphFamilies {
-            base: set("가"),
-            unit_names: vec![set("나")],
-            enemy_names: vec![set("다")],
-            classes: vec![set("라")],
-            items: vec![set("마")],
-            terrains: vec![set("바")],
-            dialogue_records: vec![set("사")],
-        };
-        let first = plan_stable_coloring(&families).unwrap();
-        let second = plan_stable_coloring(&families).unwrap();
-
-        assert_eq!(first.assignment_sha1, second.assignment_sha1);
-        assert_eq!(first.color_count, second.color_count);
-        assert_eq!(first.glyph_count, 7);
-        assert!(first.constructed_clique_glyph_count <= first.color_count);
-    }
-}
+mod tests;
