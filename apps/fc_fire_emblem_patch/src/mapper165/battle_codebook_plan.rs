@@ -15,9 +15,11 @@ use crate::{
 use super::battle_combination_probe::GAMEPLAY_BATTLE_PRESERVED_ACTIVE_CODES;
 
 mod conflict_graph;
+mod item_domain;
 mod runtime_inputs;
 
 use conflict_graph::{BattleGlyphFamilies, plan_stable_coloring};
+use item_domain::{BattleItemDomainBinding, bind_battle_item_domain};
 use runtime_inputs::{BattleRuntimeInputBinding, bind_battle_runtime_inputs};
 
 #[derive(Debug, Serialize)]
@@ -50,6 +52,7 @@ struct BattleCodebookPlanReport {
     active_slot_count: usize,
     chapter_one_preserved_active_code_count: usize,
     chapter_one_safe_target_code_count: usize,
+    item_domain: BattleItemDomainBinding,
     runtime_inputs: BattleRuntimeInputBinding,
     stable_assignment_fits_active_slot_ceiling: bool,
     stable_assignment_fits_chapter_one_safe_codes: bool,
@@ -86,7 +89,8 @@ pub(crate) fn analyze_battle_codebook_plan(
     let unit_names = entry_glyph_sets(&fixed, "unit-names");
     let enemy_names = entry_glyph_sets(&fixed, "enemy-names");
     let classes = entry_glyph_sets(&fixed, "class-names");
-    let items = entry_glyph_sets(&fixed, "item-names");
+    let item_domain = bind_battle_item_domain(&rom, &fixed)?;
+    let items = item_domain.glyph_sets;
     let terrains = entry_glyph_sets(&fixed, "terrain-names");
     for (role, entries) in [
         ("battle message", &message_templates),
@@ -139,7 +143,7 @@ pub(crate) fn analyze_battle_codebook_plan(
         source_sha1: EXPECTED_SOURCE_SHA1,
         fixed_workspace_sha1,
         dialogue_workspace_sha1,
-        cooccurrence_model: "conservative battle-cache family coverage",
+        cooccurrence_model: "source-constrained battle-cache family coverage with equip-eligible item superset",
         message_template_entry_count: message_templates.len(),
         unit_name_entry_count: coloring.family_entry_counts.unit_names,
         enemy_name_entry_count: coloring.family_entry_counts.enemy_names,
@@ -163,6 +167,7 @@ pub(crate) fn analyze_battle_codebook_plan(
         active_slot_count: ACTIVE_HANGUL_SLOT_COUNT,
         chapter_one_preserved_active_code_count: protected.len(),
         chapter_one_safe_target_code_count: chapter_one_safe_code_count,
+        item_domain: item_domain.binding,
         runtime_inputs,
         stable_assignment_fits_active_slot_ceiling: coloring.color_count
             <= ACTIVE_HANGUL_SLOT_COUNT,
@@ -176,7 +181,7 @@ pub(crate) fn analyze_battle_codebook_plan(
         glyph_characters_emitted: false,
         translation_text_emitted: false,
         release_eligible: false,
-        next_gate: "design cache-owned encoded text selection from the bound live battle records; a static chapter-table catalog cannot cover runtime record and equipped-item state",
+        next_gate: "bind class and item pair reachability before choosing between a constrained stable codebook and cache-owned encoded text selection",
     };
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize battle codebook plan")?;
@@ -220,7 +225,7 @@ mod tests {
             unit_name_entry_count: 52,
             enemy_name_entry_count: 68,
             class_entry_count: 22,
-            item_entry_count: 91,
+            item_entry_count: 64,
             terrain_entry_count: 15,
             dialogue_record_count: 28,
             player_names_per_cache: 1,
@@ -231,7 +236,7 @@ mod tests {
             dialogue_records_per_cache: 1,
             all_message_templates_per_cache: true,
             forecast_label_per_cache: true,
-            glyph_vertex_count: 319,
+            glyph_vertex_count: 299,
             conflict_edge_count: 1,
             constructed_clique_glyph_count: 1,
             stable_color_count: 1,
@@ -239,6 +244,7 @@ mod tests {
             active_slot_count: ACTIVE_HANGUL_SLOT_COUNT,
             chapter_one_preserved_active_code_count: 119,
             chapter_one_safe_target_code_count: 91,
+            item_domain: item_domain::test_binding(),
             runtime_inputs: runtime_inputs::test_binding(),
             stable_assignment_fits_active_slot_ceiling: true,
             stable_assignment_fits_chapter_one_safe_codes: true,
