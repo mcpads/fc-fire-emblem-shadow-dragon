@@ -15,8 +15,10 @@ use crate::{
 use super::battle_combination_probe::GAMEPLAY_BATTLE_PRESERVED_ACTIVE_CODES;
 
 mod conflict_graph;
+mod runtime_inputs;
 
 use conflict_graph::{BattleGlyphFamilies, plan_stable_coloring};
+use runtime_inputs::{BattleRuntimeInputBinding, bind_battle_runtime_inputs};
 
 #[derive(Debug, Serialize)]
 struct BattleCodebookPlanReport {
@@ -48,6 +50,7 @@ struct BattleCodebookPlanReport {
     active_slot_count: usize,
     chapter_one_preserved_active_code_count: usize,
     chapter_one_safe_target_code_count: usize,
+    runtime_inputs: BattleRuntimeInputBinding,
     stable_assignment_fits_active_slot_ceiling: bool,
     stable_assignment_fits_chapter_one_safe_codes: bool,
     model_active_slot_infeasibility_proven: bool,
@@ -128,6 +131,7 @@ pub(crate) fn analyze_battle_codebook_plan(
         "chapter-one battle protection includes a reserved font code"
     );
     let chapter_one_safe_code_count = active.difference(&protected).count();
+    let runtime_inputs = bind_battle_runtime_inputs(&rom)?;
     let fixed_workspace_sha1 = sha1_hex(&fs::read(fixed_workspace_path)?);
     let dialogue_workspace_sha1 = sha1_hex(&fs::read(dialogue_workspace_path)?);
     let report = BattleCodebookPlanReport {
@@ -159,6 +163,7 @@ pub(crate) fn analyze_battle_codebook_plan(
         active_slot_count: ACTIVE_HANGUL_SLOT_COUNT,
         chapter_one_preserved_active_code_count: protected.len(),
         chapter_one_safe_target_code_count: chapter_one_safe_code_count,
+        runtime_inputs,
         stable_assignment_fits_active_slot_ceiling: coloring.color_count
             <= ACTIVE_HANGUL_SLOT_COUNT,
         stable_assignment_fits_chapter_one_safe_codes: coloring.color_count
@@ -171,7 +176,7 @@ pub(crate) fn analyze_battle_codebook_plan(
         glyph_characters_emitted: false,
         translation_text_emitted: false,
         release_eligible: false,
-        next_gate: "bind the actual battle-combination graph; if its clique lower bound still exceeds active slots, store cache-owned encoded text with each glyph page",
+        next_gate: "design cache-owned encoded text selection from the bound live battle records; a static chapter-table catalog cannot cover runtime record and equipped-item state",
     };
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize battle codebook plan")?;
@@ -234,6 +239,7 @@ mod tests {
             active_slot_count: ACTIVE_HANGUL_SLOT_COUNT,
             chapter_one_preserved_active_code_count: 119,
             chapter_one_safe_target_code_count: 91,
+            runtime_inputs: runtime_inputs::test_binding(),
             stable_assignment_fits_active_slot_ceiling: true,
             stable_assignment_fits_chapter_one_safe_codes: true,
             model_active_slot_infeasibility_proven: false,
