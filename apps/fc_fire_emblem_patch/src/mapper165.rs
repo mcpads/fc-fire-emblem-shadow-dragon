@@ -16,6 +16,7 @@ pub(crate) mod battle_codebook_plan;
 pub(crate) mod battle_combination_probe;
 pub(crate) mod battle_dialogue_probe;
 pub(crate) mod battle_text_cache_probe;
+pub(crate) mod battle_text_runtime_base;
 mod dialogue_probe_font;
 pub(crate) mod dialogue_slice_probe;
 pub(crate) mod direct_chr_pairs;

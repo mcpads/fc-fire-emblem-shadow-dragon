@@ -20,14 +20,16 @@ use super::{
 
 const EXPANDED_PRG_SIZE: usize = 512 * 1024;
 const FIXED_BANK_SIZE: usize = 16 * 1024;
-const GLYPH_ATLAS_PRG_OFFSET: usize = 256 * 1024;
+pub(super) const GLYPH_ATLAS_PRG_OFFSET: usize = 256 * 1024;
 const GLYPH_TILE_SIZE: usize = 16;
-const GLYPH_ATLAS_MMC3_PAGE: u8 = 0x20;
+pub(super) const GLYPH_ATLAS_MMC3_PAGE: u8 = 0x20;
 const MATERIAL_MMC3_PAGE_SIZE: usize = 8 * 1024;
-const SOURCE_PAGE_PRG_OFFSET: usize = GLYPH_ATLAS_PRG_OFFSET + MATERIAL_MMC3_PAGE_SIZE;
-const SOURCE_PAGE_MMC3_PAGE: u8 = 0x21;
-const RECIPE_BLOB_PRG_OFFSET: usize = SOURCE_PAGE_PRG_OFFSET + FONT_PAGE_SIZE;
-const RECIPE_BLOB_MMC3_PAGE: u8 = SOURCE_PAGE_MMC3_PAGE;
+pub(super) const PHYSICAL_CODE_TABLE_PRG_OFFSET: usize = GLYPH_ATLAS_PRG_OFFSET + 0x1400;
+pub(super) const PHYSICAL_CODE_TABLE_CPU_ADDRESS: u16 = 0x9400;
+pub(super) const SOURCE_PAGE_PRG_OFFSET: usize = GLYPH_ATLAS_PRG_OFFSET + MATERIAL_MMC3_PAGE_SIZE;
+pub(super) const SOURCE_PAGE_MMC3_PAGE: u8 = 0x21;
+pub(super) const RECIPE_BLOB_PRG_OFFSET: usize = SOURCE_PAGE_PRG_OFFSET + FONT_PAGE_SIZE;
+pub(super) const RECIPE_BLOB_MMC3_PAGE: u8 = SOURCE_PAGE_MMC3_PAGE;
 
 #[derive(Debug, Serialize)]
 struct BattleTextCacheBaseReport {
@@ -100,6 +102,7 @@ pub(crate) fn build_battle_text_cache_base(
     let output = expand_prg_with_material(
         &parity_rom,
         &glyph_atlas,
+        &[],
         source_page,
         &material.recipe_blob,
     )?;
@@ -170,7 +173,7 @@ pub(crate) fn build_battle_text_cache_base(
     })
 }
 
-fn rasterize_atlas(glyphs: &[char]) -> Result<Vec<u8>> {
+pub(super) fn rasterize_atlas(glyphs: &[char]) -> Result<Vec<u8>> {
     let font = load_dalmoori()?;
     glyphs.iter().try_fold(
         Vec::with_capacity(glyphs.len() * GLYPH_TILE_SIZE),
@@ -181,9 +184,10 @@ fn rasterize_atlas(glyphs: &[char]) -> Result<Vec<u8>> {
     )
 }
 
-fn expand_prg_with_material(
+pub(super) fn expand_prg_with_material(
     parity_rom: &Rom,
     atlas: &[u8],
+    physical_color_codes: &[u8],
     source_page: &[u8],
     recipe_blob: &[u8],
 ) -> Result<Vec<u8>> {
@@ -198,7 +202,20 @@ fn expand_prg_with_material(
     let atlas_end = GLYPH_ATLAS_PRG_OFFSET
         .checked_add(atlas.len())
         .context("glyph atlas range overflow")?;
+    ensure!(
+        atlas_end <= PHYSICAL_CODE_TABLE_PRG_OFFSET,
+        "battle glyph atlas overlaps the physical-code table"
+    );
     expanded_prg[GLYPH_ATLAS_PRG_OFFSET..atlas_end].copy_from_slice(atlas);
+    let physical_code_table_end = PHYSICAL_CODE_TABLE_PRG_OFFSET
+        .checked_add(physical_color_codes.len())
+        .context("physical-code table range overflow")?;
+    ensure!(
+        physical_code_table_end <= GLYPH_ATLAS_PRG_OFFSET + MATERIAL_MMC3_PAGE_SIZE,
+        "battle physical-code table exceeds the atlas material page"
+    );
+    expanded_prg[PHYSICAL_CODE_TABLE_PRG_OFFSET..physical_code_table_end]
+        .copy_from_slice(physical_color_codes);
     ensure!(
         source_page.len() == FONT_PAGE_SIZE,
         "battle source material is not one 4 KiB page"
@@ -244,13 +261,18 @@ mod tests {
         image[HEADER_SIZE + 256 * 1024 - FIXED_BANK_SIZE..].fill(0xA5);
         let rom = Rom::parse(image).unwrap();
         let source_page = vec![2; FONT_PAGE_SIZE];
-        let output = expand_prg_with_material(&rom, &[1, 2, 3], &source_page, &[4, 5]).unwrap();
+        let output =
+            expand_prg_with_material(&rom, &[1, 2, 3], &[6, 7], &source_page, &[4, 5]).unwrap();
         let expanded = Rom::parse(output).unwrap();
         assert_eq!(GLYPH_ATLAS_MMC3_PAGE + 1, SOURCE_PAGE_MMC3_PAGE);
         assert_eq!(SOURCE_PAGE_MMC3_PAGE, RECIPE_BLOB_MMC3_PAGE);
         assert_eq!(
             &expanded.prg()[GLYPH_ATLAS_PRG_OFFSET..GLYPH_ATLAS_PRG_OFFSET + 3],
             &[1, 2, 3]
+        );
+        assert_eq!(
+            &expanded.prg()[PHYSICAL_CODE_TABLE_PRG_OFFSET..PHYSICAL_CODE_TABLE_PRG_OFFSET + 2],
+            &[6, 7]
         );
         assert_eq!(
             &expanded.prg()[SOURCE_PAGE_PRG_OFFSET..SOURCE_PAGE_PRG_OFFSET + FONT_PAGE_SIZE],

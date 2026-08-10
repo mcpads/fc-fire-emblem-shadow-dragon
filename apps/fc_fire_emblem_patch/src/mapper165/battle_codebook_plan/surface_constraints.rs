@@ -81,20 +81,26 @@ pub(crate) struct BattleSurfaceConstraintSummary {
     pub(crate) constrained_color_count: Option<usize>,
 }
 
-pub(crate) fn analyze_battle_surface_constraints(
-    source_path: &Path,
-    fixed_workspace_path: &Path,
-    dialogue_workspace_path: &Path,
-    temporal_manifest_path: &Path,
-    report_path: &Path,
-) -> Result<BattleSurfaceConstraintSummary> {
-    let rom = Rom::from_path(source_path)?;
-    rom.verify_supported_japanese()?;
-    let fixed = plan_fixed_text(&rom, fixed_workspace_path)?;
-    let dialogue = plan_battle_dialogue_records(&rom, dialogue_workspace_path)?;
-    let model = plan_battle_codebook_model(&rom, &fixed, &dialogue)?;
-    let evidence = load_observed_battle_temporal_evidence(source_path, temporal_manifest_path)?;
+pub(in crate::mapper165) struct ObservedBattleSurfaceSelection {
+    pub(in crate::mapper165) constraints: Vec<(String, ScreenCodeConstraint)>,
+    route_sample_counts: BTreeMap<String, usize>,
+    pub(in crate::mapper165) runtime_input_count: usize,
+    observed_dialogue_selector_count: usize,
+    selector_62_predicate_sample_count: usize,
+    selector_projection_changed_sample_count: usize,
+    minimum_preserved_active_code_count: usize,
+    maximum_preserved_active_code_count: usize,
+    maximum_selected_recipe_count: usize,
+    maximum_selected_glyph_count: usize,
+    pub(in crate::mapper165) maximum_selected_overlay_count: usize,
+    nametable_constrained_sample_count: usize,
+    visible_oam_constrained_sample_count: usize,
+}
 
+pub(in crate::mapper165) fn select_observed_battle_surfaces(
+    material: &super::composition::BattleCacheCompositionMaterial,
+    evidence: &crate::temporal_surface::ObservedBattleTemporalEvidence,
+) -> Result<ObservedBattleSurfaceSelection> {
     let mut route_sample_counts = BTreeMap::new();
     let mut runtime_inputs = BTreeSet::new();
     let mut observed_dialogue_selectors = BTreeSet::new();
@@ -121,7 +127,7 @@ pub(crate) fn analyze_battle_surface_constraints(
             sample.runtime_input.observed_dialogue_selector
                 != sample.runtime_input.projected_dialogue_selector,
         );
-        let selection = model.composition.select_runtime_recipes(input)?;
+        let selection = material.select_runtime_recipes(input)?;
         validate_selection(&selection)?;
         minimum_preserved_active_code_count =
             minimum_preserved_active_code_count.min(sample.active_tile_codes.len());
@@ -142,6 +148,54 @@ pub(crate) fn analyze_battle_surface_constraints(
             },
         ));
     }
+    ensure!(
+        !constraints.is_empty(),
+        "observed battle surface selection is empty"
+    );
+    Ok(ObservedBattleSurfaceSelection {
+        constraints,
+        route_sample_counts,
+        runtime_input_count: runtime_inputs.len(),
+        observed_dialogue_selector_count: observed_dialogue_selectors.len(),
+        selector_62_predicate_sample_count,
+        selector_projection_changed_sample_count,
+        minimum_preserved_active_code_count,
+        maximum_preserved_active_code_count,
+        maximum_selected_recipe_count,
+        maximum_selected_glyph_count,
+        maximum_selected_overlay_count,
+        nametable_constrained_sample_count,
+        visible_oam_constrained_sample_count,
+    })
+}
+
+pub(crate) fn analyze_battle_surface_constraints(
+    source_path: &Path,
+    fixed_workspace_path: &Path,
+    dialogue_workspace_path: &Path,
+    temporal_manifest_path: &Path,
+    report_path: &Path,
+) -> Result<BattleSurfaceConstraintSummary> {
+    let rom = Rom::from_path(source_path)?;
+    rom.verify_supported_japanese()?;
+    let fixed = plan_fixed_text(&rom, fixed_workspace_path)?;
+    let dialogue = plan_battle_dialogue_records(&rom, dialogue_workspace_path)?;
+    let model = plan_battle_codebook_model(&rom, &fixed, &dialogue)?;
+    let evidence = load_observed_battle_temporal_evidence(source_path, temporal_manifest_path)?;
+
+    let selection = select_observed_battle_surfaces(&model.composition, &evidence)?;
+    let constraints = selection.constraints;
+    let route_sample_counts = selection.route_sample_counts;
+    let minimum_preserved_active_code_count = selection.minimum_preserved_active_code_count;
+    let maximum_preserved_active_code_count = selection.maximum_preserved_active_code_count;
+    let maximum_selected_recipe_count = selection.maximum_selected_recipe_count;
+    let maximum_selected_glyph_count = selection.maximum_selected_glyph_count;
+    let maximum_selected_overlay_count = selection.maximum_selected_overlay_count;
+    let nametable_constrained_sample_count = selection.nametable_constrained_sample_count;
+    let visible_oam_constrained_sample_count = selection.visible_oam_constrained_sample_count;
+    let selector_62_predicate_sample_count = selection.selector_62_predicate_sample_count;
+    let selector_projection_changed_sample_count =
+        selection.selector_projection_changed_sample_count;
     ensure!(
         route_sample_counts.keys().cloned().collect::<BTreeSet<_>>()
             == [
@@ -220,8 +274,8 @@ pub(crate) fn analyze_battle_surface_constraints(
         temporal_manifest_sha1: evidence.manifest_sha1,
         observed_battle_sample_count: evidence.samples.len(),
         observed_route_sample_counts: route_sample_counts,
-        observed_runtime_tuple_count: runtime_inputs.len(),
-        observed_dialogue_selector_count: observed_dialogue_selectors.len(),
+        observed_runtime_tuple_count: selection.runtime_input_count,
+        observed_dialogue_selector_count: selection.observed_dialogue_selector_count,
         selector_62_predicate_sample_count,
         selector_projection_changed_sample_count,
         screen_constraint_count: constraints.len(),
@@ -266,7 +320,7 @@ pub(crate) fn analyze_battle_surface_constraints(
     Ok(BattleSurfaceConstraintSummary {
         report_sha1: sha1_hex(&report_bytes),
         sample_count: evidence.samples.len(),
-        runtime_tuple_count: runtime_inputs.len(),
+        runtime_tuple_count: selection.runtime_input_count,
         physical_assignment_sha1,
         constrained_color_count,
     })

@@ -26,9 +26,8 @@ mod physical_assignment;
 mod runtime_inputs;
 pub(crate) mod surface_constraints;
 
-use composition::{
-    BattleCacheCompositionMaterial, BattleCacheCompositionPlan, plan_cache_composition,
-};
+pub(in crate::mapper165) use composition::BattleCacheCompositionMaterial;
+use composition::{BattleCacheCompositionPlan, plan_cache_composition};
 use conflict_graph::{BattleGlyphFamilies, plan_stable_coloring};
 use enemy_domain::{EnemyBattleDomain, EnemyBattleDomainBinding, bind_enemy_battle_domain};
 use item_domain::{BattleItemDomain, BattleItemDomainBinding, bind_battle_item_domain};
@@ -54,6 +53,7 @@ struct BattleCodebookModel {
 
 pub(super) struct ConstrainedBattleCodebook {
     pub(super) glyph_codes: BTreeMap<char, u8>,
+    pub(super) color_codes: Vec<u8>,
     pub(super) abstract_assignment_sha1: String,
     pub(super) physical_assignment_sha1: String,
     pub(super) stable_color_count: usize,
@@ -249,6 +249,7 @@ pub(super) fn plan_constrained_battle_codebook(
     let physical = assign_physical_codes(&model.coloring, constraints)?;
     Ok(ConstrainedBattleCodebook {
         glyph_codes: physical.glyph_codes,
+        color_codes: physical.color_codes,
         abstract_assignment_sha1: model.coloring.assignment_sha1,
         physical_assignment_sha1: physical.assignment_sha1,
         stable_color_count: model.coloring.color_count,

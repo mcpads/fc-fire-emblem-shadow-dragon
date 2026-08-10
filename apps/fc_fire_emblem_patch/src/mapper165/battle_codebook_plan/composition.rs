@@ -14,7 +14,7 @@ use super::conflict_graph::StableColoringPlan;
 
 mod blob;
 
-use blob::{RecipeCatalog, RecipePair, RecipeRole, select_runtime_recipes};
+use blob::{RecipeCatalog, RecipePair, RecipeRole, has_directory_recipe, select_runtime_recipes};
 
 const SOURCE_PRG_BYTE_COUNT: usize = 256 * 1024;
 const EXPANDED_PRG_BYTE_COUNT: usize = 512 * 1024;
@@ -89,6 +89,23 @@ pub(in crate::mapper165) struct BattleRuntimeRecipeSelection {
 }
 
 impl BattleCacheCompositionMaterial {
+    pub(in crate::mapper165) fn includes_fixed_entry(
+        &self,
+        table_id: &str,
+        source_index: usize,
+    ) -> Result<bool> {
+        let role = match table_id {
+            "battle-message-templates" => return Ok(true),
+            "unit-names" => RecipeRole::UnitName,
+            "enemy-names" => RecipeRole::EnemyName,
+            "class-names" => RecipeRole::Class,
+            "item-names" => RecipeRole::Item,
+            "terrain-names" => RecipeRole::Terrain,
+            _ => anyhow::bail!("unknown battle fixed-text recipe table {table_id}"),
+        };
+        has_directory_recipe(&self.recipe_blob, role, source_index)
+    }
+
     pub(in crate::mapper165) fn select_runtime_recipes(
         &self,
         input: BattleRuntimeRecipeInput,

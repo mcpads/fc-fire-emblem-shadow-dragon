@@ -340,6 +340,15 @@ pub(super) fn select_runtime_recipes(
     })
 }
 
+pub(super) fn has_directory_recipe(
+    bytes: &[u8],
+    role: RecipeRole,
+    source_index: usize,
+) -> Result<bool> {
+    let layout = validate_blob(bytes)?;
+    Ok(layout.read_recipe_offset(bytes, role, source_index)? != MISSING_RECIPE_OFFSET)
+}
+
 fn validate_blob(bytes: &[u8]) -> Result<DirectoryLayout> {
     ensure!(
         bytes.len() >= HEADER_BYTE_COUNT,

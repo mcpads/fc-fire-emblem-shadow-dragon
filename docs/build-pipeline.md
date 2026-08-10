@@ -319,6 +319,9 @@ cargo run -p fc-fire-emblem-patch -- analyze-battle-codebook-plan \
 cargo run -p fc-fire-emblem-patch -- analyze-battle-surface-constraints \
   'roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes'
 
+cargo run -p fc-fire-emblem-patch -- build-battle-text-runtime-base \
+  'roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes'
+
 cargo run -p fc-fire-emblem-patch -- build-battle-combination-probe \
   'roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes'
 
@@ -335,6 +338,8 @@ cargo run -p fc-fire-emblem-patch -- build-battle-cache-upload-probe \
 `analyze-battle-surface-constraints`는 이 레시피 바이너리를 실제 런타임 소비자처럼 다시 읽는다. 전투 표본의 `$0304..$0323`에서 양측 이름·병종·장비·지형 원천을 얻고 `$7936`의 현재 대사 선택자를 읽되, 원본 `$85DE` 생산자와 같은 `$0334/$0479/$0335 != 0`, `$05DF == 0` 조건이면 장래 선택자 `3E`를 미리 투영한다. 현재값 `00`이 후반 `3E`로 바뀌는 15표본도 이 규칙으로 같은 대사 레시피를 선택한다. 32개 불규칙 전투 표본은 다섯 유효 런타임 튜플, 표본당 10개 레시피, 최대 88개 글리프가 됐다. 모든 표본의 배경은 `$1000`, 스프라이트는 `$0000` 패턴 테이블을 쓰므로 `$1000` CHR-RAM 물리 제약에는 네임테이블만 들어가고 같은 번호의 OAM 타일은 들어가지 않는다. PPU 소유를 무시하고 둘을 합치면 각 경로는 따로 풀려도 전체 매칭이 실패하지만, 실제 소비 페이지로 거르면 106색을 제약한 전역 210색 배정이 성립한다. 물리 배정 SHA-1은 `6412cefea09f8285098b061866712d8bdbda778c`, 보고서 SHA-1은 `0fd8a8340459286c45ff8f313b2a754b419859d2`다. 이는 수용한 1장·사운드 테스트 표본의 결속이며 남은 병종·무기·초상화·애니메이션 변형 전체를 닫았다는 뜻은 아니다.
 
 `build-battle-text-cache-base`는 mapper 165 패리티 이미지를 512 KiB PRG로 확장한다. 추가 PRG의 MMC3 8 KiB 페이지 `20`에는 전역 코드북 순서의 296개 글리프·4,736바이트 타일 아틀라스를 넣는다. 페이지 `21`의 앞 4,096바이트에는 mapper 패리티 CHR의 원본 글꼴·그래픽 페이지를, 뒤에는 위 3,896바이트 레시피를 넣어 기반 자산을 두 페이지에 닫는다. 원래 256 KiB PRG 접두부와 활성 고정 뱅크, CHR은 보존한다. 현재 ROM SHA-1은 `e54698f3dc019f0f6cbd187a69d0270eb6f54d31`, 보고서 SHA-1은 `89e91e1ac5c4df1cbddb86dcf115f25935daecc1`이다. 이 기반은 아직 실행 중 원본 페이지를 복원하거나 레시피를 적용하지 않으며 배포 후보가 아니다.
+
+`build-battle-text-runtime-base`는 위 자산을 실제 번역 바이트와 처음 결합한다. 32개 시간 표본에서 성립한 물리 배정으로 전투 레시피 카탈로그에 든 고정 원천 231개, 전투 대사 28레코드와 포인터 65개, 예측창 라벨을 재인코딩한다. 전체 고정 작업공간 272개 중 레시피 디렉터리에서 결측인 41개는 전투에 쓰인다고 추정하지 않고 원문 바이트를 유지한다. 추적 쓰기는 고정 231·대사 28·포인터 65·라벨 1개, 합계 325개다. 추상 색 210개에서 물리 코드로 가는 210바이트 표를 MMC3 페이지 `20`의 `$9400`에 추가하고, 아틀라스·원본 페이지·레시피와 원래 CHR을 다시 읽어 검증한다. 현재 ROM SHA-1은 `edf467e181ecec68ac0138448573e53391aa8d2a`, 보고서 SHA-1은 `4420891fcaf2878cc53d717dca3387349dae495f`다. 번역 검토와 시각 변형 카탈로그가 미완료이고 실행 로더도 아직 없으므로 개발 기반일 뿐 배포 후보가 아니다.
 
 `build-battle-combination-probe`는 1장의 카인/가르다병 전투에서 실제로 함께 쓰는 이름·병종·무기·지형, 예측 라벨, 전투 메시지 템플릿 22개와 대사 후보 하나를 86글리프로 다시 인코딩한다. 네임테이블과 가시 OAM의 활성 코드 119개를 보존하도록 이 화면의 86개 추상 색을 남은 91개 물리 코드에 매칭한다. 추상 배정은 전체 296글리프에서 안정적이지만 물리 배정은 아직 이 한 화면 제약만 반영한다. 118개 변경은 모두 Expected Write다. 이전 로컬 배정의 콜드 실행은 이름·예측·공격·동적 피해 문구와 자동 지도 복귀를 통과했지만, 새 물리 배정 산출물은 아직 콜드 재검증 전이고 자연 경로의 대사 selector 62도 미관측이다. ROM SHA-1은 `1dc83c6aed6c67674f1ec0e2c54ba0d129f98a4e`, 보고서 SHA-1은 `3efec239f22d5cfe496a49674c61ca71f8495296`이다. 이는 한 조합의 정적 결속이며 전체 동적 캐시 구현이나 배포 후보가 아니다.
 

@@ -119,6 +119,23 @@ enum Command {
         #[arg(long, default_value = "out/battle-text-cache-base.json")]
         report: PathBuf,
     },
+    /// Reinsert every translated battle string and embed its observed physical codebook.
+    BuildBattleTextRuntimeBase {
+        source: PathBuf,
+        #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
+        fixed_workspace: PathBuf,
+        #[arg(long, default_value = "private/dialogue/battle-workspace.json")]
+        dialogue_workspace: PathBuf,
+        #[arg(
+            long,
+            default_value = "evidence/private/temporal-surfaces/manifest.json"
+        )]
+        temporal_manifest: PathBuf,
+        #[arg(long, default_value = "out/battle-text-runtime-base.nes")]
+        output: PathBuf,
+        #[arg(long, default_value = "out/battle-text-runtime-base.json")]
+        report: PathBuf,
+    },
     /// Build one proven battle combination with fixed text and dialogue sharing a codebook.
     BuildBattleCombinationProbe {
         source: PathBuf,
@@ -583,6 +600,32 @@ fn main() -> Result<()> {
             println!(
                 "battle glyph atlas: {} glyphs, {} bytes",
                 summary.glyph_count, summary.glyph_atlas_byte_count
+            );
+        }
+        Command::BuildBattleTextRuntimeBase {
+            source,
+            fixed_workspace,
+            dialogue_workspace,
+            temporal_manifest,
+            output,
+            report,
+        } => {
+            let summary = mapper165::battle_text_runtime_base::build_battle_text_runtime_base(
+                &source,
+                &fixed_workspace,
+                &dialogue_workspace,
+                &temporal_manifest,
+                &output,
+                &report,
+            )?;
+            println!("wrote {}", output.display());
+            println!("output SHA-1: {}", summary.output_sha1);
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "battle runtime text base: {} fixed entries, {} dialogue records, {} tracked text writes",
+                summary.fixed_entry_count,
+                summary.dialogue_record_count,
+                summary.tracked_write_count
             );
         }
         Command::BuildBattleCombinationProbe {

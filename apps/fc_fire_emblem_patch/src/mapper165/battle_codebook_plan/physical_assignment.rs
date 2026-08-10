@@ -6,6 +6,7 @@ use crate::{font_slots::active_hangul_codes, sha1_hex};
 
 use super::conflict_graph::StableColoringPlan;
 
+#[derive(Clone)]
 pub(in crate::mapper165) struct ScreenCodeConstraint {
     pub(in crate::mapper165) glyphs: BTreeSet<char>,
     pub(in crate::mapper165) preserved_active_codes: BTreeSet<u8>,
@@ -14,6 +15,7 @@ pub(in crate::mapper165) struct ScreenCodeConstraint {
 #[derive(Debug)]
 pub(super) struct PhysicalCodeAssignment {
     pub(super) glyph_codes: BTreeMap<char, u8>,
+    pub(super) color_codes: Vec<u8>,
     pub(super) assignment_sha1: String,
     pub(super) constrained_screen_count: usize,
     pub(super) constrained_color_count: usize,
@@ -93,6 +95,7 @@ pub(super) fn assign_physical_codes(
     let assignment_sha1 = glyph_assignment_sha1(&glyph_codes);
     Ok(PhysicalCodeAssignment {
         glyph_codes,
+        color_codes,
         assignment_sha1,
         constrained_screen_count: constraints.len(),
         constrained_color_count: constrained_colors.len(),

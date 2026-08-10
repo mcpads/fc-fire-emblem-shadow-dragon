@@ -52,8 +52,8 @@ const GAMEPLAY_FIXED_SELECTIONS: [(&str, usize); 8] = [
     ("terrain-names", TERRAIN_SOURCE_INDICES[0]),
     ("terrain-names", TERRAIN_SOURCE_INDICES[1]),
 ];
-const FORECAST_LABEL_FILE_OFFSET: usize = 0x156C6;
-const FORECAST_LABEL_SOURCE: [u8; 10] =
+pub(super) const FORECAST_LABEL_FILE_OFFSET: usize = 0x156C6;
+pub(super) const FORECAST_LABEL_SOURCE: [u8; 10] =
     [0x22, 0x4D, 0x06, 0x11, 0x08, 0x01, 0x09, 0x02, 0x05, 0x00];
 pub(super) const GAMEPLAY_BATTLE_PRESERVED_ACTIVE_CODES: [u8; 119] = [
     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0B, 0x0C, 0x0E, 0x10, 0x11, 0x12,
