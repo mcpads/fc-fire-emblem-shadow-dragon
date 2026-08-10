@@ -8,19 +8,55 @@ mod tests;
 pub(super) fn validate_workspace_translations(
     workspace: &MainDialogueWorkspace,
 ) -> Result<WorkspaceTranslationCounts> {
+    let source_preservation_line_ids = workspace
+        .source_preservation_line_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        source_preservation_line_ids.len() == workspace.source_preservation_line_ids.len(),
+        "main dialogue source-preservation line IDs contain duplicates"
+    );
+    let mut found_source_preservation_line_ids = BTreeSet::new();
     let mut counts = WorkspaceTranslationCounts {
         filled_line_count: 0,
         complete_line_count: 0,
         target_glyph_count: 0,
+        preserved_source_line_count: 0,
+        untranslated_japanese_line_count: 0,
     };
     for record in &workspace.records {
         for line in &record.lines {
-            match line.status {
-                TranslationStatus::Untranslated => ensure!(
-                    line.korean.is_empty(),
-                    "{} is untranslated but its korean field is not empty",
+            let preserves_source = source_preservation_line_ids.contains(line.id.as_str());
+            if preserves_source {
+                ensure!(
+                    found_source_preservation_line_ids.insert(line.id.as_str()),
+                    "duplicate main dialogue line ID {}",
                     line.id
-                ),
+                );
+                ensure!(
+                    line.status == TranslationStatus::Untranslated && line.korean.is_empty(),
+                    "{} is source-preserved but also has a translation",
+                    line.id
+                );
+                ensure!(
+                    line.japanese_source_byte_count > 0,
+                    "{} source preservation does not own Japanese source bytes",
+                    line.id
+                );
+                counts.preserved_source_line_count += 1;
+                continue;
+            }
+            match line.status {
+                TranslationStatus::Untranslated => {
+                    ensure!(
+                        line.korean.is_empty(),
+                        "{} is untranslated but its korean field is not empty",
+                        line.id
+                    );
+                    counts.untranslated_japanese_line_count +=
+                        usize::from(line.japanese_source_byte_count > 0);
+                }
                 _ => {
                     ensure!(
                         !line.korean.is_empty(),
@@ -36,6 +72,10 @@ pub(super) fn validate_workspace_translations(
             }
         }
     }
+    ensure!(
+        found_source_preservation_line_ids.len() == source_preservation_line_ids.len(),
+        "main dialogue source-preservation list contains an unknown line ID"
+    );
     Ok(counts)
 }
 
@@ -56,6 +96,7 @@ pub(super) fn preserve_workspace_translations(
         "existing main dialogue workspace translation scope changed"
     );
     validate_workspace_translations(existing)?;
+    fresh.source_preservation_line_ids = existing.source_preservation_line_ids.clone();
 
     let mut existing_lines = BTreeMap::new();
     for record in &existing.records {
@@ -129,6 +170,7 @@ pub(super) fn build_workspace(source: &[u8]) -> Result<MainDialogueWorkspace> {
         preserve_existing_english: true,
         purpose: "private_translation_workspace".to_owned(),
         safe_japanese_source_byte_count: safe_japanese_offsets.len(),
+        source_preservation_line_ids: Vec::new(),
         records: workspace_records,
     };
     ensure!(
@@ -249,6 +291,7 @@ pub(super) fn validate_workspace_binding(
 ) -> Result<()> {
     let mut actual_header = workspace.clone();
     actual_header.records.clear();
+    actual_header.source_preservation_line_ids.clear();
     let mut expected_header = expected.clone();
     expected_header.records.clear();
     ensure!(

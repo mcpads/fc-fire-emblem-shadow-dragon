@@ -137,29 +137,50 @@ fn build_glyph_workset_report(
         max_transition_chain_glyph_count(graph, &filled_glyphs_by_record)?;
     let max_approved_transition_chain_unique_glyph_count =
         max_transition_chain_glyph_count(graph, &approved_glyphs_by_record)?;
-    let translation_input_complete = line_count > 0 && status_counts.complete == line_count;
+    let source_preservation_line_ids = workspace
+        .source_preservation_line_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    let translation_input_complete = line_count > 0
+        && workspace
+            .records
+            .iter()
+            .flat_map(|record| &record.lines)
+            .all(|line| {
+                line.japanese_source_byte_count == 0
+                    || line.status != TranslationStatus::Untranslated
+                    || source_preservation_line_ids.contains(line.id.as_str())
+            });
+    let review_complete =
+        translation_input_complete && status_counts.complete == status_counts.filled;
     let working_set_ready = translation_input_complete;
     let observed_screen_lifetimes = observed_screen_lifetime_reports(
         &filled_glyphs_by_record,
         &approved_glyphs_by_record,
         graph,
         active_slot_count,
-        working_set_ready,
+        review_complete,
     )?;
     let filled_observed_screen_lifetimes_fit_one_page = observed_screen_lifetimes
         .iter()
         .all(|lifetime| lifetime.filled_set_fits_one_page_so_far);
     let approved_single_page_fit =
-        working_set_ready.then_some(approved_glyphs.len() <= active_slot_count);
-    let approved_transition_chains_fit_one_page = working_set_ready
+        review_complete.then_some(approved_glyphs.len() <= active_slot_count);
+    let approved_transition_chains_fit_one_page = review_complete
         .then_some(max_approved_transition_chain_unique_glyph_count <= active_slot_count);
-    let approved_observed_screen_lifetimes_fit_one_page = working_set_ready.then(|| {
+    let approved_observed_screen_lifetimes_fit_one_page = review_complete.then(|| {
         observed_screen_lifetimes
             .iter()
             .all(|lifetime| lifetime.approved_set_fits_one_page == Some(true))
     });
-    let unresolved = if working_set_ready {
+    let unresolved = if review_complete {
         vec![
+            "other caller-handoff screen lifetimes and line-width checks remain separate from the glyph working-set count",
+        ]
+    } else if translation_input_complete {
+        vec![
+            "draft translation input is complete, but human review is incomplete",
             "other caller-handoff screen lifetimes and line-width checks remain separate from the glyph working-set count",
         ]
     } else {
@@ -170,7 +191,7 @@ fn build_glyph_workset_report(
     };
 
     Ok(MainDialogueGlyphWorksetReport {
-        schema: 1,
+        schema: 2,
         source_sha1: EXPECTED_SOURCE_SHA1,
         workspace_sha1,
         scope: GlyphWorksetScope {
@@ -194,6 +215,7 @@ fn build_glyph_workset_report(
         capacity: GlyphCapacityReport {
             active_slot_count,
             translation_input_complete,
+            review_complete,
             working_set_ready,
             filled_set_fits_one_page_so_far: filled_glyphs.len() <= active_slot_count,
             filled_transition_chains_fit_one_page_so_far: max_transition_chain_unique_glyph_count
@@ -203,7 +225,8 @@ fn build_glyph_workset_report(
             approved_single_page_fit,
             approved_transition_chains_fit_one_page,
             approved_observed_screen_lifetimes_fit_one_page,
-            final_page_plan_eligible: working_set_ready,
+            draft_page_plan_eligible: translation_input_complete,
+            final_page_plan_eligible: review_complete,
         },
         unresolved,
         release_eligible: false,

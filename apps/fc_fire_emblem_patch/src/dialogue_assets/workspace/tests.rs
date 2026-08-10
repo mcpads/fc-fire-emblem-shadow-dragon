@@ -53,6 +53,7 @@ fn workspace(
         preserve_existing_english: true,
         purpose: "private_translation_workspace".to_owned(),
         safe_japanese_source_byte_count: 1,
+        source_preservation_line_ids: Vec::new(),
         records: vec![WorkspaceRecord {
             id: "chapter-intro-dialogue:000".to_owned(),
             table_id: "chapter-intro-dialogue".to_owned(),

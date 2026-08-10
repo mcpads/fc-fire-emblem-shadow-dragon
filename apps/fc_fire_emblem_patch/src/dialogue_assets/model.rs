@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) const SOURCE_ASSET_FORMAT_VERSION: u8 = 3;
-pub(super) const WORKSPACE_FORMAT_VERSION: u8 = 3;
+pub(super) const WORKSPACE_FORMAT_VERSION: u8 = 4;
 
 #[derive(Debug)]
 pub struct DialogueSourceAssetSummary {
@@ -36,6 +36,10 @@ pub struct DialogueWorkspaceValidationSummary {
     pub filled_line_count: usize,
     pub complete_line_count: usize,
     pub target_glyph_count: usize,
+    pub preserved_source_line_count: usize,
+    pub untranslated_japanese_line_count: usize,
+    pub translation_input_complete: bool,
+    pub review_complete: bool,
 }
 
 #[derive(Debug)]
@@ -48,6 +52,7 @@ pub struct DialogueLayoutPlanSummary {
     pub remaining_storage_byte_count: usize,
     pub changed_record_count: usize,
     pub translation_input_complete: bool,
+    pub review_complete: bool,
     pub release_eligible: bool,
 }
 
@@ -60,6 +65,8 @@ pub(super) struct MainDialogueWorkspace {
     pub(super) preserve_existing_english: bool,
     pub(super) purpose: String,
     pub(super) safe_japanese_source_byte_count: usize,
+    #[serde(default)]
+    pub(super) source_preservation_line_ids: Vec<String>,
     pub(super) records: Vec<WorkspaceRecord>,
 }
 
@@ -132,7 +139,10 @@ pub(super) struct LayoutReportSummary {
     pub(super) changed_record_count: usize,
     pub(super) filled_line_count: usize,
     pub(super) complete_line_count: usize,
+    pub(super) preserved_source_line_count: usize,
+    pub(super) untranslated_japanese_line_count: usize,
     pub(super) translation_input_complete: bool,
+    pub(super) review_complete: bool,
     pub(super) release_eligible: bool,
 }
 
@@ -194,6 +204,8 @@ pub(super) struct WorkspaceTranslationCounts {
     pub(super) filled_line_count: usize,
     pub(super) complete_line_count: usize,
     pub(super) target_glyph_count: usize,
+    pub(super) preserved_source_line_count: usize,
+    pub(super) untranslated_japanese_line_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

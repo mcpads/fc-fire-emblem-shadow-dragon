@@ -995,12 +995,16 @@ fn main() -> Result<()> {
             println!("validated {}", workspace.display());
             println!("workspace SHA-1: {}", summary.workspace_sha1);
             println!(
-                "main dialogue translations: {} records, {} lines, {} filled, {} complete, {} target glyphs",
+                "main dialogue translations: {} records, {} lines, {} filled, {} complete, {} source-preserved, {} untranslated Japanese, {} target glyphs, input complete: {}, review complete: {}",
                 summary.record_count,
                 summary.line_count,
                 summary.filled_line_count,
                 summary.complete_line_count,
-                summary.target_glyph_count
+                summary.preserved_source_line_count,
+                summary.untranslated_japanese_line_count,
+                summary.target_glyph_count,
+                summary.translation_input_complete,
+                summary.review_complete
             );
         }
         Command::AnalyzeMainDialogueGlyphWorkset {
@@ -1013,7 +1017,7 @@ fn main() -> Result<()> {
             println!("wrote {}", report.display());
             println!("report SHA-1: {}", summary.report_sha1);
             println!(
-                "main dialogue glyph workset: {} filled lines, {} complete lines, {} filled unique glyphs, {} approved unique glyphs, max transition chain {} glyphs, chains fit one page: {}, max observed screen lifetime {} slots, observed lifetimes fit one page: {}, ready: {}",
+                "main dialogue glyph workset: {} filled lines, {} complete lines, {} filled unique glyphs, {} approved unique glyphs, max transition chain {} glyphs, chains fit one page: {}, max observed screen lifetime {} slots, observed lifetimes fit one page: {}, draft ready: {}",
                 summary.filled_line_count,
                 summary.complete_line_count,
                 summary.filled_unique_glyph_count,
@@ -1035,7 +1039,7 @@ fn main() -> Result<()> {
             println!("wrote {}", report.display());
             println!("report SHA-1: {}", summary.report_sha1);
             println!(
-                "main dialogue layout: {} regions, {} records, {} pointer writes, {} planned bytes, {} remaining bytes, {} changed records, translation input complete: {}, release eligible: {}",
+                "main dialogue layout: {} regions, {} records, {} pointer writes, {} planned bytes, {} remaining bytes, {} changed records, translation input complete: {}, review complete: {}, release eligible: {}",
                 summary.region_count,
                 summary.record_count,
                 summary.pointer_write_count,
@@ -1043,6 +1047,7 @@ fn main() -> Result<()> {
                 summary.remaining_storage_byte_count,
                 summary.changed_record_count,
                 summary.translation_input_complete,
+                summary.review_complete,
                 summary.release_eligible
             );
         }

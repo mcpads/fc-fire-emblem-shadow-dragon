@@ -143,6 +143,11 @@ pub fn validate_main_dialogue_workspace(
         filled_line_count: counts.filled_line_count,
         complete_line_count: counts.complete_line_count,
         target_glyph_count: counts.target_glyph_count,
+        preserved_source_line_count: counts.preserved_source_line_count,
+        untranslated_japanese_line_count: counts.untranslated_japanese_line_count,
+        translation_input_complete: counts.untranslated_japanese_line_count == 0,
+        review_complete: counts.untranslated_japanese_line_count == 0
+            && counts.complete_line_count == counts.filled_line_count,
     })
 }
 
@@ -302,15 +307,12 @@ pub fn plan_main_dialogue_reinsertion(
         .iter()
         .filter(|record| record.changed)
         .count();
-    let line_count = workspace
-        .records
-        .iter()
-        .map(|record| record.lines.len())
-        .sum::<usize>();
-    let translation_input_complete = translation_counts.complete_line_count == line_count;
+    let translation_input_complete = translation_counts.untranslated_japanese_line_count == 0;
+    let review_complete = translation_input_complete
+        && translation_counts.complete_line_count == translation_counts.filled_line_count;
     let release_eligible = false;
     let report = MainDialogueLayoutReport {
-        schema_version: 1,
+        schema_version: 2,
         scope: LayoutReportScope {
             source_sha1: EXPECTED_SOURCE_SHA1,
             workspace_sha1: sha1_hex(&workspace_bytes),
@@ -329,7 +331,10 @@ pub fn plan_main_dialogue_reinsertion(
             changed_record_count,
             filled_line_count: translation_counts.filled_line_count,
             complete_line_count: translation_counts.complete_line_count,
+            preserved_source_line_count: translation_counts.preserved_source_line_count,
+            untranslated_japanese_line_count: translation_counts.untranslated_japanese_line_count,
             translation_input_complete,
+            review_complete,
             release_eligible,
         },
         regions: region_reports,
@@ -353,6 +358,7 @@ pub fn plan_main_dialogue_reinsertion(
         remaining_storage_byte_count,
         changed_record_count,
         translation_input_complete,
+        review_complete,
         release_eligible,
     })
 }

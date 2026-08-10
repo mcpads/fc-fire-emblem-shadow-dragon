@@ -92,6 +92,7 @@ pub(super) struct GlyphSetReport {
 pub(super) struct GlyphCapacityReport {
     pub(super) active_slot_count: usize,
     pub(super) translation_input_complete: bool,
+    pub(super) review_complete: bool,
     pub(super) working_set_ready: bool,
     pub(super) filled_set_fits_one_page_so_far: bool,
     pub(super) filled_transition_chains_fit_one_page_so_far: bool,
@@ -99,5 +100,6 @@ pub(super) struct GlyphCapacityReport {
     pub(super) approved_single_page_fit: Option<bool>,
     pub(super) approved_transition_chains_fit_one_page: Option<bool>,
     pub(super) approved_observed_screen_lifetimes_fit_one_page: Option<bool>,
+    pub(super) draft_page_plan_eligible: bool,
     pub(super) final_page_plan_eligible: bool,
 }

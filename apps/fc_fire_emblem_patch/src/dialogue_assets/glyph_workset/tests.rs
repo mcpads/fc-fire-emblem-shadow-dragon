@@ -15,7 +15,8 @@ fn approved_set_uses_only_complete_lines() {
     assert_eq!(report.status_counts.needs_human_review, 1);
     assert_eq!(report.filled_glyphs.unique_count, 2);
     assert_eq!(report.approved_glyphs.unique_count, 1);
-    assert!(!report.capacity.working_set_ready);
+    assert!(report.capacity.working_set_ready);
+    assert!(!report.capacity.review_complete);
     assert_eq!(report.capacity.approved_single_page_fit, None);
 }
 
@@ -197,6 +198,7 @@ fn workspace_with_records(records: Vec<WorkspaceRecord>) -> MainDialogueWorkspac
         preserve_existing_english: true,
         purpose: "private_translation_workspace".to_owned(),
         safe_japanese_source_byte_count: 2,
+        source_preservation_line_ids: Vec::new(),
         records,
     }
 }
