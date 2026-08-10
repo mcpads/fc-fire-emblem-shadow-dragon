@@ -5,6 +5,7 @@ use serde::Serialize;
 
 use crate::{
     font_slots::FONT_PAGE_SIZE,
+    mmc5_chr::switchable_bank_file_offset,
     mmc5_prg::count_direct_transfers_to_range,
     rom::{EXPECTED_SOURCE_SHA1, HEADER_SIZE, Rom},
     rp2a03::{Instruction, assemble_at},
@@ -38,7 +39,8 @@ const SOURCE_RIGHT_FE_SELECTOR: u16 = 0xFAA0;
 const SOURCE_PAIR_AWARE_RIGHT_FD_SELECTOR: u16 = 0xFAC0;
 const SOURCE_CENTRAL_RIGHT_FD_CALL: u16 = 0xC9C2;
 const SOURCE_CENTRAL_FE_FD_REFRESH_CALL: u16 = 0xFABB;
-const BATTLE_PHASE: u16 = 0x047C;
+const BATTLE_ACTIVE_FLAG: u16 = 0x047D;
+const CACHE_UPLOADED_MARKER: u8 = 0x80;
 const MAIN_STATE: u8 = 0x84;
 const BATTLE_MAIN_STATE: u8 = 0x16;
 const PPU_MASK_SHADOW: u8 = 0xCC;
@@ -73,6 +75,10 @@ struct BattleCacheUploadProbeReport {
     sequential_ppu_increment_during_upload: bool,
     ppu_address_latch_reset_before_upload: bool,
     pending_vblank_cleared_before_nmi_restore: bool,
+    battle_active_flag_address: String,
+    cache_uploaded_marker: u8,
+    battle_active_nonzero_semantics_preserved: bool,
+    battle_initializers_clear_cache_marker: bool,
     original_prg_bank_restored: bool,
     battle_zero_right_page_uses_chr_ram: bool,
     non_battle_right_pages_use_natural_selection: bool,
@@ -116,6 +122,7 @@ pub(crate) fn build_battle_cache_upload_probe(
     let base_rom = Rom::parse(base.clone()).context("parse battle cache upload base")?;
     let routines = build_runtime_routines()?;
     verify_runtime_caves(&combination.parity, &routines)?;
+    verify_battle_active_flag_contract(&combination.parity)?;
     let mut image = TrackedImage::new(base.clone());
     for routine in &routines {
         image.write_expected(
@@ -227,6 +234,10 @@ pub(crate) fn build_battle_cache_upload_probe(
         sequential_ppu_increment_during_upload: true,
         ppu_address_latch_reset_before_upload: true,
         pending_vblank_cleared_before_nmi_restore: true,
+        battle_active_flag_address: format!("0x{BATTLE_ACTIVE_FLAG:04X}"),
+        cache_uploaded_marker: CACHE_UPLOADED_MARKER,
+        battle_active_nonzero_semantics_preserved: true,
+        battle_initializers_clear_cache_marker: true,
         original_prg_bank_restored: true,
         battle_zero_right_page_uses_chr_ram: true,
         non_battle_right_pages_use_natural_selection: true,
@@ -237,7 +248,7 @@ pub(crate) fn build_battle_cache_upload_probe(
         glyph_characters_emitted: false,
         runtime_verified: false,
         release_eligible: false,
-        next_gate: "consume the proven render-disabled upload window only once per battle, then exercise all visible battle text lifetimes",
+        next_gate: "exercise every visible favorable, unfavorable, defeat, and selector-driven battle text lifetime with the one-shot cache path",
     };
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize battle cache upload report")?;
@@ -322,6 +333,92 @@ fn verify_runtime_caves(parity: &[u8], routines: &[RuntimeRoutine]) -> Result<()
     Ok(())
 }
 
+fn verify_battle_active_flag_contract(parity: &[u8]) -> Result<()> {
+    let prg = Rom::parse(parity.to_vec())?.prg().to_vec();
+    let read_pattern = [0xAD, 0x7D, 0x04];
+    let write_pattern = [0x8D, 0x7D, 0x04];
+    ensure!(
+        prg.windows(read_pattern.len())
+            .filter(|bytes| *bytes == read_pattern)
+            .count()
+            == 1,
+        "battle-active flag direct read count changed"
+    );
+    ensure!(
+        prg.windows(write_pattern.len())
+            .filter(|bytes| *bytes == write_pattern)
+            .count()
+            == 5,
+        "battle-active flag direct write count changed"
+    );
+
+    verify_switchable_bytes(
+        parity,
+        0x05,
+        0x8000,
+        &[0xAD, 0x7D, 0x04, 0xD0, 0x01, 0x60],
+        "battle-active nonzero reader",
+    )?;
+    verify_switchable_bytes(
+        parity,
+        0x05,
+        0x80DE,
+        &[
+            0xA9, 0x00, 0xA2, 0x02, 0x9D, 0xAD, 0x03, 0x9D, 0x89, 0x03, 0x9D, 0xA7, 0x03, 0x9D,
+            0xAA, 0x03, 0xCA, 0x10, 0xF1, 0x8D, 0x78, 0x04, 0x8D, 0xCF, 0x03, 0x8D, 0xD0, 0x03,
+            0x8D, 0x7C, 0x04, 0x8D, 0xBF, 0x03, 0x8D, 0x7D, 0x04,
+        ],
+        "battle-active zeroing writer",
+    )?;
+    for (bank, address) in [(0x05, 0x82B9), (0x06, 0x92FE), (0x06, 0x9D50)] {
+        verify_switchable_bytes(
+            parity,
+            bank,
+            address,
+            &[0xA9, 0x01, 0x8D, 0x7D, 0x04],
+            "battle-active initializer",
+        )?;
+    }
+    verify_switchable_bytes(
+        parity,
+        0x07,
+        0xAC12,
+        &[0xA9, 0x01, 0x8D, 0xED, 0x05, 0x8D, 0x7D, 0x04],
+        "sound-test battle-active initializer",
+    )?;
+    for (bank, address) in [
+        (0x05, 0x8100),
+        (0x05, 0x82BB),
+        (0x06, 0x9300),
+        (0x06, 0x9D52),
+        (0x07, 0xAC17),
+    ] {
+        verify_switchable_bytes(
+            parity,
+            bank,
+            address,
+            &write_pattern,
+            "battle-active full-byte writer",
+        )?;
+    }
+    Ok(())
+}
+
+fn verify_switchable_bytes(
+    image: &[u8],
+    bank: u8,
+    address: u16,
+    expected: &[u8],
+    role: &str,
+) -> Result<()> {
+    let offset = switchable_bank_file_offset(bank, address)?;
+    ensure!(
+        image.get(offset..offset + expected.len()) == Some(expected),
+        "{role} changed at bank {bank:02X}:${address:04X}"
+    );
+    Ok(())
+}
+
 fn build_runtime_routines() -> Result<Vec<RuntimeRoutine>> {
     Ok(vec![
         RuntimeRoutine {
@@ -333,12 +430,13 @@ fn build_runtime_routines() -> Result<Vec<RuntimeRoutine>> {
                     Instruction::JsrAbsolute(SOURCE_NMI_INPUT_SCAN),
                     Instruction::LdaZeroPage(MAIN_STATE),
                     Instruction::CmpImmediate(BATTLE_MAIN_STATE),
-                    Instruction::BneAbsolute(BATTLE_TRANSITION_HOOK + 26),
-                    Instruction::LdaAbsolute(BATTLE_PHASE),
-                    Instruction::BneAbsolute(BATTLE_TRANSITION_HOOK + 26),
+                    Instruction::BneAbsolute(BATTLE_TRANSITION_HOOK + 28),
+                    Instruction::LdaAbsolute(BATTLE_ACTIVE_FLAG),
+                    Instruction::AndImmediate(CACHE_UPLOADED_MARKER),
+                    Instruction::BneAbsolute(BATTLE_TRANSITION_HOOK + 28),
                     Instruction::LdaZeroPage(PPU_MASK_SHADOW),
                     Instruction::CmpImmediate(UPLOAD_RENDER_MASK),
-                    Instruction::BneAbsolute(BATTLE_TRANSITION_HOOK + 26),
+                    Instruction::BneAbsolute(BATTLE_TRANSITION_HOOK + 28),
                     Instruction::JsrAbsolute(UPLOAD_FONT_PAGE),
                     Instruction::JsrAbsolute(SOURCE_NMI_SCROLL_RESTORE),
                     Instruction::Rts,
@@ -411,6 +509,9 @@ fn upload_font_page_routine() -> Result<Vec<u8>> {
         ]);
     }
     instructions.extend([
+        Instruction::LdaAbsolute(BATTLE_ACTIVE_FLAG),
+        Instruction::OraImmediate(CACHE_UPLOADED_MARKER),
+        Instruction::StaAbsolute(BATTLE_ACTIVE_FLAG),
         Instruction::LdaImmediate(6),
         Instruction::StaAbsolute(0x8000),
         Instruction::LdaImmediate(BATTLE_ENGINE_PRG_BANK * 2),
@@ -598,6 +699,19 @@ mod tests {
                 .any(|bytes| bytes == [0xAD, 0x02, 0x20, 0x68])
         );
         assert!(routine.windows(3).any(|bytes| bytes == [0x8D, 0x00, 0x20]));
+        assert!(routine.windows(8).any(|bytes| {
+            bytes
+                == [
+                    0xAD,
+                    0x7D,
+                    0x04,
+                    0x09,
+                    CACHE_UPLOADED_MARKER,
+                    0x8D,
+                    0x7D,
+                    0x04,
+                ]
+        }));
     }
 
     #[test]
@@ -610,6 +724,11 @@ mod tests {
                 .any(|bytes| bytes == [0xA5, PPU_MASK_SHADOW, 0xC9, UPLOAD_RENDER_MASK])
         );
         assert!(dispatch.starts_with(&[0x20, 0xD9, 0xC2, 0xA5, MAIN_STATE]));
+        assert!(
+            dispatch.windows(7).any(|bytes| {
+                bytes == [0xAD, 0x7D, 0x04, 0x29, CACHE_UPLOADED_MARKER, 0xD0, 0x0C]
+            })
+        );
         assert!(dispatch.ends_with(&[0x20, 0x6A, 0xC3, 0x60]));
     }
 
@@ -640,6 +759,10 @@ mod tests {
             sequential_ppu_increment_during_upload: true,
             ppu_address_latch_reset_before_upload: true,
             pending_vblank_cleared_before_nmi_restore: true,
+            battle_active_flag_address: "0x047D".to_owned(),
+            cache_uploaded_marker: CACHE_UPLOADED_MARKER,
+            battle_active_nonzero_semantics_preserved: true,
+            battle_initializers_clear_cache_marker: true,
             original_prg_bank_restored: true,
             battle_zero_right_page_uses_chr_ram: true,
             non_battle_right_pages_use_natural_selection: true,
