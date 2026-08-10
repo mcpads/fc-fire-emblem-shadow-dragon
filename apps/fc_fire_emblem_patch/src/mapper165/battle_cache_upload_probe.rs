@@ -15,6 +15,10 @@ use crate::{
 
 use super::{
     OUTPUT_MAPPER,
+    battle_cache_signature::{
+        CAIN_RECORD_IDENTITY, ENEMY_INITIATED_STATE, GARUDA_SOLDIER_RECORD_IDENTITY,
+        PLAYER_INITIATED_STATE, PREDICATE_ADDRESS, build_predicate,
+    },
     battle_combination_probe::{
         GameplayBattleCombinationImage, assemble_gameplay_battle_combination,
     },
@@ -31,7 +35,6 @@ const SOURCE_NMI_INPUT_SCAN: u16 = 0xC2D9;
 const SOURCE_NMI_SCROLL_RESTORE: u16 = 0xC36A;
 const BATTLE_TRANSITION_HOOK: u16 = 0xFAF3;
 const UPLOAD_FONT_PAGE: u16 = 0xFB20;
-const GAMEPLAY_BATTLE_CACHE_MATCH_PREDICATE: u16 = 0xFC21;
 const BATTLE_RIGHT_FD_SELECTOR: u16 = 0xFC50;
 const BATTLE_CENTRAL_RIGHT_FD_SELECTOR: u16 = 0xFC80;
 const BATTLE_RIGHT_FE_SELECTOR: u16 = 0xFCC4;
@@ -42,13 +45,6 @@ const SOURCE_CENTRAL_RIGHT_FD_CALL: u16 = 0xC9C2;
 const SOURCE_CENTRAL_FE_FD_REFRESH_CALL: u16 = 0xFABB;
 const BATTLE_ACTIVE_FLAG: u16 = 0x047D;
 const CACHE_UPLOADED_MARKER: u8 = 0x80;
-const MAIN_STATE: u8 = 0x84;
-const BATTLE_MAIN_STATE: u8 = 0x16;
-const ENEMY_INITIATED_BATTLE_MAIN_STATE: u8 = 0x32;
-const BATTLE_RECORD_ONE: u16 = 0x76F4;
-const BATTLE_RECORD_TWO: u16 = 0x7715;
-const CAIN_RECORD_IDENTITY: u8 = 0x04;
-const GARUDA_SOLDIER_RECORD_IDENTITY: u8 = 0x85;
 const PPU_MASK_SHADOW: u8 = 0xCC;
 const UPLOAD_RENDER_MASK: u8 = 0x06;
 const PPU_CONTROL_SHADOW: u16 = 0x00CD;
@@ -228,7 +224,7 @@ pub(crate) fn build_battle_cache_upload_probe(
         prg_size: output_rom.prg().len(),
         chr_size: output_rom.chr().len(),
         combination_role: "chapter-one Cain and Garuda soldier gameplay battle pair",
-        gameplay_battle_main_states: [BATTLE_MAIN_STATE, ENEMY_INITIATED_BATTLE_MAIN_STATE],
+        gameplay_battle_main_states: [PLAYER_INITIATED_STATE, ENEMY_INITIATED_STATE],
         cache_participant_record_identities: [CAIN_RECORD_IDENTITY, GARUDA_SOLDIER_RECORD_IDENTITY],
         participant_pair_gated: true,
         preserved_active_code_count: combination.preserved_active_code_count,
@@ -440,7 +436,7 @@ fn build_runtime_routines() -> Result<Vec<RuntimeRoutine>> {
                 BATTLE_TRANSITION_HOOK,
                 &[
                     Instruction::JsrAbsolute(SOURCE_NMI_INPUT_SCAN),
-                    Instruction::JsrAbsolute(GAMEPLAY_BATTLE_CACHE_MATCH_PREDICATE),
+                    Instruction::JsrAbsolute(PREDICATE_ADDRESS),
                     Instruction::BneAbsolute(BATTLE_TRANSITION_HOOK + 27),
                     Instruction::LdaAbsolute(BATTLE_ACTIVE_FLAG),
                     Instruction::AndImmediate(CACHE_UPLOADED_MARKER),
@@ -461,8 +457,8 @@ fn build_runtime_routines() -> Result<Vec<RuntimeRoutine>> {
         },
         RuntimeRoutine {
             role: "gameplay battle-cache match predicate",
-            address: GAMEPLAY_BATTLE_CACHE_MATCH_PREDICATE,
-            bytes: gameplay_battle_cache_match_predicate()?,
+            address: PREDICATE_ADDRESS,
+            bytes: build_predicate()?,
         },
         RuntimeRoutine {
             role: "battle-aware direct right FD selection",
@@ -480,33 +476,6 @@ fn build_runtime_routines() -> Result<Vec<RuntimeRoutine>> {
             bytes: battle_right_chr_selector(BATTLE_RIGHT_FE_SELECTOR, 4)?,
         },
     ])
-}
-
-fn gameplay_battle_cache_match_predicate() -> Result<Vec<u8>> {
-    let pair = GAMEPLAY_BATTLE_CACHE_MATCH_PREDICATE + 10;
-    let cain_first = GAMEPLAY_BATTLE_CACHE_MATCH_PREDICATE + 27;
-    let mismatch = GAMEPLAY_BATTLE_CACHE_MATCH_PREDICATE + 32;
-    assemble_at(
-        GAMEPLAY_BATTLE_CACHE_MATCH_PREDICATE,
-        &[
-            Instruction::LdaZeroPage(MAIN_STATE),
-            Instruction::CmpImmediate(BATTLE_MAIN_STATE),
-            Instruction::BeqAbsolute(pair),
-            Instruction::CmpImmediate(ENEMY_INITIATED_BATTLE_MAIN_STATE),
-            Instruction::BneAbsolute(mismatch),
-            Instruction::LdaAbsolute(BATTLE_RECORD_ONE),
-            Instruction::CmpImmediate(CAIN_RECORD_IDENTITY),
-            Instruction::BeqAbsolute(cain_first),
-            Instruction::CmpImmediate(GARUDA_SOLDIER_RECORD_IDENTITY),
-            Instruction::BneAbsolute(mismatch),
-            Instruction::LdaAbsolute(BATTLE_RECORD_TWO),
-            Instruction::CmpImmediate(CAIN_RECORD_IDENTITY),
-            Instruction::Rts,
-            Instruction::LdaAbsolute(BATTLE_RECORD_TWO),
-            Instruction::CmpImmediate(GARUDA_SOLDIER_RECORD_IDENTITY),
-            Instruction::Rts,
-        ],
-    )
 }
 
 fn upload_font_page_routine() -> Result<Vec<u8>> {
@@ -621,7 +590,7 @@ fn battle_right_chr_selector(address: u16, mapper_register: u8) -> Result<Vec<u8
         &[
             Instruction::Php,
             Instruction::Pha,
-            Instruction::JsrAbsolute(GAMEPLAY_BATTLE_CACHE_MATCH_PREDICATE),
+            Instruction::JsrAbsolute(PREDICATE_ADDRESS),
             Instruction::BneAbsolute(natural),
             Instruction::Pla,
             Instruction::Pha,
@@ -655,7 +624,7 @@ fn battle_central_right_fd_selector() -> Result<Vec<u8>> {
         &[
             Instruction::Php,
             Instruction::Pha,
-            Instruction::JsrAbsolute(GAMEPLAY_BATTLE_CACHE_MATCH_PREDICATE),
+            Instruction::JsrAbsolute(PREDICATE_ADDRESS),
             Instruction::BneAbsolute(natural),
             Instruction::Pla,
             Instruction::Pha,
@@ -774,48 +743,6 @@ mod tests {
     }
 
     #[test]
-    fn gameplay_battle_cache_match_requires_state_and_unordered_participant_pair() {
-        assert_eq!(
-            gameplay_battle_cache_match_predicate().unwrap(),
-            [
-                0xA5,
-                MAIN_STATE,
-                0xC9,
-                BATTLE_MAIN_STATE,
-                0xF0,
-                0x04,
-                0xC9,
-                ENEMY_INITIATED_BATTLE_MAIN_STATE,
-                0xD0,
-                0x16,
-                0xAD,
-                0xF4,
-                0x76,
-                0xC9,
-                CAIN_RECORD_IDENTITY,
-                0xF0,
-                0x0A,
-                0xC9,
-                GARUDA_SOLDIER_RECORD_IDENTITY,
-                0xD0,
-                0x0B,
-                0xAD,
-                0x15,
-                0x77,
-                0xC9,
-                CAIN_RECORD_IDENTITY,
-                0x60,
-                0xAD,
-                0x15,
-                0x77,
-                0xC9,
-                GARUDA_SOLDIER_RECORD_IDENTITY,
-                0x60,
-            ]
-        );
-    }
-
-    #[test]
     fn report_does_not_emit_translation_content_or_private_paths() {
         let report = BattleCacheUploadProbeReport {
             schema: 1,
@@ -827,7 +754,7 @@ mod tests {
             prg_size: EXPANDED_PRG_SIZE,
             chr_size: 0,
             combination_role: "battle pair",
-            gameplay_battle_main_states: [BATTLE_MAIN_STATE, ENEMY_INITIATED_BATTLE_MAIN_STATE],
+            gameplay_battle_main_states: [PLAYER_INITIATED_STATE, ENEMY_INITIATED_STATE],
             cache_participant_record_identities: [
                 CAIN_RECORD_IDENTITY,
                 GARUDA_SOLDIER_RECORD_IDENTITY,
