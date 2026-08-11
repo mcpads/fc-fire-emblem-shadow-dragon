@@ -23,6 +23,11 @@ pub(super) struct TilePlan {
     assignments: Vec<(u8, [u8; 16])>,
 }
 
+pub(super) struct DecodedTitleLogoAsset {
+    pub(super) tilemap: Vec<u8>,
+    pub(super) assignments: Vec<(u8, [u8; 16])>,
+}
+
 impl TilePlan {
     pub(super) fn cell_count(&self) -> usize {
         self.tilemap.len()
@@ -161,6 +166,78 @@ pub(super) fn encode_asset(plan: &TilePlan) -> Result<Vec<u8>> {
     Ok(asset)
 }
 
+pub(super) fn decode_asset(
+    asset: &[u8],
+    source_owned_codes: &BTreeSet<u8>,
+) -> Result<DecodedTitleLogoAsset> {
+    ensure!(
+        asset.len() >= ASSET_MAGIC.len() + 4 + LOGO_TILE_COLUMN_COUNT * TITLE_ROW_COUNT,
+        "title-logo asset is truncated"
+    );
+    ensure!(
+        &asset[..ASSET_MAGIC.len()] == ASSET_MAGIC
+            && asset[4] == ASSET_SCHEMA
+            && usize::from(asset[5]) == LOGO_TILE_COLUMN_COUNT
+            && usize::from(asset[6]) == TITLE_ROW_COUNT,
+        "title-logo asset header changed"
+    );
+    let assignment_count = usize::from(asset[7]);
+    let tilemap_start = ASSET_MAGIC.len() + 4;
+    let tilemap_end = tilemap_start + LOGO_TILE_COLUMN_COUNT * TITLE_ROW_COUNT;
+    let expected_len = tilemap_end
+        .checked_add(
+            assignment_count
+                .checked_mul(17)
+                .context("title-logo assignment length overflow")?,
+        )
+        .context("title-logo asset length overflow")?;
+    ensure!(
+        asset.len() == expected_len,
+        "title-logo asset length changed"
+    );
+    let tilemap = asset[tilemap_start..tilemap_end].to_vec();
+    ensure!(
+        tilemap
+            .iter()
+            .all(|code| *code == BLANK_TILE_CODE || source_owned_codes.contains(code)),
+        "title-logo tilemap uses a code outside source ownership"
+    );
+
+    let mut assignments = Vec::with_capacity(assignment_count);
+    let mut assigned_codes = BTreeSet::new();
+    let mut assigned_patterns = BTreeSet::new();
+    for record in asset[tilemap_end..].chunks_exact(17) {
+        let code = record[0];
+        let pattern: [u8; 16] = record[1..]
+            .try_into()
+            .expect("title-logo assignment pattern has fixed width");
+        ensure!(
+            code != BLANK_TILE_CODE
+                && source_owned_codes.contains(&code)
+                && assigned_codes.insert(code),
+            "title-logo assignment code is reserved, unowned, or repeated"
+        );
+        ensure!(
+            pattern.iter().any(|byte| *byte != 0) && assigned_patterns.insert(pattern),
+            "title-logo assignment pattern is blank or repeated"
+        );
+        assignments.push((code, pattern));
+    }
+    let referenced_codes = tilemap
+        .iter()
+        .copied()
+        .filter(|code| *code != BLANK_TILE_CODE)
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        referenced_codes == assigned_codes,
+        "title-logo tilemap and assignment code populations differ"
+    );
+    Ok(DecodedTitleLogoAsset {
+        tilemap,
+        assignments,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,5 +255,25 @@ mod tests {
         assert_eq!(pattern[8], 0b0110_0000);
         assert!(pattern[1..8].iter().all(|byte| *byte == 0));
         assert!(pattern[9..].iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn encoded_asset_roundtrips_only_owned_codes_and_nonblank_patterns() {
+        let source_owned_codes = BTreeSet::from([0x10, 0x11]);
+        let plan = TilePlan {
+            tilemap: std::iter::once(0x10)
+                .chain(std::iter::repeat_n(
+                    BLANK_TILE_CODE,
+                    LOGO_TILE_COLUMN_COUNT * TITLE_ROW_COUNT - 1,
+                ))
+                .collect(),
+            assignments: vec![(0x10, [1; 16])],
+        };
+
+        let encoded = encode_asset(&plan).unwrap();
+        let decoded = decode_asset(&encoded, &source_owned_codes).unwrap();
+
+        assert_eq!(decoded.tilemap, plan.tilemap);
+        assert_eq!(decoded.assignments, plan.assignments);
     }
 }

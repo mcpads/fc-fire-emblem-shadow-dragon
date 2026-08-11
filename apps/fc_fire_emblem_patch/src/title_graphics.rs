@@ -9,8 +9,10 @@ use crate::{
     text_inventory::is_japanese_character,
 };
 
+mod install;
 mod logo_asset;
 
+pub(crate) use install::install_title_logo_asset;
 pub(crate) use logo_asset::build_title_logo_asset;
 
 const PRG_BANK_SIZE: usize = 16 * 1024;
@@ -179,15 +181,19 @@ pub(super) fn bind_source(rom: &Rom) -> Result<()> {
 }
 
 pub(super) fn source_stream(rom: &Rom) -> Result<&[u8]> {
-    let offset = HEADER_SIZE
-        + usize::from(SOURCE_PRG_BANK) * PRG_BANK_SIZE
-        + usize::from(TITLE_STREAM_ADDRESS - CPU_WINDOW_START);
+    let offset = title_stream_file_offset();
     let end = offset
         .checked_add(TITLE_STREAM_BYTE_COUNT)
         .context("title stream overflow")?;
     rom.data()
         .get(offset..end)
         .with_context(|| format!("title stream exceeds ROM at {offset:05X}"))
+}
+
+pub(super) fn title_stream_file_offset() -> usize {
+    HEADER_SIZE
+        + usize::from(SOURCE_PRG_BANK) * PRG_BANK_SIZE
+        + usize::from(TITLE_STREAM_ADDRESS - CPU_WINDOW_START)
 }
 
 pub(super) fn source_chr_page(rom: &Rom) -> Result<&[u8]> {

@@ -16,6 +16,7 @@ pub(super) struct CumulativePatchReport {
     pub(super) front_end_menu: CumulativeFrontEndMenuReport,
     pub(super) playable_unit_names: CumulativeUnitNameReport,
     pub(super) automatic_class_profiles: CumulativeClassProfileReport,
+    pub(super) title_logo: CumulativeTitleLogoReport,
     pub(super) weapon_shop_shared_text: CumulativeWeaponShopSharedTextReport,
     pub(super) battle_text: CumulativeBattleTextReport,
     pub(super) selector_chain: Vec<SelectorChainReport>,
@@ -26,6 +27,23 @@ pub(super) struct CumulativePatchReport {
     pub(super) runtime_verified: bool,
     pub(super) unresolved: Vec<&'static str>,
     pub(super) release_eligible: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct CumulativeTitleLogoReport {
+    pub(super) workspace_sha1: String,
+    pub(super) asset_sha1: String,
+    pub(super) source_owned_tile_count: usize,
+    pub(super) installed_unique_tile_count: usize,
+    pub(super) installed_tilemap_cell_count: usize,
+    pub(super) physical_chr_page: u8,
+    pub(super) installed_chr_page_sha1: String,
+    pub(super) installed_stream_sha1: String,
+    pub(super) preserved_title_stream_bytes_unchanged: bool,
+    pub(super) unassigned_title_chr_patterns_unchanged: bool,
+    pub(super) source_sword_tm_and_copyright_outside_write_scope: bool,
+    pub(super) runtime_bound_to_build: bool,
+    pub(super) review_complete: bool,
 }
 
 #[derive(Debug, Serialize)]

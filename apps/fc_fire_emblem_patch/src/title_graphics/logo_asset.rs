@@ -49,6 +49,30 @@ pub(crate) struct TitleLogoAssetSummary {
     pub(crate) report_sha1: String,
 }
 
+pub(super) struct LoadedTitleLogoAsset {
+    pub(super) asset_sha1: String,
+    pub(super) source_owned_tile_count: usize,
+    pub(super) tilemap: Vec<u8>,
+    pub(super) assignments: Vec<(u8, [u8; 16])>,
+}
+
+pub(super) fn load_source_bound_asset(
+    source_rom: &Rom,
+    asset_path: &Path,
+) -> Result<LoadedTitleLogoAsset> {
+    bind_source(source_rom)?;
+    let ownership = tile_plan::bind_title_tile_ownership(source_stream(source_rom)?)?;
+    let bytes = fs::read(asset_path)
+        .with_context(|| format!("read title-logo asset {}", asset_path.display()))?;
+    let decoded = tile_plan::decode_asset(&bytes, &ownership.source_owned_codes)?;
+    Ok(LoadedTitleLogoAsset {
+        asset_sha1: sha1_hex(&bytes),
+        source_owned_tile_count: ownership.source_owned_codes.len(),
+        tilemap: decoded.tilemap,
+        assignments: decoded.assignments,
+    })
+}
+
 pub(crate) fn build_title_logo_asset(
     source_path: &Path,
     manifest_path: &Path,

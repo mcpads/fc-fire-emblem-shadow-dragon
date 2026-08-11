@@ -16,6 +16,7 @@ use crate::{
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
     text_inventory::plan_fixed_text,
+    title_graphics::{install_title_logo_asset, plan_title_graphics},
     tracked::TrackedImage,
     unit_names::plan_unit_names,
 };
@@ -71,8 +72,8 @@ use report::{
     CumulativeBattleTextReport, CumulativeChapterTitleReport, CumulativeClassProfileReport,
     CumulativeDialogueLifetimeReport, CumulativeDialogueReport, CumulativeFrontEndMenuReport,
     CumulativeMaximumDialogueReport, CumulativeOptionsMenuReport, CumulativePatchReport,
-    CumulativeStageReport, CumulativeUnitNameReport, CumulativeWeaponShopSharedTextReport,
-    SelectorChainReport,
+    CumulativeStageReport, CumulativeTitleLogoReport, CumulativeUnitNameReport,
+    CumulativeWeaponShopSharedTextReport, SelectorChainReport,
 };
 use shop_dialogue_runtime::verify_shop_dialogue_runtime_evidence;
 use shop_dialogue_stage::install_shop_dialogue_stage;
@@ -90,6 +91,7 @@ const CLASS_PROFILE_STAGE_ROM_NAME: &str = "class-profiles.nes";
 const SHOP_DIALOGUE_STAGE_ROM_NAME: &str = "weapon-shop-dialogue.nes";
 const SHOP_SHARED_TEXT_STAGE_ROM_NAME: &str = "weapon-shop-shared-text.nes";
 const MAXIMUM_DIALOGUE_STAGE_ROM_NAME: &str = "maximum-dialogue.nes";
+const TITLE_LOGO_STAGE_ROM_NAME: &str = "title-logo.nes";
 const DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFBD4;
 const DIALOGUE_SELECTOR_CAVE_END: u16 = 0xFC20;
 const CHAPTER_ONE_DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFBD8;
@@ -152,6 +154,8 @@ pub(crate) struct CumulativePatchInputs<'a> {
     pub(crate) maximum_dialogue_evidence_path: &'a Path,
     pub(crate) maximum_dialogue_page_boundary_path: &'a Path,
     pub(crate) maximum_dialogue_runtime_evidence_path: Option<&'a Path>,
+    pub(crate) title_graphics_localization_path: &'a Path,
+    pub(crate) title_logo_asset_path: &'a Path,
     pub(crate) stage_directory: &'a Path,
     pub(crate) output_path: &'a Path,
     pub(crate) report_path: &'a Path,
@@ -173,6 +177,12 @@ pub(crate) fn build_cumulative_patch(
     ensure!(
         chapter_title_plan.translated_entry_count == chapter_title_plan.entry_count,
         "cumulative build requires complete Japanese-to-Korean chapter-title input"
+    );
+    let title_graphics_plan =
+        plan_title_graphics(&source_rom, inputs.title_graphics_localization_path)?;
+    ensure!(
+        title_graphics_plan.translated_surface_count == 1,
+        "cumulative build requires one translated Korean title-logo surface"
     );
     let front_end_menu_plan =
         plan_front_end_menu(&source_rom, inputs.front_end_menu_localization_path)?;
@@ -608,7 +618,6 @@ pub(crate) fn build_cumulative_patch(
         &inputs.stage_directory.join(MAXIMUM_DIALOGUE_STAGE_ROM_NAME),
         &maximum_dialogue_stage.output,
     )?;
-    let output = maximum_dialogue_stage.output.clone();
     let maximum_dialogue_runtime = inputs
         .maximum_dialogue_runtime_evidence_path
         .map(|path| {
@@ -622,6 +631,16 @@ pub(crate) fn build_cumulative_patch(
             )
         })
         .transpose()?;
+    let title_logo_stage = install_title_logo_asset(
+        &maximum_dialogue_stage.output,
+        &source_rom,
+        inputs.title_logo_asset_path,
+    )?;
+    write_file(
+        &inputs.stage_directory.join(TITLE_LOGO_STAGE_ROM_NAME),
+        &title_logo_stage.output,
+    )?;
+    let output = title_logo_stage.output.clone();
     let output_rom = Rom::parse(output.clone()).context("parse cumulative Korean patch")?;
     let tracked_write_count = tracked_write_count
         + front_end_stage.tracked_write_count
@@ -630,7 +649,8 @@ pub(crate) fn build_cumulative_patch(
         + shop_dialogue_stage.tracked_write_count
         + weapon_shop_shared_text_stage.tracked_write_count
         + battle_stage.tracked_write_count
-        + maximum_dialogue_stage.tracked_write_count;
+        + maximum_dialogue_stage.tracked_write_count
+        + title_logo_stage.tracked_write_count;
 
     let translated_line_count = chapter_one_plans
         .iter()
@@ -788,6 +808,11 @@ pub(crate) fn build_cumulative_patch(
         CumulativeStageReport {
             role: "chapter_7_maximum_dialogue_page_reload",
             output_sha1: maximum_dialogue_stage.output_sha1.clone(),
+            report_sha1: None,
+        },
+        CumulativeStageReport {
+            role: "source_bound_korean_title_logo",
+            output_sha1: title_logo_stage.output_sha1.clone(),
             report_sha1: None,
         },
     ];
@@ -1078,6 +1103,23 @@ pub(crate) fn build_cumulative_patch(
             runtime_bound_to_build: true,
             review_complete: class_profile_plan.review_complete,
         },
+        title_logo: CumulativeTitleLogoReport {
+            workspace_sha1: title_graphics_plan.workspace_sha1.clone(),
+            asset_sha1: title_logo_stage.asset_sha1.clone(),
+            source_owned_tile_count: title_logo_stage.source_owned_tile_count,
+            installed_unique_tile_count: title_logo_stage.installed_unique_tile_count,
+            installed_tilemap_cell_count: title_logo_stage.installed_tilemap_cell_count,
+            physical_chr_page: title_logo_stage.physical_chr_page,
+            installed_chr_page_sha1: title_logo_stage.installed_chr_page_sha1.clone(),
+            installed_stream_sha1: title_logo_stage.installed_stream_sha1.clone(),
+            preserved_title_stream_bytes_unchanged: title_logo_stage
+                .preserved_title_stream_bytes_unchanged,
+            unassigned_title_chr_patterns_unchanged: title_logo_stage
+                .unassigned_title_chr_patterns_unchanged,
+            source_sword_tm_and_copyright_outside_write_scope: true,
+            runtime_bound_to_build: false,
+            review_complete: title_graphics_plan.review_complete,
+        },
         weapon_shop_shared_text: CumulativeWeaponShopSharedTextReport {
             screen_role: WEAPON_SHOP_SHARED_TEXT_SCREEN_ROLE,
             fixed_text_workspace_sha1: weapon_shop_shared_text_stage
@@ -1224,7 +1266,7 @@ pub(crate) fn build_cumulative_patch(
                 admitted_chapter_indices: vec![CHAPTER_ONE_INDEX, CHAPTER_TWO_INDEX],
             },
         ],
-        original_chr_preserved: true,
+        original_chr_preserved: false,
         tracked_write_count,
         translation_input_complete: dialogue_workspace.translation_input_complete
             && chapter_title_plan.translated_entry_count == chapter_title_plan.entry_count
@@ -1237,13 +1279,15 @@ pub(crate) fn build_cumulative_patch(
                 .item_name_count
                 == 6
             && choice_label_plan.entries.len() == 2
-            && battle_stage.dialogue_record_count == 28,
+            && battle_stage.dialogue_record_count == 28
+            && title_graphics_plan.translated_surface_count == 1,
         review_complete: dialogue_workspace.review_complete
             && chapter_title_plan.review_complete
             && front_end_menu_plan.review_complete
             && unit_name_plan.review_complete
             && class_profile_plan.review_complete
-            && weapon_shop_shared_text_stage.plan.review_complete,
+            && weapon_shop_shared_text_stage.plan.review_complete
+            && title_graphics_plan.review_complete,
         runtime_verified: false,
         unresolved: vec![
             "The translated Chapter 1 and Chapter 2 title bars need cold-route runtime regression together with every installed dialogue page and natural map restoration.",
@@ -1253,6 +1297,7 @@ pub(crate) fn build_cumulative_patch(
             "The installed weapon-shop shared page is capacity-bound to all nine screen roles at 150/210 slots. The decline route is runtime-bound to the eighth-stage output through item selection, choices, continue prompt, item-list return, exit message, and map restoration; the final cumulative output, purchase, and every preflight branch still need exact-output runtime evidence.",
             "Battle text and the dynamic composition loader are installed in this cumulative lineage, but the new cumulative output still needs cold-route battle and prior-screen regression evidence.",
             "The source-bound fifteen-page maximum dialogue has exact-output evidence for its state-bridged Chapter 7 seize entry, initial selector, all page font reloads, irregular temporal samples, and the final NEXT STORY exit; cold-route prior-screen continuity remains open.",
+            "The source-bound Korean title logo is installed without changing its preserved stream bytes or unassigned CHR patterns, but its initial and completed blink phases, sword sprite, TM, copyright line, and later title return still need exact-output runtime evidence and human visual approval.",
             "The remaining main-dialogue screen lifetimes and translated non-dialogue surfaces are not yet installed in this cumulative lineage.",
             "The ending scroll owns a separate physical copy of all chapter titles; that duplicate consumer is not installed by this intro-title stage.",
             "Human translation review is incomplete, so this output is a development build rather than a release candidate.",
