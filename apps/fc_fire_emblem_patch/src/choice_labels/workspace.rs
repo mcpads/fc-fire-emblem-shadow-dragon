@@ -8,6 +8,8 @@ use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 
 use crate::{
+    font_slots::active_hangul_codes,
+    japanese_encoding::is_japanese_text_code,
     mmc5_chr::switchable_bank_file_offset,
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
@@ -86,6 +88,8 @@ pub(crate) struct ChoiceLabelPlan {
     pub(crate) workspace_sha1: String,
     pub(crate) review_complete: bool,
     pub(crate) entries: Vec<ChoiceLabelPlannedEntry>,
+    pub(crate) preserved_active_codes: BTreeSet<u8>,
+    pub(crate) source_reclaimable_active_codes: BTreeSet<u8>,
 }
 
 impl ChoiceLabelPlan {
@@ -178,10 +182,34 @@ pub(crate) fn plan_choice_labels(rom: &Rom, workspace_path: &Path) -> Result<Cho
             terminator: *spec.expected.last().unwrap(),
         });
     }
+    let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
+    let preserved_active_codes = entries
+        .iter()
+        .flat_map(|entry| &entry.logical_bytes)
+        .filter_map(|byte| match byte {
+            FixedTextLogicalByte::Encoded(code) if active_codes.contains(code) => Some(*code),
+            FixedTextLogicalByte::Encoded(_) | FixedTextLogicalByte::TargetGlyph(_) => None,
+        })
+        .collect::<BTreeSet<_>>();
+    let source_reclaimable_active_codes = LABEL_SPECS
+        .iter()
+        .flat_map(|spec| spec.expected[..spec.expected.len() - 1].iter().copied())
+        .filter(|code| {
+            is_japanese_text_code(*code)
+                && active_codes.contains(code)
+                && !preserved_active_codes.contains(code)
+        })
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        !source_reclaimable_active_codes.is_empty(),
+        "choice-label plan has no exact source Japanese codes to reclaim"
+    );
     Ok(ChoiceLabelPlan {
         workspace_sha1: sha1_hex(&workspace_bytes),
         review_complete,
         entries,
+        preserved_active_codes,
+        source_reclaimable_active_codes,
     })
 }
 

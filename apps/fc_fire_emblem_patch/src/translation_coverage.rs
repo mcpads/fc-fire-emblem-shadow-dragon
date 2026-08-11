@@ -40,6 +40,7 @@ pub(crate) struct TranslationCoverageInputs<'a> {
     pub(crate) unit_ui_label_localization_path: &'a Path,
     pub(crate) item_action_label_localization_path: &'a Path,
     pub(crate) transition_label_localization_path: &'a Path,
+    pub(crate) chapter_save_continue_prompt_manifest_path: &'a Path,
     pub(crate) location_name_localization_path: &'a Path,
     pub(crate) current_build_output_path: &'a Path,
     pub(crate) current_build_report_path: &'a Path,
@@ -238,8 +239,16 @@ pub(crate) fn analyze_translation_coverage(
             fixed_text_workspace_path: inputs.fixed_text_workspace_path,
             unit_name_workspace_path: inputs.unit_name_localization_path,
             item_action_label_workspace_path: inputs.item_action_label_localization_path,
+            choice_label_workspace_path: inputs.choice_label_localization_path,
+            transition_label_workspace_path: inputs.transition_label_localization_path,
+            chapter_save_continue_prompt_manifest_path: inputs
+                .chapter_save_continue_prompt_manifest_path,
+            map_menu_localization_path: inputs.map_menu_localization_path,
             main_dialogue_workspace_sha1: translation_input_sha1("main_dialogue")?,
             item_action_label_workspace_sha1: translation_input_sha1("item_action_labels")?,
+            choice_label_workspace_sha1: translation_input_sha1("choice_labels")?,
+            transition_label_workspace_sha1: translation_input_sha1("chapter_save_offer_label")?,
+            map_menu_localization_sha1: translation_input_sha1("map_menu_labels")?,
             class_profile_page_target_glyph_counts: &installation
                 .class_profile_page_target_glyph_counts,
             class_profile_preserved_active_code_count: installation

@@ -2,6 +2,8 @@ use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
+    font_slots::active_hangul_codes,
+    japanese_encoding::is_japanese_text_code,
     rom::Rom,
     sha1_hex,
     source_literals::{
@@ -79,6 +81,7 @@ struct EndingScrollRecord {
 pub(super) struct EndingAggregateLabelSource {
     pub(super) japanese_markup: String,
     pub(super) max_visible_cells: usize,
+    pub(super) source_reclaimable_active_codes: std::collections::BTreeSet<u8>,
 }
 
 pub(super) fn bind_ending_aggregate_label_source(rom: &Rom) -> Result<EndingAggregateLabelSource> {
@@ -102,9 +105,18 @@ pub(super) fn bind_ending_aggregate_label_source(rom: &Rom) -> Result<EndingAggr
     let mut japanese_markup = decode_source_markup(&payload[..interpolation_offset]);
     japanese_markup.push_str("{ED}{19}");
     japanese_markup.push_str(&decode_source_markup(&payload[interpolation_offset + 2..]));
+    let active_codes = active_hangul_codes()
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    let source_reclaimable_active_codes =
+        ending_scroll_literal_codes(payload, "ending aggregate record")?
+            .into_iter()
+            .filter(|code| is_japanese_text_code(*code) && active_codes.contains(code))
+            .collect();
     Ok(EndingAggregateLabelSource {
         japanese_markup,
         max_visible_cells: payload.len() - 2,
+        source_reclaimable_active_codes,
     })
 }
 
@@ -360,5 +372,6 @@ mod tests {
         let rom = Rom::from_path(source).unwrap();
         let label = bind_ending_aggregate_label_source(&rom).unwrap();
         assert_eq!(label.japanese_markup, "せ゛んターンすう{ED}{19}");
+        assert!(!label.source_reclaimable_active_codes.is_empty());
     }
 }

@@ -6,7 +6,10 @@ use std::{
 
 use anyhow::{Context, Result, ensure};
 
-use crate::{dialogue_inventory::inspect_main_dialogue_storage, rom::Rom, sha1_hex};
+use crate::{
+    dialogue_inventory::inspect_main_dialogue_storage, font_slots::active_hangul_codes,
+    japanese_encoding::is_japanese_text_code, rom::Rom, sha1_hex,
+};
 
 use super::*;
 
@@ -26,6 +29,7 @@ pub(crate) struct MainDialogueBundlePlan {
     pub(crate) source_record_storage_byte_count: usize,
     pub(crate) planned_record_storage_byte_count: usize,
     pub(crate) preserved_source_codes: BTreeSet<u8>,
+    pub(crate) source_reclaimable_active_codes: BTreeSet<u8>,
     target_records: Vec<LogicalDialogueRecord>,
     regions: Vec<LogicalBundleRegion>,
 }
@@ -215,6 +219,33 @@ pub(crate) fn plan_main_dialogue_bundle(
     }) {
         preserved_source_codes.extend(DIALOGUE_PREFIX_OUTPUT_CODES);
     }
+    let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
+    let mut source_reclaimable_active_codes = BTreeSet::new();
+    for index in &target_indices {
+        for (source_line, workspace_line) in source_records[*index]
+            .lines
+            .iter()
+            .zip(&workspace.records[*index].lines)
+        {
+            if workspace_line.status == TranslationStatus::Untranslated {
+                continue;
+            }
+            for file_offset in &source_line.literal_file_offsets {
+                let code = *rom
+                    .data()
+                    .get(*file_offset)
+                    .context("main dialogue literal reclamation offset is outside the ROM")?;
+                if is_japanese_text_code(code) && active_codes.contains(&code) {
+                    source_reclaimable_active_codes.insert(code);
+                }
+            }
+        }
+    }
+    source_reclaimable_active_codes.retain(|code| !preserved_source_codes.contains(code));
+    ensure!(
+        !source_reclaimable_active_codes.is_empty(),
+        "main dialogue bundle has no exact source Japanese codes to reclaim"
+    );
 
     Ok(MainDialogueBundlePlan {
         workspace_sha1: sha1_hex(&workspace_bytes),
@@ -223,6 +254,7 @@ pub(crate) fn plan_main_dialogue_bundle(
         source_record_storage_byte_count,
         planned_record_storage_byte_count,
         preserved_source_codes,
+        source_reclaimable_active_codes,
         target_records,
         regions,
     })

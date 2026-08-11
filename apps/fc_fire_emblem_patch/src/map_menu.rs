@@ -1,10 +1,11 @@
-use std::{fs, path::Path};
+use std::{collections::BTreeSet, fs, path::Path};
 
 use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 
 use crate::{
-    japanese_encoding::japanese_text_glyph,
+    font_slots::active_hangul_codes,
+    japanese_encoding::{is_japanese_text_code, japanese_text_glyph},
     rom::{EXPECTED_SOURCE_SHA1, HEADER_SIZE, Rom},
     sha1_hex,
     text_inventory::{encode_target_markup, is_japanese_character},
@@ -90,6 +91,8 @@ pub(crate) struct MapMenuPlan {
     pub(crate) translated_entry_count: usize,
     pub(crate) review_complete: bool,
     pub(crate) workspace_sha1: String,
+    pub(crate) target_glyphs: BTreeSet<char>,
+    pub(crate) source_reclaimable_active_codes: BTreeSet<u8>,
 }
 
 pub(crate) fn plan_map_menu(rom: &Rom, workspace_path: &Path) -> Result<MapMenuPlan> {
@@ -112,6 +115,7 @@ pub(crate) fn plan_map_menu(rom: &Rom, workspace_path: &Path) -> Result<MapMenuP
     );
 
     let mut translated_entry_count = 0;
+    let mut target_glyphs = BTreeSet::new();
     for (entry, spec) in workspace.entries.iter().zip(LABELS) {
         let source_markup = decode_source_markup(&spec.expected[..spec.expected.len() - 1]);
         ensure!(
@@ -156,8 +160,20 @@ pub(crate) fn plan_map_menu(rom: &Rom, workspace_path: &Path) -> Result<MapMenuP
                 spec.id
             );
             translated_entry_count += 1;
+            target_glyphs.extend(entry.korean_markup.chars());
         }
     }
+    let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
+    let source_reclaimable_active_codes = LABELS
+        .iter()
+        .flat_map(|spec| spec.expected[..spec.expected.len() - 1].iter().copied())
+        .filter(|code| is_japanese_text_code(*code) && active_codes.contains(code))
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        !source_reclaimable_active_codes.is_empty()
+            && target_glyphs.len() <= source_reclaimable_active_codes.len(),
+        "map menu cannot reclaim enough exact source label codes for its Korean glyphs"
+    );
     Ok(MapMenuPlan {
         entry_count: workspace.entries.len(),
         translated_entry_count,
@@ -166,6 +182,8 @@ pub(crate) fn plan_map_menu(rom: &Rom, workspace_path: &Path) -> Result<MapMenuP
             .iter()
             .all(|entry| entry.status == "complete"),
         workspace_sha1: sha1_hex(&bytes),
+        target_glyphs,
+        source_reclaimable_active_codes,
     })
 }
 
@@ -267,6 +285,8 @@ mod tests {
 
         assert_eq!(plan.entry_count, 6);
         assert_eq!(plan.translated_entry_count, 6);
+        assert_eq!(plan.target_glyphs.len(), 17);
+        assert_eq!(plan.source_reclaimable_active_codes.len(), 24);
         assert!(!plan.review_complete);
     }
 }

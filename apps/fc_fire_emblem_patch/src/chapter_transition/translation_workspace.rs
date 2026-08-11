@@ -1,9 +1,11 @@
-use std::path::Path;
+use std::{collections::BTreeSet, path::Path};
 
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 
 use crate::{
     battle_text_workset::{FORECAST_LABEL_FILE_OFFSET, FORECAST_LABEL_SOURCE},
+    font_slots::active_hangul_codes,
+    japanese_encoding::is_japanese_text_code,
     rom::Rom,
     semantic_translation::{ExpectedSemanticEntry, plan_semantic_translation},
     text_inventory::decode_source_markup,
@@ -18,6 +20,8 @@ pub(crate) struct TransitionTranslationInput {
     pub(crate) workspace_sha1: String,
     pub(crate) entry_count: usize,
     pub(crate) review_complete: bool,
+    pub(crate) target_glyphs: BTreeSet<char>,
+    pub(crate) source_reclaimable_active_codes: BTreeSet<u8>,
 }
 
 pub(crate) struct TransitionTranslationPlans {
@@ -68,21 +72,49 @@ pub(crate) fn plan_transition_labels(
     let forecast_review_complete = plan.entry_review_complete("battle-forecast-label");
     let save_offer_review_complete = plan.entry_review_complete("chapter-save-offer-label");
     let ending_record_review_complete = plan.entry_review_complete("ending-total-turn-label");
+    let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
+    let reclaimable = |codes: &[u8]| {
+        codes
+            .iter()
+            .copied()
+            .filter(|code| is_japanese_text_code(*code) && active_codes.contains(code))
+            .collect::<BTreeSet<_>>()
+    };
+    let forecast_target_glyphs = plan
+        .entry_target_glyphs("battle-forecast-label")
+        .context("transition plan lost battle forecast target glyphs")?
+        .clone();
+    let save_offer_target_glyphs = plan
+        .entry_target_glyphs("chapter-save-offer-label")
+        .context("transition plan lost chapter save target glyphs")?
+        .clone();
+    let ending_record_target_glyphs = plan
+        .entry_target_glyphs("ending-total-turn-label")
+        .context("transition plan lost ending-record target glyphs")?
+        .clone();
     Ok(TransitionTranslationPlans {
         forecast: TransitionTranslationInput {
             workspace_sha1: plan.workspace_sha1.clone(),
             entry_count: 1,
             review_complete: forecast_review_complete,
+            target_glyphs: forecast_target_glyphs,
+            source_reclaimable_active_codes: reclaimable(&FORECAST_LABEL_SOURCE[3..9]),
         },
         save_offer: TransitionTranslationInput {
             workspace_sha1: plan.workspace_sha1.clone(),
             entry_count: 1,
             review_complete: save_offer_review_complete,
+            target_glyphs: save_offer_target_glyphs,
+            source_reclaimable_active_codes: reclaimable(
+                &SAVE_OFFER_LABEL_BYTES[..SAVE_OFFER_LABEL_BYTES.len() - 1],
+            ),
         },
         ending_record: TransitionTranslationInput {
             workspace_sha1: plan.workspace_sha1,
             entry_count: 1,
             review_complete: ending_record_review_complete,
+            target_glyphs: ending_record_target_glyphs,
+            source_reclaimable_active_codes: ending.source_reclaimable_active_codes,
         },
     })
 }

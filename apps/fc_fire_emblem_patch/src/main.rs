@@ -269,6 +269,11 @@ enum Command {
         item_action_label_localization: PathBuf,
         #[arg(long, default_value = "assets/translation/transition-labels.ko.json")]
         transition_label_localization: PathBuf,
+        #[arg(
+            long,
+            default_value = "evidence/private/chapter-save-lifetimes/continue-prompt-manifest.json"
+        )]
+        chapter_save_continue_prompt_manifest: PathBuf,
         #[arg(long, default_value = "assets/translation/location-names.ko.json")]
         location_name_localization: PathBuf,
         #[arg(long, default_value = "out/fire-emblem-fe1-korean-patch.nes")]
@@ -1025,6 +1030,7 @@ fn main() -> Result<()> {
             unit_ui_label_localization,
             item_action_label_localization,
             transition_label_localization,
+            chapter_save_continue_prompt_manifest,
             location_name_localization,
             current_build_output,
             current_build_report,
@@ -1051,6 +1057,8 @@ fn main() -> Result<()> {
                     unit_ui_label_localization_path: &unit_ui_label_localization,
                     item_action_label_localization_path: &item_action_label_localization,
                     transition_label_localization_path: &transition_label_localization,
+                    chapter_save_continue_prompt_manifest_path:
+                        &chapter_save_continue_prompt_manifest,
                     location_name_localization_path: &location_name_localization,
                     current_build_output_path: &current_build_output,
                     current_build_report_path: &current_build_report,

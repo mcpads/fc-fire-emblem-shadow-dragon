@@ -5,6 +5,7 @@ mod ending_scroll;
 mod ending_source;
 mod report;
 mod runtime_routes;
+mod save_dialogue;
 mod save_routes;
 mod sound_test_routes;
 mod sound_test_source;
@@ -31,6 +32,7 @@ use crate::{
 
 use report::*;
 use runtime_routes::*;
+pub(crate) use save_dialogue::bind_save_complete_dialogue_records;
 use save_routes::*;
 use sound_test_routes::*;
 use source_binding::*;

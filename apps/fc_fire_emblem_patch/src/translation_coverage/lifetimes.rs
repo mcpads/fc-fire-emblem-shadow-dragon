@@ -7,8 +7,11 @@ use crate::{font_slots::ACTIVE_HANGUL_SLOT_COUNT, rom::EXPECTED_SOURCE_SHA1, sha
 
 use super::report::{StrongestLifetimeReport, TranslationLifetimeDemandReport};
 
+mod chapter_save;
 mod front_end_menu;
+mod full_page_bound;
 mod item_flow;
+mod map_menu;
 mod options_menu;
 mod unit_roster;
 mod unit_ui;
@@ -23,8 +26,15 @@ pub(super) struct LifetimeInputBindings<'a> {
     pub(super) fixed_text_workspace_path: &'a Path,
     pub(super) unit_name_workspace_path: &'a Path,
     pub(super) item_action_label_workspace_path: &'a Path,
+    pub(super) choice_label_workspace_path: &'a Path,
+    pub(super) transition_label_workspace_path: &'a Path,
+    pub(super) chapter_save_continue_prompt_manifest_path: &'a Path,
+    pub(super) map_menu_localization_path: &'a Path,
     pub(super) main_dialogue_workspace_sha1: &'a str,
     pub(super) item_action_label_workspace_sha1: &'a str,
+    pub(super) choice_label_workspace_sha1: &'a str,
+    pub(super) transition_label_workspace_sha1: &'a str,
+    pub(super) map_menu_localization_sha1: &'a str,
     pub(super) class_profile_page_target_glyph_counts: &'a [usize],
     pub(super) class_profile_preserved_active_code_count: usize,
     pub(super) class_profile_runtime_bound_to_build: bool,
@@ -70,6 +80,8 @@ struct ConsumerLifetimeDemands {
     item_flow: Vec<TranslationLifetimeDemandReport>,
     front_end_menu: TranslationLifetimeDemandReport,
     options_menu: TranslationLifetimeDemandReport,
+    map_menu: TranslationLifetimeDemandReport,
+    chapter_save: Vec<TranslationLifetimeDemandReport>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -219,6 +231,21 @@ pub(super) fn inspect_translation_lifetimes(
         capacity_bound_to_build: bindings.options_capacity_bound_to_build,
         evidence_report_sha1: bindings.current_build_report_sha1,
     })?;
+    let map_menu_demand = map_menu::inspect(map_menu::InputBindings {
+        source_path: bindings.source_path,
+        localization_path: bindings.map_menu_localization_path,
+        localization_sha1: bindings.map_menu_localization_sha1,
+    })?;
+    let chapter_save_demands = chapter_save::inspect(chapter_save::InputBindings {
+        source_path: bindings.source_path,
+        main_dialogue_workspace_path: bindings.main_dialogue_workspace_path,
+        choice_label_workspace_path: bindings.choice_label_workspace_path,
+        transition_label_workspace_path: bindings.transition_label_workspace_path,
+        continue_prompt_manifest_path: bindings.chapter_save_continue_prompt_manifest_path,
+        main_dialogue_workspace_sha1: bindings.main_dialogue_workspace_sha1,
+        choice_label_workspace_sha1: bindings.choice_label_workspace_sha1,
+        transition_label_workspace_sha1: bindings.transition_label_workspace_sha1,
+    })?;
 
     build_translation_lifetime_inventory(
         LifetimeReports {
@@ -235,6 +262,8 @@ pub(super) fn inspect_translation_lifetimes(
             item_flow: item_flow_demands,
             front_end_menu: front_end_menu_demand,
             options_menu: options_menu_demand,
+            map_menu: map_menu_demand,
+            chapter_save: chapter_save_demands,
         },
         japanese_bearing_screen_roles,
     )
@@ -295,6 +324,8 @@ fn build_translation_lifetime_inventory(
     demands.extend(consumer_demands.item_flow);
     demands.push(consumer_demands.front_end_menu);
     demands.push(consumer_demands.options_menu);
+    demands.push(consumer_demands.map_menu);
+    demands.extend(consumer_demands.chapter_save);
     for lifetime in main.observed_screen_lifetimes {
         ensure!(
             lifetime.filled_unique_glyph_count
@@ -392,7 +423,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn exact_output_profile_group_can_replace_battle_as_the_strongest_lifetime() {
+    fn full_page_map_menu_bound_can_become_the_strongest_lifetime() {
         let main = MainDialogueGlyphWorksetReport {
             schema: MAIN_DIALOGUE_REPORT_SCHEMA,
             source_sha1: EXPECTED_SOURCE_SHA1.to_owned(),
@@ -455,6 +486,17 @@ mod tests {
             evidence_report_sha1: "build-report",
         })
         .unwrap();
+        let map_menu_demand = TranslationLifetimeDemandReport {
+            screen_role: "map_menu",
+            measurement_basis: "fixture full-page upper bound",
+            target_glyph_count: 17,
+            preserved_active_source_code_count: 186,
+            additional_target_glyph_reservation_count: 0,
+            total_slot_demand: 203,
+            active_slot_count: ACTIVE_HANGUL_SLOT_COUNT,
+            fits_active_page: true,
+            evidence_report_sha1: "map-menu-evidence".to_owned(),
+        };
         let mut roles = [
             "battle_animation",
             "class_profile",
@@ -468,6 +510,7 @@ mod tests {
             "unit_roster",
             "unit_status",
             "unit_summary",
+            "title",
         ]
         .map(str::to_owned)
         .to_vec();
@@ -491,8 +534,15 @@ mod tests {
                 fixed_text_workspace_path: Path::new("fixed.json"),
                 unit_name_workspace_path: Path::new("units.json"),
                 item_action_label_workspace_path: Path::new("item-actions.json"),
+                choice_label_workspace_path: Path::new("choices.json"),
+                transition_label_workspace_path: Path::new("transitions.json"),
+                chapter_save_continue_prompt_manifest_path: Path::new("save-runtime.json"),
+                map_menu_localization_path: Path::new("map-menu.json"),
                 main_dialogue_workspace_sha1: "main",
                 item_action_label_workspace_sha1: "item-actions",
+                choice_label_workspace_sha1: "choices",
+                transition_label_workspace_sha1: "transitions",
+                map_menu_localization_sha1: "map-menu",
                 class_profile_page_target_glyph_counts: &[143, 161],
                 class_profile_preserved_active_code_count: 12,
                 class_profile_runtime_bound_to_build: true,
@@ -524,24 +574,23 @@ mod tests {
                 item_flow: item_flow_demands,
                 front_end_menu: front_end_menu_demand,
                 options_menu: options_menu_demand,
+                map_menu: map_menu_demand,
+                chapter_save: Vec::new(),
             },
             &roles,
         )
         .unwrap();
 
-        assert_eq!(inventory.demands.len(), 26);
+        assert_eq!(inventory.demands.len(), 27);
         assert_eq!(inventory.strongest.state, "partial");
-        assert_eq!(
-            inventory.strongest.selected_screen_role,
-            Some("class_profile")
-        );
-        assert_eq!(inventory.strongest.selected_slot_demand, Some(173));
+        assert_eq!(inventory.strongest.selected_screen_role, Some("map_menu"));
+        assert_eq!(inventory.strongest.selected_slot_demand, Some(203));
         assert_eq!(
             inventory.strongest.main_dialogue_maximum_target_glyph_count,
             175
         );
         assert!(inventory.strongest.main_dialogue_maximum_screen_bound);
-        assert_eq!(inventory.unmeasured_screen_roles, ["map_menu"]);
+        assert_eq!(inventory.unmeasured_screen_roles, ["title"]);
     }
 
     fn unit_ui_demands() -> Vec<TranslationLifetimeDemandReport> {
