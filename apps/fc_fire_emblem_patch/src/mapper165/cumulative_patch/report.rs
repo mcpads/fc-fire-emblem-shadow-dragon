@@ -69,6 +69,8 @@ pub(super) struct CumulativeWeaponShopSharedTextReport {
     pub(super) item_string_byte_count: usize,
     pub(super) choice_string_byte_count: usize,
     pub(super) shared_page_unique_glyph_count: usize,
+    pub(super) shared_page_preserved_active_code_count: usize,
+    pub(super) shared_page_total_slot_demand: usize,
     pub(super) added_glyph_count: usize,
     pub(super) glyph_assignment_sha1: String,
     pub(super) font_physical_page: u8,
@@ -79,10 +81,16 @@ pub(super) struct CumulativeWeaponShopSharedTextReport {
     pub(super) selected_item_pointer_selector_installed: bool,
     pub(super) choice_pointer_selector_installed: bool,
     pub(super) unconverted_consumers_fallback_to_source_tables: bool,
+    pub(super) capacity_bound_screen_roles: Vec<&'static str>,
     pub(super) runtime_evidence_manifest_sha1: String,
+    pub(super) runtime_evidence_output_sha1: String,
     pub(super) runtime_sample_count: usize,
     pub(super) runtime_unique_image_count: usize,
-    pub(super) runtime_bound_to_build: bool,
+    pub(super) runtime_bound_dialogue_screen_roles: Vec<&'static str>,
+    pub(super) runtime_bound_item_name_screen_roles: Vec<&'static str>,
+    pub(super) runtime_bound_choice_label_screen_roles: Vec<&'static str>,
+    pub(super) runtime_bound_to_stage_output: bool,
+    pub(super) runtime_carried_forward_by_verified_writes: bool,
     pub(super) review_complete: bool,
 }
 
@@ -276,7 +284,7 @@ pub(super) struct CumulativeDialogueLifetimeReport {
     pub(super) runtime_evidence_manifest_sha1: Option<String>,
     pub(super) runtime_sample_count: usize,
     pub(super) runtime_unique_image_count: usize,
-    pub(super) runtime_bound_to_build: bool,
+    pub(super) runtime_bound_to_dialogue_stage_output: bool,
 }
 
 #[derive(Debug, Serialize)]

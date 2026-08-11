@@ -11,9 +11,22 @@ use crate::sha1_hex;
 
 pub(super) struct WeaponShopSharedTextRuntimeEvidence {
     pub(super) manifest_sha1: String,
+    pub(super) output_sha1: String,
     pub(super) sample_count: usize,
     pub(super) unique_image_count: usize,
+    pub(super) dialogue_screen_roles: Vec<&'static str>,
+    pub(super) item_name_screen_roles: Vec<&'static str>,
+    pub(super) choice_label_screen_roles: Vec<&'static str>,
 }
+
+const DIALOGUE_SCREEN_ROLES: [&str; 4] = [
+    "weapon_shop_item_list",
+    "weapon_shop_purchase_confirmation",
+    "weapon_shop_declined_continue_prompt",
+    "weapon_shop_exit_message",
+];
+const ITEM_NAME_SCREEN_ROLES: [&str; 4] = DIALOGUE_SCREEN_ROLES;
+const CHOICE_LABEL_SCREEN_ROLES: [&str; 1] = ["weapon_shop_purchase_confirmation"];
 
 #[derive(Debug, Deserialize)]
 struct RuntimeManifest {
@@ -252,8 +265,12 @@ pub(super) fn verify_weapon_shop_shared_text_runtime_evidence(
 
     Ok(WeaponShopSharedTextRuntimeEvidence {
         manifest_sha1: sha1_hex(&manifest_bytes),
+        output_sha1: manifest.output_sha1,
         sample_count: manifest.samples.len(),
         unique_image_count: image_hashes.len(),
+        dialogue_screen_roles: DIALOGUE_SCREEN_ROLES.to_vec(),
+        item_name_screen_roles: ITEM_NAME_SCREEN_ROLES.to_vec(),
+        choice_label_screen_roles: CHOICE_LABEL_SCREEN_ROLES.to_vec(),
     })
 }
 

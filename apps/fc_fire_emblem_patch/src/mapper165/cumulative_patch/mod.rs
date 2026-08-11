@@ -10,7 +10,7 @@ use crate::{
         MainDialogueBundlePlan, MainDialogueSlicePlan, plan_main_dialogue_bundle,
         plan_main_dialogue_slice, validate_main_dialogue_workspace,
     },
-    font_slots::FONT_PAGE_SIZE,
+    font_slots::{ACTIVE_HANGUL_SLOT_COUNT, FONT_PAGE_SIZE},
     front_end_menu::plan_front_end_menu,
     mmc5_prg::{count_direct_transfers_to_range, fixed_bank_file_offset},
     rom::{EXPECTED_SOURCE_SHA1, Rom},
@@ -101,6 +101,17 @@ const CHAPTER_ONE_INTRO_RECORD_IDS: [&str; 4] = [
     "chapter-intro-dialogue:002",
     "chapter-intro-dialogue:003",
     "chapter-intro-dialogue:004",
+];
+const WEAPON_SHOP_CAPACITY_BOUND_SCREEN_ROLES: [&str; 9] = [
+    "weapon_shop_item_list",
+    "weapon_shop_purchase_confirmation",
+    "weapon_shop_purchase_result",
+    "weapon_shop_exit_message",
+    "weapon_shop_inventory_full_message",
+    "weapon_shop_insufficient_funds_message",
+    "weapon_shop_item_restriction_confirmation",
+    "weapon_shop_declined_continue_prompt",
+    "weapon_shop_purchase_inventory_full_exit",
 ];
 
 pub(crate) struct CumulativePatchSummary {
@@ -673,6 +684,34 @@ pub(crate) fn build_cumulative_patch(
         &weapon_shop_shared_text_stage.output_sha1,
         weapon_shop_shared_text_stage.plan.page.mapper_register,
     )?;
+    let weapon_shop_shared_page_total_slot_demand = weapon_shop_shared_text_stage
+        .plan
+        .page
+        .assignments
+        .len()
+        .checked_add(
+            weapon_shop_shared_text_stage
+                .plan
+                .page
+                .preserved_active_code_count,
+        )
+        .context("weapon-shop shared-page slot demand overflow")?;
+    ensure!(
+        weapon_shop_shared_page_total_slot_demand <= ACTIVE_HANGUL_SLOT_COUNT,
+        "weapon-shop shared page exceeds the active glyph slots"
+    );
+    let weapon_shop_capacity_roles = WEAPON_SHOP_CAPACITY_BOUND_SCREEN_ROLES
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        weapon_shop_shared_text_runtime
+            .dialogue_screen_roles
+            .iter()
+            .chain(&weapon_shop_shared_text_runtime.item_name_screen_roles)
+            .chain(&weapon_shop_shared_text_runtime.choice_label_screen_roles)
+            .all(|role| weapon_shop_capacity_roles.contains(role)),
+        "weapon-shop runtime evidence names a screen outside the shared-page capacity contract"
+    );
     ensure!(
         sha1_hex(&unit_name_stage.output) == unit_name_stage.output_sha1,
         "unit-name stage output hash changed before class-profile installation"
@@ -1042,6 +1081,11 @@ pub(crate) fn build_cumulative_patch(
                 .page
                 .assignments
                 .len(),
+            shared_page_preserved_active_code_count: weapon_shop_shared_text_stage
+                .plan
+                .page
+                .preserved_active_code_count,
+            shared_page_total_slot_demand: weapon_shop_shared_page_total_slot_demand,
             added_glyph_count: weapon_shop_shared_text_stage.plan.page.assignments.len()
                 - shop_dialogue_stage.page.assignments.len(),
             glyph_assignment_sha1: assignment_sha1(
@@ -1055,10 +1099,19 @@ pub(crate) fn build_cumulative_patch(
             selected_item_pointer_selector_installed: true,
             choice_pointer_selector_installed: true,
             unconverted_consumers_fallback_to_source_tables: true,
+            capacity_bound_screen_roles: WEAPON_SHOP_CAPACITY_BOUND_SCREEN_ROLES.to_vec(),
             runtime_evidence_manifest_sha1: weapon_shop_shared_text_runtime.manifest_sha1,
+            runtime_evidence_output_sha1: weapon_shop_shared_text_runtime.output_sha1,
             runtime_sample_count: weapon_shop_shared_text_runtime.sample_count,
             runtime_unique_image_count: weapon_shop_shared_text_runtime.unique_image_count,
-            runtime_bound_to_build: true,
+            runtime_bound_dialogue_screen_roles: weapon_shop_shared_text_runtime
+                .dialogue_screen_roles,
+            runtime_bound_item_name_screen_roles: weapon_shop_shared_text_runtime
+                .item_name_screen_roles,
+            runtime_bound_choice_label_screen_roles: weapon_shop_shared_text_runtime
+                .choice_label_screen_roles,
+            runtime_bound_to_stage_output: true,
+            runtime_carried_forward_by_verified_writes: true,
             review_complete: weapon_shop_shared_text_stage.plan.review_complete,
         },
         battle_text: CumulativeBattleTextReport {
@@ -1166,7 +1219,7 @@ pub(crate) fn build_cumulative_patch(
             "Private observations passed the installed no-save and valid-save front-end variants, but installed runtime evidence is not yet build-bound and the suspend-data variant is unverified.",
             "Playable-unit names are installed for roster, map unit-summary/status, and battle consumers; ending consumers remain Japanese backlog until their own font lifetimes are installed.",
             "The translated playable-unit name pages still need build-bound cold runtime evidence across roster, unit summary, unit status, and their exit paths.",
-            "The installed weapon-shop shared-text decline route is exact-output-bound through item selection, choices, continue prompt, item-list return, exit message, and map restoration; purchase and every preflight branch still need exact-output runtime evidence.",
+            "The installed weapon-shop shared page is capacity-bound to all nine screen roles at 150/210 slots. The decline route is runtime-bound to the eighth-stage output through item selection, choices, continue prompt, item-list return, exit message, and map restoration; the final cumulative output, purchase, and every preflight branch still need exact-output runtime evidence.",
             "Battle text and the dynamic composition loader are installed in this cumulative lineage, but the new cumulative output still needs cold-route battle and prior-screen regression evidence.",
             "The source-bound fifteen-page maximum dialogue has exact-output evidence for its state-bridged Chapter 7 seize entry, initial selector, all page font reloads, irregular temporal samples, and the final NEXT STORY exit; cold-route prior-screen continuity remains open.",
             "The remaining main-dialogue screen lifetimes and translated non-dialogue surfaces are not yet installed in this cumulative lineage.",
@@ -1236,7 +1289,7 @@ fn dialogue_lifetime_report(
         runtime_evidence_manifest_sha1: None,
         runtime_sample_count: 0,
         runtime_unique_image_count: 0,
-        runtime_bound_to_build: false,
+        runtime_bound_to_dialogue_stage_output: false,
     }
 }
 
@@ -1269,7 +1322,7 @@ fn shop_dialogue_lifetime_report(
         runtime_evidence_manifest_sha1: Some(runtime.manifest_sha1.clone()),
         runtime_sample_count: runtime.sample_count,
         runtime_unique_image_count: runtime.unique_image_count,
-        runtime_bound_to_build: true,
+        runtime_bound_to_dialogue_stage_output: true,
     }
 }
 

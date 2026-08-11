@@ -11,6 +11,7 @@ mod lifetimes;
 mod population;
 mod report;
 mod screen_targets;
+mod weapon_shop;
 
 use installed::inspect_current_installation;
 use lifetimes::{LifetimeInputBindings, inspect_translation_lifetimes};
@@ -238,7 +239,15 @@ pub(crate) fn analyze_translation_coverage(
             class_profile_preserved_active_code_count: installation
                 .class_profile_preserved_active_code_count,
             class_profile_runtime_bound_to_build: installation.class_profile_runtime_bound_to_build,
-            class_profile_evidence_report_sha1: &installation.build_report_sha1,
+            current_build_report_sha1: &installation.build_report_sha1,
+            weapon_shop_shared_page_target_glyph_count: installation
+                .weapon_shop_shared_page_target_glyph_count,
+            weapon_shop_shared_page_preserved_active_code_count: installation
+                .weapon_shop_shared_page_preserved_active_code_count,
+            weapon_shop_shared_page_total_slot_demand: installation
+                .weapon_shop_shared_page_total_slot_demand,
+            weapon_shop_capacity_bound_screen_roles: &installation
+                .weapon_shop_capacity_bound_screen_roles,
             unit_name_workspace_sha1: translation_input_sha1("unit_names")?,
             unit_ui_label_workspace_sha1: translation_input_sha1("unit_ui_labels")?,
             battle_fixed_workspace_sha1: &installation.battle_fixed_workspace_sha1,

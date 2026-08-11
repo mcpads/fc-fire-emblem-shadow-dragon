@@ -95,26 +95,35 @@ const SCREEN_TARGETS: &[ScreenTargetSeed] = &[
         &["chapter_titles", "main_dialogue"],
     ),
     screen("suspend_message", &["main_dialogue"]),
-    screen("weapon_shop_item_list", &["item_names"]),
+    screen("weapon_shop_item_list", &["main_dialogue", "item_names"]),
     screen(
         "weapon_shop_purchase_confirmation",
         &["main_dialogue", "item_names", "choice_labels"],
     ),
     screen(
         "weapon_shop_purchase_result",
+        &["main_dialogue", "item_names", "choice_labels"],
+    ),
+    screen("weapon_shop_exit_message", &["main_dialogue", "item_names"]),
+    screen(
+        "weapon_shop_inventory_full_message",
         &["main_dialogue", "item_names"],
     ),
-    screen("weapon_shop_exit_message", &["main_dialogue"]),
-    screen("weapon_shop_inventory_full_message", &["main_dialogue"]),
-    screen("weapon_shop_insufficient_funds_message", &["main_dialogue"]),
+    screen(
+        "weapon_shop_insufficient_funds_message",
+        &["main_dialogue", "choice_labels"],
+    ),
     screen(
         "weapon_shop_item_restriction_confirmation",
         &["main_dialogue", "item_names", "choice_labels"],
     ),
-    screen("weapon_shop_declined_continue_prompt", &["main_dialogue"]),
+    screen(
+        "weapon_shop_declined_continue_prompt",
+        &["main_dialogue", "item_names", "choice_labels"],
+    ),
     screen(
         "weapon_shop_purchase_inventory_full_exit",
-        &["main_dialogue"],
+        &["main_dialogue", "item_names"],
     ),
     screen("item_inventory_list", &["item_names"]),
     screen("item_action_menu", &["item_names", "item_action_labels"]),
@@ -216,6 +225,9 @@ pub(crate) fn bind_domain_screen_targets(
 mod tests {
     use super::*;
     use crate::screen_contracts::inspect_screen_translation_partition;
+    use crate::translation_coverage::weapon_shop::{
+        CHOICE_LABEL_SCREEN_ROLES, DIALOGUE_SCREEN_ROLES, ITEM_NAME_SCREEN_ROLES,
+    };
 
     #[test]
     fn all_japanese_bearing_screens_have_exactly_one_screen_partition() {
@@ -227,5 +239,31 @@ mod tests {
         assert_eq!(partition.preserved_original_only_screen_count, 5);
         assert_eq!(partition.no_text_screen_count, 4);
         assert_eq!(domains.len(), DOMAIN_SEEDS.len());
+    }
+
+    #[test]
+    fn weapon_shop_domains_cover_retained_items_and_every_visible_choice_window() {
+        let partition = inspect_screen_translation_partition().unwrap();
+        let domains = bind_domain_screen_targets(&partition).unwrap();
+
+        for (domain_id, expected_roles) in [
+            ("main_dialogue", DIALOGUE_SCREEN_ROLES.as_slice()),
+            ("item_names", ITEM_NAME_SCREEN_ROLES.as_slice()),
+            ("choice_labels", CHOICE_LABEL_SCREEN_ROLES.as_slice()),
+        ] {
+            let actual = domains
+                .iter()
+                .find(|domain| domain.id == domain_id)
+                .unwrap()
+                .screen_roles
+                .iter()
+                .filter(|role| role.starts_with("weapon_shop_"))
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>();
+            assert_eq!(
+                actual,
+                expected_roles.iter().copied().collect::<BTreeSet<_>>()
+            );
+        }
     }
 }
