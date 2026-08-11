@@ -65,3 +65,33 @@ fn clique_extension_adds_only_vertices_adjacent_to_every_member() {
     assert!(extended.contains(&'다'));
     graph.verify_clique(&extended).unwrap();
 }
+
+#[test]
+fn color_classes_can_expand_to_a_fixed_runtime_codebook_width() {
+    let families = BattleGlyphFamilies {
+        base: set("가"),
+        player_participants: vec![set("나"), set("다")],
+        enemy_participants: vec![],
+        terrains: vec![],
+        dialogue_records: vec![],
+    };
+    let mut first = plan_stable_coloring(&families, 3).unwrap();
+    let mut second = plan_stable_coloring(&families, 3).unwrap();
+    assert_eq!(first.color_count, 2);
+
+    first.expand_to_color_count(3).unwrap();
+    second.expand_to_color_count(3).unwrap();
+
+    assert_eq!(first.color_count, 3);
+    assert_eq!(first.assignment_sha1, second.assignment_sha1);
+    assert_eq!(
+        first
+            .glyph_colors()
+            .values()
+            .copied()
+            .collect::<BTreeSet<_>>()
+            .len(),
+        3
+    );
+    assert!(!first.model_chromatic_number_proven);
+}

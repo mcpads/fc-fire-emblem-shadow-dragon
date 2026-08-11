@@ -400,12 +400,7 @@ fn plan_battle_codebook_model(
     ] {
         ensure!(!entries.is_empty(), "battle codebook has no {role} entries");
     }
-    let mut base = message_templates
-        .iter()
-        .flatten()
-        .copied()
-        .collect::<BTreeSet<_>>();
-    base.extend(FORECAST_LABEL_GLYPHS);
+    let base = always_selected_battle_glyphs(fixed);
     let dialogue_records = dialogue
         .records
         .iter()
@@ -423,7 +418,8 @@ fn plan_battle_codebook_model(
         terrains,
         dialogue_records,
     };
-    let coloring = plan_stable_coloring(&families, ACTIVE_HANGUL_SLOT_COUNT)?;
+    let mut coloring = plan_stable_coloring(&families, ACTIVE_HANGUL_SLOT_COUNT)?;
+    coloring.expand_to_color_count(ACTIVE_HANGUL_SLOT_COUNT)?;
     let mut runtime_demand = plan_runtime_demand(&families, &coloring)?;
     let [
         player_index,
@@ -501,6 +497,17 @@ fn plan_battle_codebook_model(
         item_domain,
         enemy_domain,
     })
+}
+
+fn always_selected_battle_glyphs(fixed: &FixedTextPlan) -> BTreeSet<char> {
+    let mut glyphs = fixed
+        .entries
+        .iter()
+        .filter(|entry| entry.table_id == "battle-message-templates")
+        .flat_map(|entry| entry.unique_glyphs())
+        .collect::<BTreeSet<_>>();
+    glyphs.extend(FORECAST_LABEL_GLYPHS);
+    glyphs
 }
 
 fn entry_glyph_sets(plan: &FixedTextPlan, table_id: &str) -> Vec<BTreeSet<char>> {

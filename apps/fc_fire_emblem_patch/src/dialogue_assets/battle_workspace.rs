@@ -453,6 +453,7 @@ fn validate_translation_fields(
             "{} changed a control token or existing English/digit literal",
             line.id
         );
+        validate_battle_variable_postpositions(line)?;
         let final_control = source
             .protected_items
             .last()
@@ -468,6 +469,18 @@ fn validate_translation_fields(
         target_glyphs += target.editable_glyph_count;
     }
     Ok((filled, complete, untranslated_japanese, target_glyphs))
+}
+
+fn validate_battle_variable_postpositions(line: &BattleDialogueWorkspaceLine) -> Result<()> {
+    validate_neutral_variable_postpositions(
+        &line.id,
+        &line.korean,
+        |dynamic_value, bare_postposition| {
+            line.id == "battle-dialogue:001:line:01"
+                && dynamic_value == "{EC:01}"
+                && bare_postposition == "로"
+        },
+    )
 }
 
 fn planned_storage_byte_count(workspace: &BattleDialogueWorkspace) -> Result<usize> {
@@ -649,6 +662,29 @@ mod tests {
 
         let error = validate_translation_fields(&workspace).unwrap_err();
         assert!(error.to_string().contains("changed a control token"));
+    }
+
+    #[test]
+    fn battle_variable_names_reject_a_bare_korean_postposition() {
+        let line = BattleDialogueWorkspaceLine {
+            id: "battle-dialogue:005:line:00".to_owned(),
+            index: 0,
+            source_markup: "{EC:02}は{SP}たおれた{EE}".to_owned(),
+            korean: "{EC:02}는{SP}쓰러졌다{EE}".to_owned(),
+            status: TranslationStatus::NeedsHumanReview,
+            japanese_source_byte_count: 4,
+        };
+
+        let error = validate_battle_variable_postpositions(&line)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("attaches bare postposition"));
+
+        let neutral = BattleDialogueWorkspaceLine {
+            korean: "{EC:02}은(는){SP}쓰러졌다{EE}".to_owned(),
+            ..line
+        };
+        assert!(validate_battle_variable_postpositions(&neutral).is_ok());
     }
 
     #[test]

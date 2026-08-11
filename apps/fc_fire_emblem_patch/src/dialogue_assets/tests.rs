@@ -149,6 +149,26 @@ fn accepts_hangul_while_preserving_existing_english_and_control_tokens() {
 }
 
 #[test]
+fn variable_item_names_require_a_neutral_korean_postposition() {
+    let mut line = workspace_line("{EC:00}を{SP}わたす{EF}", "{EC:00}를{SP}전한다{EF}");
+    line.id = "village-and-outro-dialogue:014:line:10".to_owned();
+
+    let error = validate_translation_markup(&line).unwrap_err().to_string();
+    assert!(error.contains("attaches bare postposition"));
+
+    line.korean = "{EC:00}을(를){SP}전한다{EF}".to_owned();
+    assert!(validate_translation_markup(&line).is_ok());
+
+    line.korean = "{EC:00}{SP}을전한다{EF}".to_owned();
+    assert!(validate_translation_markup(&line).is_err());
+
+    let mut numeric = workspace_line("{EC:00}はおおい{EF}", "{EC:00}이나많다{EF}");
+    assert!(validate_translation_markup(&numeric).is_err());
+    numeric.korean = "{EC:00}(이)나많다{EF}".to_owned();
+    assert!(validate_translation_markup(&numeric).is_ok());
+}
+
+#[test]
 fn rejects_changed_existing_english_in_a_korean_target() {
     let line = workspace_line("マルスSTR{SP}{E9:03}{EF}", "마르스SKI{SP}{E9:03}{EF}");
 

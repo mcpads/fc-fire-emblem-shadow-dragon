@@ -309,15 +309,23 @@ fn zero_right_page_selects_its_mapper_register_before_writing_chr_ram() {
             .windows(5)
             .position(|window| window[0..3] == [0xA9, 0x00, 0x4C])
             .unwrap();
-        let target = u16::from_le_bytes([
-            bytes[zero_page_branch + 3],
-            bytes[zero_page_branch + 4],
-        ]);
+        let target = u16::from_le_bytes([bytes[zero_page_branch + 3], bytes[zero_page_branch + 4]]);
         let target_offset = usize::from(target - address);
 
         assert_eq!(
             &bytes[target_offset..target_offset + 10],
-            &[0x48, 0xA9, mapper_register, 0x8D, 0x00, 0x80, 0x68, 0x8D, 0x01, 0x80]
+            &[
+                0x48,
+                0xA9,
+                mapper_register,
+                0x8D,
+                0x00,
+                0x80,
+                0x68,
+                0x8D,
+                0x01,
+                0x80
+            ]
         );
     }
 }

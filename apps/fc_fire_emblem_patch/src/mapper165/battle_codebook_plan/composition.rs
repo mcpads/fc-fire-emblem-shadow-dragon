@@ -4,14 +4,13 @@ use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
-    battle_text_workset::FORECAST_LABEL_GLYPHS,
     dialogue_assets::BattleDialogueReinsertionPlan,
     font_slots::{FONT_PAGE_SIZE, FONT_TILE_SIZE},
     text_inventory::FixedTextPlan,
 };
 
-use super::conflict_graph::StableColoringPlan;
 use super::selected_physical_assignment::assign_selected_physical_codes_with_canonical_map;
+use super::{always_selected_battle_glyphs, conflict_graph::StableColoringPlan};
 
 mod blob;
 
@@ -39,6 +38,7 @@ pub(super) struct BattleCacheCompositionPlan {
     maximum_runtime_recipe_count: usize,
     abstract_recipe_sha1: String,
     recipe_blob_byte_count: usize,
+    source_and_recipe_material_remaining_byte_count: usize,
     unique_recipe_payload_count: usize,
     missing_directory_entry_count: usize,
     glyph_atlas_tile_count: usize,
@@ -103,6 +103,30 @@ pub(in crate::mapper165) struct BattleRuntimeFontPageComposition {
     pub(in crate::mapper165) color_codes: BTreeMap<u8, u8>,
     pub(in crate::mapper165) remap_pairs: Vec<(u8, u8)>,
     pub(in crate::mapper165) assignment_sha1: String,
+}
+
+struct FamilyRecipeEncoding<'a> {
+    coloring: &'a StableColoringPlan,
+    atlas_indices: &'a BTreeMap<char, u16>,
+    common_glyphs: &'a BTreeSet<char>,
+}
+
+impl FamilyRecipeEncoding<'_> {
+    fn pairs(
+        &self,
+        glyphs: &BTreeSet<char>,
+        role: RecipeRole,
+        source_index: usize,
+    ) -> Result<Vec<RecipePair>> {
+        recipe_pairs(
+            glyphs,
+            self.common_glyphs,
+            self.coloring,
+            self.atlas_indices,
+            role,
+            source_index,
+        )
+    }
 }
 
 pub(in crate::mapper165) fn inspect_runtime_recipe_input(
@@ -273,24 +297,25 @@ pub(super) fn plan_cache_composition(
         .collect::<Result<BTreeMap<_, _>>>()?;
     let mut recipes = RecipeCatalog::default();
 
-    let mut common_glyphs = fixed
-        .entries
-        .iter()
-        .filter(|entry| entry.table_id == "battle-message-templates")
-        .flat_map(|entry| entry.unique_glyphs())
-        .collect::<BTreeSet<_>>();
-    common_glyphs.extend(FORECAST_LABEL_GLYPHS);
+    let common_glyphs = always_selected_battle_glyphs(fixed);
+    let no_excluded_glyphs = BTreeSet::new();
     recipes.add(
         RecipeRole::Common,
         0,
         recipe_pairs(
             &common_glyphs,
+            &no_excluded_glyphs,
             coloring,
             &atlas_indices,
             RecipeRole::Common,
             0,
         )?,
     )?;
+    let family_encoding = FamilyRecipeEncoding {
+        coloring,
+        atlas_indices: &atlas_indices,
+        common_glyphs: &common_glyphs,
+    };
 
     add_fixed_range(
         &mut recipes,
@@ -298,8 +323,7 @@ pub(super) fn plan_cache_composition(
         fixed,
         "unit-names",
         0..52,
-        coloring,
-        &atlas_indices,
+        &family_encoding,
     )?;
     add_fixed_indices(
         &mut recipes,
@@ -307,8 +331,7 @@ pub(super) fn plan_cache_composition(
         fixed,
         "enemy-names",
         enemy_name_source_indices.iter().copied(),
-        coloring,
-        &atlas_indices,
+        &family_encoding,
     )?;
     add_fixed_range(
         &mut recipes,
@@ -316,8 +339,7 @@ pub(super) fn plan_cache_composition(
         fixed,
         "class-names",
         0..24,
-        coloring,
-        &atlas_indices,
+        &family_encoding,
     )?;
     for source_index in candidate_item_source_indices {
         let entry = fixed
@@ -326,13 +348,7 @@ pub(super) fn plan_cache_composition(
         recipes.add(
             RecipeRole::Item,
             *source_index,
-            recipe_pairs(
-                &entry.unique_glyphs(),
-                coloring,
-                &atlas_indices,
-                RecipeRole::Item,
-                *source_index,
-            )?,
+            family_encoding.pairs(&entry.unique_glyphs(), RecipeRole::Item, *source_index)?,
         )?;
     }
     add_fixed_range(
@@ -341,8 +357,7 @@ pub(super) fn plan_cache_composition(
         fixed,
         "terrain-names",
         0..terrain_entry_count,
-        coloring,
-        &atlas_indices,
+        &family_encoding,
     )?;
 
     let mut dialogue_selector_count = 0;
@@ -350,10 +365,8 @@ pub(super) fn plan_cache_composition(
         recipes.add(
             RecipeRole::Dialogue,
             record.canonical_entry_index,
-            recipe_pairs(
+            family_encoding.pairs(
                 &record.unique_glyphs(),
-                coloring,
-                &atlas_indices,
                 RecipeRole::Dialogue,
                 record.canonical_entry_index,
             )?,
@@ -397,10 +410,16 @@ pub(super) fn plan_cache_composition(
         glyph_atlas_byte_count <= MMC3_PRG_PAGE_BYTE_COUNT,
         "battle glyph atlas exceeds one material PRG page"
     );
-    ensure!(
-        FONT_PAGE_SIZE + encoded_recipes.bytes.len() <= MMC3_PRG_PAGE_BYTE_COUNT,
-        "battle source page and recipes exceed one material PRG page"
-    );
+    let source_and_recipe_material_byte_count = FONT_PAGE_SIZE
+        .checked_add(encoded_recipes.bytes.len())
+        .context("battle source and recipe material size overflow")?;
+    let source_and_recipe_material_remaining_byte_count = MMC3_PRG_PAGE_BYTE_COUNT
+        .checked_sub(source_and_recipe_material_byte_count)
+        .with_context(|| {
+            format!(
+                "battle source page and recipes require {source_and_recipe_material_byte_count} bytes but one material PRG page has {MMC3_PRG_PAGE_BYTE_COUNT}"
+            )
+        })?;
     let maximum_full_pages_after_base_material = expanded_material_capacity
         .checked_sub(2 * MMC3_PRG_PAGE_BYTE_COUNT)
         .context("battle base material exceeds expanded PRG capacity")?
@@ -422,6 +441,7 @@ pub(super) fn plan_cache_composition(
         maximum_runtime_recipe_count: 10,
         abstract_recipe_sha1: encoded_recipes.sha1.clone(),
         recipe_blob_byte_count: encoded_recipes.bytes.len(),
+        source_and_recipe_material_remaining_byte_count,
         unique_recipe_payload_count: encoded_recipes.unique_payload_count,
         missing_directory_entry_count: encoded_recipes.missing_directory_entry_count,
         glyph_atlas_tile_count: coloring.glyph_count,
@@ -460,18 +480,9 @@ fn add_fixed_range(
     fixed: &FixedTextPlan,
     table_id: &str,
     source_indices: impl IntoIterator<Item = usize>,
-    coloring: &StableColoringPlan,
-    atlas_indices: &BTreeMap<char, u16>,
+    encoding: &FamilyRecipeEncoding<'_>,
 ) -> Result<()> {
-    add_fixed_indices(
-        recipes,
-        role,
-        fixed,
-        table_id,
-        source_indices,
-        coloring,
-        atlas_indices,
-    )
+    add_fixed_indices(recipes, role, fixed, table_id, source_indices, encoding)
 }
 
 fn add_fixed_indices(
@@ -480,8 +491,7 @@ fn add_fixed_indices(
     fixed: &FixedTextPlan,
     table_id: &str,
     source_indices: impl IntoIterator<Item = usize>,
-    coloring: &StableColoringPlan,
-    atlas_indices: &BTreeMap<char, u16>,
+    encoding: &FamilyRecipeEncoding<'_>,
 ) -> Result<()> {
     for source_index in source_indices {
         let entry = fixed
@@ -490,13 +500,7 @@ fn add_fixed_indices(
         recipes.add(
             role,
             source_index,
-            recipe_pairs(
-                &entry.unique_glyphs(),
-                coloring,
-                atlas_indices,
-                role,
-                source_index,
-            )?,
+            encoding.pairs(&entry.unique_glyphs(), role, source_index)?,
         )?;
     }
     Ok(())
@@ -504,6 +508,7 @@ fn add_fixed_indices(
 
 fn recipe_pairs(
     glyphs: &BTreeSet<char>,
+    excluded_glyphs: &BTreeSet<char>,
     coloring: &StableColoringPlan,
     atlas_indices: &BTreeMap<char, u16>,
     role: RecipeRole,
@@ -511,6 +516,7 @@ fn recipe_pairs(
 ) -> Result<Vec<RecipePair>> {
     glyphs
         .iter()
+        .filter(|glyph| !excluded_glyphs.contains(glyph))
         .map(|glyph| {
             Ok(RecipePair {
                 color: u8::try_from(
@@ -553,6 +559,7 @@ pub(super) fn test_plan() -> BattleCacheCompositionPlan {
         maximum_runtime_recipe_count: 7,
         abstract_recipe_sha1: "recipe".to_owned(),
         recipe_blob_byte_count: 1,
+        source_and_recipe_material_remaining_byte_count: 1,
         unique_recipe_payload_count: 1,
         missing_directory_entry_count: 0,
         glyph_atlas_tile_count: 1,
@@ -615,6 +622,7 @@ mod tests {
                 0,
                 recipe_pairs(
                     &"가나".chars().collect(),
+                    &BTreeSet::new(),
                     &coloring,
                     &atlas_indices,
                     RecipeRole::Common,
@@ -638,6 +646,43 @@ mod tests {
                 .windows(3)
                 .any(|bytes| bytes == "가".as_bytes())
         );
+    }
+
+    #[test]
+    fn family_recipes_omit_glyphs_owned_by_the_always_selected_common_recipe() {
+        let glyphs = "가나".chars().collect::<BTreeSet<_>>();
+        let common_glyphs = "나".chars().collect::<BTreeSet<_>>();
+        let coloring = plan_stable_coloring(
+            &BattleGlyphFamilies {
+                base: glyphs.clone(),
+                player_participants: vec![],
+                enemy_participants: vec![],
+                terrains: vec![],
+                dialogue_records: vec![],
+            },
+            glyphs.len(),
+        )
+        .unwrap();
+        let atlas_indices = coloring
+            .glyph_colors()
+            .keys()
+            .copied()
+            .enumerate()
+            .map(|(index, glyph)| (glyph, u16::try_from(index).unwrap()))
+            .collect();
+
+        let pairs = recipe_pairs(
+            &glyphs,
+            &common_glyphs,
+            &coloring,
+            &atlas_indices,
+            RecipeRole::Dialogue,
+            0,
+        )
+        .unwrap();
+
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pairs[0].atlas_index, atlas_indices[&'가']);
     }
 
     #[test]

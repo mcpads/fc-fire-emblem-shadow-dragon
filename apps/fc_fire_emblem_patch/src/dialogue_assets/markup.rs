@@ -10,6 +10,7 @@ pub(super) fn validate_translation_markup(line: &WorkspaceLine) -> Result<usize>
         "{} changed, removed, or added a protected control token or existing English character",
         line.id
     );
+    validate_neutral_variable_postpositions(&line.id, &line.korean, |_, _| false)?;
     let final_control = source
         .protected_items
         .last()
@@ -21,6 +22,43 @@ pub(super) fn validate_translation_markup(line: &WorkspaceLine) -> Result<usize>
         line.id
     );
     Ok(target.editable_glyph_count)
+}
+
+pub(super) fn validate_neutral_variable_postpositions(
+    line_id: &str,
+    markup: &str,
+    allow_bare_postposition: impl Fn(&str, &str) -> bool,
+) -> Result<()> {
+    let mut remaining = markup;
+    while let Some(token_start) = remaining.find("{EC:") {
+        let token = &remaining[token_start..];
+        let token_end = token
+            .find('}')
+            .context("dynamic value token has no closing brace")?;
+        let dynamic_value = &token[..=token_end];
+        let suffix = &token[token_end + 1..];
+        let grammatical_suffix = suffix.strip_prefix("{SP}").unwrap_or(suffix);
+        if ["은(는)", "이(가)", "을(를)", "과(와)", "(으)로", "(이)나"]
+            .iter()
+            .any(|neutral| grammatical_suffix.starts_with(neutral))
+        {
+            remaining = suffix;
+            continue;
+        }
+        let bare_postposition = [
+            "으로", "이나", "은", "는", "이", "가", "을", "를", "과", "와", "로",
+        ]
+        .into_iter()
+        .find(|postposition| grammatical_suffix.starts_with(postposition));
+        if let Some(bare_postposition) = bare_postposition {
+            ensure!(
+                allow_bare_postposition(dynamic_value, bare_postposition),
+                "{line_id} attaches bare postposition {bare_postposition:?} to variable value {dynamic_value}; use a neutral form"
+            );
+        }
+        remaining = suffix;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

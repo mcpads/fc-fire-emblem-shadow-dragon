@@ -36,6 +36,43 @@ impl StableColoringPlan {
     pub(super) fn glyph_colors(&self) -> &BTreeMap<char, usize> {
         &self.glyph_colors
     }
+
+    pub(super) fn expand_to_color_count(&mut self, target_color_count: usize) -> Result<()> {
+        ensure!(
+            target_color_count >= self.color_count,
+            "battle coloring cannot contract from {} to {target_color_count} colors",
+            self.color_count
+        );
+        ensure!(
+            target_color_count <= self.glyph_count,
+            "battle coloring cannot assign {target_color_count} colors to {} glyphs",
+            self.glyph_count
+        );
+        let initial_color_count = self.color_count;
+        while self.color_count < target_color_count {
+            let mut class_sizes = vec![0usize; self.color_count];
+            for color in self.glyph_colors.values() {
+                class_sizes[*color] += 1;
+            }
+            let glyph = self
+                .glyph_colors
+                .iter()
+                .rev()
+                .find_map(|(glyph, color)| (class_sizes[*color] > 1).then_some(*glyph))
+                .context("battle coloring has no color class left to split")?;
+            self.glyph_colors.insert(glyph, self.color_count);
+            self.color_count += 1;
+        }
+        if self.color_count != initial_color_count {
+            let glyphs = self.glyph_colors.keys().copied().collect::<Vec<_>>();
+            let colors = self.glyph_colors.values().copied().collect::<Vec<_>>();
+            self.assignment_sha1 = assignment_sha1(&glyphs, &colors)?;
+            self.coloring_strategy =
+                "bounded coloring followed by deterministic active-width color splitting";
+            self.model_chromatic_number_proven = false;
+        }
+        Ok(())
+    }
 }
 
 pub(super) fn plan_stable_coloring(
