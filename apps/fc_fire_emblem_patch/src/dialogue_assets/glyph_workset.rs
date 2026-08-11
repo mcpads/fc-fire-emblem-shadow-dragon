@@ -16,9 +16,13 @@ mod tests;
 
 use report::{
     GlyphCapacityReport, GlyphSetReport, GlyphWorksetScope, GlyphWorksetStatusCounts,
-    MainDialogueGlyphWorksetReport,
+    MainDialogueGlyphWorksetReport, MaximumTransitionChainReport,
 };
 use screen_lifetimes::observed_screen_lifetime_reports;
+
+struct MaximumLifetimeSource<'a> {
+    preserved_source_codes: &'a BTreeSet<u8>,
+}
 
 pub(crate) struct MainDialogueGlyphWorksetSummary {
     pub report_sha1: String,
@@ -49,7 +53,34 @@ pub(crate) fn analyze_main_dialogue_glyph_workset(
     validate_workspace_translations(&workspace)?;
 
     let graph = inspect_main_dialogue_graph(rom.data())?;
-    let report = build_glyph_workset_report(&workspace, &graph, sha1_hex(&workspace_bytes))?;
+    let workspace_sha1 = sha1_hex(&workspace_bytes);
+    let preliminary = build_glyph_workset_report(&workspace, &graph, workspace_sha1.clone(), None)?;
+    let maximum_record = workspace
+        .records
+        .iter()
+        .find(|record| {
+            record.table_id == preliminary.maximum_transition_chain.start_table_id
+                && record.canonical_entry_index
+                    == preliminary
+                        .maximum_transition_chain
+                        .start_canonical_entry_index
+        })
+        .context("maximum main-dialogue transition root is absent from the workspace")?;
+    let maximum_slice = plan_main_dialogue_slice(&rom, workspace_path, &maximum_record.id)?;
+    ensure!(
+        maximum_slice.unique_glyphs().len()
+            == preliminary.maximum_transition_chain.unique_glyph_count,
+        "maximum main-dialogue slice glyph count changed between analyses"
+    );
+    let maximum_lifetime_source = MaximumLifetimeSource {
+        preserved_source_codes: &maximum_slice.preserved_source_codes,
+    };
+    let report = build_glyph_workset_report(
+        &workspace,
+        &graph,
+        workspace_sha1,
+        Some(&maximum_lifetime_source),
+    )?;
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize main-dialogue glyph workset")?;
     report_bytes.push(b'\n');
@@ -83,6 +114,7 @@ fn build_glyph_workset_report(
     workspace: &MainDialogueWorkspace,
     graph: &MainDialogueGraphReport,
     workspace_sha1: String,
+    maximum_lifetime_source: Option<&MaximumLifetimeSource<'_>>,
 ) -> Result<MainDialogueGlyphWorksetReport> {
     let mut status_counts = GlyphWorksetStatusCounts::default();
     let mut filled_glyphs = BTreeSet::new();
@@ -133,10 +165,11 @@ fn build_glyph_workset_report(
 
     let line_count = status_counts.total();
     let active_slot_count = active_hangul_codes().len();
-    let max_transition_chain_unique_glyph_count =
-        max_transition_chain_glyph_count(graph, &filled_glyphs_by_record)?;
+    let maximum_transition_chain =
+        maximum_transition_chain_report(graph, &filled_glyphs_by_record)?;
+    let max_transition_chain_unique_glyph_count = maximum_transition_chain.unique_glyph_count;
     let max_approved_transition_chain_unique_glyph_count =
-        max_transition_chain_glyph_count(graph, &approved_glyphs_by_record)?;
+        maximum_transition_chain_report(graph, &approved_glyphs_by_record)?.unique_glyph_count;
     let source_preservation_line_ids = workspace
         .source_preservation_line_ids
         .iter()
@@ -159,6 +192,8 @@ fn build_glyph_workset_report(
         &filled_glyphs_by_record,
         &approved_glyphs_by_record,
         graph,
+        &maximum_transition_chain,
+        maximum_lifetime_source.map(|source| source.preserved_source_codes),
         active_slot_count,
         review_complete,
     )?;
@@ -191,7 +226,7 @@ fn build_glyph_workset_report(
     };
 
     Ok(MainDialogueGlyphWorksetReport {
-        schema: 3,
+        schema: 4,
         source_sha1: EXPECTED_SOURCE_SHA1,
         workspace_sha1,
         scope: GlyphWorksetScope {
@@ -211,6 +246,7 @@ fn build_glyph_workset_report(
         max_line_unique_glyph_count,
         max_record_unique_glyph_count,
         max_transition_chain_unique_glyph_count,
+        maximum_transition_chain,
         observed_screen_lifetimes,
         capacity: GlyphCapacityReport {
             active_slot_count,
@@ -235,10 +271,10 @@ fn build_glyph_workset_report(
 
 type DialogueRecordKey = (String, usize);
 
-fn max_transition_chain_glyph_count(
+fn maximum_transition_chain_report(
     graph: &MainDialogueGraphReport,
     glyphs_by_record: &BTreeMap<DialogueRecordKey, BTreeSet<char>>,
-) -> Result<usize> {
+) -> Result<MaximumTransitionChainReport> {
     let mut next_record = BTreeMap::new();
     let mut target_records = BTreeSet::new();
     for edge in &graph.transition_edges {
@@ -277,11 +313,13 @@ fn max_transition_chain_glyph_count(
         .cloned()
         .collect::<Vec<_>>();
     let mut reached_records = BTreeSet::new();
-    let mut max_unique_glyph_count = 0;
+    let mut maximum = None;
     for root in roots {
-        let mut current = root;
+        let mut current = root.clone();
         let mut chain_records = BTreeSet::new();
         let mut chain_glyphs = BTreeSet::new();
+        let mut table_ids = Vec::new();
+        let mut seen_table_ids = BTreeSet::new();
         loop {
             ensure!(
                 chain_records.insert(current.clone()),
@@ -290,6 +328,9 @@ fn max_transition_chain_glyph_count(
                 current.1
             );
             reached_records.insert(current.clone());
+            if seen_table_ids.insert(current.0.clone()) {
+                table_ids.push(current.0.clone());
+            }
             chain_glyphs.extend(
                 glyphs_by_record
                     .get(&current)
@@ -302,13 +343,26 @@ fn max_transition_chain_glyph_count(
             };
             current = next.clone();
         }
-        max_unique_glyph_count = max_unique_glyph_count.max(chain_glyphs.len());
+        if maximum
+            .as_ref()
+            .is_none_or(|current: &MaximumTransitionChainReport| {
+                chain_glyphs.len() > current.unique_glyph_count
+            })
+        {
+            maximum = Some(MaximumTransitionChainReport {
+                start_table_id: root.0,
+                start_canonical_entry_index: root.1,
+                record_count: chain_records.len(),
+                table_ids,
+                unique_glyph_count: chain_glyphs.len(),
+            });
+        }
     }
     ensure!(
         reached_records.len() == glyphs_by_record.len(),
         "main-dialogue transition graph has records unreachable from any root"
     );
-    Ok(max_unique_glyph_count)
+    maximum.context("main-dialogue glyph workset has no transition-chain root")
 }
 
 fn glyph_set_report(glyphs: &BTreeSet<char>) -> GlyphSetReport {

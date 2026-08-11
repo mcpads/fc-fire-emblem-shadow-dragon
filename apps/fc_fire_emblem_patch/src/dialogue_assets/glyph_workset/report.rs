@@ -17,10 +17,20 @@ pub(super) struct MainDialogueGlyphWorksetReport {
     pub(super) max_line_unique_glyph_count: usize,
     pub(super) max_record_unique_glyph_count: usize,
     pub(super) max_transition_chain_unique_glyph_count: usize,
+    pub(super) maximum_transition_chain: MaximumTransitionChainReport,
     pub(super) observed_screen_lifetimes: Vec<ObservedScreenLifetimeReport>,
     pub(super) capacity: GlyphCapacityReport,
     pub(super) unresolved: Vec<&'static str>,
     pub(super) release_eligible: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct MaximumTransitionChainReport {
+    pub(super) start_table_id: String,
+    pub(super) start_canonical_entry_index: usize,
+    pub(super) record_count: usize,
+    pub(super) table_ids: Vec<String>,
+    pub(super) unique_glyph_count: usize,
 }
 
 #[derive(Debug, Serialize)]

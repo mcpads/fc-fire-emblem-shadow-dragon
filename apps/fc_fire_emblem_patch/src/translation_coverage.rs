@@ -238,7 +238,7 @@ pub(crate) fn analyze_translation_coverage(
         &japanese_bearing_screen_roles,
     )?;
     let report = GlobalTranslationCoverageReport {
-        schema: 1,
+        schema: 2,
         source_sha1: EXPECTED_SOURCE_SHA1,
         build_output_sha1: installation.build_output_sha1,
         screen_population: ScreenPopulationReport {

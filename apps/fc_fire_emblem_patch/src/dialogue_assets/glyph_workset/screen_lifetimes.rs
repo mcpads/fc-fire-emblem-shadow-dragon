@@ -4,8 +4,12 @@ use anyhow::{Context, Result, ensure};
 
 use crate::dialogue_inventory::MainDialogueGraphReport;
 
-use super::{DialogueRecordKey, report::ObservedScreenLifetimeReport};
+use super::{
+    DialogueRecordKey,
+    report::{MaximumTransitionChainReport, ObservedScreenLifetimeReport},
+};
 
+mod chapter_clear;
 mod epilogue;
 mod game_over;
 mod shop;
@@ -14,10 +18,22 @@ pub(super) fn observed_screen_lifetime_reports(
     filled_glyphs_by_record: &BTreeMap<DialogueRecordKey, BTreeSet<char>>,
     approved_glyphs_by_record: &BTreeMap<DialogueRecordKey, BTreeSet<char>>,
     graph: &MainDialogueGraphReport,
+    maximum_transition_chain: &MaximumTransitionChainReport,
+    maximum_preserved_source_codes: Option<&BTreeSet<u8>>,
     active_slot_count: usize,
     working_set_ready: bool,
 ) -> Result<Vec<ObservedScreenLifetimeReport>> {
     let mut reports = Vec::new();
+    if let Some(preserved_source_codes) = maximum_preserved_source_codes {
+        reports.push(chapter_clear::maximum_epilogue_report(
+            filled_glyphs_by_record,
+            approved_glyphs_by_record,
+            maximum_transition_chain,
+            preserved_source_codes,
+            active_slot_count,
+            working_set_ready,
+        )?);
+    }
     if let Some(report) = shop::purchase_handoff_report(
         filled_glyphs_by_record,
         approved_glyphs_by_record,

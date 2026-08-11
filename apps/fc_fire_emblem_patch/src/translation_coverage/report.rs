@@ -92,7 +92,8 @@ pub(crate) struct StrongestLifetimeReport {
     pub(crate) japanese_bearing_screen_count: usize,
     pub(crate) selected_screen_role: Option<&'static str>,
     pub(crate) selected_slot_demand: Option<usize>,
-    pub(crate) unassigned_main_dialogue_maximum_target_glyph_count: usize,
+    pub(crate) main_dialogue_maximum_target_glyph_count: usize,
+    pub(crate) main_dialogue_maximum_screen_bound: bool,
     pub(crate) next_gate: &'static str,
 }
 
