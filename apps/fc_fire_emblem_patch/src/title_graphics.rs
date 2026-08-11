@@ -9,16 +9,20 @@ use crate::{
     text_inventory::is_japanese_character,
 };
 
+mod logo_asset;
+
+pub(crate) use logo_asset::build_title_logo_asset;
+
 const PRG_BANK_SIZE: usize = 16 * 1024;
 const SOURCE_PRG_BANK: u8 = 0x0D;
 const CPU_WINDOW_START: u16 = 0x8000;
 const TITLE_STREAM_ADDRESS: u16 = 0xB2B0;
-const TITLE_STREAM_BYTE_COUNT: usize = 180;
+pub(super) const TITLE_STREAM_BYTE_COUNT: usize = 180;
 const TITLE_ROW_COUNT: usize = 5;
 const TITLE_ROW_WIDTH: usize = 32;
 const TITLE_FIRST_PPU_ADDRESS: u16 = 0x21A0;
-const TITLE_TRANSLATION_FIRST_COLUMN: usize = 2;
-const TITLE_TRANSLATION_END_COLUMN_EXCLUSIVE: usize = 29;
+pub(super) const TITLE_TRANSLATION_FIRST_COLUMN: usize = 2;
+pub(super) const TITLE_TRANSLATION_END_COLUMN_EXCLUSIVE: usize = 29;
 const PRESERVED_TM_COLUMN: usize = 29;
 const PRESERVED_TM_TILE: u8 = 0xBB;
 const TITLE_CHR_PAGE: usize = 0x14;
@@ -121,7 +125,7 @@ pub(crate) fn plan_title_graphics(rom: &Rom, workspace_path: &Path) -> Result<Ti
     })
 }
 
-fn bind_source(rom: &Rom) -> Result<()> {
+pub(super) fn bind_source(rom: &Rom) -> Result<()> {
     let stream = source_stream(rom)?;
     ensure!(
         sha1_hex(stream) == TITLE_STREAM_SHA1,
@@ -162,20 +166,19 @@ fn bind_source(rom: &Rom) -> Result<()> {
         "title tilemap stream has trailing data"
     );
 
-    let chr_start = TITLE_CHR_PAGE * CHR_PAGE_BYTES;
-    let chr_page = &rom.chr()[chr_start..chr_start + CHR_PAGE_BYTES];
+    let chr_page = source_chr_page(rom)?;
     ensure!(
         sha1_hex(chr_page) == TITLE_CHR_PAGE_SHA1,
         "title CHR page changed"
     );
     ensure!(
-        CHR_FILE_OFFSET + chr_start == 0x54010,
+        CHR_FILE_OFFSET + TITLE_CHR_PAGE * CHR_PAGE_BYTES == 0x54010,
         "title CHR page file location changed"
     );
     Ok(())
 }
 
-fn source_stream(rom: &Rom) -> Result<&[u8]> {
+pub(super) fn source_stream(rom: &Rom) -> Result<&[u8]> {
     let offset = HEADER_SIZE
         + usize::from(SOURCE_PRG_BANK) * PRG_BANK_SIZE
         + usize::from(TITLE_STREAM_ADDRESS - CPU_WINDOW_START);
@@ -185,6 +188,15 @@ fn source_stream(rom: &Rom) -> Result<&[u8]> {
     rom.data()
         .get(offset..end)
         .with_context(|| format!("title stream exceeds ROM at {offset:05X}"))
+}
+
+pub(super) fn source_chr_page(rom: &Rom) -> Result<&[u8]> {
+    let chr_start = TITLE_CHR_PAGE
+        .checked_mul(CHR_PAGE_BYTES)
+        .context("title CHR page offset overflow")?;
+    rom.chr()
+        .get(chr_start..chr_start + CHR_PAGE_BYTES)
+        .context("title CHR page is outside the ROM")
 }
 
 #[cfg(test)]

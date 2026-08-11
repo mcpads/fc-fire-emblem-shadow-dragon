@@ -434,6 +434,18 @@ enum Command {
         #[arg(long, default_value = "out/fire-emblem-fe1-dialogue-roundtrip.nes")]
         output: PathBuf,
     },
+    /// Convert an ImageGen title concept into source-owned NES logo tiles and phase previews.
+    BuildTitleLogoAsset {
+        source: PathBuf,
+        #[arg(long, default_value = "private/title/logo-candidate-plan.json")]
+        manifest: PathBuf,
+        #[arg(long, default_value = "out/title-logo.asset")]
+        asset: PathBuf,
+        #[arg(long, default_value = "out/title-logo-phases.png")]
+        preview: PathBuf,
+        #[arg(long, default_value = "out/title-logo-asset.json")]
+        report: PathBuf,
+    },
     /// Build the Japanese-options Hangul visibility proof.
     BuildOptionsPoc {
         source: PathBuf,
@@ -1389,6 +1401,27 @@ fn main() -> Result<()> {
             println!(
                 "verified exact source roundtrip: {} regions, {} records",
                 summary.storage_region_count, summary.record_count
+            );
+        }
+        Command::BuildTitleLogoAsset {
+            source,
+            manifest,
+            asset,
+            preview,
+            report,
+        } => {
+            let summary = title_graphics::build_title_logo_asset(
+                &source, &manifest, &asset, &preview, &report,
+            )?;
+            println!("wrote {}", asset.display());
+            println!("asset SHA-1: {}", summary.asset_sha1);
+            println!("wrote {}", preview.display());
+            println!("preview SHA-1: {}", summary.preview_sha1);
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "title logo: {} unique target tiles in {} source-owned slots",
+                summary.target_unique_nonblank_tile_count, summary.source_owned_tile_count
             );
         }
         Command::BuildOptionsPoc {

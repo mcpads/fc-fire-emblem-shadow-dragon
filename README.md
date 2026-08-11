@@ -20,6 +20,8 @@
 
 전투는 원본 4 KiB 페이지와 현재 이름·병종·장비·지형·대사 레시피를 런타임에 합성한다. 가능한 모델의 정확 최대는 텍스트 131자·보호 코드 포함 `170/210`이다. 자동 병종 소개의 큰 설치 묶음은 `173/210`, 맵 메뉴 전체 라벨은 `203/210`이다. 저장 질문과 정확한 `B0:01` 전원 종료·중단 문구는 다른 모든 활성 코드를 보존하는 상한에서도 각각 `209/210`이다. `B0:00` 저장 완료 선택지는 같은 상한이 `214/210`으로 넘었으므로, 기존 상태를 8개 불규칙 프레임에서 다시 읽어 대상 셀 밖의 코드 합집합을 결속한 `78/210`을 사용한다. 유닛 UI는 전체 합집합 229자와 요약·상태 공유군 218자가 한 페이지를 넘지만 실제 화면 상한은 요약 36, 상태 30, 명령 30이다. 소지품 사용 결과는 가능한 18개 대사 경로의 최대가 `43/210`이다. 25개 장의 장 제목과 완전한 도입 대사 사슬은 전체 상주 대신 네 줄 완료 페이지마다 재적재하며 최대 `43+100=143/210`이다. 다음 구조 관문은 원본 에셋 기반 제목 그래픽이다. 그 뒤 나머지 번역을 누적 설치하고 대상 일본어 0건, 보호 영어·숫자·그래픽 손상 0건을 최종 동일 ROM에서 검증한다. 현재 산출물은 개발 빌드이며 배포 후보가 아니다. 세부 근거와 남은 작업은 [현재 상태](docs/status.md)를 따른다.
 
+제목 그래픽은 원본의 `27×5` 배경 타일 영역만 교체한다. 원본 일본어 로고가 소유한 타일 코드는 122개이고, 원본 화면 기반 ImageGen 후보를 칼 없는 로고로 정리한 현재 자산은 고유 타일 120개라 예산 안에 든다. 칼 스프라이트, `TM`, `©1990 Nintendo`와 점멸 팔레트는 원본을 유지한다. 후보 자산은 아직 누적 ROM에 설치하거나 사람 승인하지 않았으므로 제목 화면 완료를 주장하지 않는다.
+
 ```sh
 cargo run -p fc-fire-emblem-patch -- verify-source "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- analyze-font-supply "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
@@ -27,6 +29,7 @@ cargo run -p fc-fire-emblem-patch -- analyze-text-tables "roms/Fire Emblem - Ank
 cargo run -p fc-fire-emblem-patch -- analyze-dialogue-structure "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- analyze-screen-contracts "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- analyze-translation-coverage "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
+cargo run -p fc-fire-emblem-patch -- build-title-logo-asset "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- analyze-chapter-transitions "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- analyze-temporal-surfaces "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes" evidence/private/temporal-surfaces/manifest.json
 cargo run -p fc-fire-emblem-patch -- analyze-chapter-victory "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
