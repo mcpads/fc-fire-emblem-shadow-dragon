@@ -18,6 +18,7 @@ use crate::{
 
 use super::battle_combination_probe::GAMEPLAY_BATTLE_PRESERVED_ACTIVE_CODES;
 
+mod background_ownership;
 mod composition;
 mod conflict_graph;
 mod enemy_domain;

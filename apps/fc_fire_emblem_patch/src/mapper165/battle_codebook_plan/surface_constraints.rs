@@ -18,6 +18,7 @@ use crate::{
 
 use super::{
     ScreenCodeConstraint,
+    background_ownership::bind_battle_background_code_ownership,
     composition::{BattleRuntimeRecipeInput, BattleRuntimeRecipeSelection},
     physical_assignment::assign_physical_codes,
     plan_battle_codebook_model,
@@ -37,10 +38,17 @@ struct BattleSurfaceConstraintReport {
     selector_62_predicate_sample_count: usize,
     selector_projection_changed_sample_count: usize,
     screen_constraint_count: usize,
+    source_font_page_sha1: &'static str,
+    source_page_japanese_text_active_code_count: usize,
+    source_page_preserved_non_japanese_active_code_count: usize,
     route_assignment_feasibility: Vec<RouteAssignmentFeasibility>,
     gameplay_routes_combined_assignment: RouteAssignmentFeasibility,
-    minimum_preserved_active_code_count: usize,
-    maximum_preserved_active_code_count: usize,
+    minimum_observed_active_code_count: usize,
+    maximum_observed_active_code_count: usize,
+    minimum_observed_japanese_text_code_count: usize,
+    maximum_observed_japanese_text_code_count: usize,
+    minimum_preserved_non_japanese_active_code_count: usize,
+    maximum_preserved_non_japanese_active_code_count: usize,
     maximum_selected_recipe_count: usize,
     maximum_selected_glyph_count: usize,
     maximum_selected_overlay_count: usize,
@@ -50,8 +58,13 @@ struct BattleSurfaceConstraintReport {
     physical_assignment_sha1: Option<String>,
     stable_color_count: usize,
     constrained_color_count: Option<usize>,
+    conservative_text_overlay_count: usize,
+    observed_maximum_combined_slot_demand: usize,
+    observed_minimum_slot_headroom: usize,
     temporal_sampling_is_irregular: bool,
     pattern_table_consumers_filtered: bool,
+    source_page_code_ownership_applied: bool,
+    observed_japanese_codes_reclaimed_for_translation: bool,
     every_observed_recipe_resolved: bool,
     runtime_selection_uses_source_bound_dialogue_projection: bool,
     combined_physical_assignment_found: bool,
@@ -88,8 +101,12 @@ pub(in crate::mapper165) struct ObservedBattleSurfaceSelection {
     observed_dialogue_selector_count: usize,
     selector_62_predicate_sample_count: usize,
     selector_projection_changed_sample_count: usize,
-    minimum_preserved_active_code_count: usize,
-    maximum_preserved_active_code_count: usize,
+    minimum_observed_active_code_count: usize,
+    maximum_observed_active_code_count: usize,
+    minimum_observed_japanese_text_code_count: usize,
+    maximum_observed_japanese_text_code_count: usize,
+    minimum_preserved_non_japanese_active_code_count: usize,
+    maximum_preserved_non_japanese_active_code_count: usize,
     maximum_selected_recipe_count: usize,
     maximum_selected_glyph_count: usize,
     pub(in crate::mapper165) maximum_selected_overlay_count: usize,
@@ -98,15 +115,21 @@ pub(in crate::mapper165) struct ObservedBattleSurfaceSelection {
 }
 
 pub(in crate::mapper165) fn select_observed_battle_surfaces(
+    rom: &Rom,
     material: &super::composition::BattleCacheCompositionMaterial,
     evidence: &crate::temporal_surface::ObservedBattleTemporalEvidence,
 ) -> Result<ObservedBattleSurfaceSelection> {
+    let ownership = bind_battle_background_code_ownership(rom)?;
     let mut route_sample_counts = BTreeMap::new();
     let mut runtime_inputs = BTreeSet::new();
     let mut observed_dialogue_selectors = BTreeSet::new();
     let mut constraints = Vec::with_capacity(evidence.samples.len());
-    let mut minimum_preserved_active_code_count = usize::MAX;
-    let mut maximum_preserved_active_code_count = 0;
+    let mut minimum_observed_active_code_count = usize::MAX;
+    let mut maximum_observed_active_code_count = 0;
+    let mut minimum_observed_japanese_text_code_count = usize::MAX;
+    let mut maximum_observed_japanese_text_code_count = 0;
+    let mut minimum_preserved_non_japanese_active_code_count = usize::MAX;
+    let mut maximum_preserved_non_japanese_active_code_count = 0;
     let mut maximum_selected_recipe_count = 0;
     let mut maximum_selected_glyph_count = 0;
     let mut maximum_selected_overlay_count = 0;
@@ -129,10 +152,21 @@ pub(in crate::mapper165) fn select_observed_battle_surfaces(
         );
         let selection = material.select_runtime_recipes(input)?;
         validate_selection(&selection)?;
-        minimum_preserved_active_code_count =
-            minimum_preserved_active_code_count.min(sample.active_tile_codes.len());
-        maximum_preserved_active_code_count =
-            maximum_preserved_active_code_count.max(sample.active_tile_codes.len());
+        let background = ownership.partition_observed(&sample.active_tile_codes)?;
+        minimum_observed_active_code_count =
+            minimum_observed_active_code_count.min(sample.active_tile_codes.len());
+        maximum_observed_active_code_count =
+            maximum_observed_active_code_count.max(sample.active_tile_codes.len());
+        minimum_observed_japanese_text_code_count =
+            minimum_observed_japanese_text_code_count.min(background.japanese_text_codes.len());
+        maximum_observed_japanese_text_code_count =
+            maximum_observed_japanese_text_code_count.max(background.japanese_text_codes.len());
+        minimum_preserved_non_japanese_active_code_count =
+            minimum_preserved_non_japanese_active_code_count
+                .min(background.preserved_non_japanese_codes.len());
+        maximum_preserved_non_japanese_active_code_count =
+            maximum_preserved_non_japanese_active_code_count
+                .max(background.preserved_non_japanese_codes.len());
         maximum_selected_recipe_count =
             maximum_selected_recipe_count.max(selection.recipe_offsets.len());
         maximum_selected_glyph_count = maximum_selected_glyph_count.max(selection.glyphs.len());
@@ -144,7 +178,7 @@ pub(in crate::mapper165) fn select_observed_battle_surfaces(
             sample.route_role.clone(),
             ScreenCodeConstraint {
                 glyphs: selection.glyphs,
-                preserved_active_codes: sample.active_tile_codes.clone(),
+                preserved_active_codes: background.preserved_non_japanese_codes,
             },
         ));
     }
@@ -159,8 +193,12 @@ pub(in crate::mapper165) fn select_observed_battle_surfaces(
         observed_dialogue_selector_count: observed_dialogue_selectors.len(),
         selector_62_predicate_sample_count,
         selector_projection_changed_sample_count,
-        minimum_preserved_active_code_count,
-        maximum_preserved_active_code_count,
+        minimum_observed_active_code_count,
+        maximum_observed_active_code_count,
+        minimum_observed_japanese_text_code_count,
+        maximum_observed_japanese_text_code_count,
+        minimum_preserved_non_japanese_active_code_count,
+        maximum_preserved_non_japanese_active_code_count,
         maximum_selected_recipe_count,
         maximum_selected_glyph_count,
         maximum_selected_overlay_count,
@@ -182,12 +220,21 @@ pub(crate) fn analyze_battle_surface_constraints(
     let dialogue = plan_battle_dialogue_records(&rom, dialogue_workspace_path)?;
     let model = plan_battle_codebook_model(&rom, &fixed, &dialogue)?;
     let evidence = load_observed_battle_temporal_evidence(source_path, temporal_manifest_path)?;
+    let ownership = bind_battle_background_code_ownership(&rom)?;
 
-    let selection = select_observed_battle_surfaces(&model.composition, &evidence)?;
+    let selection = select_observed_battle_surfaces(&rom, &model.composition, &evidence)?;
     let constraints = selection.constraints;
     let route_sample_counts = selection.route_sample_counts;
-    let minimum_preserved_active_code_count = selection.minimum_preserved_active_code_count;
-    let maximum_preserved_active_code_count = selection.maximum_preserved_active_code_count;
+    let minimum_observed_active_code_count = selection.minimum_observed_active_code_count;
+    let maximum_observed_active_code_count = selection.maximum_observed_active_code_count;
+    let minimum_observed_japanese_text_code_count =
+        selection.minimum_observed_japanese_text_code_count;
+    let maximum_observed_japanese_text_code_count =
+        selection.maximum_observed_japanese_text_code_count;
+    let minimum_preserved_non_japanese_active_code_count =
+        selection.minimum_preserved_non_japanese_active_code_count;
+    let maximum_preserved_non_japanese_active_code_count =
+        selection.maximum_preserved_non_japanese_active_code_count;
     let maximum_selected_recipe_count = selection.maximum_selected_recipe_count;
     let maximum_selected_glyph_count = selection.maximum_selected_glyph_count;
     let maximum_selected_overlay_count = selection.maximum_selected_overlay_count;
@@ -266,8 +313,16 @@ pub(crate) fn analyze_battle_surface_constraints(
     let constrained_color_count = physical
         .as_ref()
         .map(|assignment| assignment.constrained_color_count);
+    let conservative_text_overlay_count = model.runtime_demand.maximum_overlay_glyph_count();
+    let observed_maximum_combined_slot_demand = conservative_text_overlay_count
+        .checked_add(maximum_preserved_non_japanese_active_code_count)
+        .context("observed battle combined slot demand overflow")?;
+    ensure!(
+        observed_maximum_combined_slot_demand <= ACTIVE_HANGUL_SLOT_COUNT,
+        "observed battle text and preserved background need {observed_maximum_combined_slot_demand} slots but only {ACTIVE_HANGUL_SLOT_COUNT} exist"
+    );
     let report = BattleSurfaceConstraintReport {
-        schema: 1,
+        schema: 2,
         source_sha1: EXPECTED_SOURCE_SHA1,
         fixed_workspace_sha1: sha1_hex(&fs::read(fixed_workspace_path)?),
         dialogue_workspace_sha1: sha1_hex(&fs::read(dialogue_workspace_path)?),
@@ -279,10 +334,18 @@ pub(crate) fn analyze_battle_surface_constraints(
         selector_62_predicate_sample_count,
         selector_projection_changed_sample_count,
         screen_constraint_count: constraints.len(),
+        source_font_page_sha1: ownership.source_font_page_sha1(),
+        source_page_japanese_text_active_code_count: ownership.japanese_text_active_code_count(),
+        source_page_preserved_non_japanese_active_code_count: ownership
+            .preserved_non_japanese_active_code_count(),
         route_assignment_feasibility,
         gameplay_routes_combined_assignment,
-        minimum_preserved_active_code_count,
-        maximum_preserved_active_code_count,
+        minimum_observed_active_code_count,
+        maximum_observed_active_code_count,
+        minimum_observed_japanese_text_code_count,
+        maximum_observed_japanese_text_code_count,
+        minimum_preserved_non_japanese_active_code_count,
+        maximum_preserved_non_japanese_active_code_count,
         maximum_selected_recipe_count,
         maximum_selected_glyph_count,
         maximum_selected_overlay_count,
@@ -292,8 +355,14 @@ pub(crate) fn analyze_battle_surface_constraints(
         physical_assignment_sha1: physical_assignment_sha1.clone(),
         stable_color_count: model.coloring.color_count,
         constrained_color_count,
+        conservative_text_overlay_count,
+        observed_maximum_combined_slot_demand,
+        observed_minimum_slot_headroom: ACTIVE_HANGUL_SLOT_COUNT
+            - observed_maximum_combined_slot_demand,
         temporal_sampling_is_irregular: true,
         pattern_table_consumers_filtered: true,
+        source_page_code_ownership_applied: true,
+        observed_japanese_codes_reclaimed_for_translation: true,
         every_observed_recipe_resolved: true,
         runtime_selection_uses_source_bound_dialogue_projection: true,
         combined_physical_assignment_found: physical.is_some(),
@@ -304,7 +373,7 @@ pub(crate) fn analyze_battle_surface_constraints(
         runtime_verified: false,
         release_eligible: false,
         next_gate: if physical.is_some() {
-            "extend protection constraints from the admitted chapter-one and sound-test samples to the remaining battle visual variants, then install the runtime composition loader"
+            "bind every shared battle phase background producer and prove its simultaneous preserved non-Japanese code demand before removing the observed-tuple runtime gate"
         } else {
             "separate translated text producers from preserved graphics in the admitted temporal samples before extending the visual-variant catalog or installing the runtime loader"
         },
@@ -359,7 +428,7 @@ mod tests {
     #[test]
     fn serialized_report_omits_translation_content_and_private_paths() {
         let report = BattleSurfaceConstraintReport {
-            schema: 1,
+            schema: 2,
             source_sha1: EXPECTED_SOURCE_SHA1,
             fixed_workspace_sha1: "fixed".to_owned(),
             dialogue_workspace_sha1: "dialogue".to_owned(),
@@ -371,6 +440,9 @@ mod tests {
             selector_62_predicate_sample_count: 1,
             selector_projection_changed_sample_count: 1,
             screen_constraint_count: 1,
+            source_font_page_sha1: "page",
+            source_page_japanese_text_active_code_count: 111,
+            source_page_preserved_non_japanese_active_code_count: 99,
             route_assignment_feasibility: vec![RouteAssignmentFeasibility {
                 route_role: "battle".to_owned(),
                 sample_count: 1,
@@ -385,8 +457,12 @@ mod tests {
                 physical_assignment_sha1: Some("physical".to_owned()),
                 constrained_color_count: Some(3),
             },
-            minimum_preserved_active_code_count: 1,
-            maximum_preserved_active_code_count: 2,
+            minimum_observed_active_code_count: 2,
+            maximum_observed_active_code_count: 3,
+            minimum_observed_japanese_text_code_count: 1,
+            maximum_observed_japanese_text_code_count: 2,
+            minimum_preserved_non_japanese_active_code_count: 1,
+            maximum_preserved_non_japanese_active_code_count: 2,
             maximum_selected_recipe_count: 10,
             maximum_selected_glyph_count: 3,
             maximum_selected_overlay_count: 3,
@@ -396,8 +472,13 @@ mod tests {
             physical_assignment_sha1: Some("physical".to_owned()),
             stable_color_count: 3,
             constrained_color_count: Some(3),
+            conservative_text_overlay_count: 2,
+            observed_maximum_combined_slot_demand: 4,
+            observed_minimum_slot_headroom: 206,
             temporal_sampling_is_irregular: true,
             pattern_table_consumers_filtered: true,
+            source_page_code_ownership_applied: true,
+            observed_japanese_codes_reclaimed_for_translation: true,
             every_observed_recipe_resolved: true,
             runtime_selection_uses_source_bound_dialogue_projection: true,
             combined_physical_assignment_found: true,

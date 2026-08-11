@@ -108,7 +108,7 @@ pub(crate) fn build_battle_text_runtime_base(
     let dialogue = plan_battle_dialogue_records(&source_rom, dialogue_workspace_path)?;
     let material = plan_battle_cache_composition_material(&source_rom, &fixed, &dialogue)?;
     let evidence = load_observed_battle_temporal_evidence(source_path, temporal_manifest_path)?;
-    let observed = select_observed_battle_surfaces(&material, &evidence)?;
+    let observed = select_observed_battle_surfaces(&source_rom, &material, &evidence)?;
     let constraints = observed
         .constraints
         .iter()
