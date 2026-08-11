@@ -128,6 +128,9 @@ pub(super) struct CumulativeUnitNameReport {
     pub(super) workspace_sha1: String,
     pub(super) workspace_entry_count: usize,
     pub(super) unique_glyph_count: usize,
+    pub(super) roster_page_target_glyph_count: usize,
+    pub(super) roster_page_preserved_active_code_count: usize,
+    pub(super) roster_page_total_slot_demand: usize,
     pub(super) roster_projection_byte_count: usize,
     pub(super) unit_ui_projection_byte_count: usize,
     pub(super) roster_assignment_sha1: String,
@@ -144,6 +147,7 @@ pub(super) struct CumulativeUnitNameReport {
     pub(super) unit_summary_projection_installed: bool,
     pub(super) source_battle_table_preserved: bool,
     pub(super) source_ending_table_preserved: bool,
+    pub(super) roster_capacity_bound_to_build: bool,
     pub(super) runtime_bound_to_build: bool,
     pub(super) review_complete: bool,
 }

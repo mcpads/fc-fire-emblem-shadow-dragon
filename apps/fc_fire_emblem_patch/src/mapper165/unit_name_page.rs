@@ -41,6 +41,7 @@ pub(super) struct UnitNamePagePlan {
     pub(super) evidence_manifest_sha1: String,
     pub(super) temporal_sample_count: usize,
     pub(super) unique_nametable_count: usize,
+    pub(super) preserved_roster_code_count: usize,
     pub(super) preserved_unit_ui_code_count: usize,
 }
 
@@ -71,9 +72,10 @@ pub(super) fn plan_unit_name_pages(
         .copied()
         .filter(|glyph| !roster_fixed.values().any(|fixed| fixed == glyph))
         .collect();
-    let mut roster_excluded = roster_visible_codes();
+    let mut roster_preserved = roster_visible_codes();
+    roster_preserved.retain(|code| active_codes.contains(code) && !roster_fixed.contains_key(code));
+    let mut roster_excluded = roster_preserved.clone();
     roster_excluded.extend(roster_fixed.keys().copied());
-    roster_excluded.retain(|code| active_codes.contains(code));
     let mut roster_assignments = assign_glyph_codes_excluding(&roster_remaining, &roster_excluded)?;
     for (code, glyph) in roster_fixed {
         ensure!(
@@ -118,6 +120,7 @@ pub(super) fn plan_unit_name_pages(
         evidence_manifest_sha1: evidence.manifest_sha1,
         temporal_sample_count: evidence.temporal_sample_count,
         unique_nametable_count: evidence.unique_nametable_count,
+        preserved_roster_code_count: roster_preserved.len(),
         preserved_unit_ui_code_count: unit_ui_preserved.len(),
     })
 }

@@ -81,10 +81,14 @@ struct CurrentFrontEndMenu {
 #[derive(Debug, Deserialize)]
 struct CurrentUnitNames {
     workspace_entry_count: usize,
+    roster_page_target_glyph_count: usize,
+    roster_page_preserved_active_code_count: usize,
+    roster_page_total_slot_demand: usize,
     roster_projection_installed: bool,
     unit_summary_projection_installed: bool,
     source_battle_table_preserved: bool,
     source_ending_table_preserved: bool,
+    roster_capacity_bound_to_build: bool,
     runtime_bound_to_build: bool,
 }
 
@@ -148,6 +152,9 @@ pub(crate) struct CurrentInstallation {
     pub(crate) class_profile_page_target_glyph_counts: Vec<usize>,
     pub(crate) class_profile_preserved_active_code_count: usize,
     pub(crate) class_profile_runtime_bound_to_build: bool,
+    pub(crate) roster_page_target_glyph_count: usize,
+    pub(crate) roster_page_preserved_active_code_count: usize,
+    pub(crate) roster_page_total_slot_demand: usize,
     pub(crate) weapon_shop_shared_page_target_glyph_count: usize,
     pub(crate) weapon_shop_shared_page_preserved_active_code_count: usize,
     pub(crate) weapon_shop_shared_page_total_slot_demand: usize,
@@ -187,6 +194,7 @@ pub(crate) fn inspect_current_installation(
         "current class-profile installation no longer covers two complete profile groups"
     );
     validate_weapon_shop_lifetime(&report)?;
+    validate_unit_roster_lifetime(&report)?;
     let domains = collect_domain_installations(&report)?;
 
     Ok(CurrentInstallation {
@@ -202,6 +210,11 @@ pub(crate) fn inspect_current_installation(
         class_profile_runtime_bound_to_build: report
             .automatic_class_profiles
             .runtime_bound_to_build,
+        roster_page_target_glyph_count: report.playable_unit_names.roster_page_target_glyph_count,
+        roster_page_preserved_active_code_count: report
+            .playable_unit_names
+            .roster_page_preserved_active_code_count,
+        roster_page_total_slot_demand: report.playable_unit_names.roster_page_total_slot_demand,
         weapon_shop_shared_page_target_glyph_count: report
             .weapon_shop_shared_text
             .shared_page_unique_glyph_count,
@@ -218,6 +231,23 @@ pub(crate) fn inspect_current_installation(
         battle_dialogue_workspace_sha1: report.battle_text.dialogue_workspace_sha1,
         battle_temporal_manifest_sha1: report.battle_text.temporal_manifest_sha1,
     })
+}
+
+fn validate_unit_roster_lifetime(report: &CurrentBuildReport) -> Result<()> {
+    let names = &report.playable_unit_names;
+    ensure!(
+        names.workspace_entry_count == 52
+            && names.roster_projection_installed
+            && names.roster_page_target_glyph_count > 0
+            && names.roster_page_preserved_active_code_count > 0
+            && names.roster_page_total_slot_demand
+                == names.roster_page_target_glyph_count
+                    + names.roster_page_preserved_active_code_count
+            && names.roster_page_total_slot_demand <= crate::font_slots::ACTIVE_HANGUL_SLOT_COUNT
+            && names.roster_capacity_bound_to_build,
+        "current unit-roster page lifetime changed"
+    );
+    Ok(())
 }
 
 fn validate_weapon_shop_lifetime(report: &CurrentBuildReport) -> Result<()> {
@@ -658,10 +688,14 @@ mod tests {
             },
             "playable_unit_names": {
                 "workspace_entry_count": 52,
+                "roster_page_target_glyph_count": 72,
+                "roster_page_preserved_active_code_count": 18,
+                "roster_page_total_slot_demand": 90,
                 "roster_projection_installed": true,
                 "unit_summary_projection_installed": true,
                 "source_battle_table_preserved": false,
                 "source_ending_table_preserved": true,
+                "roster_capacity_bound_to_build": true,
                 "runtime_bound_to_build": false
             },
             "automatic_class_profiles": {

@@ -700,6 +700,16 @@ pub(crate) fn build_cumulative_patch(
         weapon_shop_shared_page_total_slot_demand <= ACTIVE_HANGUL_SLOT_COUNT,
         "weapon-shop shared page exceeds the active glyph slots"
     );
+    let roster_page_total_slot_demand = unit_name_stage
+        .page
+        .roster_assignments
+        .len()
+        .checked_add(unit_name_stage.page.preserved_roster_code_count)
+        .context("unit-roster page slot demand overflow")?;
+    ensure!(
+        roster_page_total_slot_demand <= ACTIVE_HANGUL_SLOT_COUNT,
+        "unit-roster page exceeds the active glyph slots"
+    );
     let weapon_shop_capacity_roles = WEAPON_SHOP_CAPACITY_BOUND_SCREEN_ROLES
         .into_iter()
         .collect::<BTreeSet<_>>();
@@ -981,6 +991,11 @@ pub(crate) fn build_cumulative_patch(
             workspace_sha1: unit_name_plan.workspace_sha1.clone(),
             workspace_entry_count: unit_name_plan.entries.len(),
             unique_glyph_count: unit_name_plan.unique_glyphs().len(),
+            roster_page_target_glyph_count: unit_name_stage.page.roster_assignments.len(),
+            roster_page_preserved_active_code_count: unit_name_stage
+                .page
+                .preserved_roster_code_count,
+            roster_page_total_slot_demand,
             roster_projection_byte_count: unit_name_stage.tables.roster.pointer_table.len()
                 + unit_name_stage.tables.roster.strings.len(),
             unit_ui_projection_byte_count: unit_name_stage.tables.unit_ui.pointer_table.len()
@@ -999,6 +1014,7 @@ pub(crate) fn build_cumulative_patch(
             unit_summary_projection_installed: true,
             source_battle_table_preserved: false,
             source_ending_table_preserved: true,
+            roster_capacity_bound_to_build: true,
             runtime_bound_to_build: false,
             review_complete: unit_name_plan.review_complete,
         },

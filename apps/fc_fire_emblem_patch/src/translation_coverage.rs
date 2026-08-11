@@ -240,6 +240,10 @@ pub(crate) fn analyze_translation_coverage(
                 .class_profile_preserved_active_code_count,
             class_profile_runtime_bound_to_build: installation.class_profile_runtime_bound_to_build,
             current_build_report_sha1: &installation.build_report_sha1,
+            roster_page_target_glyph_count: installation.roster_page_target_glyph_count,
+            roster_page_preserved_active_code_count: installation
+                .roster_page_preserved_active_code_count,
+            roster_page_total_slot_demand: installation.roster_page_total_slot_demand,
             weapon_shop_shared_page_target_glyph_count: installation
                 .weapon_shop_shared_page_target_glyph_count,
             weapon_shop_shared_page_preserved_active_code_count: installation

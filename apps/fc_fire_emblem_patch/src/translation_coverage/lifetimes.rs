@@ -7,6 +7,7 @@ use crate::{font_slots::ACTIVE_HANGUL_SLOT_COUNT, rom::EXPECTED_SOURCE_SHA1, sha
 
 use super::report::{StrongestLifetimeReport, TranslationLifetimeDemandReport};
 
+mod unit_roster;
 mod unit_ui;
 mod weapon_shop;
 
@@ -19,6 +20,9 @@ pub(super) struct LifetimeInputBindings<'a> {
     pub(super) class_profile_preserved_active_code_count: usize,
     pub(super) class_profile_runtime_bound_to_build: bool,
     pub(super) current_build_report_sha1: &'a str,
+    pub(super) roster_page_target_glyph_count: usize,
+    pub(super) roster_page_preserved_active_code_count: usize,
+    pub(super) roster_page_total_slot_demand: usize,
     pub(super) weapon_shop_shared_page_target_glyph_count: usize,
     pub(super) weapon_shop_shared_page_preserved_active_code_count: usize,
     pub(super) weapon_shop_shared_page_total_slot_demand: usize,
@@ -152,6 +156,12 @@ pub(super) fn inspect_translation_lifetimes(
             unit_ui_label_workspace_sha1: bindings.unit_ui_label_workspace_sha1,
         },
     )?;
+    let unit_roster_demand = unit_roster::inspect(unit_roster::InputBindings {
+        page_target_glyph_count: bindings.roster_page_target_glyph_count,
+        page_preserved_active_code_count: bindings.roster_page_preserved_active_code_count,
+        page_total_slot_demand: bindings.roster_page_total_slot_demand,
+        evidence_report_sha1: bindings.current_build_report_sha1,
+    })?;
     let weapon_shop_demands = weapon_shop::inspect(weapon_shop::InputBindings {
         shared_page_target_glyph_count: bindings.weapon_shop_shared_page_target_glyph_count,
         shared_page_preserved_active_code_count: bindings
@@ -170,6 +180,7 @@ pub(super) fn inspect_translation_lifetimes(
         },
         bindings,
         unit_ui_demands,
+        unit_roster_demand,
         weapon_shop_demands,
         japanese_bearing_screen_roles,
     )
@@ -179,6 +190,7 @@ fn build_translation_lifetime_inventory(
     reports: LifetimeReports,
     bindings: LifetimeInputBindings<'_>,
     unit_ui_demands: Vec<TranslationLifetimeDemandReport>,
+    unit_roster_demand: TranslationLifetimeDemandReport,
     weapon_shop_demands: Vec<TranslationLifetimeDemandReport>,
     japanese_bearing_screen_roles: &[String],
 ) -> Result<TranslationLifetimeInventory> {
@@ -226,6 +238,7 @@ fn build_translation_lifetime_inventory(
         evidence_report_sha1: bindings.current_build_report_sha1.to_owned(),
     });
     demands.extend(unit_ui_demands);
+    demands.push(unit_roster_demand);
     demands.extend(weapon_shop_demands);
     for lifetime in main.observed_screen_lifetimes {
         ensure!(
@@ -355,6 +368,13 @@ mod tests {
             exact_modeled_global_combined_slot_demand: 170,
         };
         let unit_ui_demands = unit_ui_demands();
+        let unit_roster_demand = unit_roster::inspect(unit_roster::InputBindings {
+            page_target_glyph_count: 72,
+            page_preserved_active_code_count: 18,
+            page_total_slot_demand: 90,
+            evidence_report_sha1: "build-report",
+        })
+        .unwrap();
         let shop_roles = crate::translation_coverage::weapon_shop::SCREEN_ROLES.map(str::to_owned);
         let weapon_shop_demands = weapon_shop::inspect(weapon_shop::InputBindings {
             shared_page_target_glyph_count: 60,
@@ -372,6 +392,7 @@ mod tests {
             "game_over",
             "map_menu",
             "unit_command_menu",
+            "unit_roster",
             "unit_status",
             "unit_summary",
         ]
@@ -392,10 +413,13 @@ mod tests {
                 class_profile_preserved_active_code_count: 12,
                 class_profile_runtime_bound_to_build: true,
                 current_build_report_sha1: "build-report",
+                roster_page_target_glyph_count: 72,
+                roster_page_preserved_active_code_count: 18,
+                roster_page_total_slot_demand: 90,
                 weapon_shop_shared_page_target_glyph_count: 60,
                 weapon_shop_shared_page_preserved_active_code_count: 90,
                 weapon_shop_shared_page_total_slot_demand: 150,
-                weapon_shop_capacity_bound_screen_roles: &roles[9..],
+                weapon_shop_capacity_bound_screen_roles: &roles[10..],
                 unit_name_workspace_sha1: "units",
                 unit_ui_label_workspace_sha1: "labels",
                 battle_fixed_workspace_sha1: "fixed",
@@ -403,12 +427,13 @@ mod tests {
                 battle_temporal_manifest_sha1: "temporal",
             },
             unit_ui_demands,
+            unit_roster_demand,
             weapon_shop_demands,
             &roles,
         )
         .unwrap();
 
-        assert_eq!(inventory.demands.len(), 17);
+        assert_eq!(inventory.demands.len(), 18);
         assert_eq!(inventory.strongest.state, "partial");
         assert_eq!(
             inventory.strongest.selected_screen_role,
