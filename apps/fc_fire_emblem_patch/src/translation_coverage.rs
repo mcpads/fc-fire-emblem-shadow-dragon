@@ -231,6 +231,12 @@ pub(crate) fn analyze_translation_coverage(
         inputs.battle_surface_constraints_report_path,
         LifetimeInputBindings {
             main_dialogue_workspace_sha1: translation_input_sha1("main_dialogue")?,
+            class_profile_page_target_glyph_counts: &installation
+                .class_profile_page_target_glyph_counts,
+            class_profile_preserved_active_code_count: installation
+                .class_profile_preserved_active_code_count,
+            class_profile_runtime_bound_to_build: installation.class_profile_runtime_bound_to_build,
+            class_profile_evidence_report_sha1: &installation.build_report_sha1,
             battle_fixed_workspace_sha1: &installation.battle_fixed_workspace_sha1,
             battle_dialogue_workspace_sha1: &installation.battle_dialogue_workspace_sha1,
             battle_temporal_manifest_sha1: &installation.battle_temporal_manifest_sha1,

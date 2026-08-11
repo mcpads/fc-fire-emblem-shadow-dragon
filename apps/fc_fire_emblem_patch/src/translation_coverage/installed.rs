@@ -73,7 +73,10 @@ struct CurrentUnitNames {
 
 #[derive(Debug, Deserialize)]
 struct CurrentClassProfiles {
+    workspace_entry_count: usize,
     installed_entry_count: usize,
+    page_unique_glyph_counts: Vec<usize>,
+    preserved_active_code_count: usize,
     runtime_bound_to_build: bool,
 }
 
@@ -106,7 +109,11 @@ struct CurrentBattleText {
 
 pub(crate) struct CurrentInstallation {
     pub(crate) build_output_sha1: String,
+    pub(crate) build_report_sha1: String,
     pub(crate) domains: BTreeMap<&'static str, DomainInstallation>,
+    pub(crate) class_profile_page_target_glyph_counts: Vec<usize>,
+    pub(crate) class_profile_preserved_active_code_count: usize,
+    pub(crate) class_profile_runtime_bound_to_build: bool,
     pub(crate) battle_fixed_workspace_sha1: String,
     pub(crate) battle_dialogue_workspace_sha1: String,
     pub(crate) battle_temporal_manifest_sha1: String,
@@ -131,11 +138,31 @@ pub(crate) fn inspect_current_installation(
         output_sha1 == report.output_sha1,
         "current build report and output ROM hashes differ"
     );
+    ensure!(
+        report.automatic_class_profiles.workspace_entry_count == 22
+            && report.automatic_class_profiles.installed_entry_count == 22
+            && report
+                .automatic_class_profiles
+                .page_unique_glyph_counts
+                .len()
+                == 2,
+        "current class-profile installation no longer covers two complete profile groups"
+    );
     let domains = collect_domain_installations(&report)?;
 
     Ok(CurrentInstallation {
         build_output_sha1: output_sha1,
+        build_report_sha1: sha1_hex(&report_bytes),
         domains,
+        class_profile_page_target_glyph_counts: report
+            .automatic_class_profiles
+            .page_unique_glyph_counts,
+        class_profile_preserved_active_code_count: report
+            .automatic_class_profiles
+            .preserved_active_code_count,
+        class_profile_runtime_bound_to_build: report
+            .automatic_class_profiles
+            .runtime_bound_to_build,
         battle_fixed_workspace_sha1: report.battle_text.fixed_text_workspace_sha1,
         battle_dialogue_workspace_sha1: report.battle_text.dialogue_workspace_sha1,
         battle_temporal_manifest_sha1: report.battle_text.temporal_manifest_sha1,
@@ -482,7 +509,10 @@ mod tests {
                 "runtime_bound_to_build": false
             },
             "automatic_class_profiles": {
+                "workspace_entry_count": 0,
                 "installed_entry_count": 0,
+                "page_unique_glyph_counts": [],
+                "preserved_active_code_count": 0,
                 "runtime_bound_to_build": false
             },
             "weapon_shop_shared_text": {

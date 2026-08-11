@@ -12,6 +12,10 @@ const BATTLE_REPORT_SCHEMA: u8 = 12;
 
 pub(super) struct LifetimeInputBindings<'a> {
     pub(super) main_dialogue_workspace_sha1: &'a str,
+    pub(super) class_profile_page_target_glyph_counts: &'a [usize],
+    pub(super) class_profile_preserved_active_code_count: usize,
+    pub(super) class_profile_runtime_bound_to_build: bool,
+    pub(super) class_profile_evidence_report_sha1: &'a str,
     pub(super) battle_fixed_workspace_sha1: &'a str,
     pub(super) battle_dialogue_workspace_sha1: &'a str,
     pub(super) battle_temporal_manifest_sha1: &'a str,
@@ -128,6 +132,10 @@ pub(super) fn inspect_translation_lifetimes(
         battle,
         sha1_hex(&main_bytes),
         sha1_hex(&battle_bytes),
+        bindings.class_profile_page_target_glyph_counts,
+        bindings.class_profile_preserved_active_code_count,
+        bindings.class_profile_runtime_bound_to_build,
+        bindings.class_profile_evidence_report_sha1,
         japanese_bearing_screen_roles,
     )
 }
@@ -137,6 +145,10 @@ fn build_translation_lifetime_inventory(
     battle: BattleSurfaceConstraintsReport,
     main_report_sha1: String,
     battle_report_sha1: String,
+    class_profile_page_target_glyph_counts: &[usize],
+    class_profile_preserved_active_code_count: usize,
+    class_profile_runtime_bound_to_build: bool,
+    class_profile_evidence_report_sha1: &str,
     japanese_bearing_screen_roles: &[String],
 ) -> Result<TranslationLifetimeInventory> {
     let mut demands = vec![TranslationLifetimeDemandReport {
@@ -151,6 +163,30 @@ fn build_translation_lifetime_inventory(
             <= ACTIVE_HANGUL_SLOT_COUNT,
         evidence_report_sha1: battle_report_sha1,
     }];
+    ensure!(
+        class_profile_runtime_bound_to_build,
+        "class-profile lifetime is not runtime-bound to the current build"
+    );
+    let class_profile_target_glyph_count = class_profile_page_target_glyph_counts
+        .iter()
+        .copied()
+        .max()
+        .context("class-profile lifetime has no installed page groups")?;
+    let class_profile_total_slot_demand = class_profile_target_glyph_count
+        .checked_add(class_profile_preserved_active_code_count)
+        .context("class-profile lifetime slot demand overflow")?;
+    demands.push(TranslationLifetimeDemandReport {
+        screen_role: "class_profile",
+        measurement_basis:
+            "largest exact-output-bound installed profile-group working set plus preserved active codes",
+        target_glyph_count: class_profile_target_glyph_count,
+        preserved_active_source_code_count: class_profile_preserved_active_code_count,
+        additional_target_glyph_reservation_count: 0,
+        total_slot_demand: class_profile_total_slot_demand,
+        active_slot_count: ACTIVE_HANGUL_SLOT_COUNT,
+        fits_active_page: class_profile_total_slot_demand <= ACTIVE_HANGUL_SLOT_COUNT,
+        evidence_report_sha1: class_profile_evidence_report_sha1.to_owned(),
+    });
     for lifetime in main.observed_screen_lifetimes {
         let (screen_role, measurement_basis) = match lifetime.screen_role.as_str() {
             "weapon-shop purchase handoff" => (
@@ -240,7 +276,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn page_bound_dialogue_maximum_does_not_replace_a_stronger_battle_lifetime() {
+    fn exact_output_profile_group_can_replace_battle_as_the_strongest_lifetime() {
         let main = MainDialogueGlyphWorksetReport {
             schema: MAIN_DIALOGUE_REPORT_SCHEMA,
             source_sha1: EXPECTED_SOURCE_SHA1.to_owned(),
@@ -272,6 +308,7 @@ mod tests {
         };
         let roles = [
             "battle_animation",
+            "class_profile",
             "chapter_clear_epilogue_dialogue",
             "ending_character_epilogue",
             "game_over",
@@ -285,17 +322,21 @@ mod tests {
             battle,
             "main-report".to_owned(),
             "battle-report".to_owned(),
+            &[143, 161],
+            12,
+            true,
+            "build-report",
             &roles,
         )
         .unwrap();
 
-        assert_eq!(inventory.demands.len(), 5);
+        assert_eq!(inventory.demands.len(), 6);
         assert_eq!(inventory.strongest.state, "partial");
         assert_eq!(
             inventory.strongest.selected_screen_role,
-            Some("battle_animation")
+            Some("class_profile")
         );
-        assert_eq!(inventory.strongest.selected_slot_demand, Some(170));
+        assert_eq!(inventory.strongest.selected_slot_demand, Some(173));
         assert_eq!(
             inventory.strongest.main_dialogue_maximum_target_glyph_count,
             175
