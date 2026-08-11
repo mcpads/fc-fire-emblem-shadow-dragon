@@ -220,7 +220,7 @@ mod tests {
         }
         let evidence = verify_shop_dialogue_runtime_evidence(
             manifest,
-            "41ba8b0a3924289ffa5ded73a90ad8b36028afef",
+            "526c33aad26622f758a193aa7ef8f40776e8348b",
             0xC0,
         )
         .unwrap();

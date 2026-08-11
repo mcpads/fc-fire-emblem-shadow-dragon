@@ -1,6 +1,7 @@
 mod battle_text_workset;
 mod chapter_transition;
 mod chapter_victory;
+mod choice_labels;
 mod chr_inventory;
 mod class_profile;
 mod dialogue_assets;
@@ -421,6 +422,10 @@ enum Command {
         unit_name_localization: PathBuf,
         #[arg(long, default_value = "assets/translation/class-profiles.ko.json")]
         class_profile_localization: PathBuf,
+        #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
+        fixed_text_workspace: PathBuf,
+        #[arg(long, default_value = "assets/translation/choice-labels.ko.json")]
+        choice_label_localization: PathBuf,
         #[arg(
             long,
             default_value = "evidence/private/dialogue-lifetime/chapter-1-intro-screen.json"
@@ -452,6 +457,11 @@ enum Command {
             default_value = "evidence/private/shop-dialogue-installed/manifest.json"
         )]
         shop_dialogue_runtime_evidence: PathBuf,
+        #[arg(
+            long,
+            default_value = "evidence/private/shop-shared-text-installed/manifest.json"
+        )]
+        weapon_shop_shared_text_runtime_evidence: PathBuf,
         #[arg(long, default_value = "out/cumulative-stages")]
         stage_directory: PathBuf,
         #[arg(long, default_value = "out/fire-emblem-fe1-korean-patch.nes")]
@@ -1282,6 +1292,8 @@ fn main() -> Result<()> {
             front_end_menu_localization,
             unit_name_localization,
             class_profile_localization,
+            fixed_text_workspace,
+            choice_label_localization,
             chapter_one_intro_evidence,
             chapter_two_intro_evidence,
             front_end_menu_evidence,
@@ -1290,6 +1302,7 @@ fn main() -> Result<()> {
             class_profile_runtime_evidence,
             shop_dialogue_evidence,
             shop_dialogue_runtime_evidence,
+            weapon_shop_shared_text_runtime_evidence,
             stage_directory,
             output,
             report,
@@ -1304,6 +1317,8 @@ fn main() -> Result<()> {
                     front_end_menu_localization_path: &front_end_menu_localization,
                     unit_name_localization_path: &unit_name_localization,
                     class_profile_localization_path: &class_profile_localization,
+                    fixed_text_workspace_path: &fixed_text_workspace,
+                    choice_label_localization_path: &choice_label_localization,
                     chapter_one_intro_evidence_path: &chapter_one_intro_evidence,
                     chapter_two_intro_evidence_path: &chapter_two_intro_evidence,
                     front_end_menu_evidence_path: &front_end_menu_evidence,
@@ -1312,6 +1327,8 @@ fn main() -> Result<()> {
                     class_profile_runtime_evidence_path: &class_profile_runtime_evidence,
                     shop_dialogue_evidence_path: &shop_dialogue_evidence,
                     shop_dialogue_runtime_evidence_path: &shop_dialogue_runtime_evidence,
+                    weapon_shop_shared_text_runtime_evidence_path:
+                        &weapon_shop_shared_text_runtime_evidence,
                     stage_directory: &stage_directory,
                     output_path: &output,
                     report_path: &report,

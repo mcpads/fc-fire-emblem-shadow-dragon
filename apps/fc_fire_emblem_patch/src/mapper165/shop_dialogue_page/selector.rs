@@ -3,11 +3,11 @@ use anyhow::{Result, ensure};
 use crate::rp2a03::{Instruction, assemble_at};
 
 pub(crate) const PAGE_ROUTINE_ADDRESS: u16 = 0xF748;
-pub(crate) const PAGE_ROUTINE_END: u16 = 0xF798;
+pub(crate) const PAGE_ROUTINE_END: u16 = 0xF79A;
 pub(crate) const PAGE_ROUTINE_CAVE_END: u16 = PAGE_ROUTINE_END;
 
-const WRITE_PAGE_ADDRESS: u16 = 0xF784;
-const FALLBACK_ADDRESS: u16 = 0xF793;
+const WRITE_PAGE_ADDRESS: u16 = 0xF786;
+const FALLBACK_ADDRESS: u16 = 0xF795;
 
 pub(crate) fn build_page_selector(mapper_register: u8, fallback_target: u16) -> Result<Vec<u8>> {
     ensure!(
@@ -44,6 +44,7 @@ pub(crate) fn build_page_selector(mapper_register: u8, fallback_target: u16) -> 
             Instruction::LdaZeroPage(0x5C),
             Instruction::CmpImmediate(0x15),
             Instruction::BeqAbsolute(WRITE_PAGE_ADDRESS),
+            Instruction::AndImmediate(0xFE),
             Instruction::CmpImmediate(0x18),
             Instruction::BneAbsolute(FALLBACK_ADDRESS),
             Instruction::LdaImmediate(mapper_register),
@@ -83,7 +84,7 @@ mod tests {
         assert!(
             routine
                 .windows(5)
-                .any(|bytes| bytes == [0xAD, 0xDB, 0x05, 0xF0, 0x44])
+                .any(|bytes| bytes == [0xAD, 0xDB, 0x05, 0xF0, 0x46])
         );
         assert!(
             routine
@@ -99,6 +100,11 @@ mod tests {
             routine
                 .windows(5)
                 .any(|bytes| bytes == [0xAD, 0xF4, 0x77, 0xC9, 0xB1])
+        );
+        assert!(
+            routine
+                .windows(8)
+                .any(|bytes| bytes == [0xA5, 0x5C, 0xC9, 0x15, 0xF0, 0x06, 0x29, 0xFE])
         );
         assert!(routine.windows(2).any(|bytes| bytes == [0xA9, 0xC0]));
         assert_eq!(&routine[routine.len() - 3..], &[0x4C, 0x60, 0xFC]);

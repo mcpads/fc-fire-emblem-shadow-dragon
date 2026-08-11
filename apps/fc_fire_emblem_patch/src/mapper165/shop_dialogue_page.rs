@@ -38,6 +38,7 @@ pub(super) const RECORD_IDS: [&str; 8] = [
 
 const SOURCE_FONT_PHYSICAL_PAGE: usize = 2;
 
+#[derive(Clone)]
 pub(super) struct ShopDialoguePagePlan {
     pub(super) assignments: BTreeMap<char, u8>,
     pub(super) page_pack: Vec<u8>,
@@ -47,6 +48,7 @@ pub(super) struct ShopDialoguePagePlan {
     pub(super) preserved_screen_active_code_count: usize,
     pub(super) preserved_source_active_code_count: usize,
     pub(super) preserved_active_code_count: usize,
+    pub(super) preserved_active_codes: BTreeSet<u8>,
     pub(super) page_sha1: String,
     pub(super) physical_chr_page: u8,
     pub(super) mapper_register: u8,
@@ -104,7 +106,58 @@ pub(super) fn plan_shop_dialogue_page(
         preserved_screen_active_code_count: preserved_screen_active_codes.len(),
         preserved_source_active_code_count: preserved_source_active_codes.len(),
         preserved_active_code_count: preserved_active_codes.len(),
+        preserved_active_codes,
         physical_chr_page,
         mapper_register,
+    })
+}
+
+pub(super) fn extend_shop_dialogue_page(
+    page: &ShopDialoguePagePlan,
+    requested_glyphs: &BTreeSet<char>,
+) -> Result<ShopDialoguePagePlan> {
+    let additional_glyphs = requested_glyphs
+        .iter()
+        .filter(|glyph| !page.assignments.contains_key(glyph))
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let mut unavailable_codes = page.preserved_active_codes.clone();
+    unavailable_codes.extend(page.assignments.values().copied());
+    let additions = assign_glyph_codes_excluding(&additional_glyphs, &unavailable_codes)?;
+    ensure!(
+        additions
+            .values()
+            .all(|code| !unavailable_codes.contains(code)),
+        "weapon-shop shared-text page reused an occupied code"
+    );
+
+    let mut assignments = page.assignments.clone();
+    for (glyph, code) in &additions {
+        ensure!(
+            assignments.insert(*glyph, *code).is_none(),
+            "weapon-shop shared-text glyph was assigned twice"
+        );
+    }
+    let mut page_pack = build_font_page(&page.page_pack[..FONT_PAGE_SIZE], &additions)?;
+    page_pack.extend_from_slice(&page.page_pack[FONT_PAGE_SIZE..]);
+    ensure!(
+        page_pack.len() == page.page_pack.len()
+            && page_pack[FONT_PAGE_SIZE..] == page.page_pack[FONT_PAGE_SIZE..],
+        "weapon-shop shared-text extension changed the companion page"
+    );
+
+    Ok(ShopDialoguePagePlan {
+        assignments,
+        page_sha1: sha1_hex(&page_pack[..FONT_PAGE_SIZE]),
+        page_pack,
+        manifest_sha1: page.manifest_sha1.clone(),
+        sample_count: page.sample_count,
+        unique_nametable_count: page.unique_nametable_count,
+        preserved_screen_active_code_count: page.preserved_screen_active_code_count,
+        preserved_source_active_code_count: page.preserved_source_active_code_count,
+        preserved_active_code_count: page.preserved_active_code_count,
+        preserved_active_codes: page.preserved_active_codes.clone(),
+        physical_chr_page: page.physical_chr_page,
+        mapper_register: page.mapper_register,
     })
 }

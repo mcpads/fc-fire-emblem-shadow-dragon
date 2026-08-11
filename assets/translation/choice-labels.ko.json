@@ -1,0 +1,33 @@
+{
+  "format_version": 1,
+  "source_sha1": "0179c550d424e0397496078789e7b116601d120c",
+  "translate_from": "ja",
+  "translate_to": "ko",
+  "preserve_existing_english_and_digits": true,
+  "entries": [
+    {
+      "id": "choice-label:yes",
+      "fixed_string_index": 34,
+      "pointer_cpu_address_hex": "0x9146",
+      "source_file_offset_hex": "0x2D156",
+      "source_storage_byte_count": 3,
+      "source_bytes_hex": "1A 01 ED",
+      "source_sha1": "2f56d4adc4d04ebed948d9d6caab64635f7156d1",
+      "japanese_markup": "はい",
+      "korean_markup": "예",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "choice-label:no",
+      "fixed_string_index": 35,
+      "pointer_cpu_address_hex": "0x9149",
+      "source_file_offset_hex": "0x2D159",
+      "source_storage_byte_count": 4,
+      "source_bytes_hex": "01 01 03 ED",
+      "source_sha1": "60ef2ae996725c9ff3ad576ecd57676e7f5ef8ce",
+      "japanese_markup": "いいえ",
+      "korean_markup": "아니오",
+      "status": "needs_human_review"
+    }
+  ]
+}

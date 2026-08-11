@@ -37,6 +37,7 @@ pub(crate) mod trigger_planes;
 mod trigger_variants;
 mod unit_name_page;
 mod unit_name_table;
+mod weapon_shop_shared_text;
 mod writer_sites;
 
 use runtime::{

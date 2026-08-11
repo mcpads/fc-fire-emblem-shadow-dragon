@@ -15,6 +15,7 @@ pub(super) struct CumulativePatchReport {
     pub(super) front_end_menu: CumulativeFrontEndMenuReport,
     pub(super) playable_unit_names: CumulativeUnitNameReport,
     pub(super) automatic_class_profiles: CumulativeClassProfileReport,
+    pub(super) weapon_shop_shared_text: CumulativeWeaponShopSharedTextReport,
     pub(super) selector_chain: Vec<SelectorChainReport>,
     pub(super) original_chr_preserved: bool,
     pub(super) tracked_write_count: usize,
@@ -23,6 +24,34 @@ pub(super) struct CumulativePatchReport {
     pub(super) runtime_verified: bool,
     pub(super) unresolved: Vec<&'static str>,
     pub(super) release_eligible: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct CumulativeWeaponShopSharedTextReport {
+    pub(super) screen_role: &'static str,
+    pub(super) fixed_text_workspace_sha1: String,
+    pub(super) choice_label_workspace_sha1: String,
+    pub(super) installed_item_name_count: usize,
+    pub(super) installed_choice_label_count: usize,
+    pub(super) projected_item_pointer_count: usize,
+    pub(super) item_string_byte_count: usize,
+    pub(super) choice_string_byte_count: usize,
+    pub(super) shared_page_unique_glyph_count: usize,
+    pub(super) added_glyph_count: usize,
+    pub(super) glyph_assignment_sha1: String,
+    pub(super) font_physical_page: u8,
+    pub(super) font_mapper_register: u8,
+    pub(super) font_page_sha1: String,
+    pub(super) font_page_pack_sha1: String,
+    pub(super) item_list_pointer_selector_installed: bool,
+    pub(super) selected_item_pointer_selector_installed: bool,
+    pub(super) choice_pointer_selector_installed: bool,
+    pub(super) unconverted_consumers_fallback_to_source_tables: bool,
+    pub(super) runtime_evidence_manifest_sha1: String,
+    pub(super) runtime_sample_count: usize,
+    pub(super) runtime_unique_image_count: usize,
+    pub(super) runtime_bound_to_build: bool,
+    pub(super) review_complete: bool,
 }
 
 #[derive(Debug, Serialize)]

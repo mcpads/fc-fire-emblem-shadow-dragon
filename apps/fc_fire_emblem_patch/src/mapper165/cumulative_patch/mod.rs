@@ -4,6 +4,7 @@ use anyhow::{Context, Result, ensure};
 
 use crate::{
     chapter_transition::plan_chapter_titles,
+    choice_labels::plan_choice_labels,
     class_profile::plan_class_profiles,
     dialogue_assets::{
         MainDialogueBundlePlan, MainDialogueSlicePlan, plan_main_dialogue_bundle,
@@ -14,6 +15,7 @@ use crate::{
     mmc5_prg::{count_direct_transfers_to_range, fixed_bank_file_offset},
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
+    text_inventory::plan_fixed_text,
     tracked::TrackedImage,
     unit_names::plan_unit_names,
 };
@@ -32,6 +34,7 @@ use super::{
         PAGE_ROUTINE_ADDRESS as SHOP_DIALOGUE_SELECTOR_ADDRESS,
         RECORD_IDS as SHOP_DIALOGUE_RECORD_IDS, SCREEN_ROLE as SHOP_DIALOGUE_SCREEN_ROLE,
     },
+    weapon_shop_shared_text::SCREEN_ROLE as WEAPON_SHOP_SHARED_TEXT_SCREEN_ROLE,
 };
 
 mod chapter_page_selector;
@@ -43,6 +46,8 @@ mod shop_dialogue_runtime;
 mod shop_dialogue_stage;
 mod unit_name_stage;
 mod verify;
+mod weapon_shop_shared_text_runtime;
+mod weapon_shop_shared_text_stage;
 
 use chapter_page_selector::{ChapterPageSequence, build_chapter_page_selector};
 use class_profile_runtime::verify_class_profile_runtime_evidence;
@@ -51,12 +56,15 @@ use front_end_stage::install_front_end_stage;
 use report::{
     CumulativeChapterTitleReport, CumulativeClassProfileReport, CumulativeDialogueLifetimeReport,
     CumulativeDialogueReport, CumulativeFrontEndMenuReport, CumulativePatchReport,
-    CumulativeStageReport, CumulativeUnitNameReport, SelectorChainReport,
+    CumulativeStageReport, CumulativeUnitNameReport, CumulativeWeaponShopSharedTextReport,
+    SelectorChainReport,
 };
 use shop_dialogue_runtime::verify_shop_dialogue_runtime_evidence;
 use shop_dialogue_stage::install_shop_dialogue_stage;
 use unit_name_stage::install_unit_name_stage;
 use verify::{install_chapter_title, install_dialogue_record, verify_cumulative_output};
+use weapon_shop_shared_text_runtime::verify_weapon_shop_shared_text_runtime_evidence;
+use weapon_shop_shared_text_stage::install_weapon_shop_shared_text_stage;
 
 const UI_STAGE_ROM_NAME: &str = "mapper165-ui.nes";
 const UI_STAGE_REPORT_NAME: &str = "mapper165-ui.json";
@@ -65,6 +73,7 @@ const FRONT_END_STAGE_ROM_NAME: &str = "front-end-menu.nes";
 const UNIT_NAME_STAGE_ROM_NAME: &str = "unit-names.nes";
 const CLASS_PROFILE_STAGE_ROM_NAME: &str = "class-profiles.nes";
 const SHOP_DIALOGUE_STAGE_ROM_NAME: &str = "weapon-shop-dialogue.nes";
+const SHOP_SHARED_TEXT_STAGE_ROM_NAME: &str = "weapon-shop-shared-text.nes";
 const DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFBD4;
 const DIALOGUE_SELECTOR_CAVE_END: u16 = 0xFC20;
 const CHAPTER_ONE_DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFBD8;
@@ -99,6 +108,8 @@ pub(crate) struct CumulativePatchInputs<'a> {
     pub(crate) front_end_menu_localization_path: &'a Path,
     pub(crate) unit_name_localization_path: &'a Path,
     pub(crate) class_profile_localization_path: &'a Path,
+    pub(crate) fixed_text_workspace_path: &'a Path,
+    pub(crate) choice_label_localization_path: &'a Path,
     pub(crate) chapter_one_intro_evidence_path: &'a Path,
     pub(crate) chapter_two_intro_evidence_path: &'a Path,
     pub(crate) front_end_menu_evidence_path: &'a Path,
@@ -107,6 +118,7 @@ pub(crate) struct CumulativePatchInputs<'a> {
     pub(crate) class_profile_runtime_evidence_path: &'a Path,
     pub(crate) shop_dialogue_evidence_path: &'a Path,
     pub(crate) shop_dialogue_runtime_evidence_path: &'a Path,
+    pub(crate) weapon_shop_shared_text_runtime_evidence_path: &'a Path,
     pub(crate) stage_directory: &'a Path,
     pub(crate) output_path: &'a Path,
     pub(crate) report_path: &'a Path,
@@ -138,6 +150,8 @@ pub(crate) fn build_cumulative_patch(
     let unit_name_plan = plan_unit_names(&source_rom, inputs.unit_name_localization_path)?;
     let class_profile_plan =
         plan_class_profiles(&source_rom, inputs.class_profile_localization_path)?;
+    let fixed_text_plan = plan_fixed_text(&source_rom, inputs.fixed_text_workspace_path)?;
+    let choice_label_plan = plan_choice_labels(&source_rom, inputs.choice_label_localization_path)?;
     let shop_dialogue_plan = plan_main_dialogue_bundle(
         &source_rom,
         inputs.main_dialogue_workspace_path,
@@ -511,13 +525,25 @@ pub(crate) fn build_cumulative_patch(
         &inputs.stage_directory.join(SHOP_DIALOGUE_STAGE_ROM_NAME),
         &shop_dialogue_stage.output,
     )?;
-    let output = shop_dialogue_stage.output;
+    let weapon_shop_shared_text_stage = install_weapon_shop_shared_text_stage(
+        &shop_dialogue_stage.output,
+        &source_rom,
+        &shop_dialogue_stage.page,
+        &fixed_text_plan,
+        &choice_label_plan,
+    )?;
+    write_file(
+        &inputs.stage_directory.join(SHOP_SHARED_TEXT_STAGE_ROM_NAME),
+        &weapon_shop_shared_text_stage.output,
+    )?;
+    let output = weapon_shop_shared_text_stage.output;
     let output_rom = Rom::parse(output.clone()).context("parse cumulative Korean patch")?;
     let tracked_write_count = tracked_write_count
         + front_end_stage.tracked_write_count
         + unit_name_stage.tracked_write_count
         + class_profile_stage.tracked_write_count
-        + shop_dialogue_stage.tracked_write_count;
+        + shop_dialogue_stage.tracked_write_count
+        + weapon_shop_shared_text_stage.tracked_write_count;
 
     let translated_line_count = chapter_one_plans
         .iter()
@@ -541,7 +567,7 @@ pub(crate) fn build_cumulative_patch(
         chapter_one_plans.len() + chapter_two_plans.len() + shop_dialogue_plan.record_ids.len();
     let installed_dialogue_glyph_slot_count = chapter_one_page.assignments.len()
         + chapter_two_page.assignments.len()
-        + shop_dialogue_stage.page.assignments.len();
+        + weapon_shop_shared_text_stage.plan.page.assignments.len();
     let installed_glyph_slot_count = installed_dialogue_glyph_slot_count
         + front_end_stage.page.assignments.len()
         + unit_name_stage.page.roster_assignments.len()
@@ -551,13 +577,18 @@ pub(crate) fn build_cumulative_patch(
     let output_sha1 = sha1_hex(&output);
     let shop_dialogue_runtime = verify_shop_dialogue_runtime_evidence(
         inputs.shop_dialogue_runtime_evidence_path,
-        &output_sha1,
+        &shop_dialogue_stage.output_sha1,
         shop_dialogue_stage.page.mapper_register,
     )?;
     let class_profile_runtime = verify_class_profile_runtime_evidence(
         inputs.class_profile_runtime_evidence_path,
         &class_profile_stage.output_sha1,
         class_profile_stage.page.mapper_registers[1],
+    )?;
+    let weapon_shop_shared_text_runtime = verify_weapon_shop_shared_text_runtime_evidence(
+        inputs.weapon_shop_shared_text_runtime_evidence_path,
+        &output_sha1,
+        weapon_shop_shared_text_stage.plan.page.mapper_register,
     )?;
     ensure!(
         sha1_hex(&unit_name_stage.output) == unit_name_stage.output_sha1,
@@ -568,8 +599,8 @@ pub(crate) fn build_cumulative_patch(
         "front-end stage output hash changed before unit-name installation"
     );
     ensure!(
-        output_sha1 == shop_dialogue_stage.output_sha1,
-        "weapon-shop stage output hash changed before publication"
+        output_sha1 == weapon_shop_shared_text_stage.output_sha1,
+        "weapon-shop shared-text output hash changed before publication"
     );
     let chapter_two_output_sha1 = sha1_hex(&chapter_two_output);
     let stages = vec![
@@ -606,6 +637,11 @@ pub(crate) fn build_cumulative_patch(
         CumulativeStageReport {
             role: "weapon_shop_dialogue_branches",
             output_sha1: shop_dialogue_stage.output_sha1.clone(),
+            report_sha1: None,
+        },
+        CumulativeStageReport {
+            role: "weapon_shop_shared_item_names_and_choice_labels",
+            output_sha1: weapon_shop_shared_text_stage.output_sha1.clone(),
             report_sha1: None,
         },
     ];
@@ -770,6 +806,59 @@ pub(crate) fn build_cumulative_patch(
             runtime_bound_to_build: true,
             review_complete: class_profile_plan.review_complete,
         },
+        weapon_shop_shared_text: CumulativeWeaponShopSharedTextReport {
+            screen_role: WEAPON_SHOP_SHARED_TEXT_SCREEN_ROLE,
+            fixed_text_workspace_sha1: weapon_shop_shared_text_stage
+                .plan
+                .fixed_text_workspace_sha1
+                .clone(),
+            choice_label_workspace_sha1: weapon_shop_shared_text_stage
+                .plan
+                .choice_label_workspace_sha1
+                .clone(),
+            installed_item_name_count: weapon_shop_shared_text_stage
+                .plan
+                .projection
+                .item_name_count,
+            installed_choice_label_count: choice_label_plan.entries.len(),
+            projected_item_pointer_count: weapon_shop_shared_text_stage
+                .plan
+                .projection
+                .item_pointer_table
+                .len()
+                / 2,
+            item_string_byte_count: weapon_shop_shared_text_stage
+                .plan
+                .projection
+                .item_string_byte_count,
+            choice_string_byte_count: weapon_shop_shared_text_stage
+                .plan
+                .projection
+                .choice_string_byte_count,
+            shared_page_unique_glyph_count: weapon_shop_shared_text_stage
+                .plan
+                .page
+                .assignments
+                .len(),
+            added_glyph_count: weapon_shop_shared_text_stage.plan.page.assignments.len()
+                - shop_dialogue_stage.page.assignments.len(),
+            glyph_assignment_sha1: assignment_sha1(
+                &weapon_shop_shared_text_stage.plan.page.assignments,
+            ),
+            font_physical_page: weapon_shop_shared_text_stage.plan.page.physical_chr_page,
+            font_mapper_register: weapon_shop_shared_text_stage.plan.page.mapper_register,
+            font_page_sha1: weapon_shop_shared_text_stage.plan.page.page_sha1.clone(),
+            font_page_pack_sha1: sha1_hex(&weapon_shop_shared_text_stage.plan.page.page_pack),
+            item_list_pointer_selector_installed: true,
+            selected_item_pointer_selector_installed: true,
+            choice_pointer_selector_installed: true,
+            unconverted_consumers_fallback_to_source_tables: true,
+            runtime_evidence_manifest_sha1: weapon_shop_shared_text_runtime.manifest_sha1,
+            runtime_sample_count: weapon_shop_shared_text_runtime.sample_count,
+            runtime_unique_image_count: weapon_shop_shared_text_runtime.unique_image_count,
+            runtime_bound_to_build: true,
+            review_complete: weapon_shop_shared_text_stage.plan.review_complete,
+        },
         selector_chain: vec![
             SelectorChainReport {
                 role: "unit_roster",
@@ -808,20 +897,26 @@ pub(crate) fn build_cumulative_patch(
             && chapter_title_plan.translated_entry_count == chapter_title_plan.entry_count
             && front_end_menu_plan.entries.len() == 7
             && unit_name_plan.entries.len() == 52
-            && class_profile_plan.entries.len() == 22,
+            && class_profile_plan.entries.len() == 22
+            && weapon_shop_shared_text_stage
+                .plan
+                .projection
+                .item_name_count
+                == 6
+            && choice_label_plan.entries.len() == 2,
         review_complete: dialogue_workspace.review_complete
             && chapter_title_plan.review_complete
             && front_end_menu_plan.review_complete
             && unit_name_plan.review_complete
-            && class_profile_plan.review_complete,
+            && class_profile_plan.review_complete
+            && weapon_shop_shared_text_stage.plan.review_complete,
         runtime_verified: false,
         unresolved: vec![
             "The translated Chapter 1 and Chapter 2 title bars need cold-route runtime regression together with every installed dialogue page and natural map restoration.",
             "Private observations passed the installed no-save and valid-save front-end variants, but installed runtime evidence is not yet build-bound and the suspend-data variant is unverified.",
-            "Playable-unit names are installed only for the roster and map unit-summary/status consumers; battle and ending consumers intentionally retain the source table until their own font lifetimes are installed.",
+            "Playable-unit names are installed only for the roster and map unit-summary/status consumers; battle and ending consumers remain Japanese backlog until their own font lifetimes are installed.",
             "The translated playable-unit name pages still need build-bound cold runtime evidence across roster, unit summary, unit status, and their exit paths.",
-            "The eight weapon-shop dialogue branches are installed, while the shared Japanese item-name and yes/no consumers remain explicit translation targets for their own consumer-specific projections.",
-            "The installed weapon-shop decline route is exact-output-bound through its continue prompt, exit message, and map restoration; item selection, purchase, and every preflight branch still need exact-output runtime evidence.",
+            "The installed weapon-shop shared-text decline route is exact-output-bound through item selection, choices, continue prompt, item-list return, exit message, and map restoration; purchase and every preflight branch still need exact-output runtime evidence.",
             "The remaining main-dialogue screen lifetimes and translated non-dialogue surfaces are not yet installed in this cumulative lineage.",
             "The ending scroll owns a separate physical copy of all chapter titles; that duplicate consumer is not installed by this intro-title stage.",
             "Human translation review is incomplete, so this output is a development build rather than a release candidate.",
@@ -988,6 +1083,10 @@ mod tests {
         assert_eq!(
             directory.join(CLASS_PROFILE_STAGE_ROM_NAME),
             PathBuf::from("out/cumulative-stages/class-profiles.nes")
+        );
+        assert_eq!(
+            directory.join(SHOP_SHARED_TEXT_STAGE_ROM_NAME),
+            PathBuf::from("out/cumulative-stages/weapon-shop-shared-text.nes")
         );
     }
 }
