@@ -34,7 +34,8 @@ struct RuntimeSample {
     tm_visible: Option<bool>,
     copyright_visible: bool,
     preserved_english_visible: Option<bool>,
-    runtime_overlay_cells_match_static_logo: Option<bool>,
+    runtime_top_strip_cells_blank: Option<bool>,
+    runtime_reasserted_logo_cells_match_static_logo: Option<bool>,
     image: String,
     image_sha1: String,
 }
@@ -110,7 +111,8 @@ pub(super) fn verify_title_logo_runtime_evidence(
             && completed.korean_logo_visible
             && completed.sword_visible
             && completed.tm_visible == Some(true)
-            && completed.runtime_overlay_cells_match_static_logo == Some(true)
+            && completed.runtime_top_strip_cells_blank == Some(true)
+            && completed.runtime_reasserted_logo_cells_match_static_logo == Some(true)
             && !completed.copyright_visible,
         "installed title-logo completed palette phase changed"
     );
@@ -122,7 +124,8 @@ pub(super) fn verify_title_logo_runtime_evidence(
             && copyright.korean_logo_visible
             && copyright.sword_visible
             && copyright.tm_visible == Some(true)
-            && copyright.runtime_overlay_cells_match_static_logo == Some(true)
+            && copyright.runtime_top_strip_cells_blank == Some(true)
+            && copyright.runtime_reasserted_logo_cells_match_static_logo == Some(true)
             && copyright.copyright_visible,
         "installed title-logo copyright phase changed"
     );
@@ -181,14 +184,14 @@ mod tests {
     fn installed_manifest_binds_both_logo_phases_tm_copyright_and_exit() {
         let manifest = Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../evidence/private/title-logo-overlay-fixed/manifest.json"
+            "/../../evidence/private/title-logo-runtime-completion/manifest.json"
         ));
         if !manifest.exists() {
             return;
         }
         let evidence = verify_title_logo_runtime_evidence(
             manifest,
-            "c114fd7fab2a87784754643b230e3690ede85a40",
+            "1ddc435b5e678c214c2273ce7a665ba4bf0ade13",
         )
         .unwrap();
 

@@ -21,11 +21,14 @@ const TITLE_ROW_COUNT: usize = 5;
 const TITLE_ROW_WIDTH: usize = 32;
 const TITLE_ROW_COMMAND_BYTE_COUNT: usize = 3 + TITLE_ROW_WIDTH + 1;
 const EXPECTED_OUTPUT_PHYSICAL_CHR_PAGE: usize = 0x16;
-const TITLE_RUNTIME_OVERLAY_STREAM_OFFSET_FROM_TITLE_STREAM: usize = 0xD2;
-const TITLE_RUNTIME_OVERLAY_CELL_COUNT: usize = 11;
-const SOURCE_TITLE_RUNTIME_OVERLAY_STREAM: [u8; 25] = [
-    0x21, 0xA8, 0x05, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x21, 0xCD, 0x03, 0x2B, 0x2C, 0x2D, 0x21, 0xED,
-    0x03, 0x3B, 0x3C, 0x3D, 0x23, 0xD3, 0x01, 0x21, 0x00,
+const TITLE_RUNTIME_COMPLETION_STREAM_OFFSET_FROM_TITLE_STREAM: usize = TITLE_STREAM_BYTE_COUNT;
+const TITLE_RUNTIME_CLEARED_TOP_STRIP_CELL_COUNT: usize = 26;
+const TITLE_RUNTIME_REASSERTED_LOGO_CELL_COUNT: usize = 11;
+const SOURCE_TITLE_RUNTIME_COMPLETION_STREAM: [u8; 55] = [
+    0x21, 0x82, 0x1A, 0x00, 0x01, 0x02, 0xFF, 0xFF, 0xFF, 0x06, 0x07, 0x01, 0x09, 0x0A, 0xFF, 0xFF,
+    0x0D, 0x0E, 0x0F, 0xFF, 0x61, 0x62, 0x63, 0x64, 0x65, 0xFF, 0xFF, 0x68, 0x69, 0x00, 0x21, 0xA8,
+    0x05, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x21, 0xCD, 0x03, 0x2B, 0x2C, 0x2D, 0x21, 0xED, 0x03, 0x3B,
+    0x3C, 0x3D, 0x23, 0xD3, 0x01, 0x21, 0x00,
 ];
 
 pub(crate) struct InstalledTitleLogo {
@@ -38,10 +41,11 @@ pub(crate) struct InstalledTitleLogo {
     pub(crate) physical_chr_page: u8,
     pub(crate) installed_chr_page_sha1: String,
     pub(crate) installed_stream_sha1: String,
-    pub(crate) installed_runtime_overlay_cell_count: usize,
-    pub(crate) installed_runtime_overlay_stream_sha1: String,
+    pub(crate) installed_runtime_cleared_top_strip_cell_count: usize,
+    pub(crate) installed_runtime_reasserted_logo_cell_count: usize,
+    pub(crate) installed_runtime_completion_stream_sha1: String,
     pub(crate) preserved_title_stream_bytes_unchanged: bool,
-    pub(crate) preserved_runtime_overlay_control_bytes_unchanged: bool,
+    pub(crate) preserved_runtime_completion_control_bytes_unchanged: bool,
     pub(crate) unassigned_title_chr_patterns_unchanged: bool,
     pub(crate) tracked_write_count: usize,
 }
@@ -74,30 +78,30 @@ pub(crate) fn install_title_logo_asset(
         installed_tilemap_cell_count += replacement_width;
     }
     ensure_preserved_stream_bytes(source_stream, &installed_stream)?;
-    let runtime_overlay_offset =
-        stream_offset + TITLE_RUNTIME_OVERLAY_STREAM_OFFSET_FROM_TITLE_STREAM;
-    let source_runtime_overlay = source_rom
+    let runtime_completion_offset =
+        stream_offset + TITLE_RUNTIME_COMPLETION_STREAM_OFFSET_FROM_TITLE_STREAM;
+    let source_runtime_completion = source_rom
         .data()
         .get(
-            runtime_overlay_offset
-                ..runtime_overlay_offset + SOURCE_TITLE_RUNTIME_OVERLAY_STREAM.len(),
+            runtime_completion_offset
+                ..runtime_completion_offset + SOURCE_TITLE_RUNTIME_COMPLETION_STREAM.len(),
         )
-        .context("source title runtime-overlay stream is outside the ROM")?;
+        .context("source title runtime-completion stream is outside the ROM")?;
     ensure!(
-        source_runtime_overlay == SOURCE_TITLE_RUNTIME_OVERLAY_STREAM,
-        "source title runtime-overlay stream changed"
+        source_runtime_completion == SOURCE_TITLE_RUNTIME_COMPLETION_STREAM,
+        "source title runtime-completion stream changed"
     );
     ensure!(
         prior_output.get(
-            runtime_overlay_offset
-                ..runtime_overlay_offset + SOURCE_TITLE_RUNTIME_OVERLAY_STREAM.len()
-        ) == Some(source_runtime_overlay),
-        "pre-title cumulative ROM changed the source title runtime-overlay stream"
+            runtime_completion_offset
+                ..runtime_completion_offset + SOURCE_TITLE_RUNTIME_COMPLETION_STREAM.len()
+        ) == Some(source_runtime_completion),
+        "pre-title cumulative ROM changed the source title runtime-completion stream"
     );
-    let installed_runtime_overlay = build_installed_runtime_overlay_stream(&asset.tilemap)?;
-    ensure_runtime_overlay_control_bytes_unchanged(
-        source_runtime_overlay,
-        &installed_runtime_overlay,
+    let installed_runtime_completion = build_installed_runtime_completion_stream(&asset.tilemap)?;
+    ensure_runtime_completion_control_bytes_unchanged(
+        source_runtime_completion,
+        &installed_runtime_completion,
     )?;
 
     let source_page = source_chr_page(source_rom)?;
@@ -138,10 +142,10 @@ pub(crate) fn install_title_logo_asset(
         &installed_stream,
     )?;
     image.write_expected(
-        "install Korean title-logo runtime overlay",
-        runtime_overlay_offset,
-        source_runtime_overlay,
-        &installed_runtime_overlay,
+        "install Korean title-logo runtime completion",
+        runtime_completion_offset,
+        source_runtime_completion,
+        &installed_runtime_completion,
     )?;
     image.write_expected(
         "install Korean title-logo patterns",
@@ -164,9 +168,10 @@ pub(crate) fn install_title_logo_asset(
         "title-logo output stream changed after installation"
     );
     ensure!(
-        output[runtime_overlay_offset..runtime_overlay_offset + installed_runtime_overlay.len()]
-            == installed_runtime_overlay,
-        "title-logo runtime-overlay stream changed after installation"
+        output[runtime_completion_offset
+            ..runtime_completion_offset + installed_runtime_completion.len()]
+            == installed_runtime_completion,
+        "title-logo runtime-completion stream changed after installation"
     );
     let output_page = &output_rom.chr()
         [physical_chr_page * FONT_PAGE_SIZE..(physical_chr_page + 1) * FONT_PAGE_SIZE];
@@ -186,44 +191,53 @@ pub(crate) fn install_title_logo_asset(
             .context("title-logo physical CHR page does not fit u8")?,
         installed_chr_page_sha1: sha1_hex(&installed_page),
         installed_stream_sha1: sha1_hex(&installed_stream),
-        installed_runtime_overlay_cell_count: TITLE_RUNTIME_OVERLAY_CELL_COUNT,
-        installed_runtime_overlay_stream_sha1: sha1_hex(&installed_runtime_overlay),
+        installed_runtime_cleared_top_strip_cell_count: TITLE_RUNTIME_CLEARED_TOP_STRIP_CELL_COUNT,
+        installed_runtime_reasserted_logo_cell_count: TITLE_RUNTIME_REASSERTED_LOGO_CELL_COUNT,
+        installed_runtime_completion_stream_sha1: sha1_hex(&installed_runtime_completion),
         preserved_title_stream_bytes_unchanged: true,
-        preserved_runtime_overlay_control_bytes_unchanged: true,
+        preserved_runtime_completion_control_bytes_unchanged: true,
         unassigned_title_chr_patterns_unchanged: true,
         tracked_write_count,
     })
 }
 
-fn build_installed_runtime_overlay_stream(tilemap: &[u8]) -> Result<[u8; 25]> {
+fn build_installed_runtime_completion_stream(tilemap: &[u8]) -> Result<[u8; 55]> {
     ensure!(
         tilemap.len() == LOGO_TILE_COLUMN_COUNT * TITLE_ROW_COUNT,
         "title-logo tilemap dimensions changed"
     );
-    let mut installed = SOURCE_TITLE_RUNTIME_OVERLAY_STREAM;
-    installed[3..8].copy_from_slice(&tilemap[6..11]);
-    installed[11..14]
+    let mut installed = SOURCE_TITLE_RUNTIME_COMPLETION_STREAM;
+    installed[3..29].fill(0xFF);
+    installed[33..38].copy_from_slice(&tilemap[6..11]);
+    installed[41..44]
         .copy_from_slice(&tilemap[LOGO_TILE_COLUMN_COUNT + 11..LOGO_TILE_COLUMN_COUNT + 14]);
-    installed[17..20].copy_from_slice(
+    installed[47..50].copy_from_slice(
         &tilemap[2 * LOGO_TILE_COLUMN_COUNT + 11..2 * LOGO_TILE_COLUMN_COUNT + 14],
     );
     Ok(installed)
 }
 
-fn ensure_runtime_overlay_control_bytes_unchanged(source: &[u8], installed: &[u8]) -> Result<()> {
+fn ensure_runtime_completion_control_bytes_unchanged(
+    source: &[u8],
+    installed: &[u8],
+) -> Result<()> {
     ensure!(
-        source.len() == SOURCE_TITLE_RUNTIME_OVERLAY_STREAM.len()
-            && installed.len() == SOURCE_TITLE_RUNTIME_OVERLAY_STREAM.len(),
-        "title runtime-overlay stream length changed"
+        source.len() == SOURCE_TITLE_RUNTIME_COMPLETION_STREAM.len()
+            && installed.len() == SOURCE_TITLE_RUNTIME_COMPLETION_STREAM.len(),
+        "title runtime-completion stream length changed"
     );
-    let replaced_offsets = (3..8).chain(11..14).chain(17..20).collect::<BTreeSet<_>>();
+    let replaced_offsets = (3..29)
+        .chain(33..38)
+        .chain(41..44)
+        .chain(47..50)
+        .collect::<BTreeSet<_>>();
     ensure!(
         source
             .iter()
             .zip(installed)
             .enumerate()
             .all(|(offset, (before, after))| replaced_offsets.contains(&offset) || before == after),
-        "title runtime-overlay installation changed a control byte"
+        "title runtime-completion installation changed a control byte"
     );
     Ok(())
 }
@@ -275,16 +289,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn completed_title_overlay_reasserts_the_static_korean_logo_cells() {
+    fn completed_title_runtime_clears_the_original_top_strip_and_reasserts_logo_cells() {
         let tilemap = (0..TITLE_ROW_COUNT
             * (TITLE_TRANSLATION_MAX_END_COLUMN_EXCLUSIVE - TITLE_TRANSLATION_FIRST_COLUMN))
             .map(|index| u8::try_from(index + 1).unwrap())
             .collect::<Vec<_>>();
 
-        let overlay = build_installed_runtime_overlay_stream(&tilemap).unwrap();
+        let completion = build_installed_runtime_completion_stream(&tilemap).unwrap();
 
-        assert_eq!(&overlay[3..8], &tilemap[6..11]);
-        assert_eq!(&overlay[11..14], &tilemap[38..41]);
-        assert_eq!(&overlay[17..20], &tilemap[65..68]);
+        assert!(completion[3..29].iter().all(|code| *code == 0xFF));
+        assert_eq!(&completion[33..38], &tilemap[6..11]);
+        assert_eq!(&completion[41..44], &tilemap[38..41]);
+        assert_eq!(&completion[47..50], &tilemap[65..68]);
     }
 }

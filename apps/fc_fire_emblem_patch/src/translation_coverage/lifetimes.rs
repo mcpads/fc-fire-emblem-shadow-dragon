@@ -17,6 +17,7 @@ mod intro_dialogue;
 mod item_flow;
 mod map_menu;
 mod options_menu;
+mod title_graphics;
 mod unit_roster;
 mod unit_ui;
 mod weapon_shop;
@@ -51,6 +52,12 @@ pub(super) struct LifetimeInputBindings<'a> {
     pub(super) options_preserved_active_code_count: usize,
     pub(super) options_total_slot_demand: usize,
     pub(super) options_capacity_bound_to_build: bool,
+    pub(super) title_logo_installed_unique_tile_count: usize,
+    pub(super) title_logo_source_owned_tile_count: usize,
+    pub(super) title_logo_installed_tilemap_cell_count: usize,
+    pub(super) title_logo_installed_runtime_cleared_top_strip_cell_count: usize,
+    pub(super) title_logo_installed_runtime_reasserted_logo_cell_count: usize,
+    pub(super) title_logo_runtime_bound_to_build: bool,
     pub(super) current_build_report_sha1: &'a str,
     pub(super) roster_page_target_glyph_count: usize,
     pub(super) roster_page_preserved_active_code_count: usize,
@@ -87,6 +94,7 @@ struct ConsumerLifetimeDemands {
     item_flow: Vec<TranslationLifetimeDemandReport>,
     front_end_menu: TranslationLifetimeDemandReport,
     options_menu: TranslationLifetimeDemandReport,
+    title_graphics: TranslationLifetimeDemandReport,
     map_menu: TranslationLifetimeDemandReport,
     chapter_save: Vec<TranslationLifetimeDemandReport>,
     ending_chapter_record: TranslationLifetimeDemandReport,
@@ -241,6 +249,17 @@ pub(super) fn inspect_translation_lifetimes(
         capacity_bound_to_build: bindings.options_capacity_bound_to_build,
         evidence_report_sha1: bindings.current_build_report_sha1,
     })?;
+    let title_graphics_demand = title_graphics::inspect(title_graphics::InputBindings {
+        installed_unique_tile_count: bindings.title_logo_installed_unique_tile_count,
+        source_owned_tile_count: bindings.title_logo_source_owned_tile_count,
+        installed_tilemap_cell_count: bindings.title_logo_installed_tilemap_cell_count,
+        installed_runtime_cleared_top_strip_cell_count: bindings
+            .title_logo_installed_runtime_cleared_top_strip_cell_count,
+        installed_runtime_reasserted_logo_cell_count: bindings
+            .title_logo_installed_runtime_reasserted_logo_cell_count,
+        runtime_bound_to_build: bindings.title_logo_runtime_bound_to_build,
+        evidence_report_sha1: bindings.current_build_report_sha1,
+    })?;
     let map_menu_demand = map_menu::inspect(map_menu::InputBindings {
         source_path: bindings.source_path,
         localization_path: bindings.map_menu_localization_path,
@@ -292,6 +311,7 @@ pub(super) fn inspect_translation_lifetimes(
             item_flow: item_flow_demands,
             front_end_menu: front_end_menu_demand,
             options_menu: options_menu_demand,
+            title_graphics: title_graphics_demand,
             map_menu: map_menu_demand,
             chapter_save: chapter_save_demands,
             ending_chapter_record: ending_chapter_record_demand,
@@ -357,6 +377,7 @@ fn build_translation_lifetime_inventory(
     demands.extend(consumer_demands.item_flow);
     demands.push(consumer_demands.front_end_menu);
     demands.push(consumer_demands.options_menu);
+    demands.push(consumer_demands.title_graphics);
     demands.push(consumer_demands.map_menu);
     demands.extend(consumer_demands.chapter_save);
     demands.push(consumer_demands.ending_chapter_record);
@@ -434,20 +455,29 @@ fn build_translation_lifetime_inventory(
         .difference(&measured_roles)
         .map(|role| (*role).to_owned())
         .collect::<Vec<_>>();
+    let all_lifetimes_measured = unmeasured_screen_roles.is_empty();
     let strongest = demands
         .iter()
         .max_by_key(|demand| demand.total_slot_demand)
         .context("translation lifetime inventory has no measured demand")?;
     Ok(TranslationLifetimeInventory {
         strongest: StrongestLifetimeReport {
-            state: "partial",
+            state: if all_lifetimes_measured {
+                "complete"
+            } else {
+                "partial"
+            },
             compared_lifetime_count: demands.len(),
             japanese_bearing_screen_count: japanese_bearing_screen_roles.len(),
             selected_screen_role: Some(strongest.screen_role),
             selected_slot_demand: Some(strongest.total_slot_demand),
             main_dialogue_maximum_target_glyph_count: main.max_transition_chain_unique_glyph_count,
             main_dialogue_maximum_screen_bound: main.maximum_source_binding.screen_lifetime_bound,
-            next_gate: "compare the remaining unmeasured screen lifetimes",
+            next_gate: if all_lifetimes_measured {
+                "install the remaining translated domains and verify zero target Japanese on one final ROM"
+            } else {
+                "compare the remaining unmeasured screen lifetimes"
+            },
         },
         demands,
         unmeasured_screen_roles,
@@ -593,6 +623,12 @@ mod tests {
                 options_preserved_active_code_count: 78,
                 options_total_slot_demand: 90,
                 options_capacity_bound_to_build: true,
+                title_logo_installed_unique_tile_count: 117,
+                title_logo_source_owned_tile_count: 121,
+                title_logo_installed_tilemap_cell_count: 134,
+                title_logo_installed_runtime_cleared_top_strip_cell_count: 26,
+                title_logo_installed_runtime_reasserted_logo_cell_count: 11,
+                title_logo_runtime_bound_to_build: true,
                 current_build_report_sha1: "build-report",
                 roster_page_target_glyph_count: 72,
                 roster_page_preserved_active_code_count: 18,
@@ -615,6 +651,16 @@ mod tests {
                 item_flow: item_flow_demands,
                 front_end_menu: front_end_menu_demand,
                 options_menu: options_menu_demand,
+                title_graphics: title_graphics::inspect(title_graphics::InputBindings {
+                    installed_unique_tile_count: 117,
+                    source_owned_tile_count: 121,
+                    installed_tilemap_cell_count: 134,
+                    installed_runtime_cleared_top_strip_cell_count: 26,
+                    installed_runtime_reasserted_logo_cell_count: 11,
+                    runtime_bound_to_build: true,
+                    evidence_report_sha1: "build-report",
+                })
+                .unwrap(),
                 map_menu: map_menu_demand,
                 chapter_save: Vec::new(),
                 ending_chapter_record: TranslationLifetimeDemandReport {
@@ -645,8 +691,8 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(inventory.demands.len(), 29);
-        assert_eq!(inventory.strongest.state, "partial");
+        assert_eq!(inventory.demands.len(), 30);
+        assert_eq!(inventory.strongest.state, "complete");
         assert_eq!(inventory.strongest.selected_screen_role, Some("map_menu"));
         assert_eq!(inventory.strongest.selected_slot_demand, Some(203));
         assert_eq!(
@@ -654,7 +700,7 @@ mod tests {
             175
         );
         assert!(inventory.strongest.main_dialogue_maximum_screen_bound);
-        assert_eq!(inventory.unmeasured_screen_roles, ["title"]);
+        assert!(inventory.unmeasured_screen_roles.is_empty());
     }
 
     fn unit_ui_demands() -> Vec<TranslationLifetimeDemandReport> {

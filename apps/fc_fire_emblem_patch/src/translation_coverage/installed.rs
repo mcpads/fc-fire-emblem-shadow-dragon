@@ -30,6 +30,7 @@ struct CurrentBuildReport {
     front_end_menu: CurrentFrontEndMenu,
     playable_unit_names: CurrentUnitNames,
     automatic_class_profiles: CurrentClassProfiles,
+    title_logo: CurrentTitleLogo,
     weapon_shop_shared_text: CurrentWeaponShopSharedText,
     battle_text: CurrentBattleText,
 }
@@ -133,6 +134,23 @@ struct CurrentClassProfiles {
 }
 
 #[derive(Debug, Deserialize)]
+struct CurrentTitleLogo {
+    source_owned_tile_count: usize,
+    installed_unique_tile_count: usize,
+    installed_tilemap_cell_count: usize,
+    installed_runtime_cleared_top_strip_cell_count: usize,
+    installed_runtime_reasserted_logo_cell_count: usize,
+    preserved_title_stream_bytes_unchanged: bool,
+    preserved_runtime_completion_control_bytes_unchanged: bool,
+    unassigned_title_chr_patterns_unchanged: bool,
+    source_sword_sprite_tm_and_copyright_assets_unchanged: bool,
+    runtime_evidence_manifest_sha1: String,
+    runtime_sample_count: usize,
+    runtime_unique_image_count: usize,
+    runtime_bound_to_build: bool,
+}
+
+#[derive(Debug, Deserialize)]
 struct CurrentWeaponShopSharedText {
     screen_role: String,
     installed_item_name_count: usize,
@@ -190,6 +208,12 @@ pub(crate) struct CurrentInstallation {
     pub(crate) options_preserved_active_code_count: usize,
     pub(crate) options_total_slot_demand: usize,
     pub(crate) options_capacity_bound_to_build: bool,
+    pub(crate) title_logo_source_owned_tile_count: usize,
+    pub(crate) title_logo_installed_unique_tile_count: usize,
+    pub(crate) title_logo_installed_tilemap_cell_count: usize,
+    pub(crate) title_logo_installed_runtime_cleared_top_strip_cell_count: usize,
+    pub(crate) title_logo_installed_runtime_reasserted_logo_cell_count: usize,
+    pub(crate) title_logo_runtime_bound_to_build: bool,
     pub(crate) roster_page_target_glyph_count: usize,
     pub(crate) roster_page_preserved_active_code_count: usize,
     pub(crate) roster_page_total_slot_demand: usize,
@@ -236,6 +260,7 @@ pub(crate) fn inspect_current_installation(
     validate_unit_roster_lifetime(&report)?;
     validate_front_end_lifetime(&report)?;
     validate_options_lifetime(&report)?;
+    validate_title_logo_lifetime(&report)?;
     let intro_dialogue_capacities = collect_intro_dialogue_capacities(&report)?;
     let domains = collect_domain_installations(&report)?;
 
@@ -261,6 +286,16 @@ pub(crate) fn inspect_current_installation(
         options_preserved_active_code_count: report.options_menu.preserved_active_code_count,
         options_total_slot_demand: report.options_menu.total_slot_demand,
         options_capacity_bound_to_build: report.options_menu.capacity_bound_to_build,
+        title_logo_source_owned_tile_count: report.title_logo.source_owned_tile_count,
+        title_logo_installed_unique_tile_count: report.title_logo.installed_unique_tile_count,
+        title_logo_installed_tilemap_cell_count: report.title_logo.installed_tilemap_cell_count,
+        title_logo_installed_runtime_cleared_top_strip_cell_count: report
+            .title_logo
+            .installed_runtime_cleared_top_strip_cell_count,
+        title_logo_installed_runtime_reasserted_logo_cell_count: report
+            .title_logo
+            .installed_runtime_reasserted_logo_cell_count,
+        title_logo_runtime_bound_to_build: report.title_logo.runtime_bound_to_build,
         roster_page_target_glyph_count: report.playable_unit_names.roster_page_target_glyph_count,
         roster_page_preserved_active_code_count: report
             .playable_unit_names
@@ -360,6 +395,27 @@ fn validate_options_lifetime(report: &CurrentBuildReport) -> Result<()> {
             && options.total_slot_demand <= crate::font_slots::ACTIVE_HANGUL_SLOT_COUNT
             && options.capacity_bound_to_build,
         "current options-menu lifetime changed"
+    );
+    Ok(())
+}
+
+fn validate_title_logo_lifetime(report: &CurrentBuildReport) -> Result<()> {
+    let title = &report.title_logo;
+    ensure!(
+        title.installed_unique_tile_count > 0
+            && title.installed_unique_tile_count <= title.source_owned_tile_count
+            && title.installed_tilemap_cell_count >= title.installed_unique_tile_count
+            && title.installed_runtime_cleared_top_strip_cell_count == 26
+            && title.installed_runtime_reasserted_logo_cell_count == 11
+            && title.preserved_title_stream_bytes_unchanged
+            && title.preserved_runtime_completion_control_bytes_unchanged
+            && title.unassigned_title_chr_patterns_unchanged
+            && title.source_sword_sprite_tm_and_copyright_assets_unchanged
+            && !title.runtime_evidence_manifest_sha1.is_empty()
+            && title.runtime_sample_count == 4
+            && title.runtime_unique_image_count == 4
+            && title.runtime_bound_to_build,
+        "current title-logo lifetime changed"
     );
     Ok(())
 }
@@ -570,6 +626,18 @@ fn collect_domain_installations(
             &["class_profile"],
             &profile_runtime,
         ),
+    )?;
+
+    let title_logo_runtime = report
+        .title_logo
+        .runtime_bound_to_build
+        .then_some("title")
+        .into_iter()
+        .collect::<Vec<_>>();
+    put(
+        &mut domains,
+        "title_graphics",
+        installation(1, &["title"], &title_logo_runtime),
     )?;
 
     let title_screens = report
@@ -849,6 +917,21 @@ mod tests {
                 "preserved_active_code_count": 0,
                 "runtime_bound_to_build": false
             },
+            "title_logo": {
+                "source_owned_tile_count": 121,
+                "installed_unique_tile_count": 117,
+                "installed_tilemap_cell_count": 134,
+                "installed_runtime_cleared_top_strip_cell_count": 26,
+                "installed_runtime_reasserted_logo_cell_count": 11,
+                "preserved_title_stream_bytes_unchanged": true,
+                "preserved_runtime_completion_control_bytes_unchanged": true,
+                "unassigned_title_chr_patterns_unchanged": true,
+                "source_sword_sprite_tm_and_copyright_assets_unchanged": true,
+                "runtime_evidence_manifest_sha1": "title-runtime",
+                "runtime_sample_count": 4,
+                "runtime_unique_image_count": 4,
+                "runtime_bound_to_build": true
+            },
             "weapon_shop_shared_text": {
                 "screen_role": "weapon_shop_shared_text",
                 "installed_item_name_count": 6,
@@ -977,6 +1060,14 @@ mod tests {
             installations["battle_dialogue"]
                 .runtime_bound_screen_roles
                 .is_empty()
+        );
+        assert_eq!(
+            installations["title_graphics"].installed_screen_roles,
+            ["title"]
+        );
+        assert_eq!(
+            installations["title_graphics"].runtime_bound_screen_roles,
+            ["title"]
         );
         assert_eq!(
             installations["main_dialogue"].installed_screen_roles,
