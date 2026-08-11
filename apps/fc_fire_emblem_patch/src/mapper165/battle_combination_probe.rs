@@ -4,7 +4,9 @@ use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
-    battle_text_workset::FORECAST_LABEL_GLYPHS,
+    battle_text_workset::{
+        FORECAST_LABEL_FILE_OFFSET, FORECAST_LABEL_GLYPHS, FORECAST_LABEL_SOURCE,
+    },
     dialogue_assets::plan_battle_dialogue_records,
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
@@ -52,9 +54,6 @@ const GAMEPLAY_FIXED_SELECTIONS: [(&str, usize); 8] = [
     ("terrain-names", TERRAIN_SOURCE_INDICES[0]),
     ("terrain-names", TERRAIN_SOURCE_INDICES[1]),
 ];
-pub(super) const FORECAST_LABEL_FILE_OFFSET: usize = 0x156C6;
-pub(super) const FORECAST_LABEL_SOURCE: [u8; 10] =
-    [0x22, 0x4D, 0x06, 0x11, 0x08, 0x01, 0x09, 0x02, 0x05, 0x00];
 pub(super) const GAMEPLAY_BATTLE_PRESERVED_ACTIVE_CODES: [u8; 119] = [
     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0B, 0x0C, 0x0E, 0x10, 0x11, 0x12,
     0x13, 0x15, 0x16, 0x19, 0x1A, 0x1C, 0x1D, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,

@@ -43,7 +43,7 @@ cargo run -p fc-fire-emblem-patch -- analyze-chapter-victory \
 
 보고서는 원문이나 캡처를 포함하지 않고 화면 역할, 구조 상태와 다음 관문만 기록한다. 실행 관측이 없는 화면은 추측으로 채우지 않으며, CHR 쌍 목록도 같은 레지스트리에서 생성해 화면 목록과 매퍼 분석이 어긋나면 실패한다.
 
-`analyze-translation-coverage`는 화면 계약을 번역 원천·입력 상태·현재 누적 ROM의 설치 소비자에 연결한다. 단위가 다른 대사 줄, 이름, 프로필, 라벨을 하나의 숫자로 더하지 않고 22개 도메인별로 센다. 일본어 대상 화면 36개는 모두 적어도 한 도메인에 속해야 하며, 미등록 화면·도메인·설치 소비자, 작업공간 결속 불일치, 현재 ROM과 빌드 보고서 SHA-1 불일치는 즉시 실패한다. 공개 보고서에는 원문·번역문·글리프 문자·입력 경로를 넣지 않는다. 현재 22개 도메인은 모두 원천 결속됐고 번역 입력 완료는 14개다. 중단 화면은 상태 8의 `B0:01` 선택을 증명해 주 대사 소비자로 합쳤다. 맵 메뉴는 `0B:$8187` 생성자와 `$81B2`의 6항목 연속 블록, 타이틀은 `0D:$B2B0`의 5개 PPU 행과 CHR 페이지 `14`를 결속하고 원본 `TM`·`©1990 Nintendo`를 제외한다. 모든 소비자에 설치된 도메인은 자동 병종 소개·시작 메뉴·설정·부대 목록 머리말 4개다. 보고서 SHA-1은 `1a25aea03b1ce7a77640cd7a85e0326a21e2b7d5`다.
+`analyze-translation-coverage`는 화면 계약을 번역 원천·입력 상태·현재 누적 ROM의 설치 소비자에 연결한다. 단위가 다른 대사 줄, 이름, 프로필, 라벨을 하나의 숫자로 더하지 않고 22개 도메인별로 센다. 일본어 대상 화면 36개는 모두 적어도 한 도메인에 속해야 하며, 미등록 화면·도메인·설치 소비자, 작업공간 결속 불일치, 현재 ROM과 빌드 보고서 SHA-1 불일치는 즉시 실패한다. 공개 보고서에는 원문·번역문·글리프 문자·입력 경로를 넣지 않는다. 현재 22개 도메인은 모두 원천 결속과 번역 입력을 마쳤다. 설정·부대 목록 머리말의 초기 기술 실험도 정식 검토 대기 입력으로 승격했고, 능력치·명령 25항목, 아이템 행동 4항목, 전투 예측·저장 제안·엔딩 합계 3항목, 지명 24개를 원천에 결속했다. 모든 소비자에 설치된 도메인은 자동 병종 소개·시작 메뉴·설정·부대 목록 머리말 4개다. 보고서 SHA-1은 `582055b116646ccac0c6a7f866db30e0514898cd`다.
 
 ```sh
 cargo run -p fc-fire-emblem-patch -- analyze-translation-coverage \
@@ -387,11 +387,12 @@ cargo run -p fc-fire-emblem-patch -- build-battle-cache-upload-probe \
 cargo run -p fc-fire-emblem-patch -- extract-chapter-title-workspace "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- extract-front-end-menu-workspace "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- extract-unit-name-workspace "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
+cargo run -p fc-fire-emblem-patch -- extract-location-name-workspace "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- extract-class-profile-workspace "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- build-kr-patch "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 ```
 
-장 제목 작업공간은 25개, 작은 메뉴 작업공간은 7개, 아군명 작업공간은 52개 원문 인덱스에 각각 결속한다. 아군명 번역은 한 의미 자산에서 소비자별 바이트 투영을 만들기 때문에 부대 목록과 유닛 UI의 물리 코드가 달라도 번역은 중복하지 않는다. 포인터 선택기는 합성 상태 `$02`에서 부대 목록 표, `$04`에서 유닛 UI 표를 쓰고 나머지는 고정 뱅크 `$DE2B`의 원본 표로 돌아간다. 전투·엔딩 소비자의 현재 일본어는 보존 목표가 아니라 자체 글꼴 수명이 아직 설치되지 않은 번역 잔여분이다.
+장 제목 작업공간은 25개, 작은 메뉴 작업공간은 7개, 아군명 작업공간은 52개, 지명 작업공간은 24개 원문 인덱스에 각각 결속한다. 아군명 번역은 한 의미 자산에서 소비자별 바이트 투영을 만들기 때문에 부대 목록과 유닛 UI의 물리 코드가 달라도 번역은 중복하지 않는다. 포인터 선택기는 합성 상태 `$02`에서 부대 목록 표, `$04`에서 유닛 UI 표를 쓰고 나머지는 고정 뱅크 `$DE2B`의 원본 표로 돌아간다. 전투·엔딩 소비자의 현재 일본어는 보존 목표가 아니라 자체 글꼴 수명이 아직 설치되지 않은 번역 잔여분이다.
 
 병종 소개 작업공간은 인덱스 `$0559`의 22개 제목과 75개 설명 줄을 원본 포인터·저장 바이트에 결속한다. 빌드는 원본 영문 능력치 약어와 숫자를 보호하고 일본어 제목·설명만 바꾸며, 모든 줄이 원래 저장 길이 안에 드는지 검사한다. 자동 경로의 첫·중간·페이지 경계·마지막 소개, 검은 전환과 뒤의 영어 화면을 해당 단계 출력 SHA-1에 결속한 7개 무입력 표본이 없으면 빌드가 실패한다.
 

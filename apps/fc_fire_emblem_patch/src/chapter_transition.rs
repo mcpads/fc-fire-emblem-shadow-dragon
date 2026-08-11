@@ -14,6 +14,7 @@ mod source_spec;
 mod tests;
 mod title_localization;
 mod translation_surfaces;
+mod translation_workspace;
 mod unit_record_history;
 
 use std::{fs, path::Path};
@@ -38,6 +39,7 @@ pub(crate) use title_localization::{
     ChapterTitlePlannedEntry, extract_chapter_title_workspace, plan_chapter_titles,
 };
 use translation_surfaces::{TranslationSurfaceContracts, bind_translation_surfaces};
+pub(crate) use translation_workspace::plan_transition_labels;
 
 fn source_region_specs() -> impl Iterator<Item = SourceRegionSpec> {
     SOURCE_REGIONS

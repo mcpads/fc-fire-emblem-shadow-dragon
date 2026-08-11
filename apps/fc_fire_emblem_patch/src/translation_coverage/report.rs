@@ -13,7 +13,6 @@ pub(crate) enum TranslationInputState {
     Complete,
     Partial,
     Missing,
-    TechnicalProof,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

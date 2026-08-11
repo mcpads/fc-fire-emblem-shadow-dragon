@@ -49,6 +49,7 @@ pub struct ValidatedLocalization {
     pub entries: Vec<OptionEntry>,
     pub tiles: BTreeMap<u8, [u8; 16]>,
     pub replacement_table: [u8; 24],
+    pub review_complete: bool,
 }
 
 impl OptionsLocalization {
@@ -68,8 +69,8 @@ impl OptionsLocalization {
             "preserve_existing_english must be true"
         );
         ensure!(
-            self.status == "technical_poc",
-            "status must be technical_poc"
+            matches!(self.status.as_str(), "needs_human_review" | "complete"),
+            "status must be needs_human_review or complete"
         );
         ensure!(
             self.entries.len() == 3,
@@ -149,6 +150,7 @@ impl OptionsLocalization {
             entries: self.entries.clone(),
             tiles,
             replacement_table: replacement.try_into().unwrap(),
+            review_complete: self.status == "complete",
         })
     }
 }

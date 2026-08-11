@@ -1,0 +1,27 @@
+{
+  "format_version": 1,
+  "source_sha1": "0179c550d424e0397496078789e7b116601d120c",
+  "translate_from": "ja",
+  "translate_to": "ko",
+  "preserve_existing_english_and_digits": true,
+  "entries": [
+    {
+      "id": "battle-forecast-label",
+      "japanese_markup": "ちけいこうか",
+      "korean_markup": "지형효과",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "chapter-save-offer-label",
+      "japanese_markup": "セーフ゛しますか{FF}{9C}",
+      "korean_markup": "저장할까요{FF}{9C}",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "ending-total-turn-label",
+      "japanese_markup": "せ゛んターンすう{ED}{19}",
+      "korean_markup": "총턴수{ED}{19}",
+      "status": "needs_human_review"
+    }
+  ]
+}

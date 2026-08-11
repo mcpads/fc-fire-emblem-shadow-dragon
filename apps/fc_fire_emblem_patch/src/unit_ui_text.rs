@@ -14,8 +14,10 @@ mod glyph_budget;
 mod source_spec;
 #[cfg(test)]
 mod tests;
+mod workspace;
 
 use source_spec::*;
+pub(crate) use workspace::plan_unit_ui_labels;
 
 const PRG_BANK_SIZE: usize = 16 * 1024;
 pub(super) const UNIT_UI_BANK: usize = 0x0B;

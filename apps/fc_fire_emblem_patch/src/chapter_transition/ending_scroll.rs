@@ -8,6 +8,7 @@ use crate::{
         SourceLiteralCodeClass, TranslationSurfaceLiteralInventory, classify_source_literal_code,
         classify_translation_surface_literal_codes,
     },
+    text_inventory::decode_source_markup,
 };
 
 use super::{
@@ -75,6 +76,38 @@ struct EndingScrollRecord {
     payload_end_exclusive: usize,
 }
 
+pub(super) struct EndingAggregateLabelSource {
+    pub(super) japanese_markup: String,
+    pub(super) max_visible_cells: usize,
+}
+
+pub(super) fn bind_ending_aggregate_label_source(rom: &Rom) -> Result<EndingAggregateLabelSource> {
+    bind_ending_chapter_record_translation_surface(rom)?;
+    let stream_file_offset = source_file_offset(0x04, ENDING_SCROLL_STREAM_ADDRESS)?;
+    let stream_end_file_offset =
+        source_file_offset(0x04, ENDING_SCROLL_STREAM_END_EXCLUSIVE_ADDRESS)?;
+    let stream = &rom.data()[stream_file_offset..stream_end_file_offset];
+    let records = parse_records(stream)?;
+    let aggregate = records[ENDING_SCROLL_AGGREGATE_RECORD_INDEX];
+    let payload = &stream[aggregate.payload_start..aggregate.payload_end_exclusive];
+    let interpolation_offset = payload
+        .iter()
+        .position(|byte| *byte == ENDING_SCROLL_TURN_INTERPOLATION)
+        .context("ending aggregate record has no turn interpolation")?;
+    ensure!(
+        payload.get(interpolation_offset + 1) == Some(&0x19)
+            && !payload[interpolation_offset + 2..].contains(&ENDING_SCROLL_TURN_INTERPOLATION),
+        "ending aggregate interpolation changed"
+    );
+    let mut japanese_markup = decode_source_markup(&payload[..interpolation_offset]);
+    japanese_markup.push_str("{ED}{19}");
+    japanese_markup.push_str(&decode_source_markup(&payload[interpolation_offset + 2..]));
+    Ok(EndingAggregateLabelSource {
+        japanese_markup,
+        max_visible_cells: payload.len() - 2,
+    })
+}
+
 pub(super) fn bind_ending_chapter_record_translation_surface(
     rom: &Rom,
 ) -> Result<EndingChapterRecordTranslationSurface> {
@@ -90,35 +123,7 @@ pub(super) fn bind_ending_chapter_record_translation_surface(
         "ending scroll stream terminal changed"
     );
 
-    let mut records = Vec::new();
-    let mut cursor = 0_usize;
-    while cursor < stream.len() {
-        let header = stream[cursor];
-        if header == ENDING_SCROLL_TERMINAL {
-            ensure!(
-                cursor + 1 == stream.len(),
-                "ending scroll has bytes after its terminal"
-            );
-            break;
-        }
-        ensure!(
-            header != 0xEC,
-            "ending scroll reached an unexpected EC terminal"
-        );
-        let payload_start = cursor + 1;
-        let relative_end = stream[payload_start..]
-            .iter()
-            .position(|byte| *byte == ENDING_SCROLL_RECORD_END)
-            .context("ending scroll record has no EF terminator")?;
-        let payload_end_exclusive = payload_start + relative_end;
-        records.push(EndingScrollRecord {
-            header,
-            payload_start,
-            payload_end_exclusive,
-        });
-        cursor = payload_end_exclusive + 1;
-    }
-    ensure!(records.len() == 113, "ending scroll record count changed");
+    let records = parse_records(stream)?;
     ensure!(
         records[..ENDING_SCROLL_PRESERVED_RECORD_COUNT]
             .iter()
@@ -266,6 +271,43 @@ pub(super) fn bind_ending_chapter_record_translation_surface(
     })
 }
 
+fn parse_records(stream: &[u8]) -> Result<Vec<EndingScrollRecord>> {
+    ensure!(
+        stream.last() == Some(&ENDING_SCROLL_TERMINAL),
+        "ending scroll stream terminal changed"
+    );
+    let mut records = Vec::new();
+    let mut cursor = 0;
+    while cursor < stream.len() {
+        let header = stream[cursor];
+        if header == ENDING_SCROLL_TERMINAL {
+            ensure!(
+                cursor + 1 == stream.len(),
+                "ending scroll has bytes after its terminal"
+            );
+            break;
+        }
+        ensure!(
+            header != 0xEC,
+            "ending scroll reached an unexpected EC terminal"
+        );
+        let payload_start = cursor + 1;
+        let relative_end = stream[payload_start..]
+            .iter()
+            .position(|byte| *byte == ENDING_SCROLL_RECORD_END)
+            .context("ending scroll record has no EF terminator")?;
+        let payload_end_exclusive = payload_start + relative_end;
+        records.push(EndingScrollRecord {
+            header,
+            payload_start,
+            payload_end_exclusive,
+        });
+        cursor = payload_end_exclusive + 1;
+    }
+    ensure!(records.len() == 113, "ending scroll record count changed");
+    Ok(records)
+}
+
 fn ending_scroll_literal_codes(payload: &[u8], record_role: &str) -> Result<Vec<u8>> {
     let mut codes = Vec::new();
     let mut cursor = 0;
@@ -294,6 +336,8 @@ fn semantic_title_bytes(bytes: &[u8]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
 
     #[test]
@@ -302,5 +346,19 @@ mod tests {
             ending_scroll_literal_codes(&[0x01, 0xED, 0x19, 0x60, 0xFF], "test").unwrap(),
             [0x01, 0x60, 0xFF]
         );
+    }
+
+    #[test]
+    fn ending_aggregate_label_source_is_semantically_bound() {
+        let source = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
+        ));
+        if !source.exists() {
+            return;
+        }
+        let rom = Rom::from_path(source).unwrap();
+        let label = bind_ending_aggregate_label_source(&rom).unwrap();
+        assert_eq!(label.japanese_markup, "せ゛んターンすう{ED}{19}");
     }
 }

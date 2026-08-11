@@ -166,6 +166,10 @@ pub(crate) fn plan_unit_name_text(rom: &Rom, workspace_path: &Path) -> Result<Fi
     plan_workspace(rom, workspace_path, &["unit-names"], false, 52)
 }
 
+pub(crate) fn plan_location_name_text(rom: &Rom, workspace_path: &Path) -> Result<FixedTextPlan> {
+    plan_workspace(rom, workspace_path, &["location-names"], false, 24)
+}
+
 fn plan_workspace(
     rom: &Rom,
     workspace_path: &Path,
@@ -267,6 +271,13 @@ pub(crate) fn extract_unit_name_workspace(
     workspace_path: &Path,
 ) -> Result<FixedTextWorkspaceSummary> {
     extract_workspace(source_path, workspace_path, &["unit-names"], false, 52)
+}
+
+pub(crate) fn extract_location_name_workspace(
+    source_path: &Path,
+    workspace_path: &Path,
+) -> Result<FixedTextWorkspaceSummary> {
+    extract_workspace(source_path, workspace_path, &["location-names"], false, 24)
 }
 
 fn extract_workspace(
@@ -602,5 +613,24 @@ mod tests {
         assert_eq!(preserve_translations(&mut fresh, &existing).unwrap(), 1);
         assert_eq!(fresh.entries[0].korean_markup, "맘쿠트");
         assert_eq!(fresh.entries[0].status, "needs_human_review");
+    }
+
+    #[test]
+    fn public_location_workspace_covers_all_twenty_four_names() {
+        let source = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
+        ));
+        if !source.exists() {
+            return;
+        }
+        let workspace = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/translation/location-names.ko.json"
+        ));
+        let rom = Rom::from_path(source).unwrap();
+        let plan = plan_location_name_text(&rom, workspace).unwrap();
+        assert_eq!(plan.entries.len(), 24);
+        assert!(!plan.review_complete);
     }
 }

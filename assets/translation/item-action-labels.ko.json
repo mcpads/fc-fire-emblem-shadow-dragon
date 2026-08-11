@@ -1,0 +1,33 @@
+{
+  "format_version": 1,
+  "source_sha1": "0179c550d424e0397496078789e7b116601d120c",
+  "translate_from": "ja",
+  "translate_to": "ko",
+  "preserve_existing_english_and_digits": true,
+  "entries": [
+    {
+      "id": "item-action-label:13",
+      "japanese_markup": "そうび",
+      "korean_markup": "장비",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "item-action-label:14",
+      "japanese_markup": "つかう",
+      "korean_markup": "사용",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "item-action-label:15",
+      "japanese_markup": "わたす",
+      "korean_markup": "전달",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "item-action-label:16",
+      "japanese_markup": "すてる",
+      "korean_markup": "버리기",
+      "status": "needs_human_review"
+    }
+  ]
+}

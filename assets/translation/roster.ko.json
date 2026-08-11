@@ -3,7 +3,7 @@
   "translate_from": "ja",
   "translate_to": "ko",
   "preserve_existing_english": true,
-  "status": "technical_poc",
+  "status": "needs_human_review",
   "screen_role": "unit_roster",
   "entry": {
     "id": "name_header",

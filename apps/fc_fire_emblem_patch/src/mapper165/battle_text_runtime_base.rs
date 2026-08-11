@@ -4,7 +4,9 @@ use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
-    battle_text_workset::FORECAST_LABEL_GLYPHS,
+    battle_text_workset::{
+        FORECAST_LABEL_FILE_OFFSET, FORECAST_LABEL_GLYPHS, FORECAST_LABEL_SOURCE,
+    },
     dialogue_assets::plan_battle_dialogue_records,
     font_slots::{ACTIVE_HANGUL_SLOT_COUNT, FONT_PAGE_SIZE},
     rom::{EXPECTED_SOURCE_SHA1, Rom},
@@ -20,7 +22,6 @@ use super::{
         plan_battle_cache_composition_material, plan_constrained_battle_codebook,
         surface_constraints::select_observed_battle_surfaces,
     },
-    battle_combination_probe::{FORECAST_LABEL_FILE_OFFSET, FORECAST_LABEL_SOURCE},
     battle_text_cache_probe::{
         GLYPH_ATLAS_MMC3_PAGE, GLYPH_ATLAS_PRG_OFFSET, PHYSICAL_CODE_TABLE_CPU_ADDRESS,
         PHYSICAL_CODE_TABLE_PRG_OFFSET, RECIPE_BLOB_MMC3_PAGE, RECIPE_BLOB_PRG_OFFSET,

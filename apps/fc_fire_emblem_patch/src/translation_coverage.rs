@@ -34,6 +34,10 @@ pub(crate) struct TranslationCoverageInputs<'a> {
     pub(crate) choice_label_localization_path: &'a Path,
     pub(crate) map_menu_localization_path: &'a Path,
     pub(crate) title_graphics_localization_path: &'a Path,
+    pub(crate) unit_ui_label_localization_path: &'a Path,
+    pub(crate) item_action_label_localization_path: &'a Path,
+    pub(crate) transition_label_localization_path: &'a Path,
+    pub(crate) location_name_localization_path: &'a Path,
     pub(crate) current_build_output_path: &'a Path,
     pub(crate) current_build_report_path: &'a Path,
     pub(crate) report_path: &'a Path,
@@ -58,6 +62,10 @@ pub(crate) fn analyze_translation_coverage(
         choice_label_localization_path: inputs.choice_label_localization_path,
         map_menu_localization_path: inputs.map_menu_localization_path,
         title_graphics_localization_path: inputs.title_graphics_localization_path,
+        unit_ui_label_localization_path: inputs.unit_ui_label_localization_path,
+        item_action_label_localization_path: inputs.item_action_label_localization_path,
+        transition_label_localization_path: inputs.transition_label_localization_path,
+        location_name_localization_path: inputs.location_name_localization_path,
     })?;
     let mut installation = inspect_current_installation(
         inputs.current_build_report_path,

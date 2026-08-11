@@ -29,6 +29,7 @@ mod rom;
 mod roster_localization;
 mod rp2a03;
 mod screen_contracts;
+mod semantic_translation;
 mod shop_flow;
 mod source_literals;
 mod static_analysis;
@@ -93,6 +94,12 @@ enum Command {
     ExtractUnitNameWorkspace {
         source: PathBuf,
         #[arg(long, default_value = "assets/translation/unit-names.ko.json")]
+        output: PathBuf,
+    },
+    /// Create the small public workspace for all location names.
+    ExtractLocationNameWorkspace {
+        source: PathBuf,
+        #[arg(long, default_value = "assets/translation/location-names.ko.json")]
         output: PathBuf,
     },
     /// Create the source-bound workspace for all automatic class profiles.
@@ -258,6 +265,14 @@ enum Command {
         map_menu_localization: PathBuf,
         #[arg(long, default_value = "assets/translation/title-logo.ko.json")]
         title_graphics_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/unit-ui-labels.ko.json")]
+        unit_ui_label_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/item-action-labels.ko.json")]
+        item_action_label_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/transition-labels.ko.json")]
+        transition_label_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/location-names.ko.json")]
+        location_name_localization: PathBuf,
         #[arg(long, default_value = "out/fire-emblem-fe1-korean-patch.nes")]
         current_build_output: PathBuf,
         #[arg(long, default_value = "out/kr-patch-build.json")]
@@ -699,6 +714,17 @@ fn main() -> Result<()> {
                 summary.preserved_translation_count
             );
         }
+        Command::ExtractLocationNameWorkspace { source, output } => {
+            let summary = text_inventory::extract_location_name_workspace(&source, &output)?;
+            println!("wrote {}", output.display());
+            println!("workspace SHA-1: {}", summary.workspace_sha1);
+            println!(
+                "location names: {} entries, {} Japanese entries, {} translations preserved",
+                summary.entry_count,
+                summary.japanese_entry_count,
+                summary.preserved_translation_count
+            );
+        }
         Command::ExtractClassProfileWorkspace { source, output } => {
             let summary = class_profile::extract_class_profile_workspace(&source, &output)?;
             println!("wrote {}", output.display());
@@ -960,6 +986,10 @@ fn main() -> Result<()> {
             choice_label_localization,
             map_menu_localization,
             title_graphics_localization,
+            unit_ui_label_localization,
+            item_action_label_localization,
+            transition_label_localization,
+            location_name_localization,
             current_build_output,
             current_build_report,
             report,
@@ -979,6 +1009,10 @@ fn main() -> Result<()> {
                     choice_label_localization_path: &choice_label_localization,
                     map_menu_localization_path: &map_menu_localization,
                     title_graphics_localization_path: &title_graphics_localization,
+                    unit_ui_label_localization_path: &unit_ui_label_localization,
+                    item_action_label_localization_path: &item_action_label_localization,
+                    transition_label_localization_path: &transition_label_localization,
+                    location_name_localization_path: &location_name_localization,
                     current_build_output_path: &current_build_output,
                     current_build_report_path: &current_build_report,
                     report_path: &report,

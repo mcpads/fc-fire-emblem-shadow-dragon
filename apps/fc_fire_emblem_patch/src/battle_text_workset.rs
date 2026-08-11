@@ -12,6 +12,9 @@ use crate::{
 };
 
 pub(crate) const FORECAST_LABEL_GLYPHS: [char; 4] = ['지', '형', '효', '과'];
+pub(crate) const FORECAST_LABEL_FILE_OFFSET: usize = 0x156C6;
+pub(crate) const FORECAST_LABEL_SOURCE: [u8; 10] =
+    [0x22, 0x4D, 0x06, 0x11, 0x08, 0x01, 0x09, 0x02, 0x05, 0x00];
 
 #[derive(Debug)]
 pub(crate) struct BattleTextWorksetSummary {

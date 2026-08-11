@@ -1,0 +1,159 @@
+{
+  "format_version": 1,
+  "source_sha1": "0179c550d424e0397496078789e7b116601d120c",
+  "translate_from": "ja",
+  "translate_to": "ko",
+  "preserve_existing_english_and_digits": true,
+  "entries": [
+    {
+      "id": "unit-ui-label:00",
+      "japanese_markup": "ちから",
+      "korean_markup": "힘",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-ui-label:01",
+      "japanese_markup": "わざ",
+      "korean_markup": "기술",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-ui-label:02",
+      "japanese_markup": "ぶきレベル",
+      "korean_markup": "무기레벨",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-ui-label:03",
+      "japanese_markup": "すばやさ",
+      "korean_markup": "속도",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-ui-label:04",
+      "japanese_markup": "うんのよさ",
+      "korean_markup": "행운",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-ui-label:05",
+      "japanese_markup": "しゅびりょく",
+      "korean_markup": "수비력",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-ui-label:06",
+      "japanese_markup": "いどうりょく",
+      "korean_markup": "이동력",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-ui-label:08",
+      "japanese_markup": "レベル",
+      "korean_markup": "레벨",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-ui-label:27",
+      "japanese_markup": "まほうぼうぎょ",
+      "korean_markup": "마방",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-ui-label:28",
+      "japanese_markup": "けいけんち",
+      "korean_markup": "경험치",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-ui-label:0E",
+      "japanese_markup": "こうげき",
+      "korean_markup": "공격",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-ui-label:0F",
+      "japanese_markup": "もちもの",
+      "korean_markup": "소지품",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-ui-label:10",
+      "japanese_markup": "つえ",
+      "korean_markup": "지팡이",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-ui-label:11",
+      "japanese_markup": "たいき",
+      "korean_markup": "대기",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-ui-label:29",
+      "japanese_markup": "ぶきや",
+      "korean_markup": "무기점",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-ui-label:2A",
+      "japanese_markup": "たずねる",
+      "korean_markup": "방문",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-ui-label:33",
+      "japanese_markup": "どうぐや",
+      "korean_markup": "도구점",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-ui-label:34",
+      "japanese_markup": "とうぎじょう",
+      "korean_markup": "투기장",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-ui-label:37",
+      "japanese_markup": "たからばこ",
+      "korean_markup": "보물상자",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-ui-label:38",
+      "japanese_markup": "しろ",
+      "korean_markup": "성",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-ui-label:39",
+      "japanese_markup": "ぎょくざ",
+      "korean_markup": "왕좌",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-ui-label:3A",
+      "japanese_markup": "あずかりじょ",
+      "korean_markup": "보관소",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-ui-label:3B",
+      "japanese_markup": "はなす",
+      "korean_markup": "대화",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-ui-label:3C",
+      "japanese_markup": "へんしん",
+      "korean_markup": "변신",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-ui-label:3D",
+      "japanese_markup": "ひみつのみせ",
+      "korean_markup": "비밀상점",
+      "status": "needs_human_review"
+    }
+  ]
+}

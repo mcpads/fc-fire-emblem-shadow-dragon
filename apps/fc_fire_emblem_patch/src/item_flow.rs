@@ -11,6 +11,7 @@ use crate::{
 mod runtime_evidence;
 mod screen_roles;
 mod source_contract;
+mod translation_workspace;
 
 use runtime_evidence::{RuntimeObservation, runtime_observations};
 use screen_roles::{ItemActionChoice, ItemScreen, action_choices, item_screens};
@@ -23,6 +24,7 @@ use source_contract::{
     VULNERARY_ITEM_ID, bind_source_region, validate_action_result_dialogue_indices,
     validate_item_action_labels, validate_state_routes, validate_vulnerary_family,
 };
+pub(crate) use translation_workspace::plan_item_action_labels;
 
 #[derive(Debug, Serialize)]
 struct ItemFlowReport {

@@ -3,22 +3,22 @@ use std::{collections::BTreeMap, fs, path::Path};
 use anyhow::{Context, Result, ensure};
 
 use crate::{
-    chapter_transition::{inspect_chapter_transition_translation_population, plan_chapter_titles},
+    chapter_transition::{plan_chapter_titles, plan_transition_labels},
     choice_labels::plan_choice_labels,
     class_profile::plan_class_profiles,
     dialogue_assets::{validate_battle_dialogue_workspace, validate_main_dialogue_workspace},
     front_end_menu::plan_front_end_menu,
-    item_flow::inspect_item_action_label_count,
+    item_flow::plan_item_action_labels,
     localization::OptionsLocalization,
     map_menu::plan_map_menu,
     rom::Rom,
     roster_localization::RosterLocalization,
     sha1_hex,
     suspend_message::bind_suspend_message_to_main_dialogue,
-    text_inventory::{FixedTextPlan, plan_fixed_text, scoped_text_table_budgets},
+    text_inventory::{FixedTextPlan, plan_fixed_text, plan_location_name_text},
     title_graphics::plan_title_graphics,
     unit_names::plan_unit_names,
-    unit_ui_text::inspect_unit_ui_japanese_label_count,
+    unit_ui_text::plan_unit_ui_labels,
 };
 
 use super::report::{DomainPopulation, SourceBindingState, TranslationInputState};
@@ -37,6 +37,10 @@ pub(crate) struct TranslationPopulationInputs<'a> {
     pub(crate) choice_label_localization_path: &'a Path,
     pub(crate) map_menu_localization_path: &'a Path,
     pub(crate) title_graphics_localization_path: &'a Path,
+    pub(crate) unit_ui_label_localization_path: &'a Path,
+    pub(crate) item_action_label_localization_path: &'a Path,
+    pub(crate) transition_label_localization_path: &'a Path,
+    pub(crate) location_name_localization_path: &'a Path,
 }
 
 pub(crate) fn inspect_translation_populations(
@@ -59,6 +63,12 @@ pub(crate) fn inspect_translation_populations(
     let choice_labels = plan_choice_labels(&rom, inputs.choice_label_localization_path)?;
     let map_menu = plan_map_menu(&rom, inputs.map_menu_localization_path)?;
     let title_graphics = plan_title_graphics(&rom, inputs.title_graphics_localization_path)?;
+    let unit_ui_labels = plan_unit_ui_labels(&rom, inputs.unit_ui_label_localization_path)?;
+    let item_action_labels =
+        plan_item_action_labels(&rom, inputs.item_action_label_localization_path)?;
+    let transition_labels =
+        plan_transition_labels(&rom, inputs.transition_label_localization_path)?;
+    let location_names = plan_location_name_text(&rom, inputs.location_name_localization_path)?;
     bind_suspend_message_to_main_dialogue(&rom)?;
     validate_duplicate_unit_name_inputs(&fixed_text, &unit_names.entries)?;
 
@@ -76,15 +86,8 @@ pub(crate) fn inspect_translation_populations(
             inputs.roster_localization_path.display()
         )
     })?;
-    RosterLocalization::from_path(inputs.roster_localization_path)?.validate()?;
-
-    let transition = inspect_chapter_transition_translation_population(&rom)?;
-    let unit_ui_label_count = inspect_unit_ui_japanese_label_count(rom.data())?;
-    let item_action_label_count = inspect_item_action_label_count(&rom)?;
-    let location_names = scoped_text_table_budgets(rom.data(), &["location-names"])?
-        .into_iter()
-        .next()
-        .context("location-name source table disappeared")?;
+    let validated_roster =
+        RosterLocalization::from_path(inputs.roster_localization_path)?.validate()?;
 
     let mut populations = BTreeMap::new();
     insert(
@@ -196,38 +199,67 @@ pub(crate) fn inspect_translation_populations(
     insert(
         &mut populations,
         "options_labels",
-        technical_proof_population(validated_options.entries.len(), sha1_hex(&options_bytes)),
+        completed_population(
+            validated_options.entries.len(),
+            validated_options.review_complete,
+            Some(sha1_hex(&options_bytes)),
+        ),
     )?;
     insert(
         &mut populations,
         "roster_header",
-        technical_proof_population(1, sha1_hex(&roster_bytes)),
+        completed_population(
+            1,
+            validated_roster.review_complete,
+            Some(sha1_hex(&roster_bytes)),
+        ),
     )?;
     insert(
         &mut populations,
         "battle_forecast_label",
-        technical_proof_population(transition.battle_forecast_label_count, String::new()),
+        completed_population(
+            transition_labels.forecast.entry_count,
+            transition_labels.forecast.review_complete,
+            Some(transition_labels.forecast.workspace_sha1),
+        ),
     )?;
-
-    for (domain_id, count) in [
-        ("unit_ui_labels", unit_ui_label_count),
-        ("item_action_labels", item_action_label_count),
-        (
-            "chapter_save_offer_label",
-            transition.save_offer_label_count,
-        ),
-        (
-            "ending_record_labels",
-            transition.ending_record_additional_record_count,
-        ),
-        ("location_names", location_names.unique_string_count),
+    for (domain_id, plan) in [
+        ("unit_ui_labels", unit_ui_labels),
+        ("item_action_labels", item_action_labels),
     ] {
         insert(
             &mut populations,
             domain_id,
-            missing_translation_population(count),
+            completed_population(
+                plan.entry_count,
+                plan.review_complete,
+                Some(plan.workspace_sha1),
+            ),
         )?;
     }
+    for (domain_id, plan) in [
+        ("chapter_save_offer_label", transition_labels.save_offer),
+        ("ending_record_labels", transition_labels.ending_record),
+    ] {
+        insert(
+            &mut populations,
+            domain_id,
+            completed_population(
+                plan.entry_count,
+                plan.review_complete,
+                Some(plan.workspace_sha1),
+            ),
+        )?;
+    }
+    insert(
+        &mut populations,
+        "location_names",
+        completed_population(
+            location_names.entries.len(),
+            location_names.review_complete,
+            Some(location_names.workspace_sha1),
+        ),
+    )?;
 
     Ok(populations)
 }
@@ -306,28 +338,6 @@ fn complete_or_partial(
         },
         review_complete,
         translation_input_sha1,
-    }
-}
-
-fn technical_proof_population(count: usize, sha1: String) -> DomainPopulation {
-    DomainPopulation {
-        source_binding: SourceBindingState::Bound,
-        target_unit_count: Some(count),
-        translated_target_unit_count: count,
-        translation_input: TranslationInputState::TechnicalProof,
-        review_complete: false,
-        translation_input_sha1: (!sha1.is_empty()).then_some(sha1),
-    }
-}
-
-fn missing_translation_population(count: usize) -> DomainPopulation {
-    DomainPopulation {
-        source_binding: SourceBindingState::Bound,
-        target_unit_count: Some(count),
-        translated_target_unit_count: 0,
-        translation_input: TranslationInputState::Missing,
-        review_complete: false,
-        translation_input_sha1: None,
     }
 }
 

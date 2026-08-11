@@ -62,6 +62,7 @@ struct RosterGlyphAssignment {
 pub(crate) struct ValidatedRosterLocalization {
     pub(crate) replacement_header: [u8; SOURCE_ROSTER_HEADER.len()],
     pub(crate) tiles: BTreeMap<u8, [u8; FONT_TILE_SIZE]>,
+    pub(crate) review_complete: bool,
     characters_by_code: BTreeMap<u8, char>,
 }
 
@@ -82,8 +83,8 @@ impl RosterLocalization {
             "preserve_existing_english must be true"
         );
         ensure!(
-            self.status == "technical_poc",
-            "status must be technical_poc"
+            matches!(self.status.as_str(), "needs_human_review" | "complete"),
+            "status must be needs_human_review or complete"
         );
         ensure!(
             self.screen_role == EXPECTED_SCREEN_ROLE,
@@ -180,6 +181,7 @@ impl RosterLocalization {
         Ok(ValidatedRosterLocalization {
             replacement_header,
             tiles,
+            review_complete: self.status == "complete",
             characters_by_code,
         })
     }
