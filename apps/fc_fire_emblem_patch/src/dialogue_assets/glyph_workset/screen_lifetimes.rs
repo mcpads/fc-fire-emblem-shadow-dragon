@@ -132,18 +132,3 @@ fn maximum_transition_chain_glyph_union(
     }
     Ok((maximum_record_count, maximum_glyphs))
 }
-
-fn glyph_union_for_table(
-    table_id: &str,
-    glyphs_by_record: &BTreeMap<DialogueRecordKey, BTreeSet<char>>,
-) -> (usize, BTreeSet<char>) {
-    let records = glyphs_by_record
-        .iter()
-        .filter(|((record_table_id, _), _)| record_table_id == table_id)
-        .collect::<Vec<_>>();
-    let mut glyphs = BTreeSet::new();
-    for (_, record_glyphs) in &records {
-        glyphs.extend(record_glyphs.iter().copied());
-    }
-    (records.len(), glyphs)
-}

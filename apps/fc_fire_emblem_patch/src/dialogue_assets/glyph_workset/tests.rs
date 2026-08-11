@@ -153,13 +153,13 @@ fn observed_epilogue_family_reserves_names_locations_and_the_dialogue_chain() {
 }
 
 #[test]
-fn observed_game_over_budget_uses_every_victory_and_defeat_glyph() {
+fn observed_game_over_budget_uses_only_the_runtime_selected_record() {
     let glyphs = (0..121)
         .map(|index| char::from_u32(0xAC00 + index).unwrap())
         .collect::<String>();
     let workspace = workspace_with_records(vec![record(
         "victory-and-defeat-dialogue",
-        0,
+        10,
         &format!("{glyphs}{{E7}}"),
     )]);
 

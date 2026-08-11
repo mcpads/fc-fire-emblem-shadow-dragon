@@ -191,7 +191,7 @@ fn build_glyph_workset_report(
     };
 
     Ok(MainDialogueGlyphWorksetReport {
-        schema: 2,
+        schema: 3,
         source_sha1: EXPECTED_SOURCE_SHA1,
         workspace_sha1,
         scope: GlyphWorksetScope {

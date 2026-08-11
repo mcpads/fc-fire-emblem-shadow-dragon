@@ -22,7 +22,7 @@ use capture_state::{ChrPairReport, parse_capture_state};
 use route_analysis::*;
 
 const MANIFEST_SCHEMA: u8 = 1;
-const REPORT_SCHEMA: u8 = 2;
+const REPORT_SCHEMA: u8 = 3;
 const NAMETABLE_BYTE_COUNT: usize = 0x800;
 const NAMETABLE_PAGE_BYTE_COUNT: usize = 0x400;
 const NAMETABLE_TILE_BYTE_COUNT: usize = 0x3C0;
@@ -170,6 +170,8 @@ struct RouteReport {
     distinct_oam_count: usize,
     distinct_palette_count: usize,
     memory_expectation_count: usize,
+    game_over_dialogue_selector_hex: Option<&'static str>,
+    game_over_dialogue_selector_sample_count: usize,
     screen_role_variants: Vec<ScreenRoleVariantReport>,
     chr_pairs: Vec<ChrPairReport>,
     nametable_tile_codes_hex: Vec<String>,

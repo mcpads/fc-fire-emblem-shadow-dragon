@@ -167,3 +167,26 @@ fn battle_runtime_input_projects_selector_62_before_the_late_write() {
     assert_eq!(input.projected_dialogue_selector, 0);
     assert!(!input.selector_62_predicate_matched);
 }
+
+#[test]
+fn game_over_samples_bind_the_exact_dialogue_record() {
+    let mut files = CaptureFiles {
+        screenshot: b"\x89PNG\r\n\x1A\n".to_vec(),
+        state: Vec::new(),
+        internal_ram: vec![0; INTERNAL_RAM_BYTE_COUNT],
+        prg_ram: vec![0; PRG_RAM_BYTE_COUNT],
+        nametable: vec![0; NAMETABLE_BYTE_COUNT],
+        oam: vec![0xFF; OAM_BYTE_COUNT],
+        palette: vec![0; PALETTE_BYTE_COUNT],
+    };
+    files.prg_ram[GAME_OVER_DIALOGUE_DIRECTORY_SELECTOR_ADDRESS - 0x6000] = 0xB0;
+    files.prg_ram[GAME_OVER_DIALOGUE_ENTRY_SELECTOR_ADDRESS - 0x6000] = 0x0A;
+
+    validate_game_over_dialogue_selector(&files).unwrap();
+
+    files.prg_ram[GAME_OVER_DIALOGUE_ENTRY_SELECTOR_ADDRESS - 0x6000] = 0x09;
+    let error = validate_game_over_dialogue_selector(&files)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("B0:0A"));
+}

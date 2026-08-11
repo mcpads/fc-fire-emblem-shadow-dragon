@@ -4,10 +4,11 @@ use anyhow::{Result, ensure};
 
 use crate::font_slots::active_hangul_codes;
 
-use super::{DialogueRecordKey, ObservedScreenLifetimeReport, glyph_union_for_table};
+use super::{DialogueRecordKey, ObservedScreenLifetimeReport, glyph_union_for_records};
 
 const SCREEN_ROLE: &str = "turn-boundary game over";
 const TABLE_ID: &str = "victory-and-defeat-dialogue";
+const ENTRY_INDEX: usize = 10;
 const OBSERVED_NAMETABLE_ACTIVE_CODES: [u8; 90] = [
     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x10, 0x11, 0x12,
     0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x1E, 0x20, 0x21, 0x24, 0x25, 0x28, 0x29, 0x2F, 0x30, 0x31,
@@ -23,12 +24,16 @@ pub(super) fn turn_boundary_game_over_report(
     active_slot_count: usize,
     working_set_ready: bool,
 ) -> Result<Option<ObservedScreenLifetimeReport>> {
-    let (source_record_count, filled_glyphs) =
-        glyph_union_for_table(TABLE_ID, filled_glyphs_by_record);
-    if source_record_count == 0 {
+    if !filled_glyphs_by_record
+        .keys()
+        .any(|(table_id, _)| table_id == TABLE_ID)
+    {
         return Ok(None);
     }
-    let (_, approved_glyphs) = glyph_union_for_table(TABLE_ID, approved_glyphs_by_record);
+    let records = [(TABLE_ID, ENTRY_INDEX)];
+    let filled_glyphs = glyph_union_for_records(filled_glyphs_by_record, &records, SCREEN_ROLE)?;
+    let approved_glyphs =
+        glyph_union_for_records(approved_glyphs_by_record, &records, SCREEN_ROLE)?;
 
     let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
     let observed_active_codes = OBSERVED_NAMETABLE_ACTIVE_CODES
@@ -50,9 +55,9 @@ pub(super) fn turn_boundary_game_over_report(
 
     Ok(Some(ObservedScreenLifetimeReport {
         screen_role: SCREEN_ROLE,
-        budget_basis: "conservative union of all 12 observed game-over nametables and every Korean glyph across the entire victory-and-defeat dialogue table",
+        budget_basis: "conservative union of all 12 observed game-over nametables and the exact Korean record selected by B0:0A in every frozen runtime sample",
         evidence_digest: "sha1:ffd0fc3e8ccb44798fbc83c618ea068369fd114c",
-        source_record_count,
+        source_record_count: records.len(),
         filled_unique_glyph_count: filled_glyphs.len(),
         preserved_active_source_code_count,
         additional_target_glyph_reservation_count: 0,
