@@ -8,6 +8,7 @@ use crate::{font_slots::ACTIVE_HANGUL_SLOT_COUNT, rom::EXPECTED_SOURCE_SHA1, sha
 use super::report::{StrongestLifetimeReport, TranslationLifetimeDemandReport};
 
 mod chapter_save;
+mod ending_chapter_record;
 mod front_end_menu;
 mod full_page_bound;
 mod item_flow;
@@ -28,12 +29,14 @@ pub(super) struct LifetimeInputBindings<'a> {
     pub(super) item_action_label_workspace_path: &'a Path,
     pub(super) choice_label_workspace_path: &'a Path,
     pub(super) transition_label_workspace_path: &'a Path,
+    pub(super) chapter_title_workspace_path: &'a Path,
     pub(super) chapter_save_continue_prompt_manifest_path: &'a Path,
     pub(super) map_menu_localization_path: &'a Path,
     pub(super) main_dialogue_workspace_sha1: &'a str,
     pub(super) item_action_label_workspace_sha1: &'a str,
     pub(super) choice_label_workspace_sha1: &'a str,
     pub(super) transition_label_workspace_sha1: &'a str,
+    pub(super) chapter_title_workspace_sha1: &'a str,
     pub(super) map_menu_localization_sha1: &'a str,
     pub(super) class_profile_page_target_glyph_counts: &'a [usize],
     pub(super) class_profile_preserved_active_code_count: usize,
@@ -82,6 +85,7 @@ struct ConsumerLifetimeDemands {
     options_menu: TranslationLifetimeDemandReport,
     map_menu: TranslationLifetimeDemandReport,
     chapter_save: Vec<TranslationLifetimeDemandReport>,
+    ending_chapter_record: TranslationLifetimeDemandReport,
 }
 
 #[derive(Debug, Deserialize)]
@@ -246,6 +250,14 @@ pub(super) fn inspect_translation_lifetimes(
         choice_label_workspace_sha1: bindings.choice_label_workspace_sha1,
         transition_label_workspace_sha1: bindings.transition_label_workspace_sha1,
     })?;
+    let ending_chapter_record_demand =
+        ending_chapter_record::inspect(ending_chapter_record::InputBindings {
+            source_path: bindings.source_path,
+            chapter_title_workspace_path: bindings.chapter_title_workspace_path,
+            transition_label_workspace_path: bindings.transition_label_workspace_path,
+            chapter_title_workspace_sha1: bindings.chapter_title_workspace_sha1,
+            transition_label_workspace_sha1: bindings.transition_label_workspace_sha1,
+        })?;
 
     build_translation_lifetime_inventory(
         LifetimeReports {
@@ -264,6 +276,7 @@ pub(super) fn inspect_translation_lifetimes(
             options_menu: options_menu_demand,
             map_menu: map_menu_demand,
             chapter_save: chapter_save_demands,
+            ending_chapter_record: ending_chapter_record_demand,
         },
         japanese_bearing_screen_roles,
     )
@@ -326,6 +339,7 @@ fn build_translation_lifetime_inventory(
     demands.push(consumer_demands.options_menu);
     demands.push(consumer_demands.map_menu);
     demands.extend(consumer_demands.chapter_save);
+    demands.push(consumer_demands.ending_chapter_record);
     for lifetime in main.observed_screen_lifetimes {
         ensure!(
             lifetime.filled_unique_glyph_count
@@ -501,6 +515,7 @@ mod tests {
             "battle_animation",
             "class_profile",
             "chapter_clear_epilogue_dialogue",
+            "ending_chapter_record_scroll",
             "ending_character_epilogue",
             "game_over",
             "map_menu",
@@ -536,12 +551,14 @@ mod tests {
                 item_action_label_workspace_path: Path::new("item-actions.json"),
                 choice_label_workspace_path: Path::new("choices.json"),
                 transition_label_workspace_path: Path::new("transitions.json"),
+                chapter_title_workspace_path: Path::new("chapter-titles.json"),
                 chapter_save_continue_prompt_manifest_path: Path::new("save-runtime.json"),
                 map_menu_localization_path: Path::new("map-menu.json"),
                 main_dialogue_workspace_sha1: "main",
                 item_action_label_workspace_sha1: "item-actions",
                 choice_label_workspace_sha1: "choices",
                 transition_label_workspace_sha1: "transitions",
+                chapter_title_workspace_sha1: "chapter-titles",
                 map_menu_localization_sha1: "map-menu",
                 class_profile_page_target_glyph_counts: &[143, 161],
                 class_profile_preserved_active_code_count: 12,
@@ -576,12 +593,23 @@ mod tests {
                 options_menu: options_menu_demand,
                 map_menu: map_menu_demand,
                 chapter_save: Vec::new(),
+                ending_chapter_record: TranslationLifetimeDemandReport {
+                    screen_role: "ending_chapter_record_scroll",
+                    measurement_basis: "fixture complete ending-record union",
+                    target_glyph_count: 91,
+                    preserved_active_source_code_count: 0,
+                    additional_target_glyph_reservation_count: 0,
+                    total_slot_demand: 91,
+                    active_slot_count: ACTIVE_HANGUL_SLOT_COUNT,
+                    fits_active_page: true,
+                    evidence_report_sha1: "ending-record-evidence".to_owned(),
+                },
             },
             &roles,
         )
         .unwrap();
 
-        assert_eq!(inventory.demands.len(), 27);
+        assert_eq!(inventory.demands.len(), 28);
         assert_eq!(inventory.strongest.state, "partial");
         assert_eq!(inventory.strongest.selected_screen_role, Some("map_menu"));
         assert_eq!(inventory.strongest.selected_slot_demand, Some(203));

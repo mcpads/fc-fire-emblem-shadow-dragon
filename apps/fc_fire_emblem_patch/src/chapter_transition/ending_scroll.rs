@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
@@ -82,6 +84,63 @@ pub(super) struct EndingAggregateLabelSource {
     pub(super) japanese_markup: String,
     pub(super) max_visible_cells: usize,
     pub(super) source_reclaimable_active_codes: std::collections::BTreeSet<u8>,
+}
+
+pub(crate) struct EndingChapterRecordLifetimeSource {
+    pub(crate) record_count: usize,
+    pub(crate) target_record_count: usize,
+    pub(crate) source_reclaimable_active_codes: BTreeSet<u8>,
+    pub(crate) preserved_active_stream_codes: BTreeSet<u8>,
+}
+
+pub(crate) fn bind_ending_chapter_record_lifetime_source(
+    rom: &Rom,
+) -> Result<EndingChapterRecordLifetimeSource> {
+    bind_ending_chapter_record_translation_surface(rom)?;
+    let stream_file_offset = source_file_offset(0x04, ENDING_SCROLL_STREAM_ADDRESS)?;
+    let stream_end_file_offset =
+        source_file_offset(0x04, ENDING_SCROLL_STREAM_END_EXCLUSIVE_ADDRESS)?;
+    let stream = &rom.data()[stream_file_offset..stream_end_file_offset];
+    let records = parse_records(stream)?;
+    let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
+    let mut source_reclaimable_active_codes = BTreeSet::new();
+    let mut preserved_active_stream_codes = BTreeSet::new();
+    let mut target_record_count = 0;
+
+    for (record_index, record) in records.iter().enumerate() {
+        let is_chapter_record = (0..ENDING_SCROLL_CHAPTER_RECORD_COUNT).any(|chapter_index| {
+            record_index == ENDING_SCROLL_PRESERVED_RECORD_COUNT + chapter_index * 2
+        });
+        let is_target_record =
+            is_chapter_record || record_index == ENDING_SCROLL_AGGREGATE_RECORD_INDEX;
+        target_record_count += usize::from(is_target_record);
+        let payload = &stream[record.payload_start..record.payload_end_exclusive];
+        for code in ending_scroll_literal_codes(payload, "ending lifetime record")? {
+            if !active_codes.contains(&code) {
+                continue;
+            }
+            if is_target_record && is_japanese_text_code(code) {
+                source_reclaimable_active_codes.insert(code);
+            } else {
+                preserved_active_stream_codes.insert(code);
+            }
+        }
+    }
+    ensure!(
+        target_record_count == ENDING_SCROLL_CHAPTER_RECORD_COUNT + 1,
+        "ending chapter-record lifetime target count changed"
+    );
+    ensure!(
+        source_reclaimable_active_codes.is_disjoint(&preserved_active_stream_codes),
+        "ending chapter-record stream reclaims a code used by preserved output"
+    );
+
+    Ok(EndingChapterRecordLifetimeSource {
+        record_count: records.len(),
+        target_record_count,
+        source_reclaimable_active_codes,
+        preserved_active_stream_codes,
+    })
 }
 
 pub(super) fn bind_ending_aggregate_label_source(rom: &Rom) -> Result<EndingAggregateLabelSource> {
@@ -373,5 +432,23 @@ mod tests {
         let label = bind_ending_aggregate_label_source(&rom).unwrap();
         assert_eq!(label.japanese_markup, "せ゛んターンすう{ED}{19}");
         assert!(!label.source_reclaimable_active_codes.is_empty());
+    }
+
+    #[test]
+    fn ending_chapter_record_stream_has_no_unreserved_preserved_literals() {
+        let source = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
+        ));
+        if !source.exists() {
+            return;
+        }
+        let rom = Rom::from_path(source).unwrap();
+        let lifetime = bind_ending_chapter_record_lifetime_source(&rom).unwrap();
+
+        assert_eq!(lifetime.record_count, 113);
+        assert_eq!(lifetime.target_record_count, 26);
+        assert_eq!(lifetime.source_reclaimable_active_codes.len(), 73);
+        assert!(lifetime.preserved_active_stream_codes.is_empty());
     }
 }

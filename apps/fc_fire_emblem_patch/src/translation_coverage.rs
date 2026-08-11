@@ -241,6 +241,7 @@ pub(crate) fn analyze_translation_coverage(
             item_action_label_workspace_path: inputs.item_action_label_localization_path,
             choice_label_workspace_path: inputs.choice_label_localization_path,
             transition_label_workspace_path: inputs.transition_label_localization_path,
+            chapter_title_workspace_path: inputs.chapter_title_localization_path,
             chapter_save_continue_prompt_manifest_path: inputs
                 .chapter_save_continue_prompt_manifest_path,
             map_menu_localization_path: inputs.map_menu_localization_path,
@@ -248,6 +249,7 @@ pub(crate) fn analyze_translation_coverage(
             item_action_label_workspace_sha1: translation_input_sha1("item_action_labels")?,
             choice_label_workspace_sha1: translation_input_sha1("choice_labels")?,
             transition_label_workspace_sha1: translation_input_sha1("chapter_save_offer_label")?,
+            chapter_title_workspace_sha1: translation_input_sha1("chapter_titles")?,
             map_menu_localization_sha1: translation_input_sha1("map_menu_labels")?,
             class_profile_page_target_glyph_counts: &installation
                 .class_profile_page_target_glyph_counts,
