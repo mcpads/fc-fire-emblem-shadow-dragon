@@ -11,7 +11,7 @@ use crate::dialogue_assets::glyph_workset::report::ObservedScreenLifetimeReport;
 mod evidence;
 mod page_budget;
 
-use evidence::load_runtime_evidence;
+pub(crate) use evidence::{RuntimeEvidence, load_runtime_evidence};
 use page_budget::page_glyph_sets;
 
 const REPORT_SCREEN_ROLE: &str = "chapter-seven maximum dialogue page";
@@ -84,7 +84,7 @@ pub(in crate::dialogue_assets::glyph_workset) fn bind_runtime_lifetime(
         workspace_record.id == TARGET_RECORD_ID,
         "maximum runtime lifetime workspace record changed"
     );
-    let evidence = load_runtime_evidence(manifest_path, binding, workspace_record.lines.len())?;
+    let evidence = load_runtime_evidence(manifest_path, workspace_record.lines.len())?;
     let (filled_pages, approved_pages) = page_glyph_sets(workspace_record)?;
     ensure!(
         filled_pages.len() == OBSERVED_PAGE_COUNT,
@@ -136,8 +136,8 @@ pub(in crate::dialogue_assets::glyph_workset) fn bind_runtime_lifetime(
     };
     binding.runtime_screen_lifetime = Some(MaximumDialogueRuntimeLifetimeBinding {
         evidence_manifest_sha1: evidence.manifest_sha1,
-        completed_page_count: OBSERVED_PAGE_COUNT,
-        samples_per_page: SAMPLING_FRAME_OFFSETS.len(),
+        completed_page_count: evidence.completed_page_count,
+        samples_per_page: evidence.samples_per_page,
         temporal_sample_count: evidence.temporal_sample_count,
         unique_nametable_count: evidence.unique_nametable_count,
         display_lines_per_page: DISPLAY_LINES_PER_PAGE,

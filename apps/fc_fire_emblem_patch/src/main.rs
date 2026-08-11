@@ -529,6 +529,18 @@ enum Command {
             default_value = "evidence/private/shop-shared-text-installed/manifest.json"
         )]
         weapon_shop_shared_text_runtime_evidence: PathBuf,
+        #[arg(
+            long,
+            default_value = "evidence/private/chapter7-maximum-lifetime/manifest.json"
+        )]
+        maximum_dialogue_evidence: PathBuf,
+        #[arg(
+            long,
+            default_value = "evidence/private/chapter7-maximum-installed/page-boundaries.json"
+        )]
+        maximum_dialogue_page_boundaries: PathBuf,
+        #[arg(long)]
+        maximum_dialogue_runtime_evidence: Option<PathBuf>,
         #[arg(long, default_value = "out/cumulative-stages")]
         stage_directory: PathBuf,
         #[arg(long, default_value = "out/fire-emblem-fe1-korean-patch.nes")]
@@ -1440,6 +1452,9 @@ fn main() -> Result<()> {
             shop_dialogue_evidence,
             shop_dialogue_runtime_evidence,
             weapon_shop_shared_text_runtime_evidence,
+            maximum_dialogue_evidence,
+            maximum_dialogue_page_boundaries,
+            maximum_dialogue_runtime_evidence,
             stage_directory,
             output,
             report,
@@ -1468,6 +1483,10 @@ fn main() -> Result<()> {
                     shop_dialogue_runtime_evidence_path: &shop_dialogue_runtime_evidence,
                     weapon_shop_shared_text_runtime_evidence_path:
                         &weapon_shop_shared_text_runtime_evidence,
+                    maximum_dialogue_evidence_path: &maximum_dialogue_evidence,
+                    maximum_dialogue_page_boundary_path: &maximum_dialogue_page_boundaries,
+                    maximum_dialogue_runtime_evidence_path: maximum_dialogue_runtime_evidence
+                        .as_deref(),
                     stage_directory: &stage_directory,
                     output_path: &output,
                     report_path: &report,

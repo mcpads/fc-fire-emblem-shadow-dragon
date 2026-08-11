@@ -10,8 +10,7 @@ use serde::Deserialize;
 use crate::{rom::EXPECTED_SOURCE_SHA1, sha1_hex};
 
 use super::{
-    DISPLAY_LINES_PER_PAGE, MaximumDialogueSourceBinding, OBSERVED_PAGE_COUNT,
-    SAMPLING_FRAME_OFFSETS, TARGET_RECORD_ID,
+    DISPLAY_LINES_PER_PAGE, OBSERVED_PAGE_COUNT, SAMPLING_FRAME_OFFSETS, TARGET_RECORD_ID,
 };
 
 const SCREEN_ROLE: &str = "chapter_7_castle_clear_maximum_dialogue";
@@ -72,16 +71,17 @@ struct RuntimeSample {
 }
 
 #[derive(Debug)]
-pub(super) struct RuntimeEvidence {
-    pub(super) manifest_sha1: String,
-    pub(super) temporal_sample_count: usize,
-    pub(super) unique_nametable_count: usize,
-    pub(super) screen_codes: BTreeSet<u8>,
+pub(crate) struct RuntimeEvidence {
+    pub(crate) manifest_sha1: String,
+    pub(crate) completed_page_count: usize,
+    pub(crate) samples_per_page: usize,
+    pub(crate) temporal_sample_count: usize,
+    pub(crate) unique_nametable_count: usize,
+    pub(crate) screen_codes: BTreeSet<u8>,
 }
 
-pub(super) fn load_runtime_evidence(
+pub(crate) fn load_runtime_evidence(
     manifest_path: &Path,
-    binding: &MaximumDialogueSourceBinding,
     workspace_line_count: usize,
 ) -> Result<RuntimeEvidence> {
     let manifest_bytes = fs::read(manifest_path).with_context(|| {
@@ -113,13 +113,13 @@ pub(super) fn load_runtime_evidence(
         "maximum dialogue runtime source changed"
     );
     ensure!(
-        manifest.runtime_binding.chapter_number == binding.producer.chapter_number
-            && manifest.runtime_binding.producer_coordinate.row == binding.producer.row
-            && manifest.runtime_binding.producer_coordinate.column == binding.producer.column
+        manifest.runtime_binding.chapter_number == 7
+            && manifest.runtime_binding.producer_coordinate.row == 27
+            && manifest.runtime_binding.producer_coordinate.column == 10
             && manifest.runtime_binding.dialogue_selector == "C0:18"
             && manifest.runtime_binding.outer_screen_state == "0x0C"
             && manifest.runtime_binding.main_state == "0x3C"
-            && manifest.runtime_binding.dialogue_stage == binding.producer.selected_stage
+            && manifest.runtime_binding.dialogue_stage == 2
             && manifest.runtime_binding.completed_page_state == "0x0E",
         "maximum dialogue runtime producer binding changed"
     );
@@ -224,6 +224,8 @@ pub(super) fn load_runtime_evidence(
 
     Ok(RuntimeEvidence {
         manifest_sha1: sha1_hex(&manifest_bytes),
+        completed_page_count: expected_page_count,
+        samples_per_page: SAMPLING_FRAME_OFFSETS.len(),
         temporal_sample_count: manifest.samples.len(),
         unique_nametable_count: nametable_hashes.len(),
         screen_codes,

@@ -34,7 +34,10 @@ pub(crate) use battle_workspace::{
     validate_battle_dialogue_workspace,
 };
 pub(crate) use bundle::{MainDialogueBundlePlan, plan_main_dialogue_bundle};
-pub(crate) use glyph_workset::analyze_main_dialogue_glyph_workset;
+pub(crate) use glyph_workset::{
+    RuntimeEvidence as MaximumDialogueRuntimeEvidence, analyze_main_dialogue_glyph_workset,
+    load_maximum_dialogue_runtime_evidence,
+};
 use layout_packing::*;
 use markup::*;
 use model::*;

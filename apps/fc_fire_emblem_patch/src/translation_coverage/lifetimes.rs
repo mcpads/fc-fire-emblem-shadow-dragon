@@ -228,7 +228,7 @@ fn build_translation_lifetime_inventory(
             selected_slot_demand: Some(strongest.total_slot_demand),
             main_dialogue_maximum_target_glyph_count: main.max_transition_chain_unique_glyph_count,
             main_dialogue_maximum_screen_bound: main.maximum_source_binding.screen_lifetime_bound,
-            next_gate: "compare the remaining unmeasured screen lifetimes and implement the maximum dialogue's completed-page font reload",
+            next_gate: "compare the remaining unmeasured screen lifetimes",
         },
         demands,
         unmeasured_screen_roles,

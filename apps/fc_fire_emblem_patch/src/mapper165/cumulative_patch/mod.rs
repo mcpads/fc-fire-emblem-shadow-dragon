@@ -26,6 +26,12 @@ use super::{
     dialogue_lifetime_page::{SCREEN_ROLE, build_page_routine_at, plan_dialogue_lifetime_page},
     dialogue_probe_font::assignment_sha1,
     hangul_page_probe::build_mapper165_hangul_page_probe,
+    maximum_dialogue_page::{
+        COMPLETED_PAGE_COUNT as MAXIMUM_DIALOGUE_PAGE_COUNT,
+        DISPLAY_LINES_PER_PAGE as MAXIMUM_DIALOGUE_LINES_PER_PAGE,
+        SCREEN_ROLE as MAXIMUM_DIALOGUE_SCREEN_ROLE,
+        TARGET_RECORD_ID as MAXIMUM_DIALOGUE_RECORD_ID,
+    },
     roster_page::{
         PAGE_REGISTERS as ROSTER_PAGE_REGISTERS, PAGE_ROUTINE_ADDRESS as ROSTER_SELECTOR_ADDRESS,
         build_page_routine as build_roster_selector,
@@ -44,6 +50,8 @@ mod chapter_page_selector;
 mod class_profile_runtime;
 mod class_profile_stage;
 mod front_end_stage;
+mod maximum_dialogue_runtime_evidence;
+mod maximum_dialogue_stage;
 mod report;
 mod shop_dialogue_runtime;
 mod shop_dialogue_stage;
@@ -57,11 +65,13 @@ use chapter_page_selector::{ChapterPageSequence, build_chapter_page_selector};
 use class_profile_runtime::verify_class_profile_runtime_evidence;
 use class_profile_stage::install_class_profile_stage;
 use front_end_stage::install_front_end_stage;
+use maximum_dialogue_runtime_evidence::verify_maximum_dialogue_runtime_evidence;
+use maximum_dialogue_stage::{MaximumDialogueStageInputs, install_maximum_dialogue_stage};
 use report::{
     CumulativeBattleTextReport, CumulativeChapterTitleReport, CumulativeClassProfileReport,
     CumulativeDialogueLifetimeReport, CumulativeDialogueReport, CumulativeFrontEndMenuReport,
-    CumulativePatchReport, CumulativeStageReport, CumulativeUnitNameReport,
-    CumulativeWeaponShopSharedTextReport, SelectorChainReport,
+    CumulativeMaximumDialogueReport, CumulativePatchReport, CumulativeStageReport,
+    CumulativeUnitNameReport, CumulativeWeaponShopSharedTextReport, SelectorChainReport,
 };
 use shop_dialogue_runtime::verify_shop_dialogue_runtime_evidence;
 use shop_dialogue_stage::install_shop_dialogue_stage;
@@ -78,6 +88,7 @@ const UNIT_NAME_STAGE_ROM_NAME: &str = "unit-names.nes";
 const CLASS_PROFILE_STAGE_ROM_NAME: &str = "class-profiles.nes";
 const SHOP_DIALOGUE_STAGE_ROM_NAME: &str = "weapon-shop-dialogue.nes";
 const SHOP_SHARED_TEXT_STAGE_ROM_NAME: &str = "weapon-shop-shared-text.nes";
+const MAXIMUM_DIALOGUE_STAGE_ROM_NAME: &str = "maximum-dialogue.nes";
 const DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFBD4;
 const DIALOGUE_SELECTOR_CAVE_END: u16 = 0xFC20;
 const CHAPTER_ONE_DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFBD8;
@@ -125,6 +136,9 @@ pub(crate) struct CumulativePatchInputs<'a> {
     pub(crate) shop_dialogue_evidence_path: &'a Path,
     pub(crate) shop_dialogue_runtime_evidence_path: &'a Path,
     pub(crate) weapon_shop_shared_text_runtime_evidence_path: &'a Path,
+    pub(crate) maximum_dialogue_evidence_path: &'a Path,
+    pub(crate) maximum_dialogue_page_boundary_path: &'a Path,
+    pub(crate) maximum_dialogue_runtime_evidence_path: Option<&'a Path>,
     pub(crate) stage_directory: &'a Path,
     pub(crate) output_path: &'a Path,
     pub(crate) report_path: &'a Path,
@@ -174,6 +188,16 @@ pub(crate) fn build_cumulative_patch(
             .map(String::as_str)
             .eq(SHOP_DIALOGUE_RECORD_IDS),
         "weapon-shop dialogue plan order changed"
+    );
+    let maximum_dialogue_plan = plan_main_dialogue_slice(
+        &source_rom,
+        inputs.main_dialogue_workspace_path,
+        MAXIMUM_DIALOGUE_RECORD_ID,
+    )?;
+    ensure!(
+        maximum_dialogue_plan.workspace_sha1 == dialogue_workspace.workspace_sha1
+            && maximum_dialogue_plan.transition_chain_record_count == 1,
+        "maximum dialogue plan no longer matches its validated single-record lifetime"
     );
 
     let ui_stage_rom_path = inputs.stage_directory.join(UI_STAGE_ROM_NAME);
@@ -559,7 +583,31 @@ pub(crate) fn build_cumulative_patch(
                 .contains(source_index)),
         "weapon-shop item-name projection is no longer a subset of the installed battle catalog"
     );
-    let output = battle_stage.output.clone();
+    let maximum_dialogue_stage = install_maximum_dialogue_stage(MaximumDialogueStageInputs {
+        prior_output: &battle_stage.output,
+        source_rom: &source_rom,
+        record: &maximum_dialogue_plan,
+        evidence_path: inputs.maximum_dialogue_evidence_path,
+        page_boundary_path: inputs.maximum_dialogue_page_boundary_path,
+    })?;
+    write_file(
+        &inputs.stage_directory.join(MAXIMUM_DIALOGUE_STAGE_ROM_NAME),
+        &maximum_dialogue_stage.output,
+    )?;
+    let output = maximum_dialogue_stage.output.clone();
+    let maximum_dialogue_runtime = inputs
+        .maximum_dialogue_runtime_evidence_path
+        .map(|path| {
+            verify_maximum_dialogue_runtime_evidence(
+                path,
+                &maximum_dialogue_stage.output_sha1,
+                &maximum_dialogue_plan.workspace_sha1,
+                &maximum_dialogue_stage.page.completed_page_pointers,
+                &maximum_dialogue_stage.page.page_groups,
+                &maximum_dialogue_stage.page.mapper_registers,
+            )
+        })
+        .transpose()?;
     let output_rom = Rom::parse(output.clone()).context("parse cumulative Korean patch")?;
     let tracked_write_count = tracked_write_count
         + front_end_stage.tracked_write_count
@@ -567,31 +615,41 @@ pub(crate) fn build_cumulative_patch(
         + class_profile_stage.tracked_write_count
         + shop_dialogue_stage.tracked_write_count
         + weapon_shop_shared_text_stage.tracked_write_count
-        + battle_stage.tracked_write_count;
+        + battle_stage.tracked_write_count
+        + maximum_dialogue_stage.tracked_write_count;
 
     let translated_line_count = chapter_one_plans
         .iter()
         .chain(&chapter_two_plans)
         .map(|plan| plan.translated_line_count)
         .sum::<usize>()
-        + shop_dialogue_plan.translated_line_count;
+        + shop_dialogue_plan.translated_line_count
+        + maximum_dialogue_plan.translated_line_count;
     let source_storage_byte_count = chapter_one_plans
         .iter()
         .chain(&chapter_two_plans)
         .map(|plan| plan.source_storage_byte_count)
         .sum::<usize>()
-        + shop_dialogue_plan.source_record_storage_byte_count;
+        + shop_dialogue_plan.source_record_storage_byte_count
+        + maximum_dialogue_plan.source_storage_byte_count;
     let planned_storage_byte_count = chapter_one_encoded_records
         .iter()
         .chain(&chapter_two_encoded_records)
         .map(Vec::len)
         .sum::<usize>()
-        + shop_dialogue_plan.planned_record_storage_byte_count;
+        + shop_dialogue_plan.planned_record_storage_byte_count
+        + maximum_dialogue_stage.page.encoded_record.len();
     let installed_main_dialogue_record_count =
-        chapter_one_plans.len() + chapter_two_plans.len() + shop_dialogue_plan.record_ids.len();
+        chapter_one_plans.len() + chapter_two_plans.len() + shop_dialogue_plan.record_ids.len() + 1;
     let installed_dialogue_glyph_slot_count = chapter_one_page.assignments.len()
         + chapter_two_page.assignments.len()
-        + weapon_shop_shared_text_stage.plan.page.assignments.len();
+        + weapon_shop_shared_text_stage.plan.page.assignments.len()
+        + maximum_dialogue_stage
+            .page
+            .assignments
+            .iter()
+            .map(|assignments| assignments.len())
+            .sum::<usize>();
     let installed_glyph_slot_count = installed_dialogue_glyph_slot_count
         + front_end_stage.page.assignments.len()
         + unit_name_stage.page.roster_assignments.len()
@@ -675,6 +733,11 @@ pub(crate) fn build_cumulative_patch(
             output_sha1: battle_stage.output_sha1.clone(),
             report_sha1: Some(battle_stage.loader_report_sha1.clone()),
         },
+        CumulativeStageReport {
+            role: "chapter_7_maximum_dialogue_page_reload",
+            output_sha1: maximum_dialogue_stage.output_sha1.clone(),
+            report_sha1: None,
+        },
     ];
     let report = CumulativePatchReport {
         schema: 1,
@@ -731,6 +794,113 @@ pub(crate) fn build_cumulative_patch(
                     &shop_dialogue_runtime,
                 ),
             ],
+            maximum_page_reloaded_lifetime: CumulativeMaximumDialogueReport {
+                screen_role: MAXIMUM_DIALOGUE_SCREEN_ROLE,
+                target_record_id: maximum_dialogue_plan.record_id.clone(),
+                workspace_sha1: maximum_dialogue_plan.workspace_sha1.clone(),
+                screen_evidence_manifest_sha1: maximum_dialogue_stage
+                    .page
+                    .evidence_manifest_sha1
+                    .clone(),
+                page_boundary_manifest_sha1: maximum_dialogue_stage
+                    .page
+                    .page_boundary_manifest_sha1
+                    .clone(),
+                page_boundary_observation_output_sha1: maximum_dialogue_stage
+                    .page
+                    .boundary_observation_output_sha1
+                    .clone(),
+                installed_translated_line_count: maximum_dialogue_plan.translated_line_count,
+                source_storage_byte_count: maximum_dialogue_plan.source_storage_byte_count,
+                planned_storage_byte_count: maximum_dialogue_stage.page.encoded_record.len(),
+                remaining_storage_byte_count: maximum_dialogue_plan.source_storage_byte_count
+                    - maximum_dialogue_stage.page.encoded_record.len(),
+                completed_page_count: MAXIMUM_DIALOGUE_PAGE_COUNT,
+                display_lines_per_page: MAXIMUM_DIALOGUE_LINES_PER_PAGE,
+                font_group_count: maximum_dialogue_stage.page.assignments.len(),
+                page_group_indices: maximum_dialogue_stage.page.page_groups.clone(),
+                group_page_counts: maximum_dialogue_stage.page.group_page_counts.clone(),
+                group_unique_glyph_counts: maximum_dialogue_stage
+                    .page
+                    .group_unique_glyph_counts
+                    .clone(),
+                glyph_assignment_sha1s: maximum_dialogue_stage
+                    .page
+                    .assignments
+                    .iter()
+                    .map(assignment_sha1)
+                    .collect(),
+                preserved_screen_active_code_count: maximum_dialogue_stage
+                    .page
+                    .preserved_screen_active_code_count,
+                preserved_source_active_code_count: maximum_dialogue_stage
+                    .page
+                    .preserved_source_active_code_count,
+                preserved_active_code_count: maximum_dialogue_stage
+                    .page
+                    .preserved_active_code_count,
+                temporal_sample_count: maximum_dialogue_stage.page.temporal_sample_count,
+                unique_nametable_count: maximum_dialogue_stage.page.unique_nametable_count,
+                font_physical_pages: maximum_dialogue_stage.page.physical_chr_pages.clone(),
+                font_mapper_registers: maximum_dialogue_stage.page.mapper_registers.clone(),
+                font_page_sha1s: maximum_dialogue_stage.page.font_page_sha1s.clone(),
+                font_page_pack_sha1: sha1_hex(&maximum_dialogue_stage.page.page_pack),
+                completed_page_pointers_hex: maximum_dialogue_stage
+                    .page
+                    .completed_page_pointers
+                    .iter()
+                    .map(|pointer| format!("0x{pointer:04X}"))
+                    .collect(),
+                group_transition_pointers_hex: maximum_dialogue_stage
+                    .page
+                    .group_transition_pointers
+                    .iter()
+                    .map(|pointer| format!("0x{pointer:04X}"))
+                    .collect(),
+                initial_selector_byte_count: maximum_dialogue_stage.initial_selector_byte_count,
+                font_group_selector_byte_count: maximum_dialogue_stage
+                    .font_group_selector_byte_count,
+                completed_page_transition_byte_count: maximum_dialogue_stage
+                    .completed_page_transition_byte_count,
+                completed_page_reload_installed: true,
+                final_page_exit_bypasses_reload: true,
+                original_english_and_digits_preserved: true,
+                runtime_evidence_manifest_sha1: maximum_dialogue_runtime
+                    .as_ref()
+                    .map(|runtime| runtime.manifest_sha1.clone()),
+                runtime_sample_count: maximum_dialogue_runtime
+                    .as_ref()
+                    .map_or(0, |runtime| runtime.sample_count),
+                runtime_page_count: maximum_dialogue_runtime
+                    .as_ref()
+                    .map_or(0, |runtime| runtime.page_count),
+                runtime_unique_nametable_count: maximum_dialogue_runtime
+                    .as_ref()
+                    .map_or(0, |runtime| runtime.unique_nametable_count),
+                runtime_temporal_screen_count: maximum_dialogue_runtime
+                    .as_ref()
+                    .map_or(0, |runtime| runtime.temporal_screen_count),
+                runtime_pages_with_visual_phase_change: maximum_dialogue_runtime
+                    .as_ref()
+                    .map_or(0, |runtime| runtime.pages_with_visual_phase_change),
+                runtime_visual_review_passed: maximum_dialogue_runtime
+                    .as_ref()
+                    .is_some_and(|runtime| runtime.visual_review_passed),
+                initial_selector_runtime_bound_to_build: maximum_dialogue_runtime
+                    .as_ref()
+                    .is_some_and(|runtime| runtime.initial_selector_observed),
+                page_reload_runtime_bound_to_build: maximum_dialogue_runtime
+                    .as_ref()
+                    .is_some_and(|runtime| runtime.page_reload_bound_to_build),
+                final_exit_runtime_bound_to_build: maximum_dialogue_runtime
+                    .as_ref()
+                    .is_some_and(|runtime| runtime.final_exit_bound_to_build),
+                runtime_bound_to_build: maximum_dialogue_runtime.as_ref().is_some_and(|runtime| {
+                    runtime.initial_selector_observed
+                        && runtime.page_reload_bound_to_build
+                        && runtime.final_exit_bound_to_build
+                }),
+            },
         },
         front_end_menu: CumulativeFrontEndMenuReport {
             workspace_sha1: front_end_menu_plan.workspace_sha1.clone(),
@@ -927,6 +1097,15 @@ pub(crate) fn build_cumulative_patch(
                     "0x{:04X}",
                     CUMULATIVE_RUNTIME_LAYOUT.battle_central_right_fd_selector
                 ),
+                fallback_role: "maximum_dialogue",
+                admitted_chapter_indices: Vec::new(),
+            },
+            SelectorChainReport {
+                role: "maximum_dialogue",
+                cpu_address: format!(
+                    "0x{:04X}",
+                    super::maximum_dialogue_runtime::INITIAL_PAGE_SELECTOR_ADDRESS
+                ),
                 fallback_role: "unit_roster",
                 admitted_chapter_indices: Vec::new(),
             },
@@ -989,6 +1168,7 @@ pub(crate) fn build_cumulative_patch(
             "The translated playable-unit name pages still need build-bound cold runtime evidence across roster, unit summary, unit status, and their exit paths.",
             "The installed weapon-shop shared-text decline route is exact-output-bound through item selection, choices, continue prompt, item-list return, exit message, and map restoration; purchase and every preflight branch still need exact-output runtime evidence.",
             "Battle text and the dynamic composition loader are installed in this cumulative lineage, but the new cumulative output still needs cold-route battle and prior-screen regression evidence.",
+            "The source-bound fifteen-page maximum dialogue has exact-output evidence for its state-bridged Chapter 7 seize entry, initial selector, all page font reloads, irregular temporal samples, and the final NEXT STORY exit; cold-route prior-screen continuity remains open.",
             "The remaining main-dialogue screen lifetimes and translated non-dialogue surfaces are not yet installed in this cumulative lineage.",
             "The ending scroll owns a separate physical copy of all chapter titles; that duplicate consumer is not installed by this intro-title stage.",
             "Human translation review is incomplete, so this output is a development build rather than a release candidate.",

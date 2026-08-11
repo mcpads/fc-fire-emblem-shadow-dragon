@@ -38,11 +38,20 @@ struct CurrentChapterTitles {
 struct CurrentMainDialogue {
     installed_translated_line_count: usize,
     lifetimes: Vec<CurrentDialogueLifetime>,
+    maximum_page_reloaded_lifetime: CurrentMaximumDialogueLifetime,
 }
 
 #[derive(Debug, Deserialize)]
 struct CurrentDialogueLifetime {
     screen_role: String,
+    runtime_bound_to_build: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct CurrentMaximumDialogueLifetime {
+    screen_role: String,
+    installed_translated_line_count: usize,
+    completed_page_count: usize,
     runtime_bound_to_build: bool,
 }
 
@@ -266,6 +275,17 @@ fn collect_domain_installations(
             main_dialogue_runtime.extend_from_slice(roles);
         }
     }
+    let maximum = &report.main_dialogue.maximum_page_reloaded_lifetime;
+    ensure!(
+        maximum.screen_role == "chapter_7_castle_clear_maximum_dialogue"
+            && maximum.installed_translated_line_count > 0
+            && maximum.completed_page_count == 15,
+        "current maximum-dialogue installation changed"
+    );
+    main_dialogue_screens.push("chapter_clear_epilogue_dialogue");
+    if maximum.runtime_bound_to_build {
+        main_dialogue_runtime.push("chapter_clear_epilogue_dialogue");
+    }
     put(
         &mut domains,
         "main_dialogue",
@@ -440,8 +460,14 @@ mod tests {
                 "ending_scroll_duplicate_installed": false
             },
             "main_dialogue": {
-                "installed_translated_line_count": 0,
-                "lifetimes": []
+                "installed_translated_line_count": 57,
+                "lifetimes": [],
+                "maximum_page_reloaded_lifetime": {
+                    "screen_role": "chapter_7_castle_clear_maximum_dialogue",
+                    "installed_translated_line_count": 57,
+                    "completed_page_count": 15,
+                    "runtime_bound_to_build": true
+                }
             },
             "front_end_menu": {
                 "installed_entry_count": 0,
@@ -522,6 +548,18 @@ mod tests {
             installations["battle_dialogue"]
                 .runtime_bound_screen_roles
                 .is_empty()
+        );
+        assert_eq!(
+            installations["main_dialogue"].installed_screen_roles,
+            ["chapter_clear_epilogue_dialogue"]
+        );
+        assert_eq!(
+            installations["main_dialogue"].installed_target_unit_count,
+            57
+        );
+        assert_eq!(
+            installations["main_dialogue"].runtime_bound_screen_roles,
+            ["chapter_clear_epilogue_dialogue"]
         );
     }
 }

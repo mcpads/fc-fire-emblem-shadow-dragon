@@ -12,6 +12,7 @@ mod source_regions;
 mod tests;
 
 pub(super) use runtime_lifetime::bind_runtime_lifetime;
+pub(crate) use runtime_lifetime::{RuntimeEvidence, load_runtime_evidence};
 
 use chapter_events::{
     ChapterEventRecord, DataRegionBinding, bind_chapter_event_directory, bind_chapter_map_pointers,
