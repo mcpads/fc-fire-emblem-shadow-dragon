@@ -475,6 +475,13 @@ enum Command {
         class_profile_localization: PathBuf,
         #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
         fixed_text_workspace: PathBuf,
+        #[arg(long, default_value = "private/dialogue/battle-workspace.json")]
+        battle_dialogue_workspace: PathBuf,
+        #[arg(
+            long,
+            default_value = "evidence/private/temporal-surfaces/manifest.json"
+        )]
+        battle_temporal_manifest: PathBuf,
         #[arg(long, default_value = "assets/translation/choice-labels.ko.json")]
         choice_label_localization: PathBuf,
         #[arg(
@@ -1403,6 +1410,8 @@ fn main() -> Result<()> {
             unit_name_localization,
             class_profile_localization,
             fixed_text_workspace,
+            battle_dialogue_workspace,
+            battle_temporal_manifest,
             choice_label_localization,
             chapter_one_intro_evidence,
             chapter_two_intro_evidence,
@@ -1428,6 +1437,8 @@ fn main() -> Result<()> {
                     unit_name_localization_path: &unit_name_localization,
                     class_profile_localization_path: &class_profile_localization,
                     fixed_text_workspace_path: &fixed_text_workspace,
+                    battle_dialogue_workspace_path: &battle_dialogue_workspace,
+                    battle_temporal_manifest_path: &battle_temporal_manifest,
                     choice_label_localization_path: &choice_label_localization,
                     chapter_one_intro_evidence_path: &chapter_one_intro_evidence,
                     chapter_two_intro_evidence_path: &chapter_two_intro_evidence,

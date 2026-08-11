@@ -22,23 +22,7 @@ fn runtime_routines_fit_the_fixed_cave_without_overlap() {
 
 #[test]
 fn cumulative_layout_preserves_existing_selector_ranges() {
-    let layout = BattleCompositionRuntimeLayout {
-        dispatch: 0xFC20,
-        compose_page: 0xFC99,
-        apply_recipe: 0xFDC2,
-        apply_directory: 0xFE3C,
-        apply_participant: 0xFE4C,
-        project_dialogue_selector: 0xFE75,
-        battle_surface_active: 0xFE90,
-        initialize_sound_test_battle_remap: 0xFEB3,
-        clear_remap_state_after_battle: 0xFEC0,
-        text_projection_wrapper: 0xFECE,
-        battle_right_fd_selector: 0xFEEE,
-        battle_central_right_fd_selector: 0xFF1D,
-        battle_right_fe_selector: 0xFF43,
-        project_color: 0xFF72,
-        fixed_cave_end: 0xFFA0,
-    };
+    let layout = CUMULATIVE_RUNTIME_LAYOUT;
     let routines = build_runtime_routines_for_layout(
         RecipeDirectoryAddresses {
             unit: 0xB020,

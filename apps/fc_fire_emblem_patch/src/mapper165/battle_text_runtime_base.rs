@@ -107,6 +107,7 @@ pub(crate) struct BattleTextRuntimeBaseSummary {
     pub(crate) report_sha1: String,
     pub(crate) fixed_entry_count: usize,
     pub(crate) dialogue_record_count: usize,
+    pub(crate) dialogue_translated_line_count: usize,
     pub(crate) tracked_write_count: usize,
 }
 
@@ -334,6 +335,7 @@ pub(crate) fn build_battle_text_runtime_base(
         report_sha1: sha1_hex(&report_bytes),
         fixed_entry_count: fixed_reinserted_entry_count,
         dialogue_record_count: dialogue.records.len(),
+        dialogue_translated_line_count: dialogue.translated_line_count,
         tracked_write_count: text_tracked_write_count,
     })
 }

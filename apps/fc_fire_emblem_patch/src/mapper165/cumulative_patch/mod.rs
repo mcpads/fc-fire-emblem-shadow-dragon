@@ -22,6 +22,7 @@ use crate::{
 
 use super::{
     OUTPUT_MAPPER, SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
+    battle_composition_loader_probe::CUMULATIVE_RUNTIME_LAYOUT,
     dialogue_lifetime_page::{SCREEN_ROLE, build_page_routine_at, plan_dialogue_lifetime_page},
     dialogue_probe_font::assignment_sha1,
     hangul_page_probe::build_mapper165_hangul_page_probe,
@@ -37,6 +38,7 @@ use super::{
     weapon_shop_shared_text::SCREEN_ROLE as WEAPON_SHOP_SHARED_TEXT_SCREEN_ROLE,
 };
 
+mod battle_stage;
 mod chapter_page_selector;
 mod class_profile_runtime;
 mod class_profile_stage;
@@ -49,15 +51,16 @@ mod verify;
 mod weapon_shop_shared_text_runtime;
 mod weapon_shop_shared_text_stage;
 
+use battle_stage::{BattleStageInputs, install_battle_stage};
 use chapter_page_selector::{ChapterPageSequence, build_chapter_page_selector};
 use class_profile_runtime::verify_class_profile_runtime_evidence;
 use class_profile_stage::install_class_profile_stage;
 use front_end_stage::install_front_end_stage;
 use report::{
-    CumulativeChapterTitleReport, CumulativeClassProfileReport, CumulativeDialogueLifetimeReport,
-    CumulativeDialogueReport, CumulativeFrontEndMenuReport, CumulativePatchReport,
-    CumulativeStageReport, CumulativeUnitNameReport, CumulativeWeaponShopSharedTextReport,
-    SelectorChainReport,
+    CumulativeBattleTextReport, CumulativeChapterTitleReport, CumulativeClassProfileReport,
+    CumulativeDialogueLifetimeReport, CumulativeDialogueReport, CumulativeFrontEndMenuReport,
+    CumulativePatchReport, CumulativeStageReport, CumulativeUnitNameReport,
+    CumulativeWeaponShopSharedTextReport, SelectorChainReport,
 };
 use shop_dialogue_runtime::verify_shop_dialogue_runtime_evidence;
 use shop_dialogue_stage::install_shop_dialogue_stage;
@@ -109,6 +112,8 @@ pub(crate) struct CumulativePatchInputs<'a> {
     pub(crate) unit_name_localization_path: &'a Path,
     pub(crate) class_profile_localization_path: &'a Path,
     pub(crate) fixed_text_workspace_path: &'a Path,
+    pub(crate) battle_dialogue_workspace_path: &'a Path,
+    pub(crate) battle_temporal_manifest_path: &'a Path,
     pub(crate) choice_label_localization_path: &'a Path,
     pub(crate) chapter_one_intro_evidence_path: &'a Path,
     pub(crate) chapter_two_intro_evidence_path: &'a Path,
@@ -536,14 +541,24 @@ pub(crate) fn build_cumulative_patch(
         &inputs.stage_directory.join(SHOP_SHARED_TEXT_STAGE_ROM_NAME),
         &weapon_shop_shared_text_stage.output,
     )?;
-    let output = weapon_shop_shared_text_stage.output;
+    let battle_stage = install_battle_stage(BattleStageInputs {
+        prior_output: &weapon_shop_shared_text_stage.output,
+        source_rom: &source_rom,
+        source_path: inputs.source_path,
+        fixed_workspace_path: inputs.fixed_text_workspace_path,
+        dialogue_workspace_path: inputs.battle_dialogue_workspace_path,
+        temporal_manifest_path: inputs.battle_temporal_manifest_path,
+        stage_directory: inputs.stage_directory,
+    })?;
+    let output = battle_stage.output.clone();
     let output_rom = Rom::parse(output.clone()).context("parse cumulative Korean patch")?;
     let tracked_write_count = tracked_write_count
         + front_end_stage.tracked_write_count
         + unit_name_stage.tracked_write_count
         + class_profile_stage.tracked_write_count
         + shop_dialogue_stage.tracked_write_count
-        + weapon_shop_shared_text_stage.tracked_write_count;
+        + weapon_shop_shared_text_stage.tracked_write_count
+        + battle_stage.tracked_write_count;
 
     let translated_line_count = chapter_one_plans
         .iter()
@@ -563,7 +578,7 @@ pub(crate) fn build_cumulative_patch(
         .map(Vec::len)
         .sum::<usize>()
         + shop_dialogue_plan.planned_record_storage_byte_count;
-    let installed_record_count =
+    let installed_main_dialogue_record_count =
         chapter_one_plans.len() + chapter_two_plans.len() + shop_dialogue_plan.record_ids.len();
     let installed_dialogue_glyph_slot_count = chapter_one_page.assignments.len()
         + chapter_two_page.assignments.len()
@@ -573,7 +588,8 @@ pub(crate) fn build_cumulative_patch(
         + unit_name_stage.page.roster_assignments.len()
         + unit_name_stage.page.unit_ui_assignments.len()
         + class_profile_stage.page.assignments[0].len()
-        + class_profile_stage.page.assignments[1].len();
+        + class_profile_stage.page.assignments[1].len()
+        + battle_stage.stable_color_count;
     let output_sha1 = sha1_hex(&output);
     let shop_dialogue_runtime = verify_shop_dialogue_runtime_evidence(
         inputs.shop_dialogue_runtime_evidence_path,
@@ -587,7 +603,7 @@ pub(crate) fn build_cumulative_patch(
     )?;
     let weapon_shop_shared_text_runtime = verify_weapon_shop_shared_text_runtime_evidence(
         inputs.weapon_shop_shared_text_runtime_evidence_path,
-        &output_sha1,
+        &weapon_shop_shared_text_stage.output_sha1,
         weapon_shop_shared_text_stage.plan.page.mapper_register,
     )?;
     ensure!(
@@ -599,8 +615,9 @@ pub(crate) fn build_cumulative_patch(
         "front-end stage output hash changed before unit-name installation"
     );
     ensure!(
-        output_sha1 == weapon_shop_shared_text_stage.output_sha1,
-        "weapon-shop shared-text output hash changed before publication"
+        sha1_hex(&weapon_shop_shared_text_stage.output)
+            == weapon_shop_shared_text_stage.output_sha1,
+        "weapon-shop shared-text output hash changed before battle installation"
     );
     let chapter_two_output_sha1 = sha1_hex(&chapter_two_output);
     let stages = vec![
@@ -644,6 +661,11 @@ pub(crate) fn build_cumulative_patch(
             output_sha1: weapon_shop_shared_text_stage.output_sha1.clone(),
             report_sha1: None,
         },
+        CumulativeStageReport {
+            role: "battle_text_and_dynamic_composition",
+            output_sha1: battle_stage.output_sha1.clone(),
+            report_sha1: Some(battle_stage.loader_report_sha1.clone()),
+        },
     ];
     let report = CumulativePatchReport {
         schema: 1,
@@ -673,7 +695,7 @@ pub(crate) fn build_cumulative_patch(
             workspace_sha1: chapter_one_plans[0].workspace_sha1.clone(),
             workspace_record_count: dialogue_workspace.record_count,
             workspace_filled_line_count: dialogue_workspace.filled_line_count,
-            installed_record_count,
+            installed_record_count: installed_main_dialogue_record_count,
             installed_translated_line_count: translated_line_count,
             installed_shared_page_glyph_slot_count: installed_dialogue_glyph_slot_count,
             source_storage_byte_count,
@@ -757,7 +779,8 @@ pub(crate) fn build_cumulative_patch(
             preserved_unit_ui_code_count: unit_name_stage.page.preserved_unit_ui_code_count,
             roster_projection_installed: true,
             unit_summary_projection_installed: true,
-            source_battle_and_ending_table_preserved: true,
+            source_battle_table_preserved: false,
+            source_ending_table_preserved: true,
             runtime_bound_to_build: false,
             review_complete: unit_name_plan.review_complete,
         },
@@ -859,7 +882,37 @@ pub(crate) fn build_cumulative_patch(
             runtime_bound_to_build: true,
             review_complete: weapon_shop_shared_text_stage.plan.review_complete,
         },
+        battle_text: CumulativeBattleTextReport {
+            fixed_text_workspace_sha1: battle_stage.fixed_workspace_sha1.clone(),
+            dialogue_workspace_sha1: battle_stage.dialogue_workspace_sha1.clone(),
+            temporal_manifest_sha1: battle_stage.temporal_manifest_sha1.clone(),
+            runtime_base_report_sha1: battle_stage.runtime_base_report_sha1.clone(),
+            loader_report_sha1: battle_stage.loader_report_sha1.clone(),
+            installed_fixed_entry_count: battle_stage.fixed_entry_count,
+            installed_dialogue_record_count: battle_stage.dialogue_record_count,
+            installed_translated_line_count: battle_stage.dialogue_translated_line_count,
+            stable_color_count: battle_stage.stable_color_count,
+            glyph_atlas_tile_count: battle_stage.glyph_atlas_tile_count,
+            observed_runtime_tuple_count: battle_stage.observed_runtime_tuple_count,
+            maximum_observed_overlay_count: battle_stage.maximum_observed_overlay_count,
+            maximum_observed_ppu_write_count: battle_stage.maximum_observed_ppu_write_count,
+            runtime_routine_byte_count: battle_stage.runtime_routine_byte_count,
+            text_diff_range_count: battle_stage.text_diff_range_count,
+            cumulative_selector_ranges_preserved: true,
+            original_english_digits_and_graphics_preserved: true,
+            runtime_bound_to_build: false,
+            review_complete: false,
+        },
         selector_chain: vec![
+            SelectorChainReport {
+                role: "battle_composition",
+                cpu_address: format!(
+                    "0x{:04X}",
+                    CUMULATIVE_RUNTIME_LAYOUT.battle_central_right_fd_selector
+                ),
+                fallback_role: "unit_roster",
+                admitted_chapter_indices: Vec::new(),
+            },
             SelectorChainReport {
                 role: "unit_roster",
                 cpu_address: format!("0x{ROSTER_SELECTOR_ADDRESS:04X}"),
@@ -903,7 +956,8 @@ pub(crate) fn build_cumulative_patch(
                 .projection
                 .item_name_count
                 == 6
-            && choice_label_plan.entries.len() == 2,
+            && choice_label_plan.entries.len() == 2
+            && battle_stage.dialogue_record_count == 28,
         review_complete: dialogue_workspace.review_complete
             && chapter_title_plan.review_complete
             && front_end_menu_plan.review_complete
@@ -914,9 +968,10 @@ pub(crate) fn build_cumulative_patch(
         unresolved: vec![
             "The translated Chapter 1 and Chapter 2 title bars need cold-route runtime regression together with every installed dialogue page and natural map restoration.",
             "Private observations passed the installed no-save and valid-save front-end variants, but installed runtime evidence is not yet build-bound and the suspend-data variant is unverified.",
-            "Playable-unit names are installed only for the roster and map unit-summary/status consumers; battle and ending consumers remain Japanese backlog until their own font lifetimes are installed.",
+            "Playable-unit names are installed for roster, map unit-summary/status, and battle consumers; ending consumers remain Japanese backlog until their own font lifetimes are installed.",
             "The translated playable-unit name pages still need build-bound cold runtime evidence across roster, unit summary, unit status, and their exit paths.",
             "The installed weapon-shop shared-text decline route is exact-output-bound through item selection, choices, continue prompt, item-list return, exit message, and map restoration; purchase and every preflight branch still need exact-output runtime evidence.",
+            "Battle text and the dynamic composition loader are installed in this cumulative lineage, but the new cumulative output still needs cold-route battle and prior-screen regression evidence.",
             "The remaining main-dialogue screen lifetimes and translated non-dialogue surfaces are not yet installed in this cumulative lineage.",
             "The ending scroll owns a separate physical copy of all chapter titles; that duplicate consumer is not installed by this intro-title stage.",
             "Human translation review is incomplete, so this output is a development build rather than a release candidate.",
@@ -934,8 +989,10 @@ pub(crate) fn build_cumulative_patch(
         output_sha1,
         report_sha1,
         stage_count: report.stage_count,
-        installed_dialogue_record_count: installed_record_count,
-        installed_dialogue_line_count: translated_line_count,
+        installed_dialogue_record_count: installed_main_dialogue_record_count
+            + battle_stage.dialogue_record_count,
+        installed_dialogue_line_count: translated_line_count
+            + battle_stage.dialogue_translated_line_count,
         installed_chapter_title_count: 2,
         installed_glyph_slot_count,
         tracked_write_count,

@@ -16,6 +16,7 @@ pub(super) struct CumulativePatchReport {
     pub(super) playable_unit_names: CumulativeUnitNameReport,
     pub(super) automatic_class_profiles: CumulativeClassProfileReport,
     pub(super) weapon_shop_shared_text: CumulativeWeaponShopSharedTextReport,
+    pub(super) battle_text: CumulativeBattleTextReport,
     pub(super) selector_chain: Vec<SelectorChainReport>,
     pub(super) original_chr_preserved: bool,
     pub(super) tracked_write_count: usize,
@@ -24,6 +25,29 @@ pub(super) struct CumulativePatchReport {
     pub(super) runtime_verified: bool,
     pub(super) unresolved: Vec<&'static str>,
     pub(super) release_eligible: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct CumulativeBattleTextReport {
+    pub(super) fixed_text_workspace_sha1: String,
+    pub(super) dialogue_workspace_sha1: String,
+    pub(super) temporal_manifest_sha1: String,
+    pub(super) runtime_base_report_sha1: String,
+    pub(super) loader_report_sha1: String,
+    pub(super) installed_fixed_entry_count: usize,
+    pub(super) installed_dialogue_record_count: usize,
+    pub(super) installed_translated_line_count: usize,
+    pub(super) stable_color_count: usize,
+    pub(super) glyph_atlas_tile_count: usize,
+    pub(super) observed_runtime_tuple_count: usize,
+    pub(super) maximum_observed_overlay_count: usize,
+    pub(super) maximum_observed_ppu_write_count: usize,
+    pub(super) runtime_routine_byte_count: usize,
+    pub(super) text_diff_range_count: usize,
+    pub(super) cumulative_selector_ranges_preserved: bool,
+    pub(super) original_english_digits_and_graphics_preserved: bool,
+    pub(super) runtime_bound_to_build: bool,
+    pub(super) review_complete: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -102,7 +126,8 @@ pub(super) struct CumulativeUnitNameReport {
     pub(super) preserved_unit_ui_code_count: usize,
     pub(super) roster_projection_installed: bool,
     pub(super) unit_summary_projection_installed: bool,
-    pub(super) source_battle_and_ending_table_preserved: bool,
+    pub(super) source_battle_table_preserved: bool,
+    pub(super) source_ending_table_preserved: bool,
     pub(super) runtime_bound_to_build: bool,
     pub(super) review_complete: bool,
 }

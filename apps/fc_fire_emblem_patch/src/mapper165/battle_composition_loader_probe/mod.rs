@@ -110,6 +110,25 @@ pub(crate) const PROBE_RUNTIME_LAYOUT: BattleCompositionRuntimeLayout =
         fixed_cave_end: FIXED_CAVE_END_ADDRESS,
     };
 
+pub(crate) const CUMULATIVE_RUNTIME_LAYOUT: BattleCompositionRuntimeLayout =
+    BattleCompositionRuntimeLayout {
+        dispatch: 0xFC20,
+        compose_page: 0xFC99,
+        apply_recipe: 0xFDC2,
+        apply_directory: 0xFE3C,
+        apply_participant: 0xFE4C,
+        project_dialogue_selector: 0xFE75,
+        battle_surface_active: 0xFE90,
+        initialize_sound_test_battle_remap: 0xFEB3,
+        clear_remap_state_after_battle: 0xFEC0,
+        text_projection_wrapper: 0xFECE,
+        battle_right_fd_selector: 0xFEEE,
+        battle_central_right_fd_selector: 0xFF1D,
+        battle_right_fe_selector: 0xFF43,
+        project_color: 0xFF72,
+        fixed_cave_end: FIXED_CAVE_END_ADDRESS,
+    };
+
 const PPU_MASK_SHADOW: u8 = 0xCC;
 const PPU_CONTROL_SHADOW: u16 = 0x00CD;
 const PRG_BANK_SHADOW: u8 = 0x51;
@@ -253,6 +272,18 @@ pub(crate) struct BattleCompositionLoaderProbeSummary {
     pub(crate) observed_runtime_tuple_count: usize,
     pub(crate) maximum_observed_ppu_write_count: usize,
     pub(crate) runtime_routine_byte_count: usize,
+    pub(crate) runtime_tracked_write_count: usize,
+}
+
+pub(crate) struct BattleCompositionLoaderBuild<'a> {
+    pub(crate) source_path: &'a Path,
+    pub(crate) temporal_manifest_path: &'a Path,
+    pub(crate) base_path: &'a Path,
+    pub(crate) base_report_path: &'a Path,
+    pub(crate) output_path: &'a Path,
+    pub(crate) report_path: &'a Path,
+    pub(crate) layout: BattleCompositionRuntimeLayout,
+    pub(crate) central_fallback_target: u16,
 }
 
 pub(crate) fn build_battle_composition_loader_probe(
@@ -263,28 +294,31 @@ pub(crate) fn build_battle_composition_loader_probe(
     output_path: &Path,
     report_path: &Path,
 ) -> Result<BattleCompositionLoaderProbeSummary> {
-    build_battle_composition_loader_with_layout(
+    build_battle_composition_loader(BattleCompositionLoaderBuild {
         source_path,
         temporal_manifest_path,
         base_path,
         base_report_path,
         output_path,
         report_path,
-        PROBE_RUNTIME_LAYOUT,
-        SOURCE_PAIR_AWARE_RIGHT_FD_SELECTOR,
-    )
+        layout: PROBE_RUNTIME_LAYOUT,
+        central_fallback_target: SOURCE_PAIR_AWARE_RIGHT_FD_SELECTOR,
+    })
 }
 
-pub(crate) fn build_battle_composition_loader_with_layout(
-    source_path: &Path,
-    temporal_manifest_path: &Path,
-    base_path: &Path,
-    base_report_path: &Path,
-    output_path: &Path,
-    report_path: &Path,
-    layout: BattleCompositionRuntimeLayout,
-    central_fallback_target: u16,
+pub(crate) fn build_battle_composition_loader(
+    build: BattleCompositionLoaderBuild<'_>,
 ) -> Result<BattleCompositionLoaderProbeSummary> {
+    let BattleCompositionLoaderBuild {
+        source_path,
+        temporal_manifest_path,
+        base_path,
+        base_report_path,
+        output_path,
+        report_path,
+        layout,
+        central_fallback_target,
+    } = build;
     let source_rom = Rom::from_path(source_path)?;
     source_rom.verify_supported_japanese()?;
     let base = fs::read(base_path).with_context(|| format!("read {}", base_path.display()))?;
@@ -579,6 +613,7 @@ pub(crate) fn build_battle_composition_loader_with_layout(
         observed_runtime_tuple_count: runtime_inputs.len(),
         maximum_observed_ppu_write_count: maximum_observed_total_ppu_write_count,
         runtime_routine_byte_count,
+        runtime_tracked_write_count,
     })
 }
 
