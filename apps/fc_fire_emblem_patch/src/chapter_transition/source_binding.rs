@@ -1,6 +1,8 @@
 use super::*;
 
-pub(super) fn bind_chapter_intro_contexts(rom: &Rom) -> Result<ChapterIntroContextSummary> {
+fn validated_chapter_intro_contexts(
+    rom: &Rom,
+) -> Result<Vec<crate::dialogue_inventory::ChapterIntroContextBinding>> {
     let mut contexts = inspect_chapter_intro_contexts(rom.data())?;
     contexts.sort_by_key(|context| context.chapter_index);
     ensure!(
@@ -19,6 +21,27 @@ pub(super) fn bind_chapter_intro_contexts(rom: &Rom) -> Result<ChapterIntroConte
             context.file_offset
         );
     }
+
+    Ok(contexts)
+}
+
+pub(crate) fn bind_chapter_intro_lifetime_contexts(
+    rom: &Rom,
+) -> Result<Vec<ChapterIntroLifetimeContext>> {
+    validated_chapter_intro_contexts(rom).map(|contexts| {
+        contexts
+            .into_iter()
+            .map(|context| ChapterIntroLifetimeContext {
+                chapter_index: context.chapter_index,
+                canonical_entry_index: context.canonical_entry_index,
+                entry_indices: context.entry_indices,
+            })
+            .collect()
+    })
+}
+
+pub(super) fn bind_chapter_intro_contexts(rom: &Rom) -> Result<ChapterIntroContextSummary> {
+    let contexts = validated_chapter_intro_contexts(rom)?;
 
     Ok(ChapterIntroContextSummary {
         prefix_code: 0xE5,

@@ -30,8 +30,15 @@ pub(crate) struct MainDialogueBundlePlan {
     pub(crate) planned_record_storage_byte_count: usize,
     pub(crate) preserved_source_codes: BTreeSet<u8>,
     pub(crate) source_reclaimable_active_codes: BTreeSet<u8>,
+    pub(crate) page_worksets: Vec<MainDialoguePageWorkset>,
     target_records: Vec<LogicalDialogueRecord>,
     regions: Vec<LogicalBundleRegion>,
+}
+
+pub(crate) struct MainDialoguePageWorkset {
+    pub(crate) target_glyphs: BTreeSet<char>,
+    pub(crate) source_reclaimable_active_codes: BTreeSet<u8>,
+    pub(crate) preserved_target_active_codes: BTreeSet<u8>,
 }
 
 impl MainDialogueBundlePlan {
@@ -156,6 +163,20 @@ pub(crate) fn plan_main_dialogue_bundle(
             )
         })
         .collect::<Result<Vec<_>>>()?;
+    let page_worksets = target_indices
+        .iter()
+        .flat_map(|index| {
+            record_page_worksets(
+                rom.data(),
+                &source_records[*index],
+                &workspace.records[*index],
+            )
+        })
+        .collect::<Result<Vec<_>>>()?;
+    ensure!(
+        !page_worksets.is_empty(),
+        "main dialogue bundle has no visible page worksets"
+    );
     let target_regions = normalize_storage_ranges(
         &source_records
             .iter()
@@ -255,9 +276,73 @@ pub(crate) fn plan_main_dialogue_bundle(
         planned_record_storage_byte_count,
         preserved_source_codes,
         source_reclaimable_active_codes,
+        page_worksets,
         target_records,
         regions,
     })
+}
+
+fn record_page_worksets<'a>(
+    source: &'a [u8],
+    source_record: &'a MainDialogueStorageRecord,
+    workspace_record: &'a WorkspaceRecord,
+) -> impl Iterator<Item = Result<MainDialoguePageWorkset>> + 'a {
+    let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
+    let prefix_uses_dynamic_output = source
+        .get(source_record.file_offset..source_record.file_offset + source_record.prefix_byte_count)
+        .is_some_and(|prefix| prefix.contains(&DIALOGUE_PREFIX_CONTROL_CODE));
+    source_record
+        .lines
+        .chunks(MAIN_DIALOGUE_VISIBLE_LINES_PER_PAGE)
+        .zip(
+            workspace_record
+                .lines
+                .chunks(MAIN_DIALOGUE_VISIBLE_LINES_PER_PAGE),
+        )
+        .map(move |(source_lines, workspace_lines)| {
+            ensure!(
+                source_lines.len() == workspace_lines.len(),
+                "{} visible-page source and workspace line counts differ",
+                workspace_record.id
+            );
+            let mut target_glyphs = BTreeSet::new();
+            let mut preserved_target_active_codes = BTreeSet::new();
+            let mut source_reclaimable_active_codes = BTreeSet::new();
+            for (source_line, workspace_line) in source_lines.iter().zip(workspace_lines) {
+                if workspace_line.status == TranslationStatus::Untranslated {
+                    continue;
+                }
+                for byte in encode_korean_markup(&workspace_line.korean)? {
+                    match byte {
+                        LogicalDialogueByte::TargetGlyph(glyph) => {
+                            target_glyphs.insert(glyph);
+                        }
+                        LogicalDialogueByte::Encoded(code) if active_codes.contains(&code) => {
+                            preserved_target_active_codes.insert(code);
+                        }
+                        LogicalDialogueByte::Encoded(_) => {}
+                    }
+                }
+                for file_offset in &source_line.literal_file_offsets {
+                    let code = *source
+                        .get(*file_offset)
+                        .context("main-dialogue page literal is outside the ROM")?;
+                    if is_japanese_text_code(code) && active_codes.contains(&code) {
+                        source_reclaimable_active_codes.insert(code);
+                    }
+                }
+            }
+            if prefix_uses_dynamic_output {
+                preserved_target_active_codes.extend(DIALOGUE_PREFIX_OUTPUT_CODES);
+            }
+            source_reclaimable_active_codes
+                .retain(|code| !preserved_target_active_codes.contains(code));
+            Ok(MainDialoguePageWorkset {
+                target_glyphs,
+                source_reclaimable_active_codes,
+                preserved_target_active_codes,
+            })
+        })
 }
 
 fn encode_logical_bytes(

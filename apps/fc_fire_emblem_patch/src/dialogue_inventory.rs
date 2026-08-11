@@ -213,6 +213,7 @@ pub(crate) fn inspect_chapter_intro_contexts(
             entry_indices.sort_unstable();
 
             Ok(ChapterIntroContextBinding {
+                canonical_entry_index: entry.index,
                 entry_indices,
                 file_offset: entry.file_offset,
                 chapter_index: prefix_payload[4],

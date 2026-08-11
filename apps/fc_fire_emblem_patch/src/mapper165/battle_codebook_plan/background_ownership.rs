@@ -1,13 +1,12 @@
 use std::collections::BTreeSet;
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Result, ensure};
 use serde::Serialize;
 
+#[cfg(test)]
+use crate::{font_slots::active_hangul_codes, japanese_encoding::is_japanese_text_code};
 use crate::{
-    font_slots::{FONT_PAGE_SIZE, active_hangul_codes},
-    japanese_encoding::is_japanese_text_code,
-    rom::Rom,
-    sha1_hex,
+    rom::Rom, sha1_hex, source_font_page::bind_source_font_page_ownership,
     typed_source::decode_rp2a03_sequence,
 };
 
@@ -21,8 +20,6 @@ use super::{
     source_window::{prg_bank, source_bytes},
 };
 
-const SOURCE_FONT_PAGE_INDEX: usize = 0;
-const SOURCE_FONT_PAGE_SHA1: &str = "1860feeb0b0b216abb79bf7917bde8b51734a980";
 const QUEUE_CONSUMER_ADDRESS: u16 = 0xC3A5;
 const QUEUE_CONSUMER_BYTES: [u8; 26] = [
     0xA5, 0x21, 0xF0, 0x15, 0xA9, 0x81, 0x85, 0x00, 0xA9, 0x07, 0x85, 0x01, 0x20, 0xE7, 0xC3, 0xA9,
@@ -70,40 +67,10 @@ pub(super) fn bind_battle_background_code_ownership(
 ) -> Result<BattleBackgroundCodeOwnership> {
     let payload_model = bind_battle_background_payloads(rom)?;
     let producer_topology = bind_battle_background_producer_topology(rom, &payload_model)?;
-    let page_start = SOURCE_FONT_PAGE_INDEX
-        .checked_mul(FONT_PAGE_SIZE)
-        .context("battle source-font page offset overflow")?;
-    let page = rom
-        .chr()
-        .get(page_start..page_start + FONT_PAGE_SIZE)
-        .context("battle source-font page is outside CHR")?;
-    ensure!(
-        sha1_hex(page) == SOURCE_FONT_PAGE_SHA1,
-        "battle source-font page changed"
-    );
-
-    let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
-    let japanese_text_codes = active_codes
-        .iter()
-        .copied()
-        .filter(|code| is_japanese_text_code(*code))
-        .collect::<BTreeSet<_>>();
-    let preserved_non_japanese_codes = active_codes
-        .difference(&japanese_text_codes)
-        .copied()
-        .collect::<BTreeSet<_>>();
-    ensure!(
-        japanese_text_codes.is_disjoint(&preserved_non_japanese_codes),
-        "battle background code ownership overlaps"
-    );
-    ensure!(
-        japanese_text_codes
-            .union(&preserved_non_japanese_codes)
-            .copied()
-            .collect::<BTreeSet<_>>()
-            == active_codes,
-        "battle background code ownership does not cover every active code"
-    );
+    let source_page = bind_source_font_page_ownership(rom)?;
+    let active_codes = source_page.active_codes().clone();
+    let japanese_text_codes = source_page.japanese_text_codes().clone();
+    let preserved_non_japanese_codes = source_page.preserved_non_japanese_codes().clone();
 
     Ok(BattleBackgroundCodeOwnership {
         active_codes,
@@ -116,7 +83,7 @@ pub(super) fn bind_battle_background_code_ownership(
 
 impl BattleBackgroundCodeOwnership {
     pub(super) fn source_font_page_sha1(&self) -> &'static str {
-        SOURCE_FONT_PAGE_SHA1
+        crate::source_font_page::SOURCE_FONT_PAGE_SHA1
     }
 
     pub(super) fn japanese_text_active_code_count(&self) -> usize {

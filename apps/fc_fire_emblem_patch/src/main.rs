@@ -31,6 +31,7 @@ mod rp2a03;
 mod screen_contracts;
 mod semantic_translation;
 mod shop_flow;
+mod source_font_page;
 mod source_literals;
 mod static_analysis;
 mod suspend_message;

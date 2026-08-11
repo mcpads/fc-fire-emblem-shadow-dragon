@@ -28,6 +28,8 @@ mod source_asset;
 mod tests;
 mod workspace;
 
+const MAIN_DIALOGUE_VISIBLE_LINES_PER_PAGE: usize = 4;
+
 pub(crate) use battle_workspace::{
     BattleDialogueReinsertionPlan, EncodedBattleDialogueRecord, extract_battle_dialogue_workspace,
     import_battle_dialogue_draft, plan_battle_dialogue_records, plan_battle_dialogue_reinsertion,

@@ -35,6 +35,7 @@ pub(crate) struct MainDialogueStorageLine {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ChapterIntroContextBinding {
+    pub(crate) canonical_entry_index: usize,
     pub(crate) entry_indices: Vec<usize>,
     pub(crate) file_offset: usize,
     pub(crate) prefix_payload: [u8; OPTIONAL_PREFIX_BYTE_COUNT - 1],

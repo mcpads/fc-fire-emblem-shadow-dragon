@@ -8,6 +8,7 @@ use crate::{font_slots::ACTIVE_HANGUL_SLOT_COUNT, rom::EXPECTED_SOURCE_SHA1, sha
 use super::installed::InstalledIntroDialogueCapacity;
 use super::report::{StrongestLifetimeReport, TranslationLifetimeDemandReport};
 
+mod chapter_intro_composite;
 mod chapter_save;
 mod ending_chapter_record;
 mod front_end_menu;
@@ -90,6 +91,7 @@ struct ConsumerLifetimeDemands {
     chapter_save: Vec<TranslationLifetimeDemandReport>,
     ending_chapter_record: TranslationLifetimeDemandReport,
     intro_dialogue: Vec<TranslationLifetimeDemandReport>,
+    chapter_intro_composite: TranslationLifetimeDemandReport,
 }
 
 #[derive(Debug, Deserialize)]
@@ -266,6 +268,14 @@ pub(super) fn inspect_translation_lifetimes(
         capacities: bindings.intro_dialogue_capacities,
         current_build_report_sha1: bindings.current_build_report_sha1,
     })?;
+    let chapter_intro_composite_demand =
+        chapter_intro_composite::inspect(chapter_intro_composite::InputBindings {
+            source_path: bindings.source_path,
+            main_dialogue_workspace_path: bindings.main_dialogue_workspace_path,
+            chapter_title_workspace_path: bindings.chapter_title_workspace_path,
+            main_dialogue_workspace_sha1: bindings.main_dialogue_workspace_sha1,
+            chapter_title_workspace_sha1: bindings.chapter_title_workspace_sha1,
+        })?;
 
     build_translation_lifetime_inventory(
         LifetimeReports {
@@ -286,6 +296,7 @@ pub(super) fn inspect_translation_lifetimes(
             chapter_save: chapter_save_demands,
             ending_chapter_record: ending_chapter_record_demand,
             intro_dialogue: intro_dialogue_demands,
+            chapter_intro_composite: chapter_intro_composite_demand,
         },
         japanese_bearing_screen_roles,
     )
@@ -350,6 +361,7 @@ fn build_translation_lifetime_inventory(
     demands.extend(consumer_demands.chapter_save);
     demands.push(consumer_demands.ending_chapter_record);
     demands.extend(consumer_demands.intro_dialogue);
+    demands.push(consumer_demands.chapter_intro_composite);
     for lifetime in main.observed_screen_lifetimes {
         ensure!(
             lifetime.filled_unique_glyph_count
@@ -525,6 +537,7 @@ mod tests {
             "battle_animation",
             "class_profile",
             "chapter_clear_epilogue_dialogue",
+            "chapter_intro_title_dialogue_composite",
             "ending_chapter_record_scroll",
             "ending_character_epilogue",
             "game_over",
@@ -616,12 +629,23 @@ mod tests {
                     evidence_report_sha1: "ending-record-evidence".to_owned(),
                 },
                 intro_dialogue: Vec::new(),
+                chapter_intro_composite: TranslationLifetimeDemandReport {
+                    screen_role: "chapter_intro_title_dialogue_composite",
+                    measurement_basis: "fixture complete chapter-intro composite bound",
+                    target_glyph_count: 100,
+                    preserved_active_source_code_count: 100,
+                    additional_target_glyph_reservation_count: 0,
+                    total_slot_demand: 200,
+                    active_slot_count: ACTIVE_HANGUL_SLOT_COUNT,
+                    fits_active_page: true,
+                    evidence_report_sha1: "chapter-intro-evidence".to_owned(),
+                },
             },
             &roles,
         )
         .unwrap();
 
-        assert_eq!(inventory.demands.len(), 28);
+        assert_eq!(inventory.demands.len(), 29);
         assert_eq!(inventory.strongest.state, "partial");
         assert_eq!(inventory.strongest.selected_screen_role, Some("map_menu"));
         assert_eq!(inventory.strongest.selected_slot_demand, Some(203));

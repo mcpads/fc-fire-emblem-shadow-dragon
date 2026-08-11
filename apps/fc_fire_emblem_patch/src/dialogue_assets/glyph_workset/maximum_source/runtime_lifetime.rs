@@ -16,7 +16,7 @@ use page_budget::page_glyph_sets;
 
 const REPORT_SCREEN_ROLE: &str = "chapter-seven maximum dialogue page";
 const TARGET_RECORD_ID: &str = "village-and-outro-dialogue:024";
-const DISPLAY_LINES_PER_PAGE: usize = 4;
+const DISPLAY_LINES_PER_PAGE: usize = crate::dialogue_assets::MAIN_DIALOGUE_VISIBLE_LINES_PER_PAGE;
 const OBSERVED_PAGE_COUNT: usize = 15;
 const SAMPLING_FRAME_OFFSETS: [usize; 6] = [0, 7, 19, 43, 82, 171];
 

@@ -16,6 +16,24 @@ pub(super) fn measure(
     source_reclaimable_active_codes: &BTreeSet<u8>,
     consumer_role: &str,
 ) -> Result<FullPageReplacementBound> {
+    let bound = calculate(
+        target_glyphs,
+        source_reclaimable_active_codes,
+        consumer_role,
+    )?;
+    ensure!(
+        bound.total_slot_demand <= ACTIVE_HANGUL_SLOT_COUNT,
+        "{consumer_role} full-page replacement needs {} active slots but only {ACTIVE_HANGUL_SLOT_COUNT} exist",
+        bound.total_slot_demand
+    );
+    Ok(bound)
+}
+
+pub(super) fn calculate(
+    target_glyphs: &BTreeSet<char>,
+    source_reclaimable_active_codes: &BTreeSet<u8>,
+    consumer_role: &str,
+) -> Result<FullPageReplacementBound> {
     let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
     ensure!(
         !target_glyphs.is_empty(),
@@ -32,10 +50,6 @@ pub(super) fn measure(
     let total_slot_demand = preserved_active_source_code_count
         .checked_add(target_glyphs.len())
         .expect("full-page slot demand overflow");
-    ensure!(
-        total_slot_demand <= ACTIVE_HANGUL_SLOT_COUNT,
-        "{consumer_role} full-page replacement needs {total_slot_demand} active slots but only {ACTIVE_HANGUL_SLOT_COUNT} exist"
-    );
     Ok(FullPageReplacementBound {
         target_glyph_count: target_glyphs.len(),
         source_reclaimable_active_code_count: source_reclaimable_active_codes.len(),

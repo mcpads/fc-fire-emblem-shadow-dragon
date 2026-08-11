@@ -36,6 +36,7 @@ use runtime_routes::*;
 pub(crate) use save_dialogue::bind_save_complete_dialogue_records;
 use save_routes::*;
 use sound_test_routes::*;
+pub(crate) use source_binding::bind_chapter_intro_lifetime_contexts;
 use source_binding::*;
 use source_spec::*;
 pub(crate) use title_localization::{
@@ -43,6 +44,13 @@ pub(crate) use title_localization::{
 };
 use translation_surfaces::{TranslationSurfaceContracts, bind_translation_surfaces};
 pub(crate) use translation_workspace::plan_transition_labels;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ChapterIntroLifetimeContext {
+    pub(crate) chapter_index: u8,
+    pub(crate) canonical_entry_index: usize,
+    pub(crate) entry_indices: Vec<usize>,
+}
 
 fn source_region_specs() -> impl Iterator<Item = SourceRegionSpec> {
     SOURCE_REGIONS

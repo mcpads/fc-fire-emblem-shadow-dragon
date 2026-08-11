@@ -8,6 +8,8 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    font_slots::active_hangul_codes,
+    japanese_encoding::is_japanese_text_code,
     japanese_encoding::japanese_text_glyph,
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
@@ -75,6 +77,33 @@ impl ChapterTitlePlannedEntry {
                 FixedTextLogicalByte::Encoded(_) => None,
             })
             .collect()
+    }
+
+    pub(crate) fn source_reclaimable_active_codes(&self, rom: &Rom) -> Result<BTreeSet<u8>> {
+        let body_end = self
+            .file_offset
+            .checked_add(
+                self.source_storage_byte_count
+                    .checked_sub(1)
+                    .context("chapter-title source storage has no terminator")?,
+            )
+            .context("chapter-title source body range overflow")?;
+        let source_body = rom
+            .data()
+            .get(self.file_offset..body_end)
+            .context("chapter-title source body is outside the ROM")?;
+        let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
+        let reclaimable = source_body
+            .iter()
+            .copied()
+            .filter(|code| is_japanese_text_code(*code) && active_codes.contains(code))
+            .collect::<BTreeSet<_>>();
+        ensure!(
+            !reclaimable.is_empty(),
+            "{} has no reclaimable Japanese title codes",
+            self.id
+        );
+        Ok(reclaimable)
     }
 
     pub(crate) fn encoded_storage_bytes(
