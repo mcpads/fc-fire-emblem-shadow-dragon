@@ -24,9 +24,9 @@ const TITLE_ROW_COUNT: usize = 5;
 const TITLE_ROW_WIDTH: usize = 32;
 const TITLE_FIRST_PPU_ADDRESS: u16 = 0x21A0;
 pub(super) const TITLE_TRANSLATION_FIRST_COLUMN: usize = 2;
-pub(super) const TITLE_TRANSLATION_END_COLUMN_EXCLUSIVE: usize = 29;
-const PRESERVED_TM_COLUMN: usize = 29;
-const PRESERVED_TM_TILE: u8 = 0xBB;
+pub(super) const TITLE_TRANSLATION_MAX_END_COLUMN_EXCLUSIVE: usize = 29;
+const PRESERVED_TM_FIRST_COLUMN: usize = 28;
+const PRESERVED_TM_TILES: [u8; 2] = [0xBA, 0xBB];
 const TITLE_CHR_PAGE: usize = 0x14;
 const CHR_PAGE_BYTES: usize = 4 * 1024;
 const TITLE_CHR_PAGE_SHA1: &str = "dd382dfe729f44e3ee493fadde2394862828affd";
@@ -145,16 +145,18 @@ pub(super) fn bind_source(rom: &Rom) -> Result<()> {
             "title tilemap row {row} width changed"
         );
         let row_bytes = &stream[cursor + 3..cursor + 3 + TITLE_ROW_WIDTH];
+        let translation_end = title_translation_end_column_exclusive(row);
         ensure!(
-            row_bytes[TITLE_TRANSLATION_FIRST_COLUMN..TITLE_TRANSLATION_END_COLUMN_EXCLUSIVE]
+            row_bytes[TITLE_TRANSLATION_FIRST_COLUMN..translation_end]
                 .iter()
                 .any(|tile| *tile != 0xFF),
             "title Japanese surface row {row} disappeared"
         );
         if row == TITLE_ROW_COUNT - 1 {
             ensure!(
-                row_bytes[PRESERVED_TM_COLUMN] == PRESERVED_TM_TILE,
-                "preserved title TM tile changed"
+                row_bytes[PRESERVED_TM_FIRST_COLUMN..PRESERVED_TM_FIRST_COLUMN + 2]
+                    == PRESERVED_TM_TILES,
+                "preserved two-cell title TM changed"
             );
         }
         ensure!(
@@ -194,6 +196,14 @@ pub(super) fn title_stream_file_offset() -> usize {
     HEADER_SIZE
         + usize::from(SOURCE_PRG_BANK) * PRG_BANK_SIZE
         + usize::from(TITLE_STREAM_ADDRESS - CPU_WINDOW_START)
+}
+
+pub(super) fn title_translation_end_column_exclusive(row: usize) -> usize {
+    if row == TITLE_ROW_COUNT - 1 {
+        PRESERVED_TM_FIRST_COLUMN
+    } else {
+        TITLE_TRANSLATION_MAX_END_COLUMN_EXCLUSIVE
+    }
 }
 
 pub(super) fn source_chr_page(rom: &Rom) -> Result<&[u8]> {

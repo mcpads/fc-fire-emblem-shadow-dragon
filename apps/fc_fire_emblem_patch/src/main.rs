@@ -581,6 +581,11 @@ enum Command {
         title_graphics_localization: PathBuf,
         #[arg(long, default_value = "out/title-logo.asset")]
         title_logo_asset: PathBuf,
+        #[arg(
+            long,
+            default_value = "evidence/private/title-logo-installed-fixed/manifest.json"
+        )]
+        title_logo_runtime_evidence: PathBuf,
         #[arg(long, default_value = "out/cumulative-stages")]
         stage_directory: PathBuf,
         #[arg(long, default_value = "out/fire-emblem-fe1-korean-patch.nes")]
@@ -1539,6 +1544,7 @@ fn main() -> Result<()> {
             maximum_dialogue_runtime_evidence,
             title_graphics_localization,
             title_logo_asset,
+            title_logo_runtime_evidence,
             stage_directory,
             output,
             report,
@@ -1574,6 +1580,7 @@ fn main() -> Result<()> {
                         .as_deref(),
                     title_graphics_localization_path: &title_graphics_localization,
                     title_logo_asset_path: &title_logo_asset,
+                    title_logo_runtime_evidence_path: &title_logo_runtime_evidence,
                     stage_directory: &stage_directory,
                     output_path: &output,
                     report_path: &report,

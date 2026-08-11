@@ -56,6 +56,7 @@ mod maximum_dialogue_stage;
 mod report;
 mod shop_dialogue_runtime;
 mod shop_dialogue_stage;
+mod title_logo_runtime;
 mod unit_name_stage;
 mod verify;
 mod weapon_shop_shared_text_runtime;
@@ -77,6 +78,7 @@ use report::{
 };
 use shop_dialogue_runtime::verify_shop_dialogue_runtime_evidence;
 use shop_dialogue_stage::install_shop_dialogue_stage;
+use title_logo_runtime::verify_title_logo_runtime_evidence;
 use unit_name_stage::install_unit_name_stage;
 use verify::{install_chapter_title, install_dialogue_record, verify_cumulative_output};
 use weapon_shop_shared_text_runtime::verify_weapon_shop_shared_text_runtime_evidence;
@@ -156,6 +158,7 @@ pub(crate) struct CumulativePatchInputs<'a> {
     pub(crate) maximum_dialogue_runtime_evidence_path: Option<&'a Path>,
     pub(crate) title_graphics_localization_path: &'a Path,
     pub(crate) title_logo_asset_path: &'a Path,
+    pub(crate) title_logo_runtime_evidence_path: &'a Path,
     pub(crate) stage_directory: &'a Path,
     pub(crate) output_path: &'a Path,
     pub(crate) report_path: &'a Path,
@@ -692,6 +695,10 @@ pub(crate) fn build_cumulative_patch(
         + class_profile_stage.page.assignments[1].len()
         + battle_stage.stable_color_count;
     let output_sha1 = sha1_hex(&output);
+    let title_logo_runtime = verify_title_logo_runtime_evidence(
+        inputs.title_logo_runtime_evidence_path,
+        &title_logo_stage.output_sha1,
+    )?;
     let shop_dialogue_runtime = verify_shop_dialogue_runtime_evidence(
         inputs.shop_dialogue_runtime_evidence_path,
         &shop_dialogue_stage.output_sha1,
@@ -1117,7 +1124,10 @@ pub(crate) fn build_cumulative_patch(
             unassigned_title_chr_patterns_unchanged: title_logo_stage
                 .unassigned_title_chr_patterns_unchanged,
             source_sword_tm_and_copyright_outside_write_scope: true,
-            runtime_bound_to_build: false,
+            runtime_evidence_manifest_sha1: title_logo_runtime.manifest_sha1.clone(),
+            runtime_sample_count: title_logo_runtime.sample_count,
+            runtime_unique_image_count: title_logo_runtime.unique_image_count,
+            runtime_bound_to_build: true,
             review_complete: title_graphics_plan.review_complete,
         },
         weapon_shop_shared_text: CumulativeWeaponShopSharedTextReport {
@@ -1297,7 +1307,7 @@ pub(crate) fn build_cumulative_patch(
             "The installed weapon-shop shared page is capacity-bound to all nine screen roles at 150/210 slots. The decline route is runtime-bound to the eighth-stage output through item selection, choices, continue prompt, item-list return, exit message, and map restoration; the final cumulative output, purchase, and every preflight branch still need exact-output runtime evidence.",
             "Battle text and the dynamic composition loader are installed in this cumulative lineage, but the new cumulative output still needs cold-route battle and prior-screen regression evidence.",
             "The source-bound fifteen-page maximum dialogue has exact-output evidence for its state-bridged Chapter 7 seize entry, initial selector, all page font reloads, irregular temporal samples, and the final NEXT STORY exit; cold-route prior-screen continuity remains open.",
-            "The source-bound Korean title logo is installed without changing its preserved stream bytes or unassigned CHR patterns, but its initial and completed blink phases, sword sprite, TM, copyright line, and later title return still need exact-output runtime evidence and human visual approval.",
+            "The source-bound Korean title logo is exact-output-bound through its initial and completed blink phases, preserved sword, two-cell TM, copyright line, and automatic profile exit. The later defeat-route title return and human visual approval remain open.",
             "The remaining main-dialogue screen lifetimes and translated non-dialogue surfaces are not yet installed in this cumulative lineage.",
             "The ending scroll owns a separate physical copy of all chapter titles; that duplicate consumer is not installed by this intro-title stage.",
             "Human translation review is incomplete, so this output is a development build rather than a release candidate.",

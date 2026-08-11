@@ -10,9 +10,10 @@ use crate::{
 };
 
 use super::{
-    TITLE_STREAM_BYTE_COUNT, TITLE_TRANSLATION_END_COLUMN_EXCLUSIVE,
-    TITLE_TRANSLATION_FIRST_COLUMN, logo_asset::load_source_bound_asset, source_chr_page,
-    source_stream, title_stream_file_offset,
+    TITLE_STREAM_BYTE_COUNT, TITLE_TRANSLATION_FIRST_COLUMN,
+    TITLE_TRANSLATION_MAX_END_COLUMN_EXCLUSIVE, logo_asset::load_source_bound_asset,
+    source_chr_page, source_stream, title_stream_file_offset,
+    title_translation_end_column_exclusive,
 };
 
 const TITLE_ROW_COUNT: usize = 5;
@@ -51,18 +52,16 @@ pub(crate) fn install_title_logo_asset(
     );
 
     let mut installed_stream = source_stream.to_vec();
+    let mut installed_tilemap_cell_count = 0;
     for row in 0..TITLE_ROW_COUNT {
+        let translation_end = title_translation_end_column_exclusive(row);
+        let replacement_width = translation_end - TITLE_TRANSLATION_FIRST_COLUMN;
         let source_start = row * TITLE_ROW_COMMAND_BYTE_COUNT + 3 + TITLE_TRANSLATION_FIRST_COLUMN;
         let asset_start =
-            row * (TITLE_TRANSLATION_END_COLUMN_EXCLUSIVE - TITLE_TRANSLATION_FIRST_COLUMN);
-        installed_stream[source_start
-            ..source_start + TITLE_TRANSLATION_END_COLUMN_EXCLUSIVE
-                - TITLE_TRANSLATION_FIRST_COLUMN]
-            .copy_from_slice(
-                &asset.tilemap[asset_start
-                    ..asset_start + TITLE_TRANSLATION_END_COLUMN_EXCLUSIVE
-                        - TITLE_TRANSLATION_FIRST_COLUMN],
-            );
+            row * (TITLE_TRANSLATION_MAX_END_COLUMN_EXCLUSIVE - TITLE_TRANSLATION_FIRST_COLUMN);
+        installed_stream[source_start..source_start + replacement_width]
+            .copy_from_slice(&asset.tilemap[asset_start..asset_start + replacement_width]);
+        installed_tilemap_cell_count += replacement_width;
     }
     ensure_preserved_stream_bytes(source_stream, &installed_stream)?;
 
@@ -136,7 +135,7 @@ pub(crate) fn install_title_logo_asset(
         asset_sha1: asset.asset_sha1,
         source_owned_tile_count: asset.source_owned_tile_count,
         installed_unique_tile_count: asset.assignments.len(),
-        installed_tilemap_cell_count: asset.tilemap.len(),
+        installed_tilemap_cell_count,
         physical_chr_page: u8::try_from(physical_chr_page)
             .context("title-logo physical CHR page does not fit u8")?,
         installed_chr_page_sha1: sha1_hex(&installed_page),
@@ -156,7 +155,8 @@ fn ensure_preserved_stream_bytes(source: &[u8], installed: &[u8]) -> Result<()> 
     for row in 0..TITLE_ROW_COUNT {
         let start = row * TITLE_ROW_COMMAND_BYTE_COUNT + 3;
         translation_offsets.extend(
-            start + TITLE_TRANSLATION_FIRST_COLUMN..start + TITLE_TRANSLATION_END_COLUMN_EXCLUSIVE,
+            start + TITLE_TRANSLATION_FIRST_COLUMN
+                ..start + title_translation_end_column_exclusive(row),
         );
     }
     ensure!(

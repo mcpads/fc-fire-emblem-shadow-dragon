@@ -42,6 +42,9 @@ pub(super) struct CumulativeTitleLogoReport {
     pub(super) preserved_title_stream_bytes_unchanged: bool,
     pub(super) unassigned_title_chr_patterns_unchanged: bool,
     pub(super) source_sword_tm_and_copyright_outside_write_scope: bool,
+    pub(super) runtime_evidence_manifest_sha1: String,
+    pub(super) runtime_sample_count: usize,
+    pub(super) runtime_unique_image_count: usize,
     pub(super) runtime_bound_to_build: bool,
     pub(super) review_complete: bool,
 }

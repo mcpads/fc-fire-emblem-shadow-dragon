@@ -3,8 +3,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use anyhow::{Context, Result, ensure};
 
 use super::{LOGO_PIXEL_HEIGHT, LOGO_PIXEL_WIDTH, LOGO_TILE_COLUMN_COUNT, TITLE_ROW_COUNT};
+#[cfg(test)]
+use crate::title_graphics::TITLE_TRANSLATION_MAX_END_COLUMN_EXCLUSIVE;
 use crate::title_graphics::{
-    TITLE_STREAM_BYTE_COUNT, TITLE_TRANSLATION_END_COLUMN_EXCLUSIVE, TITLE_TRANSLATION_FIRST_COLUMN,
+    TITLE_STREAM_BYTE_COUNT, TITLE_TRANSLATION_FIRST_COLUMN, title_translation_end_column_exclusive,
 };
 
 const ASSET_SCHEMA: u8 = 1;
@@ -12,7 +14,7 @@ const ASSET_MAGIC: &[u8; 4] = b"FETL";
 const TITLE_ROW_WIDTH: usize = 32;
 const TITLE_ROW_COMMAND_BYTE_COUNT: usize = 3 + TITLE_ROW_WIDTH + 1;
 const BLANK_TILE_CODE: u8 = 0xFF;
-const EXPECTED_SOURCE_OWNED_TILE_COUNT: usize = 122;
+const EXPECTED_SOURCE_OWNED_TILE_COUNT: usize = 121;
 
 pub(super) struct TitleTileOwnership {
     pub(super) source_owned_codes: BTreeSet<u8>,
@@ -55,8 +57,9 @@ pub(super) fn bind_title_tile_ownership(stream: &[u8]) -> Result<TitleTileOwners
     for row in 0..TITLE_ROW_COUNT {
         let row_start = row * TITLE_ROW_COMMAND_BYTE_COUNT + 3;
         let row_bytes = &stream[row_start..row_start + TITLE_ROW_WIDTH];
+        let translation_end = title_translation_end_column_exclusive(row);
         source_owned_codes.extend(
-            row_bytes[TITLE_TRANSLATION_FIRST_COLUMN..TITLE_TRANSLATION_END_COLUMN_EXCLUSIVE]
+            row_bytes[TITLE_TRANSLATION_FIRST_COLUMN..translation_end]
                 .iter()
                 .copied()
                 .filter(|code| *code != BLANK_TILE_CODE),
@@ -64,7 +67,7 @@ pub(super) fn bind_title_tile_ownership(stream: &[u8]) -> Result<TitleTileOwners
         preserved_codes.extend(
             row_bytes[..TITLE_TRANSLATION_FIRST_COLUMN]
                 .iter()
-                .chain(&row_bytes[TITLE_TRANSLATION_END_COLUMN_EXCLUSIVE..])
+                .chain(&row_bytes[translation_end..])
                 .copied()
                 .filter(|code| *code != BLANK_TILE_CODE),
         );
@@ -96,6 +99,15 @@ pub(super) fn build(indices: &[u8], source_owned_codes: &BTreeSet<u8>) -> Result
             cell_patterns.push(pattern);
         }
     }
+    let preserved_tm_overlap_index = (TITLE_ROW_COUNT - 1) * LOGO_TILE_COLUMN_COUNT
+        + title_translation_end_column_exclusive(TITLE_ROW_COUNT - 1)
+        - TITLE_TRANSLATION_FIRST_COLUMN;
+    ensure!(
+        cell_patterns[preserved_tm_overlap_index]
+            .iter()
+            .all(|byte| *byte == 0),
+        "title-logo candidate overlaps the preserved two-cell TM"
+    );
     ensure!(
         unique_nonblank.len() <= source_owned_codes.len(),
         "title-logo candidate needs {} unique tiles but the source owns only {}",
@@ -196,6 +208,13 @@ pub(super) fn decode_asset(
         "title-logo asset length changed"
     );
     let tilemap = asset[tilemap_start..tilemap_end].to_vec();
+    let preserved_tm_overlap_index = (TITLE_ROW_COUNT - 1) * LOGO_TILE_COLUMN_COUNT
+        + title_translation_end_column_exclusive(TITLE_ROW_COUNT - 1)
+        - TITLE_TRANSLATION_FIRST_COLUMN;
+    ensure!(
+        tilemap[preserved_tm_overlap_index] == BLANK_TILE_CODE,
+        "title-logo asset overlaps the preserved two-cell TM"
+    );
     ensure!(
         tilemap
             .iter()
@@ -275,5 +294,33 @@ mod tests {
 
         assert_eq!(decoded.tilemap, plan.tilemap);
         assert_eq!(decoded.assignments, plan.assignments);
+    }
+
+    #[test]
+    fn ownership_keeps_both_visible_tm_cells_out_of_logo_assignments() {
+        let mut stream = vec![0_u8; TITLE_STREAM_BYTE_COUNT];
+        let logo_codes = (0_u8..=u8::MAX)
+            .filter(|code| !matches!(*code, 0xBA | 0xBB | 0xF0 | 0xFF))
+            .take(121)
+            .collect::<Vec<_>>();
+        let mut logo_cell = 0;
+        for row in 0..TITLE_ROW_COUNT {
+            let row_start = row * TITLE_ROW_COMMAND_BYTE_COUNT + 3;
+            stream[row_start..row_start + TITLE_ROW_WIDTH].fill(0xFF);
+            stream[row_start] = 0xF0;
+            for column in TITLE_TRANSLATION_FIRST_COLUMN..TITLE_TRANSLATION_MAX_END_COLUMN_EXCLUSIVE
+            {
+                stream[row_start + column] = logo_codes[logo_cell % logo_codes.len()];
+                logo_cell += 1;
+            }
+        }
+        let last_row_start = (TITLE_ROW_COUNT - 1) * TITLE_ROW_COMMAND_BYTE_COUNT + 3;
+        stream[last_row_start + 28] = 0xBA;
+        stream[last_row_start + 29] = 0xBB;
+
+        let ownership = bind_title_tile_ownership(&stream).unwrap();
+
+        assert!(!ownership.source_owned_codes.contains(&0xBA));
+        assert!(!ownership.source_owned_codes.contains(&0xBB));
     }
 }
