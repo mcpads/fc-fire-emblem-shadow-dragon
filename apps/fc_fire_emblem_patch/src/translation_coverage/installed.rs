@@ -58,11 +58,26 @@ struct CurrentMainDialogue {
 #[derive(Debug, Deserialize)]
 struct CurrentDialogueLifetime {
     screen_role: String,
+    #[serde(default)]
+    screen_evidence_manifest_sha1: String,
     unique_glyph_count: usize,
     preserved_active_code_count: usize,
+    #[serde(default)]
+    temporal_sample_count: usize,
+    #[serde(default)]
+    unique_nametable_count: usize,
     font_physical_page: u8,
     font_mapper_register: u8,
     runtime_bound_to_dialogue_stage_output: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct InstalledIntroDialogueCapacity {
+    pub(crate) screen_role: &'static str,
+    pub(crate) target_glyph_count: usize,
+    pub(crate) preserved_active_code_count: usize,
+    pub(crate) total_slot_demand: usize,
+    pub(crate) screen_evidence_manifest_sha1: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -185,6 +200,7 @@ pub(crate) struct CurrentInstallation {
     pub(crate) battle_fixed_workspace_sha1: String,
     pub(crate) battle_dialogue_workspace_sha1: String,
     pub(crate) battle_temporal_manifest_sha1: String,
+    pub(crate) intro_dialogue_capacities: Vec<InstalledIntroDialogueCapacity>,
 }
 
 pub(crate) fn inspect_current_installation(
@@ -220,6 +236,7 @@ pub(crate) fn inspect_current_installation(
     validate_unit_roster_lifetime(&report)?;
     validate_front_end_lifetime(&report)?;
     validate_options_lifetime(&report)?;
+    let intro_dialogue_capacities = collect_intro_dialogue_capacities(&report)?;
     let domains = collect_domain_installations(&report)?;
 
     Ok(CurrentInstallation {
@@ -264,7 +281,51 @@ pub(crate) fn inspect_current_installation(
         battle_fixed_workspace_sha1: report.battle_text.fixed_text_workspace_sha1,
         battle_dialogue_workspace_sha1: report.battle_text.dialogue_workspace_sha1,
         battle_temporal_manifest_sha1: report.battle_text.temporal_manifest_sha1,
+        intro_dialogue_capacities,
     })
+}
+
+fn collect_intro_dialogue_capacities(
+    report: &CurrentBuildReport,
+) -> Result<Vec<InstalledIntroDialogueCapacity>> {
+    [
+        ("chapter_1_intro_dialogue", "intro_dialogue"),
+        ("chapter_2_intro_dialogue", "later_intro_dialogue"),
+    ]
+    .into_iter()
+    .map(|(installed_role, screen_role)| {
+        let matches = report
+            .main_dialogue
+            .lifetimes
+            .iter()
+            .filter(|lifetime| lifetime.screen_role == installed_role)
+            .collect::<Vec<_>>();
+        ensure!(
+            matches.len() == 1,
+            "current build must contain one {installed_role} capacity"
+        );
+        let lifetime = matches[0];
+        let total_slot_demand = lifetime
+            .unique_glyph_count
+            .checked_add(lifetime.preserved_active_code_count)
+            .context("installed intro-dialogue capacity overflow")?;
+        ensure!(
+            !lifetime.screen_evidence_manifest_sha1.is_empty()
+                && lifetime.temporal_sample_count >= 4
+                && lifetime.unique_nametable_count >= 1
+                && lifetime.unique_glyph_count > 0
+                && total_slot_demand <= crate::font_slots::ACTIVE_HANGUL_SLOT_COUNT,
+            "current {installed_role} capacity evidence changed"
+        );
+        Ok(InstalledIntroDialogueCapacity {
+            screen_role,
+            target_glyph_count: lifetime.unique_glyph_count,
+            preserved_active_code_count: lifetime.preserved_active_code_count,
+            total_slot_demand,
+            screen_evidence_manifest_sha1: lifetime.screen_evidence_manifest_sha1.clone(),
+        })
+    })
+    .collect()
 }
 
 fn validate_front_end_lifetime(report: &CurrentBuildReport) -> Result<()> {

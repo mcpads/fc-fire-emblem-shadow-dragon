@@ -5,12 +5,14 @@ use serde::Deserialize;
 
 use crate::{font_slots::ACTIVE_HANGUL_SLOT_COUNT, rom::EXPECTED_SOURCE_SHA1, sha1_hex};
 
+use super::installed::InstalledIntroDialogueCapacity;
 use super::report::{StrongestLifetimeReport, TranslationLifetimeDemandReport};
 
 mod chapter_save;
 mod ending_chapter_record;
 mod front_end_menu;
 mod full_page_bound;
+mod intro_dialogue;
 mod item_flow;
 mod map_menu;
 mod options_menu;
@@ -61,6 +63,7 @@ pub(super) struct LifetimeInputBindings<'a> {
     pub(super) battle_fixed_workspace_sha1: &'a str,
     pub(super) battle_dialogue_workspace_sha1: &'a str,
     pub(super) battle_temporal_manifest_sha1: &'a str,
+    pub(super) intro_dialogue_capacities: &'a [InstalledIntroDialogueCapacity],
 }
 
 pub(super) struct TranslationLifetimeInventory {
@@ -86,6 +89,7 @@ struct ConsumerLifetimeDemands {
     map_menu: TranslationLifetimeDemandReport,
     chapter_save: Vec<TranslationLifetimeDemandReport>,
     ending_chapter_record: TranslationLifetimeDemandReport,
+    intro_dialogue: Vec<TranslationLifetimeDemandReport>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -258,6 +262,10 @@ pub(super) fn inspect_translation_lifetimes(
             chapter_title_workspace_sha1: bindings.chapter_title_workspace_sha1,
             transition_label_workspace_sha1: bindings.transition_label_workspace_sha1,
         })?;
+    let intro_dialogue_demands = intro_dialogue::inspect(intro_dialogue::InputBindings {
+        capacities: bindings.intro_dialogue_capacities,
+        current_build_report_sha1: bindings.current_build_report_sha1,
+    })?;
 
     build_translation_lifetime_inventory(
         LifetimeReports {
@@ -277,6 +285,7 @@ pub(super) fn inspect_translation_lifetimes(
             map_menu: map_menu_demand,
             chapter_save: chapter_save_demands,
             ending_chapter_record: ending_chapter_record_demand,
+            intro_dialogue: intro_dialogue_demands,
         },
         japanese_bearing_screen_roles,
     )
@@ -340,6 +349,7 @@ fn build_translation_lifetime_inventory(
     demands.push(consumer_demands.map_menu);
     demands.extend(consumer_demands.chapter_save);
     demands.push(consumer_demands.ending_chapter_record);
+    demands.extend(consumer_demands.intro_dialogue);
     for lifetime in main.observed_screen_lifetimes {
         ensure!(
             lifetime.filled_unique_glyph_count
@@ -583,6 +593,7 @@ mod tests {
                 battle_fixed_workspace_sha1: "fixed",
                 battle_dialogue_workspace_sha1: "battle",
                 battle_temporal_manifest_sha1: "temporal",
+                intro_dialogue_capacities: &[],
             },
             ConsumerLifetimeDemands {
                 unit_ui: unit_ui_demands,
@@ -604,6 +615,7 @@ mod tests {
                     fits_active_page: true,
                     evidence_report_sha1: "ending-record-evidence".to_owned(),
                 },
+                intro_dialogue: Vec::new(),
             },
             &roles,
         )

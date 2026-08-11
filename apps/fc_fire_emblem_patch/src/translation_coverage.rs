@@ -283,6 +283,7 @@ pub(crate) fn analyze_translation_coverage(
             battle_fixed_workspace_sha1: &installation.battle_fixed_workspace_sha1,
             battle_dialogue_workspace_sha1: &installation.battle_dialogue_workspace_sha1,
             battle_temporal_manifest_sha1: &installation.battle_temporal_manifest_sha1,
+            intro_dialogue_capacities: &installation.intro_dialogue_capacities,
         },
         &japanese_bearing_screen_roles,
     )?;
