@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     font_slots::FONT_PAGE_SIZE,
+    mmc5_chr::switchable_bank_file_offset,
     mmc5_prg::count_direct_transfers_to_range,
     rom::{EXPECTED_SOURCE_SHA1, HEADER_SIZE, Rom},
     rp2a03::{Instruction, assemble_at},
@@ -47,6 +48,8 @@ const SOURCE_CENTRAL_RIGHT_FD_CALL: u16 = 0xC9C2;
 const SOURCE_CENTRAL_FE_FD_REFRESH_CALL: u16 = 0xFABB;
 const SOURCE_PRG_BANK_SELECTOR: u16 = 0xFA20;
 const SOURCE_COMMON_GLYPH_READ: u16 = 0xE57F;
+const SOURCE_SOUND_TEST_BATTLE_ACTIVE_WRITE_BANK: u8 = 0x07;
+const SOURCE_SOUND_TEST_BATTLE_ACTIVE_WRITE: u16 = 0xAC17;
 
 const DISPATCH_ADDRESS: u16 = 0xFAF3;
 const COMPOSE_PAGE_ADDRESS: u16 = 0xFB30;
@@ -54,6 +57,8 @@ const APPLY_RECIPE_ADDRESS: u16 = 0xFC60;
 const APPLY_DIRECTORY_ADDRESS: u16 = 0xFCE0;
 const APPLY_PARTICIPANT_ADDRESS: u16 = 0xFD00;
 const PROJECT_DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFD30;
+const BATTLE_SURFACE_ACTIVE_ADDRESS: u16 = 0xFD50;
+const INITIALIZE_SOUND_TEST_BATTLE_REMAP_ADDRESS: u16 = 0xFD80;
 const CLEAR_REMAP_STATE_AFTER_BATTLE_ADDRESS: u16 = 0xFE50;
 const BATTLE_RIGHT_FD_SELECTOR_ADDRESS: u16 = 0xFEA0;
 const BATTLE_CENTRAL_RIGHT_FD_SELECTOR_ADDRESS: u16 = 0xFEE0;
@@ -70,6 +75,11 @@ const CHR_HIGH_BITS_SHADOW: u8 = 0x52;
 const MAIN_STATE_ADDRESS: u16 = 0x0084;
 const PLAYER_INITIATED_BATTLE_STATE: u8 = 0x16;
 const ENEMY_INITIATED_BATTLE_STATE: u8 = 0x32;
+const SOUND_TEST_MAIN_STATE: u8 = 0x04;
+const DIALOGUE_SUBSTATE_ADDRESS: u16 = 0x05EE;
+const SOUND_TEST_BATTLE_SUBSTATE: u8 = 0x0D;
+const SOUND_TEST_BATTLE_PHASE_ADDRESS: u16 = 0x7730;
+const SOUND_TEST_SHARED_BATTLE_PHASE: u8 = 0x05;
 const BATTLE_ACTIVE_FLAG: u16 = 0x047D;
 const CACHE_UPLOADED_MARKER: u8 = 0x80;
 const UPLOAD_RENDER_MASK: u8 = 0x06;
@@ -180,6 +190,9 @@ struct BattleCompositionLoaderProbeReport {
     remap_overflow_aborts_composition: bool,
     shared_text_projection_hook_address_hex: String,
     shared_text_projection_installed: bool,
+    sound_test_battle_initializer_hook_address_hex: String,
+    sound_test_shared_battle_activation_installed: bool,
+    sound_test_battle_recomposition_boundary_installed: bool,
     battle_zero_right_page_uses_chr_ram_after_success: bool,
     non_battle_right_pages_use_natural_selection: bool,
     dynamic_assignment_source_contract_complete: bool,
@@ -356,6 +369,23 @@ pub(crate) fn build_battle_composition_loader_probe(
         SOURCE_PAIR_AWARE_RIGHT_FD_SELECTOR,
         BATTLE_CENTRAL_RIGHT_FD_SELECTOR_ADDRESS,
     )?;
+    image.write_expected(
+        "battle composition sound-test battle initializer",
+        switchable_bank_file_offset(
+            SOURCE_SOUND_TEST_BATTLE_ACTIVE_WRITE_BANK,
+            SOURCE_SOUND_TEST_BATTLE_ACTIVE_WRITE,
+        )?,
+        &assemble_at(
+            SOURCE_SOUND_TEST_BATTLE_ACTIVE_WRITE,
+            &[Instruction::StaAbsolute(BATTLE_ACTIVE_FLAG)],
+        )?,
+        &assemble_at(
+            SOURCE_SOUND_TEST_BATTLE_ACTIVE_WRITE,
+            &[Instruction::JsrAbsolute(
+                INITIALIZE_SOUND_TEST_BATTLE_REMAP_ADDRESS,
+            )],
+        )?,
+    )?;
     image.verify_all_changes_tracked(&base)?;
     let runtime_tracked_write_count = image.writes().len();
     let output = image.into_data();
@@ -383,7 +413,7 @@ pub(crate) fn build_battle_composition_loader_probe(
         fixed_runtime_routine_byte_count + material_runtime_routine_byte_count;
     let output_sha1 = sha1_hex(&output);
     let report = BattleCompositionLoaderProbeReport {
-        schema: 3,
+        schema: 4,
         source_sha1: EXPECTED_SOURCE_SHA1,
         base_report_sha1: sha1_hex(&base_report_bytes),
         base_output_sha1: base_sha1,
@@ -448,6 +478,11 @@ pub(crate) fn build_battle_composition_loader_probe(
         remap_overflow_aborts_composition: true,
         shared_text_projection_hook_address_hex: format!("0x{SOURCE_COMMON_GLYPH_READ:04X}"),
         shared_text_projection_installed: true,
+        sound_test_battle_initializer_hook_address_hex: format!(
+            "0x{SOURCE_SOUND_TEST_BATTLE_ACTIVE_WRITE_BANK:02X}:0x{SOURCE_SOUND_TEST_BATTLE_ACTIVE_WRITE:04X}"
+        ),
+        sound_test_shared_battle_activation_installed: true,
+        sound_test_battle_recomposition_boundary_installed: true,
         battle_zero_right_page_uses_chr_ram_after_success: true,
         non_battle_right_pages_use_natural_selection: true,
         dynamic_assignment_source_contract_complete: true,
@@ -456,7 +491,7 @@ pub(crate) fn build_battle_composition_loader_probe(
         release_eligible: false,
         translation_text_emitted: false,
         glyph_characters_emitted: false,
-        next_gate: "cold-run representative gameplay and sound-test inputs through irregular temporal captures, then measure the blank transition and verify automatic exit restoration",
+        next_gate: "run the automatic sound-test battle through repeated compositions, then verify ending nonintervention and both caller-specific exit lifetimes",
     };
     let mut report_bytes = serde_json::to_vec_pretty(&report)
         .context("serialize battle composition loader probe report")?;

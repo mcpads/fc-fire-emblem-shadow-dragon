@@ -12,7 +12,7 @@ fn runtime_routines_fit_the_fixed_cave_without_overlap() {
     })
     .unwrap();
 
-    assert_eq!(routines.len(), 12);
+    assert_eq!(routines.len(), 14);
     assert!(routines.windows(2).all(|pair| {
         pair[0].address as usize + pair[0].bytes.len() <= pair[1].address as usize
     }));
@@ -194,6 +194,55 @@ fn remap_state_clear_is_limited_to_the_two_battle_exit_states() {
 }
 
 #[test]
+fn battle_surface_predicate_includes_the_shared_sound_test_lifetime() {
+    let predicate = battle_surface_active().unwrap();
+    for address in [
+        MAIN_STATE_ADDRESS,
+        DIALOGUE_SUBSTATE_ADDRESS,
+        SOUND_TEST_BATTLE_PHASE_ADDRESS,
+    ] {
+        assert!(
+            predicate
+                .windows(3)
+                .any(|window| window == [0xAD, address as u8, (address >> 8) as u8])
+        );
+    }
+    for state in [
+        PLAYER_INITIATED_BATTLE_STATE,
+        ENEMY_INITIATED_BATTLE_STATE,
+        SOUND_TEST_MAIN_STATE,
+        SOUND_TEST_BATTLE_SUBSTATE,
+        SOUND_TEST_SHARED_BATTLE_PHASE,
+    ] {
+        assert!(predicate.windows(2).any(|window| window == [0xC9, state]));
+    }
+    assert!(predicate.ends_with(&[0xA9, 0x00, 0x60]));
+}
+
+#[test]
+fn sound_test_initializer_preserves_source_effect_and_reopens_composition() {
+    let initializer = initialize_sound_test_battle_remap().unwrap();
+    assert!(initializer.starts_with(&[
+        0x8D,
+        BATTLE_ACTIVE_FLAG as u8,
+        (BATTLE_ACTIVE_FLAG >> 8) as u8,
+        0x08,
+        0x48,
+    ]));
+    assert!(initializer.windows(5).any(|window| {
+        window
+            == [
+                0xA9,
+                0x00,
+                0x8D,
+                REMAP_STATE_ADDRESS as u8,
+                (REMAP_STATE_ADDRESS >> 8) as u8,
+            ]
+    }));
+    assert!(initializer.ends_with(&[0x68, 0x28, 0x60]));
+}
+
+#[test]
 fn recipe_upload_and_shared_text_use_the_same_remap_projection() {
     let project_call = [
         0x20,
@@ -218,7 +267,7 @@ fn recipe_upload_and_shared_text_use_the_same_remap_projection() {
 }
 
 #[test]
-fn runtime_consumers_require_a_battle_main_state_and_persistent_remap_state() {
+fn runtime_consumers_require_a_supported_battle_surface_and_persistent_remap_state() {
     for bytes in [
         battle_right_selector(BATTLE_RIGHT_FD_SELECTOR_ADDRESS, 2).unwrap(),
         battle_right_selector(BATTLE_RIGHT_FE_SELECTOR_ADDRESS, 4).unwrap(),
@@ -228,21 +277,11 @@ fn runtime_consumers_require_a_battle_main_state_and_persistent_remap_state() {
         assert!(bytes.windows(3).any(|window| {
             window
                 == [
-                    0xAD,
-                    MAIN_STATE_ADDRESS as u8,
-                    (MAIN_STATE_ADDRESS >> 8) as u8,
+                    0x20,
+                    BATTLE_SURFACE_ACTIVE_ADDRESS as u8,
+                    (BATTLE_SURFACE_ACTIVE_ADDRESS >> 8) as u8,
                 ]
         }));
-        assert!(
-            bytes
-                .windows(2)
-                .any(|window| { window == [0xC9, PLAYER_INITIATED_BATTLE_STATE] })
-        );
-        assert!(
-            bytes
-                .windows(2)
-                .any(|window| { window == [0xC9, ENEMY_INITIATED_BATTLE_STATE] })
-        );
         assert!(bytes.windows(3).any(|window| {
             window
                 == [
@@ -262,7 +301,7 @@ fn runtime_consumers_require_a_battle_main_state_and_persistent_remap_state() {
 #[test]
 fn composition_report_omits_translation_content_and_private_paths() {
     let report = BattleCompositionLoaderProbeReport {
-        schema: 3,
+        schema: 4,
         source_sha1: EXPECTED_SOURCE_SHA1,
         base_report_sha1: "base-report".to_owned(),
         base_output_sha1: "base".to_owned(),
@@ -317,6 +356,9 @@ fn composition_report_omits_translation_content_and_private_paths() {
         remap_overflow_aborts_composition: true,
         shared_text_projection_hook_address_hex: "0xE57F".to_owned(),
         shared_text_projection_installed: true,
+        sound_test_battle_initializer_hook_address_hex: "0x07:0xAC17".to_owned(),
+        sound_test_shared_battle_activation_installed: true,
+        sound_test_battle_recomposition_boundary_installed: true,
         battle_zero_right_page_uses_chr_ram_after_success: true,
         non_battle_right_pages_use_natural_selection: true,
         dynamic_assignment_source_contract_complete: true,

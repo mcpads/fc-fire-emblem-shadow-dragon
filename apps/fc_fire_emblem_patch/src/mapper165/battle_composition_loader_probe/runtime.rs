@@ -75,6 +75,16 @@ pub(super) fn build_runtime_routines(
             bytes: project_dialogue_selector()?,
         },
         RuntimeRoutine {
+            role: "gameplay and sound-test battle-surface predicate",
+            address: BATTLE_SURFACE_ACTIVE_ADDRESS,
+            bytes: battle_surface_active()?,
+        },
+        RuntimeRoutine {
+            role: "sound-test battle remap-state initializer",
+            address: INITIALIZE_SOUND_TEST_BATTLE_REMAP_ADDRESS,
+            bytes: initialize_sound_test_battle_remap()?,
+        },
+        RuntimeRoutine {
             role: "battle-exit remap-state clear",
             address: CLEAR_REMAP_STATE_AFTER_BATTLE_ADDRESS,
             bytes: clear_remap_state_after_battle()?,
@@ -134,23 +144,18 @@ pub(super) fn composition_dispatch() -> Result<Vec<u8>> {
         Instruction::Pha,
         Instruction::Tya,
         Instruction::Pha,
-        Instruction::LdaAbsolute(MAIN_STATE_ADDRESS),
+        Instruction::JsrAbsolute(BATTLE_SURFACE_ACTIVE_ADDRESS),
     ];
-    instructions.push(Instruction::CmpImmediate(PLAYER_INITIATED_BATTLE_STATE));
-    let player_battle_placeholder = instructions.len();
-    instructions.push(Instruction::BeqAbsolute(DISPATCH_ADDRESS));
-    instructions.push(Instruction::CmpImmediate(ENEMY_INITIATED_BATTLE_STATE));
-    let enemy_battle_placeholder = instructions.len();
-    instructions.push(Instruction::BeqAbsolute(DISPATCH_ADDRESS));
+    let battle_placeholder = instructions.len();
+    instructions.push(Instruction::BneAbsolute(DISPATCH_ADDRESS));
     instructions.extend([
+        Instruction::LdaAbsolute(MAIN_STATE_ADDRESS),
         Instruction::JsrAbsolute(CLEAR_REMAP_STATE_AFTER_BATTLE_ADDRESS),
         Instruction::JmpAbsolute(DISPATCH_ADDRESS),
-        Instruction::Nop,
     ]);
-    let non_battle_restore_placeholder = instructions.len() - 2;
+    let non_battle_restore_placeholder = instructions.len() - 1;
     let battle = next_address(DISPATCH_ADDRESS, &instructions)?;
-    instructions[player_battle_placeholder] = Instruction::BeqAbsolute(battle);
-    instructions[enemy_battle_placeholder] = Instruction::BeqAbsolute(battle);
+    instructions[battle_placeholder] = Instruction::BneAbsolute(battle);
     instructions.extend([
         Instruction::LdaAbsolute(REMAP_STATE_ADDRESS),
         Instruction::AndImmediate(CACHE_UPLOADED_MARKER),
@@ -495,22 +500,69 @@ fn project_dialogue_selector() -> Result<Vec<u8>> {
     )
 }
 
+pub(super) fn battle_surface_active() -> Result<Vec<u8>> {
+    let mut instructions = vec![
+        Instruction::LdaAbsolute(MAIN_STATE_ADDRESS),
+        Instruction::CmpImmediate(PLAYER_INITIATED_BATTLE_STATE),
+    ];
+    let player_battle_placeholder = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(BATTLE_SURFACE_ACTIVE_ADDRESS));
+    instructions.push(Instruction::CmpImmediate(ENEMY_INITIATED_BATTLE_STATE));
+    let enemy_battle_placeholder = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(BATTLE_SURFACE_ACTIVE_ADDRESS));
+    instructions.push(Instruction::CmpImmediate(SOUND_TEST_MAIN_STATE));
+    let inactive_main_state_placeholder = instructions.len();
+    instructions.push(Instruction::BneAbsolute(BATTLE_SURFACE_ACTIVE_ADDRESS));
+    instructions.extend([
+        Instruction::LdaAbsolute(DIALOGUE_SUBSTATE_ADDRESS),
+        Instruction::CmpImmediate(SOUND_TEST_BATTLE_SUBSTATE),
+    ]);
+    let inactive_substate_placeholder = instructions.len();
+    instructions.push(Instruction::BneAbsolute(BATTLE_SURFACE_ACTIVE_ADDRESS));
+    instructions.extend([
+        Instruction::LdaAbsolute(SOUND_TEST_BATTLE_PHASE_ADDRESS),
+        Instruction::CmpImmediate(SOUND_TEST_SHARED_BATTLE_PHASE),
+    ]);
+    let inactive_phase_placeholder = instructions.len();
+    instructions.push(Instruction::BneAbsolute(BATTLE_SURFACE_ACTIVE_ADDRESS));
+    let active = next_address(BATTLE_SURFACE_ACTIVE_ADDRESS, &instructions)?;
+    instructions[player_battle_placeholder] = Instruction::BeqAbsolute(active);
+    instructions[enemy_battle_placeholder] = Instruction::BeqAbsolute(active);
+    instructions.extend([Instruction::LdaImmediate(1), Instruction::Rts]);
+    let inactive = next_address(BATTLE_SURFACE_ACTIVE_ADDRESS, &instructions)?;
+    instructions[inactive_main_state_placeholder] = Instruction::BneAbsolute(inactive);
+    instructions[inactive_substate_placeholder] = Instruction::BneAbsolute(inactive);
+    instructions[inactive_phase_placeholder] = Instruction::BneAbsolute(inactive);
+    instructions.extend([Instruction::LdaImmediate(0), Instruction::Rts]);
+    assemble_at(BATTLE_SURFACE_ACTIVE_ADDRESS, &instructions)
+}
+
+pub(super) fn initialize_sound_test_battle_remap() -> Result<Vec<u8>> {
+    assemble_at(
+        INITIALIZE_SOUND_TEST_BATTLE_REMAP_ADDRESS,
+        &[
+            Instruction::StaAbsolute(BATTLE_ACTIVE_FLAG),
+            Instruction::Php,
+            Instruction::Pha,
+            Instruction::LdaImmediate(0),
+            Instruction::StaAbsolute(REMAP_STATE_ADDRESS),
+            Instruction::Pla,
+            Instruction::Plp,
+            Instruction::Rts,
+        ],
+    )
+}
+
 pub(super) fn text_projection_wrapper() -> Result<Vec<u8>> {
     let mut instructions = vec![
         Instruction::Txa,
         Instruction::Pha,
         Instruction::LdaIndirectY(RECIPE_POINTER_LOW),
         Instruction::StaZeroPage(PHYSICAL_TILE_CODE),
-        Instruction::LdaAbsolute(MAIN_STATE_ADDRESS),
-        Instruction::CmpImmediate(PLAYER_INITIATED_BATTLE_STATE),
+        Instruction::JsrAbsolute(BATTLE_SURFACE_ACTIVE_ADDRESS),
     ];
-    let player_battle_placeholder = instructions.len();
-    instructions.push(Instruction::BeqAbsolute(TEXT_PROJECTION_WRAPPER_ADDRESS));
-    instructions.extend([Instruction::CmpImmediate(ENEMY_INITIATED_BATTLE_STATE)]);
     let natural_state_placeholder = instructions.len();
-    instructions.push(Instruction::BneAbsolute(TEXT_PROJECTION_WRAPPER_ADDRESS));
-    let battle = next_address(TEXT_PROJECTION_WRAPPER_ADDRESS, &instructions)?;
-    instructions[player_battle_placeholder] = Instruction::BeqAbsolute(battle);
+    instructions.push(Instruction::BeqAbsolute(TEXT_PROJECTION_WRAPPER_ADDRESS));
     instructions.extend([
         Instruction::LdaAbsolute(REMAP_STATE_ADDRESS),
         Instruction::AndImmediate(CACHE_UPLOADED_MARKER),
@@ -523,7 +575,7 @@ pub(super) fn text_projection_wrapper() -> Result<Vec<u8>> {
         Instruction::StaZeroPage(PHYSICAL_TILE_CODE),
     ]);
     let natural = next_address(TEXT_PROJECTION_WRAPPER_ADDRESS, &instructions)?;
-    instructions[natural_state_placeholder] = Instruction::BneAbsolute(natural);
+    instructions[natural_state_placeholder] = Instruction::BeqAbsolute(natural);
     instructions[natural_placeholder] = Instruction::BeqAbsolute(natural);
     instructions.extend([
         Instruction::Pla,
@@ -570,79 +622,100 @@ fn project_color() -> Result<Vec<u8>> {
 }
 
 pub(super) fn battle_right_selector(address: u16, mapper_register: u8) -> Result<Vec<u8>> {
-    let cache_marker_test = address + 13;
-    let natural = address + 31;
-    let write = address + 40;
-    assemble_at(
-        address,
-        &[
-            Instruction::Php,
-            Instruction::Pha,
-            Instruction::LdaAbsolute(MAIN_STATE_ADDRESS),
-            Instruction::CmpImmediate(PLAYER_INITIATED_BATTLE_STATE),
-            Instruction::BeqAbsolute(cache_marker_test),
-            Instruction::CmpImmediate(ENEMY_INITIATED_BATTLE_STATE),
-            Instruction::BneAbsolute(natural),
-            Instruction::LdaAbsolute(REMAP_STATE_ADDRESS),
-            Instruction::AndImmediate(CACHE_UPLOADED_MARKER),
-            Instruction::BeqAbsolute(natural),
-            Instruction::Pla,
-            Instruction::Pha,
-            Instruction::AndImmediate(0x1F),
-            Instruction::BneAbsolute(natural),
-            Instruction::LdaImmediate(0),
-            Instruction::JmpAbsolute(write),
-            Instruction::Pla,
-            Instruction::Pha,
-            Instruction::AndImmediate(0x1F),
-            Instruction::AslAccumulator,
-            Instruction::AslAccumulator,
-            Instruction::Clc,
-            Instruction::AdcImmediate(8),
-            Instruction::Pha,
-            Instruction::LdaImmediate(mapper_register),
-            Instruction::StaAbsolute(0x8000),
-            Instruction::Pla,
-            Instruction::StaAbsolute(0x8001),
-            Instruction::Pla,
-            Instruction::Plp,
-            Instruction::Rts,
-        ],
-    )
+    let mut instructions = vec![
+        Instruction::Php,
+        Instruction::Pha,
+        Instruction::JsrAbsolute(BATTLE_SURFACE_ACTIVE_ADDRESS),
+    ];
+    let inactive_surface_placeholder = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(address));
+    instructions.extend([
+        Instruction::LdaAbsolute(REMAP_STATE_ADDRESS),
+        Instruction::AndImmediate(CACHE_UPLOADED_MARKER),
+    ]);
+    let cache_missing_placeholder = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(address));
+    instructions.extend([
+        Instruction::Pla,
+        Instruction::Pha,
+        Instruction::AndImmediate(0x1F),
+    ]);
+    let nonzero_page_placeholder = instructions.len();
+    instructions.push(Instruction::BneAbsolute(address));
+    instructions.extend([
+        Instruction::LdaImmediate(0),
+        Instruction::JmpAbsolute(address),
+    ]);
+    let write_placeholder = instructions.len() - 1;
+    let natural = next_address(address, &instructions)?;
+    instructions[inactive_surface_placeholder] = Instruction::BeqAbsolute(natural);
+    instructions[cache_missing_placeholder] = Instruction::BeqAbsolute(natural);
+    instructions[nonzero_page_placeholder] = Instruction::BneAbsolute(natural);
+    instructions.extend([
+        Instruction::Pla,
+        Instruction::Pha,
+        Instruction::AndImmediate(0x1F),
+        Instruction::AslAccumulator,
+        Instruction::AslAccumulator,
+        Instruction::Clc,
+        Instruction::AdcImmediate(8),
+        Instruction::Pha,
+        Instruction::LdaImmediate(mapper_register),
+        Instruction::StaAbsolute(0x8000),
+        Instruction::Pla,
+    ]);
+    let write = next_address(address, &instructions)?;
+    instructions[write_placeholder] = Instruction::JmpAbsolute(write);
+    instructions.extend([
+        Instruction::StaAbsolute(0x8001),
+        Instruction::Pla,
+        Instruction::Plp,
+        Instruction::Rts,
+    ]);
+    assemble_at(address, &instructions)
 }
 
 pub(super) fn battle_central_right_fd_selector() -> Result<Vec<u8>> {
-    let cache_marker_test = BATTLE_CENTRAL_RIGHT_FD_SELECTOR_ADDRESS + 13;
-    let natural = BATTLE_CENTRAL_RIGHT_FD_SELECTOR_ADDRESS + 39;
-    assemble_at(
-        BATTLE_CENTRAL_RIGHT_FD_SELECTOR_ADDRESS,
-        &[
-            Instruction::Php,
-            Instruction::Pha,
-            Instruction::LdaAbsolute(MAIN_STATE_ADDRESS),
-            Instruction::CmpImmediate(PLAYER_INITIATED_BATTLE_STATE),
-            Instruction::BeqAbsolute(cache_marker_test),
-            Instruction::CmpImmediate(ENEMY_INITIATED_BATTLE_STATE),
-            Instruction::BneAbsolute(natural),
-            Instruction::LdaAbsolute(REMAP_STATE_ADDRESS),
-            Instruction::AndImmediate(CACHE_UPLOADED_MARKER),
-            Instruction::BeqAbsolute(natural),
-            Instruction::Pla,
-            Instruction::Pha,
-            Instruction::AndImmediate(0x1F),
-            Instruction::BneAbsolute(natural),
-            Instruction::LdaImmediate(2),
-            Instruction::StaAbsolute(0x8000),
-            Instruction::LdaImmediate(0),
-            Instruction::StaAbsolute(0x8001),
-            Instruction::Pla,
-            Instruction::Plp,
-            Instruction::Rts,
-            Instruction::Pla,
-            Instruction::Plp,
-            Instruction::JmpAbsolute(SOURCE_PAIR_AWARE_RIGHT_FD_SELECTOR),
-        ],
-    )
+    let address = BATTLE_CENTRAL_RIGHT_FD_SELECTOR_ADDRESS;
+    let mut instructions = vec![
+        Instruction::Php,
+        Instruction::Pha,
+        Instruction::JsrAbsolute(BATTLE_SURFACE_ACTIVE_ADDRESS),
+    ];
+    let inactive_surface_placeholder = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(address));
+    instructions.extend([
+        Instruction::LdaAbsolute(REMAP_STATE_ADDRESS),
+        Instruction::AndImmediate(CACHE_UPLOADED_MARKER),
+    ]);
+    let cache_missing_placeholder = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(address));
+    instructions.extend([
+        Instruction::Pla,
+        Instruction::Pha,
+        Instruction::AndImmediate(0x1F),
+    ]);
+    let nonzero_page_placeholder = instructions.len();
+    instructions.push(Instruction::BneAbsolute(address));
+    instructions.extend([
+        Instruction::LdaImmediate(2),
+        Instruction::StaAbsolute(0x8000),
+        Instruction::LdaImmediate(0),
+        Instruction::StaAbsolute(0x8001),
+        Instruction::Pla,
+        Instruction::Plp,
+        Instruction::Rts,
+    ]);
+    let natural = next_address(address, &instructions)?;
+    instructions[inactive_surface_placeholder] = Instruction::BeqAbsolute(natural);
+    instructions[cache_missing_placeholder] = Instruction::BeqAbsolute(natural);
+    instructions[nonzero_page_placeholder] = Instruction::BneAbsolute(natural);
+    instructions.extend([
+        Instruction::Pla,
+        Instruction::Plp,
+        Instruction::JmpAbsolute(SOURCE_PAIR_AWARE_RIGHT_FD_SELECTOR),
+    ]);
+    assemble_at(address, &instructions)
 }
 
 fn set_directory(instructions: &mut Vec<Instruction>, address: u16) {
