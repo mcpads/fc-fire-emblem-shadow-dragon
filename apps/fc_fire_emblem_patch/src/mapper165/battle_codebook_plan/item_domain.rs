@@ -19,7 +19,9 @@ use eligibility_tables::{
     bank_six_slice, eligible_player_loadouts, equip_candidate_source_indices,
     item_family_class_lists,
 };
-use participant_glyphs::{BattleItemGlyphSets, plan_battle_item_glyph_sets};
+use participant_glyphs::{
+    BattleItemGlyphSets, PlayerParticipantInput, plan_battle_item_glyph_sets,
+};
 
 const PRG_BANK_SIZE: usize = 16 * 1024;
 const SWITCHABLE_CPU_START: u16 = 0x8000;
@@ -55,6 +57,7 @@ pub(super) struct BattleItemDomain {
     pub(super) equip_candidate_item_source_indices: BTreeSet<usize>,
     pub(super) enemy_class_item_pairs: BTreeSet<(u8, u8)>,
     pub(super) player_participant_glyph_sets: Vec<BTreeSet<char>>,
+    pub(super) player_participant_inputs: Vec<PlayerParticipantInput>,
     pub(super) binding: BattleItemDomainBinding,
 }
 
@@ -278,6 +281,7 @@ pub(super) fn bind_battle_item_domain(
     let BattleItemGlyphSets {
         item_glyph_sets: glyph_sets,
         player_participant_glyph_sets,
+        player_participant_inputs,
     } = plan_battle_item_glyph_sets(fixed, &candidate_source_indices, &player_loadouts)?;
     let player_participant_candidate_count = player_participant_glyph_sets.len();
     let candidate_item_entry_count = candidate_source_indices.len();
@@ -287,6 +291,7 @@ pub(super) fn bind_battle_item_domain(
         equip_candidate_item_source_indices: candidate_source_indices,
         enemy_class_item_pairs,
         player_participant_glyph_sets,
+        player_participant_inputs,
         binding: BattleItemDomainBinding {
             total_item_entry_count: ITEM_ENTRY_COUNT,
             candidate_item_entry_count,

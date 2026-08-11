@@ -13,6 +13,14 @@ use super::{
 pub(super) struct BattleItemGlyphSets {
     pub(super) item_glyph_sets: Vec<BTreeSet<char>>,
     pub(super) player_participant_glyph_sets: Vec<BTreeSet<char>>,
+    pub(super) player_participant_inputs: Vec<PlayerParticipantInput>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::mapper165::battle_codebook_plan) struct PlayerParticipantInput {
+    pub(in crate::mapper165::battle_codebook_plan) identity: u8,
+    pub(in crate::mapper165::battle_codebook_plan) class_id: u8,
+    pub(in crate::mapper165::battle_codebook_plan) item_source_index: u8,
 }
 
 pub(super) fn plan_battle_item_glyph_sets(
@@ -62,6 +70,7 @@ pub(super) fn plan_battle_item_glyph_sets(
     }
 
     let mut player_participant_glyph_sets = Vec::new();
+    let mut player_participant_inputs = Vec::new();
     for loadout in player_loadouts {
         let class_source_index = usize::from(loadout.class_id) - 1;
         let item_source_index = battle_item_source_index(loadout.item_id)?;
@@ -91,6 +100,13 @@ pub(super) fn plan_battle_item_glyph_sets(
             let mut glyphs = unit.unique_glyphs();
             glyphs.extend(&loadout_glyphs);
             player_participant_glyph_sets.push(glyphs);
+            player_participant_inputs.push(PlayerParticipantInput {
+                identity: u8::try_from(unit.source_index + 1)
+                    .context("player participant identity exceeds one byte")?,
+                class_id: loadout.class_id,
+                item_source_index: u8::try_from(item_source_index)
+                    .context("player item source index exceeds one byte")?,
+            });
         }
     }
     let player_participant_candidate_count =
@@ -99,8 +115,13 @@ pub(super) fn plan_battle_item_glyph_sets(
         player_participant_glyph_sets.len() == player_participant_candidate_count,
         "player participant candidate count changed"
     );
+    ensure!(
+        player_participant_inputs.len() == player_participant_glyph_sets.len(),
+        "player participant inputs and glyph sets lost alignment"
+    );
     Ok(BattleItemGlyphSets {
         item_glyph_sets,
         player_participant_glyph_sets,
+        player_participant_inputs,
     })
 }

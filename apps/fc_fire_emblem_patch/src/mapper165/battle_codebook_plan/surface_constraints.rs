@@ -68,11 +68,14 @@ struct BattleSurfaceConstraintReport {
     stable_color_count: usize,
     constrained_color_count: Option<usize>,
     conservative_text_overlay_count: usize,
+    exact_modeled_text_overlay_count: usize,
     observed_maximum_combined_slot_demand: usize,
     observed_minimum_slot_headroom: usize,
     conservative_global_preserved_active_code_count: usize,
     conservative_global_combined_slot_demand: usize,
     conservative_global_minimum_slot_headroom: usize,
+    exact_modeled_global_combined_slot_demand: usize,
+    exact_modeled_global_minimum_slot_headroom: usize,
     temporal_sampling_is_irregular: bool,
     pattern_table_consumers_filtered: bool,
     source_page_code_ownership_applied: bool,
@@ -109,6 +112,9 @@ struct PhysicalAssignmentArchitecture {
     conservative_per_battle_text_code_count: usize,
     conservative_per_battle_combined_code_count: usize,
     dynamic_per_battle_headroom: usize,
+    exact_modeled_per_battle_text_code_count: usize,
+    exact_modeled_per_battle_combined_code_count: usize,
+    exact_modeled_per_battle_headroom: usize,
     arbitrary_selection_maximum_collision_count: usize,
     arbitrary_selection_direct_table_byte_count: usize,
     modeled_maximum_collision_count: usize,
@@ -359,6 +365,7 @@ pub(crate) fn analyze_battle_surface_constraints(
         .as_ref()
         .map(|assignment| assignment.constrained_color_count);
     let conservative_text_overlay_count = model.runtime_demand.maximum_overlay_glyph_count();
+    let exact_modeled_text_overlay_count = model.runtime_demand.exact_maximum_overlay_glyph_count();
     let observed_maximum_combined_slot_demand = conservative_text_overlay_count
         .checked_add(maximum_preserved_non_japanese_active_code_count)
         .context("observed battle combined slot demand overflow")?;
@@ -374,6 +381,13 @@ pub(crate) fn analyze_battle_surface_constraints(
     ensure!(
         conservative_global_combined_slot_demand <= ACTIVE_HANGUL_SLOT_COUNT,
         "global battle text and preserved background union need {conservative_global_combined_slot_demand} slots but only {ACTIVE_HANGUL_SLOT_COUNT} exist"
+    );
+    let exact_modeled_global_combined_slot_demand = exact_modeled_text_overlay_count
+        .checked_add(conservative_global_preserved_active_code_count)
+        .context("exact modeled global battle combined slot demand overflow")?;
+    ensure!(
+        exact_modeled_global_combined_slot_demand <= conservative_global_combined_slot_demand,
+        "exact modeled global battle demand exceeds its conservative upper bound"
     );
     let static_safe_code_count =
         ACTIVE_HANGUL_SLOT_COUNT - conservative_global_preserved_active_code_count;
@@ -405,7 +419,7 @@ pub(crate) fn analyze_battle_surface_constraints(
         "selected battle assignment proof disagrees with the global capacity bound"
     );
     let report = BattleSurfaceConstraintReport {
-        schema: 11,
+        schema: 12,
         source_sha1: EXPECTED_SOURCE_SHA1,
         fixed_workspace_sha1: sha1_hex(&fs::read(fixed_workspace_path)?),
         dialogue_workspace_sha1: sha1_hex(&fs::read(dialogue_workspace_path)?),
@@ -440,6 +454,10 @@ pub(crate) fn analyze_battle_surface_constraints(
             conservative_per_battle_combined_code_count: conservative_global_combined_slot_demand,
             dynamic_per_battle_headroom: ACTIVE_HANGUL_SLOT_COUNT
                 - conservative_global_combined_slot_demand,
+            exact_modeled_per_battle_text_code_count: exact_modeled_text_overlay_count,
+            exact_modeled_per_battle_combined_code_count: exact_modeled_global_combined_slot_demand,
+            exact_modeled_per_battle_headroom: ACTIVE_HANGUL_SLOT_COUNT
+                - exact_modeled_global_combined_slot_demand,
             arbitrary_selection_maximum_collision_count: selected_assignment_capacity
                 .maximum_collision_count,
             arbitrary_selection_direct_table_byte_count: selected_assignment_capacity
@@ -475,6 +493,7 @@ pub(crate) fn analyze_battle_surface_constraints(
         stable_color_count: model.coloring.color_count,
         constrained_color_count,
         conservative_text_overlay_count,
+        exact_modeled_text_overlay_count,
         observed_maximum_combined_slot_demand,
         observed_minimum_slot_headroom: ACTIVE_HANGUL_SLOT_COUNT
             - observed_maximum_combined_slot_demand,
@@ -482,6 +501,9 @@ pub(crate) fn analyze_battle_surface_constraints(
         conservative_global_combined_slot_demand,
         conservative_global_minimum_slot_headroom: ACTIVE_HANGUL_SLOT_COUNT
             - conservative_global_combined_slot_demand,
+        exact_modeled_global_combined_slot_demand,
+        exact_modeled_global_minimum_slot_headroom: ACTIVE_HANGUL_SLOT_COUNT
+            - exact_modeled_global_combined_slot_demand,
         temporal_sampling_is_irregular: true,
         pattern_table_consumers_filtered: true,
         source_page_code_ownership_applied: true,
@@ -497,7 +519,7 @@ pub(crate) fn analyze_battle_surface_constraints(
         runtime_verified: false,
         release_eligible: false,
         next_gate: if physical.is_some() {
-            "install a battle-conditional abstract text-code projection at the shared renderer, populate the proven split 17-byte remap payload during composition, and verify the strongest 173-slot lifetime"
+            "separate translated Korean code ownership from preserved literal English and numeric codes at the shared renderer, then prove visible battle legibility before installing the remaining translation domains"
         } else {
             "separate translated text producers from preserved graphics in the admitted temporal samples before extending the visual-variant catalog or installing the runtime loader"
         },
@@ -552,7 +574,7 @@ mod tests {
     #[test]
     fn serialized_report_omits_translation_content_and_private_paths() {
         let report = BattleSurfaceConstraintReport {
-            schema: 11,
+            schema: 12,
             source_sha1: EXPECTED_SOURCE_SHA1,
             fixed_workspace_sha1: "fixed".to_owned(),
             dialogue_workspace_sha1: "dialogue".to_owned(),
@@ -606,6 +628,9 @@ mod tests {
                 conservative_per_battle_text_code_count: 134,
                 conservative_per_battle_combined_code_count: 173,
                 dynamic_per_battle_headroom: 37,
+                exact_modeled_per_battle_text_code_count: 131,
+                exact_modeled_per_battle_combined_code_count: 170,
+                exact_modeled_per_battle_headroom: 40,
                 arbitrary_selection_maximum_collision_count: 39,
                 arbitrary_selection_direct_table_byte_count: 39,
                 modeled_maximum_collision_count: 8,
@@ -647,11 +672,14 @@ mod tests {
             stable_color_count: 3,
             constrained_color_count: Some(3),
             conservative_text_overlay_count: 2,
+            exact_modeled_text_overlay_count: 1,
             observed_maximum_combined_slot_demand: 4,
             observed_minimum_slot_headroom: 206,
             conservative_global_preserved_active_code_count: 39,
             conservative_global_combined_slot_demand: 41,
             conservative_global_minimum_slot_headroom: 169,
+            exact_modeled_global_combined_slot_demand: 40,
+            exact_modeled_global_minimum_slot_headroom: 170,
             temporal_sampling_is_irregular: true,
             pattern_table_consumers_filtered: true,
             source_page_code_ownership_applied: true,

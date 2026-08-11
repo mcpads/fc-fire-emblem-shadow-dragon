@@ -84,6 +84,8 @@ struct BattleCompositionRuntimeVerificationReport {
     compose_return_frame: u64,
     runtime_input: RuntimeInputReport,
     selected_recipe_offsets_hex: Vec<String>,
+    selected_unique_overlay_count: usize,
+    selected_glyph_reference_count: usize,
     remap_state_hex: String,
     cache_uploaded_marker_present: bool,
     dynamic_assignment_sha1: String,
@@ -249,7 +251,7 @@ pub(crate) fn verify_battle_composition_runtime(
         .map(|offset| format!("0x{:04X}", 0x1000 + offset));
     let exact_composition_match = differing_byte_count == 0;
     let report = BattleCompositionRuntimeVerificationReport {
-        schema: 4,
+        schema: 5,
         rom_sha1: sha1_hex(rom.data()),
         compose_return_cpu_address_hex: format!("0x{COMPOSE_RETURN_ADDRESS:04X}"),
         compose_return_frame: event.frame,
@@ -267,6 +269,8 @@ pub(crate) fn verify_battle_composition_runtime(
             .iter()
             .map(|offset| format!("0x{offset:04X}"))
             .collect(),
+        selected_unique_overlay_count: selection.unique_overlay_count,
+        selected_glyph_reference_count: selection.glyph_reference_count,
         remap_state_hex: format!("0x{remap_state:02X}"),
         cache_uploaded_marker_present,
         dynamic_assignment_sha1: expected_composition.assignment_sha1,

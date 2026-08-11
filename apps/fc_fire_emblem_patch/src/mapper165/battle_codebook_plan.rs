@@ -45,7 +45,7 @@ use enemy_domain::{EnemyBattleDomain, EnemyBattleDomainBinding, bind_enemy_battl
 use item_domain::{BattleItemDomain, BattleItemDomainBinding, bind_battle_item_domain};
 pub(super) use physical_assignment::ScreenCodeConstraint;
 use physical_assignment::assign_physical_codes;
-use runtime_demand::{BattleRuntimeDemandPlan, plan_runtime_demand};
+use runtime_demand::{BattleRuntimeDemandPlan, ExactModeledRuntimeInput, plan_runtime_demand};
 use runtime_inputs::{BattleRuntimeInputBinding, bind_battle_runtime_inputs};
 
 struct BattleCodebookModel {
@@ -379,10 +379,12 @@ fn plan_battle_codebook_model(
         equip_candidate_item_source_indices,
         enemy_class_item_pairs,
         player_participant_glyph_sets: player_participants,
+        player_participant_inputs,
         binding: item_domain,
     } = bind_battle_item_domain(rom, fixed)?;
     let EnemyBattleDomain {
         participant_glyph_sets: enemy_participants,
+        participant_inputs: enemy_participant_inputs,
         enemy_name_source_indices,
         binding: enemy_domain,
     } = bind_enemy_battle_domain(rom, fixed, &enemy_class_item_pairs)?;
@@ -422,7 +424,41 @@ fn plan_battle_codebook_model(
         dialogue_records,
     };
     let coloring = plan_stable_coloring(&families, ACTIVE_HANGUL_SLOT_COUNT)?;
-    let runtime_demand = plan_runtime_demand(&families, &coloring)?;
+    let mut runtime_demand = plan_runtime_demand(&families, &coloring)?;
+    let [
+        player_index,
+        enemy_index,
+        terrain_left,
+        terrain_right,
+        dialogue_index,
+    ] = runtime_demand.exact_witness_indices();
+    let player_input = player_participant_inputs
+        .get(player_index)
+        .context("exact demand player witness is outside the participant domain")?;
+    let enemy_input = enemy_participant_inputs
+        .get(enemy_index)
+        .context("exact demand enemy witness is outside the participant domain")?;
+    let dialogue_selector = u8::try_from(
+        dialogue
+            .records
+            .get(dialogue_index)
+            .context("exact demand dialogue witness is outside the dialogue domain")?
+            .canonical_entry_index,
+    )
+    .context("exact demand dialogue selector exceeds one byte")?;
+    let exact_runtime_input = ExactModeledRuntimeInput {
+        participant_record_identities: [player_input.identity, enemy_input.identity],
+        class_record_identities: [player_input.class_id, enemy_input.class_id],
+        item_source_indices: [
+            player_input.item_source_index,
+            enemy_input.item_source_index,
+        ],
+        terrain_source_indices: [
+            u8::try_from(terrain_left).context("left terrain witness exceeds one byte")?,
+            u8::try_from(terrain_right).context("right terrain witness exceeds one byte")?,
+        ],
+        dialogue_selector,
+    };
     let composition = plan_cache_composition(
         fixed,
         dialogue,
@@ -434,6 +470,20 @@ fn plan_battle_codebook_model(
         terrain_entry_count,
         runtime_demand.maximum_overlay_glyph_count(),
     )?;
+    let exact_selection = composition.select_runtime_recipes(BattleRuntimeRecipeInput {
+        participant_record_identities: exact_runtime_input.participant_record_identities,
+        class_record_identities: exact_runtime_input.class_record_identities,
+        item_source_indices: exact_runtime_input.item_source_indices,
+        terrain_source_indices: exact_runtime_input.terrain_source_indices,
+        dialogue_selector: exact_runtime_input.dialogue_selector,
+    })?;
+    ensure!(
+        exact_selection.overlays.len() == runtime_demand.exact_maximum_overlay_glyph_count(),
+        "exact demand witness selects {} runtime overlays instead of {}",
+        exact_selection.overlays.len(),
+        runtime_demand.exact_maximum_overlay_glyph_count()
+    );
+    runtime_demand.bind_exact_runtime_input(exact_runtime_input)?;
     Ok(BattleCodebookModel {
         message_template_entry_count: message_templates.len(),
         unit_name_entry_count: player_names.len(),

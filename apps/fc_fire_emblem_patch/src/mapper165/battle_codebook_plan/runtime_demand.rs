@@ -7,6 +7,10 @@ use crate::{font_slots::ACTIVE_HANGUL_SLOT_COUNT, sha1_hex};
 
 use super::conflict_graph::{BattleGlyphFamilies, StableColoringPlan};
 
+mod exact_maximum;
+
+use exact_maximum::{ExactModeledMaximum, find_exact_modeled_maximum};
+
 const MASK_WORD_COUNT: usize = ACTIVE_HANGUL_SLOT_COUNT.div_ceil(u64::BITS as usize);
 
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
@@ -32,9 +36,23 @@ pub(super) struct BattleRuntimeDemandPlan {
     every_choice_family_source_bound: bool,
     family_maxima_added_without_cross_family_overlap_credit: bool,
     conservative_upper_bound_proven: bool,
+    exact_modeled_maximum_overlay_glyph_count: usize,
+    exact_modeled_minimum_graphics_headroom: usize,
+    conservative_upper_bound_is_tight: bool,
+    exact_modeled_maximum_witness: ExactModeledMaximum,
+    exact_modeled_maximum_runtime_input: Option<ExactModeledRuntimeInput>,
     exact_modeled_maximum_proven: bool,
     glyph_characters_emitted: bool,
     translation_text_emitted: bool,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+pub(super) struct ExactModeledRuntimeInput {
+    pub(super) participant_record_identities: [u8; 2],
+    pub(super) class_record_identities: [u8; 2],
+    pub(super) item_source_indices: [u8; 2],
+    pub(super) terrain_source_indices: [u8; 2],
+    pub(super) dialogue_selector: u8,
 }
 
 pub(super) fn plan_runtime_demand(
@@ -81,6 +99,18 @@ pub(super) fn plan_runtime_demand(
         conservative_maximum_overlay_glyph_count <= ACTIVE_HANGUL_SLOT_COUNT,
         "one modeled battle can require at most {conservative_maximum_overlay_glyph_count} overlays but only {ACTIVE_HANGUL_SLOT_COUNT} slots exist"
     );
+    let exact_modeled_maximum = find_exact_modeled_maximum(
+        base,
+        &players,
+        &enemies,
+        &terrain_entries,
+        &dialogues,
+        conservative_maximum_overlay_glyph_count,
+    )?;
+    ensure!(
+        exact_modeled_maximum.overlay_glyph_count <= conservative_maximum_overlay_glyph_count,
+        "exact modeled battle demand exceeds its conservative upper bound"
+    );
 
     Ok(BattleRuntimeDemandPlan {
         strategy: "source-bound common demand plus independent per-family maxima; cross-family overlap is deliberately not credited",
@@ -102,7 +132,14 @@ pub(super) fn plan_runtime_demand(
         every_choice_family_source_bound: true,
         family_maxima_added_without_cross_family_overlap_credit: true,
         conservative_upper_bound_proven: true,
-        exact_modeled_maximum_proven: false,
+        exact_modeled_maximum_overlay_glyph_count: exact_modeled_maximum.overlay_glyph_count,
+        exact_modeled_minimum_graphics_headroom: ACTIVE_HANGUL_SLOT_COUNT
+            - exact_modeled_maximum.overlay_glyph_count,
+        conservative_upper_bound_is_tight: exact_modeled_maximum.overlay_glyph_count
+            == conservative_maximum_overlay_glyph_count,
+        exact_modeled_maximum_witness: exact_modeled_maximum,
+        exact_modeled_maximum_runtime_input: None,
+        exact_modeled_maximum_proven: true,
         glyph_characters_emitted: false,
         translation_text_emitted: false,
     })
@@ -111,6 +148,32 @@ pub(super) fn plan_runtime_demand(
 impl BattleRuntimeDemandPlan {
     pub(super) fn maximum_overlay_glyph_count(&self) -> usize {
         self.conservative_maximum_overlay_glyph_count
+    }
+
+    pub(super) fn exact_maximum_overlay_glyph_count(&self) -> usize {
+        self.exact_modeled_maximum_overlay_glyph_count
+    }
+
+    pub(super) fn exact_witness_indices(&self) -> [usize; 5] {
+        [
+            self.exact_modeled_maximum_witness.player_choice_index,
+            self.exact_modeled_maximum_witness.enemy_choice_index,
+            self.exact_modeled_maximum_witness.terrain_left_index,
+            self.exact_modeled_maximum_witness.terrain_right_index,
+            self.exact_modeled_maximum_witness.dialogue_choice_index,
+        ]
+    }
+
+    pub(super) fn bind_exact_runtime_input(
+        &mut self,
+        input: ExactModeledRuntimeInput,
+    ) -> Result<()> {
+        ensure!(
+            self.exact_modeled_maximum_runtime_input.is_none(),
+            "exact battle demand runtime input was already bound"
+        );
+        self.exact_modeled_maximum_runtime_input = Some(input);
+        Ok(())
     }
 }
 
@@ -236,7 +299,18 @@ pub(super) fn test_plan() -> BattleRuntimeDemandPlan {
         every_choice_family_source_bound: true,
         family_maxima_added_without_cross_family_overlap_credit: true,
         conservative_upper_bound_proven: true,
-        exact_modeled_maximum_proven: false,
+        exact_modeled_maximum_overlay_glyph_count: 1,
+        exact_modeled_minimum_graphics_headroom: ACTIVE_HANGUL_SLOT_COUNT - 1,
+        conservative_upper_bound_is_tight: true,
+        exact_modeled_maximum_witness: ExactModeledMaximum::test_witness(1),
+        exact_modeled_maximum_runtime_input: Some(ExactModeledRuntimeInput {
+            participant_record_identities: [1, 0x81],
+            class_record_identities: [1, 1],
+            item_source_indices: [0, 0],
+            terrain_source_indices: [0, 0],
+            dialogue_selector: 0,
+        }),
+        exact_modeled_maximum_proven: true,
         glyph_characters_emitted: false,
         translation_text_emitted: false,
     }
@@ -274,6 +348,26 @@ mod tests {
             demand.minimum_graphics_headroom,
             ACTIVE_HANGUL_SLOT_COUNT - 8
         );
-        assert!(!demand.exact_modeled_maximum_proven);
+        assert_eq!(demand.exact_modeled_maximum_overlay_glyph_count, 8);
+        assert!(demand.conservative_upper_bound_is_tight);
+        assert!(demand.exact_modeled_maximum_proven);
+    }
+
+    #[test]
+    fn exact_demand_does_not_double_count_glyphs_shared_across_families() {
+        let families = BattleGlyphFamilies {
+            base: set("가"),
+            player_participants: vec![set("나다")],
+            enemy_participants: vec![set("라")],
+            terrains: vec![set("나")],
+            dialogue_records: vec![set("다")],
+        };
+        let coloring = plan_stable_coloring(&families, ACTIVE_HANGUL_SLOT_COUNT).unwrap();
+        let demand = plan_runtime_demand(&families, &coloring).unwrap();
+
+        assert_eq!(demand.conservative_maximum_overlay_glyph_count, 6);
+        assert_eq!(demand.exact_modeled_maximum_overlay_glyph_count, 4);
+        assert!(!demand.conservative_upper_bound_is_tight);
+        assert_eq!(demand.exact_modeled_maximum_witness.overlay_glyph_count, 4);
     }
 }

@@ -19,8 +19,16 @@ pub(super) use source_records::{EnemyGeneratedHpBound, bind_enemy_generated_hp_b
 
 pub(super) struct EnemyBattleDomain {
     pub(super) participant_glyph_sets: Vec<BTreeSet<char>>,
+    pub(super) participant_inputs: Vec<EnemyParticipantInput>,
     pub(super) enemy_name_source_indices: BTreeSet<usize>,
     pub(super) binding: EnemyBattleDomainBinding,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct EnemyParticipantInput {
+    pub(super) identity: u8,
+    pub(super) class_id: u8,
+    pub(super) item_source_index: u8,
 }
 
 #[derive(Debug, Serialize)]
@@ -94,6 +102,25 @@ pub(super) fn bind_enemy_battle_domain(
         .iter()
         .map(|candidate| participant_glyphs(fixed, *candidate))
         .collect::<Result<Vec<_>>>()?;
+    let participant_inputs = candidates
+        .iter()
+        .map(|candidate| {
+            Ok(EnemyParticipantInput {
+                identity: candidate.identity,
+                class_id: candidate.class_id,
+                item_source_index: if candidate.item_id == 0 {
+                    0
+                } else {
+                    u8::try_from(battle_item_source_index(candidate.item_id)?)
+                        .context("enemy item source index exceeds one byte")?
+                },
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    ensure!(
+        participant_inputs.len() == participant_glyph_sets.len(),
+        "enemy participant inputs and glyph sets lost alignment"
+    );
     let candidate_bytes = candidates
         .iter()
         .flat_map(|candidate| [candidate.identity, candidate.class_id, candidate.item_id])
@@ -102,6 +129,7 @@ pub(super) fn bind_enemy_battle_domain(
 
     Ok(EnemyBattleDomain {
         participant_glyph_sets,
+        participant_inputs,
         enemy_name_source_indices: name_indices,
         binding: EnemyBattleDomainBinding {
             chapter_count: CHAPTER_COUNT,
