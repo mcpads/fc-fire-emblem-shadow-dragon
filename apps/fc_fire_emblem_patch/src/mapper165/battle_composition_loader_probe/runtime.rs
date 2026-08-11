@@ -646,7 +646,7 @@ pub(super) fn battle_right_selector(address: u16, mapper_register: u8) -> Result
         Instruction::LdaImmediate(0),
         Instruction::JmpAbsolute(address),
     ]);
-    let write_placeholder = instructions.len() - 1;
+    let select_register_placeholder = instructions.len() - 1;
     let natural = next_address(address, &instructions)?;
     instructions[inactive_surface_placeholder] = Instruction::BeqAbsolute(natural);
     instructions[cache_missing_placeholder] = Instruction::BeqAbsolute(natural);
@@ -659,13 +659,15 @@ pub(super) fn battle_right_selector(address: u16, mapper_register: u8) -> Result
         Instruction::AslAccumulator,
         Instruction::Clc,
         Instruction::AdcImmediate(8),
+    ]);
+    let select_register = next_address(address, &instructions)?;
+    instructions[select_register_placeholder] = Instruction::JmpAbsolute(select_register);
+    instructions.extend([
         Instruction::Pha,
         Instruction::LdaImmediate(mapper_register),
         Instruction::StaAbsolute(0x8000),
         Instruction::Pla,
     ]);
-    let write = next_address(address, &instructions)?;
-    instructions[write_placeholder] = Instruction::JmpAbsolute(write);
     instructions.extend([
         Instruction::StaAbsolute(0x8001),
         Instruction::Pla,

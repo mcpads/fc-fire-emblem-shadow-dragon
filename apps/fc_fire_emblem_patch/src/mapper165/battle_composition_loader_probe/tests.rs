@@ -299,6 +299,30 @@ fn runtime_consumers_require_a_supported_battle_surface_and_persistent_remap_sta
 }
 
 #[test]
+fn zero_right_page_selects_its_mapper_register_before_writing_chr_ram() {
+    for (address, mapper_register) in [
+        (BATTLE_RIGHT_FD_SELECTOR_ADDRESS, 2),
+        (BATTLE_RIGHT_FE_SELECTOR_ADDRESS, 4),
+    ] {
+        let bytes = battle_right_selector(address, mapper_register).unwrap();
+        let zero_page_branch = bytes
+            .windows(5)
+            .position(|window| window[0..3] == [0xA9, 0x00, 0x4C])
+            .unwrap();
+        let target = u16::from_le_bytes([
+            bytes[zero_page_branch + 3],
+            bytes[zero_page_branch + 4],
+        ]);
+        let target_offset = usize::from(target - address);
+
+        assert_eq!(
+            &bytes[target_offset..target_offset + 10],
+            &[0x48, 0xA9, mapper_register, 0x8D, 0x00, 0x80, 0x68, 0x8D, 0x01, 0x80]
+        );
+    }
+}
+
+#[test]
 fn composition_report_omits_translation_content_and_private_paths() {
     let report = BattleCompositionLoaderProbeReport {
         schema: 4,
