@@ -10,10 +10,13 @@ use crate::{
     front_end_menu::plan_front_end_menu,
     item_flow::inspect_item_action_label_count,
     localization::OptionsLocalization,
+    map_menu::plan_map_menu,
     rom::Rom,
     roster_localization::RosterLocalization,
     sha1_hex,
+    suspend_message::bind_suspend_message_to_main_dialogue,
     text_inventory::{FixedTextPlan, plan_fixed_text, scoped_text_table_budgets},
+    title_graphics::plan_title_graphics,
     unit_names::plan_unit_names,
     unit_ui_text::inspect_unit_ui_japanese_label_count,
 };
@@ -32,6 +35,8 @@ pub(crate) struct TranslationPopulationInputs<'a> {
     pub(crate) class_profile_localization_path: &'a Path,
     pub(crate) chapter_title_localization_path: &'a Path,
     pub(crate) choice_label_localization_path: &'a Path,
+    pub(crate) map_menu_localization_path: &'a Path,
+    pub(crate) title_graphics_localization_path: &'a Path,
 }
 
 pub(crate) fn inspect_translation_populations(
@@ -52,6 +57,9 @@ pub(crate) fn inspect_translation_populations(
     let class_profiles = plan_class_profiles(&rom, inputs.class_profile_localization_path)?;
     let chapter_titles = plan_chapter_titles(&rom, inputs.chapter_title_localization_path)?;
     let choice_labels = plan_choice_labels(&rom, inputs.choice_label_localization_path)?;
+    let map_menu = plan_map_menu(&rom, inputs.map_menu_localization_path)?;
+    let title_graphics = plan_title_graphics(&rom, inputs.title_graphics_localization_path)?;
+    bind_suspend_message_to_main_dialogue(&rom)?;
     validate_duplicate_unit_name_inputs(&fixed_text, &unit_names.entries)?;
 
     let options_bytes = fs::read(inputs.options_localization_path).with_context(|| {
@@ -165,6 +173,28 @@ pub(crate) fn inspect_translation_populations(
     )?;
     insert(
         &mut populations,
+        "map_menu_labels",
+        complete_or_partial(
+            map_menu.entry_count,
+            map_menu.translated_entry_count,
+            map_menu.translated_entry_count == map_menu.entry_count,
+            map_menu.review_complete,
+            Some(map_menu.workspace_sha1),
+        ),
+    )?;
+    insert(
+        &mut populations,
+        "title_graphics",
+        complete_or_partial(
+            1,
+            title_graphics.translated_surface_count,
+            title_graphics.translated_surface_count == 1,
+            title_graphics.review_complete,
+            Some(title_graphics.workspace_sha1),
+        ),
+    )?;
+    insert(
+        &mut populations,
         "options_labels",
         technical_proof_population(validated_options.entries.len(), sha1_hex(&options_bytes)),
     )?;
@@ -199,9 +229,6 @@ pub(crate) fn inspect_translation_populations(
         )?;
     }
 
-    for domain_id in ["title_graphics", "map_menu_labels", "suspend_message"] {
-        insert(&mut populations, domain_id, unresolved_source_population())?;
-    }
     Ok(populations)
 }
 
@@ -297,17 +324,6 @@ fn missing_translation_population(count: usize) -> DomainPopulation {
     DomainPopulation {
         source_binding: SourceBindingState::Bound,
         target_unit_count: Some(count),
-        translated_target_unit_count: 0,
-        translation_input: TranslationInputState::Missing,
-        review_complete: false,
-        translation_input_sha1: None,
-    }
-}
-
-fn unresolved_source_population() -> DomainPopulation {
-    DomainPopulation {
-        source_binding: SourceBindingState::Unresolved,
-        target_unit_count: None,
         translated_target_unit_count: 0,
         translation_input: TranslationInputState::Missing,
         review_complete: false,

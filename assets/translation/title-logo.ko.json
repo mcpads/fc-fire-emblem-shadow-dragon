@@ -1,0 +1,21 @@
+{
+  "format_version": 1,
+  "source_sha1": "0179c550d424e0397496078789e7b116601d120c",
+  "translate_from": "ja",
+  "translate_to": "ko",
+  "preserve_existing_english_and_digits": true,
+  "entry": {
+    "id": "title-logo",
+    "source_prg_bank_hex": "0x0D",
+    "source_cpu_address_hex": "0xB2B0",
+    "source_stream_byte_count": 180,
+    "source_stream_sha1": "bdd564533623646556668eef5da652669f0c9382",
+    "source_chr_page_hex": "0x14",
+    "source_chr_page_file_offset_hex": "0x54010",
+    "source_chr_page_sha1": "dd382dfe729f44e3ee493fadde2394862828affd",
+    "japanese_markup": "ファイアーエムブレム",
+    "korean_markup": "파이어엠블렘",
+    "preserved_original_text": ["TM", "©1990 Nintendo"],
+    "status": "needs_human_review"
+  }
+}

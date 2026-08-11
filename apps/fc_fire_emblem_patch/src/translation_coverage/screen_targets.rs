@@ -34,7 +34,6 @@ pub(crate) const DOMAIN_SEEDS: &[TranslationDomainSeed] = &[
     domain("map_menu_labels", "map_menu_label"),
     domain("options_labels", "option_label"),
     domain("roster_header", "roster_header"),
-    domain("suspend_message", "message"),
     domain("terrain_names", "terrain_name"),
     domain("title_graphics", "title_surface"),
     domain("unit_names", "unit_name"),
@@ -95,7 +94,7 @@ const SCREEN_TARGETS: &[ScreenTargetSeed] = &[
         "chapter_intro_title_dialogue_composite",
         &["chapter_titles", "main_dialogue"],
     ),
-    screen("suspend_message", &["suspend_message"]),
+    screen("suspend_message", &["main_dialogue"]),
     screen("weapon_shop_item_list", &["item_names"]),
     screen(
         "weapon_shop_purchase_confirmation",

@@ -33,9 +33,13 @@
       "input_behavior": "mixed",
       "translation_scope": "japanese_with_preserved_original_latin",
       "temporal_behavior": "animated title presentation followed by input wait",
-      "known_focus": ["left 14/14 and right 00/14 CHR pairs"],
-      "unresolved_focus": ["separate logo graphics from Japanese text and preserved original Latin"],
-      "next_gate": "classify title text and logo consumers",
+      "known_focus": [
+        "left 14/14 and right 00/14 CHR pairs",
+        "bank 0D:B2B0 owns five 32-tile PPU rows for the animated Japanese logo on CHR page 14",
+        "the logo surface excludes the original TM tile and the later original copyright line"
+      ],
+      "unresolved_focus": ["install and verify the Korean logo across the complete animated title lifetime"],
+      "next_gate": "replace the complete logo surface while preserving TM, copyright text, sword, and animation phases",
       "contract_state": "observed_partial"
     },
     {
@@ -121,9 +125,13 @@
       "input_behavior": "input_wait",
       "translation_scope": "japanese_only",
       "temporal_behavior": "selection cursor may flash",
-      "known_focus": ["left 1A/1A and right 00/19 CHR pairs"],
-      "unresolved_focus": ["exact menu tile set", "cursor phase union", "per-command transitions"],
-      "next_gate": "bind menu labels and each command transition",
+      "known_focus": [
+        "left 1A/1A and right 00/19 CHR pairs",
+        "composite state 03 at bank 0B:8187 copies one contiguous six-label block from 0B:81B2",
+        "the six source roles are roster, storage, funds, suspend, display switch, and end turn"
+      ],
+      "unresolved_focus": ["cursor phase union", "install all six Korean labels and verify every command transition"],
+      "next_gate": "install the complete translated label block before exercising each already-documented command effect",
       "contract_state": "observed_partial"
     },
     {
@@ -521,9 +529,13 @@
       "input_behavior": "terminal_instruction",
       "translation_scope": "japanese_only",
       "temporal_behavior": "static instruction after suspend selection",
-      "known_focus": ["natural suspend, SRAM, power-cycle, and one-shot resume path reached"],
-      "unresolved_focus": ["CHR pairs", "text and transition owner", "re-entry boundary after resume"],
-      "next_gate": "capture its complete screen contract without changing save semantics",
+      "known_focus": [
+        "natural suspend, SRAM, power-cycle, and one-shot resume path reached",
+        "map-message state 08 at bank 0B:9B8A selects main-dialogue directory B0 entry 01",
+        "the visible instruction belongs to the victory-and-defeat main-dialogue table rather than a separate text population"
+      ],
+      "unresolved_focus": ["CHR pairs", "installed Korean re-entry boundary after resume"],
+      "next_gate": "install main-dialogue B0:01 and repeat the existing save, power-cycle, and one-shot resume contract",
       "contract_state": "observed_partial"
     },
     {

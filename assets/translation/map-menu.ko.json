@@ -1,0 +1,63 @@
+{
+  "format_version": 1,
+  "source_sha1": "0179c550d424e0397496078789e7b116601d120c",
+  "translate_from": "ja",
+  "translate_to": "ko",
+  "preserve_existing_english_and_digits": true,
+  "entries": [
+    {
+      "id": "map-menu:roster",
+      "source_cpu_address_hex": "0x81B2",
+      "source_bytes_hex": "01 11 28 2F ED",
+      "source_sha1": "e118b6b7381ffc92c842ed74dc488043885be606",
+      "japanese_markup": "いちらん",
+      "korean_markup": "부대명단",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "map-menu:storage",
+      "source_cpu_address_hex": "0x81B7",
+      "source_bytes_hex": "00 0C 0F 05 29 0B 0F 87 ED",
+      "source_sha1": "621347f2ca0141e36c03116bda08f32411ae979b",
+      "japanese_markup": "あす゛かりし゛ょ",
+      "korean_markup": "보관소",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "map-menu:funds",
+      "source_cpu_address_hex": "0x81C0",
+      "source_bytes_hex": "0B 87 0B 0F 06 2F ED",
+      "source_sha1": "2af0a7ad6a3f680f96cc1892b87f99fa979f9fe3",
+      "japanese_markup": "しょし゛きん",
+      "korean_markup": "소지금",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "map-menu:suspend",
+      "source_cpu_address_hex": "0x81C7",
+      "source_bytes_hex": "11 86 02 10 0F 2F ED",
+      "source_sha1": "2a5cd47e1f9c49161ec4114d2f7448456179bad5",
+      "japanese_markup": "ちゅうた゛ん",
+      "korean_markup": "중단",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "map-menu:switch",
+      "source_cpu_address_hex": "0x81CE",
+      "source_bytes_hex": "3C 31 89 41 ED",
+      "source_sha1": "09f50231b4778b67d6938d3eba04ab1a3728ea3d",
+      "japanese_markup": "スイッチ",
+      "korean_markup": "표시전환",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "map-menu:end-turn",
+      "source_cpu_address_hex": "0x81D3",
+      "source_bytes_hex": "40 3F 5F 04 2D 2A ED",
+      "source_sha1": "0ae016a3794187867d7e86dc1a4e7131bf10fed1",
+      "japanese_markup": "ターンおわる",
+      "korean_markup": "턴종료",
+      "status": "needs_human_review"
+    }
+  ]
+}

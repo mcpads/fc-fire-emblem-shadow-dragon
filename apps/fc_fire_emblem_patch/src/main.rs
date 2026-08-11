@@ -14,6 +14,7 @@ mod hangul_page_plan;
 mod item_flow;
 mod japanese_encoding;
 mod localization;
+mod map_menu;
 mod mapper165;
 mod mmc4_latch;
 mod mmc5_chr;
@@ -31,8 +32,10 @@ mod screen_contracts;
 mod shop_flow;
 mod source_literals;
 mod static_analysis;
+mod suspend_message;
 mod temporal_surface;
 mod text_inventory;
+mod title_graphics;
 mod tracked;
 mod translation_coverage;
 mod typed_source;
@@ -251,6 +254,10 @@ enum Command {
         chapter_title_localization: PathBuf,
         #[arg(long, default_value = "assets/translation/choice-labels.ko.json")]
         choice_label_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/map-menu.ko.json")]
+        map_menu_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/title-logo.ko.json")]
+        title_graphics_localization: PathBuf,
         #[arg(long, default_value = "out/fire-emblem-fe1-korean-patch.nes")]
         current_build_output: PathBuf,
         #[arg(long, default_value = "out/kr-patch-build.json")]
@@ -951,6 +958,8 @@ fn main() -> Result<()> {
             class_profile_localization,
             chapter_title_localization,
             choice_label_localization,
+            map_menu_localization,
+            title_graphics_localization,
             current_build_output,
             current_build_report,
             report,
@@ -968,6 +977,8 @@ fn main() -> Result<()> {
                     class_profile_localization_path: &class_profile_localization,
                     chapter_title_localization_path: &chapter_title_localization,
                     choice_label_localization_path: &choice_label_localization,
+                    map_menu_localization_path: &map_menu_localization,
+                    title_graphics_localization_path: &title_graphics_localization,
                     current_build_output_path: &current_build_output,
                     current_build_report_path: &current_build_report,
                     report_path: &report,
