@@ -159,6 +159,9 @@ pub(crate) fn inspect_item_action_label_count(rom: &Rom) -> Result<usize> {
 pub(crate) fn validate_item_lifetime_source(rom: &Rom) -> Result<()> {
     validate_state_routes(rom)?;
     validate_action_result_dialogue_indices(rom)?;
+    for spec in SOURCE_REGIONS {
+        bind_source_region(rom, *spec)?;
+    }
     item_use_families::inspect(rom)?;
     Ok(())
 }
@@ -180,13 +183,13 @@ fn build_report(rom: &Rom) -> Result<ItemFlowReport> {
         .context("missing NO ITEM label")?;
 
     Ok(ItemFlowReport {
-        schema: 2,
+        schema: 3,
         source_sha1: EXPECTED_SOURCE_SHA1,
         scope: Scope {
             translation_direction: "Japanese to Korean",
             preserve_existing_english_and_digits: true,
             dialogue_content_emitted: false,
-            proof_boundary: "source-bound item screen flow plus runtime-observed equip, use, transfer, and discard branches; no translated dialogue or ROM mutation",
+            proof_boundary: "source-bound item screen flow, complete use-effect families, typed class-change and earth-orb downstream code, plus runtime-observed equip, use, transfer, and discard branches; no translated dialogue or ROM mutation",
         },
         route: ItemRoute {
             command_result: 6,

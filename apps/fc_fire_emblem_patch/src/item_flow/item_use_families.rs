@@ -9,6 +9,9 @@ use super::source_contract::{
     ITEM_USE_ACTION_FLAG, source_slice,
 };
 
+mod class_change;
+mod earth_orb;
+
 const FIXED_PRG_BANK: u8 = 0x0F;
 const EXPECTED_USABLE_ITEM_IDS: [u8; 26] = [
     0x0B, 0x10, 0x15, 0x40, 0x41, 0x42, 0x43, 0x44, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D,
@@ -23,6 +26,8 @@ pub(super) struct ItemUseCatalog {
     pub(super) usable_item_count: usize,
     usable_items: Vec<UsableItemBinding>,
     effect_families: Vec<ItemUseEffectFamily>,
+    class_change_contract: class_change::ClassChangeContract,
+    earth_orb_contract: earth_orb::EarthOrbContract,
     dialogue_result_indices: Vec<u8>,
     dialogue_result_indices_hex: Vec<String>,
     static_conclusion: &'static str,
@@ -116,7 +121,7 @@ const EFFECT_FAMILIES: &[FamilySpec] = &[
         handler_address: 0x97DA,
         success_dialogue_indices: &[],
         failure_dialogue_indices: &[0x30],
-        downstream_surface: "successful use bypasses the common result selection and starts the class-change sequence",
+        downstream_surface: "successful use bypasses common result selection and enters result substates 0x04 through 0x06, including the shared battle presentation",
         runtime_coverage: "successful downstream surface not yet observed",
     },
     FamilySpec {
@@ -125,7 +130,7 @@ const EFFECT_FAMILIES: &[FamilySpec] = &[
         handler_address: 0x98AC,
         success_dialogue_indices: &[0x33],
         failure_dialogue_indices: &[],
-        downstream_surface: "dedicated multi-target effect sequence before result 0x33",
+        downstream_surface: "synchronous 32-step map-displacement and multi-target record effect inside result substate 0x02 before result 0x33",
         runtime_coverage: "downstream surface not yet observed",
     },
     FamilySpec {
@@ -140,6 +145,8 @@ const EFFECT_FAMILIES: &[FamilySpec] = &[
 ];
 
 pub(super) fn inspect(rom: &Rom) -> Result<ItemUseCatalog> {
+    let class_change_contract = class_change::inspect(rom)?;
+    let earth_orb_contract = earth_orb::inspect(rom)?;
     let action_flags = source_slice(
         rom,
         FIXED_PRG_BANK,
@@ -213,12 +220,14 @@ pub(super) fn inspect(rom: &Rom) -> Result<ItemUseCatalog> {
         usable_item_count: usable_items.len(),
         usable_items,
         effect_families,
+        class_change_contract,
+        earth_orb_contract,
         dialogue_result_indices_hex: hex_values(&dialogue_result_indices),
         dialogue_result_indices,
-        static_conclusion: "all use-action items and every directly selected result dialogue are source-bound; successful class change and the earth-orb intermediate sequence are separate downstream surfaces",
+        static_conclusion: "all use-action items and every directly selected result dialogue are source-bound; successful class change uses three extra result substates and the shared battle presentation, while the earth orb runs synchronously inside result substate 0x02",
         runtime_only_gates: [
-            "successful class-change sequence: visible text producers, CHR phases, automatic steps, and return lifetime",
-            "earth-orb sequence: intermediate visible surfaces and CHR phases before source-bound result 0x33",
+            "successful class change: shared battle-presentation text producers, CHR phases, automatic substates 0x04 through 0x06, and map return",
+            "earth orb: irregular phases within the automatic 32-step effect and the final common result 0x33, with no input during the effect",
         ],
     })
 }
