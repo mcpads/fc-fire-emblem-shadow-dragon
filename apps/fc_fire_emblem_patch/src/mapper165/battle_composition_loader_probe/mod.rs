@@ -49,15 +49,16 @@ const SOURCE_PRG_BANK_SELECTOR: u16 = 0xFA20;
 const SOURCE_COMMON_GLYPH_READ: u16 = 0xE57F;
 
 const DISPATCH_ADDRESS: u16 = 0xFAF3;
-const COMPOSE_PAGE_ADDRESS: u16 = 0xFB20;
-const APPLY_RECIPE_ADDRESS: u16 = 0xFC50;
-const APPLY_DIRECTORY_ADDRESS: u16 = 0xFCD0;
-const APPLY_PARTICIPANT_ADDRESS: u16 = 0xFCF0;
-const PROJECT_DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFD20;
+const COMPOSE_PAGE_ADDRESS: u16 = 0xFB30;
+const APPLY_RECIPE_ADDRESS: u16 = 0xFC60;
+const APPLY_DIRECTORY_ADDRESS: u16 = 0xFCE0;
+const APPLY_PARTICIPANT_ADDRESS: u16 = 0xFD00;
+const PROJECT_DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFD30;
+const CLEAR_REMAP_STATE_AFTER_BATTLE_ADDRESS: u16 = 0xFE50;
 const BATTLE_RIGHT_FD_SELECTOR_ADDRESS: u16 = 0xFEA0;
 const BATTLE_CENTRAL_RIGHT_FD_SELECTOR_ADDRESS: u16 = 0xFEE0;
 const BATTLE_RIGHT_FE_SELECTOR_ADDRESS: u16 = 0xFF20;
-const TEXT_PROJECTION_WRAPPER_ADDRESS: u16 = 0xFF58;
+const TEXT_PROJECTION_WRAPPER_ADDRESS: u16 = 0xFE60;
 const PROJECT_COLOR_ADDRESS: u16 = 0xFF78;
 const FIXED_CAVE_END_ADDRESS: u16 = 0xFFA0;
 
@@ -72,9 +73,10 @@ const ENEMY_INITIATED_BATTLE_STATE: u8 = 0x32;
 const BATTLE_ACTIVE_FLAG: u16 = 0x047D;
 const CACHE_UPLOADED_MARKER: u8 = 0x80;
 const UPLOAD_RENDER_MASK: u8 = 0x06;
-const ACTIVE_AND_REMAP_CLEAR_MASK: u8 = 0xE1;
 const SELECTED_COLOR_BITMAP_ADDRESS: u16 = 0x07C4;
 const SELECTED_COLOR_BITMAP_BYTE_COUNT: u8 = 27;
+const REMAP_STATE_ADDRESS: u16 = 0x07DF;
+const REMAP_PAIR_COUNT_MASK: u8 = 0x1E;
 const REMAP_PAIR_TABLE_ADDRESS: u16 = 0x07E0;
 const MAXIMUM_REMAP_PAIR_COUNT: u8 = 8;
 
@@ -172,6 +174,7 @@ struct BattleCompositionLoaderProbeReport {
     modeled_runtime_inputs_enabled: bool,
     selected_color_bitmap_address_hex: String,
     selected_color_bitmap_byte_count: usize,
+    remap_state_address_hex: String,
     remap_pair_table_address_hex: String,
     maximum_remap_pair_count: usize,
     remap_overflow_aborts_composition: bool,
@@ -380,7 +383,7 @@ pub(crate) fn build_battle_composition_loader_probe(
         fixed_runtime_routine_byte_count + material_runtime_routine_byte_count;
     let output_sha1 = sha1_hex(&output);
     let report = BattleCompositionLoaderProbeReport {
-        schema: 2,
+        schema: 3,
         source_sha1: EXPECTED_SOURCE_SHA1,
         base_report_sha1: sha1_hex(&base_report_bytes),
         base_output_sha1: base_sha1,
@@ -439,6 +442,7 @@ pub(crate) fn build_battle_composition_loader_probe(
         modeled_runtime_inputs_enabled: true,
         selected_color_bitmap_address_hex: format!("0x{SELECTED_COLOR_BITMAP_ADDRESS:04X}"),
         selected_color_bitmap_byte_count: usize::from(SELECTED_COLOR_BITMAP_BYTE_COUNT),
+        remap_state_address_hex: format!("0x{REMAP_STATE_ADDRESS:04X}"),
         remap_pair_table_address_hex: format!("0x{REMAP_PAIR_TABLE_ADDRESS:04X}"),
         maximum_remap_pair_count: usize::from(MAXIMUM_REMAP_PAIR_COUNT),
         remap_overflow_aborts_composition: true,

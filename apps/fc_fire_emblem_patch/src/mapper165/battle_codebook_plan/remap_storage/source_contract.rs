@@ -28,8 +28,8 @@ use indirect_destinations::{
 const INLINE_POINTER_DISPATCH_ADDRESS: u16 = 0xC34C;
 const COMMON_TEXT_QUEUE_READY_ADDRESS: u16 = 0xE5C7;
 const QUEUE_READY_ZERO_PAGE_ADDRESS: u8 = 0x21;
-const REMAP_PAIR_TABLE_START: u16 = 0x07E0;
-const REMAP_PAIR_TABLE_END: u16 = 0x07EF;
+const REMAP_STORAGE_START: u16 = 0x07DF;
+const REMAP_STORAGE_END: u16 = 0x07EF;
 const BATTLE_ACTIVE_FLAG: u16 = 0x047D;
 
 #[derive(Clone, Debug, Serialize)]
@@ -38,9 +38,9 @@ pub(super) struct BattleStorageSourceContract {
     traced_instruction_count: usize,
     queue_ready_publisher_count: usize,
     queue_ready_publisher_catalog_sha1: String,
-    indexed_queue_access_instruction_count: usize,
-    indexed_queue_access_catalog_sha1: String,
-    direct_unindexed_pair_table_access_count: usize,
+    indexed_remap_storage_overlap_instruction_count: usize,
+    indexed_remap_storage_overlap_catalog_sha1: String,
+    direct_unindexed_remap_storage_access_count: usize,
     indirect_store_instruction_count: usize,
     indirect_store_catalog_sha1: String,
     indirect_store_destination_class_count: usize,
@@ -52,9 +52,9 @@ pub(super) struct BattleStorageSourceContract {
     battle_active_nonzero_reader_address_hex: String,
     battle_active_full_byte_writer_addresses_hex: Vec<String>,
     every_battle_queue_publisher_reached: bool,
-    every_indexed_pair_table_overlap_is_a_bounded_queue_access: bool,
+    every_indexed_remap_storage_overlap_is_a_bounded_queue_access: bool,
     every_indirect_store_classified: bool,
-    every_indirect_store_destination_outside_pair_table: bool,
+    every_indirect_store_destination_outside_remap_storage: bool,
     original_battle_active_reader_is_zero_nonzero_only: bool,
     original_battle_active_writers_are_full_byte_zero_or_one: bool,
 }
@@ -76,13 +76,13 @@ pub(super) fn bind_battle_storage_source_contract(
         trace.queue_ready_publishers
     );
     ensure!(
-        trace.direct_pair_table_accesses.is_empty(),
-        "original battle lifetime directly accesses the remap pair table: {:?}",
-        trace.direct_pair_table_accesses
+        trace.direct_remap_storage_accesses.is_empty(),
+        "original battle lifetime directly accesses remap storage: {:?}",
+        trace.direct_remap_storage_accesses
     );
     ensure!(
         trace
-            .indexed_pair_table_overlaps
+            .indexed_remap_storage_overlaps
             .iter()
             .all(|(_, _, base)| (0x0780..=0x0794).contains(base)),
         "battle lifetime gained an indexed pair-table overlap outside the bounded queue writers"
@@ -122,13 +122,13 @@ pub(super) fn bind_battle_storage_source_contract(
     ensure!(
         indirect_store_destination_classes
             .iter()
-            .all(|class| class.every_destination_range_outside_pair_table),
-        "an indirect-store destination class overlaps the remap pair table"
+            .all(|class| class.every_destination_range_outside_remap_storage),
+        "an indirect-store destination class overlaps remap storage"
     );
 
     let publisher_catalog = catalog_pairs(&trace.queue_ready_publishers);
     let indexed_catalog = trace
-        .indexed_pair_table_overlaps
+        .indexed_remap_storage_overlaps
         .iter()
         .flat_map(|(bank, address, base)| {
             [*bank]
@@ -153,9 +153,9 @@ pub(super) fn bind_battle_storage_source_contract(
         traced_instruction_count: trace.visited_instruction_count,
         queue_ready_publisher_count: trace.queue_ready_publishers.len(),
         queue_ready_publisher_catalog_sha1: sha1_hex(&publisher_catalog),
-        indexed_queue_access_instruction_count: trace.indexed_pair_table_overlaps.len(),
-        indexed_queue_access_catalog_sha1: sha1_hex(&indexed_catalog),
-        direct_unindexed_pair_table_access_count: trace.direct_pair_table_accesses.len(),
+        indexed_remap_storage_overlap_instruction_count: trace.indexed_remap_storage_overlaps.len(),
+        indexed_remap_storage_overlap_catalog_sha1: sha1_hex(&indexed_catalog),
+        direct_unindexed_remap_storage_access_count: trace.direct_remap_storage_accesses.len(),
         indirect_store_instruction_count: trace.indirect_stores.len(),
         indirect_store_catalog_sha1: sha1_hex(&indirect_catalog),
         indirect_store_destination_class_count: indirect_store_destination_classes.len(),
@@ -176,9 +176,9 @@ pub(super) fn bind_battle_storage_source_contract(
         .map(|(bank, address)| format!("0x{bank:02X}:0x{address:04X}"))
         .collect(),
         every_battle_queue_publisher_reached: true,
-        every_indexed_pair_table_overlap_is_a_bounded_queue_access: true,
+        every_indexed_remap_storage_overlap_is_a_bounded_queue_access: true,
         every_indirect_store_classified: true,
-        every_indirect_store_destination_outside_pair_table: true,
+        every_indirect_store_destination_outside_remap_storage: true,
         original_battle_active_reader_is_zero_nonzero_only: true,
         original_battle_active_writers_are_full_byte_zero_or_one: true,
     })
@@ -210,8 +210,8 @@ fn battle_lifetime_roots() -> Vec<(u8, u16)> {
 struct BattleLifetimeTrace {
     visited_instruction_count: usize,
     queue_ready_publishers: BTreeSet<(u8, u16)>,
-    direct_pair_table_accesses: BTreeSet<(u8, u16, u16)>,
-    indexed_pair_table_overlaps: BTreeSet<(u8, u16, u16)>,
+    direct_remap_storage_accesses: BTreeSet<(u8, u16, u16)>,
+    indexed_remap_storage_overlaps: BTreeSet<(u8, u16, u16)>,
     indirect_stores: BTreeSet<(u8, u16, u8)>,
     bounded_copy_callers: BTreeSet<(u8, u16)>,
     battle_zero_fill_callers: BTreeSet<(u8, u16)>,
@@ -222,8 +222,8 @@ fn trace_battle_lifetime(rom: &Rom, roots: &[(u8, u16)]) -> Result<BattleLifetim
     let mut pending = roots.to_vec();
     let mut visited = BTreeSet::new();
     let mut queue_ready_publishers = BTreeSet::new();
-    let mut direct_pair_table_accesses = BTreeSet::new();
-    let mut indexed_pair_table_overlaps = BTreeSet::new();
+    let mut direct_remap_storage_accesses = BTreeSet::new();
+    let mut indexed_remap_storage_overlaps = BTreeSet::new();
     let mut indirect_stores = BTreeSet::new();
     let mut bounded_copy_callers = BTreeSet::new();
     let mut battle_zero_fill_callers = BTreeSet::new();
@@ -256,15 +256,15 @@ fn trace_battle_lifetime(rom: &Rom, roots: &[(u8, u16)]) -> Result<BattleLifetim
         if let Operand::Word(base) = instruction.operand() {
             match instruction.addressing_mode() {
                 AddressingMode::Absolute
-                    if (REMAP_PAIR_TABLE_START..=REMAP_PAIR_TABLE_END).contains(&base) =>
+                    if (REMAP_STORAGE_START..=REMAP_STORAGE_END).contains(&base) =>
                 {
-                    direct_pair_table_accesses.insert((actual_bank, address, base));
+                    direct_remap_storage_accesses.insert((actual_bank, address, base));
                 }
                 AddressingMode::AbsoluteX | AddressingMode::AbsoluteY
-                    if base <= REMAP_PAIR_TABLE_END
-                        && base.saturating_add(0x00FF) >= REMAP_PAIR_TABLE_START =>
+                    if base <= REMAP_STORAGE_END
+                        && base.saturating_add(0x00FF) >= REMAP_STORAGE_START =>
                 {
-                    indexed_pair_table_overlaps.insert((actual_bank, address, base));
+                    indexed_remap_storage_overlaps.insert((actual_bank, address, base));
                 }
                 _ => {}
             }
@@ -321,8 +321,8 @@ fn trace_battle_lifetime(rom: &Rom, roots: &[(u8, u16)]) -> Result<BattleLifetim
     Ok(BattleLifetimeTrace {
         visited_instruction_count: visited.len(),
         queue_ready_publishers,
-        direct_pair_table_accesses,
-        indexed_pair_table_overlaps,
+        direct_remap_storage_accesses,
+        indexed_remap_storage_overlaps,
         indirect_stores,
         bounded_copy_callers,
         battle_zero_fill_callers,
@@ -401,9 +401,9 @@ pub(super) fn test_model() -> BattleStorageSourceContract {
         traced_instruction_count: 1,
         queue_ready_publisher_count: 18,
         queue_ready_publisher_catalog_sha1: "publishers".to_owned(),
-        indexed_queue_access_instruction_count: 1,
-        indexed_queue_access_catalog_sha1: "indexed".to_owned(),
-        direct_unindexed_pair_table_access_count: 0,
+        indexed_remap_storage_overlap_instruction_count: 1,
+        indexed_remap_storage_overlap_catalog_sha1: "indexed".to_owned(),
+        direct_unindexed_remap_storage_access_count: 0,
         indirect_store_instruction_count: EXPECTED_INDIRECT_STORES.len(),
         indirect_store_catalog_sha1: "indirect".to_owned(),
         indirect_store_destination_class_count: DESTINATION_CLASS_COUNT,
@@ -415,9 +415,9 @@ pub(super) fn test_model() -> BattleStorageSourceContract {
         battle_active_nonzero_reader_address_hex: "0x05:0x8000".to_owned(),
         battle_active_full_byte_writer_addresses_hex: Vec::new(),
         every_battle_queue_publisher_reached: true,
-        every_indexed_pair_table_overlap_is_a_bounded_queue_access: true,
+        every_indexed_remap_storage_overlap_is_a_bounded_queue_access: true,
         every_indirect_store_classified: true,
-        every_indirect_store_destination_outside_pair_table: true,
+        every_indirect_store_destination_outside_remap_storage: true,
         original_battle_active_reader_is_zero_nonzero_only: true,
         original_battle_active_writers_are_full_byte_zero_or_one: true,
     }

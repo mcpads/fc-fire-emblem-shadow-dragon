@@ -18,7 +18,7 @@
 
 매퍼 변환은 MMC2식 CHR 래치와 MMC3식 PRG·SRAM을 함께 제공하는 mapper 165를 채택했다. 무번역 프로브는 원본 CHR을 보존한 채 재배치하고, 관측한 FD/FE 쌍용 변형 페이지 1개를 자동 생성한다. 타이틀·자동 병종 설명·1장 인트로 대화·전투·게임 오버·중단 저장과 재개·1장 완료 저장·콜드 로드·2장 전환 표본이 원본과 동등해 G2를 통과했다. 화면 계약 보고서는 실제 화면 역할 45개를 모두 실행 관측했고 42개는 CHR 쌍까지 결속했다. 실제 이동·턴 종료·전투와 `しろ` 선택으로 11장 종료 대사, 원본 영어 `NEXT STORY`, 저장 제안, 저장 완료, 검은 자동 전환, 12장 도입까지 연속 관측했다. 사운드 테스트 공용 전투 11개, 자동 엔딩 18개, 턴 경계 게임 오버 12개, 적 선공 정규 전투 11개, 플레이어 선공 정규 전투 10개 시간 표본으로 패배와 전투 경로 극성을 닫았다. 인물 후일담은 112개 보이는 엔트리의 560개 불규칙 표본과 선택자 이벤트로 13개 CHR 쌍 및 직접·라우팅 제어 흐름을 닫았다. 현재 주 대사 번역 뷰 2,812줄에서 의미 있는 일본어 2,541줄을 검토 대기 한국어로 모두 채웠고, 비소비 원문 잔편 1줄은 명시적으로 보존한다. 채워진 고유 한글은 697자이고 명시적인 `E4`/`E6` 대사 전이 사슬은 최대 175자로 활성 슬롯 210칸에 들어가며, 논리 재삽입 계획도 11개 소유 구간 안에서 성립한다. 누적 ROM은 원본 CHR을 건드리지 않고 1·2장 도입부에 서로 다른 확장 페이지를 공급한다. 이는 도입 화면군 두 변형의 누적 수직 슬라이스일 뿐 1장 전체나 정식 패치·배포 후보를 뜻하지 않는다.
 
-전투는 원본 4 KiB 페이지와 현재 이름·병종·장비·지형·대사 레시피를 런타임에 합성하는 제한 로더까지 구현했다. 관측한 다섯 조합 중 한 게임플레이 전투에서 독립 재구성 페이지와 실제 CHR-RAM이 4,096바이트 모두 일치했고 한글, 원본 `LV`·`HIT`·숫자와 자동 지도 복귀를 확인했다. 나머지 조합과 전체 시각 변형은 아직 미검증이다. 현재 산출물은 게임 전반의 표시 완성도를 주장하지 않는다. 모든 도달 가능한 일본어 소비처, 최악의 동시 한글 작업 집합, 보호 영어와 주변 그래픽을 하나의 누적 ROM에서 닫기 전까지 배포 후보가 아니다.
+전투는 원본 4 KiB 페이지와 현재 이름·병종·장비·지형·대사 레시피를 런타임에 합성하는 입력 일반형 로더까지 구현했다. 콜드 경로의 연속 적 전투 두 건에서 대사 선택자 `0`과 원본 조건으로 투영된 `62`를 각각 소비했고, 두 번 모두 독립 재구성 페이지와 실제 CHR-RAM이 4,096바이트 전부 일치했다. 원본 전투 활성 바이트 `$047D`가 다음 프레임에 0으로 바뀐 뒤에도 별도 재배치 상태 `$07DF`가 전투 수명 동안 유지됐으며, 한글 이름·병종·장비·대사와 원본 `LV`·`HIT`·`EXP`·숫자를 표시했다. 각 전투의 종료 상태 `33`에서만 `$07DF`를 한 번 지웠고, 다음 전투는 0인 상태에서 다시 합성됐다. 나머지 관측 조합, 최악 173칸 수명과 엔딩 비개입은 아직 미검증이다. 현재 산출물은 게임 전반의 표시 완성도를 주장하지 않는다. 모든 도달 가능한 일본어 소비처, 최악의 동시 한글 작업 집합, 보호 영어와 주변 그래픽을 하나의 누적 ROM에서 닫기 전까지 배포 후보가 아니다.
 
 ```sh
 cargo run -p fc-fire-emblem-patch -- verify-source "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
@@ -46,7 +46,7 @@ cargo run -p fc-fire-emblem-patch -- build-mapper165-hangul-page-probe "roms/Fir
 cargo run -p fc-fire-emblem-patch -- build-kr-patch "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- build-main-dialogue-slice-probe "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- build-battle-composition-loader-probe "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
-cargo run -p fc-fire-emblem-patch -- verify-battle-composition-runtime evidence/private/battle-composition-loader/participant-fixed-compose-return-event.json --dialogue-selector 62
+cargo run -p fc-fire-emblem-patch -- verify-battle-composition-runtime evidence/private/battle-composition-loader/dynamic-lifetime-compose-return-event.json
 cargo run -p fc-fire-emblem-patch -- build-mmc5-prg-probe "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- build-mmc5-chr-writer-probe "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- build-mmc5-expanded-chr-options-probe "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"

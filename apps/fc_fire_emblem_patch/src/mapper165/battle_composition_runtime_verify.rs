@@ -20,10 +20,14 @@ use super::{
     },
 };
 
-const COMPOSE_RETURN_ADDRESS: u16 = 0xFB13;
+const COMPOSE_RETURN_ADDRESS: u16 = 0xFB26;
 const INTERNAL_BATTLE_FIELD_START: usize = 0x0304;
 const INTERNAL_BATTLE_FIELD_END_EXCLUSIVE: usize = 0x0324;
-const BATTLE_ACTIVE_FLAG: usize = 0x047D;
+const OBSERVED_DIALOGUE_SELECTOR_ADDRESS: usize = 0x7936;
+const SELECTOR_62_REQUIRED_NONZERO_ADDRESSES: [usize; 3] = [0x0334, 0x0479, 0x0335];
+const SELECTOR_62_REQUIRED_ZERO_ADDRESS: usize = 0x05DF;
+const SELECTOR_62_VALUE: u8 = 0x3E;
+const REMAP_STATE_ADDRESS: usize = 0x07DF;
 const CACHE_UPLOADED_MARKER: u8 = 0x80;
 const REMAP_PAIR_COUNT_MASK: u8 = 0x1E;
 const REMAP_PAIR_TABLE_ADDRESS: usize = 0x07E0;
@@ -56,7 +60,9 @@ struct RuntimeInputReport {
     class_record_identities: [u8; 2],
     item_source_indices: [u8; 2],
     terrain_source_indices: [u8; 2],
-    dialogue_selector: u8,
+    observed_dialogue_selector: u8,
+    projected_dialogue_selector: u8,
+    selector_62_predicate_matched: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -78,6 +84,7 @@ struct BattleCompositionRuntimeVerificationReport {
     compose_return_frame: u64,
     runtime_input: RuntimeInputReport,
     selected_recipe_offsets_hex: Vec<String>,
+    remap_state_hex: String,
     cache_uploaded_marker_present: bool,
     dynamic_assignment_sha1: String,
     expected_remap_pairs_hex: Vec<String>,
@@ -106,7 +113,6 @@ pub(crate) struct BattleCompositionRuntimeVerificationSummary {
 pub(crate) fn verify_battle_composition_runtime(
     rom_path: &Path,
     event_path: &Path,
-    dialogue_selector: u8,
     report_path: &Path,
 ) -> Result<BattleCompositionRuntimeVerificationSummary> {
     let rom = Rom::from_path(rom_path)?;
@@ -122,13 +128,17 @@ pub(crate) fn verify_battle_composition_runtime(
         .events
         .iter()
         .find(|event| event.kind == "exec" && event.pc == COMPOSE_RETURN_ADDRESS)
-        .context("debug event has no battle composition return hit at 0xFB13")?;
+        .context("debug event has no battle composition return hit at 0xFB26")?;
     let internal = snapshot_bytes(event, "nesInternalRam")?;
     let actual_page = snapshot_bytes(event, "nesChrRam")?;
     ensure!(
         actual_page.bytes.len() == FONT_PAGE_SIZE,
         "composition return snapshot does not contain 4 KiB of CHR RAM"
     );
+    let observed_dialogue_selector =
+        event_snapshot_byte(event, "nesMemory", OBSERVED_DIALOGUE_SELECTOR_ADDRESS)?;
+    let (projected_dialogue_selector, selector_62_predicate_matched) =
+        project_dialogue_selector(&internal, observed_dialogue_selector)?;
     let input = BattleRuntimeRecipeInput {
         participant_record_identities: [
             snapshot_byte(&internal, INTERNAL_BATTLE_FIELD_START)?,
@@ -146,10 +156,10 @@ pub(crate) fn verify_battle_composition_runtime(
             snapshot_byte(&internal, INTERNAL_BATTLE_FIELD_END_EXCLUSIVE - 2)?,
             snapshot_byte(&internal, INTERNAL_BATTLE_FIELD_END_EXCLUSIVE - 1)?,
         ],
-        dialogue_selector,
+        dialogue_selector: projected_dialogue_selector,
     };
-    let battle_active = snapshot_byte(&internal, BATTLE_ACTIVE_FLAG)?;
-    let cache_uploaded_marker_present = battle_active & CACHE_UPLOADED_MARKER != 0;
+    let remap_state = snapshot_byte(&internal, REMAP_STATE_ADDRESS)?;
+    let cache_uploaded_marker_present = remap_state & CACHE_UPLOADED_MARKER != 0;
 
     let prg = rom.prg();
     let recipe_header = prg
@@ -189,7 +199,7 @@ pub(crate) fn verify_battle_composition_runtime(
         input,
     )?;
     let expected_page = &expected_composition.page;
-    let actual_remap_pair_count = usize::from(battle_active & REMAP_PAIR_COUNT_MASK) / 2;
+    let actual_remap_pair_count = usize::from(remap_state & REMAP_PAIR_COUNT_MASK) / 2;
     let actual_remap_pairs = (0..actual_remap_pair_count)
         .map(|index| {
             Ok((
@@ -239,7 +249,7 @@ pub(crate) fn verify_battle_composition_runtime(
         .map(|offset| format!("0x{:04X}", 0x1000 + offset));
     let exact_composition_match = differing_byte_count == 0;
     let report = BattleCompositionRuntimeVerificationReport {
-        schema: 2,
+        schema: 4,
         rom_sha1: sha1_hex(rom.data()),
         compose_return_cpu_address_hex: format!("0x{COMPOSE_RETURN_ADDRESS:04X}"),
         compose_return_frame: event.frame,
@@ -248,13 +258,16 @@ pub(crate) fn verify_battle_composition_runtime(
             class_record_identities: input.class_record_identities,
             item_source_indices: input.item_source_indices,
             terrain_source_indices: input.terrain_source_indices,
-            dialogue_selector: input.dialogue_selector,
+            observed_dialogue_selector,
+            projected_dialogue_selector,
+            selector_62_predicate_matched,
         },
         selected_recipe_offsets_hex: selection
             .recipe_offsets
             .iter()
             .map(|offset| format!("0x{offset:04X}"))
             .collect(),
+        remap_state_hex: format!("0x{remap_state:02X}"),
         cache_uploaded_marker_present,
         dynamic_assignment_sha1: expected_composition.assignment_sha1,
         expected_remap_pairs_hex: encode_pairs(&expected_composition.remap_pairs),
@@ -325,6 +338,45 @@ fn snapshot_byte(snapshot: &DecodedSnapshot, address: usize) -> Result<u8> {
         .with_context(|| format!("snapshot does not contain address 0x{address:04X}"))
 }
 
+fn event_snapshot_byte(event: &DebugEvent, memory_type: &str, address: usize) -> Result<u8> {
+    for snapshot in event
+        .snapshot
+        .iter()
+        .filter(|snapshot| snapshot.memory_type == memory_type)
+    {
+        let decoded = DecodedSnapshot {
+            start: snapshot.address,
+            bytes: decode_hex(&snapshot.hex)
+                .with_context(|| format!("decode {memory_type} snapshot"))?,
+        };
+        if let Ok(byte) = snapshot_byte(&decoded, address) {
+            return Ok(byte);
+        }
+    }
+    anyhow::bail!("composition return event has no {memory_type} byte at 0x{address:04X}")
+}
+
+fn project_dialogue_selector(
+    internal: &DecodedSnapshot,
+    observed_selector: u8,
+) -> Result<(u8, bool)> {
+    let predicate_matched = SELECTOR_62_REQUIRED_NONZERO_ADDRESSES
+        .into_iter()
+        .map(|address| snapshot_byte(internal, address))
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .all(|value| value != 0)
+        && snapshot_byte(internal, SELECTOR_62_REQUIRED_ZERO_ADDRESS)? == 0;
+    Ok((
+        if predicate_matched {
+            SELECTOR_62_VALUE
+        } else {
+            observed_selector
+        },
+        predicate_matched,
+    ))
+}
+
 fn decode_hex(encoded: &str) -> Result<Vec<u8>> {
     ensure!(
         encoded.len().is_multiple_of(2),
@@ -383,5 +435,24 @@ mod tests {
     fn malformed_hex_snapshots_fail_closed() {
         assert!(decode_hex("0").is_err());
         assert!(decode_hex("gg").is_err());
+    }
+
+    #[test]
+    fn dialogue_selector_projection_matches_the_source_predicate() {
+        let mut internal = DecodedSnapshot {
+            start: 0,
+            bytes: vec![0; 0x0800],
+        };
+        for address in SELECTOR_62_REQUIRED_NONZERO_ADDRESSES {
+            internal.bytes[address] = 1;
+        }
+
+        assert_eq!(
+            project_dialogue_selector(&internal, 0).unwrap(),
+            (SELECTOR_62_VALUE, true)
+        );
+
+        internal.bytes[SELECTOR_62_REQUIRED_ZERO_ADDRESS] = 1;
+        assert_eq!(project_dialogue_selector(&internal, 7).unwrap(), (7, false));
     }
 }

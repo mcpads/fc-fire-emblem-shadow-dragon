@@ -6,7 +6,7 @@ use serde::Serialize;
 use crate::{rom::Rom, sha1_hex, typed_source::decode_rp2a03_sequence};
 
 use super::super::super::source_window::source_bytes;
-use super::{REMAP_PAIR_TABLE_END, REMAP_PAIR_TABLE_START};
+use super::{REMAP_STORAGE_END, REMAP_STORAGE_START};
 
 pub(super) const EXPECTED_INDIRECT_STORES: [(u8, u16, u8); 24] = [
     (0x04, 0x80E1, 0x06),
@@ -378,7 +378,7 @@ pub(super) struct IndirectStoreDestinationClass {
     source_binding_sha1: String,
     typed_source_instruction_count: usize,
     destination_ranges: Vec<IndirectStoreDestinationRange>,
-    pub(super) every_destination_range_outside_pair_table: bool,
+    pub(super) every_destination_range_outside_remap_storage: bool,
 }
 
 pub(super) fn bind_indirect_store_destination_classes(
@@ -426,15 +426,14 @@ pub(super) fn bind_indirect_store_destination_classes(
                             .checked_add(typed.len())
                             .context("indirect-store typed instruction count overflow")
                     })?;
-            let every_destination_range_outside_pair_table =
+            let every_destination_range_outside_remap_storage =
                 spec.destination_ranges.iter().all(|range| {
                     range.start <= range.end
-                        && (range.end < REMAP_PAIR_TABLE_START
-                            || range.start > REMAP_PAIR_TABLE_END)
+                        && (range.end < REMAP_STORAGE_START || range.start > REMAP_STORAGE_END)
                 });
             ensure!(
-                every_destination_range_outside_pair_table,
-                "{} destination overlaps the remap pair table",
+                every_destination_range_outside_remap_storage,
+                "{} destination overlaps remap storage",
                 spec.role
             );
             Ok(IndirectStoreDestinationClass {
@@ -452,7 +451,7 @@ pub(super) fn bind_indirect_store_destination_classes(
                         end_hex: format!("0x{:04X}", range.end),
                     })
                     .collect(),
-                every_destination_range_outside_pair_table,
+                every_destination_range_outside_remap_storage,
             })
         })
         .collect()
@@ -517,7 +516,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn indirect_store_classes_partition_sites_and_exclude_the_pair_table() {
+    fn indirect_store_classes_partition_sites_and_exclude_remap_storage() {
         let classified = INDIRECT_STORE_CLASS_SPECS
             .iter()
             .flat_map(|spec| spec.sites.iter().copied())
@@ -531,7 +530,7 @@ mod tests {
         assert!(INDIRECT_STORE_CLASS_SPECS.iter().all(|spec| {
             spec.destination_ranges.iter().all(|range| {
                 range.start <= range.end
-                    && (range.end < REMAP_PAIR_TABLE_START || range.start > REMAP_PAIR_TABLE_END)
+                    && (range.end < REMAP_STORAGE_START || range.start > REMAP_STORAGE_END)
             })
         }));
     }

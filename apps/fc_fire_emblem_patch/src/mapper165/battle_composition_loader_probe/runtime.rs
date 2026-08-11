@@ -75,6 +75,16 @@ pub(super) fn build_runtime_routines(
             bytes: project_dialogue_selector()?,
         },
         RuntimeRoutine {
+            role: "battle-exit remap-state clear",
+            address: CLEAR_REMAP_STATE_AFTER_BATTLE_ADDRESS,
+            bytes: clear_remap_state_after_battle()?,
+        },
+        RuntimeRoutine {
+            role: "battle text projection wrapper",
+            address: TEXT_PROJECTION_WRAPPER_ADDRESS,
+            bytes: text_projection_wrapper()?,
+        },
+        RuntimeRoutine {
             role: "battle-aware direct right FD selection",
             address: BATTLE_RIGHT_FD_SELECTOR_ADDRESS,
             bytes: battle_right_selector(BATTLE_RIGHT_FD_SELECTOR_ADDRESS, 2)?,
@@ -88,11 +98,6 @@ pub(super) fn build_runtime_routines(
             role: "battle-aware right FE selection",
             address: BATTLE_RIGHT_FE_SELECTOR_ADDRESS,
             bytes: battle_right_selector(BATTLE_RIGHT_FE_SELECTOR_ADDRESS, 4)?,
-        },
-        RuntimeRoutine {
-            role: "battle text projection wrapper",
-            address: TEXT_PROJECTION_WRAPPER_ADDRESS,
-            bytes: text_projection_wrapper()?,
         },
         RuntimeRoutine {
             role: "abstract-color remap projection",
@@ -129,13 +134,32 @@ pub(super) fn composition_dispatch() -> Result<Vec<u8>> {
         Instruction::Pha,
         Instruction::Tya,
         Instruction::Pha,
-        Instruction::LdaAbsolute(BATTLE_ACTIVE_FLAG),
+        Instruction::LdaAbsolute(MAIN_STATE_ADDRESS),
     ];
-    let inactive_placeholder = instructions.len();
+    instructions.push(Instruction::CmpImmediate(PLAYER_INITIATED_BATTLE_STATE));
+    let player_battle_placeholder = instructions.len();
     instructions.push(Instruction::BeqAbsolute(DISPATCH_ADDRESS));
-    instructions.extend([Instruction::AndImmediate(CACHE_UPLOADED_MARKER)]);
+    instructions.push(Instruction::CmpImmediate(ENEMY_INITIATED_BATTLE_STATE));
+    let enemy_battle_placeholder = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(DISPATCH_ADDRESS));
+    instructions.extend([
+        Instruction::JsrAbsolute(CLEAR_REMAP_STATE_AFTER_BATTLE_ADDRESS),
+        Instruction::JmpAbsolute(DISPATCH_ADDRESS),
+        Instruction::Nop,
+    ]);
+    let non_battle_restore_placeholder = instructions.len() - 2;
+    let battle = next_address(DISPATCH_ADDRESS, &instructions)?;
+    instructions[player_battle_placeholder] = Instruction::BeqAbsolute(battle);
+    instructions[enemy_battle_placeholder] = Instruction::BeqAbsolute(battle);
+    instructions.extend([
+        Instruction::LdaAbsolute(REMAP_STATE_ADDRESS),
+        Instruction::AndImmediate(CACHE_UPLOADED_MARKER),
+    ]);
     let uploaded_placeholder = instructions.len();
     instructions.push(Instruction::BneAbsolute(DISPATCH_ADDRESS));
+    instructions.push(Instruction::LdaAbsolute(BATTLE_ACTIVE_FLAG));
+    let inactive_placeholder = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(DISPATCH_ADDRESS));
     instructions.extend([
         Instruction::LdaZeroPage(PPU_MASK_SHADOW),
         Instruction::CmpImmediate(UPLOAD_RENDER_MASK),
@@ -147,6 +171,7 @@ pub(super) fn composition_dispatch() -> Result<Vec<u8>> {
         Instruction::JsrAbsolute(SOURCE_NMI_SCROLL_RESTORE),
     ]);
     let restore = next_address(DISPATCH_ADDRESS, &instructions)?;
+    instructions[non_battle_restore_placeholder] = Instruction::JmpAbsolute(restore);
     instructions[inactive_placeholder] = Instruction::BeqAbsolute(restore);
     instructions[uploaded_placeholder] = Instruction::BneAbsolute(restore);
     instructions[wrong_render_state_placeholder] = Instruction::BneAbsolute(restore);
@@ -266,9 +291,9 @@ pub(super) fn compose_page(directories: RecipeDirectoryAddresses) -> Result<Vec<
     instructions.extend([
         Instruction::JsrAbsolute(PROJECT_DIALOGUE_SELECTOR_ADDRESS),
         Instruction::JsrAbsolute(APPLY_DIRECTORY_ADDRESS),
-        Instruction::LdaAbsolute(BATTLE_ACTIVE_FLAG),
+        Instruction::LdaAbsolute(REMAP_STATE_ADDRESS),
         Instruction::OraImmediate(CACHE_UPLOADED_MARKER),
-        Instruction::StaAbsolute(BATTLE_ACTIVE_FLAG),
+        Instruction::StaAbsolute(REMAP_STATE_ADDRESS),
     ]);
     let restore = next_address(COMPOSE_PAGE_ADDRESS, &instructions)?;
     instructions[assignment_failed_placeholder] = Instruction::JmpAbsolute(restore);
@@ -296,6 +321,28 @@ pub(super) fn compose_page(directories: RecipeDirectoryAddresses) -> Result<Vec<
         Instruction::Rts,
     ]);
     assemble_at(COMPOSE_PAGE_ADDRESS, &instructions)
+}
+
+pub(super) fn clear_remap_state_after_battle() -> Result<Vec<u8>> {
+    let mut instructions = vec![
+        Instruction::CmpImmediate(PLAYER_INITIATED_BATTLE_STATE + 1),
+        Instruction::BeqAbsolute(CLEAR_REMAP_STATE_AFTER_BATTLE_ADDRESS),
+        Instruction::CmpImmediate(ENEMY_INITIATED_BATTLE_STATE + 1),
+    ];
+    let not_exit_placeholder = instructions.len();
+    instructions.push(Instruction::BneAbsolute(
+        CLEAR_REMAP_STATE_AFTER_BATTLE_ADDRESS,
+    ));
+    let clear = next_address(CLEAR_REMAP_STATE_AFTER_BATTLE_ADDRESS, &instructions)?;
+    instructions[1] = Instruction::BeqAbsolute(clear);
+    instructions.extend([
+        Instruction::LdaImmediate(0),
+        Instruction::StaAbsolute(REMAP_STATE_ADDRESS),
+    ]);
+    let done = next_address(CLEAR_REMAP_STATE_AFTER_BATTLE_ADDRESS, &instructions)?;
+    instructions[not_exit_placeholder] = Instruction::BneAbsolute(done);
+    instructions.push(Instruction::Rts);
+    assemble_at(CLEAR_REMAP_STATE_AFTER_BATTLE_ADDRESS, &instructions)
 }
 
 pub(super) fn apply_recipe() -> Result<Vec<u8>> {
@@ -454,9 +501,20 @@ pub(super) fn text_projection_wrapper() -> Result<Vec<u8>> {
         Instruction::Pha,
         Instruction::LdaIndirectY(RECIPE_POINTER_LOW),
         Instruction::StaZeroPage(PHYSICAL_TILE_CODE),
-        Instruction::LdaAbsolute(BATTLE_ACTIVE_FLAG),
-        Instruction::AndImmediate(CACHE_UPLOADED_MARKER),
+        Instruction::LdaAbsolute(MAIN_STATE_ADDRESS),
+        Instruction::CmpImmediate(PLAYER_INITIATED_BATTLE_STATE),
     ];
+    let player_battle_placeholder = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(TEXT_PROJECTION_WRAPPER_ADDRESS));
+    instructions.extend([Instruction::CmpImmediate(ENEMY_INITIATED_BATTLE_STATE)]);
+    let natural_state_placeholder = instructions.len();
+    instructions.push(Instruction::BneAbsolute(TEXT_PROJECTION_WRAPPER_ADDRESS));
+    let battle = next_address(TEXT_PROJECTION_WRAPPER_ADDRESS, &instructions)?;
+    instructions[player_battle_placeholder] = Instruction::BeqAbsolute(battle);
+    instructions.extend([
+        Instruction::LdaAbsolute(REMAP_STATE_ADDRESS),
+        Instruction::AndImmediate(CACHE_UPLOADED_MARKER),
+    ]);
     let natural_placeholder = instructions.len();
     instructions.push(Instruction::BeqAbsolute(TEXT_PROJECTION_WRAPPER_ADDRESS));
     instructions.extend([
@@ -465,6 +523,7 @@ pub(super) fn text_projection_wrapper() -> Result<Vec<u8>> {
         Instruction::StaZeroPage(PHYSICAL_TILE_CODE),
     ]);
     let natural = next_address(TEXT_PROJECTION_WRAPPER_ADDRESS, &instructions)?;
+    instructions[natural_state_placeholder] = Instruction::BneAbsolute(natural);
     instructions[natural_placeholder] = Instruction::BeqAbsolute(natural);
     instructions.extend([
         Instruction::Pla,
@@ -479,8 +538,8 @@ pub(super) fn text_projection_wrapper() -> Result<Vec<u8>> {
 fn project_color() -> Result<Vec<u8>> {
     let mut instructions = vec![
         Instruction::StaZeroPage(PHYSICAL_TILE_CODE),
-        Instruction::LdaAbsolute(BATTLE_ACTIVE_FLAG),
-        Instruction::AndImmediate(0x1E),
+        Instruction::LdaAbsolute(REMAP_STATE_ADDRESS),
+        Instruction::AndImmediate(REMAP_PAIR_COUNT_MASK),
         Instruction::Tax,
     ];
     let empty_placeholder = instructions.len();
@@ -524,7 +583,7 @@ pub(super) fn battle_right_selector(address: u16, mapper_register: u8) -> Result
             Instruction::BeqAbsolute(cache_marker_test),
             Instruction::CmpImmediate(ENEMY_INITIATED_BATTLE_STATE),
             Instruction::BneAbsolute(natural),
-            Instruction::LdaAbsolute(BATTLE_ACTIVE_FLAG),
+            Instruction::LdaAbsolute(REMAP_STATE_ADDRESS),
             Instruction::AndImmediate(CACHE_UPLOADED_MARKER),
             Instruction::BeqAbsolute(natural),
             Instruction::Pla,
@@ -565,7 +624,7 @@ pub(super) fn battle_central_right_fd_selector() -> Result<Vec<u8>> {
             Instruction::BeqAbsolute(cache_marker_test),
             Instruction::CmpImmediate(ENEMY_INITIATED_BATTLE_STATE),
             Instruction::BneAbsolute(natural),
-            Instruction::LdaAbsolute(BATTLE_ACTIVE_FLAG),
+            Instruction::LdaAbsolute(REMAP_STATE_ADDRESS),
             Instruction::AndImmediate(CACHE_UPLOADED_MARKER),
             Instruction::BeqAbsolute(natural),
             Instruction::Pla,

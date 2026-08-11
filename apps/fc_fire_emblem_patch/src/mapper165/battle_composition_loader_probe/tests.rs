@@ -12,7 +12,7 @@ fn runtime_routines_fit_the_fixed_cave_without_overlap() {
     })
     .unwrap();
 
-    assert_eq!(routines.len(), 11);
+    assert_eq!(routines.len(), 12);
     assert!(routines.windows(2).all(|pair| {
         pair[0].address as usize + pair[0].bytes.len() <= pair[1].address as usize
     }));
@@ -109,6 +109,14 @@ fn dispatch_and_composer_restore_post_scan_registers_and_borrowed_scratch() {
     let dispatch = composition_dispatch().unwrap();
     assert!(dispatch.starts_with(&[0x20, 0xD9, 0xC2, 0x08, 0x48, 0x8A, 0x48, 0x98, 0x48]));
     assert!(dispatch.ends_with(&[0x68, 0xA8, 0x68, 0xAA, 0x68, 0x28, 0x60]));
+    assert!(dispatch.windows(3).any(|window| {
+        window
+            == [
+                0x20,
+                CLEAR_REMAP_STATE_AFTER_BATTLE_ADDRESS as u8,
+                (CLEAR_REMAP_STATE_AFTER_BATTLE_ADDRESS >> 8) as u8,
+            ]
+    }));
 
     let compose = compose_page(RecipeDirectoryAddresses {
         unit: 0xB020,
@@ -158,6 +166,34 @@ fn dispatch_and_composer_restore_post_scan_registers_and_borrowed_scratch() {
 }
 
 #[test]
+fn remap_state_clear_is_limited_to_the_two_battle_exit_states() {
+    let clear = clear_remap_state_after_battle().unwrap();
+    assert!(clear.starts_with(&[0xC9, PLAYER_INITIATED_BATTLE_STATE + 1, 0xF0,]));
+    assert!(
+        clear
+            .windows(3)
+            .any(|window| { window == [0xC9, ENEMY_INITIATED_BATTLE_STATE + 1, 0xD0,] })
+    );
+    assert_eq!(
+        clear
+            .windows(5)
+            .filter(|window| {
+                *window
+                    == [
+                        0xA9,
+                        0x00,
+                        0x8D,
+                        REMAP_STATE_ADDRESS as u8,
+                        (REMAP_STATE_ADDRESS >> 8) as u8,
+                    ]
+            })
+            .count(),
+        1
+    );
+    assert_eq!(clear.last(), Some(&0x60));
+}
+
+#[test]
 fn recipe_upload_and_shared_text_use_the_same_remap_projection() {
     let project_call = [
         0x20,
@@ -182,11 +218,12 @@ fn recipe_upload_and_shared_text_use_the_same_remap_projection() {
 }
 
 #[test]
-fn right_page_selectors_require_a_battle_main_state_and_uploaded_cache() {
+fn runtime_consumers_require_a_battle_main_state_and_persistent_remap_state() {
     for bytes in [
         battle_right_selector(BATTLE_RIGHT_FD_SELECTOR_ADDRESS, 2).unwrap(),
         battle_right_selector(BATTLE_RIGHT_FE_SELECTOR_ADDRESS, 4).unwrap(),
         battle_central_right_fd_selector().unwrap(),
+        text_projection_wrapper().unwrap(),
     ] {
         assert!(bytes.windows(3).any(|window| {
             window
@@ -210,8 +247,8 @@ fn right_page_selectors_require_a_battle_main_state_and_uploaded_cache() {
             window
                 == [
                     0xAD,
-                    BATTLE_ACTIVE_FLAG as u8,
-                    (BATTLE_ACTIVE_FLAG >> 8) as u8,
+                    REMAP_STATE_ADDRESS as u8,
+                    (REMAP_STATE_ADDRESS >> 8) as u8,
                 ]
         }));
         assert!(
@@ -225,7 +262,7 @@ fn right_page_selectors_require_a_battle_main_state_and_uploaded_cache() {
 #[test]
 fn composition_report_omits_translation_content_and_private_paths() {
     let report = BattleCompositionLoaderProbeReport {
-        schema: 2,
+        schema: 3,
         source_sha1: EXPECTED_SOURCE_SHA1,
         base_report_sha1: "base-report".to_owned(),
         base_output_sha1: "base".to_owned(),
@@ -274,6 +311,7 @@ fn composition_report_omits_translation_content_and_private_paths() {
         modeled_runtime_inputs_enabled: true,
         selected_color_bitmap_address_hex: "0x07C4".to_owned(),
         selected_color_bitmap_byte_count: 27,
+        remap_state_address_hex: "0x07DF".to_owned(),
         remap_pair_table_address_hex: "0x07E0".to_owned(),
         maximum_remap_pair_count: 8,
         remap_overflow_aborts_composition: true,

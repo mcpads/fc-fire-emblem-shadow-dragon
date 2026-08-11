@@ -194,8 +194,6 @@ enum Command {
         #[arg(long, default_value = "out/battle-composition-loader-probe.nes")]
         rom: PathBuf,
         event: PathBuf,
-        #[arg(long, default_value_t = 62)]
-        dialogue_selector: u8,
         #[arg(
             long,
             default_value = "out/battle-composition-runtime-verification.json"
@@ -880,18 +878,10 @@ fn main() -> Result<()> {
                 summary.runtime_routine_byte_count
             );
         }
-        Command::VerifyBattleCompositionRuntime {
-            rom,
-            event,
-            dialogue_selector,
-            report,
-        } => {
+        Command::VerifyBattleCompositionRuntime { rom, event, report } => {
             let summary =
                 mapper165::battle_composition_runtime_verify::verify_battle_composition_runtime(
-                    &rom,
-                    &event,
-                    dialogue_selector,
-                    &report,
+                    &rom, &event, &report,
                 )?;
             println!("wrote {}", report.display());
             println!("report SHA-1: {}", summary.report_sha1);
