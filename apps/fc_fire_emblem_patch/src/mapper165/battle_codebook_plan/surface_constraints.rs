@@ -43,6 +43,8 @@ struct BattleSurfaceConstraintReport {
     source_page_preserved_non_japanese_active_code_count: usize,
     background_producer_topology: super::background_ownership::BattleBackgroundProducerTopology,
     background_payload_model: super::background_payloads::BattleBackgroundPayloadModel,
+    phase_publisher_reachability: super::phase_cooccurrence::BattlePhasePublisherReachability,
+    physical_assignment_architecture: PhysicalAssignmentArchitecture,
     route_assignment_feasibility: Vec<RouteAssignmentFeasibility>,
     gameplay_routes_combined_assignment: RouteAssignmentFeasibility,
     minimum_observed_active_code_count: usize,
@@ -90,6 +92,20 @@ struct RouteAssignmentFeasibility {
     physical_assignment_found: bool,
     physical_assignment_sha1: Option<String>,
     constrained_color_count: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+struct PhysicalAssignmentArchitecture {
+    static_abstract_color_count: usize,
+    conservative_preserved_code_count: usize,
+    static_safe_code_count: usize,
+    static_full_model_assignment_infeasible: bool,
+    conservative_per_battle_text_code_count: usize,
+    conservative_per_battle_combined_code_count: usize,
+    dynamic_per_battle_headroom: usize,
+    dynamic_per_battle_assignment_capacity_proven: bool,
+    selected_strategy: &'static str,
+    observed_static_assignment_is_release_architecture: bool,
 }
 
 pub(crate) struct BattleSurfaceConstraintSummary {
@@ -227,6 +243,8 @@ pub(crate) fn analyze_battle_surface_constraints(
     let model = plan_battle_codebook_model(&rom, &fixed, &dialogue)?;
     let evidence = load_observed_battle_temporal_evidence(source_path, temporal_manifest_path)?;
     let ownership = bind_battle_background_code_ownership(&rom)?;
+    let phase_publisher_reachability =
+        super::phase_cooccurrence::bind_phase_publisher_reachability(&rom)?;
 
     let selection = select_observed_battle_surfaces(&rom, &model.composition, &evidence)?;
     let constraints = selection.constraints;
@@ -336,8 +354,14 @@ pub(crate) fn analyze_battle_surface_constraints(
         conservative_global_combined_slot_demand <= ACTIVE_HANGUL_SLOT_COUNT,
         "global battle text and preserved background union need {conservative_global_combined_slot_demand} slots but only {ACTIVE_HANGUL_SLOT_COUNT} exist"
     );
+    let static_safe_code_count =
+        ACTIVE_HANGUL_SLOT_COUNT - conservative_global_preserved_active_code_count;
+    ensure!(
+        model.coloring.color_count > static_safe_code_count,
+        "the global battle coloring unexpectedly fits a static table that excludes every preserved graphics code"
+    );
     let report = BattleSurfaceConstraintReport {
-        schema: 4,
+        schema: 6,
         source_sha1: EXPECTED_SOURCE_SHA1,
         fixed_workspace_sha1: sha1_hex(&fs::read(fixed_workspace_path)?),
         dialogue_workspace_sha1: sha1_hex(&fs::read(dialogue_workspace_path)?),
@@ -355,6 +379,21 @@ pub(crate) fn analyze_battle_surface_constraints(
             .preserved_non_japanese_active_code_count(),
         background_producer_topology: ownership.producer_topology(),
         background_payload_model: ownership.payload_model(),
+        phase_publisher_reachability,
+        physical_assignment_architecture: PhysicalAssignmentArchitecture {
+            static_abstract_color_count: model.coloring.color_count,
+            conservative_preserved_code_count: conservative_global_preserved_active_code_count,
+            static_safe_code_count,
+            static_full_model_assignment_infeasible: model.coloring.color_count
+                > static_safe_code_count,
+            conservative_per_battle_text_code_count: conservative_text_overlay_count,
+            conservative_per_battle_combined_code_count: conservative_global_combined_slot_demand,
+            dynamic_per_battle_headroom: ACTIVE_HANGUL_SLOT_COUNT
+                - conservative_global_combined_slot_demand,
+            dynamic_per_battle_assignment_capacity_proven: true,
+            selected_strategy: "assign physical codes from the selected battle recipes at runtime while excluding the complete 39-code preserved graphics union",
+            observed_static_assignment_is_release_architecture: false,
+        },
         route_assignment_feasibility,
         gameplay_routes_combined_assignment,
         minimum_observed_active_code_count,
@@ -395,7 +434,7 @@ pub(crate) fn analyze_battle_surface_constraints(
         runtime_verified: false,
         release_eligible: false,
         next_gate: if physical.is_some() {
-            "derive source phase-to-text cooccurrence constraints for all publisher states before replacing the observed physical assignment catalog"
+            "replace the observed static physical table with a per-battle runtime allocator and abstract text-code projection, then verify the strongest 173-slot lifetime"
         } else {
             "separate translated text producers from preserved graphics in the admitted temporal samples before extending the visual-variant catalog or installing the runtime loader"
         },
@@ -450,7 +489,7 @@ mod tests {
     #[test]
     fn serialized_report_omits_translation_content_and_private_paths() {
         let report = BattleSurfaceConstraintReport {
-            schema: 4,
+            schema: 6,
             source_sha1: EXPECTED_SOURCE_SHA1,
             fixed_workspace_sha1: "fixed".to_owned(),
             dialogue_workspace_sha1: "dialogue".to_owned(),
@@ -489,6 +528,20 @@ mod tests {
                 },
             background_payload_model:
                 super::super::background_payloads::BattleBackgroundPayloadModel::test_model(),
+            phase_publisher_reachability:
+                super::super::phase_cooccurrence::BattlePhasePublisherReachability::test_model(),
+            physical_assignment_architecture: PhysicalAssignmentArchitecture {
+                static_abstract_color_count: 210,
+                conservative_preserved_code_count: 39,
+                static_safe_code_count: 171,
+                static_full_model_assignment_infeasible: true,
+                conservative_per_battle_text_code_count: 134,
+                conservative_per_battle_combined_code_count: 173,
+                dynamic_per_battle_headroom: 37,
+                dynamic_per_battle_assignment_capacity_proven: true,
+                selected_strategy: "dynamic",
+                observed_static_assignment_is_release_architecture: false,
+            },
             route_assignment_feasibility: vec![RouteAssignmentFeasibility {
                 route_role: "battle".to_owned(),
                 sample_count: 1,

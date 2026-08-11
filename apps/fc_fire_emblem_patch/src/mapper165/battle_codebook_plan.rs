@@ -24,6 +24,7 @@ mod composition;
 mod conflict_graph;
 mod enemy_domain;
 mod item_domain;
+mod phase_cooccurrence;
 mod physical_assignment;
 mod runtime_demand;
 mod runtime_inputs;
