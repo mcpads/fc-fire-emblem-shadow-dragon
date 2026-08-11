@@ -7,7 +7,7 @@ use crate::{rom::Rom, sha1_hex};
 
 use super::{phase_cooccurrence::trace_switchable_control_flow, source_window::prg_bank};
 
-mod source_contract;
+pub(super) mod source_contract;
 
 use source_contract::{
     BATTLE_TERRAIN_BANK_HANDLER_POINTER, CALLER_SPECS, CallerKey,
@@ -25,6 +25,9 @@ pub(super) struct BattleTextConsumerTopology {
     glyph_read_address_hex: String,
     glyph_read_source_bytes_hex: String,
     glyph_read_source_sha1: String,
+    row_buffer_count: usize,
+    row_buffer_byte_capacity: usize,
+    maximum_published_queue_byte_count: usize,
     direct_caller_count: usize,
     battle_caller_count: usize,
     reached_battle_caller_count: usize,
@@ -185,6 +188,9 @@ pub(super) fn bind_battle_text_consumer_topology(rom: &Rom) -> Result<BattleText
             .collect::<Vec<_>>()
             .join(" "),
         glyph_read_source_sha1: source.glyph_read_source_sha1,
+        row_buffer_count: source.row_buffer_count,
+        row_buffer_byte_capacity: source.row_buffer_byte_capacity,
+        maximum_published_queue_byte_count: source.maximum_queue_byte_count,
         direct_caller_count: callers.len(),
         battle_caller_count: expected_battle_callers.len(),
         reached_battle_caller_count: reached_battle_callers.len(),
@@ -207,6 +213,12 @@ pub(super) fn bind_battle_text_consumer_topology(rom: &Rom) -> Result<BattleText
         projection_hook_installed: false,
         runtime_verified: false,
     })
+}
+
+impl BattleTextConsumerTopology {
+    pub(super) fn maximum_published_queue_byte_count(&self) -> usize {
+        self.maximum_published_queue_byte_count
+    }
 }
 
 fn trace_consumer_group(
@@ -281,6 +293,9 @@ impl BattleTextConsumerTopology {
             glyph_read_address_hex: String::new(),
             glyph_read_source_bytes_hex: String::new(),
             glyph_read_source_sha1: String::new(),
+            row_buffer_count: 2,
+            row_buffer_byte_capacity: 30,
+            maximum_published_queue_byte_count: 67,
             direct_caller_count: 0,
             battle_caller_count: 0,
             reached_battle_caller_count: 0,

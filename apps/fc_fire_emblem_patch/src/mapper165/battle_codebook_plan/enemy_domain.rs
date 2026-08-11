@@ -9,10 +9,13 @@ use super::item_domain::battle_item_source_index;
 
 mod source_records;
 
+#[cfg(test)]
+pub(super) use source_records::test_hp_bound;
 use source_records::{
     CHAPTER_COUNT, ENEMY_RECORD_BYTE_COUNT, EnemyRecord, PointerTableBinding, SourceRoutineBinding,
     bind_enemy_source_domain,
 };
+pub(super) use source_records::{EnemyGeneratedHpBound, bind_enemy_generated_hp_bound};
 
 pub(super) struct EnemyBattleDomain {
     pub(super) participant_glyph_sets: Vec<BTreeSet<char>>,

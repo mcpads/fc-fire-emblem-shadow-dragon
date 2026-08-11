@@ -27,6 +27,7 @@ mod item_domain;
 mod phase_cooccurrence;
 mod physical_assignment;
 mod protected_color_placement;
+mod remap_storage;
 mod runtime_demand;
 mod runtime_inputs;
 mod selected_physical_assignment;

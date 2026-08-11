@@ -14,19 +14,24 @@ const COMMON_TEXT_RENDERER_BANK: u8 = 0x0F;
 const COMMON_TEXT_RENDERER_ADDRESS: u16 = 0xE56C;
 const COMMON_TEXT_RENDERER_BYTE_COUNT: usize = 0x63;
 const COMMON_TEXT_RENDERER_SHA1: &str = "c3f7246aff5669e0ac537f20796932d53cd817f3";
+const ROW_BUFFER_STARTS: [u16; 2] = [0x03E1, 0x03FF];
+const ROW_BUFFER_BYTE_CAPACITY: usize = 30;
+const QUEUE_COMMAND_HEADER_BYTE_COUNT: usize = 3;
+const QUEUE_TERMINATOR_BYTE_COUNT: usize = 1;
 const GLYPH_READ_ADDRESS: u16 = 0xE57F;
 const GLYPH_READ_BYTES: [u8; 4] = [0xB1, 0x00, 0xC9, 0xEF];
 const GLYPH_READ_SHA1: &str = "3276988cd7930e7ccb8906a0afabc0629db1df3e";
 const DIRECT_CALL_BYTES: [u8; 3] = [0x20, 0x6C, 0xE5];
 
-const BATTLE_DIALOGUE_STATE_HANDLERS: [u16; 9] = [
+pub(in crate::mapper165::battle_codebook_plan) const BATTLE_DIALOGUE_STATE_HANDLERS: [u16; 9] = [
     0xC73D, 0x8063, 0x80C2, 0x8237, 0x827D, 0x83B8, 0x8309, 0x8369, 0x8049,
 ];
 const DIALOGUE_BOX_PHASE_POINTERS: [u16; 6] = [0xC73D, 0x8012, 0x8012, 0x8012, 0x8012, 0x80D8];
-pub(super) const DIALOGUE_BOX_INNER_STATE_POINTERS: [u16; 11] = [
+pub(in crate::mapper165::battle_codebook_plan) const DIALOGUE_BOX_INNER_STATE_POINTERS: [u16; 11] = [
     0x8278, 0x81DD, 0x80F4, 0x819D, 0x8204, 0x8211, 0x81AD, 0x81BD, 0x81E5, 0x8193, 0x8234,
 ];
-pub(super) const BATTLE_TERRAIN_BANK_HANDLER_POINTER: [u16; 1] = [0x8472];
+pub(in crate::mapper165::battle_codebook_plan) const BATTLE_TERRAIN_BANK_HANDLER_POINTER: [u16; 1] =
+    [0x8472];
 pub(super) const ENDING_SEQUENCE_PHASE_POINTERS: [u16; 30] = [
     0xA3A5, 0xA3E0, 0x9FED, 0xA054, 0xA0E9, 0x9FFA, 0xA011, 0xA02D, 0xA054, 0xA071, 0x9F64, 0x9F83,
     0xA054, 0x9F57, 0xA123, 0xA165, 0xA233, 0xA252, 0xA25D, 0xA269, 0xA27E, 0xA294, 0xA384, 0x9FCA,
@@ -77,6 +82,9 @@ pub(super) struct TextConsumerSourceBinding {
     pub(super) glyph_read_address: u16,
     pub(super) glyph_read_source_bytes: Vec<u8>,
     pub(super) glyph_read_source_sha1: String,
+    pub(super) row_buffer_count: usize,
+    pub(super) row_buffer_byte_capacity: usize,
+    pub(super) maximum_queue_byte_count: usize,
 }
 
 pub(super) fn bind_text_consumer_source(rom: &Rom) -> Result<TextConsumerSourceBinding> {
@@ -116,6 +124,20 @@ pub(super) fn bind_text_consumer_source(rom: &Rom) -> Result<TextConsumerSourceB
     );
     decode_rp2a03_sequence(glyph_read, GLYPH_READ_ADDRESS, "renderer glyph read")?;
 
+    ensure!(
+        usize::from(ROW_BUFFER_STARTS[1] - ROW_BUFFER_STARTS[0]) == ROW_BUFFER_BYTE_CAPACITY,
+        "common renderer row-buffer stride changed"
+    );
+    let maximum_queue_byte_count = ROW_BUFFER_STARTS
+        .len()
+        .checked_mul(QUEUE_COMMAND_HEADER_BYTE_COUNT + ROW_BUFFER_BYTE_CAPACITY)
+        .and_then(|count| count.checked_add(QUEUE_TERMINATOR_BYTE_COUNT))
+        .context("common renderer queue bound overflow")?;
+    ensure!(
+        maximum_queue_byte_count == 67,
+        "common renderer queue bound changed"
+    );
+
     let actual_callers = scan_direct_callers(rom)?;
     let expected_callers = CALLER_SPECS
         .iter()
@@ -138,6 +160,9 @@ pub(super) fn bind_text_consumer_source(rom: &Rom) -> Result<TextConsumerSourceB
         glyph_read_address: GLYPH_READ_ADDRESS,
         glyph_read_source_bytes: glyph_read.to_vec(),
         glyph_read_source_sha1,
+        row_buffer_count: ROW_BUFFER_STARTS.len(),
+        row_buffer_byte_capacity: ROW_BUFFER_BYTE_CAPACITY,
+        maximum_queue_byte_count,
     })
 }
 

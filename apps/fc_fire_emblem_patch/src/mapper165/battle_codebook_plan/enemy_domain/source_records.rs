@@ -12,8 +12,16 @@ use crate::{
 const PRG_BANK_SIZE: usize = 16 * 1024;
 const SWITCHABLE_CPU_START: u16 = 0x8000;
 const SWITCHABLE_CPU_END_EXCLUSIVE: u16 = 0xC000;
+const FIXED_CPU_START: u16 = 0xC000;
 pub(super) const CHAPTER_COUNT: usize = 25;
 pub(super) const ENEMY_RECORD_BYTE_COUNT: usize = 11;
+const CLASS_STAT_POINTER_TABLE_ADDRESS: u16 = 0xEC04;
+const CLASS_STAT_RECORD_ADDRESS: u16 = 0xEC30;
+const CLASS_STAT_RECORD_COUNT: usize = 22;
+const CLASS_STAT_RECORD_BYTE_COUNT: usize = 9;
+const CLASS_BASE_HP_OFFSET: usize = 7;
+const CLASS_STAT_POINTER_TABLE_SHA1: &str = "f114f8d67a8ce47a95e7a483db3e92d952245fac";
+const CLASS_STAT_RECORDS_SHA1: &str = "d11d5561529dca9eec5d85666e2fca9bbf249ffa";
 
 const INITIAL_ENEMY_POINTER_TABLE: PointerTableSpec = PointerTableSpec {
     role: "initial_enemy_records_by_chapter",
@@ -76,6 +84,25 @@ pub(super) struct EnemySourceDomain {
     pub(super) initial_record_builder: SourceRoutineBinding,
     pub(super) reinforcement_selector: SourceRoutineBinding,
     pub(super) reinforcement_record_builder: SourceRoutineBinding,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(in crate::mapper165::battle_codebook_plan) struct EnemyGeneratedHpBound {
+    class_stat_pointer_count: usize,
+    class_stat_pointer_table_sha1: String,
+    class_stat_record_byte_count: usize,
+    class_stat_records_sha1: String,
+    source_record_count: usize,
+    maximum_source_level: u8,
+    maximum_generated_hp: u8,
+    generation_formula: &'static str,
+    every_source_record_class_bound: bool,
+}
+
+impl EnemyGeneratedHpBound {
+    pub(in crate::mapper165::battle_codebook_plan) fn maximum_generated_hp(&self) -> u8 {
+        self.maximum_generated_hp
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -166,6 +193,86 @@ pub(super) fn bind_enemy_source_domain(rom: &Rom) -> Result<EnemySourceDomain> {
         initial_record_builder,
         reinforcement_selector,
         reinforcement_record_builder,
+    })
+}
+
+pub(in crate::mapper165::battle_codebook_plan) fn bind_enemy_generated_hp_bound(
+    rom: &Rom,
+) -> Result<EnemyGeneratedHpBound> {
+    let source = bind_enemy_source_domain(rom)?;
+    let fixed = prg_bank(rom, 0x0F)?;
+    let pointer_offset = usize::from(CLASS_STAT_POINTER_TABLE_ADDRESS - FIXED_CPU_START);
+    let pointer_byte_count = CLASS_STAT_RECORD_COUNT * 2;
+    let pointer_bytes = fixed
+        .get(pointer_offset..pointer_offset + pointer_byte_count)
+        .context("enemy class-stat pointer table is outside fixed PRG")?;
+    ensure!(
+        sha1_hex(pointer_bytes) == CLASS_STAT_POINTER_TABLE_SHA1,
+        "enemy class-stat pointer table changed"
+    );
+    let pointers = pointer_bytes
+        .chunks_exact(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .collect::<Vec<_>>();
+    let expected_pointers = (0..CLASS_STAT_RECORD_COUNT)
+        .map(|index| CLASS_STAT_RECORD_ADDRESS + (index * CLASS_STAT_RECORD_BYTE_COUNT) as u16)
+        .collect::<Vec<_>>();
+    ensure!(
+        pointers == expected_pointers,
+        "enemy class-stat records are no longer contiguous"
+    );
+    let record_offset = usize::from(CLASS_STAT_RECORD_ADDRESS - FIXED_CPU_START);
+    let class_byte_count = CLASS_STAT_RECORD_COUNT * CLASS_STAT_RECORD_BYTE_COUNT;
+    let classes = fixed
+        .get(record_offset..record_offset + class_byte_count)
+        .context("enemy class-stat records are outside fixed PRG")?;
+    ensure!(
+        sha1_hex(classes) == CLASS_STAT_RECORDS_SHA1,
+        "enemy class-stat records changed"
+    );
+
+    let mut maximum_source_level = 0_u8;
+    let mut maximum_generated_hp = 0_u8;
+    for record in &source.records {
+        let class_index = usize::from(
+            record.bytes[1]
+                .checked_sub(1)
+                .context("enemy source record has class zero")?,
+        );
+        let class = classes
+            .get(
+                class_index * CLASS_STAT_RECORD_BYTE_COUNT
+                    ..(class_index + 1) * CLASS_STAT_RECORD_BYTE_COUNT,
+            )
+            .context("enemy source record class exceeds the class-stat table")?;
+        let level = record.bytes[2];
+        ensure!(level > 0, "enemy source record has level zero");
+        let half_level_bonus = (level - 1) >> 1;
+        let hp = class[CLASS_BASE_HP_OFFSET]
+            .checked_add(
+                half_level_bonus
+                    .checked_mul(3)
+                    .context("enemy generated HP bonus overflow")?,
+            )
+            .context("enemy generated HP overflow")?;
+        maximum_source_level = maximum_source_level.max(level);
+        maximum_generated_hp = maximum_generated_hp.max(hp);
+    }
+    ensure!(
+        maximum_source_level == 20 && maximum_generated_hp == 45,
+        "enemy generated HP domain changed"
+    );
+
+    Ok(EnemyGeneratedHpBound {
+        class_stat_pointer_count: pointers.len(),
+        class_stat_pointer_table_sha1: sha1_hex(pointer_bytes),
+        class_stat_record_byte_count: classes.len(),
+        class_stat_records_sha1: sha1_hex(classes),
+        source_record_count: source.records.len(),
+        maximum_source_level,
+        maximum_generated_hp,
+        generation_formula: "class_base_hp + 3 * ((level - 1) >> 1)",
+        every_source_record_class_bound: true,
     })
 }
 
@@ -333,6 +440,21 @@ pub(super) fn test_table(role: &'static str) -> PointerTableBinding {
         record_count: 1,
         record_data_sha1: "records".to_owned(),
         all_lists_zero_terminated: true,
+    }
+}
+
+#[cfg(test)]
+pub(in crate::mapper165::battle_codebook_plan) fn test_hp_bound() -> EnemyGeneratedHpBound {
+    EnemyGeneratedHpBound {
+        class_stat_pointer_count: CLASS_STAT_RECORD_COUNT,
+        class_stat_pointer_table_sha1: "pointers".to_owned(),
+        class_stat_record_byte_count: CLASS_STAT_RECORD_COUNT * CLASS_STAT_RECORD_BYTE_COUNT,
+        class_stat_records_sha1: "classes".to_owned(),
+        source_record_count: 1,
+        maximum_source_level: 20,
+        maximum_generated_hp: 45,
+        generation_formula: "test",
+        every_source_record_class_bound: true,
     }
 }
 

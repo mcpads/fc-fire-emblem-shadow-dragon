@@ -47,6 +47,7 @@ struct BattleSurfaceConstraintReport {
     background_payload_model: super::background_payloads::BattleBackgroundPayloadModel,
     phase_publisher_reachability: super::phase_cooccurrence::BattlePhasePublisherReachability,
     text_consumer_topology: super::text_consumer_topology::BattleTextConsumerTopology,
+    remap_storage: super::remap_storage::BattleRemapStorageContract,
     protected_color_placement: super::protected_color_placement::ProtectedColorPlacementReport,
     physical_assignment_architecture: PhysicalAssignmentArchitecture,
     route_assignment_feasibility: Vec<RouteAssignmentFeasibility>,
@@ -259,6 +260,12 @@ pub(crate) fn analyze_battle_surface_constraints(
         super::phase_cooccurrence::bind_phase_publisher_reachability(&rom)?;
     let text_consumer_topology =
         super::text_consumer_topology::bind_battle_text_consumer_topology(&rom)?;
+    let background_payload_model = ownership.payload_model();
+    let remap_storage = super::remap_storage::bind_battle_remap_storage(
+        &rom,
+        &background_payload_model,
+        &text_consumer_topology,
+    )?;
 
     let selection = select_observed_battle_surfaces(&rom, &model.composition, &evidence)?;
     let constraints = selection.constraints;
@@ -398,7 +405,7 @@ pub(crate) fn analyze_battle_surface_constraints(
         "selected battle assignment proof disagrees with the global capacity bound"
     );
     let report = BattleSurfaceConstraintReport {
-        schema: 9,
+        schema: 10,
         source_sha1: EXPECTED_SOURCE_SHA1,
         fixed_workspace_sha1: sha1_hex(&fs::read(fixed_workspace_path)?),
         dialogue_workspace_sha1: sha1_hex(&fs::read(dialogue_workspace_path)?),
@@ -415,9 +422,10 @@ pub(crate) fn analyze_battle_surface_constraints(
         source_page_preserved_non_japanese_active_code_count: ownership
             .preserved_non_japanese_active_code_count(),
         background_producer_topology: ownership.producer_topology(),
-        background_payload_model: ownership.payload_model(),
+        background_payload_model,
         phase_publisher_reachability,
         text_consumer_topology,
+        remap_storage,
         protected_color_placement: protected_color_placement.report,
         physical_assignment_architecture: PhysicalAssignmentArchitecture {
             static_abstract_color_count: model.coloring.color_count,
@@ -489,7 +497,7 @@ pub(crate) fn analyze_battle_surface_constraints(
         runtime_verified: false,
         release_eligible: false,
         next_gate: if physical.is_some() {
-            "prove a battle-lifetime home for the 17-byte remap table, install a battle-conditional abstract text-code projection at the shared renderer, and verify the strongest 173-slot lifetime"
+            "install a battle-conditional abstract text-code projection at the shared renderer, populate the proven split 17-byte remap payload during composition, and verify the strongest 173-slot lifetime"
         } else {
             "separate translated text producers from preserved graphics in the admitted temporal samples before extending the visual-variant catalog or installing the runtime loader"
         },
@@ -544,7 +552,7 @@ mod tests {
     #[test]
     fn serialized_report_omits_translation_content_and_private_paths() {
         let report = BattleSurfaceConstraintReport {
-            schema: 9,
+            schema: 10,
             source_sha1: EXPECTED_SOURCE_SHA1,
             fixed_workspace_sha1: "fixed".to_owned(),
             dialogue_workspace_sha1: "dialogue".to_owned(),
@@ -587,6 +595,7 @@ mod tests {
                 super::super::phase_cooccurrence::BattlePhasePublisherReachability::test_model(),
             text_consumer_topology:
                 super::super::text_consumer_topology::BattleTextConsumerTopology::test_model(),
+            remap_storage: super::super::remap_storage::test_model(),
             protected_color_placement: super::super::protected_color_placement::test_report(),
             physical_assignment_architecture: PhysicalAssignmentArchitecture {
                 static_abstract_color_count: 210,

@@ -1,12 +1,13 @@
 use std::collections::BTreeSet;
 
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{font_slots::active_hangul_codes, rom::Rom, sha1_hex};
 
 use super::source_window::source_bytes;
 
+mod hp_bar;
 mod queue;
 mod source_regions;
 
@@ -42,6 +43,8 @@ pub(super) struct BattleBackgroundPayloadModel {
     source_region_count: usize,
     source_region_catalog_sha1: String,
     queue_template_count: usize,
+    maximum_published_queue_byte_count: usize,
+    hp_bar_queue_bound: hp_bar::BattleHpBarQueueBound,
     publisher_bindings: Vec<QueuePublisherPayloadBinding>,
     conservative_global_preserved_active_codes: Vec<String>,
     conservative_global_preserved_active_code_count: usize,
@@ -60,12 +63,14 @@ struct QueuePublisherPayloadBinding {
     publish_address_hex: String,
     role: &'static str,
     payload_model: &'static str,
+    maximum_published_queue_byte_count: usize,
     potential_preserved_active_code_count: usize,
 }
 
 pub(super) fn bind_battle_background_payloads(rom: &Rom) -> Result<BattleBackgroundPayloadModel> {
     let source_region_catalog_sha1 = bind_source_regions(rom)?;
     let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
+    let hp_bar_queue_bound = hp_bar::bind_hp_bar_queue_bound(rom)?;
 
     let mut exp_label = QueueCodeOwnership::default();
     add_queue(
@@ -175,6 +180,7 @@ pub(super) fn bind_battle_background_payloads(rom: &Rom) -> Result<BattleBackgro
             0x83F7,
             "experience_label",
             "literal_queue",
+            7,
             &exp_label,
         ),
         binding(
@@ -182,6 +188,7 @@ pub(super) fn bind_battle_background_payloads(rom: &Rom) -> Result<BattleBackgro
             0x84CD,
             "experience_meter",
             "bounded_meter_helper",
+            14,
             &meter,
         ),
         binding(
@@ -189,6 +196,7 @@ pub(super) fn bind_battle_background_payloads(rom: &Rom) -> Result<BattleBackgro
             0x8562,
             "battle_screen_wipe",
             "source_table_fill",
+            23,
             &wipe,
         ),
         binding(
@@ -196,6 +204,7 @@ pub(super) fn bind_battle_background_payloads(rom: &Rom) -> Result<BattleBackgro
             0x88A3,
             "unit_panel_frame",
             "source_queue_templates",
+            45,
             &unit_panel,
         ),
         binding(
@@ -203,6 +212,7 @@ pub(super) fn bind_battle_background_payloads(rom: &Rom) -> Result<BattleBackgro
             0x8A33,
             "unit_panel_stat_digits",
             "reserved_digit_domain",
+            8,
             &unit_stats,
         ),
         binding(
@@ -210,6 +220,7 @@ pub(super) fn bind_battle_background_payloads(rom: &Rom) -> Result<BattleBackgro
             0x8AB4,
             "unit_panel_marker",
             "reserved_literal",
+            5,
             &unit_marker,
         ),
         binding(
@@ -217,6 +228,7 @@ pub(super) fn bind_battle_background_payloads(rom: &Rom) -> Result<BattleBackgro
             0x8B9F,
             "unit_panel_hp_bar",
             "bounded_literal_domain",
+            33,
             &hp_bar,
         ),
         binding(
@@ -224,6 +236,7 @@ pub(super) fn bind_battle_background_payloads(rom: &Rom) -> Result<BattleBackgro
             0x8C15,
             "unit_panel_meters",
             "bounded_meter_helper",
+            40,
             &meter,
         ),
         binding(
@@ -231,6 +244,7 @@ pub(super) fn bind_battle_background_payloads(rom: &Rom) -> Result<BattleBackgro
             0x8CEC,
             "attribute_and_latch_init",
             "source_queue_template",
+            44,
             &attribute_and_latch,
         ),
         binding(
@@ -238,6 +252,7 @@ pub(super) fn bind_battle_background_payloads(rom: &Rom) -> Result<BattleBackgro
             0x952F,
             "animation_border",
             "source_queue_templates",
+            37,
             &animation_border,
         ),
         binding(
@@ -245,6 +260,7 @@ pub(super) fn bind_battle_background_payloads(rom: &Rom) -> Result<BattleBackgro
             0x968A,
             "damage_digits",
             "reserved_digits_plus_literal",
+            7,
             &damage_digits,
         ),
         binding(
@@ -252,6 +268,7 @@ pub(super) fn bind_battle_background_payloads(rom: &Rom) -> Result<BattleBackgro
             0x96B0,
             "critical_message",
             "translation_owned_queue",
+            10,
             &critical_message,
         ),
         binding(
@@ -259,6 +276,7 @@ pub(super) fn bind_battle_background_payloads(rom: &Rom) -> Result<BattleBackgro
             0x9C2E,
             "animation_clear",
             "source_queue_templates",
+            21,
             &animation_clear,
         ),
         binding(
@@ -266,6 +284,7 @@ pub(super) fn bind_battle_background_payloads(rom: &Rom) -> Result<BattleBackgro
             0xAE39,
             "effect_overlay",
             "source_queue_templates",
+            11,
             &effect_overlay,
         ),
         binding(
@@ -273,6 +292,7 @@ pub(super) fn bind_battle_background_payloads(rom: &Rom) -> Result<BattleBackgro
             0xAFE4,
             "staggered_clear",
             "reserved_fill",
+            25,
             &staggered_clear,
         ),
         binding(
@@ -280,6 +300,7 @@ pub(super) fn bind_battle_background_payloads(rom: &Rom) -> Result<BattleBackgro
             0xB013,
             "animation_reset",
             "literal_queue",
+            5,
             &animation_reset,
         ),
         binding(
@@ -287,6 +308,7 @@ pub(super) fn bind_battle_background_payloads(rom: &Rom) -> Result<BattleBackgro
             0x803D,
             "battle_dialogue_box",
             "source_queue_templates",
+            32,
             &dialogue_box,
         ),
     ];
@@ -303,6 +325,15 @@ pub(super) fn bind_battle_background_payloads(rom: &Rom) -> Result<BattleBackgro
                     && binding.publish_address_hex == format!("0x{:04X}", site.1)
             }),
         "battle payload bindings no longer cover the publisher census in order"
+    );
+    let maximum_published_queue_byte_count = bindings
+        .iter()
+        .map(|binding| binding.maximum_published_queue_byte_count)
+        .max()
+        .context("battle payload binding set is empty")?;
+    ensure!(
+        maximum_published_queue_byte_count == 45,
+        "battle background queue bound changed"
     );
 
     let ownerships = [
@@ -353,6 +384,8 @@ pub(super) fn bind_battle_background_payloads(rom: &Rom) -> Result<BattleBackgro
         model_bytes.extend_from_slice(
             &(binding.potential_preserved_active_code_count as u64).to_le_bytes(),
         );
+        model_bytes
+            .extend_from_slice(&(binding.maximum_published_queue_byte_count as u64).to_le_bytes());
     }
     model_bytes.extend_from_slice(&preserved_bytes);
     model_bytes.extend_from_slice(&japanese_bytes);
@@ -362,6 +395,8 @@ pub(super) fn bind_battle_background_payloads(rom: &Rom) -> Result<BattleBackgro
         source_region_count: SOURCE_REGION_COUNT,
         source_region_catalog_sha1,
         queue_template_count: 22,
+        maximum_published_queue_byte_count,
+        hp_bar_queue_bound,
         publisher_bindings: bindings,
         conservative_global_preserved_active_codes: hex_codes(&preserved_active),
         conservative_global_preserved_active_code_count: preserved_active.len(),
@@ -384,6 +419,10 @@ impl BattleBackgroundPayloadModel {
         self.every_publisher_payload_source_bound
     }
 
+    pub(super) fn maximum_published_queue_byte_count(&self) -> usize {
+        self.maximum_published_queue_byte_count
+    }
+
     #[cfg(test)]
     pub(super) fn test_model() -> Self {
         let preserved = expected_global_preserved_codes();
@@ -393,6 +432,8 @@ impl BattleBackgroundPayloadModel {
             source_region_count: 0,
             source_region_catalog_sha1: String::new(),
             queue_template_count: 0,
+            maximum_published_queue_byte_count: 0,
+            hp_bar_queue_bound: hp_bar::test_model(),
             publisher_bindings: Vec::new(),
             conservative_global_preserved_active_codes: hex_codes(&preserved),
             conservative_global_preserved_active_code_count: preserved.len(),
@@ -412,6 +453,7 @@ fn binding(
     address: u16,
     role: &'static str,
     payload_model: &'static str,
+    maximum_published_queue_byte_count: usize,
     ownership: &QueueCodeOwnership,
 ) -> QueuePublisherPayloadBinding {
     QueuePublisherPayloadBinding {
@@ -419,6 +461,7 @@ fn binding(
         publish_address_hex: format!("0x{address:04X}"),
         role,
         payload_model,
+        maximum_published_queue_byte_count,
         potential_preserved_active_code_count: ownership.preserved_active.len(),
     }
 }

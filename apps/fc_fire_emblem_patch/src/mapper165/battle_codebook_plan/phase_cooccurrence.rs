@@ -44,6 +44,23 @@ const ANIMATION_CLEANUP_PHASE_POINTERS: [u16; 8] = [
 ];
 const DIALOGUE_BOX_PHASE_POINTERS: [u16; 6] = [0xC73D, 0x8012, 0x8012, 0x8012, 0x8012, 0x80D8];
 
+pub(super) fn battle_phase_roots() -> Vec<(u8, u16)> {
+    PRIMARY_PHASE_POINTERS
+        .into_iter()
+        .chain(UNIT_PANEL_PHASE_POINTERS)
+        .chain(ANIMATION_PHASE_POINTERS)
+        .chain(ANIMATION_COMMAND_PHASE_POINTERS)
+        .chain(EFFECT_OBJECT_PHASE_POINTERS)
+        .chain(ANIMATION_CLEANUP_PHASE_POINTERS)
+        .map(|address| (0x05, address))
+        .chain(
+            DIALOGUE_BOX_PHASE_POINTERS
+                .into_iter()
+                .map(|address| (0x07, address)),
+        )
+        .collect()
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub(super) struct BattlePhasePublisherReachability {
     phase_group_count: usize,
