@@ -41,6 +41,7 @@ struct BattleSurfaceConstraintReport {
     source_font_page_sha1: &'static str,
     source_page_japanese_text_active_code_count: usize,
     source_page_preserved_non_japanese_active_code_count: usize,
+    background_producer_topology: super::background_ownership::BattleBackgroundProducerTopology,
     route_assignment_feasibility: Vec<RouteAssignmentFeasibility>,
     gameplay_routes_combined_assignment: RouteAssignmentFeasibility,
     minimum_observed_active_code_count: usize,
@@ -322,7 +323,7 @@ pub(crate) fn analyze_battle_surface_constraints(
         "observed battle text and preserved background need {observed_maximum_combined_slot_demand} slots but only {ACTIVE_HANGUL_SLOT_COUNT} exist"
     );
     let report = BattleSurfaceConstraintReport {
-        schema: 2,
+        schema: 3,
         source_sha1: EXPECTED_SOURCE_SHA1,
         fixed_workspace_sha1: sha1_hex(&fs::read(fixed_workspace_path)?),
         dialogue_workspace_sha1: sha1_hex(&fs::read(dialogue_workspace_path)?),
@@ -338,6 +339,7 @@ pub(crate) fn analyze_battle_surface_constraints(
         source_page_japanese_text_active_code_count: ownership.japanese_text_active_code_count(),
         source_page_preserved_non_japanese_active_code_count: ownership
             .preserved_non_japanese_active_code_count(),
+        background_producer_topology: ownership.producer_topology(),
         route_assignment_feasibility,
         gameplay_routes_combined_assignment,
         minimum_observed_active_code_count,
@@ -428,7 +430,7 @@ mod tests {
     #[test]
     fn serialized_report_omits_translation_content_and_private_paths() {
         let report = BattleSurfaceConstraintReport {
-            schema: 2,
+            schema: 3,
             source_sha1: EXPECTED_SOURCE_SHA1,
             fixed_workspace_sha1: "fixed".to_owned(),
             dialogue_workspace_sha1: "dialogue".to_owned(),
@@ -443,6 +445,26 @@ mod tests {
             source_font_page_sha1: "page",
             source_page_japanese_text_active_code_count: 111,
             source_page_preserved_non_japanese_active_code_count: 99,
+            background_producer_topology:
+                super::super::background_ownership::BattleBackgroundProducerTopology {
+                    primary_phase_count: 32,
+                    primary_distinct_handler_count: 27,
+                    unit_panel_phase_count: 12,
+                    animation_phase_count: 41,
+                    battle_switchable_bank_count: 2,
+                    queue_publish_site_count: 17,
+                    queue_publish_sites_sha1: "publishers".to_owned(),
+                    direct_ppu_data_store_count: 0,
+                    queue_ready_address_hex: "0x0021",
+                    queue_buffer_address_hex: "0x0781",
+                    queue_consumer_address_hex: "0xC3A5".to_owned(),
+                    every_primary_phase_source_bound: true,
+                    every_nested_phase_source_bound: true,
+                    every_battle_bank_queue_publisher_classified: true,
+                    battle_banks_have_no_direct_ppu_data_stores: true,
+                    producer_topology_complete: true,
+                    simultaneous_preserved_code_demand_complete: false,
+                },
             route_assignment_feasibility: vec![RouteAssignmentFeasibility {
                 route_role: "battle".to_owned(),
                 sample_count: 1,
