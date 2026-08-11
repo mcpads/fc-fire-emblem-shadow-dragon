@@ -34,6 +34,7 @@ mod static_analysis;
 mod temporal_surface;
 mod text_inventory;
 mod tracked;
+mod translation_coverage;
 mod typed_source;
 mod unit_names;
 mod unit_ui_text;
@@ -225,6 +226,36 @@ enum Command {
     AnalyzeScreenContracts {
         source: PathBuf,
         #[arg(long, default_value = "out/screen-contracts.json")]
+        report: PathBuf,
+    },
+    /// Connect every Japanese-bearing screen to translation input and current installation status.
+    AnalyzeTranslationCoverage {
+        source: PathBuf,
+        #[arg(long, default_value = "private/dialogue/main-workspace.json")]
+        main_dialogue_workspace: PathBuf,
+        #[arg(long, default_value = "private/dialogue/battle-workspace.json")]
+        battle_dialogue_workspace: PathBuf,
+        #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
+        fixed_text_workspace: PathBuf,
+        #[arg(long, default_value = "assets/translation/options.ko.json")]
+        options_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/roster.ko.json")]
+        roster_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/front-end-menu.ko.json")]
+        front_end_menu_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/unit-names.ko.json")]
+        unit_name_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/class-profiles.ko.json")]
+        class_profile_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/chapter-titles.ko.json")]
+        chapter_title_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/choice-labels.ko.json")]
+        choice_label_localization: PathBuf,
+        #[arg(long, default_value = "out/fire-emblem-fe1-korean-patch.nes")]
+        current_build_output: PathBuf,
+        #[arg(long, default_value = "out/kr-patch-build.json")]
+        current_build_report: PathBuf,
+        #[arg(long, default_value = "out/translation-coverage.json")]
         report: PathBuf,
     },
     /// Bind chapter-clear, save, title, and chapter-intro screen lifetimes and producers.
@@ -906,6 +937,50 @@ fn main() -> Result<()> {
                 summary.runtime_observed_screen_count,
                 summary.mixed_original_latin_screen_count,
                 summary.next_observation_gate_role
+            );
+        }
+        Command::AnalyzeTranslationCoverage {
+            source,
+            main_dialogue_workspace,
+            battle_dialogue_workspace,
+            fixed_text_workspace,
+            options_localization,
+            roster_localization,
+            front_end_menu_localization,
+            unit_name_localization,
+            class_profile_localization,
+            chapter_title_localization,
+            choice_label_localization,
+            current_build_output,
+            current_build_report,
+            report,
+        } => {
+            let summary = translation_coverage::analyze_translation_coverage(
+                translation_coverage::TranslationCoverageInputs {
+                    source_path: &source,
+                    main_dialogue_workspace_path: &main_dialogue_workspace,
+                    battle_dialogue_workspace_path: &battle_dialogue_workspace,
+                    fixed_text_workspace_path: &fixed_text_workspace,
+                    options_localization_path: &options_localization,
+                    roster_localization_path: &roster_localization,
+                    front_end_menu_localization_path: &front_end_menu_localization,
+                    unit_name_localization_path: &unit_name_localization,
+                    class_profile_localization_path: &class_profile_localization,
+                    chapter_title_localization_path: &chapter_title_localization,
+                    choice_label_localization_path: &choice_label_localization,
+                    current_build_output_path: &current_build_output,
+                    current_build_report_path: &current_build_report,
+                    report_path: &report,
+                },
+            )?;
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "translation coverage: {} Japanese-bearing screens, {} domains, {} unresolved source domains, {} domains installed for all consumers",
+                summary.japanese_bearing_screen_count,
+                summary.domain_count,
+                summary.unresolved_source_domain_count,
+                summary.all_consumers_installed_domain_count
             );
         }
         Command::AnalyzeChapterTransitions { source, report } => {

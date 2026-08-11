@@ -161,6 +161,14 @@ pub fn analyze_item_flow(source_path: &Path, report_path: &Path) -> Result<ItemF
     })
 }
 
+pub(crate) fn inspect_item_action_label_count(rom: &Rom) -> Result<usize> {
+    validate_state_routes(rom)?;
+    Ok(validate_item_action_labels(rom)?
+        .into_iter()
+        .filter(|label| label.translation_scope == "japanese_only")
+        .count())
+}
+
 fn build_report(rom: &Rom) -> Result<ItemFlowReport> {
     validate_state_routes(rom)?;
     validate_action_result_dialogue_indices(rom)?;

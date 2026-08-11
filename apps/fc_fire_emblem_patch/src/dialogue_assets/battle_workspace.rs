@@ -28,11 +28,14 @@ pub(crate) struct BattleDialogueValidationSummary {
     pub(crate) line_count: usize,
     pub(crate) filled_line_count: usize,
     pub(crate) complete_line_count: usize,
+    pub(crate) untranslated_japanese_line_count: usize,
     pub(crate) target_glyph_count: usize,
     pub(crate) translated_record_storage_byte_count: usize,
     pub(crate) preserved_unreferenced_storage_byte_count: usize,
     pub(crate) planned_storage_byte_count: usize,
     pub(crate) remaining_storage_byte_count: usize,
+    pub(crate) translation_input_complete: bool,
+    pub(crate) review_complete: bool,
 }
 
 #[derive(Debug)]
@@ -175,8 +178,12 @@ pub(crate) fn validate_battle_dialogue_workspace(
     let workspace: BattleDialogueWorkspace = serde_json::from_slice(&workspace_bytes)
         .with_context(|| format!("parse {}", workspace_path.display()))?;
     validate_workspace_binding(rom.data(), &workspace)?;
-    let (filled_line_count, complete_line_count, target_glyph_count) =
-        validate_translation_fields(&workspace)?;
+    let (
+        filled_line_count,
+        complete_line_count,
+        untranslated_japanese_line_count,
+        target_glyph_count,
+    ) = validate_translation_fields(&workspace)?;
     let translated_record_storage_byte_count = planned_storage_byte_count(&workspace)?;
     let preserved_unreferenced_storage_byte_count = 16;
     let planned_storage_byte_count =
@@ -196,11 +203,15 @@ pub(crate) fn validate_battle_dialogue_workspace(
             .sum(),
         filled_line_count,
         complete_line_count,
+        untranslated_japanese_line_count,
         target_glyph_count,
         translated_record_storage_byte_count,
         preserved_unreferenced_storage_byte_count,
         planned_storage_byte_count,
         remaining_storage_byte_count: physical_storage_byte_count - planned_storage_byte_count,
+        translation_input_complete: untranslated_japanese_line_count == 0,
+        review_complete: untranslated_japanese_line_count == 0
+            && complete_line_count == filled_line_count,
     })
 }
 
@@ -309,6 +320,14 @@ fn preserve_translations(
             let mut existing_line_binding = existing_line.clone();
             existing_line_binding.korean.clear();
             existing_line_binding.status = TranslationStatus::Untranslated;
+            if source_markup_matches_current_punctuation_decode(
+                &existing_line_binding.source_markup,
+                &fresh_line_binding.source_markup,
+            ) {
+                existing_line_binding
+                    .source_markup
+                    .clone_from(&fresh_line_binding.source_markup);
+            }
             ensure!(
                 fresh_line_binding == existing_line_binding,
                 "battle workspace source changed at {}",
@@ -381,6 +400,14 @@ fn validate_workspace_binding(source: &[u8], workspace: &BattleDialogueWorkspace
             let mut binding = actual_line.clone();
             binding.korean.clear();
             binding.status = TranslationStatus::Untranslated;
+            if source_markup_matches_current_punctuation_decode(
+                &binding.source_markup,
+                &expected_line.source_markup,
+            ) {
+                binding
+                    .source_markup
+                    .clone_from(&expected_line.source_markup);
+            }
             ensure!(
                 binding == expected_line,
                 "battle workspace source binding changed at {}",
@@ -391,11 +418,16 @@ fn validate_workspace_binding(source: &[u8], workspace: &BattleDialogueWorkspace
     Ok(())
 }
 
+fn source_markup_matches_current_punctuation_decode(existing: &str, current: &str) -> bool {
+    existing == current || existing.replace('。', "、").replace("{LIT:8F}", "。") == current
+}
+
 fn validate_translation_fields(
     workspace: &BattleDialogueWorkspace,
-) -> Result<(usize, usize, usize)> {
+) -> Result<(usize, usize, usize, usize)> {
     let mut filled = 0;
     let mut complete = 0;
+    let mut untranslated_japanese = 0;
     let mut target_glyphs = 0;
     for line in workspace.records.iter().flat_map(|record| &record.lines) {
         if line.status == TranslationStatus::Untranslated {
@@ -404,6 +436,7 @@ fn validate_translation_fields(
                 "{} is untranslated but not empty",
                 line.id
             );
+            untranslated_japanese += usize::from(line.japanese_source_byte_count != 0);
             continue;
         }
         ensure!(
@@ -434,7 +467,7 @@ fn validate_translation_fields(
         complete += usize::from(line.status == TranslationStatus::Complete);
         target_glyphs += target.editable_glyph_count;
     }
-    Ok((filled, complete, target_glyphs))
+    Ok((filled, complete, untranslated_japanese, target_glyphs))
 }
 
 fn planned_storage_byte_count(workspace: &BattleDialogueWorkspace) -> Result<usize> {
@@ -541,6 +574,18 @@ fn decode_battle_record_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accepts_the_previous_punctuation_decode_for_translation_preservation() {
+        assert!(source_markup_matches_current_punctuation_decode(
+            "{AB}あ。{AC}{ED}",
+            "{AB}あ、{AC}{ED}"
+        ));
+        assert!(!source_markup_matches_current_punctuation_decode(
+            "{AB}い。{AC}{ED}",
+            "{AB}あ、{AC}{ED}"
+        ));
+    }
 
     #[test]
     fn battle_workspace_lines_keep_dynamic_values_controls_and_existing_english_protected() {

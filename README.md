@@ -12,6 +12,8 @@
 
 `build-kr-patch`는 지원 일본판 원본에서 mapper 165 설정·부대 목록, 1·2장 도입부, 시작·기록 메뉴, 아군명 52개, 자동 병종 소개 22개, 무기점 대사·품목명·선택지를 순서대로 다시 만들어 하나의 8단계 누적 개발 ROM을 낸다. 주 대사 번역 입력은 의미 있는 일본어 2,541줄이 모두 채워졌지만 사람 승인 완료는 0줄이며, 현재 설치 범위는 13레코드·41줄이다. 원본 영어 `MAP`, `LV`, `HP`, `STR`, `SKI`, `WLV`, `AGI`, `DEF`, `MOV`, `H.P`, `EXP`, 숫자와 `※`는 보존한다. 전투·엔딩의 이름 소비자는 각 화면 글꼴 수명을 붙일 때 같은 번역 자산을 별도 투영한다.
 
+`analyze-translation-coverage`는 현재 누적 ROM과 번역 입력을 함께 읽어 45개 화면을 일본어 대상 36개·원문 문자만 보존 5개·텍스트 없음 4개로 나누고, 일본어 대상 전부를 23개 번역 도메인에 연결한다. 현재 원천 미결속은 타이틀 그래픽·맵 메뉴 라벨·중단 메시지 3개이고, 23개 중 모든 소비자에 설치된 도메인은 4개뿐이다. 이 보고서는 원문·번역문·글리프 문자를 싣지 않으며, 최악 수명 비교가 끝나기 전에는 완료 판정에 쓰지 않는다.
+
 설정 항목 `サウンド`, `アニメーション`, `ウエイトタイマー`를 각각 `사운드`, `애니메이션`, `대기시간`으로 바꾸는 페이지 전환 PoC를 제공한다. 부대 목록의 기존 A/B 증명 페이지는 실제 아군명 페이지로 교체했고, 한글 `이름`·아군명과 원본 `LV`·`HP`·숫자를 함께 표시한다. 맵 유닛 요약·상태도 같은 의미 번역 자산에서 별도 코드북을 만들어 이름만 한글로 표시하고 아직 미설치인 일본어 병종·아이템·능력치 라벨은 원형을 유지한다. 자동 병종 소개는 216개 한글 합집합을 프로필 인덱스 11에서 두 페이지로 나누고, 원본 영문 능력치 표와 주변 그래픽을 유지한다. 동적 글꼴 공급 관문 G3는 통과했지만 아직 정식 패치나 배포 후보는 아니다.
 
 매퍼 변환은 MMC2식 CHR 래치와 MMC3식 PRG·SRAM을 함께 제공하는 mapper 165를 채택했다. 무번역 프로브는 원본 CHR을 보존한 채 재배치하고, 관측한 FD/FE 쌍용 변형 페이지 1개를 자동 생성한다. 타이틀·자동 병종 설명·1장 인트로 대화·전투·게임 오버·중단 저장과 재개·1장 완료 저장·콜드 로드·2장 전환 표본이 원본과 동등해 G2를 통과했다. 화면 계약 보고서는 실제 화면 역할 45개를 모두 실행 관측했고 42개는 CHR 쌍까지 결속했다. 실제 이동·턴 종료·전투와 `しろ` 선택으로 11장 종료 대사, 원본 영어 `NEXT STORY`, 저장 제안, 저장 완료, 검은 자동 전환, 12장 도입까지 연속 관측했다. 사운드 테스트 공용 전투 11개, 자동 엔딩 18개, 턴 경계 게임 오버 12개, 적 선공 정규 전투 11개, 플레이어 선공 정규 전투 10개 시간 표본으로 패배와 전투 경로 극성을 닫았다. 인물 후일담은 112개 보이는 엔트리의 560개 불규칙 표본과 선택자 이벤트로 13개 CHR 쌍 및 직접·라우팅 제어 흐름을 닫았다. 현재 주 대사 번역 뷰 2,812줄에서 의미 있는 일본어 2,541줄을 검토 대기 한국어로 모두 채웠고, 비소비 원문 잔편 1줄은 명시적으로 보존한다. 채워진 고유 한글은 697자이고 명시적인 `E4`/`E6` 대사 전이 사슬은 최대 175자로 활성 슬롯 210칸에 들어가며, 논리 재삽입 계획도 11개 소유 구간 안에서 성립한다. 누적 ROM은 원본 CHR을 건드리지 않고 1·2장 도입부에 서로 다른 확장 페이지를 공급한다. 이는 도입 화면군 두 변형의 누적 수직 슬라이스일 뿐 1장 전체나 정식 패치·배포 후보를 뜻하지 않는다.
@@ -24,6 +26,7 @@ cargo run -p fc-fire-emblem-patch -- analyze-font-supply "roms/Fire Emblem - Ank
 cargo run -p fc-fire-emblem-patch -- analyze-text-tables "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- analyze-dialogue-structure "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- analyze-screen-contracts "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
+cargo run -p fc-fire-emblem-patch -- analyze-translation-coverage "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- analyze-chapter-transitions "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
 cargo run -p fc-fire-emblem-patch -- analyze-temporal-surfaces "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes" evidence/private/temporal-surfaces/manifest.json
 cargo run -p fc-fire-emblem-patch -- analyze-chapter-victory "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"

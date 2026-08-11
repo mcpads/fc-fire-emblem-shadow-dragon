@@ -57,7 +57,7 @@ struct FixedTextEntry {
     status: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum FixedTextLogicalByte {
     TargetGlyph(char),
     Encoded(u8),
@@ -71,6 +71,7 @@ pub(crate) struct FixedTextPlannedEntry {
     pub(crate) alias_indices: Vec<usize>,
     pub(crate) file_offset: usize,
     pub(crate) source_storage_byte_count: usize,
+    pub(crate) review_complete: bool,
     pub(crate) logical_bytes: Vec<FixedTextLogicalByte>,
 }
 
@@ -242,6 +243,7 @@ fn plan_workspace(
                 alias_indices: entry.alias_indices.clone(),
                 file_offset,
                 source_storage_byte_count: source_len,
+                review_complete: entry.status == "complete",
                 logical_bytes,
             })
         })

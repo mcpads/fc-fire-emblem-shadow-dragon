@@ -147,6 +147,65 @@ pub struct ScreenContractSummary {
     pub next_observation_gate_role: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct JapaneseBearingScreen {
+    pub(crate) role: String,
+    pub(crate) surface_family: String,
+    pub(crate) preserves_original_latin: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ScreenTranslationPartition {
+    pub(crate) screen_count: usize,
+    pub(crate) japanese_bearing_screens: Vec<JapaneseBearingScreen>,
+    pub(crate) preserved_original_only_screen_count: usize,
+    pub(crate) no_text_screen_count: usize,
+}
+
+pub(crate) fn inspect_screen_translation_partition() -> Result<ScreenTranslationPartition> {
+    let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS)?;
+    ensure!(
+        report
+            .screens
+            .iter()
+            .all(|screen| screen.translation_scope != TranslationScope::Unresolved),
+        "screen contracts still contain an unresolved translation scope"
+    );
+    let japanese_bearing_screens = report
+        .screens
+        .iter()
+        .filter_map(|screen| match screen.translation_scope {
+            TranslationScope::JapaneseOnly => Some(JapaneseBearingScreen {
+                role: screen.screen_role.clone(),
+                surface_family: screen.surface_family.clone(),
+                preserves_original_latin: false,
+            }),
+            TranslationScope::JapaneseWithPreservedOriginalLatin => Some(JapaneseBearingScreen {
+                role: screen.screen_role.clone(),
+                surface_family: screen.surface_family.clone(),
+                preserves_original_latin: true,
+            }),
+            TranslationScope::NoText
+            | TranslationScope::PreservedOriginalOnly
+            | TranslationScope::Unresolved => None,
+        })
+        .collect::<Vec<_>>();
+    Ok(ScreenTranslationPartition {
+        screen_count: report.screens.len(),
+        japanese_bearing_screens,
+        preserved_original_only_screen_count: report
+            .screens
+            .iter()
+            .filter(|screen| screen.translation_scope == TranslationScope::PreservedOriginalOnly)
+            .count(),
+        no_text_screen_count: report
+            .screens
+            .iter()
+            .filter(|screen| screen.translation_scope == TranslationScope::NoText)
+            .count(),
+    })
+}
+
 pub fn analyze_screen_contracts(
     source_path: &Path,
     report_path: &Path,

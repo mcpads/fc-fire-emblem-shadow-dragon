@@ -168,6 +168,23 @@ pub fn analyze_unit_ui_text(source_path: &Path, report_path: &Path) -> Result<Un
     })
 }
 
+pub(crate) fn inspect_unit_ui_japanese_label_count(source: &[u8]) -> Result<usize> {
+    let prg = source
+        .get(HEADER_SIZE..HEADER_SIZE + PRG_SIZE)
+        .context("supported source does not contain the complete PRG region")?;
+    validate_code_regions(prg)?;
+    let fixed_labels = validate_fixed_labels(
+        prg,
+        SUMMARY_AND_STATUS_LABEL_SPECS
+            .iter()
+            .chain(command_menu::COMMAND_LABEL_SPECS),
+    )?;
+    Ok(fixed_labels
+        .iter()
+        .filter(|label| label.translation_scope == "japanese_only")
+        .count())
+}
+
 pub(crate) fn preserved_codes_for_unit_name_projection(source: &[u8]) -> Result<BTreeSet<u8>> {
     validate_code_regions(&source[HEADER_SIZE..HEADER_SIZE + PRG_SIZE])?;
     validate_fixed_labels(

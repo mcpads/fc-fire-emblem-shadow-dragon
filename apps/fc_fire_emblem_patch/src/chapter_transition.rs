@@ -60,6 +60,33 @@ pub struct ChapterTransitionSummary {
     pub next_observation_gate_role: &'static str,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ChapterTransitionTranslationPopulation {
+    pub(crate) save_offer_label_count: usize,
+    pub(crate) ending_record_additional_record_count: usize,
+    pub(crate) battle_forecast_label_count: usize,
+}
+
+pub(crate) fn inspect_chapter_transition_translation_population(
+    rom: &Rom,
+) -> Result<ChapterTransitionTranslationPopulation> {
+    let report = build_report(rom)?;
+    let save_offer_label_count = report
+        .fixed_labels
+        .iter()
+        .filter(|label| label.screen_role == "chapter_save_offer")
+        .count();
+    ensure!(
+        save_offer_label_count == 1,
+        "chapter-save offer label population changed"
+    );
+    Ok(ChapterTransitionTranslationPopulation {
+        save_offer_label_count,
+        ending_record_additional_record_count: 1,
+        battle_forecast_label_count: 1,
+    })
+}
+
 pub fn analyze_chapter_transitions(
     source_path: &Path,
     report_path: &Path,
