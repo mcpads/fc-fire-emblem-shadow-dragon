@@ -46,6 +46,7 @@ struct BattleSurfaceConstraintReport {
     background_producer_topology: super::background_ownership::BattleBackgroundProducerTopology,
     background_payload_model: super::background_payloads::BattleBackgroundPayloadModel,
     phase_publisher_reachability: super::phase_cooccurrence::BattlePhasePublisherReachability,
+    text_consumer_topology: super::text_consumer_topology::BattleTextConsumerTopology,
     protected_color_placement: super::protected_color_placement::ProtectedColorPlacementReport,
     physical_assignment_architecture: PhysicalAssignmentArchitecture,
     route_assignment_feasibility: Vec<RouteAssignmentFeasibility>,
@@ -256,6 +257,8 @@ pub(crate) fn analyze_battle_surface_constraints(
     let ownership = bind_battle_background_code_ownership(&rom)?;
     let phase_publisher_reachability =
         super::phase_cooccurrence::bind_phase_publisher_reachability(&rom)?;
+    let text_consumer_topology =
+        super::text_consumer_topology::bind_battle_text_consumer_topology(&rom)?;
 
     let selection = select_observed_battle_surfaces(&rom, &model.composition, &evidence)?;
     let constraints = selection.constraints;
@@ -395,7 +398,7 @@ pub(crate) fn analyze_battle_surface_constraints(
         "selected battle assignment proof disagrees with the global capacity bound"
     );
     let report = BattleSurfaceConstraintReport {
-        schema: 8,
+        schema: 9,
         source_sha1: EXPECTED_SOURCE_SHA1,
         fixed_workspace_sha1: sha1_hex(&fs::read(fixed_workspace_path)?),
         dialogue_workspace_sha1: sha1_hex(&fs::read(dialogue_workspace_path)?),
@@ -414,6 +417,7 @@ pub(crate) fn analyze_battle_surface_constraints(
         background_producer_topology: ownership.producer_topology(),
         background_payload_model: ownership.payload_model(),
         phase_publisher_reachability,
+        text_consumer_topology,
         protected_color_placement: protected_color_placement.report,
         physical_assignment_architecture: PhysicalAssignmentArchitecture {
             static_abstract_color_count: model.coloring.color_count,
@@ -485,7 +489,7 @@ pub(crate) fn analyze_battle_surface_constraints(
         runtime_verified: false,
         release_eligible: false,
         next_gate: if physical.is_some() {
-            "replace the observed static physical table with a per-battle runtime allocator and abstract text-code projection, then verify the strongest 173-slot lifetime"
+            "prove a battle-lifetime home for the 17-byte remap table, install a battle-conditional abstract text-code projection at the shared renderer, and verify the strongest 173-slot lifetime"
         } else {
             "separate translated text producers from preserved graphics in the admitted temporal samples before extending the visual-variant catalog or installing the runtime loader"
         },
@@ -540,7 +544,7 @@ mod tests {
     #[test]
     fn serialized_report_omits_translation_content_and_private_paths() {
         let report = BattleSurfaceConstraintReport {
-            schema: 8,
+            schema: 9,
             source_sha1: EXPECTED_SOURCE_SHA1,
             fixed_workspace_sha1: "fixed".to_owned(),
             dialogue_workspace_sha1: "dialogue".to_owned(),
@@ -581,6 +585,8 @@ mod tests {
                 super::super::background_payloads::BattleBackgroundPayloadModel::test_model(),
             phase_publisher_reachability:
                 super::super::phase_cooccurrence::BattlePhasePublisherReachability::test_model(),
+            text_consumer_topology:
+                super::super::text_consumer_topology::BattleTextConsumerTopology::test_model(),
             protected_color_placement: super::super::protected_color_placement::test_report(),
             physical_assignment_architecture: PhysicalAssignmentArchitecture {
                 static_abstract_color_count: 210,

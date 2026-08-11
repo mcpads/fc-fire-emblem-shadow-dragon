@@ -32,6 +32,7 @@ mod runtime_inputs;
 mod selected_physical_assignment;
 mod source_window;
 pub(crate) mod surface_constraints;
+mod text_consumer_topology;
 
 pub(in crate::mapper165) use composition::{
     BattleCacheCompositionMaterial, BattleRuntimeRecipeInput, compose_runtime_font_page,

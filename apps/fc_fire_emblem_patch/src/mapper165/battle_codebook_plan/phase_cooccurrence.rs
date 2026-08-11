@@ -284,14 +284,14 @@ fn trace_group(
         .copied()
         .enumerate()
         .map(|(phase_index, handler)| {
-            let trace = trace_switchable_handler(bank, handler, publisher_addresses)
+            let trace = trace_switchable_control_flow(bank, handler, publisher_addresses)
                 .with_context(|| format!("trace {role} phase {phase_index} at ${handler:04X}"))?;
             Ok(PhaseReachability {
                 phase_index,
                 handler_address_hex: format!("0x{handler:04X}"),
                 traced_instruction_count: trace.visited_instructions.len(),
                 publisher_addresses_hex: trace
-                    .publishers
+                    .reached_target_addresses
                     .iter()
                     .map(|address| format!("0x{address:04X}"))
                     .collect(),
@@ -313,29 +313,29 @@ fn trace_group(
     })
 }
 
-struct HandlerTrace {
-    visited_instructions: BTreeSet<u16>,
-    publishers: BTreeSet<u16>,
+pub(super) struct SwitchableControlFlowTrace {
+    pub(super) visited_instructions: BTreeSet<u16>,
+    pub(super) reached_target_addresses: BTreeSet<u16>,
 }
 
-fn trace_switchable_handler(
+pub(super) fn trace_switchable_control_flow(
     bank: &[u8],
     start: u16,
-    publisher_addresses: &BTreeSet<u16>,
-) -> Result<HandlerTrace> {
+    target_addresses: &BTreeSet<u16>,
+) -> Result<SwitchableControlFlowTrace> {
     if !(0x8000..0xC000).contains(&start) {
         ensure!(
             start == 0xC73D,
             "battle phase handler is outside its switchable bank"
         );
-        return Ok(HandlerTrace {
+        return Ok(SwitchableControlFlowTrace {
             visited_instructions: BTreeSet::new(),
-            publishers: BTreeSet::new(),
+            reached_target_addresses: BTreeSet::new(),
         });
     }
     let mut pending = vec![start];
     let mut visited_instructions = BTreeSet::new();
-    let mut publishers = BTreeSet::new();
+    let mut reached_target_addresses = BTreeSet::new();
     while let Some(address) = pending.pop() {
         if !(0x8000..0xC000).contains(&address) || !visited_instructions.insert(address) {
             continue;
@@ -350,8 +350,8 @@ fn trace_switchable_handler(
             instruction.opcode_is_documented(),
             "battle phase graph reached undocumented selector at ${address:04X}"
         );
-        if publisher_addresses.contains(&address) {
-            publishers.insert(address);
+        if target_addresses.contains(&address) {
+            reached_target_addresses.insert(address);
         }
         match instruction.control_flow(address) {
             ControlFlow::FallThrough { next } => pending.push(next),
@@ -377,9 +377,9 @@ fn trace_switchable_handler(
             ControlFlow::Return | ControlFlow::Interrupt | ControlFlow::Stop => {}
         }
     }
-    Ok(HandlerTrace {
+    Ok(SwitchableControlFlowTrace {
         visited_instructions,
-        publishers,
+        reached_target_addresses,
     })
 }
 
@@ -392,10 +392,13 @@ mod tests {
         let mut bank = vec![0x60; 0x4000];
         bank[0..8].copy_from_slice(&[0x20, 0x08, 0x80, 0xF0, 0x02, 0x84, 0x21, 0x60]);
         bank[8..11].copy_from_slice(&[0x86, 0x21, 0x60]);
-        let trace =
-            trace_switchable_handler(&bank, 0x8000, &BTreeSet::from([0x8005, 0x8008])).unwrap();
+        let trace = trace_switchable_control_flow(&bank, 0x8000, &BTreeSet::from([0x8005, 0x8008]))
+            .unwrap();
 
-        assert_eq!(trace.publishers, BTreeSet::from([0x8005, 0x8008]));
+        assert_eq!(
+            trace.reached_target_addresses,
+            BTreeSet::from([0x8005, 0x8008])
+        );
         assert!(trace.visited_instructions.contains(&0x8007));
     }
 }
