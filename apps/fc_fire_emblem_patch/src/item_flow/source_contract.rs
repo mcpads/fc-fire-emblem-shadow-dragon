@@ -26,6 +26,8 @@ pub(super) const ITEM_ACTION_RESULT_DIALOGUE_INDICES: [u8; 4] = [0x19, 0x1A, 0x1
 pub(super) const VULNERARY_ITEM_ID: u8 = 0x40;
 pub(super) const ITEM_DEFAULT_USES_TABLE_ADDRESS: u16 = 0xD87F;
 pub(super) const ITEM_ACTION_FLAGS_TABLE_ADDRESS: u16 = 0xD9C3;
+pub(super) const ITEM_COUNT: usize = 91;
+pub(super) const ITEM_USE_ACTION_FLAG: u8 = 0x40;
 pub(super) const VULNERARY_DEFAULT_USES: u8 = 5;
 pub(super) const VULNERARY_ACTION_FLAGS: u8 = 0x41;
 
@@ -162,6 +164,48 @@ pub(super) const SOURCE_REGIONS: &[SourceRegionSpec] = &[
         "d168df1f45306ddbe91c0939483464048b3bf2ac",
     ),
     region(
+        "apply_map_key",
+        0x06,
+        0x9690,
+        102,
+        "87f86132e2b81da84492552f4173893a4d0dff5f",
+    ),
+    region(
+        "find_map_key_target",
+        0x06,
+        0x96FA,
+        146,
+        "9640e820ca029923d344d4d9ffb60e91f82e64c6",
+    ),
+    region(
+        "apply_stat_booster",
+        0x06,
+        0x978C,
+        78,
+        "0b0e530c7881795f6e5e71f6a0c744c23f53e0bf",
+    ),
+    region(
+        "run_class_change_item_sequence",
+        0x06,
+        0x97DA,
+        210,
+        "d2d9004d8feeffd70f8c316cb5dd7b1d47b3fb9b",
+    ),
+    region(
+        "enter_earth_orb_sequence",
+        0x06,
+        0x98AC,
+        15,
+        "698039edc69d1714ba92801a1a31e79fdfe90a0c",
+    ),
+    region(
+        "resolve_earth_orb_sequence",
+        0x06,
+        0x98BB,
+        186,
+        "848f734c735571fd32282b0abf3f7f7c5dc077ac",
+    ),
+    region(
         "swap_selected_item_to_equipped_slot",
         0x06,
         0xA5CE,
@@ -216,6 +260,20 @@ pub(super) const SOURCE_REGIONS: &[SourceRegionSpec] = &[
         0xC39A,
         5,
         "32367567aa0ecae3cff1f09dce7659fc68a97d5e",
+    ),
+    region(
+        "item_default_uses_table",
+        0x0F,
+        ITEM_DEFAULT_USES_TABLE_ADDRESS,
+        ITEM_COUNT,
+        "cb37390f803c0e99ba02feb0dbf8a60e0582807d",
+    ),
+    region(
+        "item_action_flags_table",
+        0x0F,
+        ITEM_ACTION_FLAGS_TABLE_ADDRESS,
+        ITEM_COUNT,
+        "17c5bdab2181218617fdc1d7f1f6866ce437eea5",
     ),
 ];
 
@@ -437,7 +495,7 @@ fn read_u16(rom: &Rom, prg_bank: u8, cpu_address: u16) -> Result<u16> {
     Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
 }
 
-fn source_slice(rom: &Rom, prg_bank: u8, cpu_address: u16, len: usize) -> Result<&[u8]> {
+pub(super) fn source_slice(rom: &Rom, prg_bank: u8, cpu_address: u16, len: usize) -> Result<&[u8]> {
     let file_offset = source_file_offset(prg_bank, cpu_address)?;
     let end = file_offset
         .checked_add(len)

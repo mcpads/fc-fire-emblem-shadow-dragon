@@ -1153,10 +1153,11 @@ fn main() -> Result<()> {
             println!("wrote {}", report.display());
             println!("report SHA-1: {}", summary.report_sha1);
             println!(
-                "item flow: {} screen roles, {} source-bound regions, {} action choices, next: {}",
+                "item flow: {} screen roles, {} source-bound regions, {} action choices, {} usable items, next: {}",
                 summary.screen_count,
                 summary.source_region_count,
                 summary.action_count,
+                summary.usable_item_count,
                 summary.next_screen_role
             );
         }

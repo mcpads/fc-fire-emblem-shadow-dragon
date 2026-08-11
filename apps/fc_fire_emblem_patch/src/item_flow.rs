@@ -8,6 +8,7 @@ use crate::{
     sha1_hex,
 };
 
+mod item_use_families;
 mod runtime_evidence;
 mod screen_roles;
 mod source_contract;
@@ -16,13 +17,12 @@ mod translation_workspace;
 use runtime_evidence::{RuntimeObservation, runtime_observations};
 use screen_roles::{ItemActionChoice, ItemScreen, action_choices, item_screens};
 use source_contract::{
-    COMPOSITE_STATE_ADDRESS, ELIGIBLE_RECIPIENT_COUNT_ADDRESS, ITEM_ACTION_FLAGS_TABLE_ADDRESS,
-    ITEM_DEFAULT_USES_TABLE_ADDRESS, ITEM_FLOW_STATES, MAIN_STATE_ADDRESS,
-    MENU_CHOICE_MASK_BASE_ADDRESS, MENU_CONTROLLER_INDEX_ADDRESS, MENU_RESULT_ADDRESS,
-    MENU_SELECTION_BASE_ADDRESS, SELECTED_ITEM_ACTION_ADDRESS, SELECTED_ITEM_ADDRESS,
-    SELECTED_ITEM_SLOT_ADDRESS, SOURCE_REGIONS, VULNERARY_ACTION_FLAGS, VULNERARY_DEFAULT_USES,
-    VULNERARY_ITEM_ID, bind_source_region, validate_action_result_dialogue_indices,
-    validate_item_action_labels, validate_state_routes, validate_vulnerary_family,
+    COMPOSITE_STATE_ADDRESS, ELIGIBLE_RECIPIENT_COUNT_ADDRESS, ITEM_FLOW_STATES,
+    MAIN_STATE_ADDRESS, MENU_CHOICE_MASK_BASE_ADDRESS, MENU_CONTROLLER_INDEX_ADDRESS,
+    MENU_RESULT_ADDRESS, MENU_SELECTION_BASE_ADDRESS, SELECTED_ITEM_ACTION_ADDRESS,
+    SELECTED_ITEM_ADDRESS, SELECTED_ITEM_SLOT_ADDRESS, SOURCE_REGIONS, bind_source_region,
+    validate_action_result_dialogue_indices, validate_item_action_labels, validate_state_routes,
+    validate_vulnerary_family,
 };
 pub(crate) use translation_workspace::plan_item_action_labels;
 
@@ -34,7 +34,7 @@ struct ItemFlowReport {
     route: ItemRoute,
     screens: Vec<ItemScreen>,
     action_choices: Vec<ItemActionChoice>,
-    usable_item_families: Vec<UsableItemFamilyBinding>,
+    item_use_catalog: item_use_families::ItemUseCatalog,
     empty_inventory_label: FixedLabelBinding,
     runtime_observations: Vec<RuntimeObservation>,
     source_regions: Vec<SourceRegionBinding>,
@@ -89,23 +89,6 @@ struct CodeLocation {
     cpu_address_hex: String,
 }
 
-#[derive(Debug, Serialize)]
-struct UsableItemFamilyBinding {
-    item_id: u8,
-    item_id_hex: String,
-    action_flags: u8,
-    action_flags_hex: String,
-    action_flags_source: CodeLocation,
-    default_uses: u8,
-    default_uses_source: CodeLocation,
-    progression_dispatch: CodeLocation,
-    effect_handler: CodeLocation,
-    effect_target: &'static str,
-    success_rule: &'static str,
-    no_effect_rule: &'static str,
-    consumption_rule: &'static str,
-}
-
 #[derive(Clone, Debug, Serialize)]
 pub(super) struct FixedLabelBinding {
     index: u8,
@@ -135,6 +118,7 @@ pub struct ItemFlowSummary {
     pub screen_count: usize,
     pub source_region_count: usize,
     pub action_count: usize,
+    pub usable_item_count: usize,
     pub next_screen_role: &'static str,
 }
 
@@ -159,6 +143,7 @@ pub fn analyze_item_flow(source_path: &Path, report_path: &Path) -> Result<ItemF
         screen_count: report.screens.len(),
         source_region_count: report.source_regions.len(),
         action_count: report.action_choices.len(),
+        usable_item_count: report.item_use_catalog.usable_item_count,
         next_screen_role: report.unresolved_downstream_roles[0],
     })
 }
@@ -175,6 +160,7 @@ fn build_report(rom: &Rom) -> Result<ItemFlowReport> {
     validate_state_routes(rom)?;
     validate_action_result_dialogue_indices(rom)?;
     validate_vulnerary_family(rom)?;
+    let item_use_catalog = item_use_families::inspect(rom)?;
     let labels = validate_item_action_labels(rom)?;
     let source_regions = SOURCE_REGIONS
         .iter()
@@ -187,7 +173,7 @@ fn build_report(rom: &Rom) -> Result<ItemFlowReport> {
         .context("missing NO ITEM label")?;
 
     Ok(ItemFlowReport {
-        schema: 1,
+        schema: 2,
         source_sha1: EXPECTED_SOURCE_SHA1,
         scope: Scope {
             translation_direction: "Japanese to Korean",
@@ -226,32 +212,17 @@ fn build_report(rom: &Rom) -> Result<ItemFlowReport> {
         },
         screens: item_screens(),
         action_choices,
-        usable_item_families: vec![vulnerary_family()],
+        item_use_catalog,
         empty_inventory_label,
         runtime_observations: runtime_observations(),
         source_regions,
-        unresolved_downstream_roles: vec!["item_transfer_target_selection"],
+        unresolved_downstream_roles: vec![
+            "item_transfer_target_selection",
+            "item_class_change_sequence",
+            "item_earth_orb_sequence",
+        ],
         release_eligible: false,
     })
-}
-
-fn vulnerary_family() -> UsableItemFamilyBinding {
-    let item_index = u16::from(VULNERARY_ITEM_ID - 1);
-    UsableItemFamilyBinding {
-        item_id: VULNERARY_ITEM_ID,
-        item_id_hex: format!("0x{VULNERARY_ITEM_ID:02X}"),
-        action_flags: VULNERARY_ACTION_FLAGS,
-        action_flags_hex: format!("0x{VULNERARY_ACTION_FLAGS:02X}"),
-        action_flags_source: location(0x0F, ITEM_ACTION_FLAGS_TABLE_ADDRESS + item_index),
-        default_uses: VULNERARY_DEFAULT_USES,
-        default_uses_source: location(0x0F, ITEM_DEFAULT_USES_TABLE_ADDRESS + item_index),
-        progression_dispatch: location(0x06, 0x95A9),
-        effect_handler: location(0x06, 0x9653),
-        effect_target: "current HP at selected unit-record offset 0x03, capped by max HP at offset 0x04",
-        success_rule: "heal min(10, max HP - current HP) and select result code 0x1D",
-        no_effect_rule: "when healing is zero, select result code 0x30 and skip consumption",
-        consumption_rule: "positive healing decrements durability; zero durability clears the selected item slot and repairs the equipped-slot invariant when needed",
-    }
 }
 
 fn location(prg_bank: u8, cpu_address: u16) -> CodeLocation {
@@ -267,8 +238,10 @@ fn location(prg_bank: u8, cpu_address: u16) -> CodeLocation {
 mod tests {
     use super::source_contract::{
         COMMAND_ACTION_POINTER_TABLE_ADDRESS, COMPOSITE_POINTER_TABLE_ADDRESS,
-        FIXED_STRING_POINTER_TABLE_ADDRESS, ITEM_ACTION_LABELS,
-        ITEM_ACTION_RESULT_DIALOGUE_INDICES, MAP_STATE_POINTER_TABLE_ADDRESS, source_file_offset,
+        FIXED_STRING_POINTER_TABLE_ADDRESS, ITEM_ACTION_FLAGS_TABLE_ADDRESS, ITEM_ACTION_LABELS,
+        ITEM_ACTION_RESULT_DIALOGUE_INDICES, ITEM_DEFAULT_USES_TABLE_ADDRESS,
+        MAP_STATE_POINTER_TABLE_ADDRESS, VULNERARY_ACTION_FLAGS, VULNERARY_DEFAULT_USES,
+        VULNERARY_ITEM_ID, source_file_offset,
     };
     use super::*;
     use crate::rom::{CHR_SIZE, EXPECTED_HEADER, HEADER_SIZE, PRG_SIZE};
@@ -389,12 +362,9 @@ mod tests {
         let rom = Rom::parse(source_fixture()).unwrap();
         validate_vulnerary_family(&rom).unwrap();
 
-        let family = vulnerary_family();
-        assert_eq!(family.item_id, 0x40);
-        assert_eq!(family.action_flags, 0x41);
-        assert_eq!(family.default_uses, 5);
-        assert_eq!(family.progression_dispatch.cpu_address, 0x95A9);
-        assert_eq!(family.effect_handler.cpu_address, 0x9653);
+        assert_eq!(VULNERARY_ITEM_ID, 0x40);
+        assert_eq!(VULNERARY_ACTION_FLAGS, 0x41);
+        assert_eq!(VULNERARY_DEFAULT_USES, 5);
     }
 
     #[test]
