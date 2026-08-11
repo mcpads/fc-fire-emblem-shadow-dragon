@@ -40,7 +40,7 @@ pub(super) struct EarthOrbContract {
     effect: CodeLocation,
     record_effect: CodeLocation,
     static_conclusion: &'static str,
-    runtime_gate: &'static str,
+    runtime_conclusion: &'static str,
 }
 
 pub(super) fn inspect(rom: &Rom) -> Result<EarthOrbContract> {
@@ -82,7 +82,7 @@ pub(super) fn inspect(rom: &Rom) -> Result<EarthOrbContract> {
         effect: location(PRG_BANK, EFFECT_ADDRESS),
         record_effect: location(PRG_BANK, RECORD_EFFECT_ADDRESS),
         static_conclusion: "item 0x55 runs a synchronous 32-step map-displacement effect inside result substate 0x02, applies the effect to allied and enemy record lists, selects result dialogue 0x33, and then enters the common input-wait substate 0x03; it does not enter the class-change progression",
-        runtime_gate: "capture the automatic 32-step effect at irregular phases and the final substate 0x03 result without input during the effect; verify whether any intermediate text is visible and which CHR pairs remain live",
+        runtime_conclusion: "irregular samples across all 32 automatic steps showed no new intermediate text: the initial use sentence and 1A/1A plus 00/15 CHR pairs remained live until result 0x33 replaced the text in common input-wait substate 0x03",
     })
 }
 

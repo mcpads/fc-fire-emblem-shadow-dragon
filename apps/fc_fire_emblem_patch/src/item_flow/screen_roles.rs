@@ -164,13 +164,21 @@ pub(super) fn item_screens() -> Vec<ItemScreen> {
                 "item-family-specific effect or failure result",
                 "map or target context",
             ],
-            input_actions: vec![InputAction {
-                input: "A after progression state 3",
-                immediate_effect: "dismiss the completed result dialogue, restore main state 0x19, and complete the unit action",
-                may_cause_persistent_gameplay_mutation: true,
-                next_role: "map_idle",
-            }],
-            next_gate: "bind the remaining usable item families and font-page exit lifetime without treating the observed self-heal family as universal",
+            input_actions: vec![
+                InputAction {
+                    input: "A after progression state 3",
+                    immediate_effect: "dismiss the completed result dialogue, restore main state 0x19, and complete the unit action",
+                    may_cause_persistent_gameplay_mutation: true,
+                    next_role: "map_idle",
+                },
+                InputAction {
+                    input: "A after the successful class-change presentation reaches nested battle-dialogue state 0x04 with 0x76ED=0 and 0x794A nonzero",
+                    immediate_effect: "acknowledge the completed class-change sentence; shared battle cleanup and outer result state 0x06 then return to the map automatically",
+                    may_cause_persistent_gameplay_mutation: true,
+                    next_role: "map_idle",
+                },
+            ],
+            next_gate: "retain the source-enumerated 18-route capacity bound and regress the item_use_result and battle_animation lifetimes when their installed text changes",
         },
         ItemScreen {
             screen_role: "item_transfer_result",

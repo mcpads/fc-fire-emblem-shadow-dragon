@@ -6,7 +6,9 @@ use serde::Serialize;
 use crate::{
     dialogue_assets::plan_main_dialogue_bundle,
     font_slots::{ACTIVE_HANGUL_SLOT_COUNT, active_hangul_codes},
-    item_flow::{plan_item_action_labels, validate_item_lifetime_source},
+    item_flow::{
+        item_use_result_dialogue_sequences, plan_item_action_labels, validate_item_lifetime_source,
+    },
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
     text_inventory::{FixedTextLogicalByte, FixedTextPlannedEntry, plan_fixed_text},
@@ -34,6 +36,8 @@ struct Measurements {
     maximum_unit_name_glyph_count: usize,
     action_label_union_glyph_count: usize,
     inventory_preserved_active_code_count: usize,
+    use_dialogue_glyph_count: usize,
+    use_preserved_active_code_count: usize,
     equip_dialogue_glyph_count: usize,
     equip_preserved_active_code_count: usize,
     transfer_dialogue_glyph_count: usize,
@@ -53,9 +57,8 @@ struct EvidenceDigest<'a> {
     maximum_item_name_glyph_count: usize,
     maximum_unit_name_glyph_count: usize,
     action_label_union_glyph_count: usize,
-    measured_screen_roles: [&'static str; 5],
-    excluded_screen_role: &'static str,
-    exclusion_reason: &'static str,
+    measured_screen_roles: [&'static str; 6],
+    item_use_result_sequence_count: usize,
 }
 
 pub(super) fn inspect(bindings: InputBindings<'_>) -> Result<Vec<TranslationLifetimeDemandReport>> {
@@ -98,6 +101,14 @@ pub(super) fn inspect(bindings: InputBindings<'_>) -> Result<Vec<TranslationLife
         .union(&unit_preserved_codes)
         .copied()
         .collect::<BTreeSet<_>>();
+    let use_dialogue_sequences = item_use_result_dialogue_sequences();
+    let use_result = maximum_dialogue_sequence(
+        &rom,
+        &bindings,
+        &use_dialogue_sequences,
+        &active_codes,
+        &dynamic_preserved_codes,
+    )?;
     let equip = dialogue_record(&rom, &bindings, 0x19, &active_codes)?;
     let transfer = dialogue_record(&rom, &bindings, 0x1B, &active_codes)?;
     let discard = dialogue_record(&rom, &bindings, 0x1C, &active_codes)?;
@@ -107,6 +118,11 @@ pub(super) fn inspect(bindings: InputBindings<'_>) -> Result<Vec<TranslationLife
         maximum_unit_name_glyph_count,
         action_label_union_glyph_count,
         inventory_preserved_active_code_count: item_preserved_codes.len(),
+        use_dialogue_glyph_count: use_result.target_glyph_count,
+        use_preserved_active_code_count: union_count(
+            &use_result.preserved_active_codes,
+            &dynamic_preserved_codes,
+        ),
         equip_dialogue_glyph_count: equip.target_glyph_count,
         equip_preserved_active_code_count: union_count(
             &equip.preserved_active_codes,
@@ -124,7 +140,7 @@ pub(super) fn inspect(bindings: InputBindings<'_>) -> Result<Vec<TranslationLife
         ),
     };
     let evidence = EvidenceDigest {
-        schema: 1,
+        schema: 2,
         source_sha1: EXPECTED_SOURCE_SHA1,
         main_dialogue_workspace_sha1: bindings.main_dialogue_workspace_sha1,
         fixed_text_workspace_sha1: bindings.fixed_text_workspace_sha1,
@@ -136,12 +152,12 @@ pub(super) fn inspect(bindings: InputBindings<'_>) -> Result<Vec<TranslationLife
         measured_screen_roles: [
             "item_inventory_list",
             "item_action_menu",
+            "item_use_result",
             "item_equip_result",
             "item_transfer_result",
             "item_discard_result",
         ],
-        excluded_screen_role: "item_use_result",
-        exclusion_reason: "successful class-change and earth-orb intermediate surfaces are not runtime-bound",
+        item_use_result_sequence_count: use_dialogue_sequences.len(),
     };
     let evidence_sha1 = sha1_hex(
         &serde_json::to_vec(&evidence).context("serialize item-flow lifetime evidence digest")?,
@@ -160,12 +176,22 @@ fn dialogue_record(
     index: u8,
     active_codes: &BTreeSet<u8>,
 ) -> Result<DialogueRecordMeasurement> {
-    let record_id = format!("shop-and-item-dialogue:{index:03}");
-    let plan = plan_main_dialogue_bundle(
-        rom,
-        bindings.main_dialogue_workspace_path,
-        &[record_id.as_str()],
-    )?;
+    dialogue_sequence(rom, bindings, &[index], active_codes)
+}
+
+fn dialogue_sequence(
+    rom: &Rom,
+    bindings: &InputBindings<'_>,
+    indices: &[u8],
+    active_codes: &BTreeSet<u8>,
+) -> Result<DialogueRecordMeasurement> {
+    let record_ids = indices
+        .iter()
+        .map(|index| format!("shop-and-item-dialogue:{index:03}"))
+        .collect::<Vec<_>>();
+    let record_id_refs = record_ids.iter().map(String::as_str).collect::<Vec<_>>();
+    let plan =
+        plan_main_dialogue_bundle(rom, bindings.main_dialogue_workspace_path, &record_id_refs)?;
     ensure!(
         plan.workspace_sha1 == bindings.main_dialogue_workspace_sha1,
         "item-flow dialogue lifetime does not match global coverage"
@@ -178,6 +204,29 @@ fn dialogue_record(
             .copied()
             .collect(),
     })
+}
+
+fn maximum_dialogue_sequence(
+    rom: &Rom,
+    bindings: &InputBindings<'_>,
+    sequences: &[Vec<u8>],
+    active_codes: &BTreeSet<u8>,
+    dynamic_preserved_codes: &BTreeSet<u8>,
+) -> Result<DialogueRecordMeasurement> {
+    ensure!(
+        !sequences.is_empty(),
+        "item-use lifetime has no dialogue sequence"
+    );
+    sequences
+        .iter()
+        .map(|sequence| dialogue_sequence(rom, bindings, sequence, active_codes))
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .max_by_key(|measurement| {
+            measurement.target_glyph_count
+                + union_count(&measurement.preserved_active_codes, dynamic_preserved_codes)
+        })
+        .context("item-use lifetime has no measured dialogue sequence")
 }
 
 fn maximum_entry_glyph_count(entries: &[&FixedTextPlannedEntry], role: &str) -> Result<usize> {
@@ -245,6 +294,14 @@ fn build_demands(
             evidence_sha1,
         )?,
         demand(
+            "item_use_result",
+            "largest of the complete source-enumerated mutually exclusive routes: initial use record plus its selected result sequence, including the 0x27 to 0x28 continuation, with independent maxima for one unit and one item; earth-orb text stays in this lifetime while successful class change moves to battle_animation",
+            measurements.use_dialogue_glyph_count,
+            measurements.use_preserved_active_code_count,
+            one_unit_and_item,
+            evidence_sha1,
+        )?,
+        demand(
             "item_equip_result",
             "exact translated result record plus independent maxima for one unit and one item name",
             measurements.equip_dialogue_glyph_count,
@@ -308,6 +365,8 @@ mod tests {
                 maximum_unit_name_glyph_count: 4,
                 action_label_union_glyph_count: 9,
                 inventory_preserved_active_code_count: 0,
+                use_dialogue_glyph_count: 11,
+                use_preserved_active_code_count: 4,
                 equip_dialogue_glyph_count: 8,
                 equip_preserved_active_code_count: 2,
                 transfer_dialogue_glyph_count: 7,
@@ -319,16 +378,13 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(demands.len(), 5);
+        assert_eq!(demands.len(), 6);
         assert_eq!(demands[0].total_slot_demand, 24);
         assert_eq!(demands[1].total_slot_demand, 33);
-        assert_eq!(demands[2].total_slot_demand, 20);
-        assert_eq!(demands[3].total_slot_demand, 24);
-        assert_eq!(demands[4].total_slot_demand, 17);
-        assert!(
-            demands
-                .iter()
-                .all(|demand| demand.screen_role != "item_use_result")
-        );
+        assert_eq!(demands[2].screen_role, "item_use_result");
+        assert_eq!(demands[2].total_slot_demand, 25);
+        assert_eq!(demands[3].total_slot_demand, 20);
+        assert_eq!(demands[4].total_slot_demand, 24);
+        assert_eq!(demands[5].total_slot_demand, 17);
     }
 }

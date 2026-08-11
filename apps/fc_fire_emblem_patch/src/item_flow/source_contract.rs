@@ -248,6 +248,20 @@ pub(super) const SOURCE_REGIONS: &[SourceRegionSpec] = &[
         "16b99f01d5052e6b8ef9ec2f002d39ed93ddda5e",
     ),
     region(
+        "acknowledge_completed_class_change_battle_dialogue",
+        0x04,
+        0x827D,
+        52,
+        "f880ea430f0131545c93bdc1c15852bfb147a481",
+    ),
+    region(
+        "complete_shared_class_change_battle",
+        0x01,
+        0xB956,
+        13,
+        "e98e9929a9e81be8e3af55219e7ffdad29a28f2d",
+    ),
+    region(
         "restore_map_after_class_change",
         0x06,
         0xB97F,

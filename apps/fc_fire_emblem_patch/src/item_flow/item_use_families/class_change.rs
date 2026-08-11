@@ -8,6 +8,8 @@ use crate::{rom::Rom, typed_source::decode_rp2a03_sequence};
 use super::super::{CodeLocation, location, source_contract::source_slice};
 
 const PRG_BANK: u8 = 0x06;
+const BATTLE_DIALOGUE_BANK: u8 = 0x04;
+const SHARED_BATTLE_COMPLETION_BANK: u8 = 0x01;
 const ITEM_ID_BASE: u8 = 0x50;
 const ITEM_COUNT: usize = 5;
 const MINIMUM_LEVEL: u8 = 10;
@@ -26,6 +28,16 @@ const COMPLETION_ADDRESS: u16 = 0x98AC;
 const COMPLETION_LENGTH: usize = 15;
 const MAP_RESTORE_ADDRESS: u16 = 0xB97F;
 const MAP_RESTORE_LENGTH: usize = 45;
+const BATTLE_DIALOGUE_INPUT_HANDLER_ADDRESS: u16 = 0x827D;
+const BATTLE_DIALOGUE_INPUT_HANDLER_LENGTH: usize = 0x34;
+const SHARED_BATTLE_COMPLETION_ADDRESS: u16 = 0xB956;
+const SHARED_BATTLE_COMPLETION_LENGTH: usize = 13;
+const CONTROLLER_INPUT_ADDRESS: u16 = 0x0018;
+const BATTLE_DIALOGUE_STATE_ADDRESS: u16 = 0x7937;
+const CLASS_CHANGE_DIALOGUE_STATE: u8 = 0x04;
+const DECODE_ACTIVITY_ADDRESS: u16 = 0x76ED;
+const PUBLISHED_ROW_PENDING_ADDRESS: u16 = 0x794A;
+const SHARED_BATTLE_ACTIVE_ADDRESS: u16 = 0x05ED;
 
 const EXPECTED_PRIMARY_CLASSES: [u8; ITEM_COUNT] = [0x01, 0x06, 0x12, 0x0B, 0x03];
 const EXPECTED_ALTERNATE_CLASSES: [u8; ITEM_COUNT] = [0x01, 0x06, 0x13, 0x0B, 0x03];
@@ -44,10 +56,12 @@ pub(super) struct ClassChangeContract {
     typed_instruction_count: usize,
     entry: CodeLocation,
     battle_state_handlers: CodeLocation,
+    nested_battle_dialogue_input: NestedBattleDialogueInput,
+    shared_battle_completion: CodeLocation,
     completion: CodeLocation,
     map_restore: CodeLocation,
     static_conclusion: &'static str,
-    runtime_gate: &'static str,
+    runtime_conclusion: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -66,6 +80,25 @@ struct ResultProgressionState {
     state_hex: String,
     role: &'static str,
     handler: CodeLocation,
+}
+
+#[derive(Debug, Serialize)]
+struct NestedBattleDialogueInput {
+    handler: CodeLocation,
+    controller_input_address: u16,
+    controller_input_address_hex: String,
+    dialogue_state_address: u16,
+    dialogue_state_address_hex: String,
+    acknowledgement_state: u8,
+    acknowledgement_state_hex: String,
+    decode_activity_address: u16,
+    decode_activity_address_hex: String,
+    published_row_pending_address: u16,
+    published_row_pending_address_hex: String,
+    shared_battle_active_address: u16,
+    shared_battle_active_address_hex: String,
+    input_condition: &'static str,
+    input_effect: &'static str,
 }
 
 pub(super) fn inspect(rom: &Rom) -> Result<ClassChangeContract> {
@@ -117,6 +150,31 @@ pub(super) fn inspect(rom: &Rom) -> Result<ClassChangeContract> {
         Ok(decode_rp2a03_sequence(code, address, role)?.len())
     })
     .sum::<Result<usize>>()?;
+    let nested_input_code = source_slice(
+        rom,
+        BATTLE_DIALOGUE_BANK,
+        BATTLE_DIALOGUE_INPUT_HANDLER_ADDRESS,
+        BATTLE_DIALOGUE_INPUT_HANDLER_LENGTH,
+    )?;
+    let shared_battle_completion_code = source_slice(
+        rom,
+        SHARED_BATTLE_COMPLETION_BANK,
+        SHARED_BATTLE_COMPLETION_ADDRESS,
+        SHARED_BATTLE_COMPLETION_LENGTH,
+    )?;
+    let typed_instruction_count = typed_instruction_count
+        + decode_rp2a03_sequence(
+            nested_input_code,
+            BATTLE_DIALOGUE_INPUT_HANDLER_ADDRESS,
+            "class-change nested battle-dialogue input boundary",
+        )?
+        .len()
+        + decode_rp2a03_sequence(
+            shared_battle_completion_code,
+            SHARED_BATTLE_COMPLETION_ADDRESS,
+            "class-change shared-battle completion",
+        )?
+        .len();
 
     let eligibility_routes = (0..ITEM_COUNT)
         .map(|index| {
@@ -146,7 +204,7 @@ pub(super) fn inspect(rom: &Rom) -> Result<ClassChangeContract> {
             progression(0x04, "initialize shared battle presentation", 0x9D3C),
             progression(
                 0x05,
-                "run shared battle presentation until state 0x05ED clears",
+                "run shared battle presentation; acknowledge its completed nested dialogue before state 0x05ED clears",
                 0x9D5E,
             ),
             progression(0x06, "leave item flow and restore the map", 0x98AC),
@@ -154,10 +212,31 @@ pub(super) fn inspect(rom: &Rom) -> Result<ClassChangeContract> {
         typed_instruction_count,
         entry: location(PRG_BANK, ENTRY_ADDRESS),
         battle_state_handlers: location(PRG_BANK, BATTLE_STATE_HANDLERS_ADDRESS),
+        nested_battle_dialogue_input: NestedBattleDialogueInput {
+            handler: location(BATTLE_DIALOGUE_BANK, BATTLE_DIALOGUE_INPUT_HANDLER_ADDRESS),
+            controller_input_address: CONTROLLER_INPUT_ADDRESS,
+            controller_input_address_hex: format!("0x{CONTROLLER_INPUT_ADDRESS:04X}"),
+            dialogue_state_address: BATTLE_DIALOGUE_STATE_ADDRESS,
+            dialogue_state_address_hex: format!("0x{BATTLE_DIALOGUE_STATE_ADDRESS:04X}"),
+            acknowledgement_state: CLASS_CHANGE_DIALOGUE_STATE,
+            acknowledgement_state_hex: format!("0x{CLASS_CHANGE_DIALOGUE_STATE:02X}"),
+            decode_activity_address: DECODE_ACTIVITY_ADDRESS,
+            decode_activity_address_hex: format!("0x{DECODE_ACTIVITY_ADDRESS:04X}"),
+            published_row_pending_address: PUBLISHED_ROW_PENDING_ADDRESS,
+            published_row_pending_address_hex: format!("0x{PUBLISHED_ROW_PENDING_ADDRESS:04X}"),
+            shared_battle_active_address: SHARED_BATTLE_ACTIVE_ADDRESS,
+            shared_battle_active_address_hex: format!("0x{SHARED_BATTLE_ACTIVE_ADDRESS:04X}"),
+            input_condition: "inside outer result substate 0x05, nested battle-dialogue state 0x04 checks A only after decode activity is zero and a published row remains pending",
+            input_effect: "A advances the completed class-change dialogue; shared battle cleanup subsequently clears 0x05ED and outer result substate 0x06 restores the map",
+        },
+        shared_battle_completion: location(
+            SHARED_BATTLE_COMPLETION_BANK,
+            SHARED_BATTLE_COMPLETION_ADDRESS,
+        ),
         completion: location(PRG_BANK, COMPLETION_ADDRESS),
         map_restore: location(PRG_BANK, MAP_RESTORE_ADDRESS),
-        static_conclusion: "success requires level 10 or higher plus the selected item's declared source class; it changes the class, enters result substates 0x04 through 0x06, runs the shared battle presentation, and returns to the map without selecting a common result dialogue",
-        runtime_gate: "observe the shared battle presentation as a consumer: visible text producers, CHR phases, automatic completion, and map return; do not press during automatic substates 0x04 through 0x06",
+        static_conclusion: "success requires level 10 or higher plus the selected item's declared source class; it changes the class, enters result substates 0x04 through 0x06, runs the shared battle presentation, waits at its nested completed dialogue, and returns to the map without selecting a common result dialogue",
+        runtime_conclusion: "the use sentence is followed by a distinct shared battle lifetime containing unit, source-class, target-class, equipment-empty, and class-change text; one A acknowledgement is required only after the nested dialogue completes, after which shared battle cleanup and map return are automatic",
     })
 }
 
@@ -198,5 +277,12 @@ mod tests {
     #[test]
     fn success_progression_uses_three_non_dialogue_handlers() {
         assert_eq!(&EXPECTED_RESULT_HANDLERS[4..], [0x9D3C, 0x9D5E, 0x98AC]);
+    }
+
+    #[test]
+    fn acknowledgement_is_nested_inside_the_shared_battle_state() {
+        assert_eq!(CLASS_CHANGE_DIALOGUE_STATE, 0x04);
+        assert_eq!(BATTLE_DIALOGUE_INPUT_HANDLER_ADDRESS, 0x827D);
+        assert_eq!(SHARED_BATTLE_ACTIVE_ADDRESS, 0x05ED);
     }
 }

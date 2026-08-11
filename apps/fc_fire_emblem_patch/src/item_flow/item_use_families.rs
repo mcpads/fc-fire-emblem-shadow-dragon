@@ -31,7 +31,7 @@ pub(super) struct ItemUseCatalog {
     dialogue_result_indices: Vec<u8>,
     dialogue_result_indices_hex: Vec<String>,
     static_conclusion: &'static str,
-    runtime_only_gates: [&'static str; 2],
+    runtime_conclusions: [&'static str; 2],
 }
 
 #[derive(Debug, Serialize)]
@@ -122,7 +122,7 @@ const EFFECT_FAMILIES: &[FamilySpec] = &[
         success_dialogue_indices: &[],
         failure_dialogue_indices: &[0x30],
         downstream_surface: "successful use bypasses common result selection and enters result substates 0x04 through 0x06, including the shared battle presentation",
-        runtime_coverage: "successful downstream surface not yet observed",
+        runtime_coverage: "successful use observed through the initial use sentence, shared battle presentation, its nested acknowledgement boundary, automatic cleanup, and map return",
     },
     FamilySpec {
         role: "earth_orb",
@@ -131,7 +131,7 @@ const EFFECT_FAMILIES: &[FamilySpec] = &[
         success_dialogue_indices: &[0x33],
         failure_dialogue_indices: &[],
         downstream_surface: "synchronous 32-step map-displacement and multi-target record effect inside result substate 0x02 before result 0x33",
-        runtime_coverage: "downstream surface not yet observed",
+        runtime_coverage: "all 32 effect steps, stable use text and CHR, final result 0x33, input wait, and map return observed",
     },
     FamilySpec {
         role: "explicit_no_effect",
@@ -225,11 +225,35 @@ pub(super) fn inspect(rom: &Rom) -> Result<ItemUseCatalog> {
         dialogue_result_indices_hex: hex_values(&dialogue_result_indices),
         dialogue_result_indices,
         static_conclusion: "all use-action items and every directly selected result dialogue are source-bound; successful class change uses three extra result substates and the shared battle presentation, while the earth orb runs synchronously inside result substate 0x02",
-        runtime_only_gates: [
-            "successful class change: shared battle-presentation text producers, CHR phases, automatic substates 0x04 through 0x06, and map return",
-            "earth orb: irregular phases within the automatic 32-step effect and the final common result 0x33, with no input during the effect",
+        runtime_conclusions: [
+            "successful class change: the initial use sentence leaves the map-text lifetime for the shared battle lifetime; the completed nested battle dialogue requires one A acknowledgement before automatic cleanup and map return",
+            "earth orb: the initial use sentence and CHR remain live throughout all 32 automatic displacement steps, then result 0x33 shares that lifetime and waits for A in common result substate 0x03",
         ],
     })
+}
+
+pub(super) fn common_result_dialogue_sequences() -> Vec<Vec<u8>> {
+    const INITIAL_USE_DIALOGUE_INDEX: u8 = 0x1A;
+    const STAT_CAP_CONTINUATION_INDEX: u8 = 0x28;
+
+    let mut sequences = EFFECT_FAMILIES
+        .iter()
+        .flat_map(|family| {
+            family
+                .success_dialogue_indices
+                .iter()
+                .chain(family.failure_dialogue_indices)
+        })
+        .map(|result| {
+            let mut sequence = vec![INITIAL_USE_DIALOGUE_INDEX, *result];
+            if *result == 0x27 {
+                sequence.push(STAT_CAP_CONTINUATION_INDEX);
+            }
+            sequence
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    sequences.insert(vec![INITIAL_USE_DIALOGUE_INDEX]);
+    sequences.into_iter().collect()
 }
 
 fn family_for_item(item_id: u8) -> Result<&'static FamilySpec> {
@@ -293,5 +317,19 @@ mod tests {
         assert!(results.contains(&0x27));
         assert!(results.contains(&0x33));
         assert!(results.contains(&0x50));
+    }
+
+    #[test]
+    fn common_result_sequences_keep_mutually_exclusive_results_separate() {
+        let sequences = common_result_dialogue_sequences();
+        assert_eq!(sequences.len(), 18);
+        assert!(sequences.contains(&vec![0x1A]));
+        assert!(sequences.contains(&vec![0x1A, 0x27, 0x28]));
+        assert!(sequences.contains(&vec![0x1A, 0x33]));
+        assert!(
+            !sequences
+                .iter()
+                .any(|sequence| { sequence.contains(&0x1D) && sequence.contains(&0x30) })
+        );
     }
 }

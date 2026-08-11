@@ -12,6 +12,7 @@ mod item_use_families;
 mod runtime_evidence;
 mod screen_roles;
 mod source_contract;
+mod special_use_runtime;
 mod translation_workspace;
 
 use runtime_evidence::{RuntimeObservation, runtime_observations};
@@ -37,6 +38,7 @@ struct ItemFlowReport {
     item_use_catalog: item_use_families::ItemUseCatalog,
     empty_inventory_label: FixedLabelBinding,
     runtime_observations: Vec<RuntimeObservation>,
+    special_use_runtime_observations: Vec<special_use_runtime::SpecialUseRuntimeObservation>,
     source_regions: Vec<SourceRegionBinding>,
     unresolved_downstream_roles: Vec<&'static str>,
     release_eligible: bool,
@@ -166,6 +168,10 @@ pub(crate) fn validate_item_lifetime_source(rom: &Rom) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn item_use_result_dialogue_sequences() -> Vec<Vec<u8>> {
+    item_use_families::common_result_dialogue_sequences()
+}
+
 fn build_report(rom: &Rom) -> Result<ItemFlowReport> {
     validate_state_routes(rom)?;
     validate_action_result_dialogue_indices(rom)?;
@@ -183,13 +189,13 @@ fn build_report(rom: &Rom) -> Result<ItemFlowReport> {
         .context("missing NO ITEM label")?;
 
     Ok(ItemFlowReport {
-        schema: 3,
+        schema: 4,
         source_sha1: EXPECTED_SOURCE_SHA1,
         scope: Scope {
             translation_direction: "Japanese to Korean",
             preserve_existing_english_and_digits: true,
             dialogue_content_emitted: false,
-            proof_boundary: "source-bound item screen flow, complete use-effect families, typed class-change and earth-orb downstream code, plus runtime-observed equip, use, transfer, and discard branches; no translated dialogue or ROM mutation",
+            proof_boundary: "source-bound item screen flow, complete use-effect families, typed class-change and earth-orb downstream code, plus runtime-observed equip, use, transfer, discard, successful class-change, and earth-orb branches; forced special-item setups prove consumer reachability rather than natural acquisition, and no translated dialogue or ROM mutation is emitted",
         },
         route: ItemRoute {
             command_result: 6,
@@ -225,12 +231,9 @@ fn build_report(rom: &Rom) -> Result<ItemFlowReport> {
         item_use_catalog,
         empty_inventory_label,
         runtime_observations: runtime_observations(),
+        special_use_runtime_observations: special_use_runtime::observations(),
         source_regions,
-        unresolved_downstream_roles: vec![
-            "item_transfer_target_selection",
-            "item_class_change_sequence",
-            "item_earth_orb_sequence",
-        ],
+        unresolved_downstream_roles: vec!["item_transfer_target_selection"],
         release_eligible: false,
     })
 }

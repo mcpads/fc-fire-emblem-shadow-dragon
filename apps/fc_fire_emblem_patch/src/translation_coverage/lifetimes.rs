@@ -467,7 +467,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(inventory.demands.len(), 23);
+        assert_eq!(inventory.demands.len(), 24);
         assert_eq!(inventory.strongest.state, "partial");
         assert_eq!(
             inventory.strongest.selected_screen_role,
@@ -507,6 +507,7 @@ mod tests {
         [
             "item_inventory_list",
             "item_action_menu",
+            "item_use_result",
             "item_equip_result",
             "item_transfer_result",
             "item_discard_result",
