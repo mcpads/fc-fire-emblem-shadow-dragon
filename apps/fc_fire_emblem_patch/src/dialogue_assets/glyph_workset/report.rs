@@ -1,6 +1,7 @@
 use serde::Serialize;
 
 use super::TranslationStatus;
+use super::maximum_source::MaximumDialogueSourceBinding;
 
 #[derive(Debug, Serialize)]
 pub(super) struct MainDialogueGlyphWorksetReport {
@@ -18,6 +19,7 @@ pub(super) struct MainDialogueGlyphWorksetReport {
     pub(super) max_record_unique_glyph_count: usize,
     pub(super) max_transition_chain_unique_glyph_count: usize,
     pub(super) maximum_transition_chain: MaximumTransitionChainReport,
+    pub(super) maximum_source_binding: Option<MaximumDialogueSourceBinding>,
     pub(super) observed_screen_lifetimes: Vec<ObservedScreenLifetimeReport>,
     pub(super) capacity: GlyphCapacityReport,
     pub(super) unresolved: Vec<&'static str>,

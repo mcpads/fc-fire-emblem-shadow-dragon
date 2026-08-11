@@ -9,6 +9,7 @@ use crate::font_slots::active_hangul_codes;
 
 use super::*;
 
+mod maximum_source;
 mod report;
 mod screen_lifetimes;
 #[cfg(test)]
@@ -49,7 +50,18 @@ pub(crate) fn analyze_main_dialogue_glyph_workset(
     validate_workspace_translations(&workspace)?;
 
     let graph = inspect_main_dialogue_graph(rom.data())?;
-    let report = build_glyph_workset_report(&workspace, &graph, sha1_hex(&workspace_bytes))?;
+    let workspace_sha1 = sha1_hex(&workspace_bytes);
+    let preliminary = build_glyph_workset_report(&workspace, &graph, workspace_sha1.clone(), None)?;
+    let maximum_source_binding = maximum_source::bind_maximum_dialogue_source(
+        rom.prg(),
+        &preliminary.maximum_transition_chain,
+    )?;
+    let report = build_glyph_workset_report(
+        &workspace,
+        &graph,
+        workspace_sha1,
+        Some(maximum_source_binding),
+    )?;
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize main-dialogue glyph workset")?;
     report_bytes.push(b'\n');
@@ -83,6 +95,7 @@ fn build_glyph_workset_report(
     workspace: &MainDialogueWorkspace,
     graph: &MainDialogueGraphReport,
     workspace_sha1: String,
+    maximum_source_binding: Option<maximum_source::MaximumDialogueSourceBinding>,
 ) -> Result<MainDialogueGlyphWorksetReport> {
     let mut status_counts = GlyphWorksetStatusCounts::default();
     let mut filled_glyphs = BTreeSet::new();
@@ -177,22 +190,25 @@ fn build_glyph_workset_report(
     });
     let unresolved = if review_complete {
         vec![
+            "the source-bound chapter-seven C0:18 maximum still needs its runtime screen-code lifetime",
             "other caller-handoff screen lifetimes and line-width checks remain separate from the glyph working-set count",
         ]
     } else if translation_input_complete {
         vec![
             "draft translation input is complete, but human review is incomplete",
+            "the source-bound chapter-seven C0:18 maximum still needs its runtime screen-code lifetime",
             "other caller-handoff screen lifetimes and line-width checks remain separate from the glyph working-set count",
         ]
     } else {
         vec![
             "reviewed Korean translation input is incomplete, so the approved working set is not final",
+            "the source-bound chapter-seven C0:18 maximum still needs its runtime screen-code lifetime",
             "other caller-handoff screen lifetimes and line-width checks remain separate from the glyph working-set count",
         ]
     };
 
     Ok(MainDialogueGlyphWorksetReport {
-        schema: 4,
+        schema: 5,
         source_sha1: EXPECTED_SOURCE_SHA1,
         workspace_sha1,
         scope: GlyphWorksetScope {
@@ -213,6 +229,7 @@ fn build_glyph_workset_report(
         max_record_unique_glyph_count,
         max_transition_chain_unique_glyph_count,
         maximum_transition_chain,
+        maximum_source_binding,
         observed_screen_lifetimes,
         capacity: GlyphCapacityReport {
             active_slot_count,

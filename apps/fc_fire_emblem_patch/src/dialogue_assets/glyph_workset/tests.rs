@@ -7,9 +7,13 @@ fn approved_set_uses_only_complete_lines() {
         line("line-review", "글{EF}", TranslationStatus::NeedsHumanReview),
     ]);
 
-    let report =
-        build_glyph_workset_report(&workspace, &empty_graph(), "workspace-sha1".to_owned())
-            .unwrap();
+    let report = build_glyph_workset_report(
+        &workspace,
+        &empty_graph(),
+        "workspace-sha1".to_owned(),
+        None,
+    )
+    .unwrap();
 
     assert_eq!(report.status_counts.complete, 1);
     assert_eq!(report.status_counts.needs_human_review, 1);
@@ -31,9 +35,13 @@ fn all_complete_input_reports_final_capacity() {
         TranslationStatus::Complete,
     )]);
 
-    let report =
-        build_glyph_workset_report(&workspace, &empty_graph(), "workspace-sha1".to_owned())
-            .unwrap();
+    let report = build_glyph_workset_report(
+        &workspace,
+        &empty_graph(),
+        "workspace-sha1".to_owned(),
+        None,
+    )
+    .unwrap();
 
     assert!(report.capacity.translation_input_complete);
     assert!(report.capacity.working_set_ready);
@@ -49,9 +57,13 @@ fn serialized_report_omits_dialogue_glyphs_and_paths() {
         "한{EF}",
         TranslationStatus::Complete,
     )]);
-    let report =
-        build_glyph_workset_report(&workspace, &empty_graph(), "workspace-sha1".to_owned())
-            .unwrap();
+    let report = build_glyph_workset_report(
+        &workspace,
+        &empty_graph(),
+        "workspace-sha1".to_owned(),
+        None,
+    )
+    .unwrap();
     let json = serde_json::to_string(&report).unwrap();
 
     assert!(!json.contains('한'));
@@ -75,7 +87,7 @@ fn transition_chain_capacity_uses_the_union_of_every_record() {
     let graph = graph_with_edge("main-dialogue", 0, "main-dialogue", 1);
 
     let report =
-        build_glyph_workset_report(&workspace, &graph, "workspace-sha1".to_owned()).unwrap();
+        build_glyph_workset_report(&workspace, &graph, "workspace-sha1".to_owned(), None).unwrap();
 
     assert_eq!(report.max_record_unique_glyph_count, 110);
     assert_eq!(report.max_transition_chain_unique_glyph_count, 220);
@@ -114,9 +126,13 @@ fn observed_shop_lifetime_counts_retained_source_slots_and_both_dialogue_records
         ),
     ]);
 
-    let report =
-        build_glyph_workset_report(&workspace, &empty_graph(), "workspace-sha1".to_owned())
-            .unwrap();
+    let report = build_glyph_workset_report(
+        &workspace,
+        &empty_graph(),
+        "workspace-sha1".to_owned(),
+        None,
+    )
+    .unwrap();
 
     let lifetime = &report.observed_screen_lifetimes[0];
     assert_eq!(lifetime.source_record_count, 2);
@@ -150,9 +166,13 @@ fn observed_epilogue_family_reserves_names_locations_and_the_dialogue_chain() {
         &format!("{glyphs}{{E7}}"),
     )]);
 
-    let report =
-        build_glyph_workset_report(&workspace, &empty_graph(), "workspace-sha1".to_owned())
-            .unwrap();
+    let report = build_glyph_workset_report(
+        &workspace,
+        &empty_graph(),
+        "workspace-sha1".to_owned(),
+        None,
+    )
+    .unwrap();
 
     let lifetime = &report.observed_screen_lifetimes[0];
     assert_eq!(lifetime.source_record_count, 1);
@@ -174,9 +194,13 @@ fn observed_game_over_budget_uses_only_the_runtime_selected_record() {
         &format!("{glyphs}{{E7}}"),
     )]);
 
-    let report =
-        build_glyph_workset_report(&workspace, &empty_graph(), "workspace-sha1".to_owned())
-            .unwrap();
+    let report = build_glyph_workset_report(
+        &workspace,
+        &empty_graph(),
+        "workspace-sha1".to_owned(),
+        None,
+    )
+    .unwrap();
 
     let lifetime = &report.observed_screen_lifetimes[0];
     assert_eq!(lifetime.source_record_count, 1);

@@ -54,6 +54,11 @@ pub struct ChapterVictorySummary {
     pub next_observation_gate: &'static str,
 }
 
+pub(crate) fn validate_chapter_clear_command_route(prg: &[u8]) -> Result<()> {
+    source_flow::bind_command_route(prg)?;
+    Ok(())
+}
+
 pub fn analyze_chapter_victory(
     source_path: &Path,
     report_path: &Path,

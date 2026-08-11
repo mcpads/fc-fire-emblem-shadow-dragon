@@ -7,7 +7,7 @@ use crate::{font_slots::ACTIVE_HANGUL_SLOT_COUNT, rom::EXPECTED_SOURCE_SHA1, sha
 
 use super::report::{StrongestLifetimeReport, TranslationLifetimeDemandReport};
 
-const MAIN_DIALOGUE_REPORT_SCHEMA: u8 = 4;
+const MAIN_DIALOGUE_REPORT_SCHEMA: u8 = 5;
 const BATTLE_REPORT_SCHEMA: u8 = 12;
 
 pub(super) struct LifetimeInputBindings<'a> {
@@ -218,7 +218,7 @@ fn build_translation_lifetime_inventory(
             selected_slot_demand: Some(strongest.total_slot_demand),
             main_dialogue_maximum_target_glyph_count: main.max_transition_chain_unique_glyph_count,
             main_dialogue_maximum_screen_bound: false,
-            next_gate: "bind the 175-glyph main-dialogue maximum to its actual producer and screen lifetime before selecting the global font-supply structure",
+            next_gate: "bind the source-proven chapter-seven C0:18 producer to its actual runtime screen lifetime before selecting the global font-supply structure",
         },
         demands,
         unmeasured_screen_roles,
