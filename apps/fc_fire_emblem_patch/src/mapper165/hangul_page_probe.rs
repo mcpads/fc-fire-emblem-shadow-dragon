@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{collections::BTreeSet, fs, path::Path};
 
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
@@ -21,6 +21,7 @@ use crate::{
 use super::{
     FIRST_EXTENSION_CHR_PAGE, SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
     assemble_mapper165_parity_bytes, encode_chr_page_register,
+    options_lifetime::inspect_options_lifetime,
     options_page::{
         PAGE_A_REGISTER as OPTIONS_PAGE_A_REGISTER, PAGE_B_REGISTER as OPTIONS_PAGE_B_REGISTER,
         PAGE_ROUTINE_ADDRESS as OPTIONS_PAGE_ROUTINE_ADDRESS,
@@ -89,6 +90,14 @@ struct ScreenContractReport {
     row_state_address: String,
     page_a_rows: Vec<u8>,
     page_b_rows: Vec<u8>,
+    screen_evidence_manifest_sha1: String,
+    temporal_sample_count: usize,
+    unique_nametable_count: usize,
+    observed_row_states: Vec<u8>,
+    target_glyph_count: usize,
+    visible_active_code_count: usize,
+    preserved_active_code_count: usize,
+    total_slot_demand: usize,
     fallback: &'static str,
 }
 
@@ -162,6 +171,14 @@ pub(crate) struct HangulPageProbeSummary {
     pub(crate) report_sha1: String,
     pub(crate) page_pack_sha1: String,
     pub(crate) roster_page_pack_sha1: String,
+    pub(crate) options_screen_evidence_manifest_sha1: String,
+    pub(crate) options_temporal_sample_count: usize,
+    pub(crate) options_unique_nametable_count: usize,
+    pub(crate) options_observed_row_states: Vec<u8>,
+    pub(crate) options_target_glyph_count: usize,
+    pub(crate) options_visible_active_code_count: usize,
+    pub(crate) options_preserved_active_code_count: usize,
+    pub(crate) options_total_slot_demand: usize,
     pub(crate) tracked_write_count: usize,
 }
 
@@ -169,6 +186,7 @@ pub(crate) fn build_mapper165_hangul_page_probe(
     source_path: &Path,
     localization_path: &Path,
     roster_localization_path: &Path,
+    options_screen_evidence_path: &Path,
     output_path: &Path,
     report_path: &Path,
 ) -> Result<HangulPageProbeSummary> {
@@ -195,6 +213,17 @@ pub(crate) fn build_mapper165_hangul_page_probe(
     );
     let localization = OptionsLocalization::from_path(localization_path)?;
     let validated_localization = localization.validate()?;
+    let option_target_codes = localization
+        .glyphs
+        .iter()
+        .map(|glyph| glyph.code)
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        option_target_codes.len() == validated_localization.tiles.len(),
+        "options glyph assignments repeat a target code"
+    );
+    let options_lifetime =
+        inspect_options_lifetime(options_screen_evidence_path, &option_target_codes)?;
     let page_pack = assemble_hangul_page_pack(&source_rom, &localization)?;
     ensure!(
         page_pack.len() == OPTIONS_PAGE_COUNT * CHR_PAGE_SIZE,
@@ -416,6 +445,14 @@ pub(crate) fn build_mapper165_hangul_page_probe(
             row_state_address: "0x0034".to_owned(),
             page_a_rows: vec![0x20, 0x40],
             page_b_rows: vec![0x30],
+            screen_evidence_manifest_sha1: options_lifetime.manifest_sha1.clone(),
+            temporal_sample_count: options_lifetime.sample_count,
+            unique_nametable_count: options_lifetime.unique_nametable_count,
+            observed_row_states: options_lifetime.observed_row_states.clone(),
+            target_glyph_count: options_lifetime.target_glyph_count,
+            visible_active_code_count: options_lifetime.visible_active_code_count,
+            preserved_active_code_count: options_lifetime.preserved_active_code_count,
+            total_slot_demand: options_lifetime.total_slot_demand,
             fallback: "call the existing pair-aware right FD selector",
         },
         roster_screen_contract: RosterScreenContractReport {
@@ -510,6 +547,14 @@ pub(crate) fn build_mapper165_hangul_page_probe(
         report_sha1,
         page_pack_sha1,
         roster_page_pack_sha1,
+        options_screen_evidence_manifest_sha1: options_lifetime.manifest_sha1,
+        options_temporal_sample_count: options_lifetime.sample_count,
+        options_unique_nametable_count: options_lifetime.unique_nametable_count,
+        options_observed_row_states: options_lifetime.observed_row_states,
+        options_target_glyph_count: options_lifetime.target_glyph_count,
+        options_visible_active_code_count: options_lifetime.visible_active_code_count,
+        options_preserved_active_code_count: options_lifetime.preserved_active_code_count,
+        options_total_slot_demand: options_lifetime.total_slot_demand,
         tracked_write_count,
     })
 }

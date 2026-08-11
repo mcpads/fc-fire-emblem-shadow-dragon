@@ -245,6 +245,15 @@ pub(crate) fn analyze_translation_coverage(
             class_profile_preserved_active_code_count: installation
                 .class_profile_preserved_active_code_count,
             class_profile_runtime_bound_to_build: installation.class_profile_runtime_bound_to_build,
+            front_end_target_glyph_count: installation.front_end_target_glyph_count,
+            front_end_preserved_active_code_count: installation
+                .front_end_preserved_active_code_count,
+            front_end_no_save_source_lifetime_bound: installation
+                .front_end_no_save_source_lifetime_bound,
+            options_target_glyph_count: installation.options_target_glyph_count,
+            options_preserved_active_code_count: installation.options_preserved_active_code_count,
+            options_total_slot_demand: installation.options_total_slot_demand,
+            options_capacity_bound_to_build: installation.options_capacity_bound_to_build,
             current_build_report_sha1: &installation.build_report_sha1,
             roster_page_target_glyph_count: installation.roster_page_target_glyph_count,
             roster_page_preserved_active_code_count: installation

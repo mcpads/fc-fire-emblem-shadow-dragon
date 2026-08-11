@@ -70,8 +70,9 @@ use maximum_dialogue_stage::{MaximumDialogueStageInputs, install_maximum_dialogu
 use report::{
     CumulativeBattleTextReport, CumulativeChapterTitleReport, CumulativeClassProfileReport,
     CumulativeDialogueLifetimeReport, CumulativeDialogueReport, CumulativeFrontEndMenuReport,
-    CumulativeMaximumDialogueReport, CumulativePatchReport, CumulativeStageReport,
-    CumulativeUnitNameReport, CumulativeWeaponShopSharedTextReport, SelectorChainReport,
+    CumulativeMaximumDialogueReport, CumulativeOptionsMenuReport, CumulativePatchReport,
+    CumulativeStageReport, CumulativeUnitNameReport, CumulativeWeaponShopSharedTextReport,
+    SelectorChainReport,
 };
 use shop_dialogue_runtime::verify_shop_dialogue_runtime_evidence;
 use shop_dialogue_stage::install_shop_dialogue_stage;
@@ -129,6 +130,7 @@ pub(crate) struct CumulativePatchInputs<'a> {
     pub(crate) source_path: &'a Path,
     pub(crate) options_localization_path: &'a Path,
     pub(crate) roster_localization_path: &'a Path,
+    pub(crate) options_screen_evidence_path: &'a Path,
     pub(crate) main_dialogue_workspace_path: &'a Path,
     pub(crate) chapter_title_localization_path: &'a Path,
     pub(crate) front_end_menu_localization_path: &'a Path,
@@ -217,6 +219,7 @@ pub(crate) fn build_cumulative_patch(
         inputs.source_path,
         inputs.options_localization_path,
         inputs.roster_localization_path,
+        inputs.options_screen_evidence_path,
         &ui_stage_rom_path,
         &ui_stage_report_path,
     )?;
@@ -950,6 +953,18 @@ pub(crate) fn build_cumulative_patch(
                         && runtime.final_exit_bound_to_build
                 }),
             },
+        },
+        options_menu: CumulativeOptionsMenuReport {
+            installed_entry_count: 3,
+            screen_evidence_manifest_sha1: ui_stage.options_screen_evidence_manifest_sha1.clone(),
+            temporal_sample_count: ui_stage.options_temporal_sample_count,
+            unique_nametable_count: ui_stage.options_unique_nametable_count,
+            observed_row_states: ui_stage.options_observed_row_states.clone(),
+            target_glyph_count: ui_stage.options_target_glyph_count,
+            visible_active_code_count: ui_stage.options_visible_active_code_count,
+            preserved_active_code_count: ui_stage.options_preserved_active_code_count,
+            total_slot_demand: ui_stage.options_total_slot_demand,
+            capacity_bound_to_build: true,
         },
         front_end_menu: CumulativeFrontEndMenuReport {
             workspace_sha1: front_end_menu_plan.workspace_sha1.clone(),

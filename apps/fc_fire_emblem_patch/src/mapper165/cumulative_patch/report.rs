@@ -12,6 +12,7 @@ pub(super) struct CumulativePatchReport {
     pub(super) stages: Vec<CumulativeStageReport>,
     pub(super) chapter_titles: CumulativeChapterTitleReport,
     pub(super) main_dialogue: CumulativeDialogueReport,
+    pub(super) options_menu: CumulativeOptionsMenuReport,
     pub(super) front_end_menu: CumulativeFrontEndMenuReport,
     pub(super) playable_unit_names: CumulativeUnitNameReport,
     pub(super) automatic_class_profiles: CumulativeClassProfileReport,
@@ -25,6 +26,20 @@ pub(super) struct CumulativePatchReport {
     pub(super) runtime_verified: bool,
     pub(super) unresolved: Vec<&'static str>,
     pub(super) release_eligible: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct CumulativeOptionsMenuReport {
+    pub(super) installed_entry_count: usize,
+    pub(super) screen_evidence_manifest_sha1: String,
+    pub(super) temporal_sample_count: usize,
+    pub(super) unique_nametable_count: usize,
+    pub(super) observed_row_states: Vec<u8>,
+    pub(super) target_glyph_count: usize,
+    pub(super) visible_active_code_count: usize,
+    pub(super) preserved_active_code_count: usize,
+    pub(super) total_slot_demand: usize,
+    pub(super) capacity_bound_to_build: bool,
 }
 
 #[derive(Debug, Serialize)]

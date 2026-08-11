@@ -30,6 +30,7 @@ pub(crate) mod hangul_page_probe;
 mod maximum_dialogue_boundary;
 mod maximum_dialogue_page;
 mod maximum_dialogue_runtime;
+mod options_lifetime;
 mod options_page;
 mod roster_page;
 mod runtime;

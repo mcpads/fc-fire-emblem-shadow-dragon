@@ -467,6 +467,11 @@ enum Command {
         roster_localization: PathBuf,
         #[arg(
             long,
+            default_value = "evidence/private/hangul-page-context/options-lifetime-manifest.json"
+        )]
+        options_screen_evidence: PathBuf,
+        #[arg(
+            long,
             default_value = "out/fire-emblem-fe1-mapper165-hangul-page-probe.nes"
         )]
         output: PathBuf,
@@ -480,6 +485,11 @@ enum Command {
         options_localization: PathBuf,
         #[arg(long, default_value = "assets/translation/roster.ko.json")]
         roster_localization: PathBuf,
+        #[arg(
+            long,
+            default_value = "evidence/private/hangul-page-context/options-lifetime-manifest.json"
+        )]
+        options_screen_evidence: PathBuf,
         #[arg(long, default_value = "private/dialogue/main-workspace.json")]
         main_dialogue_workspace: PathBuf,
         #[arg(long, default_value = "assets/translation/chapter-titles.ko.json")]
@@ -1435,6 +1445,7 @@ fn main() -> Result<()> {
             source,
             localization,
             roster_localization,
+            options_screen_evidence,
             output,
             report,
         } => {
@@ -1442,6 +1453,7 @@ fn main() -> Result<()> {
                 &source,
                 &localization,
                 &roster_localization,
+                &options_screen_evidence,
                 &output,
                 &report,
             )?;
@@ -1457,6 +1469,7 @@ fn main() -> Result<()> {
             source,
             options_localization,
             roster_localization,
+            options_screen_evidence,
             main_dialogue_workspace,
             chapter_title_localization,
             front_end_menu_localization,
@@ -1487,6 +1500,7 @@ fn main() -> Result<()> {
                     source_path: &source,
                     options_localization_path: &options_localization,
                     roster_localization_path: &roster_localization,
+                    options_screen_evidence_path: &options_screen_evidence,
                     main_dialogue_workspace_path: &main_dialogue_workspace,
                     chapter_title_localization_path: &chapter_title_localization,
                     front_end_menu_localization_path: &front_end_menu_localization,

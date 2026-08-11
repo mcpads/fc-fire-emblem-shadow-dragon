@@ -26,6 +26,7 @@ struct CurrentBuildReport {
     stages: Vec<CurrentBuildStage>,
     chapter_titles: CurrentChapterTitles,
     main_dialogue: CurrentMainDialogue,
+    options_menu: CurrentOptionsMenu,
     front_end_menu: CurrentFrontEndMenu,
     playable_unit_names: CurrentUnitNames,
     automatic_class_profiles: CurrentClassProfiles,
@@ -75,7 +76,22 @@ struct CurrentMaximumDialogueLifetime {
 #[derive(Debug, Deserialize)]
 struct CurrentFrontEndMenu {
     installed_entry_count: usize,
+    unique_glyph_count: usize,
+    preserved_active_code_count: usize,
+    no_save_source_lifetime_bound: bool,
     runtime_variants_bound_to_build: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct CurrentOptionsMenu {
+    installed_entry_count: usize,
+    temporal_sample_count: usize,
+    observed_row_states: Vec<u8>,
+    target_glyph_count: usize,
+    visible_active_code_count: usize,
+    preserved_active_code_count: usize,
+    total_slot_demand: usize,
+    capacity_bound_to_build: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -152,6 +168,13 @@ pub(crate) struct CurrentInstallation {
     pub(crate) class_profile_page_target_glyph_counts: Vec<usize>,
     pub(crate) class_profile_preserved_active_code_count: usize,
     pub(crate) class_profile_runtime_bound_to_build: bool,
+    pub(crate) front_end_target_glyph_count: usize,
+    pub(crate) front_end_preserved_active_code_count: usize,
+    pub(crate) front_end_no_save_source_lifetime_bound: bool,
+    pub(crate) options_target_glyph_count: usize,
+    pub(crate) options_preserved_active_code_count: usize,
+    pub(crate) options_total_slot_demand: usize,
+    pub(crate) options_capacity_bound_to_build: bool,
     pub(crate) roster_page_target_glyph_count: usize,
     pub(crate) roster_page_preserved_active_code_count: usize,
     pub(crate) roster_page_total_slot_demand: usize,
@@ -195,6 +218,8 @@ pub(crate) fn inspect_current_installation(
     );
     validate_weapon_shop_lifetime(&report)?;
     validate_unit_roster_lifetime(&report)?;
+    validate_front_end_lifetime(&report)?;
+    validate_options_lifetime(&report)?;
     let domains = collect_domain_installations(&report)?;
 
     Ok(CurrentInstallation {
@@ -210,6 +235,15 @@ pub(crate) fn inspect_current_installation(
         class_profile_runtime_bound_to_build: report
             .automatic_class_profiles
             .runtime_bound_to_build,
+        front_end_target_glyph_count: report.front_end_menu.unique_glyph_count,
+        front_end_preserved_active_code_count: report.front_end_menu.preserved_active_code_count,
+        front_end_no_save_source_lifetime_bound: report
+            .front_end_menu
+            .no_save_source_lifetime_bound,
+        options_target_glyph_count: report.options_menu.target_glyph_count,
+        options_preserved_active_code_count: report.options_menu.preserved_active_code_count,
+        options_total_slot_demand: report.options_menu.total_slot_demand,
+        options_capacity_bound_to_build: report.options_menu.capacity_bound_to_build,
         roster_page_target_glyph_count: report.playable_unit_names.roster_page_target_glyph_count,
         roster_page_preserved_active_code_count: report
             .playable_unit_names
@@ -231,6 +265,42 @@ pub(crate) fn inspect_current_installation(
         battle_dialogue_workspace_sha1: report.battle_text.dialogue_workspace_sha1,
         battle_temporal_manifest_sha1: report.battle_text.temporal_manifest_sha1,
     })
+}
+
+fn validate_front_end_lifetime(report: &CurrentBuildReport) -> Result<()> {
+    let front_end = &report.front_end_menu;
+    ensure!(
+        front_end.installed_entry_count == 7
+            && front_end.unique_glyph_count > 0
+            && front_end.preserved_active_code_count > 0
+            && front_end.no_save_source_lifetime_bound,
+        "current front-end menu lifetime changed"
+    );
+    Ok(())
+}
+
+fn validate_options_lifetime(report: &CurrentBuildReport) -> Result<()> {
+    let options = &report.options_menu;
+    let observed_rows = options
+        .observed_row_states
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        options.installed_entry_count == 3
+            && options.temporal_sample_count >= 2
+            && observed_rows.contains(&0x20)
+            && observed_rows.contains(&0x30)
+            && options.target_glyph_count > 0
+            && options.preserved_active_code_count > 0
+            && options.visible_active_code_count == options.total_slot_demand
+            && options.total_slot_demand
+                == options.target_glyph_count + options.preserved_active_code_count
+            && options.total_slot_demand <= crate::font_slots::ACTIVE_HANGUL_SLOT_COUNT
+            && options.capacity_bound_to_build,
+        "current options-menu lifetime changed"
+    );
+    Ok(())
 }
 
 fn validate_unit_roster_lifetime(report: &CurrentBuildReport) -> Result<()> {
@@ -684,7 +754,20 @@ mod tests {
             },
             "front_end_menu": {
                 "installed_entry_count": 0,
+                "unique_glyph_count": 0,
+                "preserved_active_code_count": 0,
+                "no_save_source_lifetime_bound": false,
                 "runtime_variants_bound_to_build": false
+            },
+            "options_menu": {
+                "installed_entry_count": 3,
+                "temporal_sample_count": 2,
+                "observed_row_states": [32, 48],
+                "target_glyph_count": 12,
+                "visible_active_code_count": 90,
+                "preserved_active_code_count": 78,
+                "total_slot_demand": 90,
+                "capacity_bound_to_build": true
             },
             "playable_unit_names": {
                 "workspace_entry_count": 52,

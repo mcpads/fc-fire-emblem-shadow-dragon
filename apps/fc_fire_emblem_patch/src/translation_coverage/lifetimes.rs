@@ -7,7 +7,9 @@ use crate::{font_slots::ACTIVE_HANGUL_SLOT_COUNT, rom::EXPECTED_SOURCE_SHA1, sha
 
 use super::report::{StrongestLifetimeReport, TranslationLifetimeDemandReport};
 
+mod front_end_menu;
 mod item_flow;
+mod options_menu;
 mod unit_roster;
 mod unit_ui;
 mod weapon_shop;
@@ -26,6 +28,13 @@ pub(super) struct LifetimeInputBindings<'a> {
     pub(super) class_profile_page_target_glyph_counts: &'a [usize],
     pub(super) class_profile_preserved_active_code_count: usize,
     pub(super) class_profile_runtime_bound_to_build: bool,
+    pub(super) front_end_target_glyph_count: usize,
+    pub(super) front_end_preserved_active_code_count: usize,
+    pub(super) front_end_no_save_source_lifetime_bound: bool,
+    pub(super) options_target_glyph_count: usize,
+    pub(super) options_preserved_active_code_count: usize,
+    pub(super) options_total_slot_demand: usize,
+    pub(super) options_capacity_bound_to_build: bool,
     pub(super) current_build_report_sha1: &'a str,
     pub(super) roster_page_target_glyph_count: usize,
     pub(super) roster_page_preserved_active_code_count: usize,
@@ -52,6 +61,15 @@ struct LifetimeReports {
     battle: BattleSurfaceConstraintsReport,
     main_dialogue_sha1: String,
     battle_sha1: String,
+}
+
+struct ConsumerLifetimeDemands {
+    unit_ui: Vec<TranslationLifetimeDemandReport>,
+    unit_roster: TranslationLifetimeDemandReport,
+    weapon_shop: Vec<TranslationLifetimeDemandReport>,
+    item_flow: Vec<TranslationLifetimeDemandReport>,
+    front_end_menu: TranslationLifetimeDemandReport,
+    options_menu: TranslationLifetimeDemandReport,
 }
 
 #[derive(Debug, Deserialize)]
@@ -188,6 +206,19 @@ pub(super) fn inspect_translation_lifetimes(
         unit_name_workspace_sha1: bindings.unit_name_workspace_sha1,
         item_action_label_workspace_sha1: bindings.item_action_label_workspace_sha1,
     })?;
+    let front_end_menu_demand = front_end_menu::inspect(front_end_menu::InputBindings {
+        target_glyph_count: bindings.front_end_target_glyph_count,
+        preserved_active_code_count: bindings.front_end_preserved_active_code_count,
+        no_save_source_lifetime_bound: bindings.front_end_no_save_source_lifetime_bound,
+        evidence_report_sha1: bindings.current_build_report_sha1,
+    })?;
+    let options_menu_demand = options_menu::inspect(options_menu::InputBindings {
+        target_glyph_count: bindings.options_target_glyph_count,
+        preserved_active_code_count: bindings.options_preserved_active_code_count,
+        total_slot_demand: bindings.options_total_slot_demand,
+        capacity_bound_to_build: bindings.options_capacity_bound_to_build,
+        evidence_report_sha1: bindings.current_build_report_sha1,
+    })?;
 
     build_translation_lifetime_inventory(
         LifetimeReports {
@@ -197,10 +228,14 @@ pub(super) fn inspect_translation_lifetimes(
             battle_sha1: sha1_hex(&battle_bytes),
         },
         bindings,
-        unit_ui_demands,
-        unit_roster_demand,
-        weapon_shop_demands,
-        item_flow_demands,
+        ConsumerLifetimeDemands {
+            unit_ui: unit_ui_demands,
+            unit_roster: unit_roster_demand,
+            weapon_shop: weapon_shop_demands,
+            item_flow: item_flow_demands,
+            front_end_menu: front_end_menu_demand,
+            options_menu: options_menu_demand,
+        },
         japanese_bearing_screen_roles,
     )
 }
@@ -208,10 +243,7 @@ pub(super) fn inspect_translation_lifetimes(
 fn build_translation_lifetime_inventory(
     reports: LifetimeReports,
     bindings: LifetimeInputBindings<'_>,
-    unit_ui_demands: Vec<TranslationLifetimeDemandReport>,
-    unit_roster_demand: TranslationLifetimeDemandReport,
-    weapon_shop_demands: Vec<TranslationLifetimeDemandReport>,
-    item_flow_demands: Vec<TranslationLifetimeDemandReport>,
+    consumer_demands: ConsumerLifetimeDemands,
     japanese_bearing_screen_roles: &[String],
 ) -> Result<TranslationLifetimeInventory> {
     let LifetimeReports {
@@ -257,10 +289,12 @@ fn build_translation_lifetime_inventory(
         fits_active_page: class_profile_total_slot_demand <= ACTIVE_HANGUL_SLOT_COUNT,
         evidence_report_sha1: bindings.current_build_report_sha1.to_owned(),
     });
-    demands.extend(unit_ui_demands);
-    demands.push(unit_roster_demand);
-    demands.extend(weapon_shop_demands);
-    demands.extend(item_flow_demands);
+    demands.extend(consumer_demands.unit_ui);
+    demands.push(consumer_demands.unit_roster);
+    demands.extend(consumer_demands.weapon_shop);
+    demands.extend(consumer_demands.item_flow);
+    demands.push(consumer_demands.front_end_menu);
+    demands.push(consumer_demands.options_menu);
     for lifetime in main.observed_screen_lifetimes {
         ensure!(
             lifetime.filled_unique_glyph_count
@@ -406,6 +440,21 @@ mod tests {
         })
         .unwrap();
         let item_flow_demands = item_flow_demands();
+        let front_end_menu_demand = front_end_menu::inspect(front_end_menu::InputBindings {
+            target_glyph_count: 15,
+            preserved_active_code_count: 12,
+            no_save_source_lifetime_bound: true,
+            evidence_report_sha1: "build-report",
+        })
+        .unwrap();
+        let options_menu_demand = options_menu::inspect(options_menu::InputBindings {
+            target_glyph_count: 12,
+            preserved_active_code_count: 78,
+            total_slot_demand: 90,
+            capacity_bound_to_build: true,
+            evidence_report_sha1: "build-report",
+        })
+        .unwrap();
         let mut roles = [
             "battle_animation",
             "class_profile",
@@ -413,6 +462,8 @@ mod tests {
             "ending_character_epilogue",
             "game_over",
             "map_menu",
+            "new_game_choice",
+            "options",
             "unit_command_menu",
             "unit_roster",
             "unit_status",
@@ -445,6 +496,13 @@ mod tests {
                 class_profile_page_target_glyph_counts: &[143, 161],
                 class_profile_preserved_active_code_count: 12,
                 class_profile_runtime_bound_to_build: true,
+                front_end_target_glyph_count: 15,
+                front_end_preserved_active_code_count: 12,
+                front_end_no_save_source_lifetime_bound: true,
+                options_target_glyph_count: 12,
+                options_preserved_active_code_count: 78,
+                options_total_slot_demand: 90,
+                options_capacity_bound_to_build: true,
                 current_build_report_sha1: "build-report",
                 roster_page_target_glyph_count: 72,
                 roster_page_preserved_active_code_count: 18,
@@ -459,15 +517,19 @@ mod tests {
                 battle_dialogue_workspace_sha1: "battle",
                 battle_temporal_manifest_sha1: "temporal",
             },
-            unit_ui_demands,
-            unit_roster_demand,
-            weapon_shop_demands,
-            item_flow_demands,
+            ConsumerLifetimeDemands {
+                unit_ui: unit_ui_demands,
+                unit_roster: unit_roster_demand,
+                weapon_shop: weapon_shop_demands,
+                item_flow: item_flow_demands,
+                front_end_menu: front_end_menu_demand,
+                options_menu: options_menu_demand,
+            },
             &roles,
         )
         .unwrap();
 
-        assert_eq!(inventory.demands.len(), 24);
+        assert_eq!(inventory.demands.len(), 26);
         assert_eq!(inventory.strongest.state, "partial");
         assert_eq!(
             inventory.strongest.selected_screen_role,
