@@ -20,10 +20,6 @@ use report::{
 };
 use screen_lifetimes::observed_screen_lifetime_reports;
 
-struct MaximumLifetimeSource<'a> {
-    preserved_source_codes: &'a BTreeSet<u8>,
-}
-
 pub(crate) struct MainDialogueGlyphWorksetSummary {
     pub report_sha1: String,
     pub filled_line_count: usize,
@@ -53,34 +49,7 @@ pub(crate) fn analyze_main_dialogue_glyph_workset(
     validate_workspace_translations(&workspace)?;
 
     let graph = inspect_main_dialogue_graph(rom.data())?;
-    let workspace_sha1 = sha1_hex(&workspace_bytes);
-    let preliminary = build_glyph_workset_report(&workspace, &graph, workspace_sha1.clone(), None)?;
-    let maximum_record = workspace
-        .records
-        .iter()
-        .find(|record| {
-            record.table_id == preliminary.maximum_transition_chain.start_table_id
-                && record.canonical_entry_index
-                    == preliminary
-                        .maximum_transition_chain
-                        .start_canonical_entry_index
-        })
-        .context("maximum main-dialogue transition root is absent from the workspace")?;
-    let maximum_slice = plan_main_dialogue_slice(&rom, workspace_path, &maximum_record.id)?;
-    ensure!(
-        maximum_slice.unique_glyphs().len()
-            == preliminary.maximum_transition_chain.unique_glyph_count,
-        "maximum main-dialogue slice glyph count changed between analyses"
-    );
-    let maximum_lifetime_source = MaximumLifetimeSource {
-        preserved_source_codes: &maximum_slice.preserved_source_codes,
-    };
-    let report = build_glyph_workset_report(
-        &workspace,
-        &graph,
-        workspace_sha1,
-        Some(&maximum_lifetime_source),
-    )?;
+    let report = build_glyph_workset_report(&workspace, &graph, sha1_hex(&workspace_bytes))?;
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize main-dialogue glyph workset")?;
     report_bytes.push(b'\n');
@@ -114,7 +83,6 @@ fn build_glyph_workset_report(
     workspace: &MainDialogueWorkspace,
     graph: &MainDialogueGraphReport,
     workspace_sha1: String,
-    maximum_lifetime_source: Option<&MaximumLifetimeSource<'_>>,
 ) -> Result<MainDialogueGlyphWorksetReport> {
     let mut status_counts = GlyphWorksetStatusCounts::default();
     let mut filled_glyphs = BTreeSet::new();
@@ -192,8 +160,6 @@ fn build_glyph_workset_report(
         &filled_glyphs_by_record,
         &approved_glyphs_by_record,
         graph,
-        &maximum_transition_chain,
-        maximum_lifetime_source.map(|source| source.preserved_source_codes),
         active_slot_count,
         review_complete,
     )?;

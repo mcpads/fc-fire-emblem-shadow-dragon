@@ -147,10 +147,6 @@ fn build_translation_lifetime_inventory(
     }];
     for lifetime in main.observed_screen_lifetimes {
         let (screen_role, measurement_basis) = match lifetime.screen_role.as_str() {
-            "chapter-clear epilogue maximum" => (
-                "chapter_clear_epilogue_dialogue",
-                "observed chapter-clear epilogue with retained map and exact record/runtime codes",
-            ),
             "weapon-shop purchase handoff" => (
                 "weapon_shop_purchase_confirmation",
                 "observed purchase handoff with retained item and choice text",
@@ -213,15 +209,6 @@ fn build_translation_lifetime_inventory(
         .iter()
         .max_by_key(|demand| demand.total_slot_demand)
         .context("translation lifetime inventory has no measured demand")?;
-    let main_dialogue_maximum_screen_bound = demands.iter().any(|demand| {
-        demand.screen_role == "chapter_clear_epilogue_dialogue"
-            && demand.target_glyph_count == main.max_transition_chain_unique_glyph_count
-    });
-    ensure!(
-        main_dialogue_maximum_screen_bound,
-        "maximum main-dialogue transition chain has no screen-lifetime binding"
-    );
-
     Ok(TranslationLifetimeInventory {
         strongest: StrongestLifetimeReport {
             state: "partial",
@@ -230,8 +217,8 @@ fn build_translation_lifetime_inventory(
             selected_screen_role: Some(strongest.screen_role),
             selected_slot_demand: Some(strongest.total_slot_demand),
             main_dialogue_maximum_target_glyph_count: main.max_transition_chain_unique_glyph_count,
-            main_dialogue_maximum_screen_bound,
-            next_gate: "split or dynamically compose the 233-slot chapter-clear epilogue lifetime before installing the main-dialogue domain",
+            main_dialogue_maximum_screen_bound: false,
+            next_gate: "bind the 175-glyph main-dialogue maximum to its actual producer and screen lifetime before selecting the global font-supply structure",
         },
         demands,
         unmeasured_screen_roles,
@@ -243,14 +230,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bound_chapter_clear_maximum_replaces_battle_as_the_strongest_measured_lifetime() {
+    fn unbound_dialogue_maximum_does_not_replace_the_strongest_measured_lifetime() {
         let main = MainDialogueGlyphWorksetReport {
             schema: MAIN_DIALOGUE_REPORT_SCHEMA,
             source_sha1: EXPECTED_SOURCE_SHA1.to_owned(),
             workspace_sha1: "main".to_owned(),
             max_transition_chain_unique_glyph_count: 175,
             observed_screen_lifetimes: vec![
-                observed("chapter-clear epilogue maximum", 175, 58, 0),
                 observed("weapon-shop purchase handoff", 9, 17, 0),
                 observed("ending character epilogue family", 33, 99, 18),
                 observed("turn-boundary game over", 30, 90, 0),
@@ -272,7 +258,6 @@ mod tests {
         };
         let roles = [
             "battle_animation",
-            "chapter_clear_epilogue_dialogue",
             "ending_character_epilogue",
             "game_over",
             "map_menu",
@@ -289,18 +274,18 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(inventory.demands.len(), 5);
+        assert_eq!(inventory.demands.len(), 4);
         assert_eq!(inventory.strongest.state, "partial");
         assert_eq!(
             inventory.strongest.selected_screen_role,
-            Some("chapter_clear_epilogue_dialogue")
+            Some("battle_animation")
         );
-        assert_eq!(inventory.strongest.selected_slot_demand, Some(233));
+        assert_eq!(inventory.strongest.selected_slot_demand, Some(170));
         assert_eq!(
             inventory.strongest.main_dialogue_maximum_target_glyph_count,
             175
         );
-        assert!(inventory.strongest.main_dialogue_maximum_screen_bound);
+        assert!(!inventory.strongest.main_dialogue_maximum_screen_bound);
         assert_eq!(inventory.unmeasured_screen_roles, ["map_menu"]);
     }
 
