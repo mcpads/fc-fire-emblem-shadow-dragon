@@ -10,6 +10,7 @@ pub(super) const UNUSED_REMAP_TARGET: u8 = 0xFF;
 pub(super) struct SelectedPhysicalCodeAssignment {
     pub(super) color_codes: BTreeMap<u8, u8>,
     pub(super) protected_code_remap_targets: Vec<u8>,
+    pub(super) remap_pairs: Vec<(u8, u8)>,
     pub(super) collision_count: usize,
     pub(super) identity_code_count: usize,
     pub(super) remaining_safe_code_count: usize,
@@ -32,6 +33,18 @@ pub(super) fn assign_selected_physical_codes(
     selected_abstract_colors: &BTreeSet<u8>,
     protected_physical_codes: &BTreeSet<u8>,
 ) -> Result<SelectedPhysicalCodeAssignment> {
+    assign_selected_physical_codes_with_canonical_map(
+        selected_abstract_colors,
+        protected_physical_codes,
+        &active_hangul_codes(),
+    )
+}
+
+pub(super) fn assign_selected_physical_codes_with_canonical_map(
+    selected_abstract_colors: &BTreeSet<u8>,
+    protected_physical_codes: &BTreeSet<u8>,
+    canonical_color_codes: &[u8],
+) -> Result<SelectedPhysicalCodeAssignment> {
     let active_codes = active_hangul_codes();
     let active_set = active_codes.iter().copied().collect::<BTreeSet<_>>();
     ensure!(
@@ -41,8 +54,17 @@ pub(super) fn assign_selected_physical_codes(
     ensure!(
         selected_abstract_colors
             .iter()
-            .all(|color| usize::from(*color) < active_codes.len()),
+            .all(|color| usize::from(*color) < canonical_color_codes.len()),
         "selected battle contains an abstract color outside the active codebook"
+    );
+    ensure!(
+        canonical_color_codes.len() == active_codes.len()
+            && canonical_color_codes
+                .iter()
+                .copied()
+                .collect::<BTreeSet<_>>()
+                == active_set,
+        "selected battle canonical code map is not a permutation of the active codes"
     );
     ensure!(
         selected_abstract_colors.len() + protected_physical_codes.len() <= active_codes.len(),
@@ -52,7 +74,7 @@ pub(super) fn assign_selected_physical_codes(
         active_codes.len()
     );
 
-    let canonical_code_owners = active_codes
+    let canonical_code_owners = canonical_color_codes
         .iter()
         .copied()
         .enumerate()
@@ -66,7 +88,9 @@ pub(super) fn assign_selected_physical_codes(
     let colliding_colors = selected_abstract_colors
         .iter()
         .copied()
-        .filter(|color| protected_physical_codes.contains(&active_codes[usize::from(*color)]))
+        .filter(|color| {
+            protected_physical_codes.contains(&canonical_color_codes[usize::from(*color)])
+        })
         .collect::<Vec<_>>();
     let available_safe_codes = active_codes
         .iter()
@@ -93,7 +117,7 @@ pub(super) fn assign_selected_physical_codes(
         .iter()
         .copied()
         .map(|color| {
-            let canonical = active_codes[usize::from(color)];
+            let canonical = canonical_color_codes[usize::from(color)];
             (
                 color,
                 replacements.get(&color).copied().unwrap_or(canonical),
@@ -120,6 +144,12 @@ pub(super) fn assign_selected_physical_codes(
                 .unwrap_or(UNUSED_REMAP_TARGET)
         })
         .collect::<Vec<_>>();
+    let remap_pairs = protected_physical_codes
+        .iter()
+        .copied()
+        .zip(protected_code_remap_targets.iter().copied())
+        .filter(|(_, target)| *target != UNUSED_REMAP_TARGET)
+        .collect::<Vec<_>>();
     ensure!(
         protected_code_remap_targets
             .iter()
@@ -133,7 +163,7 @@ pub(super) fn assign_selected_physical_codes(
 
     let identity_code_count = color_codes
         .iter()
-        .filter(|(color, code)| active_codes[usize::from(**color)] == **code)
+        .filter(|(color, code)| canonical_color_codes[usize::from(**color)] == **code)
         .count();
     let remaining_safe_code_count =
         active_codes.len() - protected_physical_codes.len() - selected_abstract_colors.len();
@@ -145,6 +175,7 @@ pub(super) fn assign_selected_physical_codes(
     Ok(SelectedPhysicalCodeAssignment {
         color_codes,
         protected_code_remap_targets,
+        remap_pairs,
         collision_count: colliding_colors.len(),
         identity_code_count,
         remaining_safe_code_count,
@@ -205,6 +236,10 @@ pub(super) fn prove_selected_assignment_capacity(
     ensure!(
         assignment.protected_code_remap_targets.len() == protected_physical_codes.len(),
         "selected battle capacity proof produced the wrong remap table width"
+    );
+    ensure!(
+        assignment.remap_pairs.len() == assignment.collision_count,
+        "selected battle capacity proof lost a sparse remap pair"
     );
 
     Ok(SelectedAssignmentCapacityProof {
@@ -334,5 +369,25 @@ mod tests {
             first.protected_code_remap_targets,
             second.protected_code_remap_targets
         );
+    }
+
+    #[test]
+    fn custom_canonical_map_controls_which_selected_colors_collide() {
+        let active = active_hangul_codes();
+        let protected = BTreeSet::from([active[0], active[1]]);
+        let mut canonical = active.clone();
+        canonical.swap(0, 10);
+        canonical.swap(1, 11);
+        let selected = BTreeSet::from([0, 1, 10]);
+
+        let assignment =
+            assign_selected_physical_codes_with_canonical_map(&selected, &protected, &canonical)
+                .unwrap();
+
+        assert_eq!(assignment.collision_count, 1);
+        assert_eq!(assignment.remap_pairs.len(), 1);
+        assert_eq!(assignment.color_codes[&0], canonical[0]);
+        assert_eq!(assignment.color_codes[&1], canonical[1]);
+        assert_ne!(assignment.color_codes[&10], canonical[10]);
     }
 }

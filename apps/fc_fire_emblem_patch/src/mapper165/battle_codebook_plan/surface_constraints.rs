@@ -22,6 +22,7 @@ use super::{
     composition::{BattleRuntimeRecipeInput, BattleRuntimeRecipeSelection},
     physical_assignment::assign_physical_codes,
     plan_battle_codebook_model,
+    protected_color_placement::plan_protected_color_placement,
     selected_physical_assignment::prove_selected_assignment_capacity,
 };
 
@@ -45,6 +46,7 @@ struct BattleSurfaceConstraintReport {
     background_producer_topology: super::background_ownership::BattleBackgroundProducerTopology,
     background_payload_model: super::background_payloads::BattleBackgroundPayloadModel,
     phase_publisher_reachability: super::phase_cooccurrence::BattlePhasePublisherReachability,
+    protected_color_placement: super::protected_color_placement::ProtectedColorPlacementReport,
     physical_assignment_architecture: PhysicalAssignmentArchitecture,
     route_assignment_feasibility: Vec<RouteAssignmentFeasibility>,
     gameplay_routes_combined_assignment: RouteAssignmentFeasibility,
@@ -105,8 +107,10 @@ struct PhysicalAssignmentArchitecture {
     conservative_per_battle_text_code_count: usize,
     conservative_per_battle_combined_code_count: usize,
     dynamic_per_battle_headroom: usize,
-    maximum_sparse_remap_entry_count: usize,
-    sparse_remap_table_byte_count: usize,
+    arbitrary_selection_maximum_collision_count: usize,
+    arbitrary_selection_direct_table_byte_count: usize,
+    modeled_maximum_collision_count: usize,
+    modeled_pair_table_byte_count: usize,
     identity_code_count_at_maximum_collision: usize,
     strongest_dynamic_assignment_sha1: String,
     dynamic_per_battle_assignment_capacity_proven: bool,
@@ -371,13 +375,27 @@ pub(crate) fn analyze_battle_surface_constraints(
         conservative_text_overlay_count,
         &ownership.conservative_global_preserved_active_codes(),
     )?;
+    let protected_color_placement = plan_protected_color_placement(
+        &model.glyph_families,
+        &model.coloring,
+        &ownership.conservative_global_preserved_active_codes(),
+    )?;
+    ensure!(
+        protected_color_placement.canonical_color_codes.len() == model.coloring.color_count,
+        "protected battle color placement lost a canonical code"
+    );
+    ensure!(
+        protected_color_placement.conservative_collision_count
+            <= selected_assignment_capacity.maximum_collision_count,
+        "protected battle color placement exceeds the arbitrary-selection collision bound"
+    );
     ensure!(
         selected_assignment_capacity.remaining_safe_code_count
             == ACTIVE_HANGUL_SLOT_COUNT - conservative_global_combined_slot_demand,
         "selected battle assignment proof disagrees with the global capacity bound"
     );
     let report = BattleSurfaceConstraintReport {
-        schema: 7,
+        schema: 8,
         source_sha1: EXPECTED_SOURCE_SHA1,
         fixed_workspace_sha1: sha1_hex(&fs::read(fixed_workspace_path)?),
         dialogue_workspace_sha1: sha1_hex(&fs::read(dialogue_workspace_path)?),
@@ -396,6 +414,7 @@ pub(crate) fn analyze_battle_surface_constraints(
         background_producer_topology: ownership.producer_topology(),
         background_payload_model: ownership.payload_model(),
         phase_publisher_reachability,
+        protected_color_placement: protected_color_placement.report,
         physical_assignment_architecture: PhysicalAssignmentArchitecture {
             static_abstract_color_count: model.coloring.color_count,
             canonical_text_code_count: selected_assignment_capacity.safe_code_count
@@ -409,15 +428,21 @@ pub(crate) fn analyze_battle_surface_constraints(
             conservative_per_battle_combined_code_count: conservative_global_combined_slot_demand,
             dynamic_per_battle_headroom: ACTIVE_HANGUL_SLOT_COUNT
                 - conservative_global_combined_slot_demand,
-            maximum_sparse_remap_entry_count: selected_assignment_capacity.maximum_collision_count,
-            sparse_remap_table_byte_count: selected_assignment_capacity.remap_table_byte_count,
+            arbitrary_selection_maximum_collision_count: selected_assignment_capacity
+                .maximum_collision_count,
+            arbitrary_selection_direct_table_byte_count: selected_assignment_capacity
+                .remap_table_byte_count,
+            modeled_maximum_collision_count: protected_color_placement.conservative_collision_count,
+            modeled_pair_table_byte_count: 1 + protected_color_placement
+                .conservative_collision_count
+                * 2,
             identity_code_count_at_maximum_collision: selected_assignment_capacity
                 .identity_code_count_at_maximum_collision,
             strongest_dynamic_assignment_sha1: selected_assignment_capacity
                 .strongest_assignment_sha1,
             dynamic_per_battle_assignment_capacity_proven: true,
             selected_assignment_algorithm_complete: true,
-            selected_strategy: "encode text with canonical abstract codes, keep noncolliding selected codes at identity, and remap only selected codes that collide with the complete preserved graphics union",
+            selected_strategy: "place preserved physical codes on abstract colors outside the always-live common set, encode text with that canonical permutation, and keep a counted pair only for selected canonical codes that collide",
             observed_static_assignment_is_release_architecture: false,
         },
         route_assignment_feasibility,
@@ -515,7 +540,7 @@ mod tests {
     #[test]
     fn serialized_report_omits_translation_content_and_private_paths() {
         let report = BattleSurfaceConstraintReport {
-            schema: 7,
+            schema: 8,
             source_sha1: EXPECTED_SOURCE_SHA1,
             fixed_workspace_sha1: "fixed".to_owned(),
             dialogue_workspace_sha1: "dialogue".to_owned(),
@@ -556,6 +581,7 @@ mod tests {
                 super::super::background_payloads::BattleBackgroundPayloadModel::test_model(),
             phase_publisher_reachability:
                 super::super::phase_cooccurrence::BattlePhasePublisherReachability::test_model(),
+            protected_color_placement: super::super::protected_color_placement::test_report(),
             physical_assignment_architecture: PhysicalAssignmentArchitecture {
                 static_abstract_color_count: 210,
                 canonical_text_code_count: 210,
@@ -565,8 +591,10 @@ mod tests {
                 conservative_per_battle_text_code_count: 134,
                 conservative_per_battle_combined_code_count: 173,
                 dynamic_per_battle_headroom: 37,
-                maximum_sparse_remap_entry_count: 39,
-                sparse_remap_table_byte_count: 39,
+                arbitrary_selection_maximum_collision_count: 39,
+                arbitrary_selection_direct_table_byte_count: 39,
+                modeled_maximum_collision_count: 8,
+                modeled_pair_table_byte_count: 17,
                 identity_code_count_at_maximum_collision: 95,
                 strongest_dynamic_assignment_sha1: "strongest".to_owned(),
                 dynamic_per_battle_assignment_capacity_proven: true,

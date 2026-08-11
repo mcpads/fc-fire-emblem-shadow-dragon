@@ -26,6 +26,7 @@ mod enemy_domain;
 mod item_domain;
 mod phase_cooccurrence;
 mod physical_assignment;
+mod protected_color_placement;
 mod runtime_demand;
 mod runtime_inputs;
 mod selected_physical_assignment;
@@ -47,6 +48,7 @@ use runtime_inputs::{BattleRuntimeInputBinding, bind_battle_runtime_inputs};
 
 struct BattleCodebookModel {
     coloring: conflict_graph::StableColoringPlan,
+    glyph_families: BattleGlyphFamilies,
     message_template_entry_count: usize,
     unit_name_entry_count: usize,
     enemy_name_entry_count: usize,
@@ -148,6 +150,7 @@ pub(crate) fn analyze_battle_codebook_plan(
     let model = plan_battle_codebook_model(&rom, &fixed, &dialogue)?;
     let BattleCodebookModel {
         coloring,
+        glyph_families: _,
         message_template_entry_count,
         unit_name_entry_count,
         enemy_name_entry_count,
@@ -360,6 +363,7 @@ fn plan_battle_codebook_model(
         player_participant_candidate_count: player_participants.len(),
         enemy_participant_candidate_count: enemy_participants.len(),
         coloring,
+        glyph_families: families,
         runtime_demand,
         composition,
         item_domain,
