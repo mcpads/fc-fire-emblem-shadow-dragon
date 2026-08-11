@@ -68,12 +68,23 @@ struct BattleCodebookModel {
 
 pub(super) struct ConstrainedBattleCodebook {
     pub(super) glyph_codes: BTreeMap<char, u8>,
-    pub(super) color_codes: Vec<u8>,
     pub(super) abstract_assignment_sha1: String,
     pub(super) physical_assignment_sha1: String,
     pub(super) stable_color_count: usize,
     pub(super) constrained_screen_count: usize,
     pub(super) constrained_color_count: usize,
+}
+
+pub(super) struct CanonicalBattleCodebook {
+    pub(super) glyph_codes: BTreeMap<char, u8>,
+    pub(super) color_codes: Vec<u8>,
+    pub(super) protected_abstract_colors: Vec<u8>,
+    pub(super) safe_abstract_colors: Vec<u8>,
+    pub(super) abstract_assignment_sha1: String,
+    pub(super) canonical_assignment_sha1: String,
+    pub(super) stable_color_count: usize,
+    pub(super) protected_physical_code_count: usize,
+    pub(super) maximum_remap_pair_count: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -268,12 +279,81 @@ pub(super) fn plan_constrained_battle_codebook(
     let physical = assign_physical_codes(&model.coloring, constraints)?;
     Ok(ConstrainedBattleCodebook {
         glyph_codes: physical.glyph_codes,
-        color_codes: physical.color_codes,
         abstract_assignment_sha1: model.coloring.assignment_sha1,
         physical_assignment_sha1: physical.assignment_sha1,
         stable_color_count: model.coloring.color_count,
         constrained_screen_count: physical.constrained_screen_count,
         constrained_color_count: physical.constrained_color_count,
+    })
+}
+
+pub(super) fn plan_canonical_battle_codebook(
+    rom: &Rom,
+    fixed: &FixedTextPlan,
+    dialogue: &BattleDialogueReinsertionPlan,
+) -> Result<CanonicalBattleCodebook> {
+    let model = plan_battle_codebook_model(rom, fixed, dialogue)?;
+    let protected_physical_codes =
+        background_ownership::bind_battle_background_code_ownership(rom)?
+            .conservative_global_preserved_active_codes();
+    let placement = protected_color_placement::plan_protected_color_placement(
+        &model.glyph_families,
+        &model.coloring,
+        &protected_physical_codes,
+    )?;
+    let glyph_codes = model
+        .coloring
+        .glyph_colors()
+        .iter()
+        .map(|(glyph, color)| {
+            Ok((
+                *glyph,
+                *placement
+                    .canonical_color_codes
+                    .get(*color)
+                    .with_context(|| format!("canonical battle color {color} is absent"))?,
+            ))
+        })
+        .collect::<Result<BTreeMap<_, _>>>()?;
+    let protected_abstract_colors = placement
+        .canonical_color_codes
+        .iter()
+        .enumerate()
+        .filter(|(_, code)| protected_physical_codes.contains(code))
+        .map(|(color, _)| {
+            u8::try_from(color).context("protected battle abstract color exceeds one byte")
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let safe_abstract_colors = placement
+        .canonical_color_codes
+        .iter()
+        .enumerate()
+        .filter(|(_, code)| !protected_physical_codes.contains(code))
+        .map(|(color, _)| {
+            u8::try_from(color).context("safe battle abstract color exceeds one byte")
+        })
+        .collect::<Result<Vec<_>>>()?;
+    ensure!(
+        protected_abstract_colors.len() == protected_physical_codes.len()
+            && safe_abstract_colors.len() + protected_abstract_colors.len()
+                == placement.canonical_color_codes.len(),
+        "canonical battle color partitions changed"
+    );
+    ensure!(
+        placement.conservative_collision_count <= 8,
+        "canonical battle placement exceeds the proven eight remap pairs"
+    );
+
+    Ok(CanonicalBattleCodebook {
+        glyph_codes,
+        canonical_assignment_sha1: sha1_hex(&placement.canonical_color_codes),
+        color_codes: placement.canonical_color_codes,
+        protected_abstract_colors,
+        safe_abstract_colors,
+        abstract_assignment_sha1: model.coloring.assignment_sha1,
+        stable_color_count: model.coloring.color_count,
+        protected_physical_code_count: protected_physical_codes.len(),
+        maximum_remap_pair_count: placement.conservative_collision_count,
     })
 }
 

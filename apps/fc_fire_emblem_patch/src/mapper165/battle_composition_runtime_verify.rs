@@ -15,8 +15,8 @@ use super::{
         BattleRuntimeRecipeInput, compose_runtime_font_page, inspect_runtime_recipe_input,
     },
     battle_text_cache_probe::{
-        GLYPH_ATLAS_PRG_OFFSET, PHYSICAL_CODE_TABLE_PRG_OFFSET, RECIPE_BLOB_PRG_OFFSET,
-        SOURCE_PAGE_PRG_OFFSET,
+        GLYPH_ATLAS_PRG_OFFSET, PHYSICAL_CODE_TABLE_PRG_OFFSET, PROTECTED_ABSTRACT_COLOR_COUNT,
+        PROTECTED_ABSTRACT_COLORS_PRG_OFFSET, RECIPE_BLOB_PRG_OFFSET, SOURCE_PAGE_PRG_OFFSET,
     },
 };
 
@@ -25,6 +25,8 @@ const INTERNAL_BATTLE_FIELD_START: usize = 0x0304;
 const INTERNAL_BATTLE_FIELD_END_EXCLUSIVE: usize = 0x0324;
 const BATTLE_ACTIVE_FLAG: usize = 0x047D;
 const CACHE_UPLOADED_MARKER: u8 = 0x80;
+const REMAP_PAIR_COUNT_MASK: u8 = 0x1E;
+const REMAP_PAIR_TABLE_ADDRESS: usize = 0x07E0;
 const RECIPE_HEADER_BYTE_COUNT: usize = 32;
 const RECIPE_MAGIC: &[u8; 4] = b"FBRC";
 
@@ -77,6 +79,10 @@ struct BattleCompositionRuntimeVerificationReport {
     runtime_input: RuntimeInputReport,
     selected_recipe_offsets_hex: Vec<String>,
     cache_uploaded_marker_present: bool,
+    dynamic_assignment_sha1: String,
+    expected_remap_pairs_hex: Vec<String>,
+    actual_remap_pairs_hex: Vec<String>,
+    exact_remap_match: bool,
     expected_chr_ram_sha1: String,
     actual_chr_ram_sha1: String,
     differing_byte_count: usize,
@@ -142,8 +148,8 @@ pub(crate) fn verify_battle_composition_runtime(
         ],
         dialogue_selector,
     };
-    let cache_uploaded_marker_present =
-        snapshot_byte(&internal, BATTLE_ACTIVE_FLAG)? & CACHE_UPLOADED_MARKER != 0;
+    let battle_active = snapshot_byte(&internal, BATTLE_ACTIVE_FLAG)?;
+    let cache_uploaded_marker_present = battle_active & CACHE_UPLOADED_MARKER != 0;
 
     let prg = rom.prg();
     let recipe_header = prg
@@ -159,17 +165,40 @@ pub(crate) fn verify_battle_composition_runtime(
     let glyph_atlas = prg
         .get(GLYPH_ATLAS_PRG_OFFSET..GLYPH_ATLAS_PRG_OFFSET + atlas_tile_count * FONT_TILE_SIZE)
         .context("battle glyph atlas is outside PRG")?;
-    let physical_codes = prg
+    let canonical_color_codes = prg
         .get(PHYSICAL_CODE_TABLE_PRG_OFFSET..PHYSICAL_CODE_TABLE_PRG_OFFSET + abstract_color_count)
-        .context("battle physical code table is outside PRG")?;
+        .context("battle canonical code table is outside PRG")?;
+    let protected_abstract_colors = prg
+        .get(
+            PROTECTED_ABSTRACT_COLORS_PRG_OFFSET
+                ..PROTECTED_ABSTRACT_COLORS_PRG_OFFSET + PROTECTED_ABSTRACT_COLOR_COUNT,
+        )
+        .context("battle protected abstract-color list is outside PRG")?;
     let source_page = prg
         .get(SOURCE_PAGE_PRG_OFFSET..SOURCE_PAGE_PRG_OFFSET + FONT_PAGE_SIZE)
         .context("battle source font page is outside PRG")?;
     let recipe_blob = prg
         .get(RECIPE_BLOB_PRG_OFFSET..RECIPE_BLOB_PRG_OFFSET + recipe_byte_count)
         .context("battle recipe blob is outside PRG")?;
-    let expected_page =
-        compose_runtime_font_page(source_page, glyph_atlas, physical_codes, recipe_blob, input)?;
+    let expected_composition = compose_runtime_font_page(
+        source_page,
+        glyph_atlas,
+        canonical_color_codes,
+        protected_abstract_colors,
+        recipe_blob,
+        input,
+    )?;
+    let expected_page = &expected_composition.page;
+    let actual_remap_pair_count = usize::from(battle_active & REMAP_PAIR_COUNT_MASK) / 2;
+    let actual_remap_pairs = (0..actual_remap_pair_count)
+        .map(|index| {
+            Ok((
+                snapshot_byte(&internal, REMAP_PAIR_TABLE_ADDRESS + index * 2)?,
+                snapshot_byte(&internal, REMAP_PAIR_TABLE_ADDRESS + index * 2 + 1)?,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let exact_remap_match = actual_remap_pairs == expected_composition.remap_pairs;
     let selection = inspect_runtime_recipe_input(recipe_blob, input)?;
     let differing_byte_count = expected_page
         .iter()
@@ -190,10 +219,11 @@ pub(crate) fn verify_battle_composition_runtime(
         .map(
             |(physical_code, ((expected, actual), source))| DifferingTileReport {
                 physical_code: u8::try_from(physical_code).expect("font page tile code fits u8"),
-                abstract_color: physical_codes
+                abstract_color: expected_composition
+                    .color_codes
                     .iter()
-                    .position(|code| usize::from(*code) == physical_code)
-                    .map(|color| u8::try_from(color).expect("physical color table fits u8")),
+                    .find(|(_, code)| usize::from(**code) == physical_code)
+                    .map(|(color, _)| *color),
                 expected_atlas_index: atlas_tile_index(glyph_atlas, expected),
                 actual_atlas_index: atlas_tile_index(glyph_atlas, actual),
                 actual_matches_source_tile: actual == source,
@@ -209,7 +239,7 @@ pub(crate) fn verify_battle_composition_runtime(
         .map(|offset| format!("0x{:04X}", 0x1000 + offset));
     let exact_composition_match = differing_byte_count == 0;
     let report = BattleCompositionRuntimeVerificationReport {
-        schema: 1,
+        schema: 2,
         rom_sha1: sha1_hex(rom.data()),
         compose_return_cpu_address_hex: format!("0x{COMPOSE_RETURN_ADDRESS:04X}"),
         compose_return_frame: event.frame,
@@ -226,7 +256,11 @@ pub(crate) fn verify_battle_composition_runtime(
             .map(|offset| format!("0x{offset:04X}"))
             .collect(),
         cache_uploaded_marker_present,
-        expected_chr_ram_sha1: sha1_hex(&expected_page),
+        dynamic_assignment_sha1: expected_composition.assignment_sha1,
+        expected_remap_pairs_hex: encode_pairs(&expected_composition.remap_pairs),
+        actual_remap_pairs_hex: encode_pairs(&actual_remap_pairs),
+        exact_remap_match,
+        expected_chr_ram_sha1: sha1_hex(expected_page),
         actual_chr_ram_sha1: sha1_hex(&actual_page.bytes),
         differing_byte_count,
         differing_tile_count,
@@ -235,7 +269,7 @@ pub(crate) fn verify_battle_composition_runtime(
         exact_composition_match,
         runtime_verified: false,
         release_eligible: false,
-        next_gate: "bind every visible translated text code to the composed physical tile, then verify temporal battle rendering and automatic exit restoration",
+        next_gate: "verify temporal battle rendering across varied inputs and automatic exit restoration",
     };
     let report_bytes = serde_json::to_vec_pretty(&report)?;
     write_file(report_path, &report_bytes)?;
@@ -249,6 +283,10 @@ pub(crate) fn verify_battle_composition_runtime(
     ensure!(
         cache_uploaded_marker_present,
         "composition return snapshot does not have the uploaded-cache marker"
+    );
+    ensure!(
+        exact_remap_match,
+        "runtime remap pairs differ from the independently planned dynamic assignment"
     );
     ensure!(
         exact_composition_match,
@@ -304,6 +342,13 @@ fn decode_hex(encoded: &str) -> Result<Vec<u8>> {
 
 fn encode_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn encode_pairs(pairs: &[(u8, u8)]) -> Vec<String> {
+    pairs
+        .iter()
+        .map(|(canonical, target)| format!("{canonical:02X}:{target:02X}"))
+        .collect()
 }
 
 fn atlas_tile_index(glyph_atlas: &[u8], tile: &[u8]) -> Option<u16> {

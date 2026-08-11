@@ -11,6 +11,7 @@ use crate::{
 };
 
 use super::conflict_graph::StableColoringPlan;
+use super::selected_physical_assignment::assign_selected_physical_codes_with_canonical_map;
 
 mod blob;
 
@@ -97,6 +98,13 @@ pub(in crate::mapper165) struct BattleRuntimeRecipeStats {
     pub(in crate::mapper165) recipe_offsets: Vec<u16>,
 }
 
+pub(in crate::mapper165) struct BattleRuntimeFontPageComposition {
+    pub(in crate::mapper165) page: Vec<u8>,
+    pub(in crate::mapper165) color_codes: BTreeMap<u8, u8>,
+    pub(in crate::mapper165) remap_pairs: Vec<(u8, u8)>,
+    pub(in crate::mapper165) assignment_sha1: String,
+}
+
 pub(in crate::mapper165) fn inspect_runtime_recipe_input(
     recipe_blob: &[u8],
     input: BattleRuntimeRecipeInput,
@@ -113,10 +121,11 @@ pub(in crate::mapper165) fn inspect_runtime_recipe_input(
 pub(in crate::mapper165) fn compose_runtime_font_page(
     source_page: &[u8],
     glyph_atlas: &[u8],
-    physical_codes: &[u8],
+    canonical_color_codes: &[u8],
+    protected_abstract_colors: &[u8],
     recipe_blob: &[u8],
     input: BattleRuntimeRecipeInput,
-) -> Result<Vec<u8>> {
+) -> Result<BattleRuntimeFontPageComposition> {
     ensure!(
         source_page.len() == FONT_PAGE_SIZE,
         "battle runtime source page is not 4 KiB"
@@ -126,12 +135,36 @@ pub(in crate::mapper165) fn compose_runtime_font_page(
         "battle runtime glyph atlas is not tile-aligned"
     );
     let selection = select_runtime_recipes(recipe_blob, input)?;
+    let selected_abstract_colors = selection
+        .overlays
+        .iter()
+        .map(|overlay| overlay.color)
+        .collect::<BTreeSet<_>>();
+    let protected_physical_codes = protected_abstract_colors
+        .iter()
+        .map(|color| {
+            canonical_color_codes
+                .get(usize::from(*color))
+                .copied()
+                .context("battle protected abstract color is outside the canonical code table")
+        })
+        .collect::<Result<BTreeSet<_>>>()?;
+    let assignment = assign_selected_physical_codes_with_canonical_map(
+        &selected_abstract_colors,
+        &protected_physical_codes,
+        canonical_color_codes,
+    )?;
+    ensure!(
+        assignment.remap_pairs.len() <= 8,
+        "battle runtime composition exceeds eight remap pairs"
+    );
     let mut page = source_page.to_vec();
     for overlay in selection.overlays {
-        let physical_code = physical_codes
-            .get(usize::from(overlay.color))
+        let physical_code = assignment
+            .color_codes
+            .get(&overlay.color)
             .copied()
-            .context("battle runtime recipe color is absent from the physical code table")?;
+            .context("battle runtime recipe color is absent from the dynamic assignment")?;
         let atlas_start = usize::from(overlay.atlas_index)
             .checked_mul(FONT_TILE_SIZE)
             .context("battle runtime atlas tile offset overflow")?;
@@ -151,7 +184,12 @@ pub(in crate::mapper165) fn compose_runtime_font_page(
             .context("battle runtime physical code exceeds the font page")?
             .copy_from_slice(tile);
     }
-    Ok(page)
+    Ok(BattleRuntimeFontPageComposition {
+        page,
+        color_codes: assignment.color_codes,
+        remap_pairs: assignment.remap_pairs,
+        assignment_sha1: assignment.assignment_sha1,
+    })
 }
 
 impl BattleCacheCompositionMaterial {
@@ -544,6 +582,7 @@ pub(super) fn test_plan() -> BattleCacheCompositionPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::font_slots::{ACTIVE_HANGUL_SLOT_COUNT, active_hangul_codes};
     use crate::mapper165::battle_codebook_plan::conflict_graph::{
         BattleGlyphFamilies, plan_stable_coloring,
     };
@@ -598,6 +637,65 @@ mod tests {
                 .bytes
                 .windows(3)
                 .any(|bytes| bytes == "가".as_bytes())
+        );
+    }
+
+    #[test]
+    fn runtime_composition_moves_a_protected_canonical_color_to_an_unused_safe_code() {
+        let mut catalog = RecipeCatalog::default();
+        catalog
+            .add(
+                RecipeRole::Common,
+                0,
+                vec![RecipePair {
+                    color: 0,
+                    atlas_index: 0,
+                }],
+            )
+            .unwrap();
+        for role in [
+            RecipeRole::UnitName,
+            RecipeRole::EnemyName,
+            RecipeRole::Class,
+            RecipeRole::Item,
+            RecipeRole::Terrain,
+            RecipeRole::Dialogue,
+        ] {
+            catalog.add(role, 0, Vec::new()).unwrap();
+        }
+        for selector in 0..65 {
+            catalog.add_dialogue_alias(selector, 0).unwrap();
+        }
+        let encoded = catalog.encode(ACTIVE_HANGUL_SLOT_COUNT, 1).unwrap().bytes;
+        let canonical = active_hangul_codes();
+        let source_page = vec![0; FONT_PAGE_SIZE];
+        let atlas = vec![0xA5; FONT_TILE_SIZE];
+
+        let composition = compose_runtime_font_page(
+            &source_page,
+            &atlas,
+            &canonical,
+            &[0],
+            &encoded,
+            BattleRuntimeRecipeInput {
+                participant_record_identities: [1, 0x81],
+                class_record_identities: [1, 1],
+                item_source_indices: [0, 0],
+                terrain_source_indices: [0, 0],
+                dialogue_selector: 0,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(composition.remap_pairs, [(canonical[0], canonical[1])]);
+        assert_eq!(composition.color_codes[&0], canonical[1]);
+        assert_eq!(
+            &composition.page[usize::from(canonical[1]) * FONT_TILE_SIZE..][..FONT_TILE_SIZE],
+            atlas
+        );
+        assert_eq!(
+            &composition.page[usize::from(canonical[0]) * FONT_TILE_SIZE..][..FONT_TILE_SIZE],
+            vec![0; FONT_TILE_SIZE]
         );
     }
 }

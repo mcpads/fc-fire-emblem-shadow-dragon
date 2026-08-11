@@ -6,7 +6,7 @@ use serde::Serialize;
 use crate::{
     dialogue_assets::plan_battle_dialogue_records,
     font::{load_dalmoori, rasterize_glyph},
-    font_slots::FONT_PAGE_SIZE,
+    font_slots::{ACTIVE_HANGUL_SLOT_COUNT, FONT_PAGE_SIZE},
     rom::{EXPECTED_SOURCE_SHA1, HEADER_SIZE, Rom},
     sha1_hex,
     text_inventory::plan_fixed_text,
@@ -26,10 +26,34 @@ pub(super) const GLYPH_ATLAS_MMC3_PAGE: u8 = 0x20;
 const MATERIAL_MMC3_PAGE_SIZE: usize = 8 * 1024;
 pub(super) const PHYSICAL_CODE_TABLE_PRG_OFFSET: usize = GLYPH_ATLAS_PRG_OFFSET + 0x1400;
 pub(super) const PHYSICAL_CODE_TABLE_CPU_ADDRESS: u16 = 0x9400;
+pub(super) const PROTECTED_ABSTRACT_COLORS_PRG_OFFSET: usize =
+    PHYSICAL_CODE_TABLE_PRG_OFFSET + ACTIVE_HANGUL_SLOT_COUNT;
+pub(super) const PROTECTED_ABSTRACT_COLORS_CPU_ADDRESS: u16 =
+    PHYSICAL_CODE_TABLE_CPU_ADDRESS + ACTIVE_HANGUL_SLOT_COUNT as u16;
+pub(super) const PROTECTED_ABSTRACT_COLOR_COUNT: usize = 39;
+pub(super) const SAFE_ABSTRACT_COLORS_PRG_OFFSET: usize =
+    PROTECTED_ABSTRACT_COLORS_PRG_OFFSET + PROTECTED_ABSTRACT_COLOR_COUNT;
+pub(super) const SAFE_ABSTRACT_COLORS_CPU_ADDRESS: u16 =
+    PROTECTED_ABSTRACT_COLORS_CPU_ADDRESS + PROTECTED_ABSTRACT_COLOR_COUNT as u16;
+pub(super) const SAFE_ABSTRACT_COLOR_COUNT: usize = 171;
+pub(super) const COLOR_BIT_MASKS_PRG_OFFSET: usize =
+    SAFE_ABSTRACT_COLORS_PRG_OFFSET + SAFE_ABSTRACT_COLOR_COUNT;
+pub(super) const COLOR_BIT_MASKS_CPU_ADDRESS: u16 =
+    SAFE_ABSTRACT_COLORS_CPU_ADDRESS + SAFE_ABSTRACT_COLOR_COUNT as u16;
+pub(super) const DYNAMIC_ASSIGNMENT_CODE_PRG_OFFSET: usize = GLYPH_ATLAS_PRG_OFFSET + 0x15C0;
+pub(super) const DYNAMIC_ASSIGNMENT_CODE_CPU_ADDRESS: u16 = 0x95C0;
 pub(super) const SOURCE_PAGE_PRG_OFFSET: usize = GLYPH_ATLAS_PRG_OFFSET + MATERIAL_MMC3_PAGE_SIZE;
 pub(super) const SOURCE_PAGE_MMC3_PAGE: u8 = 0x21;
 pub(super) const RECIPE_BLOB_PRG_OFFSET: usize = SOURCE_PAGE_PRG_OFFSET + FONT_PAGE_SIZE;
 pub(super) const RECIPE_BLOB_MMC3_PAGE: u8 = SOURCE_PAGE_MMC3_PAGE;
+
+pub(super) const COLOR_BIT_MASKS: [u8; 8] = [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80];
+
+pub(super) struct DynamicAssignmentMaterial<'a> {
+    pub(super) canonical_color_codes: &'a [u8],
+    pub(super) protected_abstract_colors: &'a [u8],
+    pub(super) safe_abstract_colors: &'a [u8],
+}
 
 #[derive(Debug, Serialize)]
 struct BattleTextCacheBaseReport {
@@ -102,7 +126,7 @@ pub(crate) fn build_battle_text_cache_base(
     let output = expand_prg_with_material(
         &parity_rom,
         &glyph_atlas,
-        &[],
+        None,
         source_page,
         &material.recipe_blob,
     )?;
@@ -187,7 +211,7 @@ pub(super) fn rasterize_atlas(glyphs: &[char]) -> Result<Vec<u8>> {
 pub(super) fn expand_prg_with_material(
     parity_rom: &Rom,
     atlas: &[u8],
-    physical_color_codes: &[u8],
+    dynamic_assignment: Option<&DynamicAssignmentMaterial<'_>>,
     source_page: &[u8],
     recipe_blob: &[u8],
 ) -> Result<Vec<u8>> {
@@ -207,15 +231,44 @@ pub(super) fn expand_prg_with_material(
         "battle glyph atlas overlaps the physical-code table"
     );
     expanded_prg[GLYPH_ATLAS_PRG_OFFSET..atlas_end].copy_from_slice(atlas);
-    let physical_code_table_end = PHYSICAL_CODE_TABLE_PRG_OFFSET
-        .checked_add(physical_color_codes.len())
-        .context("physical-code table range overflow")?;
-    ensure!(
-        physical_code_table_end <= GLYPH_ATLAS_PRG_OFFSET + MATERIAL_MMC3_PAGE_SIZE,
-        "battle physical-code table exceeds the atlas material page"
-    );
-    expanded_prg[PHYSICAL_CODE_TABLE_PRG_OFFSET..physical_code_table_end]
-        .copy_from_slice(physical_color_codes);
+    if let Some(dynamic) = dynamic_assignment {
+        ensure!(
+            dynamic.canonical_color_codes.len() == ACTIVE_HANGUL_SLOT_COUNT
+                && dynamic.protected_abstract_colors.len() == PROTECTED_ABSTRACT_COLOR_COUNT
+                && dynamic.safe_abstract_colors.len() == SAFE_ABSTRACT_COLOR_COUNT,
+            "battle dynamic-assignment material dimensions changed"
+        );
+        ensure!(
+            dynamic
+                .protected_abstract_colors
+                .iter()
+                .chain(dynamic.safe_abstract_colors)
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                == ACTIVE_HANGUL_SLOT_COUNT,
+            "battle dynamic-assignment abstract color partitions overlap"
+        );
+        let physical_code_table_end = PHYSICAL_CODE_TABLE_PRG_OFFSET
+            .checked_add(dynamic.canonical_color_codes.len())
+            .context("canonical-code table range overflow")?;
+        ensure!(
+            physical_code_table_end == PROTECTED_ABSTRACT_COLORS_PRG_OFFSET,
+            "battle canonical-code table no longer meets the protected-color list"
+        );
+        expanded_prg[PHYSICAL_CODE_TABLE_PRG_OFFSET..physical_code_table_end]
+            .copy_from_slice(dynamic.canonical_color_codes);
+        expanded_prg[PROTECTED_ABSTRACT_COLORS_PRG_OFFSET..SAFE_ABSTRACT_COLORS_PRG_OFFSET]
+            .copy_from_slice(dynamic.protected_abstract_colors);
+        expanded_prg[SAFE_ABSTRACT_COLORS_PRG_OFFSET..COLOR_BIT_MASKS_PRG_OFFSET]
+            .copy_from_slice(dynamic.safe_abstract_colors);
+        let mask_end = COLOR_BIT_MASKS_PRG_OFFSET + COLOR_BIT_MASKS.len();
+        ensure!(
+            mask_end <= DYNAMIC_ASSIGNMENT_CODE_PRG_OFFSET,
+            "battle dynamic-assignment tables overlap runtime code"
+        );
+        expanded_prg[COLOR_BIT_MASKS_PRG_OFFSET..mask_end].copy_from_slice(&COLOR_BIT_MASKS);
+    }
     ensure!(
         source_page.len() == FONT_PAGE_SIZE,
         "battle source material is not one 4 KiB page"
@@ -261,8 +314,21 @@ mod tests {
         image[HEADER_SIZE + 256 * 1024 - FIXED_BANK_SIZE..].fill(0xA5);
         let rom = Rom::parse(image).unwrap();
         let source_page = vec![2; FONT_PAGE_SIZE];
-        let output =
-            expand_prg_with_material(&rom, &[1, 2, 3], &[6, 7], &source_page, &[4, 5]).unwrap();
+        let canonical = (0..ACTIVE_HANGUL_SLOT_COUNT as u8).collect::<Vec<_>>();
+        let protected = canonical[..39].to_vec();
+        let safe = canonical[39..].to_vec();
+        let output = expand_prg_with_material(
+            &rom,
+            &[1, 2, 3],
+            Some(&DynamicAssignmentMaterial {
+                canonical_color_codes: &canonical,
+                protected_abstract_colors: &protected,
+                safe_abstract_colors: &safe,
+            }),
+            &source_page,
+            &[4, 5],
+        )
+        .unwrap();
         let expanded = Rom::parse(output).unwrap();
         assert_eq!(GLYPH_ATLAS_MMC3_PAGE + 1, SOURCE_PAGE_MMC3_PAGE);
         assert_eq!(SOURCE_PAGE_MMC3_PAGE, RECIPE_BLOB_MMC3_PAGE);
@@ -271,8 +337,21 @@ mod tests {
             &[1, 2, 3]
         );
         assert_eq!(
-            &expanded.prg()[PHYSICAL_CODE_TABLE_PRG_OFFSET..PHYSICAL_CODE_TABLE_PRG_OFFSET + 2],
-            &[6, 7]
+            &expanded.prg()
+                [PHYSICAL_CODE_TABLE_PRG_OFFSET..PHYSICAL_CODE_TABLE_PRG_OFFSET + canonical.len()],
+            canonical
+        );
+        assert_eq!(
+            &expanded.prg()[PROTECTED_ABSTRACT_COLORS_PRG_OFFSET..SAFE_ABSTRACT_COLORS_PRG_OFFSET],
+            protected
+        );
+        assert_eq!(
+            &expanded.prg()[SAFE_ABSTRACT_COLORS_PRG_OFFSET..COLOR_BIT_MASKS_PRG_OFFSET],
+            safe
+        );
+        assert_eq!(
+            &expanded.prg()[COLOR_BIT_MASKS_PRG_OFFSET..COLOR_BIT_MASKS_PRG_OFFSET + 8],
+            COLOR_BIT_MASKS
         );
         assert_eq!(
             &expanded.prg()[SOURCE_PAGE_PRG_OFFSET..SOURCE_PAGE_PRG_OFFSET + FONT_PAGE_SIZE],

@@ -874,8 +874,8 @@ fn main() -> Result<()> {
             println!("output SHA-1: {}", summary.output_sha1);
             println!("report SHA-1: {}", summary.report_sha1);
             println!(
-                "battle composition loader: {} admitted tuples, at most {} observed PPU data writes, {} runtime bytes",
-                summary.admitted_runtime_tuple_count,
+                "battle composition loader: {} observed verification tuples, at most {} observed PPU data writes, {} runtime bytes",
+                summary.observed_runtime_tuple_count,
                 summary.maximum_observed_ppu_write_count,
                 summary.runtime_routine_byte_count
             );

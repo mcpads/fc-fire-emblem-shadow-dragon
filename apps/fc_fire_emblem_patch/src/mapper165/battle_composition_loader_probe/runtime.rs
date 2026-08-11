@@ -41,7 +41,6 @@ pub(super) fn parse_recipe_directories(bytes: &[u8]) -> Result<RecipeDirectoryAd
 }
 
 pub(super) fn build_runtime_routines(
-    runtime_inputs: &BTreeSet<BattleRuntimeRecipeInput>,
     directories: RecipeDirectoryAddresses,
 ) -> Result<Vec<RuntimeRoutine>> {
     let routines = vec![
@@ -76,11 +75,6 @@ pub(super) fn build_runtime_routines(
             bytes: project_dialogue_selector()?,
         },
         RuntimeRoutine {
-            role: "admitted runtime tuple predicate",
-            address: ADMITTED_TUPLE_PREDICATE_ADDRESS,
-            bytes: admitted_tuple_predicate(runtime_inputs)?,
-        },
-        RuntimeRoutine {
             role: "battle-aware direct right FD selection",
             address: BATTLE_RIGHT_FD_SELECTOR_ADDRESS,
             bytes: battle_right_selector(BATTLE_RIGHT_FD_SELECTOR_ADDRESS, 2)?,
@@ -94,6 +88,16 @@ pub(super) fn build_runtime_routines(
             role: "battle-aware right FE selection",
             address: BATTLE_RIGHT_FE_SELECTOR_ADDRESS,
             bytes: battle_right_selector(BATTLE_RIGHT_FE_SELECTOR_ADDRESS, 4)?,
+        },
+        RuntimeRoutine {
+            role: "battle text projection wrapper",
+            address: TEXT_PROJECTION_WRAPPER_ADDRESS,
+            bytes: text_projection_wrapper()?,
+        },
+        RuntimeRoutine {
+            role: "abstract-color remap projection",
+            address: PROJECT_COLOR_ADDRESS,
+            bytes: project_color()?,
         },
     ];
     for pair in routines.windows(2) {
@@ -117,37 +121,45 @@ pub(super) fn build_runtime_routines(
 }
 
 pub(super) fn composition_dispatch() -> Result<Vec<u8>> {
-    let restore = DISPATCH_ADDRESS + 35;
-    assemble_at(
-        DISPATCH_ADDRESS,
-        &[
-            Instruction::JsrAbsolute(SOURCE_NMI_INPUT_SCAN),
-            Instruction::Php,
-            Instruction::Pha,
-            Instruction::Txa,
-            Instruction::Pha,
-            Instruction::Tya,
-            Instruction::Pha,
-            Instruction::LdaAbsolute(BATTLE_ACTIVE_FLAG),
-            Instruction::BeqAbsolute(restore),
-            Instruction::AndImmediate(CACHE_UPLOADED_MARKER),
-            Instruction::BneAbsolute(restore),
-            Instruction::LdaZeroPage(PPU_MASK_SHADOW),
-            Instruction::CmpImmediate(UPLOAD_RENDER_MASK),
-            Instruction::BneAbsolute(restore),
-            Instruction::JsrAbsolute(ADMITTED_TUPLE_PREDICATE_ADDRESS),
-            Instruction::BneAbsolute(restore),
-            Instruction::JsrAbsolute(COMPOSE_PAGE_ADDRESS),
-            Instruction::JsrAbsolute(SOURCE_NMI_SCROLL_RESTORE),
-            Instruction::Pla,
-            Instruction::Tay,
-            Instruction::Pla,
-            Instruction::Tax,
-            Instruction::Pla,
-            Instruction::Plp,
-            Instruction::Rts,
-        ],
-    )
+    let mut instructions = vec![
+        Instruction::JsrAbsolute(SOURCE_NMI_INPUT_SCAN),
+        Instruction::Php,
+        Instruction::Pha,
+        Instruction::Txa,
+        Instruction::Pha,
+        Instruction::Tya,
+        Instruction::Pha,
+        Instruction::LdaAbsolute(BATTLE_ACTIVE_FLAG),
+    ];
+    let inactive_placeholder = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(DISPATCH_ADDRESS));
+    instructions.extend([Instruction::AndImmediate(CACHE_UPLOADED_MARKER)]);
+    let uploaded_placeholder = instructions.len();
+    instructions.push(Instruction::BneAbsolute(DISPATCH_ADDRESS));
+    instructions.extend([
+        Instruction::LdaZeroPage(PPU_MASK_SHADOW),
+        Instruction::CmpImmediate(UPLOAD_RENDER_MASK),
+    ]);
+    let wrong_render_state_placeholder = instructions.len();
+    instructions.push(Instruction::BneAbsolute(DISPATCH_ADDRESS));
+    instructions.extend([
+        Instruction::JsrAbsolute(COMPOSE_PAGE_ADDRESS),
+        Instruction::JsrAbsolute(SOURCE_NMI_SCROLL_RESTORE),
+    ]);
+    let restore = next_address(DISPATCH_ADDRESS, &instructions)?;
+    instructions[inactive_placeholder] = Instruction::BeqAbsolute(restore);
+    instructions[uploaded_placeholder] = Instruction::BneAbsolute(restore);
+    instructions[wrong_render_state_placeholder] = Instruction::BneAbsolute(restore);
+    instructions.extend([
+        Instruction::Pla,
+        Instruction::Tay,
+        Instruction::Pla,
+        Instruction::Tax,
+        Instruction::Pla,
+        Instruction::Plp,
+        Instruction::Rts,
+    ]);
+    assemble_at(DISPATCH_ADDRESS, &instructions)
 }
 
 pub(super) fn compose_page(directories: RecipeDirectoryAddresses) -> Result<Vec<u8>> {
@@ -176,6 +188,15 @@ pub(super) fn compose_page(directories: RecipeDirectoryAddresses) -> Result<Vec<
         Instruction::StaAbsolute(0x8000),
         Instruction::LdaImmediate(SOURCE_PAGE_MMC3_PAGE),
         Instruction::StaAbsolute(0x8001),
+        Instruction::JsrAbsolute(DYNAMIC_ASSIGNMENT_CODE_CPU_ADDRESS),
+    ]);
+    let assignment_succeeded_placeholder = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(COMPOSE_PAGE_ADDRESS));
+    let assignment_failed_placeholder = instructions.len();
+    instructions.push(Instruction::JmpAbsolute(COMPOSE_PAGE_ADDRESS));
+    let assignment_succeeded = next_address(COMPOSE_PAGE_ADDRESS, &instructions)?;
+    instructions[assignment_succeeded_placeholder] = Instruction::BeqAbsolute(assignment_succeeded);
+    instructions.extend([
         Instruction::LdaImmediate(2),
         Instruction::StaAbsolute(0x8000),
         Instruction::LdaImmediate(0),
@@ -248,6 +269,10 @@ pub(super) fn compose_page(directories: RecipeDirectoryAddresses) -> Result<Vec<
         Instruction::LdaAbsolute(BATTLE_ACTIVE_FLAG),
         Instruction::OraImmediate(CACHE_UPLOADED_MARKER),
         Instruction::StaAbsolute(BATTLE_ACTIVE_FLAG),
+    ]);
+    let restore = next_address(COMPOSE_PAGE_ADDRESS, &instructions)?;
+    instructions[assignment_failed_placeholder] = Instruction::JmpAbsolute(restore);
+    instructions.extend([
         Instruction::LdaZeroPage(PRG_BANK_SHADOW),
         Instruction::JsrAbsolute(SOURCE_PRG_BANK_SELECTOR),
         Instruction::LdaZeroPage(RIGHT_FE_SHADOW),
@@ -273,7 +298,7 @@ pub(super) fn compose_page(directories: RecipeDirectoryAddresses) -> Result<Vec<
     assemble_at(COMPOSE_PAGE_ADDRESS, &instructions)
 }
 
-fn apply_recipe() -> Result<Vec<u8>> {
+pub(super) fn apply_recipe() -> Result<Vec<u8>> {
     let mut instructions = vec![
         Instruction::LdyImmediate(0),
         Instruction::LdaIndirectY(RECIPE_POINTER_LOW),
@@ -296,6 +321,7 @@ fn apply_recipe() -> Result<Vec<u8>> {
         Instruction::LdaIndirectY(RECIPE_POINTER_LOW),
         Instruction::Tax,
         Instruction::LdaAbsoluteX(PHYSICAL_CODE_TABLE_CPU_ADDRESS),
+        Instruction::JsrAbsolute(PROJECT_COLOR_ADDRESS),
         Instruction::StaZeroPage(PHYSICAL_TILE_CODE),
         Instruction::LdaAbsolute(0x2002),
         Instruction::LdaZeroPage(PHYSICAL_TILE_CODE),
@@ -422,53 +448,66 @@ fn project_dialogue_selector() -> Result<Vec<u8>> {
     )
 }
 
-pub(super) fn admitted_tuple_predicate(
-    runtime_inputs: &BTreeSet<BattleRuntimeRecipeInput>,
-) -> Result<Vec<u8>> {
-    const TUPLE_BLOCK_BYTE_COUNT: u16 = 65;
+pub(super) fn text_projection_wrapper() -> Result<Vec<u8>> {
     let mut instructions = vec![
         Instruction::Txa,
         Instruction::Pha,
-        Instruction::JsrAbsolute(PROJECT_DIALOGUE_SELECTOR_ADDRESS),
-        Instruction::Tax,
+        Instruction::LdaIndirectY(RECIPE_POINTER_LOW),
+        Instruction::StaZeroPage(PHYSICAL_TILE_CODE),
+        Instruction::LdaAbsolute(BATTLE_ACTIVE_FLAG),
+        Instruction::AndImmediate(CACHE_UPLOADED_MARKER),
     ];
-    let mut block_address = ADMITTED_TUPLE_PREDICATE_ADDRESS + 6;
-    for input in runtime_inputs {
-        let next = block_address + TUPLE_BLOCK_BYTE_COUNT;
-        let values = [
-            input.participant_record_identities[0],
-            input.participant_record_identities[1],
-            input.class_record_identities[0],
-            input.class_record_identities[1],
-            input.item_source_indices[0],
-            input.item_source_indices[1],
-            input.terrain_source_indices[0],
-            input.terrain_source_indices[1],
-        ];
-        for (address, value) in RUNTIME_FIELD_ADDRESSES.into_iter().zip(values) {
-            instructions.extend([
-                Instruction::LdaAbsolute(address),
-                Instruction::CmpImmediate(value),
-                Instruction::BneAbsolute(next),
-            ]);
-        }
-        instructions.extend([
-            Instruction::CpxImmediate(input.dialogue_selector),
-            Instruction::BneAbsolute(next),
-            Instruction::Pla,
-            Instruction::Tax,
-            Instruction::LdaImmediate(0),
-            Instruction::Rts,
-        ]);
-        block_address = next;
-    }
+    let natural_placeholder = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(TEXT_PROJECTION_WRAPPER_ADDRESS));
+    instructions.extend([
+        Instruction::LdaZeroPage(PHYSICAL_TILE_CODE),
+        Instruction::JsrAbsolute(PROJECT_COLOR_ADDRESS),
+        Instruction::StaZeroPage(PHYSICAL_TILE_CODE),
+    ]);
+    let natural = next_address(TEXT_PROJECTION_WRAPPER_ADDRESS, &instructions)?;
+    instructions[natural_placeholder] = Instruction::BeqAbsolute(natural);
     instructions.extend([
         Instruction::Pla,
         Instruction::Tax,
-        Instruction::LdaImmediate(1),
+        Instruction::LdaZeroPage(PHYSICAL_TILE_CODE),
+        Instruction::CmpImmediate(0xEF),
         Instruction::Rts,
     ]);
-    assemble_at(ADMITTED_TUPLE_PREDICATE_ADDRESS, &instructions)
+    assemble_at(TEXT_PROJECTION_WRAPPER_ADDRESS, &instructions)
+}
+
+fn project_color() -> Result<Vec<u8>> {
+    let mut instructions = vec![
+        Instruction::StaZeroPage(PHYSICAL_TILE_CODE),
+        Instruction::LdaAbsolute(BATTLE_ACTIVE_FLAG),
+        Instruction::AndImmediate(0x1E),
+        Instruction::Tax,
+    ];
+    let empty_placeholder = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(PROJECT_COLOR_ADDRESS));
+    let loop_address = next_address(PROJECT_COLOR_ADDRESS, &instructions)?;
+    instructions.extend([
+        Instruction::Dex,
+        Instruction::Dex,
+        Instruction::LdaAbsoluteX(REMAP_PAIR_TABLE_ADDRESS),
+        Instruction::CmpZeroPage(PHYSICAL_TILE_CODE),
+    ]);
+    let matched_placeholder = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(PROJECT_COLOR_ADDRESS));
+    instructions.extend([Instruction::Txa, Instruction::BneAbsolute(loop_address)]);
+    let done = next_address(PROJECT_COLOR_ADDRESS, &instructions)?;
+    instructions[empty_placeholder] = Instruction::BeqAbsolute(done);
+    instructions.extend([
+        Instruction::LdaZeroPage(PHYSICAL_TILE_CODE),
+        Instruction::Rts,
+    ]);
+    let matched = next_address(PROJECT_COLOR_ADDRESS, &instructions)?;
+    instructions[matched_placeholder] = Instruction::BeqAbsolute(matched);
+    instructions.extend([
+        Instruction::LdaAbsoluteX(REMAP_PAIR_TABLE_ADDRESS + 1),
+        Instruction::Rts,
+    ]);
+    assemble_at(PROJECT_COLOR_ADDRESS, &instructions)
 }
 
 pub(super) fn battle_right_selector(address: u16, mapper_register: u8) -> Result<Vec<u8>> {

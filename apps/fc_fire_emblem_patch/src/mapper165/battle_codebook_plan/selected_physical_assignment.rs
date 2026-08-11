@@ -92,7 +92,7 @@ pub(super) fn assign_selected_physical_codes_with_canonical_map(
             protected_physical_codes.contains(&canonical_color_codes[usize::from(*color)])
         })
         .collect::<Vec<_>>();
-    let available_safe_codes = active_codes
+    let available_safe_codes = canonical_color_codes
         .iter()
         .copied()
         .filter(|code| !protected_physical_codes.contains(code))
@@ -144,11 +144,15 @@ pub(super) fn assign_selected_physical_codes_with_canonical_map(
                 .unwrap_or(UNUSED_REMAP_TARGET)
         })
         .collect::<Vec<_>>();
-    let remap_pairs = protected_physical_codes
+    let remap_pairs = colliding_colors
         .iter()
         .copied()
-        .zip(protected_code_remap_targets.iter().copied())
-        .filter(|(_, target)| *target != UNUSED_REMAP_TARGET)
+        .map(|color| {
+            (
+                canonical_color_codes[usize::from(color)],
+                replacements[&color],
+            )
+        })
         .collect::<Vec<_>>();
     ensure!(
         protected_code_remap_targets

@@ -19,13 +19,17 @@ use crate::{
 use super::{
     OUTPUT_MAPPER, assemble_mapper165_parity_bytes,
     battle_codebook_plan::{
-        plan_battle_cache_composition_material, plan_constrained_battle_codebook,
+        plan_battle_cache_composition_material, plan_canonical_battle_codebook,
         surface_constraints::select_observed_battle_surfaces,
     },
     battle_text_cache_probe::{
-        GLYPH_ATLAS_MMC3_PAGE, GLYPH_ATLAS_PRG_OFFSET, PHYSICAL_CODE_TABLE_CPU_ADDRESS,
-        PHYSICAL_CODE_TABLE_PRG_OFFSET, RECIPE_BLOB_MMC3_PAGE, RECIPE_BLOB_PRG_OFFSET,
-        SOURCE_PAGE_MMC3_PAGE, SOURCE_PAGE_PRG_OFFSET, expand_prg_with_material, rasterize_atlas,
+        COLOR_BIT_MASKS, COLOR_BIT_MASKS_CPU_ADDRESS, COLOR_BIT_MASKS_PRG_OFFSET,
+        DynamicAssignmentMaterial, GLYPH_ATLAS_MMC3_PAGE, GLYPH_ATLAS_PRG_OFFSET,
+        PHYSICAL_CODE_TABLE_CPU_ADDRESS, PHYSICAL_CODE_TABLE_PRG_OFFSET,
+        PROTECTED_ABSTRACT_COLORS_CPU_ADDRESS, PROTECTED_ABSTRACT_COLORS_PRG_OFFSET,
+        RECIPE_BLOB_MMC3_PAGE, RECIPE_BLOB_PRG_OFFSET, SAFE_ABSTRACT_COLORS_CPU_ADDRESS,
+        SAFE_ABSTRACT_COLORS_PRG_OFFSET, SOURCE_PAGE_MMC3_PAGE, SOURCE_PAGE_PRG_OFFSET,
+        expand_prg_with_material, rasterize_atlas,
     },
     dialogue_probe_font::SOURCE_FONT_PHYSICAL_PAGE,
 };
@@ -57,10 +61,22 @@ struct BattleTextRuntimeBaseReport {
     observed_runtime_tuple_count: usize,
     maximum_observed_overlay_count: usize,
     stable_color_count: usize,
-    physical_assignment_sha1: String,
-    physical_code_table_byte_count: usize,
-    physical_code_table_sha1: String,
-    physical_code_table_cpu_address_hex: String,
+    abstract_assignment_sha1: String,
+    canonical_assignment_sha1: String,
+    canonical_code_table_byte_count: usize,
+    canonical_code_table_sha1: String,
+    canonical_code_table_cpu_address_hex: String,
+    protected_physical_code_count: usize,
+    protected_abstract_color_count: usize,
+    protected_abstract_colors_sha1: String,
+    protected_abstract_colors_cpu_address_hex: String,
+    safe_abstract_color_count: usize,
+    safe_abstract_colors_sha1: String,
+    safe_abstract_colors_cpu_address_hex: String,
+    color_bit_mask_byte_count: usize,
+    color_bit_masks_sha1: String,
+    color_bit_masks_cpu_address_hex: String,
+    maximum_remap_pair_count: usize,
     glyph_atlas_tile_count: usize,
     glyph_atlas_byte_count: usize,
     glyph_atlas_sha1: String,
@@ -76,7 +92,7 @@ struct BattleTextRuntimeBaseReport {
     battle_catalog_fixed_text_reinserted: bool,
     battle_dialogue_reinserted: bool,
     forecast_label_reinserted: bool,
-    physical_assignment_catalog_complete: bool,
+    dynamic_assignment_source_contract_complete: bool,
     translation_review_complete: bool,
     runtime_loader_installed: bool,
     translation_text_emitted: bool,
@@ -109,15 +125,10 @@ pub(crate) fn build_battle_text_runtime_base(
     let material = plan_battle_cache_composition_material(&source_rom, &fixed, &dialogue)?;
     let evidence = load_observed_battle_temporal_evidence(source_path, temporal_manifest_path)?;
     let observed = select_observed_battle_surfaces(&source_rom, &material, &evidence)?;
-    let constraints = observed
-        .constraints
-        .iter()
-        .map(|(_, constraint)| constraint.clone())
-        .collect::<Vec<_>>();
-    let codebook = plan_constrained_battle_codebook(&source_rom, &fixed, &dialogue, &constraints)?;
+    let codebook = plan_canonical_battle_codebook(&source_rom, &fixed, &dialogue)?;
     ensure!(
         codebook.color_codes.len() == ACTIVE_HANGUL_SLOT_COUNT,
-        "battle runtime base physical table does not fill the active codebook"
+        "battle runtime base canonical table does not fill the active codebook"
     );
     ensure!(
         codebook
@@ -127,7 +138,7 @@ pub(crate) fn build_battle_text_runtime_base(
             .collect::<std::collections::BTreeSet<_>>()
             .len()
             == codebook.color_codes.len(),
-        "battle runtime base physical table reuses a tile code"
+        "battle runtime base canonical table reuses a tile code"
     );
 
     let parity = assemble_mapper165_parity_bytes(&source_rom)?;
@@ -175,7 +186,11 @@ pub(crate) fn build_battle_text_runtime_base(
     let output = expand_prg_with_material(
         &translated_parity_rom,
         &glyph_atlas,
-        &codebook.color_codes,
+        Some(&DynamicAssignmentMaterial {
+            canonical_color_codes: &codebook.color_codes,
+            protected_abstract_colors: &codebook.protected_abstract_colors,
+            safe_abstract_colors: &codebook.safe_abstract_colors,
+        }),
         source_page,
         &material.recipe_blob,
     )?;
@@ -204,15 +219,33 @@ pub(crate) fn build_battle_text_runtime_base(
         "battle text runtime base did not duplicate the translated active fixed bank"
     );
     ensure!(
-        &output_rom.prg()[GLYPH_ATLAS_PRG_OFFSET..GLYPH_ATLAS_PRG_OFFSET + glyph_atlas.len()]
+        output_rom.prg()[GLYPH_ATLAS_PRG_OFFSET..GLYPH_ATLAS_PRG_OFFSET + glyph_atlas.len()]
             == glyph_atlas,
         "battle runtime glyph atlas changed after expansion"
     );
     ensure!(
-        &output_rom.prg()[PHYSICAL_CODE_TABLE_PRG_OFFSET
+        output_rom.prg()[PHYSICAL_CODE_TABLE_PRG_OFFSET
             ..PHYSICAL_CODE_TABLE_PRG_OFFSET + codebook.color_codes.len()]
             == codebook.color_codes,
-        "battle runtime physical-code table changed after expansion"
+        "battle runtime canonical-code table changed after expansion"
+    );
+    ensure!(
+        output_rom.prg()[PROTECTED_ABSTRACT_COLORS_PRG_OFFSET
+            ..PROTECTED_ABSTRACT_COLORS_PRG_OFFSET + codebook.protected_abstract_colors.len()]
+            == codebook.protected_abstract_colors,
+        "battle runtime protected abstract-color list changed after expansion"
+    );
+    ensure!(
+        output_rom.prg()[SAFE_ABSTRACT_COLORS_PRG_OFFSET
+            ..SAFE_ABSTRACT_COLORS_PRG_OFFSET + codebook.safe_abstract_colors.len()]
+            == codebook.safe_abstract_colors,
+        "battle runtime safe abstract-color list changed after expansion"
+    );
+    ensure!(
+        output_rom.prg()
+            [COLOR_BIT_MASKS_PRG_OFFSET..COLOR_BIT_MASKS_PRG_OFFSET + COLOR_BIT_MASKS.len()]
+            == COLOR_BIT_MASKS,
+        "battle runtime color bit-mask table changed after expansion"
     );
     ensure!(
         &output_rom.prg()[SOURCE_PAGE_PRG_OFFSET..SOURCE_PAGE_PRG_OFFSET + source_page.len()]
@@ -220,7 +253,7 @@ pub(crate) fn build_battle_text_runtime_base(
         "battle runtime source page changed after expansion"
     );
     ensure!(
-        &output_rom.prg()
+        output_rom.prg()
             [RECIPE_BLOB_PRG_OFFSET..RECIPE_BLOB_PRG_OFFSET + material.recipe_blob.len()]
             == material.recipe_blob,
         "battle runtime recipe blob changed after expansion"
@@ -228,7 +261,7 @@ pub(crate) fn build_battle_text_runtime_base(
 
     let output_sha1 = sha1_hex(&output);
     let report = BattleTextRuntimeBaseReport {
-        schema: 1,
+        schema: 2,
         source_sha1: EXPECTED_SOURCE_SHA1,
         fixed_workspace_sha1: sha1_hex(&fs::read(fixed_workspace_path)?),
         dialogue_workspace_sha1: sha1_hex(&fs::read(dialogue_workspace_path)?),
@@ -249,10 +282,24 @@ pub(crate) fn build_battle_text_runtime_base(
         observed_runtime_tuple_count: observed.runtime_input_count,
         maximum_observed_overlay_count: observed.maximum_selected_overlay_count,
         stable_color_count: codebook.stable_color_count,
-        physical_assignment_sha1: codebook.physical_assignment_sha1,
-        physical_code_table_byte_count: codebook.color_codes.len(),
-        physical_code_table_sha1: sha1_hex(&codebook.color_codes),
-        physical_code_table_cpu_address_hex: format!("0x{PHYSICAL_CODE_TABLE_CPU_ADDRESS:04X}"),
+        abstract_assignment_sha1: codebook.abstract_assignment_sha1,
+        canonical_assignment_sha1: codebook.canonical_assignment_sha1,
+        canonical_code_table_byte_count: codebook.color_codes.len(),
+        canonical_code_table_sha1: sha1_hex(&codebook.color_codes),
+        canonical_code_table_cpu_address_hex: format!("0x{PHYSICAL_CODE_TABLE_CPU_ADDRESS:04X}"),
+        protected_physical_code_count: codebook.protected_physical_code_count,
+        protected_abstract_color_count: codebook.protected_abstract_colors.len(),
+        protected_abstract_colors_sha1: sha1_hex(&codebook.protected_abstract_colors),
+        protected_abstract_colors_cpu_address_hex: format!(
+            "0x{PROTECTED_ABSTRACT_COLORS_CPU_ADDRESS:04X}"
+        ),
+        safe_abstract_color_count: codebook.safe_abstract_colors.len(),
+        safe_abstract_colors_sha1: sha1_hex(&codebook.safe_abstract_colors),
+        safe_abstract_colors_cpu_address_hex: format!("0x{SAFE_ABSTRACT_COLORS_CPU_ADDRESS:04X}"),
+        color_bit_mask_byte_count: COLOR_BIT_MASKS.len(),
+        color_bit_masks_sha1: sha1_hex(&COLOR_BIT_MASKS),
+        color_bit_masks_cpu_address_hex: format!("0x{COLOR_BIT_MASKS_CPU_ADDRESS:04X}"),
+        maximum_remap_pair_count: codebook.maximum_remap_pair_count,
         glyph_atlas_tile_count: material.atlas_glyphs.len(),
         glyph_atlas_byte_count: glyph_atlas.len(),
         glyph_atlas_sha1: sha1_hex(&glyph_atlas),
@@ -268,14 +315,14 @@ pub(crate) fn build_battle_text_runtime_base(
         battle_catalog_fixed_text_reinserted: true,
         battle_dialogue_reinserted: true,
         forecast_label_reinserted: true,
-        physical_assignment_catalog_complete: false,
+        dynamic_assignment_source_contract_complete: true,
         translation_review_complete: false,
         runtime_loader_installed: false,
         translation_text_emitted: false,
         glyph_characters_emitted: false,
         runtime_verified: false,
         release_eligible: false,
-        next_gate: "install an observed-tuple-gated runtime recipe loader, then extend the pattern-table protection catalog before removing that gate",
+        next_gate: "install dynamic assignment and project the shared text renderer through the resulting remap pairs",
     };
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize battle text runtime base report")?;
@@ -421,7 +468,7 @@ mod tests {
     #[test]
     fn report_omits_translation_content_and_private_paths() {
         let report = BattleTextRuntimeBaseReport {
-            schema: 1,
+            schema: 2,
             source_sha1: EXPECTED_SOURCE_SHA1,
             fixed_workspace_sha1: "fixed".to_owned(),
             dialogue_workspace_sha1: "dialogue".to_owned(),
@@ -442,10 +489,22 @@ mod tests {
             observed_runtime_tuple_count: 5,
             maximum_observed_overlay_count: 88,
             stable_color_count: ACTIVE_HANGUL_SLOT_COUNT,
-            physical_assignment_sha1: "physical".to_owned(),
-            physical_code_table_byte_count: ACTIVE_HANGUL_SLOT_COUNT,
-            physical_code_table_sha1: "table".to_owned(),
-            physical_code_table_cpu_address_hex: "0x9400".to_owned(),
+            abstract_assignment_sha1: "abstract".to_owned(),
+            canonical_assignment_sha1: "canonical".to_owned(),
+            canonical_code_table_byte_count: ACTIVE_HANGUL_SLOT_COUNT,
+            canonical_code_table_sha1: "table".to_owned(),
+            canonical_code_table_cpu_address_hex: "0x9400".to_owned(),
+            protected_physical_code_count: 39,
+            protected_abstract_color_count: 39,
+            protected_abstract_colors_sha1: "protected".to_owned(),
+            protected_abstract_colors_cpu_address_hex: "0x94D2".to_owned(),
+            safe_abstract_color_count: 171,
+            safe_abstract_colors_sha1: "safe".to_owned(),
+            safe_abstract_colors_cpu_address_hex: "0x94F9".to_owned(),
+            color_bit_mask_byte_count: 8,
+            color_bit_masks_sha1: "masks".to_owned(),
+            color_bit_masks_cpu_address_hex: "0x95A4".to_owned(),
+            maximum_remap_pair_count: 8,
             glyph_atlas_tile_count: 296,
             glyph_atlas_byte_count: 4736,
             glyph_atlas_sha1: "atlas".to_owned(),
@@ -461,7 +520,7 @@ mod tests {
             battle_catalog_fixed_text_reinserted: true,
             battle_dialogue_reinserted: true,
             forecast_label_reinserted: true,
-            physical_assignment_catalog_complete: false,
+            dynamic_assignment_source_contract_complete: true,
             translation_review_complete: false,
             runtime_loader_installed: false,
             translation_text_emitted: false,

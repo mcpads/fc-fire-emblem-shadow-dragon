@@ -17,13 +17,18 @@ use super::{
     OUTPUT_MAPPER,
     battle_codebook_plan::{BattleRuntimeRecipeInput, inspect_runtime_recipe_input},
     battle_text_cache_probe::{
-        GLYPH_ATLAS_MMC3_PAGE, PHYSICAL_CODE_TABLE_CPU_ADDRESS, RECIPE_BLOB_MMC3_PAGE,
-        RECIPE_BLOB_PRG_OFFSET, SOURCE_PAGE_MMC3_PAGE,
+        COLOR_BIT_MASKS_CPU_ADDRESS, DYNAMIC_ASSIGNMENT_CODE_CPU_ADDRESS,
+        DYNAMIC_ASSIGNMENT_CODE_PRG_OFFSET, GLYPH_ATLAS_MMC3_PAGE, PHYSICAL_CODE_TABLE_CPU_ADDRESS,
+        PROTECTED_ABSTRACT_COLOR_COUNT, PROTECTED_ABSTRACT_COLORS_CPU_ADDRESS,
+        RECIPE_BLOB_MMC3_PAGE, RECIPE_BLOB_PRG_OFFSET, SAFE_ABSTRACT_COLOR_COUNT,
+        SAFE_ABSTRACT_COLORS_CPU_ADDRESS, SOURCE_PAGE_MMC3_PAGE,
     },
 };
 
+mod dynamic_assignment;
 mod runtime;
 
+use dynamic_assignment::build_dynamic_assignment_routines;
 use runtime::{RuntimeRoutine, build_runtime_routines, parse_recipe_directories};
 
 const EXPANDED_PRG_SIZE: usize = 512 * 1024;
@@ -41,6 +46,7 @@ const SOURCE_PAIR_AWARE_RIGHT_FD_SELECTOR: u16 = 0xFAC0;
 const SOURCE_CENTRAL_RIGHT_FD_CALL: u16 = 0xC9C2;
 const SOURCE_CENTRAL_FE_FD_REFRESH_CALL: u16 = 0xFABB;
 const SOURCE_PRG_BANK_SELECTOR: u16 = 0xFA20;
+const SOURCE_COMMON_GLYPH_READ: u16 = 0xE57F;
 
 const DISPATCH_ADDRESS: u16 = 0xFAF3;
 const COMPOSE_PAGE_ADDRESS: u16 = 0xFB20;
@@ -48,10 +54,11 @@ const APPLY_RECIPE_ADDRESS: u16 = 0xFC50;
 const APPLY_DIRECTORY_ADDRESS: u16 = 0xFCD0;
 const APPLY_PARTICIPANT_ADDRESS: u16 = 0xFCF0;
 const PROJECT_DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFD20;
-const ADMITTED_TUPLE_PREDICATE_ADDRESS: u16 = 0xFD40;
 const BATTLE_RIGHT_FD_SELECTOR_ADDRESS: u16 = 0xFEA0;
 const BATTLE_CENTRAL_RIGHT_FD_SELECTOR_ADDRESS: u16 = 0xFEE0;
 const BATTLE_RIGHT_FE_SELECTOR_ADDRESS: u16 = 0xFF20;
+const TEXT_PROJECTION_WRAPPER_ADDRESS: u16 = 0xFF58;
+const PROJECT_COLOR_ADDRESS: u16 = 0xFF78;
 const FIXED_CAVE_END_ADDRESS: u16 = 0xFFA0;
 
 const PPU_MASK_SHADOW: u8 = 0xCC;
@@ -65,6 +72,11 @@ const ENEMY_INITIATED_BATTLE_STATE: u8 = 0x32;
 const BATTLE_ACTIVE_FLAG: u16 = 0x047D;
 const CACHE_UPLOADED_MARKER: u8 = 0x80;
 const UPLOAD_RENDER_MASK: u8 = 0x06;
+const ACTIVE_AND_REMAP_CLEAR_MASK: u8 = 0xE1;
+const SELECTED_COLOR_BITMAP_ADDRESS: u16 = 0x07C4;
+const SELECTED_COLOR_BITMAP_BYTE_COUNT: u8 = 27;
+const REMAP_PAIR_TABLE_ADDRESS: u16 = 0x07E0;
+const MAXIMUM_REMAP_PAIR_COUNT: u8 = 8;
 
 const RECIPE_POINTER_LOW: u8 = 0x00;
 const RECIPE_POINTER_HIGH: u8 = 0x01;
@@ -90,14 +102,21 @@ struct BattleTextRuntimeBaseContract {
     observed_runtime_tuple_count: usize,
     maximum_observed_overlay_count: usize,
     stable_color_count: usize,
-    physical_code_table_byte_count: usize,
-    physical_code_table_cpu_address_hex: String,
+    canonical_code_table_byte_count: usize,
+    canonical_code_table_cpu_address_hex: String,
+    protected_abstract_color_count: usize,
+    protected_abstract_colors_cpu_address_hex: String,
+    safe_abstract_color_count: usize,
+    safe_abstract_colors_cpu_address_hex: String,
+    color_bit_mask_byte_count: usize,
+    color_bit_masks_cpu_address_hex: String,
+    maximum_remap_pair_count: usize,
     glyph_atlas_mmc3_page: u8,
     source_page_mmc3_page: u8,
     recipe_blob_byte_count: usize,
     recipe_blob_sha1: String,
     recipe_blob_mmc3_page: u8,
-    physical_assignment_catalog_complete: bool,
+    dynamic_assignment_source_contract_complete: bool,
     runtime_loader_installed: bool,
     release_eligible: bool,
 }
@@ -113,7 +132,7 @@ struct BattleCompositionLoaderProbeReport {
     output_mapper: u16,
     prg_size: usize,
     chr_size: usize,
-    admitted_runtime_tuple_count: usize,
+    observed_runtime_tuple_count: usize,
     runtime_field_count: usize,
     maximum_observed_unique_overlay_count: usize,
     maximum_observed_raw_glyph_reference_count: usize,
@@ -123,14 +142,19 @@ struct BattleCompositionLoaderProbeReport {
     glyph_atlas_mmc3_page: u8,
     source_and_recipe_mmc3_page: u8,
     atlas_cpu_address_hex: String,
-    physical_code_table_cpu_address_hex: String,
+    canonical_code_table_cpu_address_hex: String,
     source_page_cpu_address_hex: String,
     recipe_blob_cpu_address_hex: String,
     fixed_cave_start_cpu_address_hex: String,
     fixed_cave_end_cpu_address_exclusive_hex: String,
     fixed_cave_byte_count: usize,
-    runtime_routine_count: usize,
-    runtime_routine_byte_count: usize,
+    fixed_runtime_routine_count: usize,
+    fixed_runtime_routine_byte_count: usize,
+    material_runtime_start_cpu_address_hex: String,
+    material_runtime_end_cpu_address_exclusive_hex: String,
+    material_runtime_routine_count: usize,
+    material_runtime_routine_byte_count: usize,
+    total_runtime_routine_byte_count: usize,
     runtime_tracked_write_count: usize,
     source_raw_direct_cave_transfer_pattern_count: usize,
     raw_direct_transfer_patterns_are_code_proof: bool,
@@ -144,10 +168,18 @@ struct BattleCompositionLoaderProbeReport {
     source_prg_bank_restored_from_shadow: bool,
     runtime_recipe_duplicates_replayed: bool,
     source_bound_dialogue_projection_installed: bool,
-    admitted_tuple_gate_installed: bool,
+    observed_tuple_gate_installed: bool,
+    modeled_runtime_inputs_enabled: bool,
+    selected_color_bitmap_address_hex: String,
+    selected_color_bitmap_byte_count: usize,
+    remap_pair_table_address_hex: String,
+    maximum_remap_pair_count: usize,
+    remap_overflow_aborts_composition: bool,
+    shared_text_projection_hook_address_hex: String,
+    shared_text_projection_installed: bool,
     battle_zero_right_page_uses_chr_ram_after_success: bool,
     non_battle_right_pages_use_natural_selection: bool,
-    physical_assignment_catalog_complete: bool,
+    dynamic_assignment_source_contract_complete: bool,
     runtime_cycle_budget_measured: bool,
     runtime_verified: bool,
     release_eligible: bool,
@@ -159,7 +191,7 @@ struct BattleCompositionLoaderProbeReport {
 pub(crate) struct BattleCompositionLoaderProbeSummary {
     pub(crate) output_sha1: String,
     pub(crate) report_sha1: String,
-    pub(crate) admitted_runtime_tuple_count: usize,
+    pub(crate) observed_runtime_tuple_count: usize,
     pub(crate) maximum_observed_ppu_write_count: usize,
     pub(crate) runtime_routine_byte_count: usize,
 }
@@ -212,7 +244,7 @@ pub(crate) fn build_battle_composition_loader_probe(
         .collect::<BTreeSet<_>>();
     ensure!(
         !runtime_inputs.is_empty(),
-        "battle composition loader has no admitted runtime tuples"
+        "battle composition loader has no observed verification tuples"
     );
     ensure!(
         runtime_inputs.len() == base_contract.observed_runtime_tuple_count,
@@ -241,14 +273,24 @@ pub(crate) fn build_battle_composition_loader_probe(
         "battle composition loader overlay count disagrees with its base"
     );
 
-    let routines = build_runtime_routines(&runtime_inputs, directories)?;
+    let routines = build_runtime_routines(directories)?;
+    let material_routines = build_dynamic_assignment_routines(directories)?;
     let source_raw_direct_cave_transfer_pattern_count =
         verify_runtime_cave(&base_rom, source_rom.prg(), &routines)?;
+    verify_material_runtime_region(&base_rom, &material_routines)?;
     let mut image = TrackedImage::new(base.clone());
     for routine in &routines {
         image.write_expected(
             format!("battle composition {} routine", routine.role),
             expanded_fixed_bank_file_offset(routine.address)?,
+            &vec![0xFF; routine.bytes.len()],
+            &routine.bytes,
+        )?;
+    }
+    for routine in &material_routines {
+        image.write_expected(
+            format!("battle composition {} routine", routine.role),
+            material_runtime_file_offset(routine.address)?,
             &vec![0xFF; routine.bytes.len()],
             &routine.bytes,
         )?;
@@ -263,6 +305,24 @@ pub(crate) fn build_battle_composition_loader_probe(
         &assemble_at(
             SOURCE_NMI_UPLOAD_HOOK,
             &[Instruction::JsrAbsolute(DISPATCH_ADDRESS)],
+        )?,
+    )?;
+    image.write_expected(
+        "battle composition shared text projection hook",
+        expanded_fixed_bank_file_offset(SOURCE_COMMON_GLYPH_READ)?,
+        &assemble_at(
+            SOURCE_COMMON_GLYPH_READ,
+            &[
+                Instruction::LdaIndirectY(RECIPE_POINTER_LOW),
+                Instruction::CmpImmediate(0xEF),
+            ],
+        )?,
+        &assemble_at(
+            SOURCE_COMMON_GLYPH_READ,
+            &[
+                Instruction::JsrAbsolute(TEXT_PROJECTION_WRAPPER_ADDRESS),
+                Instruction::Nop,
+            ],
         )?,
     )?;
     redirect_right_selector(
@@ -308,10 +368,19 @@ pub(crate) fn build_battle_composition_loader_probe(
     let maximum_observed_overlay_ppu_write_count = maximum_observed_raw_glyph_reference_count * 16;
     let maximum_observed_total_ppu_write_count =
         source_page_ppu_write_count + maximum_observed_overlay_ppu_write_count;
-    let runtime_routine_byte_count = routines.iter().map(|routine| routine.bytes.len()).sum();
+    let fixed_runtime_routine_byte_count = routines
+        .iter()
+        .map(|routine| routine.bytes.len())
+        .sum::<usize>();
+    let material_runtime_routine_byte_count = material_routines
+        .iter()
+        .map(|routine| routine.bytes.len())
+        .sum::<usize>();
+    let runtime_routine_byte_count =
+        fixed_runtime_routine_byte_count + material_runtime_routine_byte_count;
     let output_sha1 = sha1_hex(&output);
     let report = BattleCompositionLoaderProbeReport {
-        schema: 1,
+        schema: 2,
         source_sha1: EXPECTED_SOURCE_SHA1,
         base_report_sha1: sha1_hex(&base_report_bytes),
         base_output_sha1: base_sha1,
@@ -320,7 +389,7 @@ pub(crate) fn build_battle_composition_loader_probe(
         output_mapper: output_rom.mapper(),
         prg_size: output_rom.prg().len(),
         chr_size: output_rom.chr().len(),
-        admitted_runtime_tuple_count: runtime_inputs.len(),
+        observed_runtime_tuple_count: runtime_inputs.len(),
         runtime_field_count: RUNTIME_FIELD_ADDRESSES.len() + 1,
         maximum_observed_unique_overlay_count,
         maximum_observed_raw_glyph_reference_count,
@@ -330,14 +399,29 @@ pub(crate) fn build_battle_composition_loader_probe(
         glyph_atlas_mmc3_page: GLYPH_ATLAS_MMC3_PAGE,
         source_and_recipe_mmc3_page: SOURCE_PAGE_MMC3_PAGE,
         atlas_cpu_address_hex: format!("0x{MATERIAL_ATLAS_CPU_ADDRESS:04X}"),
-        physical_code_table_cpu_address_hex: format!("0x{PHYSICAL_CODE_TABLE_CPU_ADDRESS:04X}"),
+        canonical_code_table_cpu_address_hex: format!("0x{PHYSICAL_CODE_TABLE_CPU_ADDRESS:04X}"),
         source_page_cpu_address_hex: format!("0x{MATERIAL_SOURCE_PAGE_CPU_ADDRESS:04X}"),
         recipe_blob_cpu_address_hex: format!("0x{MATERIAL_RECIPE_CPU_ADDRESS:04X}"),
         fixed_cave_start_cpu_address_hex: format!("0x{DISPATCH_ADDRESS:04X}"),
         fixed_cave_end_cpu_address_exclusive_hex: format!("0x{FIXED_CAVE_END_ADDRESS:04X}"),
         fixed_cave_byte_count: usize::from(FIXED_CAVE_END_ADDRESS - DISPATCH_ADDRESS),
-        runtime_routine_count: routines.len(),
-        runtime_routine_byte_count,
+        fixed_runtime_routine_count: routines.len(),
+        fixed_runtime_routine_byte_count,
+        material_runtime_start_cpu_address_hex: format!(
+            "0x{DYNAMIC_ASSIGNMENT_CODE_CPU_ADDRESS:04X}"
+        ),
+        material_runtime_end_cpu_address_exclusive_hex: material_routines
+            .last()
+            .map(|routine| {
+                format!(
+                    "0x{:04X}",
+                    usize::from(routine.address) + routine.bytes.len()
+                )
+            })
+            .context("battle composition has no material runtime routines")?,
+        material_runtime_routine_count: material_routines.len(),
+        material_runtime_routine_byte_count,
+        total_runtime_routine_byte_count: runtime_routine_byte_count,
         runtime_tracked_write_count,
         source_raw_direct_cave_transfer_pattern_count,
         raw_direct_transfer_patterns_are_code_proof: false,
@@ -351,16 +435,24 @@ pub(crate) fn build_battle_composition_loader_probe(
         source_prg_bank_restored_from_shadow: true,
         runtime_recipe_duplicates_replayed: true,
         source_bound_dialogue_projection_installed: true,
-        admitted_tuple_gate_installed: true,
+        observed_tuple_gate_installed: false,
+        modeled_runtime_inputs_enabled: true,
+        selected_color_bitmap_address_hex: format!("0x{SELECTED_COLOR_BITMAP_ADDRESS:04X}"),
+        selected_color_bitmap_byte_count: usize::from(SELECTED_COLOR_BITMAP_BYTE_COUNT),
+        remap_pair_table_address_hex: format!("0x{REMAP_PAIR_TABLE_ADDRESS:04X}"),
+        maximum_remap_pair_count: usize::from(MAXIMUM_REMAP_PAIR_COUNT),
+        remap_overflow_aborts_composition: true,
+        shared_text_projection_hook_address_hex: format!("0x{SOURCE_COMMON_GLYPH_READ:04X}"),
+        shared_text_projection_installed: true,
         battle_zero_right_page_uses_chr_ram_after_success: true,
         non_battle_right_pages_use_natural_selection: true,
-        physical_assignment_catalog_complete: false,
+        dynamic_assignment_source_contract_complete: true,
         runtime_cycle_budget_measured: false,
         runtime_verified: false,
         release_eligible: false,
         translation_text_emitted: false,
         glyph_characters_emitted: false,
-        next_gate: "cold-run every admitted sound-test and gameplay tuple through irregular temporal captures, measure the blank transition, and verify automatic exit restoration",
+        next_gate: "cold-run representative gameplay and sound-test inputs through irregular temporal captures, then measure the blank transition and verify automatic exit restoration",
     };
     let mut report_bytes = serde_json::to_vec_pretty(&report)
         .context("serialize battle composition loader probe report")?;
@@ -370,7 +462,7 @@ pub(crate) fn build_battle_composition_loader_probe(
     Ok(BattleCompositionLoaderProbeSummary {
         output_sha1,
         report_sha1: sha1_hex(&report_bytes),
-        admitted_runtime_tuple_count: runtime_inputs.len(),
+        observed_runtime_tuple_count: runtime_inputs.len(),
         maximum_observed_ppu_write_count: maximum_observed_total_ppu_write_count,
         runtime_routine_byte_count,
     })
@@ -381,7 +473,7 @@ fn validate_base_contract(
     actual_sha1: &str,
 ) -> Result<()> {
     ensure!(
-        contract.schema == 1
+        contract.schema == 2
             && contract.source_sha1 == EXPECTED_SOURCE_SHA1
             && contract.output_sha1 == actual_sha1
             && contract.output_mapper == OUTPUT_MAPPER
@@ -389,10 +481,23 @@ fn validate_base_contract(
         "battle composition loader base report binding changed"
     );
     ensure!(
-        contract.stable_color_count == contract.physical_code_table_byte_count
-            && contract.physical_code_table_cpu_address_hex
+        contract.stable_color_count == contract.canonical_code_table_byte_count
+            && contract.canonical_code_table_cpu_address_hex
                 == format!("0x{PHYSICAL_CODE_TABLE_CPU_ADDRESS:04X}"),
-        "battle composition loader physical table contract changed"
+        "battle composition loader canonical table contract changed"
+    );
+    ensure!(
+        contract.protected_abstract_color_count == PROTECTED_ABSTRACT_COLOR_COUNT
+            && contract.protected_abstract_colors_cpu_address_hex
+                == format!("0x{PROTECTED_ABSTRACT_COLORS_CPU_ADDRESS:04X}")
+            && contract.safe_abstract_color_count == SAFE_ABSTRACT_COLOR_COUNT
+            && contract.safe_abstract_colors_cpu_address_hex
+                == format!("0x{SAFE_ABSTRACT_COLORS_CPU_ADDRESS:04X}")
+            && contract.color_bit_mask_byte_count == 8
+            && contract.color_bit_masks_cpu_address_hex
+                == format!("0x{COLOR_BIT_MASKS_CPU_ADDRESS:04X}")
+            && contract.maximum_remap_pair_count == usize::from(MAXIMUM_REMAP_PAIR_COUNT),
+        "battle composition loader dynamic-assignment material contract changed"
     );
     ensure!(
         contract.glyph_atlas_mmc3_page == GLYPH_ATLAS_MMC3_PAGE
@@ -401,10 +506,10 @@ fn validate_base_contract(
         "battle composition loader material page contract changed"
     );
     ensure!(
-        !contract.physical_assignment_catalog_complete
+        contract.dynamic_assignment_source_contract_complete
             && !contract.runtime_loader_installed
             && !contract.release_eligible,
-        "battle composition loader expected a gated development base"
+        "battle composition loader expected a source-complete development base"
     );
     Ok(())
 }
@@ -432,6 +537,29 @@ fn verify_runtime_cave(
         direct_transfer_count += count_direct_transfers_to_range(source_prg, routine.address, end)?;
     }
     Ok(direct_transfer_count)
+}
+
+fn verify_material_runtime_region(
+    base_rom: &Rom,
+    routines: &[dynamic_assignment::MaterialRuntimeRoutine],
+) -> Result<()> {
+    for routine in routines {
+        let start = material_runtime_prg_offset(routine.address)?;
+        let end = start
+            .checked_add(routine.bytes.len())
+            .context("battle material runtime range overflow")?;
+        ensure!(
+            base_rom
+                .prg()
+                .get(start..end)
+                .context("battle material runtime is outside expanded PRG")?
+                .iter()
+                .all(|byte| *byte == 0xFF),
+            "battle composition {} material region is no longer all FF",
+            routine.role
+        );
+    }
+    Ok(())
 }
 
 fn redirect_right_selector(
@@ -499,6 +627,24 @@ fn redirect_call(
 fn expanded_fixed_bank_file_offset(cpu_address: u16) -> Result<usize> {
     ensure!(cpu_address >= 0xC000, "address is outside the fixed bank");
     Ok(HEADER_SIZE + EXPANDED_PRG_SIZE - FIXED_BANK_SIZE + usize::from(cpu_address - 0xC000))
+}
+
+fn material_runtime_prg_offset(cpu_address: u16) -> Result<usize> {
+    ensure!(
+        (DYNAMIC_ASSIGNMENT_CODE_CPU_ADDRESS..0xA000).contains(&cpu_address),
+        "address is outside the battle material runtime page"
+    );
+    DYNAMIC_ASSIGNMENT_CODE_PRG_OFFSET
+        .checked_add(usize::from(
+            cpu_address - DYNAMIC_ASSIGNMENT_CODE_CPU_ADDRESS,
+        ))
+        .context("battle material runtime PRG offset overflow")
+}
+
+fn material_runtime_file_offset(cpu_address: u16) -> Result<usize> {
+    HEADER_SIZE
+        .checked_add(material_runtime_prg_offset(cpu_address)?)
+        .context("battle material runtime file offset overflow")
 }
 
 fn read_u16(bytes: &[u8], offset: usize) -> u16 {

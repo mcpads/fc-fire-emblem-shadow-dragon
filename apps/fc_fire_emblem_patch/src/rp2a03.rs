@@ -12,6 +12,7 @@ pub enum Instruction {
     LdaAbsoluteY(u16),
     LdaIndirectY(u8),
     LdxImmediate(u8),
+    LdxZeroPage(u8),
     LdyImmediate(u8),
     LdyAbsoluteX(u16),
     StaZeroPage(u8),
@@ -24,14 +25,17 @@ pub enum Instruction {
     RolZeroPage(u8),
     LsrAccumulator,
     AndImmediate(u8),
+    AndZeroPage(u8),
     AdcImmediate(u8),
     AdcZeroPage(u8),
     AdcAbsoluteX(u16),
     SbcImmediate(u8),
     CmpImmediate(u8),
+    CmpZeroPage(u8),
     CpxImmediate(u8),
     CpyImmediate(u8),
     IncAbsolute(u16),
+    IncZeroPage(u8),
     DecAbsolute(u16),
     Inx,
     Dex,
@@ -84,6 +88,7 @@ impl Instruction {
             | Self::LdaZeroPage(_)
             | Self::LdaIndirectY(_)
             | Self::LdxImmediate(_)
+            | Self::LdxZeroPage(_)
             | Self::LdyImmediate(_)
             | Self::StaZeroPage(_)
             | Self::StyZeroPage(_)
@@ -91,14 +96,17 @@ impl Instruction {
             | Self::AslZeroPage(_)
             | Self::RolZeroPage(_)
             | Self::AndImmediate(_)
+            | Self::AndZeroPage(_)
             | Self::AdcImmediate(_)
             | Self::AdcZeroPage(_)
             | Self::SbcImmediate(_)
             | Self::CmpImmediate(_)
+            | Self::CmpZeroPage(_)
             | Self::CpxImmediate(_)
             | Self::CpyImmediate(_)
             | Self::OraImmediate(_)
             | Self::OraZeroPage(_)
+            | Self::IncZeroPage(_)
             | Self::BeqAbsolute(_)
             | Self::BccAbsolute(_)
             | Self::BcsAbsolute(_)
@@ -130,6 +138,7 @@ impl Instruction {
                 Operand::Byte(address),
             ),
             Self::LdxImmediate(value) => immediate(Mnemonic::Ldx, value),
+            Self::LdxZeroPage(address) => zero_page(Mnemonic::Ldx, address),
             Self::LdyImmediate(value) => immediate(Mnemonic::Ldy, value),
             Self::LdyAbsoluteX(address) => absolute_x(Mnemonic::Ldy, address),
             Self::StaZeroPage(address) => zero_page(Mnemonic::Sta, address),
@@ -146,14 +155,17 @@ impl Instruction {
             Self::RolZeroPage(address) => zero_page(Mnemonic::Rol, address),
             Self::LsrAccumulator => implied(Mnemonic::Lsr, AddressingMode::Accumulator),
             Self::AndImmediate(value) => immediate(Mnemonic::And, value),
+            Self::AndZeroPage(address) => zero_page(Mnemonic::And, address),
             Self::AdcImmediate(value) => immediate(Mnemonic::Adc, value),
             Self::AdcZeroPage(address) => zero_page(Mnemonic::Adc, address),
             Self::AdcAbsoluteX(address) => absolute_x(Mnemonic::Adc, address),
             Self::SbcImmediate(value) => immediate(Mnemonic::Sbc, value),
             Self::CmpImmediate(value) => immediate(Mnemonic::Cmp, value),
+            Self::CmpZeroPage(address) => zero_page(Mnemonic::Cmp, address),
             Self::CpxImmediate(value) => immediate(Mnemonic::Cpx, value),
             Self::CpyImmediate(value) => immediate(Mnemonic::Cpy, value),
             Self::IncAbsolute(address) => absolute(Mnemonic::Inc, address),
+            Self::IncZeroPage(address) => zero_page(Mnemonic::Inc, address),
             Self::DecAbsolute(address) => absolute(Mnemonic::Dec, address),
             Self::Inx => implied(Mnemonic::Inx, AddressingMode::Implied),
             Self::Dex => implied(Mnemonic::Dex, AddressingMode::Implied),
@@ -347,6 +359,22 @@ mod tests {
         .unwrap();
 
         assert_eq!(bytes, [0xB1, 0x6E, 0x7D, 0xD8, 0x93, 0xC8]);
+    }
+
+    #[test]
+    fn encodes_dynamic_assignment_zero_page_forms() {
+        let bytes = assemble_at(
+            0x9000,
+            &[
+                Instruction::LdxZeroPage(0x06),
+                Instruction::AndZeroPage(0x00),
+                Instruction::CmpZeroPage(0x07),
+                Instruction::IncZeroPage(0x05),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(bytes, [0xA6, 0x06, 0x25, 0x00, 0xC5, 0x07, 0xE6, 0x05]);
     }
 
     #[test]
