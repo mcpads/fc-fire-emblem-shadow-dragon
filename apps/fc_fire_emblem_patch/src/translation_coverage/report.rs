@@ -45,6 +45,8 @@ pub(crate) struct GlobalTranslationCoverageReport {
     pub(crate) build_output_sha1: String,
     pub(crate) screen_population: ScreenPopulationReport,
     pub(crate) domains: Vec<TranslationDomainReport>,
+    pub(crate) lifetime_demands: Vec<TranslationLifetimeDemandReport>,
+    pub(crate) unmeasured_screen_roles: Vec<String>,
     pub(crate) strongest_lifetime: StrongestLifetimeReport,
     pub(crate) summary: CoverageSummary,
     pub(crate) translation_text_emitted: bool,
@@ -87,8 +89,24 @@ pub(crate) struct TranslationDomainReport {
 pub(crate) struct StrongestLifetimeReport {
     pub(crate) state: &'static str,
     pub(crate) compared_lifetime_count: usize,
+    pub(crate) japanese_bearing_screen_count: usize,
     pub(crate) selected_screen_role: Option<&'static str>,
+    pub(crate) selected_slot_demand: Option<usize>,
+    pub(crate) unassigned_main_dialogue_maximum_target_glyph_count: usize,
     pub(crate) next_gate: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct TranslationLifetimeDemandReport {
+    pub(crate) screen_role: &'static str,
+    pub(crate) measurement_basis: &'static str,
+    pub(crate) target_glyph_count: usize,
+    pub(crate) preserved_active_source_code_count: usize,
+    pub(crate) additional_target_glyph_reservation_count: usize,
+    pub(crate) total_slot_demand: usize,
+    pub(crate) active_slot_count: usize,
+    pub(crate) fits_active_page: bool,
+    pub(crate) evidence_report_sha1: String,
 }
 
 #[derive(Debug, Serialize)]

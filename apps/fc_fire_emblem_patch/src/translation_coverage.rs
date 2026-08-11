@@ -7,16 +7,18 @@ use crate::{
 };
 
 mod installed;
+mod lifetimes;
 mod population;
 mod report;
 mod screen_targets;
 
 use installed::inspect_current_installation;
+use lifetimes::{LifetimeInputBindings, inspect_translation_lifetimes};
 use population::{TranslationPopulationInputs, inspect_translation_populations};
 pub(crate) use report::TranslationCoverageSummary;
 use report::{
     CapacityState, CoverageSummary, GlobalTranslationCoverageReport, ScreenPopulationReport,
-    SourceBindingState, StrongestLifetimeReport, TranslationDomainReport, TranslationInputState,
+    SourceBindingState, TranslationDomainReport, TranslationInputState,
 };
 use screen_targets::{DOMAIN_SEEDS, bind_domain_screen_targets};
 
@@ -40,6 +42,8 @@ pub(crate) struct TranslationCoverageInputs<'a> {
     pub(crate) location_name_localization_path: &'a Path,
     pub(crate) current_build_output_path: &'a Path,
     pub(crate) current_build_report_path: &'a Path,
+    pub(crate) main_dialogue_glyph_workset_report_path: &'a Path,
+    pub(crate) battle_surface_constraints_report_path: &'a Path,
     pub(crate) report_path: &'a Path,
 }
 
@@ -210,6 +214,29 @@ pub(crate) fn analyze_translation_coverage(
             .map(|domain| domain.id)
             .collect(),
     };
+    let translation_input_sha1 = |domain_id: &str| -> Result<&str> {
+        domains
+            .iter()
+            .find(|domain| domain.id == domain_id)
+            .and_then(|domain| domain.translation_input_sha1.as_deref())
+            .with_context(|| format!("translation domain {domain_id} has no input hash"))
+    };
+    let japanese_bearing_screen_roles = partition
+        .japanese_bearing_screens
+        .iter()
+        .map(|screen| screen.role.clone())
+        .collect::<Vec<_>>();
+    let lifetime_inventory = inspect_translation_lifetimes(
+        inputs.main_dialogue_glyph_workset_report_path,
+        inputs.battle_surface_constraints_report_path,
+        LifetimeInputBindings {
+            main_dialogue_workspace_sha1: translation_input_sha1("main_dialogue")?,
+            battle_fixed_workspace_sha1: &installation.battle_fixed_workspace_sha1,
+            battle_dialogue_workspace_sha1: &installation.battle_dialogue_workspace_sha1,
+            battle_temporal_manifest_sha1: &installation.battle_temporal_manifest_sha1,
+        },
+        &japanese_bearing_screen_roles,
+    )?;
     let report = GlobalTranslationCoverageReport {
         schema: 1,
         source_sha1: EXPECTED_SOURCE_SHA1,
@@ -223,12 +250,9 @@ pub(crate) fn analyze_translation_coverage(
             unmapped_japanese_bearing_screen_roles: Vec::new(),
         },
         domains,
-        strongest_lifetime: StrongestLifetimeReport {
-            state: "unmeasured",
-            compared_lifetime_count: 0,
-            selected_screen_role: None,
-            next_gate: "derive every reachable simultaneous glyph workset, then select and defeat the maximum instead of extending isolated screen proofs",
-        },
+        lifetime_demands: lifetime_inventory.demands,
+        unmeasured_screen_roles: lifetime_inventory.unmeasured_screen_roles,
+        strongest_lifetime: lifetime_inventory.strongest,
         summary,
         translation_text_emitted: false,
         glyph_characters_emitted: false,

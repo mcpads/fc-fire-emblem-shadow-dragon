@@ -275,6 +275,10 @@ enum Command {
         current_build_output: PathBuf,
         #[arg(long, default_value = "out/kr-patch-build.json")]
         current_build_report: PathBuf,
+        #[arg(long, default_value = "out/main-dialogue-glyph-workset.json")]
+        main_dialogue_glyph_workset_report: PathBuf,
+        #[arg(long, default_value = "out/battle-surface-constraints.json")]
+        battle_surface_constraints_report: PathBuf,
         #[arg(long, default_value = "out/translation-coverage.json")]
         report: PathBuf,
     },
@@ -989,6 +993,8 @@ fn main() -> Result<()> {
             location_name_localization,
             current_build_output,
             current_build_report,
+            main_dialogue_glyph_workset_report,
+            battle_surface_constraints_report,
             report,
         } => {
             let summary = translation_coverage::analyze_translation_coverage(
@@ -1012,6 +1018,8 @@ fn main() -> Result<()> {
                     location_name_localization_path: &location_name_localization,
                     current_build_output_path: &current_build_output,
                     current_build_report_path: &current_build_report,
+                    main_dialogue_glyph_workset_report_path: &main_dialogue_glyph_workset_report,
+                    battle_surface_constraints_report_path: &battle_surface_constraints_report,
                     report_path: &report,
                 },
             )?;

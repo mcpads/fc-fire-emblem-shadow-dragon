@@ -77,6 +77,9 @@ struct CurrentWeaponShopSharedText {
 
 #[derive(Debug, Deserialize)]
 struct CurrentBattleText {
+    fixed_text_workspace_sha1: String,
+    dialogue_workspace_sha1: String,
+    temporal_manifest_sha1: String,
     installed_fixed_entry_count: usize,
     installed_unit_name_count: usize,
     installed_enemy_name_count: usize,
@@ -95,6 +98,9 @@ struct CurrentBattleText {
 pub(crate) struct CurrentInstallation {
     pub(crate) build_output_sha1: String,
     pub(crate) domains: BTreeMap<&'static str, DomainInstallation>,
+    pub(crate) battle_fixed_workspace_sha1: String,
+    pub(crate) battle_dialogue_workspace_sha1: String,
+    pub(crate) battle_temporal_manifest_sha1: String,
 }
 
 pub(crate) fn inspect_current_installation(
@@ -121,6 +127,9 @@ pub(crate) fn inspect_current_installation(
     Ok(CurrentInstallation {
         build_output_sha1: output_sha1,
         domains,
+        battle_fixed_workspace_sha1: report.battle_text.fixed_text_workspace_sha1,
+        battle_dialogue_workspace_sha1: report.battle_text.dialogue_workspace_sha1,
+        battle_temporal_manifest_sha1: report.battle_text.temporal_manifest_sha1,
     })
 }
 
@@ -456,6 +465,9 @@ mod tests {
                 "runtime_bound_to_build": true
             },
             "battle_text": {
+                "fixed_text_workspace_sha1": "fixed-workspace",
+                "dialogue_workspace_sha1": "dialogue-workspace",
+                "temporal_manifest_sha1": "temporal-manifest",
                 "installed_fixed_entry_count": 231,
                 "installed_unit_name_count": 52,
                 "installed_enemy_name_count": 55,
