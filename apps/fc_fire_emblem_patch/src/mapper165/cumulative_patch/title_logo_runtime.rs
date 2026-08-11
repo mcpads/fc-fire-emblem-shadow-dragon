@@ -34,6 +34,7 @@ struct RuntimeSample {
     tm_visible: Option<bool>,
     copyright_visible: bool,
     preserved_english_visible: Option<bool>,
+    runtime_overlay_cells_match_static_logo: Option<bool>,
     image: String,
     image_sha1: String,
 }
@@ -109,6 +110,7 @@ pub(super) fn verify_title_logo_runtime_evidence(
             && completed.korean_logo_visible
             && completed.sword_visible
             && completed.tm_visible == Some(true)
+            && completed.runtime_overlay_cells_match_static_logo == Some(true)
             && !completed.copyright_visible,
         "installed title-logo completed palette phase changed"
     );
@@ -120,6 +122,7 @@ pub(super) fn verify_title_logo_runtime_evidence(
             && copyright.korean_logo_visible
             && copyright.sword_visible
             && copyright.tm_visible == Some(true)
+            && copyright.runtime_overlay_cells_match_static_logo == Some(true)
             && copyright.copyright_visible,
         "installed title-logo copyright phase changed"
     );
@@ -178,14 +181,14 @@ mod tests {
     fn installed_manifest_binds_both_logo_phases_tm_copyright_and_exit() {
         let manifest = Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../evidence/private/title-logo-installed-fixed/manifest.json"
+            "/../../evidence/private/title-logo-overlay-fixed/manifest.json"
         ));
         if !manifest.exists() {
             return;
         }
         let evidence = verify_title_logo_runtime_evidence(
             manifest,
-            "48f5c42f12dbfa93ee2b8b8ee5664dbe9e646b96",
+            "c114fd7fab2a87784754643b230e3690ede85a40",
         )
         .unwrap();
 

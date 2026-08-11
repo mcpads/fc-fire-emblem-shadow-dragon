@@ -1119,11 +1119,18 @@ pub(crate) fn build_cumulative_patch(
             physical_chr_page: title_logo_stage.physical_chr_page,
             installed_chr_page_sha1: title_logo_stage.installed_chr_page_sha1.clone(),
             installed_stream_sha1: title_logo_stage.installed_stream_sha1.clone(),
+            installed_runtime_overlay_cell_count: title_logo_stage
+                .installed_runtime_overlay_cell_count,
+            installed_runtime_overlay_stream_sha1: title_logo_stage
+                .installed_runtime_overlay_stream_sha1
+                .clone(),
             preserved_title_stream_bytes_unchanged: title_logo_stage
                 .preserved_title_stream_bytes_unchanged,
+            preserved_runtime_overlay_control_bytes_unchanged: title_logo_stage
+                .preserved_runtime_overlay_control_bytes_unchanged,
             unassigned_title_chr_patterns_unchanged: title_logo_stage
                 .unassigned_title_chr_patterns_unchanged,
-            source_sword_tm_and_copyright_outside_write_scope: true,
+            source_sword_sprite_tm_and_copyright_assets_unchanged: true,
             runtime_evidence_manifest_sha1: title_logo_runtime.manifest_sha1.clone(),
             runtime_sample_count: title_logo_runtime.sample_count,
             runtime_unique_image_count: title_logo_runtime.unique_image_count,

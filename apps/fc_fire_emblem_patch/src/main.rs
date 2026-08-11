@@ -583,7 +583,7 @@ enum Command {
         title_logo_asset: PathBuf,
         #[arg(
             long,
-            default_value = "evidence/private/title-logo-installed-fixed/manifest.json"
+            default_value = "evidence/private/title-logo-overlay-fixed/manifest.json"
         )]
         title_logo_runtime_evidence: PathBuf,
         #[arg(long, default_value = "out/cumulative-stages")]
