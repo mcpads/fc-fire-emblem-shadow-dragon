@@ -50,7 +50,8 @@ pub(super) fn purchase_handoff_report(
     Ok(Some(ObservedScreenLifetimeReport {
         screen_role: SCREEN_ROLE,
         budget_basis: "one exact E7 handoff frame with the retained six-item list, purchase question, and later yes/no codes",
-        evidence_digest: "sha256:bfd547fdbcc8eac92baee4163ae0e4fe0c96571d07dcb600c53571b59e6fe2ea",
+        evidence_digest: "sha256:bfd547fdbcc8eac92baee4163ae0e4fe0c96571d07dcb600c53571b59e6fe2ea"
+            .to_owned(),
         source_record_count: LIFETIME_RECORDS.len(),
         filled_unique_glyph_count: filled_glyphs.len(),
         preserved_active_source_code_count,

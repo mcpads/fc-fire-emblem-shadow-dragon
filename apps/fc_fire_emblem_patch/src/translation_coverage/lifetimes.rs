@@ -7,7 +7,7 @@ use crate::{font_slots::ACTIVE_HANGUL_SLOT_COUNT, rom::EXPECTED_SOURCE_SHA1, sha
 
 use super::report::{StrongestLifetimeReport, TranslationLifetimeDemandReport};
 
-const MAIN_DIALOGUE_REPORT_SCHEMA: u8 = 5;
+const MAIN_DIALOGUE_REPORT_SCHEMA: u8 = 6;
 const BATTLE_REPORT_SCHEMA: u8 = 12;
 
 pub(super) struct LifetimeInputBindings<'a> {
@@ -29,8 +29,14 @@ struct MainDialogueGlyphWorksetReport {
     source_sha1: String,
     workspace_sha1: String,
     max_transition_chain_unique_glyph_count: usize,
+    maximum_source_binding: MaximumDialogueSourceBinding,
     observed_screen_lifetimes: Vec<ObservedScreenLifetime>,
     capacity: MainDialogueCapacity,
+}
+
+#[derive(Debug, Deserialize)]
+struct MaximumDialogueSourceBinding {
+    screen_lifetime_bound: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -159,6 +165,10 @@ fn build_translation_lifetime_inventory(
                 "game_over",
                 "observed turn-boundary game-over union and selected dialogue",
             ),
+            "chapter-seven maximum dialogue page" => (
+                "chapter_clear_epilogue_dialogue",
+                "observed fifteen-page maximum dialogue with page-granular Korean demand",
+            ),
             other => anyhow::bail!("unknown measured main-dialogue lifetime {other}"),
         };
         ensure!(
@@ -217,8 +227,8 @@ fn build_translation_lifetime_inventory(
             selected_screen_role: Some(strongest.screen_role),
             selected_slot_demand: Some(strongest.total_slot_demand),
             main_dialogue_maximum_target_glyph_count: main.max_transition_chain_unique_glyph_count,
-            main_dialogue_maximum_screen_bound: false,
-            next_gate: "bind the source-proven chapter-seven C0:18 producer to its actual runtime screen lifetime before selecting the global font-supply structure",
+            main_dialogue_maximum_screen_bound: main.maximum_source_binding.screen_lifetime_bound,
+            next_gate: "compare the remaining unmeasured screen lifetimes and implement the maximum dialogue's completed-page font reload",
         },
         demands,
         unmeasured_screen_roles,
@@ -230,16 +240,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unbound_dialogue_maximum_does_not_replace_the_strongest_measured_lifetime() {
+    fn page_bound_dialogue_maximum_does_not_replace_a_stronger_battle_lifetime() {
         let main = MainDialogueGlyphWorksetReport {
             schema: MAIN_DIALOGUE_REPORT_SCHEMA,
             source_sha1: EXPECTED_SOURCE_SHA1.to_owned(),
             workspace_sha1: "main".to_owned(),
             max_transition_chain_unique_glyph_count: 175,
+            maximum_source_binding: MaximumDialogueSourceBinding {
+                screen_lifetime_bound: true,
+            },
             observed_screen_lifetimes: vec![
                 observed("weapon-shop purchase handoff", 9, 17, 0),
                 observed("ending character epilogue family", 33, 99, 18),
                 observed("turn-boundary game over", 30, 90, 0),
+                observed("chapter-seven maximum dialogue page", 35, 100, 0),
             ],
             capacity: MainDialogueCapacity {
                 active_slot_count: ACTIVE_HANGUL_SLOT_COUNT,
@@ -258,6 +272,7 @@ mod tests {
         };
         let roles = [
             "battle_animation",
+            "chapter_clear_epilogue_dialogue",
             "ending_character_epilogue",
             "game_over",
             "map_menu",
@@ -274,7 +289,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(inventory.demands.len(), 4);
+        assert_eq!(inventory.demands.len(), 5);
         assert_eq!(inventory.strongest.state, "partial");
         assert_eq!(
             inventory.strongest.selected_screen_role,
@@ -285,7 +300,7 @@ mod tests {
             inventory.strongest.main_dialogue_maximum_target_glyph_count,
             175
         );
-        assert!(!inventory.strongest.main_dialogue_maximum_screen_bound);
+        assert!(inventory.strongest.main_dialogue_maximum_screen_bound);
         assert_eq!(inventory.unmeasured_screen_roles, ["map_menu"]);
     }
 

@@ -6,9 +6,12 @@ use crate::chapter_victory::validate_chapter_clear_command_route;
 use super::report::MaximumTransitionChainReport;
 
 mod chapter_events;
+mod runtime_lifetime;
 mod source_regions;
 #[cfg(test)]
 mod tests;
+
+pub(super) use runtime_lifetime::bind_runtime_lifetime;
 
 use chapter_events::{
     ChapterEventRecord, DataRegionBinding, bind_chapter_event_directory, bind_chapter_map_pointers,
@@ -42,7 +45,7 @@ const OTHER_DIRECTORY_SELECTOR: u8 = 0x30;
 
 #[derive(Debug, Serialize)]
 pub(super) struct MaximumDialogueSourceBinding {
-    binding_status: &'static str,
+    pub(super) binding_status: &'static str,
     table_id: &'static str,
     canonical_entry_index: usize,
     source_prg_bank: u8,
@@ -57,7 +60,20 @@ pub(super) struct MaximumDialogueSourceBinding {
     pub(super) same_entry_other_selector: OtherSelectorBinding,
     source_regions: Vec<SourceRegionBinding>,
     pub(super) screen_lifetime_bound: bool,
-    next_gate: &'static str,
+    runtime_screen_lifetime: Option<runtime_lifetime::MaximumDialogueRuntimeLifetimeBinding>,
+    pub(super) next_gate: &'static str,
+}
+
+impl MaximumDialogueSourceBinding {
+    pub(super) fn observed_screen_lifetime_report(
+        &self,
+        active_slot_count: usize,
+        review_complete: bool,
+    ) -> Option<super::report::ObservedScreenLifetimeReport> {
+        self.runtime_screen_lifetime.as_ref().map(|lifetime| {
+            lifetime.observed_screen_lifetime_report(active_slot_count, review_complete)
+        })
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -208,6 +224,7 @@ fn bind_maximum_dialogue_source_records(
         },
         source_regions,
         screen_lifetime_bound: false,
+        runtime_screen_lifetime: None,
         next_gate: "observe the chapter-seven castle-clear C0:18 pages and bind their simultaneous non-dialogue active codes",
     })
 }

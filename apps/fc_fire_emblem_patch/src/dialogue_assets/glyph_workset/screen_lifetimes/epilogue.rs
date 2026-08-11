@@ -68,7 +68,7 @@ pub(super) fn ending_character_family_report(
     Ok(Some(ObservedScreenLifetimeReport {
         screen_role: SCREEN_ROLE,
         budget_basis: "conservative union of all 560 observed nametables, the maximum visible dialogue transition chain, and full character/location display-cell reservations",
-        evidence_digest: "sha1:71546fe01803a13a5340c68334111bfa9f13b443",
+        evidence_digest: "sha1:71546fe01803a13a5340c68334111bfa9f13b443".to_owned(),
         source_record_count,
         filled_unique_glyph_count: filled_glyphs.len(),
         preserved_active_source_code_count,

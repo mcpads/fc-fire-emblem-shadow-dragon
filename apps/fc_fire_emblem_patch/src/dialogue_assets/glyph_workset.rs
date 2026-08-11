@@ -37,6 +37,7 @@ pub(crate) struct MainDialogueGlyphWorksetSummary {
 pub(crate) fn analyze_main_dialogue_glyph_workset(
     source_path: &Path,
     workspace_path: &Path,
+    maximum_lifetime_manifest_path: &Path,
     report_path: &Path,
 ) -> Result<MainDialogueGlyphWorksetSummary> {
     let rom = Rom::from_path(source_path)?;
@@ -52,9 +53,28 @@ pub(crate) fn analyze_main_dialogue_glyph_workset(
     let graph = inspect_main_dialogue_graph(rom.data())?;
     let workspace_sha1 = sha1_hex(&workspace_bytes);
     let preliminary = build_glyph_workset_report(&workspace, &graph, workspace_sha1.clone(), None)?;
-    let maximum_source_binding = maximum_source::bind_maximum_dialogue_source(
+    let mut maximum_source_binding = maximum_source::bind_maximum_dialogue_source(
         rom.prg(),
         &preliminary.maximum_transition_chain,
+    )?;
+    let maximum_record = workspace
+        .records
+        .iter()
+        .find(|record| {
+            record.table_id == preliminary.maximum_transition_chain.start_table_id
+                && record.canonical_entry_index
+                    == preliminary
+                        .maximum_transition_chain
+                        .start_canonical_entry_index
+        })
+        .context("maximum main-dialogue workspace record is missing")?;
+    let maximum_slice = plan_main_dialogue_slice(&rom, workspace_path, &maximum_record.id)?;
+    maximum_source::bind_runtime_lifetime(
+        &mut maximum_source_binding,
+        maximum_lifetime_manifest_path,
+        maximum_record,
+        &maximum_slice.preserved_source_codes,
+        preliminary.maximum_transition_chain.unique_glyph_count,
     )?;
     let report = build_glyph_workset_report(
         &workspace,
@@ -169,13 +189,18 @@ fn build_glyph_workset_report(
     let review_complete =
         translation_input_complete && status_counts.complete == status_counts.filled;
     let working_set_ready = translation_input_complete;
-    let observed_screen_lifetimes = observed_screen_lifetime_reports(
+    let mut observed_screen_lifetimes = observed_screen_lifetime_reports(
         &filled_glyphs_by_record,
         &approved_glyphs_by_record,
         graph,
         active_slot_count,
         review_complete,
     )?;
+    if let Some(lifetime) = maximum_source_binding.as_ref().and_then(|binding| {
+        binding.observed_screen_lifetime_report(active_slot_count, review_complete)
+    }) {
+        observed_screen_lifetimes.push(lifetime);
+    }
     let filled_observed_screen_lifetimes_fit_one_page = observed_screen_lifetimes
         .iter()
         .all(|lifetime| lifetime.filled_set_fits_one_page_so_far);
@@ -190,25 +215,25 @@ fn build_glyph_workset_report(
     });
     let unresolved = if review_complete {
         vec![
-            "the source-bound chapter-seven C0:18 maximum still needs its runtime screen-code lifetime",
+            "the source-and-runtime-bound chapter-seven C0:18 maximum requires a font reload at completed-page boundaries",
             "other caller-handoff screen lifetimes and line-width checks remain separate from the glyph working-set count",
         ]
     } else if translation_input_complete {
         vec![
             "draft translation input is complete, but human review is incomplete",
-            "the source-bound chapter-seven C0:18 maximum still needs its runtime screen-code lifetime",
+            "the source-and-runtime-bound chapter-seven C0:18 maximum requires a font reload at completed-page boundaries",
             "other caller-handoff screen lifetimes and line-width checks remain separate from the glyph working-set count",
         ]
     } else {
         vec![
             "reviewed Korean translation input is incomplete, so the approved working set is not final",
-            "the source-bound chapter-seven C0:18 maximum still needs its runtime screen-code lifetime",
+            "the source-and-runtime-bound chapter-seven C0:18 maximum requires a font reload at completed-page boundaries",
             "other caller-handoff screen lifetimes and line-width checks remain separate from the glyph working-set count",
         ]
     };
 
     Ok(MainDialogueGlyphWorksetReport {
-        schema: 5,
+        schema: 6,
         source_sha1: EXPECTED_SOURCE_SHA1,
         workspace_sha1,
         scope: GlyphWorksetScope {

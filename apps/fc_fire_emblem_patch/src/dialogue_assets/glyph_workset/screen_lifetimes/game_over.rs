@@ -56,7 +56,7 @@ pub(super) fn turn_boundary_game_over_report(
     Ok(Some(ObservedScreenLifetimeReport {
         screen_role: SCREEN_ROLE,
         budget_basis: "conservative union of all 12 observed game-over nametables and the exact Korean record selected by B0:0A in every frozen runtime sample",
-        evidence_digest: "sha1:ffd0fc3e8ccb44798fbc83c618ea068369fd114c",
+        evidence_digest: "sha1:ffd0fc3e8ccb44798fbc83c618ea068369fd114c".to_owned(),
         source_record_count: records.len(),
         filled_unique_glyph_count: filled_glyphs.len(),
         preserved_active_source_code_count,

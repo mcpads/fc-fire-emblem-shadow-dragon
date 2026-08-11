@@ -396,6 +396,11 @@ enum Command {
         source: PathBuf,
         #[arg(long, default_value = "private/dialogue/main-workspace.json")]
         workspace: PathBuf,
+        #[arg(
+            long,
+            default_value = "evidence/private/chapter7-maximum-lifetime/manifest.json"
+        )]
+        maximum_lifetime_evidence: PathBuf,
         #[arg(long, default_value = "out/main-dialogue-glyph-workset.json")]
         report: PathBuf,
     },
@@ -1272,10 +1277,15 @@ fn main() -> Result<()> {
         Command::AnalyzeMainDialogueGlyphWorkset {
             source,
             workspace,
+            maximum_lifetime_evidence,
             report,
         } => {
-            let summary =
-                dialogue_assets::analyze_main_dialogue_glyph_workset(&source, &workspace, &report)?;
+            let summary = dialogue_assets::analyze_main_dialogue_glyph_workset(
+                &source,
+                &workspace,
+                &maximum_lifetime_evidence,
+                &report,
+            )?;
             println!("wrote {}", report.display());
             println!("report SHA-1: {}", summary.report_sha1);
             println!(

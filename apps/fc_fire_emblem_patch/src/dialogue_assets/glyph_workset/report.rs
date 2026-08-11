@@ -39,7 +39,7 @@ pub(super) struct MaximumTransitionChainReport {
 pub(super) struct ObservedScreenLifetimeReport {
     pub(super) screen_role: &'static str,
     pub(super) budget_basis: &'static str,
-    pub(super) evidence_digest: &'static str,
+    pub(super) evidence_digest: String,
     pub(super) source_record_count: usize,
     pub(super) filled_unique_glyph_count: usize,
     pub(super) preserved_active_source_code_count: usize,
