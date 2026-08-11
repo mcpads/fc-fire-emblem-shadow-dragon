@@ -1,4 +1,4 @@
-use std::{fs, ops::Range, path::Path};
+use std::{collections::BTreeSet, fs, ops::Range, path::Path};
 
 use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
@@ -48,6 +48,14 @@ pub(super) struct BattleStageOutput {
     pub(super) dialogue_workspace_sha1: String,
     pub(super) temporal_manifest_sha1: String,
     pub(super) fixed_entry_count: usize,
+    pub(super) unit_name_count: usize,
+    pub(super) enemy_name_count: usize,
+    pub(super) class_name_count: usize,
+    pub(super) item_name_count: usize,
+    pub(super) terrain_name_count: usize,
+    pub(super) battle_message_template_count: usize,
+    pub(super) battle_forecast_label_count: usize,
+    pub(super) installed_item_source_indices: BTreeSet<usize>,
     pub(super) dialogue_record_count: usize,
     pub(super) dialogue_translated_line_count: usize,
     pub(super) stable_color_count: usize,
@@ -209,6 +217,14 @@ pub(super) fn install_battle_stage(inputs: BattleStageInputs<'_>) -> Result<Batt
         dialogue_workspace_sha1: metadata.dialogue_workspace_sha1,
         temporal_manifest_sha1: metadata.temporal_manifest_sha1,
         fixed_entry_count: runtime_base.fixed_entry_count,
+        unit_name_count: runtime_base.unit_name_count,
+        enemy_name_count: runtime_base.enemy_name_count,
+        class_name_count: runtime_base.class_name_count,
+        item_name_count: runtime_base.item_name_count,
+        terrain_name_count: runtime_base.terrain_name_count,
+        battle_message_template_count: runtime_base.battle_message_template_count,
+        battle_forecast_label_count: runtime_base.battle_forecast_label_count,
+        installed_item_source_indices: runtime_base.installed_item_source_indices,
         dialogue_record_count: runtime_base.dialogue_record_count,
         dialogue_translated_line_count: runtime_base.dialogue_translated_line_count,
         stable_color_count: metadata.stable_color_count,

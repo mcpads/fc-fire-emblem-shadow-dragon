@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{collections::BTreeSet, fs, path::Path};
 
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
@@ -52,6 +52,13 @@ struct BattleTextRuntimeBaseReport {
     fixed_source_entry_count: usize,
     fixed_reinserted_entry_count: usize,
     fixed_preserved_nonbattle_entry_count: usize,
+    installed_unit_name_count: usize,
+    installed_enemy_name_count: usize,
+    installed_class_name_count: usize,
+    installed_item_name_count: usize,
+    installed_terrain_name_count: usize,
+    installed_battle_message_template_count: usize,
+    installed_battle_forecast_label_count: usize,
     dialogue_record_count: usize,
     dialogue_pointer_write_count: usize,
     dialogue_translated_line_count: usize,
@@ -106,6 +113,14 @@ pub(crate) struct BattleTextRuntimeBaseSummary {
     pub(crate) output_sha1: String,
     pub(crate) report_sha1: String,
     pub(crate) fixed_entry_count: usize,
+    pub(crate) unit_name_count: usize,
+    pub(crate) enemy_name_count: usize,
+    pub(crate) class_name_count: usize,
+    pub(crate) item_name_count: usize,
+    pub(crate) terrain_name_count: usize,
+    pub(crate) battle_message_template_count: usize,
+    pub(crate) battle_forecast_label_count: usize,
+    pub(crate) installed_item_source_indices: BTreeSet<usize>,
     pub(crate) dialogue_record_count: usize,
     pub(crate) dialogue_translated_line_count: usize,
     pub(crate) tracked_write_count: usize,
@@ -145,13 +160,14 @@ pub(crate) fn build_battle_text_runtime_base(
     let parity = assemble_mapper165_parity_bytes(&source_rom)?;
     let parity_rom = Rom::parse(parity.clone()).context("parse mapper 165 battle text parity")?;
     let mut image = TrackedImage::new(parity.clone());
-    let fixed_reinserted_entry_count = install_fixed_text(
+    let fixed_installation = install_fixed_text(
         &mut image,
         &parity,
         &fixed,
         &material,
         &codebook.glyph_codes,
     )?;
+    let fixed_reinserted_entry_count = fixed_installation.total_count();
     let fixed_preserved_nonbattle_entry_count = fixed
         .entries
         .len()
@@ -274,6 +290,13 @@ pub(crate) fn build_battle_text_runtime_base(
         fixed_source_entry_count: fixed.entries.len(),
         fixed_reinserted_entry_count,
         fixed_preserved_nonbattle_entry_count,
+        installed_unit_name_count: fixed_installation.unit_name_count,
+        installed_enemy_name_count: fixed_installation.enemy_name_count,
+        installed_class_name_count: fixed_installation.class_name_count,
+        installed_item_name_count: fixed_installation.item_name_count,
+        installed_terrain_name_count: fixed_installation.terrain_name_count,
+        installed_battle_message_template_count: fixed_installation.battle_message_template_count,
+        installed_battle_forecast_label_count: 1,
         dialogue_record_count: dialogue.records.len(),
         dialogue_pointer_write_count,
         dialogue_translated_line_count: dialogue.translated_line_count,
@@ -334,10 +357,59 @@ pub(crate) fn build_battle_text_runtime_base(
         output_sha1,
         report_sha1: sha1_hex(&report_bytes),
         fixed_entry_count: fixed_reinserted_entry_count,
+        unit_name_count: fixed_installation.unit_name_count,
+        enemy_name_count: fixed_installation.enemy_name_count,
+        class_name_count: fixed_installation.class_name_count,
+        item_name_count: fixed_installation.item_name_count,
+        terrain_name_count: fixed_installation.terrain_name_count,
+        battle_message_template_count: fixed_installation.battle_message_template_count,
+        battle_forecast_label_count: 1,
+        installed_item_source_indices: fixed_installation.installed_item_source_indices,
         dialogue_record_count: dialogue.records.len(),
         dialogue_translated_line_count: dialogue.translated_line_count,
         tracked_write_count: text_tracked_write_count,
     })
+}
+
+#[derive(Default)]
+struct BattleFixedTextInstallation {
+    unit_name_count: usize,
+    enemy_name_count: usize,
+    class_name_count: usize,
+    item_name_count: usize,
+    terrain_name_count: usize,
+    battle_message_template_count: usize,
+    installed_item_source_indices: BTreeSet<usize>,
+}
+
+impl BattleFixedTextInstallation {
+    fn record(&mut self, table_id: &str, source_index: usize) -> Result<()> {
+        match table_id {
+            "unit-names" => self.unit_name_count += 1,
+            "enemy-names" => self.enemy_name_count += 1,
+            "class-names" => self.class_name_count += 1,
+            "item-names" => {
+                self.item_name_count += 1;
+                ensure!(
+                    self.installed_item_source_indices.insert(source_index),
+                    "battle fixed-text installation repeats item source index {source_index}"
+                );
+            }
+            "terrain-names" => self.terrain_name_count += 1,
+            "battle-message-templates" => self.battle_message_template_count += 1,
+            _ => anyhow::bail!("unknown installed battle fixed-text table {table_id}"),
+        }
+        Ok(())
+    }
+
+    fn total_count(&self) -> usize {
+        self.unit_name_count
+            + self.enemy_name_count
+            + self.class_name_count
+            + self.item_name_count
+            + self.terrain_name_count
+            + self.battle_message_template_count
+    }
 }
 
 fn install_fixed_text(
@@ -346,8 +418,8 @@ fn install_fixed_text(
     fixed: &crate::text_inventory::FixedTextPlan,
     material: &super::battle_codebook_plan::BattleCacheCompositionMaterial,
     assignments: &std::collections::BTreeMap<char, u8>,
-) -> Result<usize> {
-    let mut installed_entry_count = 0;
+) -> Result<BattleFixedTextInstallation> {
+    let mut installation = BattleFixedTextInstallation::default();
     for entry in &fixed.entries {
         if !material.includes_fixed_entry(&entry.table_id, entry.source_index)? {
             continue;
@@ -368,9 +440,9 @@ fn install_fixed_text(
             expected,
             &replacement,
         )?;
-        installed_entry_count += 1;
+        installation.record(&entry.table_id, entry.source_index)?;
     }
-    Ok(installed_entry_count)
+    Ok(installation)
 }
 
 fn install_battle_dialogue(
@@ -482,6 +554,13 @@ mod tests {
             fixed_source_entry_count: 272,
             fixed_reinserted_entry_count: 231,
             fixed_preserved_nonbattle_entry_count: 41,
+            installed_unit_name_count: 52,
+            installed_enemy_name_count: 55,
+            installed_class_name_count: 22,
+            installed_item_name_count: 64,
+            installed_terrain_name_count: 16,
+            installed_battle_message_template_count: 22,
+            installed_battle_forecast_label_count: 1,
             dialogue_record_count: 28,
             dialogue_pointer_write_count: 65,
             dialogue_translated_line_count: 70,

@@ -19,6 +19,7 @@ struct CurrentBuildReport {
     playable_unit_names: CurrentUnitNames,
     automatic_class_profiles: CurrentClassProfiles,
     weapon_shop_shared_text: CurrentWeaponShopSharedText,
+    battle_text: CurrentBattleText,
 }
 
 #[derive(Debug, Deserialize)]
@@ -56,7 +57,8 @@ struct CurrentUnitNames {
     workspace_entry_count: usize,
     roster_projection_installed: bool,
     unit_summary_projection_installed: bool,
-    source_battle_and_ending_table_preserved: bool,
+    source_battle_table_preserved: bool,
+    source_ending_table_preserved: bool,
     runtime_bound_to_build: bool,
 }
 
@@ -70,6 +72,23 @@ struct CurrentClassProfiles {
 struct CurrentWeaponShopSharedText {
     installed_item_name_count: usize,
     installed_choice_label_count: usize,
+    runtime_bound_to_build: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct CurrentBattleText {
+    installed_fixed_entry_count: usize,
+    installed_unit_name_count: usize,
+    installed_enemy_name_count: usize,
+    installed_class_name_count: usize,
+    installed_item_name_count: usize,
+    installed_terrain_name_count: usize,
+    installed_battle_message_template_count: usize,
+    installed_battle_forecast_label_count: usize,
+    installed_translated_line_count: usize,
+    weapon_shop_item_names_subset_of_battle_catalog: bool,
+    cumulative_selector_ranges_preserved: bool,
+    original_english_digits_and_graphics_preserved: bool,
     runtime_bound_to_build: bool,
 }
 
@@ -97,7 +116,17 @@ pub(crate) fn inspect_current_installation(
         output_sha1 == report.output_sha1,
         "current build report and output ROM hashes differ"
     );
+    let domains = collect_domain_installations(&report)?;
 
+    Ok(CurrentInstallation {
+        build_output_sha1: output_sha1,
+        domains,
+    })
+}
+
+fn collect_domain_installations(
+    report: &CurrentBuildReport,
+) -> Result<BTreeMap<&'static str, DomainInstallation>> {
     let mut domains = BTreeMap::new();
     let ui_stage_installed = report
         .stages
@@ -139,11 +168,18 @@ pub(crate) fn inspect_current_installation(
     if report.playable_unit_names.unit_summary_projection_installed {
         unit_name_screens.extend(["unit_summary", "unit_status"]);
     }
+    if !report.playable_unit_names.source_battle_table_preserved {
+        unit_name_screens.push("battle_animation");
+    }
     ensure!(
-        report
-            .playable_unit_names
-            .source_battle_and_ending_table_preserved,
-        "current build no longer declares the untranslated battle and ending unit-name consumers"
+        report.playable_unit_names.source_ending_table_preserved,
+        "current build no longer declares the untranslated ending unit-name consumer"
+    );
+    ensure!(
+        report.battle_text.installed_unit_name_count
+            == report.playable_unit_names.workspace_entry_count
+            && !report.playable_unit_names.source_battle_table_preserved,
+        "current battle and shared unit-name installations disagree"
     );
     let unit_name_runtime = if report.playable_unit_names.runtime_bound_to_build {
         unit_name_screens.clone()
@@ -231,19 +267,83 @@ pub(crate) fn inspect_current_installation(
         ),
     )?;
 
+    ensure!(
+        report.battle_text.cumulative_selector_ranges_preserved
+            && report
+                .battle_text
+                .original_english_digits_and_graphics_preserved,
+        "current battle installation does not preserve its cumulative selectors and protected source text"
+    );
+    ensure!(
+        report.battle_text.installed_fixed_entry_count
+            == report.battle_text.installed_unit_name_count
+                + report.battle_text.installed_enemy_name_count
+                + report.battle_text.installed_class_name_count
+                + report.battle_text.installed_item_name_count
+                + report.battle_text.installed_terrain_name_count
+                + report.battle_text.installed_battle_message_template_count,
+        "current battle fixed-text domain counts do not cover the installed total"
+    );
+    let battle_runtime = report
+        .battle_text
+        .runtime_bound_to_build
+        .then_some("battle_animation")
+        .into_iter()
+        .collect::<Vec<_>>();
+    for (domain_id, installed_count) in [
+        (
+            "battle_dialogue",
+            report.battle_text.installed_translated_line_count,
+        ),
+        (
+            "battle_forecast_label",
+            report.battle_text.installed_battle_forecast_label_count,
+        ),
+        (
+            "battle_message_templates",
+            report.battle_text.installed_battle_message_template_count,
+        ),
+        ("class_names", report.battle_text.installed_class_name_count),
+        ("enemy_names", report.battle_text.installed_enemy_name_count),
+        (
+            "terrain_names",
+            report.battle_text.installed_terrain_name_count,
+        ),
+    ] {
+        put(
+            &mut domains,
+            domain_id,
+            installation(installed_count, &["battle_animation"], &battle_runtime),
+        )?;
+    }
+
     let shop_runtime = report.weapon_shop_shared_text.runtime_bound_to_build;
     let installed_item_screens = ["weapon_shop_item_list", "weapon_shop_purchase_confirmation"];
+    ensure!(
+        report
+            .battle_text
+            .weapon_shop_item_names_subset_of_battle_catalog
+            && report.battle_text.installed_item_name_count
+                >= report.weapon_shop_shared_text.installed_item_name_count,
+        "current weapon-shop item names are not covered by the installed battle item catalog"
+    );
+    let mut item_name_screens = installed_item_screens.to_vec();
+    item_name_screens.push("battle_animation");
+    let mut item_name_runtime = if shop_runtime {
+        installed_item_screens.to_vec()
+    } else {
+        Vec::new()
+    };
+    if report.battle_text.runtime_bound_to_build {
+        item_name_runtime.push("battle_animation");
+    }
     put(
         &mut domains,
         "item_names",
         installation(
-            report.weapon_shop_shared_text.installed_item_name_count,
-            &installed_item_screens,
-            if shop_runtime {
-                &installed_item_screens
-            } else {
-                &[]
-            },
+            report.battle_text.installed_item_name_count,
+            &item_name_screens,
+            &item_name_runtime,
         ),
     )?;
     let installed_choice_screens = [
@@ -264,10 +364,7 @@ pub(crate) fn inspect_current_installation(
         ),
     )?;
 
-    Ok(CurrentInstallation {
-        build_output_sha1: output_sha1,
-        domains,
-    })
+    Ok(domains)
 }
 
 const WEAPON_SHOP_DIALOGUE_SCREEN_ROLES: &[&str] = &[
@@ -315,4 +412,104 @@ fn put(
         "current installation repeats domain {domain_id}"
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cumulative_battle_stage_projects_each_domain_without_claiming_ending_or_runtime() {
+        let report: CurrentBuildReport = serde_json::from_value(serde_json::json!({
+            "schema": 1,
+            "source_sha1": EXPECTED_SOURCE_SHA1,
+            "output_sha1": "output-sha1",
+            "stages": [{"role": "mapper165_options_and_roster"}],
+            "chapter_titles": {
+                "installed_entry_count": 0,
+                "intro_title_table_installed": false,
+                "ending_scroll_duplicate_installed": false
+            },
+            "main_dialogue": {
+                "installed_translated_line_count": 0,
+                "lifetimes": []
+            },
+            "front_end_menu": {
+                "installed_entry_count": 0,
+                "runtime_variants_bound_to_build": false
+            },
+            "playable_unit_names": {
+                "workspace_entry_count": 52,
+                "roster_projection_installed": true,
+                "unit_summary_projection_installed": true,
+                "source_battle_table_preserved": false,
+                "source_ending_table_preserved": true,
+                "runtime_bound_to_build": false
+            },
+            "automatic_class_profiles": {
+                "installed_entry_count": 0,
+                "runtime_bound_to_build": false
+            },
+            "weapon_shop_shared_text": {
+                "installed_item_name_count": 6,
+                "installed_choice_label_count": 2,
+                "runtime_bound_to_build": true
+            },
+            "battle_text": {
+                "installed_fixed_entry_count": 231,
+                "installed_unit_name_count": 52,
+                "installed_enemy_name_count": 55,
+                "installed_class_name_count": 22,
+                "installed_item_name_count": 64,
+                "installed_terrain_name_count": 16,
+                "installed_battle_message_template_count": 22,
+                "installed_battle_forecast_label_count": 1,
+                "installed_translated_line_count": 70,
+                "weapon_shop_item_names_subset_of_battle_catalog": true,
+                "cumulative_selector_ranges_preserved": true,
+                "original_english_digits_and_graphics_preserved": true,
+                "runtime_bound_to_build": false
+            }
+        }))
+        .unwrap();
+
+        let installations = collect_domain_installations(&report).unwrap();
+        let unit_names = &installations["unit_names"];
+        assert_eq!(unit_names.installed_target_unit_count, 52);
+        assert_eq!(
+            unit_names.installed_screen_roles,
+            [
+                "battle_animation",
+                "unit_roster",
+                "unit_status",
+                "unit_summary"
+            ]
+        );
+        assert!(unit_names.runtime_bound_screen_roles.is_empty());
+
+        let item_names = &installations["item_names"];
+        assert_eq!(item_names.installed_target_unit_count, 64);
+        assert_eq!(
+            item_names.installed_screen_roles,
+            [
+                "battle_animation",
+                "weapon_shop_item_list",
+                "weapon_shop_purchase_confirmation"
+            ]
+        );
+        assert_eq!(
+            item_names.runtime_bound_screen_roles,
+            ["weapon_shop_item_list", "weapon_shop_purchase_confirmation"]
+        );
+        assert_eq!(
+            installations["battle_dialogue"].installed_target_unit_count,
+            70
+        );
+        assert_eq!(installations["enemy_names"].installed_target_unit_count, 55);
+        assert!(
+            installations["battle_dialogue"]
+                .runtime_bound_screen_roles
+                .is_empty()
+        );
+    }
 }

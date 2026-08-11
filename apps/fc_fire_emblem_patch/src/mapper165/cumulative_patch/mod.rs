@@ -35,6 +35,7 @@ use super::{
         PAGE_ROUTINE_ADDRESS as SHOP_DIALOGUE_SELECTOR_ADDRESS,
         RECORD_IDS as SHOP_DIALOGUE_RECORD_IDS, SCREEN_ROLE as SHOP_DIALOGUE_SCREEN_ROLE,
     },
+    weapon_shop_shared_text::ITEM_NAME_SOURCE_INDICES as WEAPON_SHOP_ITEM_NAME_SOURCE_INDICES,
     weapon_shop_shared_text::SCREEN_ROLE as WEAPON_SHOP_SHARED_TEXT_SCREEN_ROLE,
 };
 
@@ -550,6 +551,14 @@ pub(crate) fn build_cumulative_patch(
         temporal_manifest_path: inputs.battle_temporal_manifest_path,
         stage_directory: inputs.stage_directory,
     })?;
+    ensure!(
+        WEAPON_SHOP_ITEM_NAME_SOURCE_INDICES
+            .iter()
+            .all(|source_index| battle_stage
+                .installed_item_source_indices
+                .contains(source_index)),
+        "weapon-shop item-name projection is no longer a subset of the installed battle catalog"
+    );
     let output = battle_stage.output.clone();
     let output_rom = Rom::parse(output.clone()).context("parse cumulative Korean patch")?;
     let tracked_write_count = tracked_write_count
@@ -889,6 +898,14 @@ pub(crate) fn build_cumulative_patch(
             runtime_base_report_sha1: battle_stage.runtime_base_report_sha1.clone(),
             loader_report_sha1: battle_stage.loader_report_sha1.clone(),
             installed_fixed_entry_count: battle_stage.fixed_entry_count,
+            installed_unit_name_count: battle_stage.unit_name_count,
+            installed_enemy_name_count: battle_stage.enemy_name_count,
+            installed_class_name_count: battle_stage.class_name_count,
+            installed_item_name_count: battle_stage.item_name_count,
+            installed_terrain_name_count: battle_stage.terrain_name_count,
+            installed_battle_message_template_count: battle_stage.battle_message_template_count,
+            installed_battle_forecast_label_count: battle_stage.battle_forecast_label_count,
+            weapon_shop_item_names_subset_of_battle_catalog: true,
             installed_dialogue_record_count: battle_stage.dialogue_record_count,
             installed_translated_line_count: battle_stage.dialogue_translated_line_count,
             stable_color_count: battle_stage.stable_color_count,
