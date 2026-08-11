@@ -156,6 +156,13 @@ pub(crate) fn inspect_item_action_label_count(rom: &Rom) -> Result<usize> {
         .count())
 }
 
+pub(crate) fn validate_item_lifetime_source(rom: &Rom) -> Result<()> {
+    validate_state_routes(rom)?;
+    validate_action_result_dialogue_indices(rom)?;
+    item_use_families::inspect(rom)?;
+    Ok(())
+}
+
 fn build_report(rom: &Rom) -> Result<ItemFlowReport> {
     validate_state_routes(rom)?;
     validate_action_result_dialogue_indices(rom)?;

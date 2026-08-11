@@ -7,6 +7,7 @@ use crate::{font_slots::ACTIVE_HANGUL_SLOT_COUNT, rom::EXPECTED_SOURCE_SHA1, sha
 
 use super::report::{StrongestLifetimeReport, TranslationLifetimeDemandReport};
 
+mod item_flow;
 mod unit_roster;
 mod unit_ui;
 mod weapon_shop;
@@ -15,7 +16,13 @@ const MAIN_DIALOGUE_REPORT_SCHEMA: u8 = 6;
 const BATTLE_REPORT_SCHEMA: u8 = 12;
 
 pub(super) struct LifetimeInputBindings<'a> {
+    pub(super) source_path: &'a Path,
+    pub(super) main_dialogue_workspace_path: &'a Path,
+    pub(super) fixed_text_workspace_path: &'a Path,
+    pub(super) unit_name_workspace_path: &'a Path,
+    pub(super) item_action_label_workspace_path: &'a Path,
     pub(super) main_dialogue_workspace_sha1: &'a str,
+    pub(super) item_action_label_workspace_sha1: &'a str,
     pub(super) class_profile_page_target_glyph_counts: &'a [usize],
     pub(super) class_profile_preserved_active_code_count: usize,
     pub(super) class_profile_runtime_bound_to_build: bool,
@@ -170,6 +177,17 @@ pub(super) fn inspect_translation_lifetimes(
         capacity_bound_screen_roles: bindings.weapon_shop_capacity_bound_screen_roles,
         evidence_report_sha1: bindings.current_build_report_sha1,
     })?;
+    let item_flow_demands = item_flow::inspect(item_flow::InputBindings {
+        source_path: bindings.source_path,
+        main_dialogue_workspace_path: bindings.main_dialogue_workspace_path,
+        fixed_text_workspace_path: bindings.fixed_text_workspace_path,
+        unit_name_workspace_path: bindings.unit_name_workspace_path,
+        item_action_label_workspace_path: bindings.item_action_label_workspace_path,
+        main_dialogue_workspace_sha1: bindings.main_dialogue_workspace_sha1,
+        fixed_text_workspace_sha1: bindings.battle_fixed_workspace_sha1,
+        unit_name_workspace_sha1: bindings.unit_name_workspace_sha1,
+        item_action_label_workspace_sha1: bindings.item_action_label_workspace_sha1,
+    })?;
 
     build_translation_lifetime_inventory(
         LifetimeReports {
@@ -182,6 +200,7 @@ pub(super) fn inspect_translation_lifetimes(
         unit_ui_demands,
         unit_roster_demand,
         weapon_shop_demands,
+        item_flow_demands,
         japanese_bearing_screen_roles,
     )
 }
@@ -192,6 +211,7 @@ fn build_translation_lifetime_inventory(
     unit_ui_demands: Vec<TranslationLifetimeDemandReport>,
     unit_roster_demand: TranslationLifetimeDemandReport,
     weapon_shop_demands: Vec<TranslationLifetimeDemandReport>,
+    item_flow_demands: Vec<TranslationLifetimeDemandReport>,
     japanese_bearing_screen_roles: &[String],
 ) -> Result<TranslationLifetimeInventory> {
     let LifetimeReports {
@@ -240,6 +260,7 @@ fn build_translation_lifetime_inventory(
     demands.extend(unit_ui_demands);
     demands.push(unit_roster_demand);
     demands.extend(weapon_shop_demands);
+    demands.extend(item_flow_demands);
     for lifetime in main.observed_screen_lifetimes {
         ensure!(
             lifetime.filled_unique_glyph_count
@@ -384,6 +405,7 @@ mod tests {
             evidence_report_sha1: "build-report",
         })
         .unwrap();
+        let item_flow_demands = item_flow_demands();
         let mut roles = [
             "battle_animation",
             "class_profile",
@@ -398,7 +420,12 @@ mod tests {
         ]
         .map(str::to_owned)
         .to_vec();
-        roles.extend(shop_roles);
+        roles.extend(shop_roles.iter().cloned());
+        roles.extend(
+            item_flow_demands
+                .iter()
+                .map(|demand| demand.screen_role.to_owned()),
+        );
 
         let inventory = build_translation_lifetime_inventory(
             LifetimeReports {
@@ -408,7 +435,13 @@ mod tests {
                 battle_sha1: "battle-report".to_owned(),
             },
             LifetimeInputBindings {
+                source_path: Path::new("source.nes"),
+                main_dialogue_workspace_path: Path::new("main.json"),
+                fixed_text_workspace_path: Path::new("fixed.json"),
+                unit_name_workspace_path: Path::new("units.json"),
+                item_action_label_workspace_path: Path::new("item-actions.json"),
                 main_dialogue_workspace_sha1: "main",
+                item_action_label_workspace_sha1: "item-actions",
                 class_profile_page_target_glyph_counts: &[143, 161],
                 class_profile_preserved_active_code_count: 12,
                 class_profile_runtime_bound_to_build: true,
@@ -419,7 +452,7 @@ mod tests {
                 weapon_shop_shared_page_target_glyph_count: 60,
                 weapon_shop_shared_page_preserved_active_code_count: 90,
                 weapon_shop_shared_page_total_slot_demand: 150,
-                weapon_shop_capacity_bound_screen_roles: &roles[10..],
+                weapon_shop_capacity_bound_screen_roles: &shop_roles,
                 unit_name_workspace_sha1: "units",
                 unit_ui_label_workspace_sha1: "labels",
                 battle_fixed_workspace_sha1: "fixed",
@@ -429,11 +462,12 @@ mod tests {
             unit_ui_demands,
             unit_roster_demand,
             weapon_shop_demands,
+            item_flow_demands,
             &roles,
         )
         .unwrap();
 
-        assert_eq!(inventory.demands.len(), 18);
+        assert_eq!(inventory.demands.len(), 23);
         assert_eq!(inventory.strongest.state, "partial");
         assert_eq!(
             inventory.strongest.selected_screen_role,
@@ -465,6 +499,29 @@ mod tests {
             active_slot_count: ACTIVE_HANGUL_SLOT_COUNT,
             fits_active_page: true,
             evidence_report_sha1: "unit-ui-report".to_owned(),
+        })
+        .collect()
+    }
+
+    fn item_flow_demands() -> Vec<TranslationLifetimeDemandReport> {
+        [
+            "item_inventory_list",
+            "item_action_menu",
+            "item_equip_result",
+            "item_transfer_result",
+            "item_discard_result",
+        ]
+        .into_iter()
+        .map(|screen_role| TranslationLifetimeDemandReport {
+            screen_role,
+            measurement_basis: "fixture item-flow upper bound",
+            target_glyph_count: 20,
+            preserved_active_source_code_count: 0,
+            additional_target_glyph_reservation_count: 0,
+            total_slot_demand: 20,
+            active_slot_count: ACTIVE_HANGUL_SLOT_COUNT,
+            fits_active_page: true,
+            evidence_report_sha1: "item-flow-evidence".to_owned(),
         })
         .collect()
     }

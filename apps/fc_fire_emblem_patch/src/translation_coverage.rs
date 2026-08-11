@@ -233,7 +233,13 @@ pub(crate) fn analyze_translation_coverage(
         inputs.battle_surface_constraints_report_path,
         inputs.unit_ui_text_report_path,
         LifetimeInputBindings {
+            source_path: inputs.source_path,
+            main_dialogue_workspace_path: inputs.main_dialogue_workspace_path,
+            fixed_text_workspace_path: inputs.fixed_text_workspace_path,
+            unit_name_workspace_path: inputs.unit_name_localization_path,
+            item_action_label_workspace_path: inputs.item_action_label_localization_path,
             main_dialogue_workspace_sha1: translation_input_sha1("main_dialogue")?,
+            item_action_label_workspace_sha1: translation_input_sha1("item_action_labels")?,
             class_profile_page_target_glyph_counts: &installation
                 .class_profile_page_target_glyph_counts,
             class_profile_preserved_active_code_count: installation
