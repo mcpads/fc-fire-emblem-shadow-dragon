@@ -19,6 +19,7 @@ use crate::{
 use super::battle_combination_probe::GAMEPLAY_BATTLE_PRESERVED_ACTIVE_CODES;
 
 mod background_ownership;
+mod background_payloads;
 mod composition;
 mod conflict_graph;
 mod enemy_domain;
@@ -26,6 +27,7 @@ mod item_domain;
 mod physical_assignment;
 mod runtime_demand;
 mod runtime_inputs;
+mod source_window;
 pub(crate) mod surface_constraints;
 
 pub(in crate::mapper165) use composition::{

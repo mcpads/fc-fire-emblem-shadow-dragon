@@ -42,6 +42,7 @@ struct BattleSurfaceConstraintReport {
     source_page_japanese_text_active_code_count: usize,
     source_page_preserved_non_japanese_active_code_count: usize,
     background_producer_topology: super::background_ownership::BattleBackgroundProducerTopology,
+    background_payload_model: super::background_payloads::BattleBackgroundPayloadModel,
     route_assignment_feasibility: Vec<RouteAssignmentFeasibility>,
     gameplay_routes_combined_assignment: RouteAssignmentFeasibility,
     minimum_observed_active_code_count: usize,
@@ -62,6 +63,9 @@ struct BattleSurfaceConstraintReport {
     conservative_text_overlay_count: usize,
     observed_maximum_combined_slot_demand: usize,
     observed_minimum_slot_headroom: usize,
+    conservative_global_preserved_active_code_count: usize,
+    conservative_global_combined_slot_demand: usize,
+    conservative_global_minimum_slot_headroom: usize,
     temporal_sampling_is_irregular: bool,
     pattern_table_consumers_filtered: bool,
     source_page_code_ownership_applied: bool,
@@ -70,6 +74,7 @@ struct BattleSurfaceConstraintReport {
     runtime_selection_uses_source_bound_dialogue_projection: bool,
     combined_physical_assignment_found: bool,
     observed_route_catalog_complete: bool,
+    global_background_capacity_bound_complete: bool,
     physical_assignment_catalog_complete: bool,
     glyph_characters_emitted: bool,
     translation_text_emitted: bool,
@@ -322,8 +327,17 @@ pub(crate) fn analyze_battle_surface_constraints(
         observed_maximum_combined_slot_demand <= ACTIVE_HANGUL_SLOT_COUNT,
         "observed battle text and preserved background need {observed_maximum_combined_slot_demand} slots but only {ACTIVE_HANGUL_SLOT_COUNT} exist"
     );
+    let conservative_global_preserved_active_code_count =
+        ownership.conservative_global_preserved_active_codes().len();
+    let conservative_global_combined_slot_demand = conservative_text_overlay_count
+        .checked_add(conservative_global_preserved_active_code_count)
+        .context("global battle combined slot demand overflow")?;
+    ensure!(
+        conservative_global_combined_slot_demand <= ACTIVE_HANGUL_SLOT_COUNT,
+        "global battle text and preserved background union need {conservative_global_combined_slot_demand} slots but only {ACTIVE_HANGUL_SLOT_COUNT} exist"
+    );
     let report = BattleSurfaceConstraintReport {
-        schema: 3,
+        schema: 4,
         source_sha1: EXPECTED_SOURCE_SHA1,
         fixed_workspace_sha1: sha1_hex(&fs::read(fixed_workspace_path)?),
         dialogue_workspace_sha1: sha1_hex(&fs::read(dialogue_workspace_path)?),
@@ -340,6 +354,7 @@ pub(crate) fn analyze_battle_surface_constraints(
         source_page_preserved_non_japanese_active_code_count: ownership
             .preserved_non_japanese_active_code_count(),
         background_producer_topology: ownership.producer_topology(),
+        background_payload_model: ownership.payload_model(),
         route_assignment_feasibility,
         gameplay_routes_combined_assignment,
         minimum_observed_active_code_count,
@@ -361,6 +376,10 @@ pub(crate) fn analyze_battle_surface_constraints(
         observed_maximum_combined_slot_demand,
         observed_minimum_slot_headroom: ACTIVE_HANGUL_SLOT_COUNT
             - observed_maximum_combined_slot_demand,
+        conservative_global_preserved_active_code_count,
+        conservative_global_combined_slot_demand,
+        conservative_global_minimum_slot_headroom: ACTIVE_HANGUL_SLOT_COUNT
+            - conservative_global_combined_slot_demand,
         temporal_sampling_is_irregular: true,
         pattern_table_consumers_filtered: true,
         source_page_code_ownership_applied: true,
@@ -369,13 +388,14 @@ pub(crate) fn analyze_battle_surface_constraints(
         runtime_selection_uses_source_bound_dialogue_projection: true,
         combined_physical_assignment_found: physical.is_some(),
         observed_route_catalog_complete: true,
+        global_background_capacity_bound_complete: true,
         physical_assignment_catalog_complete: false,
         glyph_characters_emitted: false,
         translation_text_emitted: false,
         runtime_verified: false,
         release_eligible: false,
         next_gate: if physical.is_some() {
-            "bind every shared battle phase background producer and prove its simultaneous preserved non-Japanese code demand before removing the observed-tuple runtime gate"
+            "derive source phase-to-text cooccurrence constraints for all publisher states before replacing the observed physical assignment catalog"
         } else {
             "separate translated text producers from preserved graphics in the admitted temporal samples before extending the visual-variant catalog or installing the runtime loader"
         },
@@ -430,7 +450,7 @@ mod tests {
     #[test]
     fn serialized_report_omits_translation_content_and_private_paths() {
         let report = BattleSurfaceConstraintReport {
-            schema: 3,
+            schema: 4,
             source_sha1: EXPECTED_SOURCE_SHA1,
             fixed_workspace_sha1: "fixed".to_owned(),
             dialogue_workspace_sha1: "dialogue".to_owned(),
@@ -463,8 +483,12 @@ mod tests {
                     every_battle_bank_queue_publisher_classified: true,
                     battle_banks_have_no_direct_ppu_data_stores: true,
                     producer_topology_complete: true,
+                    every_publisher_payload_source_bound: true,
+                    conservative_global_preserved_code_union_complete: true,
                     simultaneous_preserved_code_demand_complete: false,
                 },
+            background_payload_model:
+                super::super::background_payloads::BattleBackgroundPayloadModel::test_model(),
             route_assignment_feasibility: vec![RouteAssignmentFeasibility {
                 route_role: "battle".to_owned(),
                 sample_count: 1,
@@ -497,6 +521,9 @@ mod tests {
             conservative_text_overlay_count: 2,
             observed_maximum_combined_slot_demand: 4,
             observed_minimum_slot_headroom: 206,
+            conservative_global_preserved_active_code_count: 39,
+            conservative_global_combined_slot_demand: 41,
+            conservative_global_minimum_slot_headroom: 169,
             temporal_sampling_is_irregular: true,
             pattern_table_consumers_filtered: true,
             source_page_code_ownership_applied: true,
@@ -505,6 +532,7 @@ mod tests {
             runtime_selection_uses_source_bound_dialogue_projection: true,
             combined_physical_assignment_found: true,
             observed_route_catalog_complete: true,
+            global_background_capacity_bound_complete: true,
             physical_assignment_catalog_complete: false,
             glyph_characters_emitted: false,
             translation_text_emitted: false,

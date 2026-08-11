@@ -11,9 +11,15 @@ use crate::{
     typed_source::decode_rp2a03_sequence,
 };
 
+use super::{
+    background_payloads::{
+        BATTLE_BANK_PUBLISH_SITES, BattleBackgroundPayloadModel, bind_battle_background_payloads,
+    },
+    source_window::{prg_bank, source_bytes},
+};
+
 const SOURCE_FONT_PAGE_INDEX: usize = 0;
 const SOURCE_FONT_PAGE_SHA1: &str = "1860feeb0b0b216abb79bf7917bde8b51734a980";
-const PRG_BANK_SIZE: usize = 16 * 1024;
 const PRIMARY_PHASE_POINTERS: [u16; 32] = [
     0x82C7, 0x8830, 0x8C5D, 0x8830, 0x8C5D, 0x881C, 0x8827, 0x8CD3, 0x9304, 0x82F1, 0x8505, 0x8522,
     0x85DE, 0x8341, 0x83FD, 0x8522, 0x83D3, 0x8467, 0x8475, 0x8353, 0x84D5, 0x8522, 0x837F, 0x8341,
@@ -28,25 +34,6 @@ const ANIMATION_PHASE_POINTERS: [u16; 41] = [
     0x972A, 0x99B7, 0x9801, 0x97EF, 0x984D, 0x98D5, 0x98D9, 0x9829, 0x97EF, 0xA059, 0x98D5, 0xAE70,
     0xAE87, 0xAED2, 0x98D9, 0xAEEB, 0x8830,
 ];
-const BATTLE_BANK_PUBLISH_SITES: [(u8, u16, u8); 17] = [
-    (0x05, 0x83F7, 0x85),
-    (0x05, 0x84CD, 0x85),
-    (0x05, 0x8562, 0x85),
-    (0x05, 0x88A3, 0x85),
-    (0x05, 0x8A33, 0x85),
-    (0x05, 0x8AB4, 0x86),
-    (0x05, 0x8B9F, 0x85),
-    (0x05, 0x8C15, 0x85),
-    (0x05, 0x8CEC, 0x85),
-    (0x05, 0x952F, 0x85),
-    (0x05, 0x968A, 0x86),
-    (0x05, 0x96B0, 0x85),
-    (0x05, 0x9C2E, 0x85),
-    (0x05, 0xAE39, 0x85),
-    (0x05, 0xAFE4, 0x85),
-    (0x05, 0xB013, 0x86),
-    (0x07, 0x803D, 0x85),
-];
 const QUEUE_CONSUMER_ADDRESS: u16 = 0xC3A5;
 const QUEUE_CONSUMER_BYTES: [u8; 26] = [
     0xA5, 0x21, 0xF0, 0x15, 0xA9, 0x81, 0x85, 0x00, 0xA9, 0x07, 0x85, 0x01, 0x20, 0xE7, 0xC3, 0xA9,
@@ -58,6 +45,7 @@ pub(super) struct BattleBackgroundCodeOwnership {
     japanese_text_codes: BTreeSet<u8>,
     preserved_non_japanese_codes: BTreeSet<u8>,
     producer_topology: BattleBackgroundProducerTopology,
+    payload_model: BattleBackgroundPayloadModel,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -78,6 +66,8 @@ pub(super) struct BattleBackgroundProducerTopology {
     pub(super) every_battle_bank_queue_publisher_classified: bool,
     pub(super) battle_banks_have_no_direct_ppu_data_stores: bool,
     pub(super) producer_topology_complete: bool,
+    pub(super) every_publisher_payload_source_bound: bool,
+    pub(super) conservative_global_preserved_code_union_complete: bool,
     pub(super) simultaneous_preserved_code_demand_complete: bool,
 }
 
@@ -89,7 +79,8 @@ pub(super) struct ObservedBattleBackgroundCodes {
 pub(super) fn bind_battle_background_code_ownership(
     rom: &Rom,
 ) -> Result<BattleBackgroundCodeOwnership> {
-    let producer_topology = bind_battle_background_producer_topology(rom)?;
+    let payload_model = bind_battle_background_payloads(rom)?;
+    let producer_topology = bind_battle_background_producer_topology(rom, &payload_model)?;
     let page_start = SOURCE_FONT_PAGE_INDEX
         .checked_mul(FONT_PAGE_SIZE)
         .context("battle source-font page offset overflow")?;
@@ -130,6 +121,7 @@ pub(super) fn bind_battle_background_code_ownership(
         japanese_text_codes,
         preserved_non_japanese_codes,
         producer_topology,
+        payload_model,
     })
 }
 
@@ -148,6 +140,14 @@ impl BattleBackgroundCodeOwnership {
 
     pub(super) fn producer_topology(&self) -> BattleBackgroundProducerTopology {
         self.producer_topology.clone()
+    }
+
+    pub(super) fn payload_model(&self) -> BattleBackgroundPayloadModel {
+        self.payload_model.clone()
+    }
+
+    pub(super) fn conservative_global_preserved_active_codes(&self) -> BTreeSet<u8> {
+        self.payload_model.conservative_preserved_active_codes()
     }
 
     pub(super) fn partition_observed(
@@ -181,7 +181,10 @@ impl BattleBackgroundCodeOwnership {
     }
 }
 
-fn bind_battle_background_producer_topology(rom: &Rom) -> Result<BattleBackgroundProducerTopology> {
+fn bind_battle_background_producer_topology(
+    rom: &Rom,
+    payload_model: &BattleBackgroundPayloadModel,
+) -> Result<BattleBackgroundProducerTopology> {
     bind_dispatcher(
         rom,
         0x05,
@@ -283,6 +286,8 @@ fn bind_battle_background_producer_topology(rom: &Rom) -> Result<BattleBackgroun
         every_battle_bank_queue_publisher_classified: true,
         battle_banks_have_no_direct_ppu_data_stores: true,
         producer_topology_complete: true,
+        every_publisher_payload_source_bound: payload_model.every_publisher_payload_source_bound(),
+        conservative_global_preserved_code_union_complete: true,
         simultaneous_preserved_code_demand_complete: false,
     })
 }
@@ -320,38 +325,6 @@ fn bind_dispatcher(
     Ok(())
 }
 
-fn source_bytes(rom: &Rom, bank: u8, address: u16, byte_count: usize) -> Result<&[u8]> {
-    ensure!(
-        address >= 0x8000,
-        "source address ${address:04X} is below the PRG window"
-    );
-    let bank_offset = if bank == 0x0F {
-        usize::from(
-            address
-                .checked_sub(0xC000)
-                .context("fixed-bank source address is below the fixed CPU window")?,
-        )
-    } else {
-        usize::from(address - 0x8000)
-    };
-    let start = usize::from(bank)
-        .checked_mul(PRG_BANK_SIZE)
-        .and_then(|offset| offset.checked_add(bank_offset))
-        .context("source PRG offset overflow")?;
-    rom.prg()
-        .get(start..start + byte_count)
-        .with_context(|| format!("source {bank:02X}:${address:04X} is outside PRG"))
-}
-
-fn prg_bank(rom: &Rom, bank: u8) -> Result<&[u8]> {
-    let start = usize::from(bank)
-        .checked_mul(PRG_BANK_SIZE)
-        .context("source PRG bank offset overflow")?;
-    rom.prg()
-        .get(start..start + PRG_BANK_SIZE)
-        .with_context(|| format!("source PRG bank {bank:02X} is absent"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -371,6 +344,7 @@ mod tests {
                 .into_iter()
                 .filter(|code| !is_japanese_text_code(*code))
                 .collect(),
+            payload_model: BattleBackgroundPayloadModel::test_model(),
             producer_topology: BattleBackgroundProducerTopology {
                 primary_phase_count: 0,
                 primary_distinct_handler_count: 0,
@@ -388,6 +362,8 @@ mod tests {
                 every_battle_bank_queue_publisher_classified: false,
                 battle_banks_have_no_direct_ppu_data_stores: false,
                 producer_topology_complete: false,
+                every_publisher_payload_source_bound: false,
+                conservative_global_preserved_code_union_complete: false,
                 simultaneous_preserved_code_demand_complete: false,
             },
         };
