@@ -12,6 +12,7 @@ use crate::{
 mod command_menu;
 mod glyph_budget;
 mod source_spec;
+mod target_glyphs;
 #[cfg(test)]
 mod tests;
 mod workspace;
@@ -128,10 +129,16 @@ pub struct UnitUiTextSummary {
     pub dynamic_pointer_count: usize,
     pub dynamic_unique_string_count: usize,
     pub provisional_hangul_slot_ceiling: usize,
-    pub single_family_page_fit: &'static str,
+    pub single_family_page_fit: bool,
 }
 
-pub fn analyze_unit_ui_text(source_path: &Path, report_path: &Path) -> Result<UnitUiTextSummary> {
+pub fn analyze_unit_ui_text(
+    source_path: &Path,
+    fixed_text_workspace_path: &Path,
+    unit_name_workspace_path: &Path,
+    unit_ui_label_workspace_path: &Path,
+    report_path: &Path,
+) -> Result<UnitUiTextSummary> {
     let source_rom = Rom::from_path(source_path)?;
     source_rom.verify_supported_japanese()?;
     let fixed_japanese_label_count = SUMMARY_AND_STATUS_LABEL_SPECS
@@ -139,7 +146,17 @@ pub fn analyze_unit_ui_text(source_path: &Path, report_path: &Path) -> Result<Un
         .chain(command_menu::COMMAND_LABEL_SPECS)
         .filter(|label| label.translation_scope == "japanese_only")
         .count();
-    let glyph_budget = glyph_budget::analyze(source_rom.data(), fixed_japanese_label_count)?;
+    let target_glyph_budget = target_glyphs::plan_target_glyph_budget(
+        &source_rom,
+        fixed_text_workspace_path,
+        unit_name_workspace_path,
+        unit_ui_label_workspace_path,
+    )?;
+    let glyph_budget = glyph_budget::analyze(
+        source_rom.data(),
+        fixed_japanese_label_count,
+        target_glyph_budget,
+    )?;
     let report = build_report(source_rom.prg(), glyph_budget)?;
     let report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize unit-UI text report")?;

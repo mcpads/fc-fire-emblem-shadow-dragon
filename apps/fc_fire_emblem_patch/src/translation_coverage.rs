@@ -44,6 +44,7 @@ pub(crate) struct TranslationCoverageInputs<'a> {
     pub(crate) current_build_report_path: &'a Path,
     pub(crate) main_dialogue_glyph_workset_report_path: &'a Path,
     pub(crate) battle_surface_constraints_report_path: &'a Path,
+    pub(crate) unit_ui_text_report_path: &'a Path,
     pub(crate) report_path: &'a Path,
 }
 
@@ -229,6 +230,7 @@ pub(crate) fn analyze_translation_coverage(
     let lifetime_inventory = inspect_translation_lifetimes(
         inputs.main_dialogue_glyph_workset_report_path,
         inputs.battle_surface_constraints_report_path,
+        inputs.unit_ui_text_report_path,
         LifetimeInputBindings {
             main_dialogue_workspace_sha1: translation_input_sha1("main_dialogue")?,
             class_profile_page_target_glyph_counts: &installation
@@ -237,6 +239,8 @@ pub(crate) fn analyze_translation_coverage(
                 .class_profile_preserved_active_code_count,
             class_profile_runtime_bound_to_build: installation.class_profile_runtime_bound_to_build,
             class_profile_evidence_report_sha1: &installation.build_report_sha1,
+            unit_name_workspace_sha1: translation_input_sha1("unit_names")?,
+            unit_ui_label_workspace_sha1: translation_input_sha1("unit_ui_labels")?,
             battle_fixed_workspace_sha1: &installation.battle_fixed_workspace_sha1,
             battle_dialogue_workspace_sha1: &installation.battle_dialogue_workspace_sha1,
             battle_temporal_manifest_sha1: &installation.battle_temporal_manifest_sha1,

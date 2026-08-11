@@ -9,6 +9,8 @@ use crate::{
     text_inventory::{TextTableBudget, scoped_text_table_budgets},
 };
 
+use super::target_glyphs::TargetGlyphBudget;
+
 const UNIT_UI_TEXT_TABLE_IDS: [&str; 4] =
     ["class-names", "item-names", "unit-names", "enemy-names"];
 
@@ -26,8 +28,21 @@ pub(super) struct GlyphBudgetReport {
     additional_preserved_unresolved_codes: Vec<u8>,
     additional_preserved_unresolved_codes_hex: Vec<String>,
     provisional_unit_ui_family_hangul_slot_ceiling: usize,
-    target_korean_glyph_count: Option<usize>,
-    single_family_page_fit: &'static str,
+    fixed_text_workspace_sha1: String,
+    unit_name_workspace_sha1: String,
+    unit_ui_label_workspace_sha1: String,
+    translation_inputs_review_complete: bool,
+    target_korean_glyph_count: usize,
+    summary_status_family_target_glyph_count: usize,
+    command_family_target_glyph_count: usize,
+    maximum_unit_or_enemy_name_glyph_count: usize,
+    maximum_class_name_glyph_count: usize,
+    maximum_item_name_glyph_count: usize,
+    level_label_unique_glyph_count: usize,
+    summary_status_label_unique_glyph_count: usize,
+    single_family_page_fit: bool,
+    summary_status_family_page_fit: bool,
+    command_family_page_fit: bool,
     source_repertoire_is_target_glyph_budget: bool,
     screen_lifetimes: Vec<ScreenLifetimeBudgetReport>,
     mutable_content_boundary: &'static str,
@@ -50,7 +65,7 @@ impl GlyphBudgetReport {
         self.provisional_unit_ui_family_hangul_slot_ceiling
     }
 
-    pub(super) fn single_family_page_fit(&self) -> &'static str {
+    pub(super) fn single_family_page_fit(&self) -> bool {
         self.single_family_page_fit
     }
 }
@@ -70,7 +85,12 @@ struct DynamicTableBudgetReport {
 
 #[derive(Debug, Serialize)]
 struct ScreenLifetimeBudgetReport {
-    screen_roles: Vec<&'static str>,
+    screen_role: &'static str,
+    target_glyph_upper_bound: usize,
+    preserved_active_source_code_upper_bound: usize,
+    total_slot_upper_bound: usize,
+    active_slot_count: usize,
+    upper_bound_fits_active_page: bool,
     page_behavior: &'static str,
     visible_dynamic_content: &'static str,
     fixed_content: &'static str,
@@ -79,14 +99,16 @@ struct ScreenLifetimeBudgetReport {
 pub(super) fn analyze(
     source: &[u8],
     fixed_japanese_label_count: usize,
+    target: TargetGlyphBudget,
 ) -> Result<GlyphBudgetReport> {
     let table_budgets = scoped_text_table_budgets(source, &UNIT_UI_TEXT_TABLE_IDS)?;
-    build_glyph_budget(table_budgets, fixed_japanese_label_count)
+    build_glyph_budget(table_budgets, fixed_japanese_label_count, target)
 }
 
 fn build_glyph_budget(
     table_budgets: Vec<TextTableBudget>,
     fixed_japanese_label_count: usize,
+    target: TargetGlyphBudget,
 ) -> Result<GlyphBudgetReport> {
     ensure!(
         !table_budgets.is_empty(),
@@ -123,6 +145,19 @@ fn build_glyph_budget(
     let provisional_unit_ui_family_hangul_slot_ceiling = ACTIVE_HANGUL_SLOT_COUNT
         .checked_sub(additional_preserved_unresolved_codes.len())
         .ok_or_else(|| anyhow::anyhow!("unit-UI preserved codes exceed active Hangul slots"))?;
+    let preserved_active_source_code_upper_bound = additional_preserved_unresolved_codes.len();
+    let screen_upper_bound = |target_glyph_upper_bound: usize| -> Result<usize> {
+        target_glyph_upper_bound
+            .checked_add(preserved_active_source_code_upper_bound)
+            .ok_or_else(|| anyhow::anyhow!("unit-UI screen slot upper bound overflow"))
+    };
+    let summary_slot_upper_bound = screen_upper_bound(target.summary_target_glyph_upper_bound)?;
+    let status_slot_upper_bound = screen_upper_bound(target.status_target_glyph_upper_bound)?;
+    let command_slot_upper_bound = screen_upper_bound(target.command_target_glyph_upper_bound)?;
+    let all_family_slot_count = screen_upper_bound(target.all_family_unique_glyph_count)?;
+    let summary_status_family_slot_count =
+        screen_upper_bound(target.summary_status_family_unique_glyph_count)?;
+    let command_family_slot_count = screen_upper_bound(target.command_family_unique_glyph_count)?;
 
     let dynamic_tables = table_budgets
         .into_iter()
@@ -161,24 +196,59 @@ fn build_glyph_budget(
             .collect(),
         additional_preserved_unresolved_codes,
         provisional_unit_ui_family_hangul_slot_ceiling,
-        target_korean_glyph_count: None,
-        single_family_page_fit: "unresolved_without_reviewed_korean_translations",
+        fixed_text_workspace_sha1: target.fixed_text_workspace_sha1,
+        unit_name_workspace_sha1: target.unit_name_workspace_sha1,
+        unit_ui_label_workspace_sha1: target.unit_ui_label_workspace_sha1,
+        translation_inputs_review_complete: target.translation_inputs_review_complete,
+        target_korean_glyph_count: target.all_family_unique_glyph_count,
+        summary_status_family_target_glyph_count: target.summary_status_family_unique_glyph_count,
+        command_family_target_glyph_count: target.command_family_unique_glyph_count,
+        maximum_unit_or_enemy_name_glyph_count: target.maximum_unit_or_enemy_name_glyph_count,
+        maximum_class_name_glyph_count: target.maximum_class_name_glyph_count,
+        maximum_item_name_glyph_count: target.maximum_item_name_glyph_count,
+        level_label_unique_glyph_count: target.level_label_unique_glyph_count,
+        summary_status_label_unique_glyph_count: target.summary_status_label_unique_glyph_count,
+        single_family_page_fit: all_family_slot_count <= ACTIVE_HANGUL_SLOT_COUNT,
+        summary_status_family_page_fit: summary_status_family_slot_count
+            <= ACTIVE_HANGUL_SLOT_COUNT,
+        command_family_page_fit: command_family_slot_count <= ACTIVE_HANGUL_SLOT_COUNT,
         source_repertoire_is_target_glyph_budget: false,
         screen_lifetimes: vec![
             ScreenLifetimeBudgetReport {
-                screen_roles: vec!["unit_summary", "unit_status"],
+                screen_role: "unit_summary",
+                target_glyph_upper_bound: target.summary_target_glyph_upper_bound,
+                preserved_active_source_code_upper_bound,
+                total_slot_upper_bound: summary_slot_upper_bound,
+                active_slot_count: ACTIVE_HANGUL_SLOT_COUNT,
+                upper_bound_fits_active_page: summary_slot_upper_bound <= ACTIVE_HANGUL_SLOT_COUNT,
                 page_behavior: "unit_summary supplies the right FD page and unit_status inherits it",
                 visible_dynamic_content: "one playable-or-enemy unit name, one class name, and up to four current item names",
-                fixed_content: "level and nine Japanese stat labels; original Latin, digits, slash, and punctuation stay preserved",
+                fixed_content: "level label; original Latin, digits, slash, and punctuation stay preserved",
             },
             ScreenLifetimeBudgetReport {
-                screen_roles: vec!["unit_command_menu"],
+                screen_role: "unit_status",
+                target_glyph_upper_bound: target.status_target_glyph_upper_bound,
+                preserved_active_source_code_upper_bound,
+                total_slot_upper_bound: status_slot_upper_bound,
+                active_slot_count: ACTIVE_HANGUL_SLOT_COUNT,
+                upper_bound_fits_active_page: status_slot_upper_bound <= ACTIVE_HANGUL_SLOT_COUNT,
+                page_behavior: "unit_status inherits the page selected by unit_summary",
+                visible_dynamic_content: "one playable-or-enemy unit name and one class name",
+                fixed_content: "level and nine stat labels; original Latin, digits, slash, and punctuation stay preserved",
+            },
+            ScreenLifetimeBudgetReport {
+                screen_role: "unit_command_menu",
+                target_glyph_upper_bound: target.command_target_glyph_upper_bound,
+                preserved_active_source_code_upper_bound,
+                total_slot_upper_bound: command_slot_upper_bound,
+                active_slot_count: ACTIVE_HANGUL_SLOT_COUNT,
+                upper_bound_fits_active_page: command_slot_upper_bound <= ACTIVE_HANGUL_SLOT_COUNT,
                 page_behavior: "entry supplies a new right FD page independently of unit_status inheritance",
                 visible_dynamic_content: "a condition-selected subset of fifteen fixed command labels",
-                fixed_content: "all fifteen Japanese command labels belong to the family budget even though only two have runtime display evidence",
+                fixed_content: "all fifteen command labels belong to the safe upper bound even though only six have runtime display evidence",
             },
         ],
-        mutable_content_boundary: "inventory contents can change at runtime, so a page fixed only by unit identity cannot guarantee the summary-and-status working set; measure reviewed Korean translations before choosing a family-wide page, a content-keyed page, or runtime glyph upload",
+        mutable_content_boundary: "the complete and summary-status family unions exceed one page even though each screen upper bound fits; unit_summary therefore needs a content-keyed page or runtime glyph upload, unit_status must inherit that page, and unit_command_menu can use an independent static page",
     })
 }
 
@@ -195,6 +265,23 @@ pub(super) fn fixture_report(fixed_japanese_label_count: usize) -> GlyphBudgetRe
             source_codes: [0x00].into_iter().collect(),
         }],
         fixed_japanese_label_count,
+        TargetGlyphBudget {
+            fixed_text_workspace_sha1: "fixed".to_owned(),
+            unit_name_workspace_sha1: "units".to_owned(),
+            unit_ui_label_workspace_sha1: "labels".to_owned(),
+            translation_inputs_review_complete: false,
+            all_family_unique_glyph_count: 4,
+            summary_status_family_unique_glyph_count: 3,
+            command_family_unique_glyph_count: 1,
+            maximum_unit_or_enemy_name_glyph_count: 1,
+            maximum_class_name_glyph_count: 1,
+            maximum_item_name_glyph_count: 1,
+            level_label_unique_glyph_count: 1,
+            summary_status_label_unique_glyph_count: 1,
+            summary_target_glyph_upper_bound: 7,
+            status_target_glyph_upper_bound: 3,
+            command_target_glyph_upper_bound: 1,
+        },
     )
     .expect("static unit-UI glyph-budget fixture must be valid")
 }
@@ -216,13 +303,30 @@ mod tests {
     }
 
     #[test]
-    fn keeps_source_repertoire_separate_from_unavailable_target_glyph_count() {
+    fn keeps_source_repertoire_separate_from_target_glyph_count() {
         let report = build_glyph_budget(
             vec![
                 table("unit-names", &[0x00, 0x6A, 0xA5]),
                 table("item-names", &[0x00, 0x84, 0xAB]),
             ],
             25,
+            TargetGlyphBudget {
+                fixed_text_workspace_sha1: "fixed".to_owned(),
+                unit_name_workspace_sha1: "units".to_owned(),
+                unit_ui_label_workspace_sha1: "labels".to_owned(),
+                translation_inputs_review_complete: false,
+                all_family_unique_glyph_count: 229,
+                summary_status_family_unique_glyph_count: 218,
+                command_family_unique_glyph_count: 30,
+                maximum_unit_or_enemy_name_glyph_count: 6,
+                maximum_class_name_glyph_count: 4,
+                maximum_item_name_glyph_count: 6,
+                level_label_unique_glyph_count: 2,
+                summary_status_label_unique_glyph_count: 20,
+                summary_target_glyph_upper_bound: 36,
+                status_target_glyph_upper_bound: 30,
+                command_target_glyph_upper_bound: 30,
+            },
         )
         .unwrap();
 
@@ -235,17 +339,41 @@ mod tests {
             report.provisional_unit_ui_family_hangul_slot_ceiling,
             ACTIVE_HANGUL_SLOT_COUNT - 1
         );
-        assert_eq!(report.target_korean_glyph_count, None);
-        assert_eq!(
-            report.single_family_page_fit,
-            "unresolved_without_reviewed_korean_translations"
-        );
+        assert_eq!(report.target_korean_glyph_count, 229);
+        assert!(!report.single_family_page_fit);
+        assert!(!report.summary_status_family_page_fit);
+        assert!(report.command_family_page_fit);
+        assert_eq!(report.screen_lifetimes[0].total_slot_upper_bound, 37);
+        assert_eq!(report.screen_lifetimes[1].total_slot_upper_bound, 31);
+        assert_eq!(report.screen_lifetimes[2].total_slot_upper_bound, 31);
         assert!(!report.source_repertoire_is_target_glyph_budget);
     }
 
     #[test]
     fn rejects_an_empty_dynamic_family() {
-        let error = build_glyph_budget(Vec::new(), 25).unwrap_err().to_string();
+        let error = build_glyph_budget(
+            Vec::new(),
+            25,
+            TargetGlyphBudget {
+                fixed_text_workspace_sha1: "fixed".to_owned(),
+                unit_name_workspace_sha1: "units".to_owned(),
+                unit_ui_label_workspace_sha1: "labels".to_owned(),
+                translation_inputs_review_complete: false,
+                all_family_unique_glyph_count: 0,
+                summary_status_family_unique_glyph_count: 0,
+                command_family_unique_glyph_count: 0,
+                maximum_unit_or_enemy_name_glyph_count: 0,
+                maximum_class_name_glyph_count: 0,
+                maximum_item_name_glyph_count: 0,
+                level_label_unique_glyph_count: 0,
+                summary_status_label_unique_glyph_count: 0,
+                summary_target_glyph_upper_bound: 0,
+                status_target_glyph_upper_bound: 0,
+                command_target_glyph_upper_bound: 0,
+            },
+        )
+        .unwrap_err()
+        .to_string();
         assert!(error.contains("at least one dynamic text table"));
     }
 }

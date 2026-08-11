@@ -279,6 +279,8 @@ enum Command {
         main_dialogue_glyph_workset_report: PathBuf,
         #[arg(long, default_value = "out/battle-surface-constraints.json")]
         battle_surface_constraints_report: PathBuf,
+        #[arg(long, default_value = "out/unit-ui-text.json")]
+        unit_ui_text_report: PathBuf,
         #[arg(long, default_value = "out/translation-coverage.json")]
         report: PathBuf,
     },
@@ -333,6 +335,12 @@ enum Command {
     /// Bind unit-summary and unit-status composers, sources, labels, and shared page lifetime.
     AnalyzeUnitUiText {
         source: PathBuf,
+        #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
+        fixed_text_workspace: PathBuf,
+        #[arg(long, default_value = "assets/translation/unit-names.ko.json")]
+        unit_name_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/unit-ui-labels.ko.json")]
+        unit_ui_label_localization: PathBuf,
         #[arg(long, default_value = "out/unit-ui-text.json")]
         report: PathBuf,
     },
@@ -1012,6 +1020,7 @@ fn main() -> Result<()> {
             current_build_report,
             main_dialogue_glyph_workset_report,
             battle_surface_constraints_report,
+            unit_ui_text_report,
             report,
         } => {
             let summary = translation_coverage::analyze_translation_coverage(
@@ -1037,6 +1046,7 @@ fn main() -> Result<()> {
                     current_build_report_path: &current_build_report,
                     main_dialogue_glyph_workset_report_path: &main_dialogue_glyph_workset_report,
                     battle_surface_constraints_report_path: &battle_surface_constraints_report,
+                    unit_ui_text_report_path: &unit_ui_text_report,
                     report_path: &report,
                 },
             )?;
@@ -1150,12 +1160,24 @@ fn main() -> Result<()> {
                 summary.next_screen_role
             );
         }
-        Command::AnalyzeUnitUiText { source, report } => {
-            let summary = unit_ui_text::analyze_unit_ui_text(&source, &report)?;
+        Command::AnalyzeUnitUiText {
+            source,
+            fixed_text_workspace,
+            unit_name_localization,
+            unit_ui_label_localization,
+            report,
+        } => {
+            let summary = unit_ui_text::analyze_unit_ui_text(
+                &source,
+                &fixed_text_workspace,
+                &unit_name_localization,
+                &unit_ui_label_localization,
+                &report,
+            )?;
             println!("wrote {}", report.display());
             println!("report SHA-1: {}", summary.report_sha1);
             println!(
-                "unit UI text: {} screen roles, {} composers, {} fixed labels, {} Japanese labels targeted, {} command labels, {} dynamic pointers / {} unique strings, provisional Hangul ceiling {}, family-page fit {}",
+                "unit UI text: {} screen roles, {} composers, {} fixed labels, {} Japanese labels targeted, {} command labels, {} dynamic pointers / {} unique strings, Hangul ceiling {}, single-family fit {}",
                 summary.screen_role_count,
                 summary.composer_count,
                 summary.fixed_label_count,

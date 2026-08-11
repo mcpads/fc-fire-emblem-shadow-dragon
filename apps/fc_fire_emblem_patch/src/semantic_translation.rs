@@ -1,4 +1,8 @@
-use std::{collections::BTreeSet, fs, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::Path,
+};
 
 use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
@@ -17,11 +21,24 @@ pub(crate) struct SemanticTranslationPlan {
     pub(crate) entry_count: usize,
     pub(crate) review_complete: bool,
     reviewed_entry_ids: BTreeSet<String>,
+    target_glyphs_by_entry_id: BTreeMap<String, BTreeSet<char>>,
 }
 
 impl SemanticTranslationPlan {
     pub(crate) fn entry_review_complete(&self, id: &str) -> bool {
         self.reviewed_entry_ids.contains(id)
+    }
+
+    pub(crate) fn entry_target_glyphs(&self, id: &str) -> Option<&BTreeSet<char>> {
+        self.target_glyphs_by_entry_id.get(id)
+    }
+
+    pub(crate) fn unique_target_glyphs(&self) -> BTreeSet<char> {
+        self.target_glyphs_by_entry_id
+            .values()
+            .flatten()
+            .copied()
+            .collect()
     }
 }
 
@@ -68,6 +85,7 @@ pub(crate) fn plan_semantic_translation(
     );
 
     let mut reviewed_entry_ids = BTreeSet::new();
+    let mut target_glyphs_by_entry_id = BTreeMap::new();
     for (entry, expected) in workspace.entries.iter().zip(expected_entries) {
         ensure!(
             entry.id == expected.id && entry.japanese_markup == expected.japanese_markup,
@@ -104,6 +122,18 @@ pub(crate) fn plan_semantic_translation(
         if entry.status == "complete" {
             reviewed_entry_ids.insert(entry.id.clone());
         }
+        let target_glyphs = entry
+            .korean_markup
+            .chars()
+            .filter(|character| is_target_hangul(*character))
+            .collect();
+        ensure!(
+            target_glyphs_by_entry_id
+                .insert(entry.id.clone(), target_glyphs)
+                .is_none(),
+            "semantic translation repeats entry {}",
+            entry.id
+        );
     }
 
     Ok(SemanticTranslationPlan {
@@ -111,6 +141,7 @@ pub(crate) fn plan_semantic_translation(
         entry_count: workspace.entries.len(),
         review_complete: reviewed_entry_ids.len() == workspace.entries.len(),
         reviewed_entry_ids,
+        target_glyphs_by_entry_id,
     })
 }
 

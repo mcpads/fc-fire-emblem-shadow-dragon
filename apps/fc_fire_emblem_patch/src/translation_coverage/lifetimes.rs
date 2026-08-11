@@ -7,6 +7,8 @@ use crate::{font_slots::ACTIVE_HANGUL_SLOT_COUNT, rom::EXPECTED_SOURCE_SHA1, sha
 
 use super::report::{StrongestLifetimeReport, TranslationLifetimeDemandReport};
 
+mod unit_ui;
+
 const MAIN_DIALOGUE_REPORT_SCHEMA: u8 = 6;
 const BATTLE_REPORT_SCHEMA: u8 = 12;
 
@@ -16,6 +18,8 @@ pub(super) struct LifetimeInputBindings<'a> {
     pub(super) class_profile_preserved_active_code_count: usize,
     pub(super) class_profile_runtime_bound_to_build: bool,
     pub(super) class_profile_evidence_report_sha1: &'a str,
+    pub(super) unit_name_workspace_sha1: &'a str,
+    pub(super) unit_ui_label_workspace_sha1: &'a str,
     pub(super) battle_fixed_workspace_sha1: &'a str,
     pub(super) battle_dialogue_workspace_sha1: &'a str,
     pub(super) battle_temporal_manifest_sha1: &'a str,
@@ -25,6 +29,13 @@ pub(super) struct TranslationLifetimeInventory {
     pub(super) demands: Vec<TranslationLifetimeDemandReport>,
     pub(super) unmeasured_screen_roles: Vec<String>,
     pub(super) strongest: StrongestLifetimeReport,
+}
+
+struct LifetimeReports {
+    main_dialogue: MainDialogueGlyphWorksetReport,
+    battle: BattleSurfaceConstraintsReport,
+    main_dialogue_sha1: String,
+    battle_sha1: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -74,6 +85,7 @@ struct BattleSurfaceConstraintsReport {
 pub(super) fn inspect_translation_lifetimes(
     main_dialogue_report_path: &Path,
     battle_report_path: &Path,
+    unit_ui_report_path: &Path,
     bindings: LifetimeInputBindings<'_>,
     japanese_bearing_screen_roles: &[String],
 ) -> Result<TranslationLifetimeInventory> {
@@ -127,30 +139,40 @@ pub(super) fn inspect_translation_lifetimes(
         "battle lifetime demand components no longer sum to the exact modeled total"
     );
 
+    let unit_ui_demands = unit_ui::inspect(
+        unit_ui_report_path,
+        unit_ui::InputBindings {
+            fixed_text_workspace_sha1: bindings.battle_fixed_workspace_sha1,
+            unit_name_workspace_sha1: bindings.unit_name_workspace_sha1,
+            unit_ui_label_workspace_sha1: bindings.unit_ui_label_workspace_sha1,
+        },
+    )?;
+
     build_translation_lifetime_inventory(
-        main,
-        battle,
-        sha1_hex(&main_bytes),
-        sha1_hex(&battle_bytes),
-        bindings.class_profile_page_target_glyph_counts,
-        bindings.class_profile_preserved_active_code_count,
-        bindings.class_profile_runtime_bound_to_build,
-        bindings.class_profile_evidence_report_sha1,
+        LifetimeReports {
+            main_dialogue: main,
+            battle,
+            main_dialogue_sha1: sha1_hex(&main_bytes),
+            battle_sha1: sha1_hex(&battle_bytes),
+        },
+        bindings,
+        unit_ui_demands,
         japanese_bearing_screen_roles,
     )
 }
 
 fn build_translation_lifetime_inventory(
-    main: MainDialogueGlyphWorksetReport,
-    battle: BattleSurfaceConstraintsReport,
-    main_report_sha1: String,
-    battle_report_sha1: String,
-    class_profile_page_target_glyph_counts: &[usize],
-    class_profile_preserved_active_code_count: usize,
-    class_profile_runtime_bound_to_build: bool,
-    class_profile_evidence_report_sha1: &str,
+    reports: LifetimeReports,
+    bindings: LifetimeInputBindings<'_>,
+    unit_ui_demands: Vec<TranslationLifetimeDemandReport>,
     japanese_bearing_screen_roles: &[String],
 ) -> Result<TranslationLifetimeInventory> {
+    let LifetimeReports {
+        main_dialogue: main,
+        battle,
+        main_dialogue_sha1: main_report_sha1,
+        battle_sha1: battle_report_sha1,
+    } = reports;
     let mut demands = vec![TranslationLifetimeDemandReport {
         screen_role: "battle_animation",
         measurement_basis: "exact modeled battle text maximum plus the conservative global preserved-code union",
@@ -164,29 +186,31 @@ fn build_translation_lifetime_inventory(
         evidence_report_sha1: battle_report_sha1,
     }];
     ensure!(
-        class_profile_runtime_bound_to_build,
+        bindings.class_profile_runtime_bound_to_build,
         "class-profile lifetime is not runtime-bound to the current build"
     );
-    let class_profile_target_glyph_count = class_profile_page_target_glyph_counts
+    let class_profile_target_glyph_count = bindings
+        .class_profile_page_target_glyph_counts
         .iter()
         .copied()
         .max()
         .context("class-profile lifetime has no installed page groups")?;
     let class_profile_total_slot_demand = class_profile_target_glyph_count
-        .checked_add(class_profile_preserved_active_code_count)
+        .checked_add(bindings.class_profile_preserved_active_code_count)
         .context("class-profile lifetime slot demand overflow")?;
     demands.push(TranslationLifetimeDemandReport {
         screen_role: "class_profile",
         measurement_basis:
             "largest exact-output-bound installed profile-group working set plus preserved active codes",
         target_glyph_count: class_profile_target_glyph_count,
-        preserved_active_source_code_count: class_profile_preserved_active_code_count,
+        preserved_active_source_code_count: bindings.class_profile_preserved_active_code_count,
         additional_target_glyph_reservation_count: 0,
         total_slot_demand: class_profile_total_slot_demand,
         active_slot_count: ACTIVE_HANGUL_SLOT_COUNT,
         fits_active_page: class_profile_total_slot_demand <= ACTIVE_HANGUL_SLOT_COUNT,
-        evidence_report_sha1: class_profile_evidence_report_sha1.to_owned(),
+        evidence_report_sha1: bindings.class_profile_evidence_report_sha1.to_owned(),
     });
+    demands.extend(unit_ui_demands);
     for lifetime in main.observed_screen_lifetimes {
         let (screen_role, measurement_basis) = match lifetime.screen_role.as_str() {
             "weapon-shop purchase handoff" => (
@@ -306,6 +330,7 @@ mod tests {
             conservative_global_preserved_active_code_count: 39,
             exact_modeled_global_combined_slot_demand: 170,
         };
+        let unit_ui_demands = unit_ui_demands();
         let roles = [
             "battle_animation",
             "class_profile",
@@ -313,24 +338,38 @@ mod tests {
             "ending_character_epilogue",
             "game_over",
             "map_menu",
+            "unit_command_menu",
+            "unit_status",
+            "unit_summary",
             "weapon_shop_purchase_confirmation",
         ]
         .map(str::to_owned);
 
         let inventory = build_translation_lifetime_inventory(
-            main,
-            battle,
-            "main-report".to_owned(),
-            "battle-report".to_owned(),
-            &[143, 161],
-            12,
-            true,
-            "build-report",
+            LifetimeReports {
+                main_dialogue: main,
+                battle,
+                main_dialogue_sha1: "main-report".to_owned(),
+                battle_sha1: "battle-report".to_owned(),
+            },
+            LifetimeInputBindings {
+                main_dialogue_workspace_sha1: "main",
+                class_profile_page_target_glyph_counts: &[143, 161],
+                class_profile_preserved_active_code_count: 12,
+                class_profile_runtime_bound_to_build: true,
+                class_profile_evidence_report_sha1: "build-report",
+                unit_name_workspace_sha1: "units",
+                unit_ui_label_workspace_sha1: "labels",
+                battle_fixed_workspace_sha1: "fixed",
+                battle_dialogue_workspace_sha1: "battle",
+                battle_temporal_manifest_sha1: "temporal",
+            },
+            unit_ui_demands,
             &roles,
         )
         .unwrap();
 
-        assert_eq!(inventory.demands.len(), 6);
+        assert_eq!(inventory.demands.len(), 9);
         assert_eq!(inventory.strongest.state, "partial");
         assert_eq!(
             inventory.strongest.selected_screen_role,
@@ -343,6 +382,27 @@ mod tests {
         );
         assert!(inventory.strongest.main_dialogue_maximum_screen_bound);
         assert_eq!(inventory.unmeasured_screen_roles, ["map_menu"]);
+    }
+
+    fn unit_ui_demands() -> Vec<TranslationLifetimeDemandReport> {
+        [
+            ("unit_summary", 36),
+            ("unit_status", 30),
+            ("unit_command_menu", 30),
+        ]
+        .into_iter()
+        .map(|(screen_role, demand)| TranslationLifetimeDemandReport {
+            screen_role,
+            measurement_basis: "fixture upper bound",
+            target_glyph_count: demand,
+            preserved_active_source_code_count: 0,
+            additional_target_glyph_reservation_count: 0,
+            total_slot_demand: demand,
+            active_slot_count: ACTIVE_HANGUL_SLOT_COUNT,
+            fits_active_page: true,
+            evidence_report_sha1: "unit-ui-report".to_owned(),
+        })
+        .collect()
     }
 
     fn observed(
