@@ -59,6 +59,8 @@ pub(super) struct BattleCacheCompositionPlan {
     physical_assignment_complete: bool,
     runtime_loader_implemented: bool,
     runtime_verified: bool,
+    maximum_overlay_bound_is_conservative: bool,
+    maximum_overlay_bound_is_exact: bool,
 }
 
 pub(in crate::mapper165) struct BattleCacheCompositionMaterial {
@@ -213,6 +215,7 @@ pub(super) fn plan_cache_composition(
     player_participant_candidate_count: usize,
     enemy_participant_candidate_count: usize,
     terrain_entry_count: usize,
+    maximum_runtime_overlay_glyph_count: usize,
 ) -> Result<BattleCacheCompositionMaterial> {
     ensure!(
         coloring.color_count <= u8::MAX.into(),
@@ -343,8 +346,7 @@ pub(super) fn plan_cache_composition(
         .glyph_count
         .checked_mul(FONT_TILE_SIZE)
         .context("battle glyph atlas size overflow")?;
-    let maximum_overlay_byte_count = coloring
-        .color_count
+    let maximum_overlay_byte_count = maximum_runtime_overlay_glyph_count
         .checked_mul(FONT_TILE_SIZE)
         .context("battle overlay size overflow")?;
     let maximum_rebuild_byte_count = FONT_PAGE_SIZE
@@ -387,7 +389,7 @@ pub(super) fn plan_cache_composition(
         glyph_atlas_tile_count: coloring.glyph_count,
         glyph_atlas_byte_count,
         source_page_copy_byte_count: FONT_PAGE_SIZE,
-        maximum_overlay_glyph_count: coloring.color_count,
+        maximum_overlay_glyph_count: maximum_runtime_overlay_glyph_count,
         maximum_overlay_byte_count,
         maximum_rebuild_byte_count,
         modeled_participant_pair_count,
@@ -404,6 +406,8 @@ pub(super) fn plan_cache_composition(
         physical_assignment_complete: false,
         runtime_loader_implemented: false,
         runtime_verified: false,
+        maximum_overlay_bound_is_conservative: true,
+        maximum_overlay_bound_is_exact: false,
     };
     Ok(BattleCacheCompositionMaterial {
         plan,
@@ -532,6 +536,8 @@ pub(super) fn test_plan() -> BattleCacheCompositionPlan {
         physical_assignment_complete: false,
         runtime_loader_implemented: false,
         runtime_verified: false,
+        maximum_overlay_bound_is_conservative: true,
+        maximum_overlay_bound_is_exact: false,
     }
 }
 

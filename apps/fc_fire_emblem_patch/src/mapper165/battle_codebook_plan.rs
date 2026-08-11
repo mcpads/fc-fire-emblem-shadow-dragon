@@ -23,6 +23,7 @@ mod conflict_graph;
 mod enemy_domain;
 mod item_domain;
 mod physical_assignment;
+mod runtime_demand;
 mod runtime_inputs;
 pub(crate) mod surface_constraints;
 
@@ -36,6 +37,7 @@ use enemy_domain::{EnemyBattleDomain, EnemyBattleDomainBinding, bind_enemy_battl
 use item_domain::{BattleItemDomain, BattleItemDomainBinding, bind_battle_item_domain};
 pub(super) use physical_assignment::ScreenCodeConstraint;
 use physical_assignment::assign_physical_codes;
+use runtime_demand::{BattleRuntimeDemandPlan, plan_runtime_demand};
 use runtime_inputs::{BattleRuntimeInputBinding, bind_battle_runtime_inputs};
 
 struct BattleCodebookModel {
@@ -49,6 +51,7 @@ struct BattleCodebookModel {
     dialogue_record_count: usize,
     player_participant_candidate_count: usize,
     enemy_participant_candidate_count: usize,
+    runtime_demand: BattleRuntimeDemandPlan,
     composition: BattleCacheCompositionMaterial,
     item_domain: BattleItemDomainBinding,
     enemy_domain: EnemyBattleDomainBinding,
@@ -104,6 +107,7 @@ struct BattleCodebookPlanReport {
     item_domain: BattleItemDomainBinding,
     enemy_domain: EnemyBattleDomainBinding,
     runtime_inputs: BattleRuntimeInputBinding,
+    runtime_demand: BattleRuntimeDemandPlan,
     composition: BattleCacheCompositionPlan,
     stable_assignment_fits_active_slot_ceiling: bool,
     stable_assignment_fits_chapter_one_safe_codes: bool,
@@ -148,6 +152,7 @@ pub(crate) fn analyze_battle_codebook_plan(
         dialogue_record_count,
         player_participant_candidate_count,
         enemy_participant_candidate_count,
+        runtime_demand,
         composition,
         item_domain,
         enemy_domain,
@@ -171,7 +176,7 @@ pub(crate) fn analyze_battle_codebook_plan(
     let fixed_workspace_sha1 = sha1_hex(&fs::read(fixed_workspace_path)?);
     let dialogue_workspace_sha1 = sha1_hex(&fs::read(dialogue_workspace_path)?);
     let report = BattleCodebookPlanReport {
-        schema: 2,
+        schema: 3,
         source_sha1: EXPECTED_SOURCE_SHA1,
         fixed_workspace_sha1,
         dialogue_workspace_sha1,
@@ -209,6 +214,7 @@ pub(crate) fn analyze_battle_codebook_plan(
         item_domain,
         enemy_domain,
         runtime_inputs,
+        runtime_demand,
         composition: composition.plan,
         stable_assignment_fits_active_slot_ceiling: coloring.color_count
             <= ACTIVE_HANGUL_SLOT_COUNT,
@@ -318,16 +324,15 @@ fn plan_battle_codebook_model(
         "battle codebook has no dialogue records"
     );
     let terrain_entry_count = terrains.len();
-    let coloring = plan_stable_coloring(
-        &BattleGlyphFamilies {
-            base,
-            player_participants: player_participants.clone(),
-            enemy_participants: enemy_participants.clone(),
-            terrains,
-            dialogue_records,
-        },
-        ACTIVE_HANGUL_SLOT_COUNT,
-    )?;
+    let families = BattleGlyphFamilies {
+        base,
+        player_participants: player_participants.clone(),
+        enemy_participants: enemy_participants.clone(),
+        terrains,
+        dialogue_records,
+    };
+    let coloring = plan_stable_coloring(&families, ACTIVE_HANGUL_SLOT_COUNT)?;
+    let runtime_demand = plan_runtime_demand(&families, &coloring)?;
     let composition = plan_cache_composition(
         fixed,
         dialogue,
@@ -337,6 +342,7 @@ fn plan_battle_codebook_model(
         player_participants.len(),
         enemy_participants.len(),
         terrain_entry_count,
+        runtime_demand.maximum_overlay_glyph_count(),
     )?;
     Ok(BattleCodebookModel {
         message_template_entry_count: message_templates.len(),
@@ -349,6 +355,7 @@ fn plan_battle_codebook_model(
         player_participant_candidate_count: player_participants.len(),
         enemy_participant_candidate_count: enemy_participants.len(),
         coloring,
+        runtime_demand,
         composition,
         item_domain,
         enemy_domain,
@@ -370,7 +377,7 @@ mod tests {
     #[test]
     fn report_does_not_emit_translation_content_or_private_paths() {
         let report = BattleCodebookPlanReport {
-            schema: 2,
+            schema: 3,
             source_sha1: EXPECTED_SOURCE_SHA1,
             fixed_workspace_sha1: "fixed".to_owned(),
             dialogue_workspace_sha1: "dialogue".to_owned(),
@@ -408,6 +415,7 @@ mod tests {
             item_domain: item_domain::test_binding(),
             enemy_domain: enemy_domain::test_binding(),
             runtime_inputs: runtime_inputs::test_binding(),
+            runtime_demand: runtime_demand::test_plan(),
             composition: composition::test_plan(),
             stable_assignment_fits_active_slot_ceiling: true,
             stable_assignment_fits_chapter_one_safe_codes: true,
