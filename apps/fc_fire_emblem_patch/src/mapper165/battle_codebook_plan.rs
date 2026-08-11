@@ -28,6 +28,7 @@ mod phase_cooccurrence;
 mod physical_assignment;
 mod runtime_demand;
 mod runtime_inputs;
+mod selected_physical_assignment;
 mod source_window;
 pub(crate) mod surface_constraints;
 

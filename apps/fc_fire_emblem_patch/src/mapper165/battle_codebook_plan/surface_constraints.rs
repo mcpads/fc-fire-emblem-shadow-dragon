@@ -22,6 +22,7 @@ use super::{
     composition::{BattleRuntimeRecipeInput, BattleRuntimeRecipeSelection},
     physical_assignment::assign_physical_codes,
     plan_battle_codebook_model,
+    selected_physical_assignment::prove_selected_assignment_capacity,
 };
 
 #[derive(Debug, Serialize)]
@@ -97,13 +98,19 @@ struct RouteAssignmentFeasibility {
 #[derive(Debug, Serialize)]
 struct PhysicalAssignmentArchitecture {
     static_abstract_color_count: usize,
+    canonical_text_code_count: usize,
     conservative_preserved_code_count: usize,
     static_safe_code_count: usize,
     static_full_model_assignment_infeasible: bool,
     conservative_per_battle_text_code_count: usize,
     conservative_per_battle_combined_code_count: usize,
     dynamic_per_battle_headroom: usize,
+    maximum_sparse_remap_entry_count: usize,
+    sparse_remap_table_byte_count: usize,
+    identity_code_count_at_maximum_collision: usize,
+    strongest_dynamic_assignment_sha1: String,
     dynamic_per_battle_assignment_capacity_proven: bool,
+    selected_assignment_algorithm_complete: bool,
     selected_strategy: &'static str,
     observed_static_assignment_is_release_architecture: bool,
 }
@@ -360,8 +367,17 @@ pub(crate) fn analyze_battle_surface_constraints(
         model.coloring.color_count > static_safe_code_count,
         "the global battle coloring unexpectedly fits a static table that excludes every preserved graphics code"
     );
+    let selected_assignment_capacity = prove_selected_assignment_capacity(
+        conservative_text_overlay_count,
+        &ownership.conservative_global_preserved_active_codes(),
+    )?;
+    ensure!(
+        selected_assignment_capacity.remaining_safe_code_count
+            == ACTIVE_HANGUL_SLOT_COUNT - conservative_global_combined_slot_demand,
+        "selected battle assignment proof disagrees with the global capacity bound"
+    );
     let report = BattleSurfaceConstraintReport {
-        schema: 6,
+        schema: 7,
         source_sha1: EXPECTED_SOURCE_SHA1,
         fixed_workspace_sha1: sha1_hex(&fs::read(fixed_workspace_path)?),
         dialogue_workspace_sha1: sha1_hex(&fs::read(dialogue_workspace_path)?),
@@ -382,16 +398,26 @@ pub(crate) fn analyze_battle_surface_constraints(
         phase_publisher_reachability,
         physical_assignment_architecture: PhysicalAssignmentArchitecture {
             static_abstract_color_count: model.coloring.color_count,
-            conservative_preserved_code_count: conservative_global_preserved_active_code_count,
-            static_safe_code_count,
+            canonical_text_code_count: selected_assignment_capacity.safe_code_count
+                + selected_assignment_capacity.protected_code_count,
+            conservative_preserved_code_count: selected_assignment_capacity.protected_code_count,
+            static_safe_code_count: selected_assignment_capacity.safe_code_count,
             static_full_model_assignment_infeasible: model.coloring.color_count
                 > static_safe_code_count,
-            conservative_per_battle_text_code_count: conservative_text_overlay_count,
+            conservative_per_battle_text_code_count: selected_assignment_capacity
+                .maximum_selected_code_count,
             conservative_per_battle_combined_code_count: conservative_global_combined_slot_demand,
             dynamic_per_battle_headroom: ACTIVE_HANGUL_SLOT_COUNT
                 - conservative_global_combined_slot_demand,
+            maximum_sparse_remap_entry_count: selected_assignment_capacity.maximum_collision_count,
+            sparse_remap_table_byte_count: selected_assignment_capacity.remap_table_byte_count,
+            identity_code_count_at_maximum_collision: selected_assignment_capacity
+                .identity_code_count_at_maximum_collision,
+            strongest_dynamic_assignment_sha1: selected_assignment_capacity
+                .strongest_assignment_sha1,
             dynamic_per_battle_assignment_capacity_proven: true,
-            selected_strategy: "assign physical codes from the selected battle recipes at runtime while excluding the complete 39-code preserved graphics union",
+            selected_assignment_algorithm_complete: true,
+            selected_strategy: "encode text with canonical abstract codes, keep noncolliding selected codes at identity, and remap only selected codes that collide with the complete preserved graphics union",
             observed_static_assignment_is_release_architecture: false,
         },
         route_assignment_feasibility,
@@ -489,7 +515,7 @@ mod tests {
     #[test]
     fn serialized_report_omits_translation_content_and_private_paths() {
         let report = BattleSurfaceConstraintReport {
-            schema: 6,
+            schema: 7,
             source_sha1: EXPECTED_SOURCE_SHA1,
             fixed_workspace_sha1: "fixed".to_owned(),
             dialogue_workspace_sha1: "dialogue".to_owned(),
@@ -532,13 +558,19 @@ mod tests {
                 super::super::phase_cooccurrence::BattlePhasePublisherReachability::test_model(),
             physical_assignment_architecture: PhysicalAssignmentArchitecture {
                 static_abstract_color_count: 210,
+                canonical_text_code_count: 210,
                 conservative_preserved_code_count: 39,
                 static_safe_code_count: 171,
                 static_full_model_assignment_infeasible: true,
                 conservative_per_battle_text_code_count: 134,
                 conservative_per_battle_combined_code_count: 173,
                 dynamic_per_battle_headroom: 37,
+                maximum_sparse_remap_entry_count: 39,
+                sparse_remap_table_byte_count: 39,
+                identity_code_count_at_maximum_collision: 95,
+                strongest_dynamic_assignment_sha1: "strongest".to_owned(),
                 dynamic_per_battle_assignment_capacity_proven: true,
+                selected_assignment_algorithm_complete: true,
                 selected_strategy: "dynamic",
                 observed_static_assignment_is_release_architecture: false,
             },
