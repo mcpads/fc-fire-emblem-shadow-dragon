@@ -21,6 +21,54 @@ fn runtime_routines_fit_the_fixed_cave_without_overlap() {
 }
 
 #[test]
+fn cumulative_layout_preserves_existing_selector_ranges() {
+    let layout = BattleCompositionRuntimeLayout {
+        dispatch: 0xFC20,
+        compose_page: 0xFC99,
+        apply_recipe: 0xFDC2,
+        apply_directory: 0xFE3C,
+        apply_participant: 0xFE4C,
+        project_dialogue_selector: 0xFE75,
+        battle_surface_active: 0xFE90,
+        initialize_sound_test_battle_remap: 0xFEB3,
+        clear_remap_state_after_battle: 0xFEC0,
+        text_projection_wrapper: 0xFECE,
+        battle_right_fd_selector: 0xFEEE,
+        battle_central_right_fd_selector: 0xFF1D,
+        battle_right_fe_selector: 0xFF43,
+        project_color: 0xFF72,
+        fixed_cave_end: 0xFFA0,
+    };
+    let routines = build_runtime_routines_for_layout(
+        RecipeDirectoryAddresses {
+            unit: 0xB020,
+            enemy: 0xB088,
+            class: 0xB112,
+            item: 0xB142,
+            terrain: 0xB1F8,
+            dialogue: 0xB218,
+        },
+        layout,
+        0xFB80,
+    )
+    .unwrap();
+
+    let protected = [(0xFB20_usize, 0xFC20_usize), (0xFC60, 0xFC99)];
+    assert!(routines.windows(2).all(|pair| {
+        pair[0].address as usize + pair[0].bytes.len() <= pair[1].address as usize
+    }));
+    assert!(routines.iter().all(|routine| {
+        let start = usize::from(routine.address);
+        let end = start + routine.bytes.len();
+        protected.iter().all(|(protected_start, protected_end)| {
+            end <= *protected_start || start >= *protected_end
+        })
+    }));
+    let last = routines.last().unwrap();
+    assert_eq!(usize::from(last.address) + last.bytes.len(), 0xFF8F);
+}
+
+#[test]
 fn dynamic_assignment_routines_fit_the_material_page_without_overlap() {
     let routines = build_dynamic_assignment_routines(RecipeDirectoryAddresses {
         unit: 0xB020,

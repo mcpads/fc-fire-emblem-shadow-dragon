@@ -29,8 +29,13 @@ use super::{
 mod dynamic_assignment;
 mod runtime;
 
-use dynamic_assignment::build_dynamic_assignment_routines;
-use runtime::{RuntimeRoutine, build_runtime_routines, parse_recipe_directories};
+use dynamic_assignment::{
+    build_dynamic_assignment_routines, build_dynamic_assignment_routines_for_layout,
+};
+use runtime::{
+    RuntimeRoutine, build_runtime_routines, build_runtime_routines_for_layout,
+    parse_recipe_directories,
+};
 
 const EXPANDED_PRG_SIZE: usize = 512 * 1024;
 const FIXED_BANK_SIZE: usize = 16 * 1024;
@@ -66,6 +71,44 @@ const BATTLE_RIGHT_FE_SELECTOR_ADDRESS: u16 = 0xFF20;
 const TEXT_PROJECTION_WRAPPER_ADDRESS: u16 = 0xFE60;
 const PROJECT_COLOR_ADDRESS: u16 = 0xFF78;
 const FIXED_CAVE_END_ADDRESS: u16 = 0xFFA0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct BattleCompositionRuntimeLayout {
+    pub(crate) dispatch: u16,
+    pub(crate) compose_page: u16,
+    pub(crate) apply_recipe: u16,
+    pub(crate) apply_directory: u16,
+    pub(crate) apply_participant: u16,
+    pub(crate) project_dialogue_selector: u16,
+    pub(crate) battle_surface_active: u16,
+    pub(crate) initialize_sound_test_battle_remap: u16,
+    pub(crate) clear_remap_state_after_battle: u16,
+    pub(crate) text_projection_wrapper: u16,
+    pub(crate) battle_right_fd_selector: u16,
+    pub(crate) battle_central_right_fd_selector: u16,
+    pub(crate) battle_right_fe_selector: u16,
+    pub(crate) project_color: u16,
+    pub(crate) fixed_cave_end: u16,
+}
+
+pub(crate) const PROBE_RUNTIME_LAYOUT: BattleCompositionRuntimeLayout =
+    BattleCompositionRuntimeLayout {
+        dispatch: DISPATCH_ADDRESS,
+        compose_page: COMPOSE_PAGE_ADDRESS,
+        apply_recipe: APPLY_RECIPE_ADDRESS,
+        apply_directory: APPLY_DIRECTORY_ADDRESS,
+        apply_participant: APPLY_PARTICIPANT_ADDRESS,
+        project_dialogue_selector: PROJECT_DIALOGUE_SELECTOR_ADDRESS,
+        battle_surface_active: BATTLE_SURFACE_ACTIVE_ADDRESS,
+        initialize_sound_test_battle_remap: INITIALIZE_SOUND_TEST_BATTLE_REMAP_ADDRESS,
+        clear_remap_state_after_battle: CLEAR_REMAP_STATE_AFTER_BATTLE_ADDRESS,
+        text_projection_wrapper: TEXT_PROJECTION_WRAPPER_ADDRESS,
+        battle_right_fd_selector: BATTLE_RIGHT_FD_SELECTOR_ADDRESS,
+        battle_central_right_fd_selector: BATTLE_CENTRAL_RIGHT_FD_SELECTOR_ADDRESS,
+        battle_right_fe_selector: BATTLE_RIGHT_FE_SELECTOR_ADDRESS,
+        project_color: PROJECT_COLOR_ADDRESS,
+        fixed_cave_end: FIXED_CAVE_END_ADDRESS,
+    };
 
 const PPU_MASK_SHADOW: u8 = 0xCC;
 const PPU_CONTROL_SHADOW: u16 = 0x00CD;
@@ -220,6 +263,28 @@ pub(crate) fn build_battle_composition_loader_probe(
     output_path: &Path,
     report_path: &Path,
 ) -> Result<BattleCompositionLoaderProbeSummary> {
+    build_battle_composition_loader_with_layout(
+        source_path,
+        temporal_manifest_path,
+        base_path,
+        base_report_path,
+        output_path,
+        report_path,
+        PROBE_RUNTIME_LAYOUT,
+        SOURCE_PAIR_AWARE_RIGHT_FD_SELECTOR,
+    )
+}
+
+pub(crate) fn build_battle_composition_loader_with_layout(
+    source_path: &Path,
+    temporal_manifest_path: &Path,
+    base_path: &Path,
+    base_report_path: &Path,
+    output_path: &Path,
+    report_path: &Path,
+    layout: BattleCompositionRuntimeLayout,
+    central_fallback_target: u16,
+) -> Result<BattleCompositionLoaderProbeSummary> {
     let source_rom = Rom::from_path(source_path)?;
     source_rom.verify_supported_japanese()?;
     let base = fs::read(base_path).with_context(|| format!("read {}", base_path.display()))?;
@@ -289,8 +354,18 @@ pub(crate) fn build_battle_composition_loader_probe(
         "battle composition loader overlay count disagrees with its base"
     );
 
-    let routines = build_runtime_routines(directories)?;
-    let material_routines = build_dynamic_assignment_routines(directories)?;
+    let routines = if layout == PROBE_RUNTIME_LAYOUT
+        && central_fallback_target == SOURCE_PAIR_AWARE_RIGHT_FD_SELECTOR
+    {
+        build_runtime_routines(directories)?
+    } else {
+        build_runtime_routines_for_layout(directories, layout, central_fallback_target)?
+    };
+    let material_routines = if layout == PROBE_RUNTIME_LAYOUT {
+        build_dynamic_assignment_routines(directories)?
+    } else {
+        build_dynamic_assignment_routines_for_layout(directories, layout)?
+    };
     let source_raw_direct_cave_transfer_pattern_count =
         verify_runtime_cave(&base_rom, source_rom.prg(), &routines)?;
     verify_material_runtime_region(&base_rom, &material_routines)?;
@@ -320,7 +395,7 @@ pub(crate) fn build_battle_composition_loader_probe(
         )?,
         &assemble_at(
             SOURCE_NMI_UPLOAD_HOOK,
-            &[Instruction::JsrAbsolute(DISPATCH_ADDRESS)],
+            &[Instruction::JsrAbsolute(layout.dispatch)],
         )?,
     )?;
     image.write_expected(
@@ -336,7 +411,7 @@ pub(crate) fn build_battle_composition_loader_probe(
         &assemble_at(
             SOURCE_COMMON_GLYPH_READ,
             &[
-                Instruction::JsrAbsolute(TEXT_PROJECTION_WRAPPER_ADDRESS),
+                Instruction::JsrAbsolute(layout.text_projection_wrapper),
                 Instruction::Nop,
             ],
         )?,
@@ -345,29 +420,29 @@ pub(crate) fn build_battle_composition_loader_probe(
         &mut image,
         "battle composition direct right FD selector",
         SOURCE_RIGHT_FD_SELECTOR,
-        BATTLE_RIGHT_FD_SELECTOR_ADDRESS,
+        layout.battle_right_fd_selector,
         2,
     )?;
     redirect_right_selector(
         &mut image,
         "battle composition right FE selector",
         SOURCE_RIGHT_FE_SELECTOR,
-        BATTLE_RIGHT_FE_SELECTOR_ADDRESS,
+        layout.battle_right_fe_selector,
         4,
     )?;
     redirect_call(
         &mut image,
         "battle composition central right FD selector",
         SOURCE_CENTRAL_RIGHT_FD_CALL,
-        SOURCE_PAIR_AWARE_RIGHT_FD_SELECTOR,
-        BATTLE_CENTRAL_RIGHT_FD_SELECTOR_ADDRESS,
+        central_fallback_target,
+        layout.battle_central_right_fd_selector,
     )?;
     redirect_call(
         &mut image,
         "battle composition central FE right FD refresh",
         SOURCE_CENTRAL_FE_FD_REFRESH_CALL,
-        SOURCE_PAIR_AWARE_RIGHT_FD_SELECTOR,
-        BATTLE_CENTRAL_RIGHT_FD_SELECTOR_ADDRESS,
+        central_fallback_target,
+        layout.battle_central_right_fd_selector,
     )?;
     image.write_expected(
         "battle composition sound-test battle initializer",
@@ -382,7 +457,7 @@ pub(crate) fn build_battle_composition_loader_probe(
         &assemble_at(
             SOURCE_SOUND_TEST_BATTLE_ACTIVE_WRITE,
             &[Instruction::JsrAbsolute(
-                INITIALIZE_SOUND_TEST_BATTLE_REMAP_ADDRESS,
+                layout.initialize_sound_test_battle_remap,
             )],
         )?,
     )?;
@@ -435,9 +510,9 @@ pub(crate) fn build_battle_composition_loader_probe(
         canonical_code_table_cpu_address_hex: format!("0x{PHYSICAL_CODE_TABLE_CPU_ADDRESS:04X}"),
         source_page_cpu_address_hex: format!("0x{MATERIAL_SOURCE_PAGE_CPU_ADDRESS:04X}"),
         recipe_blob_cpu_address_hex: format!("0x{MATERIAL_RECIPE_CPU_ADDRESS:04X}"),
-        fixed_cave_start_cpu_address_hex: format!("0x{DISPATCH_ADDRESS:04X}"),
-        fixed_cave_end_cpu_address_exclusive_hex: format!("0x{FIXED_CAVE_END_ADDRESS:04X}"),
-        fixed_cave_byte_count: usize::from(FIXED_CAVE_END_ADDRESS - DISPATCH_ADDRESS),
+        fixed_cave_start_cpu_address_hex: format!("0x{:04X}", layout.dispatch),
+        fixed_cave_end_cpu_address_exclusive_hex: format!("0x{:04X}", layout.fixed_cave_end),
+        fixed_cave_byte_count: usize::from(layout.fixed_cave_end - layout.dispatch),
         fixed_runtime_routine_count: routines.len(),
         fixed_runtime_routine_byte_count,
         material_runtime_start_cpu_address_hex: format!(

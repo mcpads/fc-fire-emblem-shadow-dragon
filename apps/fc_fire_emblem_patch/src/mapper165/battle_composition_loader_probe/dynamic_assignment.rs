@@ -17,11 +17,18 @@ pub(super) struct MaterialRuntimeRoutine {
 pub(super) fn build_dynamic_assignment_routines(
     directories: RecipeDirectoryAddresses,
 ) -> Result<Vec<MaterialRuntimeRoutine>> {
+    build_dynamic_assignment_routines_for_layout(directories, PROBE_RUNTIME_LAYOUT)
+}
+
+pub(crate) fn build_dynamic_assignment_routines_for_layout(
+    directories: RecipeDirectoryAddresses,
+    layout: BattleCompositionRuntimeLayout,
+) -> Result<Vec<MaterialRuntimeRoutine>> {
     let routines = vec![
         MaterialRuntimeRoutine {
             role: "selected-color collection dispatch",
             address: DYNAMIC_ASSIGNMENT_CODE_CPU_ADDRESS,
-            bytes: prepare_dynamic_assignment(directories)?,
+            bytes: prepare_dynamic_assignment(directories, layout.project_dialogue_selector)?,
         },
         MaterialRuntimeRoutine {
             role: "recipe selected-color collection",
@@ -72,7 +79,10 @@ pub(super) fn build_dynamic_assignment_routines(
     Ok(routines)
 }
 
-fn prepare_dynamic_assignment(directories: RecipeDirectoryAddresses) -> Result<Vec<u8>> {
+fn prepare_dynamic_assignment(
+    directories: RecipeDirectoryAddresses,
+    project_dialogue_selector_address: u16,
+) -> Result<Vec<u8>> {
     let mut instructions = vec![Instruction::LdxImmediate(SELECTED_COLOR_BITMAP_BYTE_COUNT)];
     let clear_loop = next_address(DYNAMIC_ASSIGNMENT_CODE_CPU_ADDRESS, &instructions)?;
     instructions.extend([
@@ -121,7 +131,7 @@ fn prepare_dynamic_assignment(directories: RecipeDirectoryAddresses) -> Result<V
     ]);
     set_directory(&mut instructions, directories.dialogue);
     instructions.extend([
-        Instruction::JsrAbsolute(PROJECT_DIALOGUE_SELECTOR_ADDRESS),
+        Instruction::JsrAbsolute(project_dialogue_selector_address),
         Instruction::JsrAbsolute(COLLECT_DIRECTORY_ADDRESS),
         Instruction::JmpAbsolute(ALLOCATE_REMAP_PAIRS_ADDRESS),
     ]);
