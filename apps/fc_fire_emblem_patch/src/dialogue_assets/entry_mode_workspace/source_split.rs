@@ -236,54 +236,75 @@ fn decode_range_markup(
     Ok(markup)
 }
 
-pub(super) fn seed_common_body_translation(
+pub(super) fn seed_entry_mode_translations(
     record: &mut EntryModeRecord,
     main_record: &WorkspaceRecord,
 ) -> Result<()> {
-    if record.common_body.source_storage_byte_count == 0 {
+    seed_part_translation(&mut record.transition_leading, main_record, true)?;
+    seed_part_translation(&mut record.common_body, main_record, true)?;
+    seed_part_translation(&mut record.direct_leading, main_record, false)?;
+    Ok(())
+}
+
+fn seed_part_translation(
+    part: &mut EntryModePart,
+    main_record: &WorkspaceRecord,
+    exact_line_boundary_required: bool,
+) -> Result<()> {
+    if part.source_storage_byte_count == 0 || part.japanese_source_byte_count == 0 {
         return Ok(());
     }
-    let suffix_start = main_record
+    let Some(start) = main_record
         .lines
         .iter()
-        .position(|line| line.file_offset_hex == record.common_body_source_file_offset_hex)
-        .with_context(|| {
-            format!(
-                "{} common body is not a line boundary in the transition-view workspace",
-                record.id
-            )
-        })?;
-    let suffix = &main_record.lines[suffix_start..];
-    let source_markup = suffix
-        .iter()
-        .map(|line| line.source_markup.as_str())
-        .collect::<String>();
-    ensure!(
-        source_markup == record.common_body.source_markup,
-        "{} main-workspace suffix does not match the normalized common body",
-        record.id
-    );
-    if record.common_body.japanese_source_byte_count == 0 {
+        .position(|line| line.file_offset_hex == part.source_file_offset_hex)
+    else {
+        ensure!(
+            !exact_line_boundary_required,
+            "{} is not a line boundary in the transition-view workspace",
+            part.id
+        );
         return Ok(());
+    };
+    let mut end = None;
+    let mut source_markup = String::new();
+    for (relative_index, line) in main_record.lines[start..].iter().enumerate() {
+        source_markup.push_str(&line.source_markup);
+        if source_markup == part.source_markup {
+            end = Some(start + relative_index + 1);
+            break;
+        }
+        if !part.source_markup.starts_with(&source_markup) {
+            break;
+        }
     }
+    let Some(end) = end else {
+        ensure!(
+            !exact_line_boundary_required,
+            "{} does not match complete transition-view lines",
+            part.id
+        );
+        return Ok(());
+    };
+    let source_lines = &main_record.lines[start..end];
     let mut status = TranslationStatus::Complete;
     let mut korean = String::new();
-    for line in suffix {
+    for line in source_lines {
         if line.japanese_source_byte_count == 0 {
             korean.push_str(&line.source_markup);
             continue;
         }
         ensure!(
             line.status != TranslationStatus::Untranslated && !line.korean.is_empty(),
-            "{} cannot seed its common body because {} is untranslated",
-            record.id,
+            "{} cannot reuse {} because it is untranslated",
+            part.id,
             line.id
         );
         korean.push_str(&line.korean);
         status = least_reviewed_status(status, line.status);
     }
-    record.common_body.korean = korean;
-    record.common_body.status = status;
+    part.korean = korean;
+    part.status = status;
     Ok(())
 }
 

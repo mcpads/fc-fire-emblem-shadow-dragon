@@ -11,7 +11,7 @@ mod tests;
 mod validation;
 
 use model::*;
-use source_split::{build_entry_mode_workspace_without_seed, seed_common_body_translation};
+use source_split::{build_entry_mode_workspace_without_seed, seed_entry_mode_translations};
 use validation::{
     preserve_translations, validate_workspace_binding, validate_workspace_translations,
 };
@@ -58,21 +58,20 @@ pub(crate) fn extract_main_dialogue_entry_mode_workspace(
     rom.verify_supported_japanese()?;
     let main_workspace = load_main_workspace(rom.data(), main_workspace_path)?;
     let mut workspace = build_entry_mode_workspace(rom.data(), &main_workspace)?;
-    let preserved_translation_part_count = if output_path.exists() {
+    if output_path.exists() {
         let existing_bytes = fs::read(output_path)
             .with_context(|| format!("read entry-mode workspace {}", output_path.display()))?;
         let existing: EntryModeWorkspace = serde_json::from_slice(&existing_bytes)
             .with_context(|| format!("parse entry-mode workspace {}", output_path.display()))?;
-        preserve_translations(&mut workspace, &existing)?
-    } else {
-        workspace
-            .records
-            .iter()
-            .flat_map(EntryModeRecord::parts)
-            .filter(|part| part.status != TranslationStatus::Untranslated)
-            .count()
-    };
+        preserve_translations(&mut workspace, &existing)?;
+    }
     validate_workspace_translations(&workspace)?;
+    let preserved_translation_part_count = workspace
+        .records
+        .iter()
+        .flat_map(EntryModeRecord::parts)
+        .filter(|part| part.status != TranslationStatus::Untranslated)
+        .count();
 
     let mut bytes = serde_json::to_vec_pretty(&workspace)
         .context("serialize main-dialogue entry-mode workspace")?;
@@ -150,7 +149,7 @@ fn build_entry_mode_workspace(
                 record.id
             )
         })?;
-        seed_common_body_translation(record, main_record)?;
+        seed_entry_mode_translations(record, main_record)?;
     }
     Ok(workspace)
 }
