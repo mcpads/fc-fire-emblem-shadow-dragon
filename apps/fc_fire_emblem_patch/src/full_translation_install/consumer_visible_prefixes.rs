@@ -5,13 +5,13 @@ use serde::Serialize;
 
 use crate::{
     dialogue_assets::MainDialogueBundlePlan, dialogue_inventory::inspect_main_dialogue_entry_modes,
-    sha1_hex,
+    japanese_encoding::is_japanese_text_code, sha1_hex,
 };
 
 const NO_PREFIX_ROW: u8 = 0xFF;
 const PREFIX_ROW_BYTE_COUNT: usize = 6;
 const E8_PREFIX_CODE: u8 = 0xE8;
-const NORMALIZED_PREFIX_STRATEGY: &str = "normalize each dual-entry record at the later body boundary; replay entry-mode metadata effects and inject only the bytes visible to that consumer";
+const LEADING_STRATEGY: &str = "prove direct and transition reachability for every differing entry mode; keep one mode when the other is unreachable, otherwise translate the mode-specific visible fragment before normalizing the common body";
 
 #[derive(Serialize)]
 pub(in crate::full_translation_install) struct ConsumerVisiblePrefixPlan {
@@ -41,20 +41,37 @@ pub(in crate::full_translation_install) struct ConsumerVisiblePrefixPlan {
     prefix_row_byte_count: usize,
     normalized_common_body_skip_byte_counts: Vec<usize>,
     direct_visible_prefix_byte_count: usize,
+    direct_visible_prefix_japanese_byte_count: usize,
+    direct_visible_prefix_japanese_record_count: usize,
     transition_visible_prefix_byte_count: usize,
-    selected_normalized_prefix_material_byte_count: usize,
-    normalized_prefix_material_sha1: String,
+    transition_visible_prefix_japanese_byte_count: usize,
+    transition_visible_prefix_japanese_record_count: usize,
+    mode_specific_visible_prefix_japanese_byte_count: usize,
+    mode_specific_visible_prefix_translation_input_complete: bool,
+    source_entry_mode_material_byte_count: usize,
+    source_entry_mode_material_sha1: String,
     atlas_scan_remap_and_prefix_material_byte_count: usize,
     material_prg_8k_page_count_before_prefix_normalization: usize,
     material_prg_8k_page_count_after_prefix_normalization: usize,
     prefix_normalization_adds_prg_8k_pages: bool,
-    leading_candidate: &'static str,
+    leading_strategy: &'static str,
     candidate_strategies: [&'static str; 5],
     selected_strategy: Option<&'static str>,
-    every_transition_target_has_normalization_row: bool,
+    every_transition_target_has_source_mode_row: bool,
+    source_entry_mode_material_built: bool,
     consumer_specific_visible_prefix_material_built: bool,
     normalized_body_encoding_bound: bool,
     entry_mode_shims_bound: bool,
+}
+
+impl ConsumerVisiblePrefixPlan {
+    pub(super) fn translation_input_complete(&self) -> bool {
+        self.mode_specific_visible_prefix_translation_input_complete
+    }
+
+    pub(super) fn japanese_source_byte_count(&self) -> usize {
+        self.mode_specific_visible_prefix_japanese_byte_count
+    }
 }
 
 #[derive(Serialize)]
@@ -220,7 +237,11 @@ pub(in crate::full_translation_install) fn plan_consumer_visible_prefixes(
         Vec::with_capacity(inspection.transition_targets.len() * PREFIX_ROW_BYTE_COUNT);
     let mut normalized_common_body_skip_byte_counts = BTreeSet::new();
     let mut direct_visible_prefix_byte_count = 0;
+    let mut direct_visible_prefix_japanese_byte_count = 0;
+    let mut direct_visible_prefix_japanese_record_count = 0;
     let mut transition_visible_prefix_byte_count = 0;
+    let mut transition_visible_prefix_japanese_byte_count = 0;
+    let mut transition_visible_prefix_japanese_record_count = 0;
     for (row_index, target) in inspection.transition_targets.iter().enumerate() {
         let record_index = record_indices
             .get(target.record_id.as_str())
@@ -248,6 +269,9 @@ pub(in crate::full_translation_install) fn plan_consumer_visible_prefixes(
                 );
                 normalized_common_body_skip_byte_counts.insert(4);
                 transition_visible_prefix_byte_count += 4;
+                let japanese_count = japanese_byte_count(&target.leading_source_bytes[..4]);
+                transition_visible_prefix_japanese_byte_count += japanese_count;
+                transition_visible_prefix_japanese_record_count += usize::from(japanese_count > 0);
             }
             (4, 6, -2) => {
                 ensure!(
@@ -257,6 +281,9 @@ pub(in crate::full_translation_install) fn plan_consumer_visible_prefixes(
                 );
                 normalized_common_body_skip_byte_counts.insert(6);
                 direct_visible_prefix_byte_count += 2;
+                let japanese_count = japanese_byte_count(&target.leading_source_bytes[4..6]);
+                direct_visible_prefix_japanese_byte_count += japanese_count;
+                direct_visible_prefix_japanese_record_count += usize::from(japanese_count > 0);
             }
             mode => anyhow::bail!(
                 "{} has unsupported direct/transition prefix mode {mode:?}",
@@ -279,14 +306,14 @@ pub(in crate::full_translation_install) fn plan_consumer_visible_prefixes(
     let fixed_row_normalized_prefix_payload_byte_count =
         inspection.transition_targets.len() * PREFIX_ROW_BYTE_COUNT;
     let dense_record_to_prefix_row_byte_count = inspection.canonical_record_count;
-    let selected_normalized_prefix_material_byte_count =
+    let source_entry_mode_material_byte_count =
         fixed_row_normalized_prefix_payload_byte_count + dense_record_to_prefix_row_byte_count;
     ensure!(
-        normalized_prefix_material.len() == selected_normalized_prefix_material_byte_count,
-        "normalized prefix material size changed"
+        normalized_prefix_material.len() == source_entry_mode_material_byte_count,
+        "source entry-mode material size changed"
     );
     let atlas_scan_remap_and_prefix_material_byte_count = atlas_scan_and_dynamic_remap_byte_count
-        .checked_add(selected_normalized_prefix_material_byte_count)
+        .checked_add(source_entry_mode_material_byte_count)
         .context("dialogue material size overflow after prefix normalization")?;
     let material_prg_8k_page_count_before_prefix_normalization =
         atlas_scan_and_dynamic_remap_byte_count.div_ceil(8 * 1024);
@@ -341,16 +368,25 @@ pub(in crate::full_translation_install) fn plan_consumer_visible_prefixes(
             .into_iter()
             .collect(),
         direct_visible_prefix_byte_count,
+        direct_visible_prefix_japanese_byte_count,
+        direct_visible_prefix_japanese_record_count,
         transition_visible_prefix_byte_count,
-        selected_normalized_prefix_material_byte_count,
-        normalized_prefix_material_sha1: sha1_hex(&normalized_prefix_material),
+        transition_visible_prefix_japanese_byte_count,
+        transition_visible_prefix_japanese_record_count,
+        mode_specific_visible_prefix_japanese_byte_count: direct_visible_prefix_japanese_byte_count
+            + transition_visible_prefix_japanese_byte_count,
+        mode_specific_visible_prefix_translation_input_complete:
+            direct_visible_prefix_japanese_byte_count == 0
+                && transition_visible_prefix_japanese_byte_count == 0,
+        source_entry_mode_material_byte_count,
+        source_entry_mode_material_sha1: sha1_hex(&normalized_prefix_material),
         atlas_scan_remap_and_prefix_material_byte_count,
         material_prg_8k_page_count_before_prefix_normalization,
         material_prg_8k_page_count_after_prefix_normalization,
         prefix_normalization_adds_prg_8k_pages:
             material_prg_8k_page_count_after_prefix_normalization
                 > material_prg_8k_page_count_before_prefix_normalization,
-        leading_candidate: NORMALIZED_PREFIX_STRATEGY,
+        leading_strategy: LEADING_STRATEGY,
         candidate_strategies: [
             "bind direct producers, then keep only the entry modes that are actually reachable",
             "normalize relocated records and use a mode-aware transition shim that preserves E8 side effects",
@@ -358,12 +394,20 @@ pub(in crate::full_translation_install) fn plan_consumer_visible_prefixes(
             "redirect transition controls to consumer-specific pointer aliases when unused table slots are proven",
             "recover split cost with dialogue token compression only if regional storage still overflows",
         ],
-        selected_strategy: Some(NORMALIZED_PREFIX_STRATEGY),
-        every_transition_target_has_normalization_row: true,
-        consumer_specific_visible_prefix_material_built: true,
+        selected_strategy: None,
+        every_transition_target_has_source_mode_row: true,
+        source_entry_mode_material_built: true,
+        consumer_specific_visible_prefix_material_built: false,
         normalized_body_encoding_bound: false,
         entry_mode_shims_bound: false,
     })
+}
+
+fn japanese_byte_count(bytes: &[u8]) -> usize {
+    bytes
+        .iter()
+        .filter(|code| is_japanese_text_code(**code))
+        .count()
 }
 
 #[cfg(test)]
@@ -383,5 +427,11 @@ mod tests {
     fn fixed_rows_have_a_sentinel_outside_the_valid_row_range() {
         assert!(139 < usize::from(NO_PREFIX_ROW));
         assert_eq!(PREFIX_ROW_BYTE_COUNT, 6);
+    }
+
+    #[test]
+    fn mode_specific_source_fragments_count_japanese_instead_of_calling_it_metadata() {
+        assert_eq!(japanese_byte_count(&[0x06, 0x26]), 2);
+        assert_eq!(japanese_byte_count(&[0x60, 0x61]), 0);
     }
 }

@@ -93,6 +93,8 @@ struct TranslationInputs {
     item_action_label_count: usize,
     transition_label_count: usize,
     location_name_count: usize,
+    mode_specific_visible_prefix_japanese_source_byte_count: usize,
+    mode_specific_visible_prefix_translation_input_complete: bool,
     translation_input_complete: bool,
     review_complete: bool,
 }
@@ -341,6 +343,7 @@ pub(crate) fn plan_full_translation_installation(
         planned_storage_byte_count,
         atlas_scan_and_dynamic_remap_byte_count,
     )?;
+    let translation_input_complete = consumer_visible_prefixes.translation_input_complete();
     let review_complete = dialogue_validation.review_complete
         && fixed.review_complete
         && unit_names.review_complete
@@ -351,7 +354,8 @@ pub(crate) fn plan_full_translation_installation(
         && item_actions.review_complete
         && transitions.save_offer.review_complete
         && transitions.ending_record.review_complete
-        && locations.review_complete;
+        && locations.review_complete
+        && translation_input_complete;
 
     let report = FullTranslationInstallReport {
         schema: 2,
@@ -385,7 +389,10 @@ pub(crate) fn plan_full_translation_installation(
             transition_label_count: transitions.save_offer.entry_count
                 + transitions.ending_record.entry_count,
             location_name_count: locations.entries.len(),
-            translation_input_complete: true,
+            mode_specific_visible_prefix_japanese_source_byte_count: consumer_visible_prefixes
+                .japanese_source_byte_count(),
+            mode_specific_visible_prefix_translation_input_complete: translation_input_complete,
+            translation_input_complete,
             review_complete,
         },
         dialogue_codebook: DialogueCodebook {
@@ -530,7 +537,7 @@ pub(crate) fn plan_full_translation_installation(
             every_pointer_within_source_owned_regions: true,
         },
         installation_gates: InstallationGates {
-            all_translation_inputs_loaded: true,
+            all_translation_inputs_loaded: translation_input_complete,
             all_dialogue_records_encoded: true,
             all_visible_dialogue_text_encoded: false,
             all_dialogue_pointers_planned: true,
@@ -544,7 +551,7 @@ pub(crate) fn plan_full_translation_installation(
         },
         rom_emitted: false,
         dynamic_verification_started: false,
-        next_gate: "bind normalized common-body encoding and the direct/transition entry-mode shims, then choose a scan boundary that sees the complete rendered line before binding the atlas compositor; do not emit or run a partial ROM",
+        next_gate: "prove direct and transition reachability for every differing entry mode and translate every reachable mode-specific Japanese fragment before binding normalized bodies or shims; do not emit or run a partial ROM",
     };
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize full translation install plan")?;
