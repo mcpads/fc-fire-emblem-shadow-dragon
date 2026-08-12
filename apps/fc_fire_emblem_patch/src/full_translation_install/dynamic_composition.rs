@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use anyhow::{Context, Result, ensure};
 
 use crate::{
-    dialogue_assets::MainDialogueBundlePlan,
+    dialogue_assets::MainDialogueDisplayPlan,
     font::{load_dalmoori, rasterize_glyph},
     font_slots::{FONT_PAGE_SIZE, FONT_TILE_SIZE},
     mapper165::battle_codebook_plan::GlyphWorksetPagePlan,
@@ -51,7 +51,7 @@ struct VisiblePageRecipe {
 }
 
 pub(super) fn plan_dialogue_runtime_composition(
-    dialogue: &MainDialogueBundlePlan,
+    dialogue: &MainDialogueDisplayPlan,
     codebook: &GlyphWorksetPagePlan,
     source_font_page: &[u8],
     static_page_pack: &[u8],
@@ -375,11 +375,13 @@ fn target_codes(
         .collect()
 }
 
-fn record_workset_indices(dialogue: &MainDialogueBundlePlan) -> Result<BTreeMap<&str, Vec<usize>>> {
+fn record_workset_indices(
+    dialogue: &MainDialogueDisplayPlan,
+) -> Result<BTreeMap<&str, Vec<usize>>> {
     let mut records = BTreeMap::<&str, Vec<(usize, usize)>>::new();
     for (workset_index, workset) in dialogue.page_worksets.iter().enumerate() {
         records
-            .entry(workset.record_id.as_str())
+            .entry(workset.display_path_id.as_str())
             .or_default()
             .push((workset.page_index, workset_index));
     }

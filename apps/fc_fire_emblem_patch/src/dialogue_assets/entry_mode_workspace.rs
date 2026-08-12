@@ -4,6 +4,7 @@ use anyhow::{Context, Result, ensure};
 
 use super::*;
 
+mod display_plan;
 mod draft_import;
 mod model;
 mod source_split;
@@ -11,6 +12,7 @@ mod source_split;
 mod tests;
 mod validation;
 
+pub(crate) use display_plan::{MainDialogueDisplayPlan, plan_normalized_main_dialogue_display};
 pub(crate) use draft_import::import_entry_mode_draft;
 use model::*;
 use source_split::{build_entry_mode_workspace_without_seed, seed_entry_mode_translations};

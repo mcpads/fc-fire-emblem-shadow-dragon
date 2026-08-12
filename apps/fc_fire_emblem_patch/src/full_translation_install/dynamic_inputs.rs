@@ -4,7 +4,7 @@ use anyhow::{Result, ensure};
 use serde::Serialize;
 
 use crate::{
-    dialogue_assets::MainDialogueBundlePlan, font_slots::active_hangul_codes,
+    dialogue_assets::MainDialogueDisplayPlan, font_slots::active_hangul_codes,
     mapper165::battle_codebook_plan::GlyphWorkset, text_inventory::FixedTextPlannedEntry,
 };
 
@@ -41,7 +41,7 @@ pub(super) struct DynamicDialogueInputPlan {
 }
 
 pub(super) fn plan_dynamic_dialogue_inputs(
-    dialogue: &MainDialogueBundlePlan,
+    dialogue: &MainDialogueDisplayPlan,
     fixed_text: &[FixedTextPlannedEntry],
     unit_names: &[FixedTextPlannedEntry],
     location_names: &[FixedTextPlannedEntry],

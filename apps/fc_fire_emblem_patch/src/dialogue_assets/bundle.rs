@@ -39,8 +39,10 @@ pub(crate) struct MainDialogueBundlePlan {
     regions: Vec<LogicalBundleRegion>,
 }
 
+#[derive(Clone)]
 pub(crate) struct MainDialoguePageWorkset {
     pub(crate) record_id: String,
+    pub(crate) display_path_id: String,
     pub(crate) page_index: usize,
     pub(crate) target_glyphs: BTreeSet<char>,
     pub(crate) dynamic_string_selectors: BTreeSet<u8>,
@@ -433,6 +435,7 @@ fn record_page_worksets<'a>(
                 .retain(|code| !preserved_target_active_codes.contains(code));
             Ok(MainDialoguePageWorkset {
                 record_id: workspace_record.id.clone(),
+                display_path_id: workspace_record.id.clone(),
                 page_index,
                 target_glyphs,
                 dynamic_string_selectors: dynamic_string_selector_counts.keys().copied().collect(),
@@ -444,7 +447,9 @@ fn record_page_worksets<'a>(
         })
 }
 
-fn dynamic_string_controls(bytes: &[LogicalDialogueByte]) -> Result<BTreeMap<u8, usize>> {
+pub(super) fn dynamic_string_controls(
+    bytes: &[LogicalDialogueByte],
+) -> Result<BTreeMap<u8, usize>> {
     let mut selectors = BTreeMap::new();
     let mut index = 0;
     while index < bytes.len() {

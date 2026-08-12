@@ -7,8 +7,8 @@ use crate::{
     chapter_transition::{plan_chapter_titles, plan_transition_labels},
     choice_labels::plan_choice_labels,
     dialogue_assets::{
-        plan_all_main_dialogue_records, validate_main_dialogue_entry_mode_workspace,
-        validate_main_dialogue_workspace,
+        plan_all_main_dialogue_records, plan_normalized_main_dialogue_display,
+        validate_main_dialogue_entry_mode_workspace, validate_main_dialogue_workspace,
     },
     font_slots::{FONT_PAGE_SIZE, FONT_TILE_SIZE},
     item_flow::plan_item_action_labels,
@@ -110,6 +110,12 @@ struct TranslationInputs {
 
 #[derive(Serialize)]
 struct DialogueCodebook {
+    canonical_record_count: usize,
+    display_path_count: usize,
+    ordinary_record_count: usize,
+    dual_entry_record_count: usize,
+    direct_display_path_count: usize,
+    transition_display_path_count: usize,
     page_workset_count: usize,
     unique_workset_count: usize,
     literal_glyph_count: usize,
@@ -125,6 +131,7 @@ struct DialogueCodebook {
     page_assignment_sha1: String,
     static_page_upper_bound_count: usize,
     static_page_pack_sha1: String,
+    normalized_display_paths_connected: bool,
     page_local_bundle_encoding_connected: bool,
     glyph_characters_emitted: bool,
 }
@@ -234,6 +241,7 @@ struct DialogueStorage {
     planned_storage_byte_count: usize,
     remaining_storage_byte_count: usize,
     every_pointer_within_source_owned_regions: bool,
+    normalized_entry_mode_bodies_bound: bool,
 }
 
 #[derive(Serialize)]
@@ -272,6 +280,11 @@ pub(crate) fn plan_full_translation_installation(
         inputs.main_dialogue_entry_mode_workspace_path,
     )?;
     let dialogue = plan_all_main_dialogue_records(&rom, inputs.main_dialogue_workspace_path)?;
+    let display = plan_normalized_main_dialogue_display(
+        rom.data(),
+        inputs.main_dialogue_entry_mode_workspace_path,
+        &dialogue,
+    )?;
     let fixed = plan_fixed_text(&rom, inputs.fixed_text_workspace_path)?;
     let unit_names = plan_unit_names(&rom, inputs.unit_name_localization_path)?;
     let chapter_titles = plan_chapter_titles(&rom, inputs.chapter_title_localization_path)?;
@@ -299,8 +312,27 @@ pub(crate) fn plan_full_translation_installation(
         "full translation installation input population changed"
     );
 
+    let baseline_display =
+        crate::dialogue_assets::MainDialogueDisplayPlan::from_canonical_bundle(&dialogue);
+    let baseline_dynamic_inputs = plan_dynamic_dialogue_inputs(
+        &baseline_display,
+        &fixed.entries,
+        &unit_names.entries,
+        &locations.entries,
+    )?;
+    let baseline_codebook =
+        plan_glyph_workset_page_upper_bound(&baseline_dynamic_inputs.augmented_worksets)?;
+    let baseline_encoded = dialogue.encoded_by_page_groups(
+        &baseline_codebook.workset_page_indices,
+        &baseline_codebook.page_assignments,
+    )?;
+    ensure!(
+        baseline_encoded.regions.len() == 11 && baseline_encoded.pointer_writes.len() == 517,
+        "baseline dialogue encoded layout changed"
+    );
+
     let dynamic_inputs = plan_dynamic_dialogue_inputs(
-        &dialogue,
+        &display,
         &fixed.entries,
         &unit_names.entries,
         &locations.entries,
@@ -311,8 +343,8 @@ pub(crate) fn plan_full_translation_installation(
     let codebook = plan_glyph_workset_page_upper_bound(&dynamic_inputs.augmented_worksets)?;
     let dynamic_remap = plan_dynamic_string_remap(&dynamic_inputs, &codebook)?;
     ensure!(
-        codebook.workset_count == dialogue.page_worksets.len()
-            && codebook.workset_page_indices.len() == dialogue.page_worksets.len(),
+        codebook.workset_count == display.page_worksets.len()
+            && codebook.workset_page_indices.len() == display.page_worksets.len(),
         "dialogue codebook lost visible page worksets"
     );
     let source_font_page = rom
@@ -325,19 +357,13 @@ pub(crate) fn plan_full_translation_installation(
         "dialogue font page pack length changed after rasterization"
     );
     let composition =
-        plan_dialogue_runtime_composition(&dialogue, &codebook, source_font_page, &font_page_pack)?;
-    let encoded = dialogue
-        .encoded_by_page_groups(&codebook.workset_page_indices, &codebook.page_assignments)?;
-    ensure!(
-        encoded.regions.len() == 11 && encoded.pointer_writes.len() == 517,
-        "complete dialogue encoded layout changed"
-    );
-    let source_owned_storage_byte_count = encoded
+        plan_dialogue_runtime_composition(&display, &codebook, source_font_page, &font_page_pack)?;
+    let source_owned_storage_byte_count = baseline_encoded
         .regions
         .iter()
         .map(|region| region.source_storage.len())
         .sum::<usize>();
-    let planned_storage_byte_count = encoded
+    let planned_storage_byte_count = baseline_encoded
         .regions
         .iter()
         .map(|region| region.used_storage_byte_count)
@@ -373,13 +399,13 @@ pub(crate) fn plan_full_translation_installation(
         && entry_mode_validation.review_complete
         && translation_input_complete;
     let next_gate = if translation_input_complete {
-        "replace every dual-entry first-line body with the normalized direct/common/transition translations and recalculate complete glyph lifetimes before binding shims; do not emit or run a partial ROM"
+        "bind the already packed normalized display paths to shared common-body storage and mode-aware entry shims, then recalculate exact encoded storage; do not emit or run a partial ROM"
     } else {
         "author Korean for every untranslated Japanese part in the closed 139-record direct/common/transition workspace, then recalculate complete glyph lifetimes before binding normalized bodies or shims; do not emit or run a partial ROM"
     };
 
     let report = FullTranslationInstallReport {
-        schema: 2,
+        schema: 3,
         source_sha1: EXPECTED_SOURCE_SHA1,
         strategy: "install all remaining translation domains in one cumulative candidate, run complete static gates, then run consumer-path dynamic regression on that same ROM",
         required_domain_count: REQUIRED_DOMAIN_COUNT,
@@ -425,9 +451,15 @@ pub(crate) fn plan_full_translation_installation(
             review_complete,
         },
         dialogue_codebook: DialogueCodebook {
-            page_workset_count: dialogue.page_worksets.len(),
+            canonical_record_count: display.canonical_record_count,
+            display_path_count: display.display_path_count,
+            ordinary_record_count: display.ordinary_record_count,
+            dual_entry_record_count: display.dual_entry_record_count,
+            direct_display_path_count: display.direct_display_path_count,
+            transition_display_path_count: display.transition_display_path_count,
+            page_workset_count: display.page_worksets.len(),
             unique_workset_count: codebook.unique_workset_count,
-            literal_glyph_count: dialogue.unique_glyphs().len(),
+            literal_glyph_count: display.unique_glyphs().len(),
             unique_glyph_count: codebook.glyph_count,
             active_slot_count: crate::font_slots::ACTIVE_HANGUL_SLOT_COUNT,
             maximum_workset_slot_demand: codebook.maximum_workset_slot_demand,
@@ -440,7 +472,8 @@ pub(crate) fn plan_full_translation_installation(
             page_assignment_sha1: codebook.page_assignment_sha1,
             static_page_upper_bound_count: codebook.page_assignments.len(),
             static_page_pack_sha1: sha1_hex(&font_page_pack),
-            page_local_bundle_encoding_connected: true,
+            normalized_display_paths_connected: true,
+            page_local_bundle_encoding_connected: false,
             glyph_characters_emitted: false,
         },
         dialogue_page_pool: DialoguePagePool {
@@ -556,25 +589,26 @@ pub(crate) fn plan_full_translation_installation(
             main_dialogue_transition_hook_planned: false,
         },
         dialogue_storage: DialogueStorage {
-            region_count: encoded.regions.len(),
+            region_count: baseline_encoded.regions.len(),
             record_count: dialogue.record_ids.len(),
-            pointer_write_count: encoded.pointer_writes.len(),
+            pointer_write_count: baseline_encoded.pointer_writes.len(),
             source_owned_storage_byte_count,
             planned_storage_byte_count,
             remaining_storage_byte_count: source_owned_storage_byte_count
                 - planned_storage_byte_count,
             every_pointer_within_source_owned_regions: true,
+            normalized_entry_mode_bodies_bound: false,
         },
         installation_gates: InstallationGates {
             all_translation_inputs_loaded: translation_input_complete,
-            all_dialogue_records_encoded: true,
+            all_dialogue_records_encoded: false,
             all_visible_dialogue_text_encoded: false,
-            all_dialogue_pointers_planned: true,
+            all_dialogue_pointers_planned: false,
             all_dialogue_page_code_assignments_found: true,
             all_dialogue_page_worksets_packed: true,
             static_prebuilt_dialogue_page_pool_fits: codebook.page_assignments.len()
                 <= page_capacity.available_page_count,
-            dialogue_runtime_composition_planned: false,
+            dialogue_runtime_composition_planned: true,
             cross_domain_consumer_writes_planned: false,
             integrated_candidate_ready: false,
         },
@@ -595,11 +629,11 @@ pub(crate) fn plan_full_translation_installation(
         report_sha1: sha1_hex(&report_bytes),
         required_domain_count: REQUIRED_DOMAIN_COUNT,
         dialogue_record_count: dialogue.record_ids.len(),
-        dialogue_page_workset_count: dialogue.page_worksets.len(),
+        dialogue_page_workset_count: display.page_worksets.len(),
         dialogue_glyph_count: codebook.glyph_count,
         dialogue_maximum_page_slot_demand: codebook.maximum_page_slot_demand,
         dialogue_static_page_upper_bound_count: codebook.page_assignments.len(),
-        dialogue_pointer_write_count: encoded.pointer_writes.len(),
+        dialogue_pointer_write_count: baseline_encoded.pointer_writes.len(),
         dialogue_planned_storage_byte_count: planned_storage_byte_count,
     })
 }

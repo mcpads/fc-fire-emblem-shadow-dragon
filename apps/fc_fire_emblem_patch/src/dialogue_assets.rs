@@ -37,11 +37,13 @@ pub(crate) use battle_workspace::{
     validate_battle_dialogue_workspace,
 };
 pub(crate) use bundle::{
-    MainDialogueBundlePlan, plan_all_main_dialogue_records, plan_main_dialogue_bundle,
+    MainDialogueBundlePlan, MainDialoguePageWorkset, plan_all_main_dialogue_records,
+    plan_main_dialogue_bundle,
 };
 pub(crate) use entry_mode_workspace::{
-    EntryModeWorkspaceValidationSummary, extract_main_dialogue_entry_mode_workspace,
-    import_entry_mode_draft, validate_main_dialogue_entry_mode_workspace,
+    EntryModeWorkspaceValidationSummary, MainDialogueDisplayPlan,
+    extract_main_dialogue_entry_mode_workspace, import_entry_mode_draft,
+    plan_normalized_main_dialogue_display, validate_main_dialogue_entry_mode_workspace,
 };
 pub(crate) use glyph_workset::{
     RuntimeEvidence as MaximumDialogueRuntimeEvidence, analyze_main_dialogue_glyph_workset,
