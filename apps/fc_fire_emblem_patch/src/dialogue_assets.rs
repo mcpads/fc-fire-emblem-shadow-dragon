@@ -38,8 +38,8 @@ pub(crate) use battle_workspace::{
 };
 pub(crate) use bundle::{
     EncodedMainDialogueDisplayStorage, MainDialogueBundlePlan, MainDialogueDisplayMode,
-    MainDialogueDisplayPath, MainDialoguePageWorkset, plan_all_main_dialogue_records,
-    plan_main_dialogue_bundle,
+    MainDialogueDisplayPath, MainDialoguePageWorkset, MainDialogueTransitionMirror,
+    plan_all_main_dialogue_records, plan_main_dialogue_bundle,
 };
 pub(crate) use entry_mode_workspace::{
     EntryModeWorkspaceValidationSummary, MainDialogueDisplayPlan,

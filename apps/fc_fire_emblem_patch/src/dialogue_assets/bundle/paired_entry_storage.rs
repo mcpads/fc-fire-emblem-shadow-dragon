@@ -13,6 +13,7 @@ const EMPTY_BYTE: u8 = 0xFF;
 impl MainDialogueBundlePlan {
     pub(crate) fn encoded_display_storage_by_page_groups(
         &self,
+        source: &Rom,
         display: &MainDialogueDisplayPlan,
         workset_page_indices: &[usize],
         group_assignments: &[BTreeMap<char, u8>],
@@ -68,7 +69,8 @@ impl MainDialogueBundlePlan {
 
         let mut direct_regions = Vec::with_capacity(self.regions.len());
         let mut pointer_writes = Vec::new();
-        let mut mirror_material_by_bank = BTreeMap::<u8, (Vec<u8>, usize, usize)>::new();
+        let mut mirror_material_by_bank =
+            BTreeMap::<u8, (Vec<u8>, Vec<bool>, Vec<Range<usize>>, usize, usize)>::new();
         let mut normalized_record_count = 0;
         for region in &self.regions {
             let mut encoded_storage = Vec::new();
@@ -144,17 +146,29 @@ impl MainDialogueBundlePlan {
                     );
                     let mirror = mirror_material_by_bank
                         .entry(region.source_prg_bank)
-                        .or_insert_with(|| (vec![EMPTY_BYTE; PRG_BANK_SIZE], 0, 0));
+                        .or_insert_with(|| {
+                            let start = usize::from(region.source_prg_bank) * PRG_BANK_SIZE;
+                            let end = start + PRG_BANK_SIZE;
+                            (
+                                source.prg()[start..end].to_vec(),
+                                vec![false; PRG_BANK_SIZE],
+                                Vec::new(),
+                                0,
+                                0,
+                            )
+                        });
                     ensure!(
-                        mirror.0[mirror_offset..mirror_end]
+                        mirror.1[mirror_offset..mirror_end]
                             .iter()
-                            .all(|byte| *byte == EMPTY_BYTE),
+                            .all(|occupied| !*occupied),
                         "{} transition mirror overlaps another record",
                         record.id
                     );
                     mirror.0[mirror_offset..mirror_end].copy_from_slice(transition);
-                    mirror.1 += transition.len();
-                    mirror.2 += 1;
+                    mirror.1[mirror_offset..mirror_end].fill(true);
+                    mirror.2.push(mirror_offset..mirror_end);
+                    mirror.3 += transition.len();
+                    mirror.4 += 1;
                 }
             }
             let used_storage_byte_count = encoded_storage.len();
@@ -189,16 +203,28 @@ impl MainDialogueBundlePlan {
         let transition_mirrors = mirror_material_by_bank
             .into_iter()
             .map(
-                |(source_prg_bank, (material, payload_byte_count, record_count))| {
-                    MainDialogueTransitionMirror {
+                |(
+                    source_prg_bank,
+                    (material, payload_occupancy, payload_ranges, payload_byte_count, record_count),
+                )| {
+                    ensure!(
+                        payload_occupancy
+                            .iter()
+                            .filter(|occupied| **occupied)
+                            .count()
+                            == payload_byte_count,
+                        "transition mirror payload occupancy changed"
+                    );
+                    Ok(MainDialogueTransitionMirror {
                         source_prg_bank,
                         material,
+                        payload_ranges,
                         payload_byte_count,
                         record_count,
-                    }
+                    })
                 },
             )
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>>>()?;
         let direct_used_storage_byte_count = direct_regions
             .iter()
             .map(|region| region.used_storage_byte_count)

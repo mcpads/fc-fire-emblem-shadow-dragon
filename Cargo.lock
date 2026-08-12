@@ -202,6 +202,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha1",
+ "typed-isa-core",
 ]
 
 [[package]]
@@ -346,9 +347,10 @@ dependencies = [
 [[package]]
 name = "rp2a03"
 version = "0.1.0"
-source = "git+https://github.com/mcpads/retro-typed-isa.git?rev=2ea602812dcdacf8b1f9e41ad815a41cdb8fb780#2ea602812dcdacf8b1f9e41ad815a41cdb8fb780"
+source = "git+https://github.com/mcpads/retro-typed-isa.git?rev=7afd6a33df7b91198f9bdd3bd1c992d1a211d5de#7afd6a33df7b91198f9bdd3bd1c992d1a211d5de"
 dependencies = [
  "thiserror",
+ "typed-isa-core",
 ]
 
 [[package]]
@@ -456,6 +458,11 @@ checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 dependencies = [
  "core_maths",
 ]
+
+[[package]]
+name = "typed-isa-core"
+version = "0.1.0"
+source = "git+https://github.com/mcpads/retro-typed-isa.git?rev=7afd6a33df7b91198f9bdd3bd1c992d1a211d5de#7afd6a33df7b91198f9bdd3bd1c992d1a211d5de"
 
 [[package]]
 name = "typenum"

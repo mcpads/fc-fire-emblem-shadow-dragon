@@ -185,6 +185,7 @@ pub(crate) struct EncodedMainDialogueDisplayStorage {
 pub(crate) struct MainDialogueTransitionMirror {
     pub(crate) source_prg_bank: u8,
     pub(crate) material: Vec<u8>,
+    pub(crate) payload_ranges: Vec<Range<usize>>,
     pub(crate) payload_byte_count: usize,
     pub(crate) record_count: usize,
 }

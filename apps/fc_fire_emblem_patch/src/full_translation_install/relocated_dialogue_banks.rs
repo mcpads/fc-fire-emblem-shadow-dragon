@@ -107,13 +107,20 @@ struct TransitionMirrorBankMapping {
     second_mmc3_page: u8,
     record_count: usize,
     payload_byte_count: usize,
+    source_preserved_byte_count: usize,
+    source_bank_sha1: String,
     material_byte_count: usize,
     material_sha1: String,
+    non_payload_bytes_match_source: bool,
+    nmi_directory_source_sha1: String,
+    nmi_directory_mirror_sha1: String,
+    nmi_directory_matches_source: bool,
     candidate_bank_sha1: String,
     candidate_bank_is_exact_ff: bool,
 }
 
 pub(super) fn plan_relocated_dialogue_banks(
+    source: &Rom,
     candidate: &Rom,
     storage: &EncodedMainDialogueDisplayStorage,
 ) -> Result<RelocatedDialogueBankPlan> {
@@ -145,6 +152,40 @@ pub(super) fn plan_relocated_dialogue_banks(
                 mirror.material.len() == PRG_BANK_SIZE,
                 "source dialogue bank {source_prg_bank:02X} transition mirror is not 16 KiB"
             );
+            let source_bank = prg_bank(source, source_prg_bank)?;
+            let payload_byte_count = mirror
+                .payload_ranges
+                .iter()
+                .map(|range| range.len())
+                .sum::<usize>();
+            ensure!(
+                payload_byte_count == mirror.payload_byte_count,
+                "transition mirror payload ranges changed"
+            );
+            let non_payload_bytes_match_source = source_bank
+                .iter()
+                .zip(&mirror.material)
+                .enumerate()
+                .all(|(offset, (source_byte, mirror_byte))| {
+                    mirror
+                        .payload_ranges
+                        .iter()
+                        .any(|range| range.contains(&offset))
+                        || source_byte == mirror_byte
+                });
+            ensure!(
+                non_payload_bytes_match_source,
+                "transition mirror {source_prg_bank:02X} changes bytes outside its dialogue payloads"
+            );
+            let nmi_directory_offset = usize::from(0xBFC0_u16 - 0x8000);
+            let nmi_directory_source = &source_bank[nmi_directory_offset..nmi_directory_offset + 2];
+            let nmi_directory_mirror =
+                &mirror.material[nmi_directory_offset..nmi_directory_offset + 2];
+            let nmi_directory_matches_source = nmi_directory_source == nmi_directory_mirror;
+            ensure!(
+                nmi_directory_matches_source,
+                "transition mirror {source_prg_bank:02X} does not preserve its bank-local NMI directory"
+            );
             let candidate_bank = prg_bank(candidate, transition_prg_bank)?;
             let exact_ff = candidate_bank.iter().all(|byte| *byte == 0xFF);
             ensure!(
@@ -162,9 +203,15 @@ pub(super) fn plan_relocated_dialogue_banks(
                 first_mmc3_page,
                 second_mmc3_page: first_mmc3_page + 1,
                 record_count: mirror.record_count,
-                payload_byte_count: mirror.payload_byte_count,
+                payload_byte_count,
+                source_preserved_byte_count: PRG_BANK_SIZE - payload_byte_count,
+                source_bank_sha1: sha1_hex(source_bank),
                 material_byte_count: mirror.material.len(),
                 material_sha1: sha1_hex(&mirror.material),
+                non_payload_bytes_match_source,
+                nmi_directory_source_sha1: sha1_hex(nmi_directory_source),
+                nmi_directory_mirror_sha1: sha1_hex(nmi_directory_mirror),
+                nmi_directory_matches_source,
                 candidate_bank_sha1: sha1_hex(candidate_bank),
                 candidate_bank_is_exact_ff: exact_ff,
             })
@@ -228,7 +275,7 @@ pub(super) fn plan_relocated_dialogue_banks(
 
     Ok(RelocatedDialogueBankPlan {
         strategy_selected: true,
-        strategy: "store every direct path in its source-owned region, mirror each dual-entry transition path at the same CPU address in one expanded bank per source bank, and mark only transition reads",
+        strategy: "store every direct path in its source-owned region, clone each complete source bank into an execution-equivalent transition mirror, replace only transition dialogue payloads at the same CPU addresses, and mark only transition reads",
         current_candidate_mapper: candidate.mapper(),
         current_candidate_prg_size: candidate.prg().len(),
         battle_material_bank: BATTLE_MATERIAL_BANK,

@@ -1,10 +1,14 @@
 use std::collections::BTreeSet;
 
 use anyhow::{Context, Result, ensure};
-use retro_rp2a03::{ControlFlow, decode_bytes};
+use retro_rp2a03::decode_bytes;
 use serde::Serialize;
 
-use crate::{rom::Rom, sha1_hex};
+use crate::{
+    rom::Rom,
+    sha1_hex,
+    typed_source::{Rp2a03DirectControlFlow, rp2a03_direct_control_flow},
+};
 
 use super::{
     background_payloads::BATTLE_BANK_PUBLISH_SITES,
@@ -370,9 +374,9 @@ pub(super) fn trace_switchable_control_flow(
         if target_addresses.contains(&address) {
             reached_target_addresses.insert(address);
         }
-        match instruction.control_flow(address) {
-            ControlFlow::FallThrough { next } => pending.push(next),
-            ControlFlow::Branch {
+        match rp2a03_direct_control_flow(&instruction, address)? {
+            Rp2a03DirectControlFlow::FallThrough { next } => pending.push(next),
+            Rp2a03DirectControlFlow::Branch {
                 target,
                 fallthrough,
             } => {
@@ -381,8 +385,8 @@ pub(super) fn trace_switchable_control_flow(
                     pending.push(fallthrough);
                 }
             }
-            ControlFlow::Jump { target } => pending.extend(target),
-            ControlFlow::Call {
+            Rp2a03DirectControlFlow::Jump { target } => pending.extend(target),
+            Rp2a03DirectControlFlow::Call {
                 target,
                 return_address,
             } => {
@@ -391,7 +395,9 @@ pub(super) fn trace_switchable_control_flow(
                 }
                 pending.push(target);
             }
-            ControlFlow::Return | ControlFlow::Interrupt | ControlFlow::Stop => {}
+            Rp2a03DirectControlFlow::Return
+            | Rp2a03DirectControlFlow::Interrupt
+            | Rp2a03DirectControlFlow::Stop => {}
         }
     }
     Ok(SwitchableControlFlowTrace {

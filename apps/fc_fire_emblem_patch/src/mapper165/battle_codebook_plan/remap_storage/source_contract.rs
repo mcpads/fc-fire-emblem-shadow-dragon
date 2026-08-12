@@ -1,10 +1,14 @@
 use std::collections::BTreeSet;
 
 use anyhow::{Context, Result, ensure};
-use retro_rp2a03::{AddressingMode, ControlFlow, Mnemonic, Operand, decode_bytes};
+use retro_rp2a03::{AddressingMode, Mnemonic, Operand, decode_bytes};
 use serde::Serialize;
 
-use crate::{rom::Rom, sha1_hex, typed_source::decode_rp2a03_sequence};
+use crate::{
+    rom::Rom,
+    sha1_hex,
+    typed_source::{Rp2a03DirectControlFlow, decode_rp2a03_sequence, rp2a03_direct_control_flow},
+};
 
 use super::super::{
     background_payloads::BATTLE_BANK_PUBLISH_SITES,
@@ -282,19 +286,21 @@ fn trace_battle_lifetime(rom: &Rom, roots: &[(u8, u16)]) -> Result<BattleLifetim
             indirect_stores.insert((actual_bank, address, pointer));
         }
 
-        match instruction.control_flow(address) {
-            ControlFlow::FallThrough { next } => pending.push((switchable_bank, next)),
-            ControlFlow::Branch {
+        match rp2a03_direct_control_flow(&instruction, address)? {
+            Rp2a03DirectControlFlow::FallThrough { next } => {
+                pending.push((switchable_bank, next));
+            }
+            Rp2a03DirectControlFlow::Branch {
                 target,
                 fallthrough,
             } => {
                 pending.push((switchable_bank, target));
                 pending.extend(fallthrough.map(|next| (switchable_bank, next)));
             }
-            ControlFlow::Jump { target } => {
+            Rp2a03DirectControlFlow::Jump { target } => {
                 pending.extend(target.map(|target| (switchable_bank, target)));
             }
-            ControlFlow::Call {
+            Rp2a03DirectControlFlow::Call {
                 target,
                 return_address,
             } => {
@@ -315,7 +321,9 @@ fn trace_battle_lifetime(rom: &Rom, roots: &[(u8, u16)]) -> Result<BattleLifetim
                     pending.push((switchable_bank, target));
                 }
             }
-            ControlFlow::Return | ControlFlow::Interrupt | ControlFlow::Stop => {}
+            Rp2a03DirectControlFlow::Return
+            | Rp2a03DirectControlFlow::Interrupt
+            | Rp2a03DirectControlFlow::Stop => {}
         }
     }
     Ok(BattleLifetimeTrace {

@@ -1,6 +1,78 @@
 use anyhow::{Context, Result, ensure};
-use retro_rp2a03::decode_bytes;
+use retro_rp2a03::{Instruction, Rp2A03, decode_bytes};
 use serde::Serialize;
+use typed_isa_core::{ControlAction, ControlBoundary, ControlTarget, StaticSemantics};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Rp2a03DirectControlFlow {
+    FallThrough {
+        next: u16,
+    },
+    Branch {
+        target: u16,
+        fallthrough: Option<u16>,
+    },
+    Jump {
+        target: Option<u16>,
+    },
+    Call {
+        target: u16,
+        return_address: u16,
+    },
+    Return,
+    Interrupt,
+    Stop,
+}
+
+pub(crate) fn rp2a03_direct_control_flow(
+    instruction: &Instruction,
+    address: u16,
+) -> Result<Rp2a03DirectControlFlow> {
+    let flow = Rp2A03::semantics(instruction, &address)
+        .expect("RP2A03 static semantics are infallible")
+        .control_flow;
+    match flow.action {
+        ControlAction::Continue => Ok(Rp2a03DirectControlFlow::FallThrough {
+            next: flow
+                .fallthrough
+                .context("RP2A03 continuation has no fallthrough")?,
+        }),
+        ControlAction::Transfer {
+            target: ControlTarget::Direct(target),
+        } if flow.fallthrough.is_some() => Ok(Rp2a03DirectControlFlow::Branch {
+            target,
+            fallthrough: flow.fallthrough,
+        }),
+        ControlAction::Transfer {
+            target: ControlTarget::Direct(target),
+        } => Ok(Rp2a03DirectControlFlow::Jump {
+            target: Some(target),
+        }),
+        ControlAction::Transfer {
+            target: ControlTarget::Indirect(_),
+        } => Ok(Rp2a03DirectControlFlow::Jump { target: None }),
+        ControlAction::LinkedTransfer {
+            target: ControlTarget::Direct(target),
+            return_site,
+        } => Ok(Rp2a03DirectControlFlow::Call {
+            target,
+            return_address: return_site,
+        }),
+        ControlAction::LinkedTransfer {
+            target: ControlTarget::Indirect(_),
+            ..
+        } => anyhow::bail!("RP2A03 linked transfer has an indirect target"),
+        ControlAction::Return { .. } => Ok(Rp2a03DirectControlFlow::Return),
+        ControlAction::ExceptionReturn { .. } => Ok(Rp2a03DirectControlFlow::Interrupt),
+        ControlAction::Boundary(ControlBoundary::Trap { .. }) => {
+            Ok(Rp2a03DirectControlFlow::Interrupt)
+        }
+        ControlAction::Boundary(ControlBoundary::Stop { .. }) => Ok(Rp2a03DirectControlFlow::Stop),
+        ControlAction::Boundary(
+            ControlBoundary::Wait { .. } | ControlBoundary::ProfileExit { .. },
+        ) => anyhow::bail!("RP2A03 produced an unsupported control boundary"),
+    }
+}
 
 #[derive(Debug, Serialize)]
 pub(crate) struct TypedInstructionBinding {

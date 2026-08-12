@@ -143,6 +143,7 @@ pub(super) struct RuntimeControlFlowInputs<'a> {
     pub(super) candidate: &'a Rom,
     pub(super) runtime_code_offset: usize,
     pub(super) runtime_code_byte_count: usize,
+    pub(super) selected_runtime_state_cpu_range: &'a str,
 }
 
 pub(super) fn plan_dialogue_runtime_control_flow(
@@ -421,7 +422,7 @@ pub(super) fn plan_dialogue_runtime_control_flow(
                 "inactive_cold_continuous_or_ready_state",
             ],
             ownership_rule: "select no address until every direct and indirect source access, save lifetime, PPU queue lifetime, and existing battle runtime reservation excludes it",
-            selected_cpu_range_hex: None,
+            selected_cpu_range_hex: Some(inputs.selected_runtime_state_cpu_range.to_owned()),
         },
         superseded_sample_runtime: SupersededSampleRuntime {
             completed_page_hook_cpu_range_hex: "0A:0x85C9..0x85E6",
@@ -437,7 +438,7 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         source_entry_points_bound: true,
         existing_nmi_owner_preserved: true,
         runtime_material_execution_address_bound: true,
-        runtime_state_storage_bound: false,
+        runtime_state_storage_bound: true,
         runtime_code_emitted: false,
         runtime_hooks_contributed: false,
         complete: false,

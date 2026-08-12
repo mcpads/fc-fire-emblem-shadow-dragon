@@ -90,6 +90,10 @@ pub(crate) fn inspect_main_dialogue_graph(source: &[u8]) -> Result<MainDialogueG
     Ok(build_report(source)?.main_dialogue_graph)
 }
 
+pub(crate) const fn main_dialogue_runtime_handler_roots() -> [u16; 18] {
+    MAIN_DIALOGUE_STATE_HANDLERS
+}
+
 pub(crate) fn inspect_battle_dialogue_translation_records(
     source: &[u8],
 ) -> Result<Vec<BattleDialogueTranslationRecord>> {

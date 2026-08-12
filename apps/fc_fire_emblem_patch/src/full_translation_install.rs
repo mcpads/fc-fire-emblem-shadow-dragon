@@ -35,6 +35,7 @@ mod relocated_dialogue_banks;
 mod runtime_control_flow;
 mod runtime_identity;
 mod runtime_material;
+mod runtime_state_storage;
 
 use consumer_visible_prefixes::{ConsumerVisiblePrefixPlan, plan_consumer_visible_prefixes};
 use current_candidate::{CurrentCandidateInputs, inspect_dialogue_page_pool_capacity};
@@ -54,6 +55,7 @@ use runtime_identity::{DialogueRuntimeIdentityPlan, plan_dialogue_runtime_identi
 use runtime_material::{
     DialogueRuntimeMaterialPlan, RuntimeMaterialInputs, plan_dialogue_runtime_material,
 };
+use runtime_state_storage::{DialogueRuntimeStateStoragePlan, plan_dialogue_runtime_state_storage};
 
 const REQUIRED_DOMAIN_COUNT: usize = 13;
 const REQUIRED_DOMAINS: [&str; REQUIRED_DOMAIN_COUNT] = [
@@ -115,6 +117,7 @@ struct FullTranslationInstallReport {
     installation_layout: InstallationLayoutPlan,
     integrated_write_set: IntegratedWriteSetPlan,
     dialogue_runtime_control_flow: DialogueRuntimeControlFlowPlan,
+    dialogue_runtime_state_storage: DialogueRuntimeStateStoragePlan,
     dialogue_runtime_composition: DialogueRuntimeComposition,
     dialogue_storage: DialogueStorage,
     installation_gates: InstallationGates,
@@ -412,6 +415,7 @@ pub(crate) fn plan_full_translation_installation(
         &font_page_pack,
     )?;
     let encoded_display = dialogue.encoded_display_storage_by_page_groups(
+        &rom,
         &display,
         &codebook.workset_page_indices,
         &codebook.page_assignments,
@@ -433,7 +437,8 @@ pub(crate) fn plan_full_translation_installation(
         sha1_hex(current_candidate.data()) == page_capacity.current_candidate_sha1,
         "relocated dialogue bank plan and page-pool plan use different current candidates"
     );
-    let relocated_bank_plan = plan_relocated_dialogue_banks(&current_candidate, &encoded_display)?;
+    let relocated_bank_plan =
+        plan_relocated_dialogue_banks(&rom, &current_candidate, &encoded_display)?;
     ensure!(
         planned_storage_byte_count <= source_owned_storage_byte_count,
         "complete dialogue encoded storage exceeds its source-owned regions"
@@ -451,12 +456,21 @@ pub(crate) fn plan_full_translation_installation(
         dynamic_remap: &dynamic_remap.selected_dense_material,
         runtime_identity: &runtime_identity.material,
     })?;
+    let runtime_state_storage = plan_dialogue_runtime_state_storage(&rom, &encoded_display)?;
+    ensure!(
+        runtime_state_storage.selection_complete(),
+        "dialogue runtime-state storage selection is incomplete"
+    );
+    let selected_runtime_state_cpu_range = runtime_state_storage
+        .selected_cpu_range_hex()
+        .context("dialogue runtime-state selection has no CPU range")?;
     let runtime_control_flow = plan_dialogue_runtime_control_flow(RuntimeControlFlowInputs {
         source: &rom,
         candidate: &current_candidate,
         runtime_code_offset: runtime_material.runtime_code_offset,
         runtime_code_byte_count: runtime_material.material.len()
             - runtime_material.runtime_code_offset,
+        selected_runtime_state_cpu_range,
     })?;
     let installation_layout = plan_installation_layout(
         &current_candidate,
@@ -493,8 +507,13 @@ pub(crate) fn plan_full_translation_installation(
         && locations.review_complete
         && entry_mode_validation.review_complete
         && translation_input_complete;
-    let next_gate = if translation_input_complete && relocated_bank_plan.strategy_selected {
-        "prove one exact five-byte volatile runtime-state range against every direct and indirect source access, save lifetime, PPU queue lifetime, and battle reservation; then emit the one shared dialogue runtime and all of its hooks into the cumulative Expected Write plan without emitting or running a partial ROM"
+    let next_gate = if translation_input_complete
+        && relocated_bank_plan.strategy_selected
+        && runtime_state_storage.selection_complete()
+    {
+        "emit the one shared dialogue runtime and all producer, NMI-consumer, selector, and conditional dynamic-remap hooks into the cumulative Expected Write plan; reject any implementation that does not cold-initialize 0x07F0..0x07F4 before use, and do not emit or run a partial ROM"
+    } else if translation_input_complete && relocated_bank_plan.strategy_selected {
+        "close the exact volatile runtime-state storage selection against source access, queue, save/load, and battle lifetimes; do not emit or run a partial ROM"
     } else if translation_input_complete {
         "bind the already packed normalized display paths to shared common-body storage and mode-aware entry shims, then recalculate exact encoded storage; do not emit or run a partial ROM"
     } else {
@@ -502,7 +521,7 @@ pub(crate) fn plan_full_translation_installation(
     };
 
     let report = FullTranslationInstallReport {
-        schema: 8,
+        schema: 9,
         source_sha1: EXPECTED_SOURCE_SHA1,
         strategy: "install all remaining translation domains in one cumulative candidate, run complete static gates, then run consumer-path dynamic regression on that same ROM",
         required_domain_count: REQUIRED_DOMAIN_COUNT,
@@ -577,6 +596,7 @@ pub(crate) fn plan_full_translation_installation(
         installation_layout,
         integrated_write_set,
         dialogue_runtime_control_flow: runtime_control_flow,
+        dialogue_runtime_state_storage: runtime_state_storage,
         dialogue_runtime_composition: DialogueRuntimeComposition {
             strategy_selected: true,
             glyph_atlas_tile_count: composition.glyph_atlas_tile_count,

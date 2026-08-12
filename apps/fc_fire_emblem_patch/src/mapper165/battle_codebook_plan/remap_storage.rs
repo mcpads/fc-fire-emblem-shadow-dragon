@@ -11,9 +11,11 @@ use super::{
 mod source_contract;
 
 const SOURCE_QUEUE_START: u16 = 0x0781;
-const REMAP_STATE_ADDRESS: u16 = 0x07DF;
+pub(crate) const BATTLE_RUNTIME_STORAGE_START: u16 = 0x07DF;
 const PAIR_TABLE_START: u16 = 0x07E0;
 const PAIR_TABLE_BYTE_COUNT: usize = 16;
+pub(crate) const BATTLE_RUNTIME_STORAGE_END: u16 =
+    PAIR_TABLE_START + PAIR_TABLE_BYTE_COUNT as u16 - 1;
 const MAXIMUM_REMAP_PAIR_COUNT: usize = 8;
 const BATTLE_ACTIVE_FLAG: u16 = 0x047D;
 const REMAP_COUNT_MASK: u8 = 0x1E;
@@ -61,7 +63,7 @@ pub(super) fn bind_battle_remap_storage(
     let maximum_battle_queue_byte_count =
         maximum_background_queue_byte_count.max(maximum_text_queue_byte_count);
     let remap_state_offset_from_queue_start = usize::from(
-        REMAP_STATE_ADDRESS
+        BATTLE_RUNTIME_STORAGE_START
             .checked_sub(SOURCE_QUEUE_START)
             .context("remap state precedes the source queue")?,
     );
@@ -83,7 +85,10 @@ pub(super) fn bind_battle_remap_storage(
                 .context("remap pair-table byte count exceeds u16")?,
         )
         .context("remap pair-table end overflow")?;
-    ensure!(pair_table_end == 0x07EF, "remap pair-table end changed");
+    ensure!(
+        pair_table_end == BATTLE_RUNTIME_STORAGE_END,
+        "remap pair-table end changed"
+    );
     ensure!(
         MAXIMUM_REMAP_PAIR_COUNT * 2 == PAIR_TABLE_BYTE_COUNT,
         "remap pair capacity and storage disagree"
@@ -104,7 +109,7 @@ pub(super) fn bind_battle_remap_storage(
         pair_table_start_hex: format!("0x{PAIR_TABLE_START:04X}"),
         pair_table_end_hex: format!("0x{pair_table_end:04X}"),
         pair_table_byte_count: PAIR_TABLE_BYTE_COUNT,
-        remap_state_address_hex: format!("0x{REMAP_STATE_ADDRESS:04X}"),
+        remap_state_address_hex: format!("0x{BATTLE_RUNTIME_STORAGE_START:04X}"),
         original_active_address_hex: format!("0x{BATTLE_ACTIVE_FLAG:04X}"),
         remap_count_mask_hex: format!("0x{REMAP_COUNT_MASK:02X}"),
         remap_count_shift: REMAP_COUNT_SHIFT,

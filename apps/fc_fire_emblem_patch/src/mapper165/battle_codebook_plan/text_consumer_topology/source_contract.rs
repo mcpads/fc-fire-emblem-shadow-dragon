@@ -1,9 +1,13 @@
 use std::collections::BTreeSet;
 
 use anyhow::{Context, Result, ensure};
-use retro_rp2a03::{ControlFlow, decode_bytes};
+use retro_rp2a03::decode_bytes;
 
-use crate::{rom::Rom, sha1_hex, typed_source::decode_rp2a03_sequence};
+use crate::{
+    rom::Rom,
+    sha1_hex,
+    typed_source::{Rp2a03DirectControlFlow, decode_rp2a03_sequence, rp2a03_direct_control_flow},
+};
 
 use super::super::{
     phase_cooccurrence::UNIT_PANEL_PHASE_POINTERS,
@@ -268,8 +272,8 @@ fn bind_typed_direct_call(rom: &Rom, key: CallerKey) -> Result<()> {
     })?;
     ensure!(
         matches!(
-            instruction.control_flow(key.address),
-            ControlFlow::Call {
+            rp2a03_direct_control_flow(&instruction, key.address)?,
+            Rp2a03DirectControlFlow::Call {
                 target: COMMON_TEXT_RENDERER_ADDRESS,
                 ..
             }
