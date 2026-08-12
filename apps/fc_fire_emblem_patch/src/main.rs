@@ -314,6 +314,10 @@ enum Command {
         transition_label_localization: PathBuf,
         #[arg(long, default_value = "assets/translation/location-names.ko.json")]
         location_name_localization: PathBuf,
+        #[arg(long, default_value = "out/fire-emblem-fe1-korean-patch.nes")]
+        current_candidate: PathBuf,
+        #[arg(long, default_value = "out/kr-patch-build.json")]
+        current_build_report: PathBuf,
         #[arg(long, default_value = "out/full-translation-installation.json")]
         report: PathBuf,
     },
@@ -1139,6 +1143,8 @@ fn main() -> Result<()> {
             item_action_label_localization,
             transition_label_localization,
             location_name_localization,
+            current_candidate,
+            current_build_report,
             report,
         } => {
             let summary = full_translation_install::plan_full_translation_installation(
@@ -1154,18 +1160,21 @@ fn main() -> Result<()> {
                     item_action_label_localization_path: &item_action_label_localization,
                     transition_label_localization_path: &transition_label_localization,
                     location_name_localization_path: &location_name_localization,
+                    current_candidate_path: &current_candidate,
+                    current_build_report_path: &current_build_report,
                     report_path: &report,
                 },
             )?;
             println!("wrote {}", report.display());
             println!("report SHA-1: {}", summary.report_sha1);
             println!(
-                "full translation installation: {} required domains, {} dialogue records, {} page worksets, {} glyphs in {} stable colors, {} pointer writes, {} planned bytes",
+                "full translation installation: {} required domains, {} dialogue records, {} page worksets, {} glyphs with a {}-page static upper bound and maximum {}-slot page demand, {} pointer writes, {} planned bytes",
                 summary.required_domain_count,
                 summary.dialogue_record_count,
                 summary.dialogue_page_workset_count,
                 summary.dialogue_glyph_count,
-                summary.dialogue_stable_color_count,
+                summary.dialogue_static_page_upper_bound_count,
+                summary.dialogue_maximum_page_slot_demand,
                 summary.dialogue_pointer_write_count,
                 summary.dialogue_planned_storage_byte_count,
             );

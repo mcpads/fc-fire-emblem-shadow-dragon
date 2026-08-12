@@ -34,6 +34,7 @@ mod selected_physical_assignment;
 mod source_window;
 pub(crate) mod surface_constraints;
 mod text_consumer_topology;
+mod workset_pages;
 
 pub(in crate::mapper165) use composition::{
     BattleCacheCompositionMaterial, BattleRuntimeRecipeInput, compose_runtime_font_page,
@@ -47,6 +48,21 @@ pub(super) use physical_assignment::ScreenCodeConstraint;
 use physical_assignment::assign_physical_codes;
 use runtime_demand::{BattleRuntimeDemandPlan, ExactModeledRuntimeInput, plan_runtime_demand};
 use runtime_inputs::{BattleRuntimeInputBinding, bind_battle_runtime_inputs};
+pub(crate) use workset_pages::{GlyphWorksetPagePlan, plan_glyph_workset_page_upper_bound};
+
+pub(crate) fn build_glyph_workset_font_page_pack(
+    source_page: &[u8],
+    plan: &GlyphWorksetPagePlan,
+) -> Result<Vec<u8>> {
+    let mut page_pack = Vec::new();
+    for assignments in &plan.page_assignments {
+        page_pack.extend_from_slice(&super::dialogue_probe_font::build_font_page(
+            source_page,
+            assignments,
+        )?);
+    }
+    Ok(page_pack)
+}
 
 struct BattleCodebookModel {
     coloring: conflict_graph::StableColoringPlan,
@@ -92,22 +108,11 @@ pub(crate) struct GlyphWorkset {
     pub(crate) preserved_active_codes: BTreeSet<u8>,
 }
 
-pub(crate) struct GlyphWorksetCodebook {
-    pub(crate) glyph_codes: BTreeMap<char, u8>,
-    pub(crate) glyph_count: usize,
-    pub(crate) conflict_edge_count: usize,
-    pub(crate) constructed_clique_glyph_count: usize,
-    pub(crate) stable_color_count: usize,
-    pub(crate) abstract_assignment_sha1: String,
-    pub(crate) physical_assignment_sha1: String,
-    pub(crate) workset_count: usize,
-    pub(crate) constrained_color_count: usize,
-    pub(crate) active_ceiling_assignment_found: bool,
-}
-
-pub(crate) fn plan_glyph_workset_codebook(
+/// Assign one-byte placeholders only to validate dialogue storage and pointer layout.
+/// Runtime rendering uses page-local codebooks instead of this cross-page projection.
+pub(crate) fn plan_storage_layout_glyph_codes(
     worksets: &[GlyphWorkset],
-) -> Result<GlyphWorksetCodebook> {
+) -> Result<BTreeMap<char, u8>> {
     ensure!(!worksets.is_empty(), "glyph codebook has no worksets");
     let families = BattleGlyphFamilies {
         base: BTreeSet::new(),
@@ -135,18 +140,7 @@ pub(crate) fn plan_glyph_workset_codebook(
         })
         .collect::<Vec<_>>();
     let physical = assign_physical_codes(&coloring, &constraints)?;
-    Ok(GlyphWorksetCodebook {
-        glyph_codes: physical.glyph_codes,
-        glyph_count: coloring.glyph_count,
-        conflict_edge_count: coloring.conflict_edge_count,
-        constructed_clique_glyph_count: coloring.constructed_clique_glyph_count,
-        stable_color_count: coloring.color_count,
-        abstract_assignment_sha1: coloring.assignment_sha1,
-        physical_assignment_sha1: physical.assignment_sha1,
-        workset_count: physical.constrained_screen_count,
-        constrained_color_count: physical.constrained_color_count,
-        active_ceiling_assignment_found: coloring.active_ceiling_assignment_found,
-    })
+    Ok(physical.glyph_codes)
 }
 
 #[derive(Debug, Serialize)]
@@ -589,7 +583,7 @@ mod tests {
     }
 
     #[test]
-    fn workset_codebook_reuses_codes_only_across_noncooccurring_glyphs() {
+    fn storage_layout_codes_reuse_only_across_noncooccurring_glyphs() {
         let active = active_hangul_codes();
         let worksets = [
             GlyphWorkset {
@@ -602,23 +596,15 @@ mod tests {
             },
         ];
 
-        let first = plan_glyph_workset_codebook(&worksets).unwrap();
-        let second = plan_glyph_workset_codebook(&worksets).unwrap();
+        let first = plan_storage_layout_glyph_codes(&worksets).unwrap();
+        let second = plan_storage_layout_glyph_codes(&worksets).unwrap();
 
-        assert_ne!(first.glyph_codes[&'가'], first.glyph_codes[&'나']);
-        assert_ne!(first.glyph_codes[&'가'], first.glyph_codes[&'다']);
-        assert_eq!(first.glyph_codes[&'나'], first.glyph_codes[&'다']);
-        assert_ne!(first.glyph_codes[&'가'], active[0]);
-        assert_ne!(first.glyph_codes[&'가'], active[1]);
-        assert_eq!(
-            first.abstract_assignment_sha1,
-            second.abstract_assignment_sha1
-        );
-        assert_eq!(
-            first.physical_assignment_sha1,
-            second.physical_assignment_sha1
-        );
-        assert_eq!(first.workset_count, worksets.len());
+        assert_ne!(first[&'가'], first[&'나']);
+        assert_ne!(first[&'가'], first[&'다']);
+        assert_eq!(first[&'나'], first[&'다']);
+        assert_ne!(first[&'가'], active[0]);
+        assert_ne!(first[&'가'], active[1]);
+        assert_eq!(first, second);
     }
 
     #[test]

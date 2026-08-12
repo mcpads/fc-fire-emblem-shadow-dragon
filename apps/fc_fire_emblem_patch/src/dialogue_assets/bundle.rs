@@ -36,6 +36,8 @@ pub(crate) struct MainDialogueBundlePlan {
 }
 
 pub(crate) struct MainDialoguePageWorkset {
+    pub(crate) record_id: String,
+    pub(crate) page_index: usize,
     pub(crate) target_glyphs: BTreeSet<char>,
     pub(crate) source_reclaimable_active_codes: BTreeSet<u8>,
     pub(crate) preserved_target_active_codes: BTreeSet<u8>,
@@ -327,7 +329,8 @@ fn record_page_worksets<'a>(
                 .lines
                 .chunks(MAIN_DIALOGUE_VISIBLE_LINES_PER_PAGE),
         )
-        .map(move |(source_lines, workspace_lines)| {
+        .enumerate()
+        .map(move |(page_index, (source_lines, workspace_lines))| {
             ensure!(
                 source_lines.len() == workspace_lines.len(),
                 "{} visible-page source and workspace line counts differ",
@@ -366,6 +369,8 @@ fn record_page_worksets<'a>(
             source_reclaimable_active_codes
                 .retain(|code| !preserved_target_active_codes.contains(code));
             Ok(MainDialoguePageWorkset {
+                record_id: workspace_record.id.clone(),
+                page_index,
                 target_glyphs,
                 source_reclaimable_active_codes,
                 preserved_target_active_codes,
