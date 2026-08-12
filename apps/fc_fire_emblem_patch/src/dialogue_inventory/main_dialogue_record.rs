@@ -20,8 +20,30 @@ pub(super) fn inspect_main_record_prefix(
     let fixed_record_header_file_offset = entry_file_offset
         .checked_add(e5_prefix_byte_count)
         .context("main record E5 prefix range overflow")?;
+
+    // 창 기술자는 모든 레코드에 있지 않다. 기술자는 숫자 파라미터 네 바이트이고
+    // 그 뒤에는 반드시 줄이나 선택 프리픽스를 여는 제어 코드가 온다. 따라서 이 자리가
+    // 제어 코드로 시작하거나, 네 바이트 뒤가 다시 표시 글자면 기술자가 없는 것이다.
+    //
+    // 실행으로 확인했다. `chapter-intro-dialogue:004`는 `ed ea 10 0f …`로 시작하는데
+    // 화면에는 `※だいじょうぶだよ`가 그대로 나온다. 네 바이트를 기술자로 먹으면
+    // 줄 제어와 `だ` 한 글자가 사라진다. `chapter-intro-dialogue:002`는 `e8 …`로
+    // 시작하고 화면은 `※どうしたんだ`로 시작한다. `shop-and-item-dialogue:036`은
+    // `0a 07 13 06 …`이고 화면은 `さくてきが … あがった`다.
+    let fixed_record_header_byte_count = if source
+        .get(fixed_record_header_file_offset)
+        .is_some_and(|code| *code >= FIRST_MAIN_CONTROL_CODE)
+    {
+        0
+    } else {
+        match source.get(fixed_record_header_file_offset + FIXED_RECORD_HEADER_BYTE_COUNT) {
+            Some(code) if *code >= FIRST_MAIN_CONTROL_CODE => FIXED_RECORD_HEADER_BYTE_COUNT,
+            _ => 0,
+        }
+    };
+
     let after_fixed_record_header = fixed_record_header_file_offset
-        .checked_add(FIXED_RECORD_HEADER_BYTE_COUNT)
+        .checked_add(fixed_record_header_byte_count)
         .context("main fixed record header range overflow")?;
     ensure!(
         after_fixed_record_header < bank_end,
@@ -46,7 +68,7 @@ pub(super) fn inspect_main_record_prefix(
         e5_prefix_byte_count,
         fixed_record_header_file_offset,
         fixed_record_header_file_offset_hex: format!("0x{fixed_record_header_file_offset:05X}"),
-        fixed_record_header_byte_count: FIXED_RECORD_HEADER_BYTE_COUNT,
+        fixed_record_header_byte_count,
         e8_prefix_present,
         e8_prefix_byte_count,
         first_line_file_offset,

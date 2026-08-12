@@ -1,5 +1,8 @@
 use super::*;
 
+/// 줄을 여는 제어 코드다. 창 기술자가 있는 레코드는 기술자 뒤가 이런 코드로 이어진다.
+const LINE_START_CONTROL_CODE: u8 = 0xE9;
+
 const SYNTHETIC_BANK: u8 = 0x02;
 const SYNTHETIC_TABLE_OFFSET: usize = HEADER_SIZE + 2 * PRG_BANK_SIZE + 0x0100;
 const SYNTHETIC_DATA_START: usize = HEADER_SIZE + 2 * PRG_BANK_SIZE + 0x0200;
@@ -212,6 +215,10 @@ fn locates_the_first_line_after_only_declared_record_prefixes() {
     source[entry_file_offset] = OPTIONAL_E5_PREFIX_CODE;
     source[entry_file_offset + OPTIONAL_PREFIX_BYTE_COUNT + FIXED_RECORD_HEADER_BYTE_COUNT] =
         OPTIONAL_E8_PREFIX_CODE;
+    // 창 기술자가 있는 레코드는 기술자 뒤가 제어 코드다. 그 조건으로 기술자 유무를
+    // 가르므로 기술자를 두는 픽스처에는 반드시 함께 넣는다.
+    let plain_entry_file_offset = entry_file_offset + 0x40;
+    source[plain_entry_file_offset + FIXED_RECORD_HEADER_BYTE_COUNT] = LINE_START_CONTROL_CODE;
 
     let full = inspect_main_record_prefix(
         &source,
@@ -226,7 +233,6 @@ fn locates_the_first_line_after_only_declared_record_prefixes() {
     assert_eq!(full.total_prefix_byte_count, 16);
     assert_eq!(full.first_line_file_offset, entry_file_offset + 16);
 
-    let plain_entry_file_offset = entry_file_offset + 0x40;
     let plain = inspect_main_record_prefix(
         &source,
         plain_entry_file_offset,
@@ -239,6 +245,35 @@ fn locates_the_first_line_after_only_declared_record_prefixes() {
     assert!(!plain.e8_prefix_present);
     assert_eq!(plain.total_prefix_byte_count, 4);
     assert_eq!(plain.first_line_file_offset, plain_entry_file_offset + 4);
+
+    // 기술자 없이 표시 내용부터 시작하는 레코드다. `E7` 인계에서 상태 9로 복귀하는
+    // 경로가 여기에 해당하며, 네 바이트를 기술자로 먹으면 화면 글자가 잘린다.
+    let resumed_entry_file_offset = entry_file_offset + 0x80;
+    source[resumed_entry_file_offset..resumed_entry_file_offset + 5]
+        .copy_from_slice(&[0x0A, 0x07, 0x13, 0x06, 0x05]);
+    let resumed = inspect_main_record_prefix(
+        &source,
+        resumed_entry_file_offset,
+        bank_end,
+        "synthetic-dialogue",
+        2,
+    )
+    .unwrap();
+    assert_eq!(resumed.total_prefix_byte_count, 0);
+    assert_eq!(resumed.first_line_file_offset, resumed_entry_file_offset);
+
+    // 선두가 제어 코드면 기술자 자리가 아니다.
+    let control_led_entry_file_offset = entry_file_offset + 0xC0;
+    source[control_led_entry_file_offset] = 0xED;
+    let control_led = inspect_main_record_prefix(
+        &source,
+        control_led_entry_file_offset,
+        bank_end,
+        "synthetic-dialogue",
+        3,
+    )
+    .unwrap();
+    assert_eq!(control_led.total_prefix_byte_count, 0);
 }
 
 #[test]
@@ -366,8 +401,19 @@ fn scans_linear_lines_until_the_first_non_linear_boundary() {
 fn bounds_a_main_record_from_prefix_through_transition_target_bytes() {
     let mut source = synthetic_source();
     let record_file_offset = SYNTHETIC_DATA_START;
-    source[record_file_offset..record_file_offset + 8]
-        .copy_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x60, 0xE4, 0x71, 0x02]);
+    // 창 기술자로 인정되려면 네 바이트 뒤가 제어 코드여야 한다. 줄 시작 코드는
+    // 피연산자 한 바이트를 가지므로 함께 둔다.
+    source[record_file_offset..record_file_offset + 9].copy_from_slice(&[
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        LINE_START_CONTROL_CODE,
+        0x01,
+        0xE4,
+        0x71,
+        0x02,
+    ]);
     let bank_end = switchable_bank_file_start(SYNTHETIC_BANK) + PRG_BANK_SIZE;
     let prefix = inspect_main_record_prefix(
         &source,
@@ -398,10 +444,10 @@ fn bounds_a_main_record_from_prefix_through_transition_target_bytes() {
     .unwrap();
 
     assert_eq!(storage.file_offset, record_file_offset);
-    assert_eq!(storage.end_file_offset_exclusive, record_file_offset + 8);
-    assert_eq!(storage.storage_byte_count, 8);
+    assert_eq!(storage.end_file_offset_exclusive, record_file_offset + 9);
+    assert_eq!(storage.storage_byte_count, 9);
     assert_eq!(storage.prefix_byte_count, 4);
-    assert_eq!(storage.linear_segment_storage_byte_count, 4);
+    assert_eq!(storage.linear_segment_storage_byte_count, 5);
     assert_eq!(storage.boundary_control, 0xE4);
 }
 

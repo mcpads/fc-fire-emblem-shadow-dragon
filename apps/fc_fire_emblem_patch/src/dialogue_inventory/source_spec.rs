@@ -11,6 +11,8 @@ pub(super) const OPTIONAL_E5_PREFIX_CODE: u8 = 0xE5;
 pub(super) const OPTIONAL_E8_PREFIX_CODE: u8 = 0xE8;
 pub(super) const OPTIONAL_PREFIX_BYTE_COUNT: usize = 6;
 pub(super) const FIXED_RECORD_HEADER_BYTE_COUNT: usize = 4;
+/// 이 값부터가 대사 제어 코드다. 표시 글자는 모두 이보다 작다.
+pub(super) const FIRST_MAIN_CONTROL_CODE: u8 = 0xE0;
 pub(super) const MAX_MAIN_LINE_SCAN_BYTES: usize = 256;
 pub(super) const MAX_MAIN_LINEAR_SEGMENT_LINES: usize = 64;
 pub(super) const MAIN_LINE_END_CODES: [u8; 7] = [0xEF, 0xE7, 0xE4, 0xE6, 0xEE, 0xEB, 0xED];

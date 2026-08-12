@@ -48,6 +48,7 @@ pub(crate) fn plan_unit_names(rom: &Rom, workspace_path: &Path) -> Result<UnitNa
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::font_slots::ACTIVE_HANGUL_SLOT_COUNT;
 
     #[test]
     fn public_unit_name_workspace_has_one_translation_per_source_index() {
@@ -66,6 +67,9 @@ mod tests {
         let plan = plan_unit_names(&rom, workspace).unwrap();
 
         assert_eq!(plan.entries.len(), UNIT_NAME_ENTRY_COUNT);
-        assert_eq!(plan.unique_glyphs().len(), 72);
+        // 고유 글리프 수는 확정한 표기에 따라 달라지므로 고정하지 않는다.
+        // 지켜야 하는 것은 아군명 전체가 한 글꼴 페이지의 활성 슬롯 예산 안에 든다는 점이다.
+        assert!(!plan.unique_glyphs().is_empty());
+        assert!(plan.unique_glyphs().len() <= ACTIVE_HANGUL_SLOT_COUNT);
     }
 }

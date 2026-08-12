@@ -22,10 +22,8 @@ use super::super::{
     },
     unit_name_table::{
         CAVE_END_ADDRESS as TABLE_CAVE_END_ADDRESS, CAVE_START_ADDRESS as TABLE_CAVE_START_ADDRESS,
-        PLAYER_POINTER_LOAD_ADDRESS, ROSTER_POINTER_TABLE_ADDRESS, ROSTER_STRING_DATA_ADDRESS,
-        SELECTOR_ADDRESS, SOURCE_PLAYER_POINTER_LOAD, SOURCE_PRG_BANK,
-        UNIT_UI_POINTER_TABLE_ADDRESS, UNIT_UI_STRING_DATA_ADDRESS, UnitNameTablePlan,
-        plan_unit_name_tables,
+        PLAYER_POINTER_LOAD_ADDRESS, SELECTOR_ADDRESS, SOURCE_PLAYER_POINTER_LOAD, SOURCE_PRG_BANK,
+        UnitNameTablePlan, plan_unit_name_tables,
     },
 };
 use super::{ROSTER_PAGE_REGISTERS, ROSTER_SELECTOR_ADDRESS, build_chained_roster_selector};
@@ -142,28 +140,28 @@ pub(super) fn install_unit_name_stage(
         &mut image,
         "roster playable-unit name pointers",
         SOURCE_PRG_BANK,
-        ROSTER_POINTER_TABLE_ADDRESS,
+        tables.roster.pointer_table_address,
         &tables.roster.pointer_table,
     )?;
     write_projection(
         &mut image,
         "roster playable-unit name strings",
         SOURCE_PRG_BANK,
-        ROSTER_STRING_DATA_ADDRESS,
+        tables.roster.string_data_address,
         &tables.roster.strings,
     )?;
     write_projection(
         &mut image,
         "unit-UI playable-unit name pointers",
         SOURCE_PRG_BANK,
-        UNIT_UI_POINTER_TABLE_ADDRESS,
+        tables.unit_ui.pointer_table_address,
         &tables.unit_ui.pointer_table,
     )?;
     write_projection(
         &mut image,
         "unit-UI playable-unit name strings",
         SOURCE_PRG_BANK,
-        UNIT_UI_STRING_DATA_ADDRESS,
+        tables.unit_ui.string_data_address,
         &tables.unit_ui.strings,
     )?;
     image.verify_all_changes_tracked(&expanded_base)?;
