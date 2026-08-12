@@ -26,7 +26,7 @@ mod dynamic_inputs;
 
 use current_candidate::{CurrentCandidateInputs, inspect_dialogue_page_pool_capacity};
 use dynamic_composition::plan_dialogue_runtime_composition;
-use dynamic_inputs::plan_dynamic_dialogue_inputs;
+use dynamic_inputs::{plan_dynamic_dialogue_inputs, plan_dynamic_string_remap};
 
 const REQUIRED_DOMAIN_COUNT: usize = 13;
 
@@ -176,8 +176,21 @@ struct DialogueRuntimeComposition {
     maximum_possible_domain_glyph_count: usize,
     maximum_augmented_workset_slot_demand: usize,
     maximum_rendered_target_glyph_upper_bound: usize,
+    mixed_dynamic_domain_page_count: usize,
     dynamic_string_domains_classified: bool,
     dynamic_augmented_worksets_fit: bool,
+    canonical_dynamic_code_count: usize,
+    remapped_page_group_count: usize,
+    dynamic_remap_entry_count: usize,
+    non_identity_dynamic_remap_entry_count: usize,
+    dense_dynamic_remap_byte_count: usize,
+    sparse_dynamic_remap_byte_count: usize,
+    sparse_non_identity_dynamic_remap_byte_count: usize,
+    selected_dynamic_remap_byte_count: usize,
+    selected_dynamic_remap_strategy: &'static str,
+    dynamic_remap_material_sha1: String,
+    page_selector_remap_flag_sufficient: bool,
+    every_translated_dynamic_page_remappable: bool,
     dynamic_string_producers_bound: bool,
     consumer_specific_visible_prefixes_bound: bool,
     dense_group_lookup_byte_count: usize,
@@ -185,6 +198,7 @@ struct DialogueRuntimeComposition {
     record_selector_directory_byte_count: usize,
     scan_material_byte_count: usize,
     atlas_and_scan_material_byte_count: usize,
+    atlas_scan_and_dynamic_remap_byte_count: usize,
     runtime_page_scan_bound_to_control_flow: bool,
     current_battle_glyph_atlas_tile_count: usize,
     current_battle_maximum_ppu_write_count: usize,
@@ -272,6 +286,7 @@ pub(crate) fn plan_full_translation_installation(
         &locations.entries,
     )?;
     let codebook = plan_glyph_workset_page_upper_bound(&dynamic_inputs.augmented_worksets)?;
+    let dynamic_remap = plan_dynamic_string_remap(&dynamic_inputs, &codebook)?;
     ensure!(
         codebook.workset_count == dialogue.page_worksets.len()
             && codebook.workset_page_indices.len() == dialogue.page_worksets.len(),
@@ -448,8 +463,23 @@ pub(crate) fn plan_full_translation_installation(
                 .maximum_augmented_workset_slot_demand,
             maximum_rendered_target_glyph_upper_bound: dynamic_inputs
                 .maximum_rendered_target_glyph_upper_bound,
+            mixed_dynamic_domain_page_count: dynamic_inputs.mixed_dynamic_domain_page_count,
             dynamic_string_domains_classified: dynamic_inputs.every_dynamic_control_classified,
             dynamic_augmented_worksets_fit: dynamic_inputs.every_augmented_workset_fits,
+            canonical_dynamic_code_count: dynamic_remap.canonical_code_count,
+            remapped_page_group_count: dynamic_remap.remapped_page_group_count,
+            dynamic_remap_entry_count: dynamic_remap.remap_entry_count,
+            non_identity_dynamic_remap_entry_count: dynamic_remap.non_identity_remap_entry_count,
+            dense_dynamic_remap_byte_count: dynamic_remap.dense_remap_byte_count,
+            sparse_dynamic_remap_byte_count: dynamic_remap.sparse_remap_byte_count,
+            sparse_non_identity_dynamic_remap_byte_count: dynamic_remap
+                .sparse_non_identity_remap_byte_count,
+            selected_dynamic_remap_byte_count: dynamic_remap.selected_dense_remap_byte_count,
+            selected_dynamic_remap_strategy: dynamic_remap.selected_strategy,
+            dynamic_remap_material_sha1: dynamic_remap.remap_material_sha1,
+            page_selector_remap_flag_sufficient: dynamic_remap.page_selector_remap_flag_sufficient,
+            every_translated_dynamic_page_remappable: dynamic_remap
+                .every_translated_dynamic_page_remappable,
             dynamic_string_producers_bound: false,
             consumer_specific_visible_prefixes_bound: false,
             dense_group_lookup_byte_count: composition.dense_group_lookup_byte_count,
@@ -459,6 +489,9 @@ pub(crate) fn plan_full_translation_installation(
             scan_material_byte_count: composition.scan_material_byte_count,
             atlas_and_scan_material_byte_count: composition.glyph_atlas.len()
                 + composition.scan_material_byte_count,
+            atlas_scan_and_dynamic_remap_byte_count: composition.glyph_atlas.len()
+                + composition.scan_material_byte_count
+                + dynamic_remap.selected_dense_remap_byte_count,
             runtime_page_scan_bound_to_control_flow: false,
             current_battle_glyph_atlas_tile_count: page_capacity.battle_glyph_atlas_tile_count,
             current_battle_maximum_ppu_write_count: page_capacity.battle_maximum_ppu_write_count,

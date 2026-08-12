@@ -3,9 +3,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use anyhow::{Result, ensure};
 
 use crate::{
-    dialogue_assets::MainDialogueBundlePlan, mapper165::battle_codebook_plan::GlyphWorkset,
-    text_inventory::FixedTextPlannedEntry,
+    dialogue_assets::MainDialogueBundlePlan, font_slots::active_hangul_codes,
+    mapper165::battle_codebook_plan::GlyphWorkset, text_inventory::FixedTextPlannedEntry,
 };
+
+mod remap;
+
+pub(in crate::full_translation_install) use remap::plan_dynamic_string_remap;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum DynamicStringDomain {
@@ -17,6 +21,10 @@ enum DynamicStringDomain {
 
 pub(super) struct DynamicDialogueInputPlan {
     pub(super) augmented_worksets: Vec<GlyphWorkset>,
+    dynamic_glyphs_by_workset: Vec<BTreeSet<char>>,
+    translated_dynamic_by_workset: Vec<bool>,
+    preserved_numeric_by_workset: Vec<bool>,
+    canonical_dynamic_codes: BTreeMap<char, u8>,
     pub(super) declared_domain_count: usize,
     pub(super) translated_dynamic_page_count: usize,
     pub(super) preserved_numeric_page_count: usize,
@@ -25,6 +33,7 @@ pub(super) struct DynamicDialogueInputPlan {
     pub(super) maximum_possible_domain_glyph_count: usize,
     pub(super) maximum_augmented_workset_slot_demand: usize,
     pub(super) maximum_rendered_target_glyph_upper_bound: usize,
+    pub(super) mixed_dynamic_domain_page_count: usize,
     pub(super) every_dynamic_control_classified: bool,
     pub(super) every_augmented_workset_fits: bool,
 }
@@ -51,13 +60,27 @@ pub(super) fn plan_dynamic_dialogue_inputs(
     let combined_dialogue_glyph_count = literal_dialogue_glyphs
         .union(&translated_dynamic_glyphs)
         .count();
+    let active_codes = active_hangul_codes();
+    ensure!(
+        translated_dynamic_glyphs.len() <= active_codes.len(),
+        "dynamic dialogue canonical domain exceeds one physical codebook"
+    );
+    let canonical_dynamic_codes = translated_dynamic_glyphs
+        .iter()
+        .copied()
+        .zip(active_codes)
+        .collect::<BTreeMap<_, _>>();
 
     let mut augmented_worksets = Vec::with_capacity(dialogue.page_worksets.len());
+    let mut dynamic_glyphs_by_workset = Vec::with_capacity(dialogue.page_worksets.len());
+    let mut translated_dynamic_by_workset = Vec::with_capacity(dialogue.page_worksets.len());
+    let mut preserved_numeric_by_workset = Vec::with_capacity(dialogue.page_worksets.len());
     let mut translated_dynamic_page_count = 0;
     let mut preserved_numeric_page_count = 0;
     let mut maximum_possible_domain_glyph_count = 0;
     let mut maximum_augmented_workset_slot_demand = 0;
     let mut maximum_rendered_target_glyph_upper_bound = 0;
+    let mut mixed_dynamic_domain_page_count = 0;
     let mut classified_control_count = 0;
 
     for workset in &dialogue.page_worksets {
@@ -93,13 +116,16 @@ pub(super) fn plan_dynamic_dialogue_inputs(
         if has_preserved_numeric {
             preserved_numeric_page_count += 1;
         }
+        if has_translated_domain && has_preserved_numeric {
+            mixed_dynamic_domain_page_count += 1;
+        }
         maximum_possible_domain_glyph_count =
             maximum_possible_domain_glyph_count.max(possible_domain_glyphs.len());
         let rendered_target_glyph_upper_bound =
             target_glyphs.len() + rendered_dynamic_glyph_upper_bound;
         maximum_rendered_target_glyph_upper_bound =
             maximum_rendered_target_glyph_upper_bound.max(rendered_target_glyph_upper_bound);
-        target_glyphs.extend(possible_domain_glyphs);
+        target_glyphs.extend(possible_domain_glyphs.iter().copied());
         let slot_demand = target_glyphs.len() + workset.preserved_target_active_codes.len();
         maximum_augmented_workset_slot_demand =
             maximum_augmented_workset_slot_demand.max(slot_demand);
@@ -107,6 +133,9 @@ pub(super) fn plan_dynamic_dialogue_inputs(
             target_glyphs,
             preserved_active_codes: workset.preserved_target_active_codes.clone(),
         });
+        dynamic_glyphs_by_workset.push(possible_domain_glyphs);
+        translated_dynamic_by_workset.push(has_translated_domain);
+        preserved_numeric_by_workset.push(has_preserved_numeric);
     }
 
     let dynamic_control_count = dialogue
@@ -128,6 +157,10 @@ pub(super) fn plan_dynamic_dialogue_inputs(
 
     Ok(DynamicDialogueInputPlan {
         augmented_worksets,
+        dynamic_glyphs_by_workset,
+        translated_dynamic_by_workset,
+        preserved_numeric_by_workset,
+        canonical_dynamic_codes,
         declared_domain_count: DynamicStringDomain::ALL.len(),
         translated_dynamic_page_count,
         preserved_numeric_page_count,
@@ -136,6 +169,7 @@ pub(super) fn plan_dynamic_dialogue_inputs(
         maximum_possible_domain_glyph_count,
         maximum_augmented_workset_slot_demand,
         maximum_rendered_target_glyph_upper_bound,
+        mixed_dynamic_domain_page_count,
         every_dynamic_control_classified: true,
         every_augmented_workset_fits,
     })
