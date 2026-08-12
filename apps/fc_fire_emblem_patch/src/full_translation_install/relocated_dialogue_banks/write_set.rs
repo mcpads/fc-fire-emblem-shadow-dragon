@@ -8,10 +8,12 @@ use crate::{
 };
 
 use super::{
-    DIALOGUE_BYTE_BANK_SELECT_CALL, PRG_BANK_SIZE, SOURCE_DIALOGUE_BANK, TRANSITION_MIRROR_BANKS,
+    DIALOGUE_BYTE_BANK_RESTORE_CALL, DIALOGUE_BYTE_BANK_SELECT_CALL, NMI_AUDIO_BANK_RESTORE_CALL,
+    PRG_BANK_SIZE, SOURCE_DIALOGUE_BANK, TRANSITION_MIRROR_BANKS,
     TRANSITION_POINTER_RESOLVER_CALLS,
     transition_reader::{
-        TRANSITION_BANK_SELECTOR, TRANSITION_POINTER_RESOLVER, TransitionReaderRoutines,
+        NMI_PRG_BANK_RESTORE_SELECTOR, TRANSITION_BANK_RESTORE, TRANSITION_BANK_SELECTOR,
+        TRANSITION_POINTER_RESOLVER, TransitionReaderRoutines,
     },
 };
 
@@ -22,6 +24,7 @@ pub(super) struct CompleteDialogueWriteSetPlan {
     transition_mirror_bank_write_count: usize,
     transition_mode_hook_write_count: usize,
     dialogue_reader_hook_write_count: usize,
+    nmi_audio_restore_hook_write_count: usize,
     fixed_routine_write_count: usize,
     pub(super) expected_write_count: usize,
     changed_byte_count: usize,
@@ -52,8 +55,9 @@ pub(super) fn validate_complete_dialogue_write_set(
                 + storage.pointer_writes.len()
                 + storage.transition_mirrors.len()
                 + TRANSITION_POINTER_RESOLVER_CALLS.len()
+                + 2
                 + 1
-                + 2,
+                + 4,
         "complete dialogue Expected Write population changed"
     );
     ensure!(
@@ -65,8 +69,9 @@ pub(super) fn validate_complete_dialogue_write_set(
         canonical_pointer_write_count: storage.pointer_writes.len(),
         transition_mirror_bank_write_count: storage.transition_mirrors.len(),
         transition_mode_hook_write_count: TRANSITION_POINTER_RESOLVER_CALLS.len(),
-        dialogue_reader_hook_write_count: 1,
-        fixed_routine_write_count: 2,
+        dialogue_reader_hook_write_count: 2,
+        nmi_audio_restore_hook_write_count: 1,
+        fixed_routine_write_count: 4,
         expected_write_count,
         changed_byte_count,
         every_change_tracked: true,
@@ -145,9 +150,32 @@ pub(super) fn append_complete_dialogue_writes(
     write_current_candidate_bytes(
         image,
         candidate,
-        "dialogue transition reader hook",
+        "dialogue transition reader bank-select hook",
         fixed_cpu_file_offset(candidate, DIALOGUE_BYTE_BANK_SELECT_CALL)?,
         &transition_selector_call,
+    )?;
+    let transition_restore_call = [
+        0x20,
+        TRANSITION_BANK_RESTORE as u8,
+        (TRANSITION_BANK_RESTORE >> 8) as u8,
+    ];
+    write_current_candidate_bytes(
+        image,
+        candidate,
+        "dialogue transition reader restore hook",
+        fixed_cpu_file_offset(candidate, DIALOGUE_BYTE_BANK_RESTORE_CALL)?,
+        &transition_restore_call,
+    )?;
+    write_current_candidate_bytes(
+        image,
+        candidate,
+        "NMI audio physical-bank restore hook",
+        fixed_cpu_file_offset(candidate, NMI_AUDIO_BANK_RESTORE_CALL)?,
+        &[
+            0x20,
+            NMI_PRG_BANK_RESTORE_SELECTOR as u8,
+            (NMI_PRG_BANK_RESTORE_SELECTOR >> 8) as u8,
+        ],
     )?;
     write_current_candidate_bytes(
         image,
@@ -162,6 +190,20 @@ pub(super) fn append_complete_dialogue_writes(
         "dialogue transition bank selector",
         fixed_cpu_file_offset(candidate, TRANSITION_BANK_SELECTOR)?,
         &routines.bank_selector,
+    )?;
+    write_current_candidate_bytes(
+        image,
+        candidate,
+        "dialogue transition bank restore",
+        fixed_cpu_file_offset(candidate, TRANSITION_BANK_RESTORE)?,
+        &routines.bank_restore,
+    )?;
+    write_current_candidate_bytes(
+        image,
+        candidate,
+        "NMI physical-bank restore selector",
+        fixed_cpu_file_offset(candidate, NMI_PRG_BANK_RESTORE_SELECTOR)?,
+        &routines.nmi_bank_restore_selector,
     )?;
 
     Ok(())

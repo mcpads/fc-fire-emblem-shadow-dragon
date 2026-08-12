@@ -11,9 +11,9 @@ mod transition_reader;
 mod write_set;
 
 use transition_reader::{
-    SELECTOR_CAVE_END_EXCLUSIVE, SELECTOR_CAVE_START, SOURCE_POINTER_RESOLVER,
-    TRANSITION_BANK_MARKER, TRANSITION_BANK_SELECTOR, TRANSITION_POINTER_RESOLVER,
-    assemble_transition_reader_routines,
+    NMI_PRG_BANK_RESTORE_SELECTOR, SELECTOR_CAVE_END_EXCLUSIVE, SELECTOR_CAVE_START,
+    SOURCE_POINTER_RESOLVER, TRANSITION_BANK_MARKER, TRANSITION_BANK_RESTORE,
+    TRANSITION_BANK_SELECTOR, TRANSITION_POINTER_RESOLVER, assemble_transition_reader_routines,
 };
 use write_set::{CompleteDialogueWriteSetPlan, validate_complete_dialogue_write_set};
 
@@ -28,16 +28,21 @@ pub(super) const ACTIVE_FIXED_BANK: u8 = 0x1F;
 const DIALOGUE_BYTE_BANK_SELECT_CALL: u16 = 0xE6A1;
 const DIALOGUE_BYTE_BANK_RESTORE_CALL: u16 = 0xE6AB;
 const SOURCE_PRG_SELECTOR: u16 = 0xFA20;
+const NMI_AUDIO_BANK_DISPATCH: u16 = 0xC1FB;
+const NMI_AUDIO_BANK_RESTORE_CALL: u16 = 0xC205;
+const NMI_AUDIO_BANK_DISPATCH_CODE: [u8; 14] = [
+    0xA9, 0x0E, 0x20, 0x20, 0xFA, 0x20, 0x00, 0x80, 0xA5, 0x29, 0x20, 0x20, 0xFA, 0x60,
+];
 const TRANSITION_POINTER_RESOLVER_CALLS: [u16; 2] = [0x85F8, 0x865F];
 
 pub(super) fn transition_reader_reserved_range() -> Result<std::ops::Range<u16>> {
     let routines = assemble_transition_reader_routines()?;
-    let end = TRANSITION_BANK_SELECTOR
+    let end = NMI_PRG_BANK_RESTORE_SELECTOR
         .checked_add(
-            u16::try_from(routines.bank_selector.len())
-                .context("transition bank selector length does not fit u16")?,
+            u16::try_from(routines.nmi_bank_restore_selector.len())
+                .context("NMI PRG bank restore selector length does not fit u16")?,
         )
-        .context("transition bank selector range overflow")?;
+        .context("NMI PRG bank restore selector range overflow")?;
     Ok(TRANSITION_POINTER_RESOLVER..end)
 }
 
@@ -77,6 +82,11 @@ pub(super) struct RelocatedDialogueBankPlan {
     dialogue_byte_bank_restore_call_cpu_address_hex: String,
     source_prg_selector_cpu_address_hex: String,
     source_selector_masks_to_low_nibble: bool,
+    source_selector_entry_preserved: bool,
+    nmi_audio_bank_dispatch_sha1: String,
+    nmi_audio_restore_uses_active_bank_shadow: bool,
+    nmi_audio_bank_restore_call_cpu_address_hex: String,
+    nmi_audio_bank_restore_call_hooked: bool,
     transition_pointer_resolver_call_cpu_addresses_hex: Vec<String>,
     transition_pointer_resolver_cpu_address_hex: String,
     transition_pointer_resolver_byte_count: usize,
@@ -84,6 +94,12 @@ pub(super) struct RelocatedDialogueBankPlan {
     transition_bank_selector_cpu_address_hex: String,
     transition_bank_selector_byte_count: usize,
     transition_bank_selector_sha1: String,
+    transition_bank_restore_cpu_address_hex: String,
+    transition_bank_restore_byte_count: usize,
+    transition_bank_restore_sha1: String,
+    nmi_prg_bank_restore_selector_cpu_address_hex: String,
+    nmi_prg_bank_restore_selector_byte_count: usize,
+    nmi_prg_bank_restore_selector_sha1: String,
     selector_cave_cpu_start_hex: String,
     selector_cave_cpu_end_exclusive_hex: String,
     selector_cave_byte_count: usize,
@@ -92,7 +108,7 @@ pub(super) struct RelocatedDialogueBankPlan {
     canonical_pointer_binding_planned: bool,
     transition_operands_preserved: bool,
     transition_mode_hooks_planned: bool,
-    reader_selector_assembled: bool,
+    nmi_restorable_reader_selection_assembled: bool,
     complete_dialogue_write_set: CompleteDialogueWriteSetPlan,
     writes_installed: bool,
 }
@@ -238,6 +254,20 @@ pub(super) fn plan_relocated_dialogue_banks(
         source_selector == [0x08, 0x48, 0x29, 0x0F, 0x0A, 0x48],
         "source mapper 165 PRG selector no longer masks to the low nibble"
     );
+    let nmi_audio_dispatch = fixed_cpu_bytes(
+        candidate,
+        NMI_AUDIO_BANK_DISPATCH,
+        NMI_AUDIO_BANK_DISPATCH_CODE.len(),
+    )?;
+    ensure!(
+        nmi_audio_dispatch == NMI_AUDIO_BANK_DISPATCH_CODE,
+        "NMI audio dispatch no longer restores through the active PRG bank shadow"
+    );
+    ensure!(
+        fixed_cpu_bytes(candidate, NMI_AUDIO_BANK_RESTORE_CALL, 3)?
+            == expected_source_selector_call,
+        "NMI audio bank-restore call no longer targets the source mapper 165 selector"
+    );
     let source_resolver_call = [
         0x20,
         SOURCE_POINTER_RESOLVER as u8,
@@ -267,6 +297,12 @@ pub(super) fn plan_relocated_dialogue_banks(
             <= usize::from(TRANSITION_BANK_SELECTOR - SELECTOR_CAVE_START)
             && usize::from(TRANSITION_BANK_SELECTOR - SELECTOR_CAVE_START)
                 + routines.bank_selector.len()
+                <= usize::from(TRANSITION_BANK_RESTORE - SELECTOR_CAVE_START)
+            && usize::from(TRANSITION_BANK_RESTORE - SELECTOR_CAVE_START)
+                + routines.bank_restore.len()
+                <= usize::from(NMI_PRG_BANK_RESTORE_SELECTOR - SELECTOR_CAVE_START)
+            && usize::from(NMI_PRG_BANK_RESTORE_SELECTOR - SELECTOR_CAVE_START)
+                + routines.nmi_bank_restore_selector.len()
                 <= selector_cave.len(),
         "transition mirror routines do not fit their checked fixed-bank cave"
     );
@@ -275,7 +311,7 @@ pub(super) fn plan_relocated_dialogue_banks(
 
     Ok(RelocatedDialogueBankPlan {
         strategy_selected: true,
-        strategy: "store every direct path in its source-owned region, clone each complete source bank into an execution-equivalent transition mirror, replace only transition dialogue payloads at the same CPU addresses, and mark only transition reads",
+        strategy: "store every direct path in its source-owned region, clone each complete source bank into an execution-equivalent transition mirror, replace only transition dialogue payloads at the same CPU addresses, select marked transition banks only through the dialogue reader, preserve the central PRG selector, and restore a physical mirror only through the NMI audio return when it matches the live transition identity",
         current_candidate_mapper: candidate.mapper(),
         current_candidate_prg_size: candidate.prg().len(),
         battle_material_bank: BATTLE_MATERIAL_BANK,
@@ -299,6 +335,11 @@ pub(super) fn plan_relocated_dialogue_banks(
         ),
         source_prg_selector_cpu_address_hex: format!("{SOURCE_PRG_SELECTOR:04X}"),
         source_selector_masks_to_low_nibble: true,
+        source_selector_entry_preserved: true,
+        nmi_audio_bank_dispatch_sha1: sha1_hex(nmi_audio_dispatch),
+        nmi_audio_restore_uses_active_bank_shadow: true,
+        nmi_audio_bank_restore_call_cpu_address_hex: format!("{NMI_AUDIO_BANK_RESTORE_CALL:04X}"),
+        nmi_audio_bank_restore_call_hooked: true,
         transition_pointer_resolver_call_cpu_addresses_hex: TRANSITION_POINTER_RESOLVER_CALLS
             .map(|address| format!("{address:04X}"))
             .to_vec(),
@@ -308,6 +349,14 @@ pub(super) fn plan_relocated_dialogue_banks(
         transition_bank_selector_cpu_address_hex: format!("{TRANSITION_BANK_SELECTOR:04X}"),
         transition_bank_selector_byte_count: routines.bank_selector.len(),
         transition_bank_selector_sha1: sha1_hex(&routines.bank_selector),
+        transition_bank_restore_cpu_address_hex: format!("{TRANSITION_BANK_RESTORE:04X}"),
+        transition_bank_restore_byte_count: routines.bank_restore.len(),
+        transition_bank_restore_sha1: sha1_hex(&routines.bank_restore),
+        nmi_prg_bank_restore_selector_cpu_address_hex: format!(
+            "{NMI_PRG_BANK_RESTORE_SELECTOR:04X}"
+        ),
+        nmi_prg_bank_restore_selector_byte_count: routines.nmi_bank_restore_selector.len(),
+        nmi_prg_bank_restore_selector_sha1: sha1_hex(&routines.nmi_bank_restore_selector),
         selector_cave_cpu_start_hex: format!("{SELECTOR_CAVE_START:04X}"),
         selector_cave_cpu_end_exclusive_hex: format!("{SELECTOR_CAVE_END_EXCLUSIVE:04X}"),
         selector_cave_byte_count: selector_cave.len(),
@@ -316,7 +365,7 @@ pub(super) fn plan_relocated_dialogue_banks(
         canonical_pointer_binding_planned: true,
         transition_operands_preserved: true,
         transition_mode_hooks_planned: true,
-        reader_selector_assembled: true,
+        nmi_restorable_reader_selection_assembled: true,
         complete_dialogue_write_set,
         writes_installed: false,
     })
