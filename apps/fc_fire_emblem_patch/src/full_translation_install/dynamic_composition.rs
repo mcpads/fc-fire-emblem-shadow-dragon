@@ -39,6 +39,9 @@ pub(super) struct DialogueRuntimeCompositionPlan {
     pub(super) record_page_group_selector_byte_count: usize,
     pub(super) record_selector_directory_byte_count: usize,
     pub(super) scan_material_byte_count: usize,
+    pub(super) dynamic_string_control_count: usize,
+    pub(super) dynamic_string_page_count: usize,
+    pub(super) dynamic_string_selector_count: usize,
 }
 
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
@@ -231,6 +234,22 @@ pub(super) fn plan_dialogue_runtime_composition(
     let scan_material_byte_count = dense_group_lookup_byte_count
         + record_page_group_selector_byte_count
         + record_selector_directory_byte_count;
+    let dynamic_string_control_count = dialogue
+        .page_worksets
+        .iter()
+        .map(|workset| workset.dynamic_string_control_count)
+        .sum();
+    let dynamic_string_page_count = dialogue
+        .page_worksets
+        .iter()
+        .filter(|workset| workset.dynamic_string_control_count != 0)
+        .count();
+    let dynamic_string_selector_count = dialogue
+        .page_worksets
+        .iter()
+        .flat_map(|workset| workset.dynamic_string_selectors.iter().copied())
+        .collect::<BTreeSet<_>>()
+        .len();
 
     Ok(DialogueRuntimeCompositionPlan {
         glyph_atlas,
@@ -262,6 +281,9 @@ pub(super) fn plan_dialogue_runtime_composition(
         record_page_group_selector_byte_count,
         record_selector_directory_byte_count,
         scan_material_byte_count,
+        dynamic_string_control_count,
+        dynamic_string_page_count,
+        dynamic_string_selector_count,
     })
 }
 

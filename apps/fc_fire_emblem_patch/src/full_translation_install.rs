@@ -161,6 +161,12 @@ struct DialogueRuntimeComposition {
     direct_delta_recipe_byte_count: usize,
     bitpacked_delta_recipe_byte_count: usize,
     encoded_page_scan_strategy_selected: bool,
+    script_scan_covers_dynamic_strings: bool,
+    dynamic_string_control_count: usize,
+    dynamic_string_page_count: usize,
+    dynamic_string_selector_count: usize,
+    dynamic_string_producers_bound: bool,
+    consumer_specific_visible_prefixes_bound: bool,
     dense_group_lookup_byte_count: usize,
     record_page_group_selector_byte_count: usize,
     record_selector_directory_byte_count: usize,
@@ -191,6 +197,7 @@ struct DialogueStorage {
 struct InstallationGates {
     all_translation_inputs_loaded: bool,
     all_dialogue_records_encoded: bool,
+    all_visible_dialogue_text_encoded: bool,
     all_dialogue_pointers_planned: bool,
     all_dialogue_page_code_assignments_found: bool,
     all_dialogue_page_worksets_packed: bool,
@@ -414,7 +421,13 @@ pub(crate) fn plan_full_translation_installation(
                 .bitmap_and_atlas_index_visible_page_recipe_byte_count,
             direct_delta_recipe_byte_count: composition.direct_delta_recipe_byte_count,
             bitpacked_delta_recipe_byte_count: composition.bitpacked_delta_recipe_byte_count,
-            encoded_page_scan_strategy_selected: true,
+            encoded_page_scan_strategy_selected: false,
+            script_scan_covers_dynamic_strings: false,
+            dynamic_string_control_count: composition.dynamic_string_control_count,
+            dynamic_string_page_count: composition.dynamic_string_page_count,
+            dynamic_string_selector_count: composition.dynamic_string_selector_count,
+            dynamic_string_producers_bound: false,
+            consumer_specific_visible_prefixes_bound: false,
             dense_group_lookup_byte_count: composition.dense_group_lookup_byte_count,
             record_page_group_selector_byte_count: composition
                 .record_page_group_selector_byte_count,
@@ -445,6 +458,7 @@ pub(crate) fn plan_full_translation_installation(
         installation_gates: InstallationGates {
             all_translation_inputs_loaded: true,
             all_dialogue_records_encoded: true,
+            all_visible_dialogue_text_encoded: false,
             all_dialogue_pointers_planned: true,
             all_dialogue_page_code_assignments_found: true,
             all_dialogue_page_worksets_packed: true,
@@ -456,7 +470,7 @@ pub(crate) fn plan_full_translation_installation(
         },
         rom_emitted: false,
         dynamic_verification_started: false,
-        next_gate: "bind the encoded-page scan and atlas compositor to main-dialogue page identity and completed-page transitions; do not emit or run a partial ROM",
+        next_gate: "bind EC dynamic-string producers and consumer-specific visible prefixes, then choose a scan boundary that sees the complete rendered line before binding the atlas compositor; do not emit or run a partial ROM",
     };
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize full translation install plan")?;

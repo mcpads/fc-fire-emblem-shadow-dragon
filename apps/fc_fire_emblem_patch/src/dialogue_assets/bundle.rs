@@ -43,6 +43,8 @@ pub(crate) struct MainDialoguePageWorkset {
     pub(crate) record_id: String,
     pub(crate) page_index: usize,
     pub(crate) target_glyphs: BTreeSet<char>,
+    pub(crate) dynamic_string_selectors: BTreeSet<u8>,
+    pub(crate) dynamic_string_control_count: usize,
     pub(crate) source_reclaimable_active_codes: BTreeSet<u8>,
     pub(crate) preserved_target_active_codes: BTreeSet<u8>,
 }
@@ -358,13 +360,19 @@ fn record_page_worksets<'a>(
                 workspace_record.id
             );
             let mut target_glyphs = BTreeSet::new();
+            let mut dynamic_string_selectors = BTreeSet::new();
+            let mut dynamic_string_control_count = 0;
             let mut preserved_target_active_codes = BTreeSet::new();
             let mut source_reclaimable_active_codes = BTreeSet::new();
             for (source_line, workspace_line) in source_lines.iter().zip(workspace_lines) {
                 if workspace_line.status == TranslationStatus::Untranslated {
                     continue;
                 }
-                for byte in encode_korean_markup(&workspace_line.korean)? {
+                let logical_line = encode_korean_markup(&workspace_line.korean)?;
+                let (line_selectors, line_control_count) = dynamic_string_controls(&logical_line)?;
+                dynamic_string_selectors.extend(line_selectors);
+                dynamic_string_control_count += line_control_count;
+                for byte in logical_line {
                     match byte {
                         LogicalDialogueByte::TargetGlyph(glyph) => {
                             target_glyphs.insert(glyph);
@@ -393,10 +401,32 @@ fn record_page_worksets<'a>(
                 record_id: workspace_record.id.clone(),
                 page_index,
                 target_glyphs,
+                dynamic_string_selectors,
+                dynamic_string_control_count,
                 source_reclaimable_active_codes,
                 preserved_target_active_codes,
             })
         })
+}
+
+fn dynamic_string_controls(bytes: &[LogicalDialogueByte]) -> Result<(BTreeSet<u8>, usize)> {
+    let mut selectors = BTreeSet::new();
+    let mut control_count = 0;
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != LogicalDialogueByte::Encoded(0xEC) {
+            index += 1;
+            continue;
+        }
+        let selector = match bytes.get(index + 1) {
+            Some(LogicalDialogueByte::Encoded(selector)) if *selector <= 3 => *selector,
+            _ => anyhow::bail!("main-dialogue EC control lost its selector operand"),
+        };
+        selectors.insert(selector);
+        control_count += 1;
+        index += 2;
+    }
+    Ok((selectors, control_count))
 }
 
 fn encode_logical_bytes(
@@ -413,4 +443,19 @@ fn encode_logical_bytes(
                 .with_context(|| format!("missing main-dialogue bundle code for {glyph:?}")),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dynamic_string_inventory_counts_controls_and_unique_selectors() {
+        let logical = encode_korean_markup("{EC:00}한{EC:00}{EC:02}{EF}").unwrap();
+
+        let (selectors, control_count) = dynamic_string_controls(&logical).unwrap();
+
+        assert_eq!(selectors, BTreeSet::from([0, 2]));
+        assert_eq!(control_count, 3);
+    }
 }
