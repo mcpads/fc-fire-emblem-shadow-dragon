@@ -23,7 +23,6 @@ use crate::{
     unit_ui_text::plan_unit_ui_labels,
 };
 
-mod consumer_visible_prefixes;
 mod current_candidate;
 mod dynamic_composition;
 mod dynamic_input_producers;
@@ -37,7 +36,6 @@ mod runtime_identity;
 mod runtime_material;
 mod runtime_state_storage;
 
-use consumer_visible_prefixes::{ConsumerVisiblePrefixPlan, plan_consumer_visible_prefixes};
 use current_candidate::{CurrentCandidateInputs, inspect_dialogue_page_pool_capacity};
 use dynamic_composition::plan_dialogue_runtime_composition;
 use dynamic_input_producers::{DynamicInputProducerPlan, inspect_dynamic_input_producers};
@@ -77,7 +75,6 @@ const REQUIRED_DOMAINS: [&str; REQUIRED_DOMAIN_COUNT] = [
 pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) source_path: &'a Path,
     pub(crate) main_dialogue_workspace_path: &'a Path,
-    pub(crate) main_dialogue_entry_mode_workspace_path: &'a Path,
     pub(crate) fixed_text_workspace_path: &'a Path,
     pub(crate) unit_name_localization_path: &'a Path,
     pub(crate) chapter_title_localization_path: &'a Path,
@@ -138,13 +135,6 @@ struct TranslationInputs {
     item_action_label_count: usize,
     transition_label_count: usize,
     location_name_count: usize,
-    mode_specific_visible_prefix_japanese_source_byte_count: usize,
-    normalized_entry_mode_record_count: usize,
-    normalized_entry_mode_part_count: usize,
-    normalized_entry_mode_leading_japanese_occurrence_count: usize,
-    normalized_entry_mode_common_body_japanese_source_byte_count: usize,
-    normalized_entry_mode_untranslated_japanese_part_count: usize,
-    mode_specific_visible_prefix_translation_input_complete: bool,
     translation_input_complete: bool,
     review_complete: bool,
 }
@@ -256,7 +246,6 @@ struct DialogueRuntimeComposition {
     every_translated_dynamic_page_remappable: bool,
     dynamic_string_producers_bound: bool,
     dynamic_string_producers: DynamicInputProducerPlan,
-    consumer_visible_prefixes: ConsumerVisiblePrefixPlan,
     dense_group_lookup_byte_count: usize,
     record_page_group_selector_byte_count: usize,
     record_selector_directory_byte_count: usize,
@@ -290,9 +279,7 @@ struct DialogueStorage {
     transition_mirror_bank_count: usize,
     transition_mirror_payload_byte_count: usize,
     every_pointer_within_source_owned_regions: bool,
-    normalized_entry_mode_bodies_bound: bool,
     duplicated_mode_path_upper_bound: NormalizedStorageBudgetPlan,
-    selected_relocated_bank_plan: RelocatedDialogueBankPlan,
 }
 
 #[derive(Serialize)]
@@ -326,16 +313,10 @@ pub(crate) fn plan_full_translation_installation(
         dialogue_validation.translation_input_complete,
         "all-record main dialogue installation still has untranslated Japanese"
     );
-    let entry_mode_validation = validate_main_dialogue_entry_mode_workspace(
-        inputs.source_path,
-        inputs.main_dialogue_entry_mode_workspace_path,
-    )?;
     let dialogue = plan_all_main_dialogue_records(&rom, inputs.main_dialogue_workspace_path)?;
-    let display = plan_normalized_main_dialogue_display(
-        rom.data(),
-        inputs.main_dialogue_entry_mode_workspace_path,
-        &dialogue,
-    )?;
+    // 표시 계획은 정규 레코드에서 바로 만든다. 직접 진입과 전이 진입을 나누던 구조는
+    // 프리픽스 파서 결함이 만든 것이어서 폐기했다. 의사결정 59번을 따른다.
+    let display = crate::dialogue_assets::MainDialogueDisplayPlan::from_canonical_bundle(&dialogue)?;
     let fixed = plan_fixed_text(&rom, inputs.fixed_text_workspace_path)?;
     let unit_names = plan_unit_names(&rom, inputs.unit_name_localization_path)?;
     let chapter_titles = plan_chapter_titles(&rom, inputs.chapter_title_localization_path)?;
@@ -363,10 +344,8 @@ pub(crate) fn plan_full_translation_installation(
         "full translation installation input population changed"
     );
 
-    let baseline_display =
-        crate::dialogue_assets::MainDialogueDisplayPlan::from_canonical_bundle(&dialogue)?;
     let baseline_dynamic_inputs = plan_dynamic_dialogue_inputs(
-        &baseline_display,
+        &display,
         &fixed.entries,
         &unit_names.entries,
         &locations.entries,
@@ -484,16 +463,7 @@ pub(crate) fn plan_full_translation_installation(
         required_domains: &REQUIRED_DOMAINS,
         expected_dialogue_storage_write_count: relocated_bank_plan.expected_write_count(),
     })?;
-    let consumer_visible_prefixes = plan_consumer_visible_prefixes(
-        rom.data(),
-        &dialogue,
-        &entry_mode_validation,
-        source_owned_storage_byte_count,
-        baseline_planned_storage_byte_count,
-        atlas_scan_and_dynamic_remap_byte_count,
-    )?;
-    let translation_input_complete = entry_mode_validation.translation_input_complete
-        && consumer_visible_prefixes.translation_input_complete();
+    let translation_input_complete = dialogue_validation.translation_input_complete;
     let review_complete = dialogue_validation.review_complete
         && fixed.review_complete
         && unit_names.review_complete
@@ -505,7 +475,6 @@ pub(crate) fn plan_full_translation_installation(
         && transitions.save_offer.review_complete
         && transitions.ending_record.review_complete
         && locations.review_complete
-        && entry_mode_validation.review_complete
         && translation_input_complete;
     let next_gate = if translation_input_complete
         && relocated_bank_plan.strategy_selected
@@ -538,17 +507,6 @@ pub(crate) fn plan_full_translation_installation(
             transition_label_count: transitions.save_offer.entry_count
                 + transitions.ending_record.entry_count,
             location_name_count: locations.entries.len(),
-            mode_specific_visible_prefix_japanese_source_byte_count: consumer_visible_prefixes
-                .japanese_source_byte_count(),
-            normalized_entry_mode_record_count: entry_mode_validation.record_count,
-            normalized_entry_mode_part_count: entry_mode_validation.part_count,
-            normalized_entry_mode_leading_japanese_occurrence_count: entry_mode_validation
-                .leading_japanese_source_byte_count,
-            normalized_entry_mode_common_body_japanese_source_byte_count: entry_mode_validation
-                .common_body_japanese_source_byte_count,
-            normalized_entry_mode_untranslated_japanese_part_count: entry_mode_validation
-                .untranslated_japanese_part_count,
-            mode_specific_visible_prefix_translation_input_complete: translation_input_complete,
             translation_input_complete,
             review_complete,
         },
@@ -675,7 +633,6 @@ pub(crate) fn plan_full_translation_installation(
                 .every_translated_dynamic_page_remappable,
             dynamic_string_producers_bound,
             dynamic_string_producers: dynamic_input_producers,
-            consumer_visible_prefixes,
             dense_group_lookup_byte_count: composition.dense_group_lookup_byte_count,
             record_page_group_selector_byte_count: composition
                 .record_page_group_selector_byte_count,
@@ -711,9 +668,7 @@ pub(crate) fn plan_full_translation_installation(
             transition_mirror_bank_count: encoded_display.transition_mirrors.len(),
             transition_mirror_payload_byte_count: encoded_display.transition_payload_byte_count,
             every_pointer_within_source_owned_regions: true,
-            normalized_entry_mode_bodies_bound: true,
             duplicated_mode_path_upper_bound: normalized_storage_budget,
-            selected_relocated_bank_plan: relocated_bank_plan,
         },
         installation_gates: InstallationGates {
             all_translation_inputs_loaded: translation_input_complete,
