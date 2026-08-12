@@ -87,6 +87,68 @@ pub(super) struct CanonicalBattleCodebook {
     pub(super) maximum_remap_pair_count: usize,
 }
 
+pub(crate) struct GlyphWorkset {
+    pub(crate) target_glyphs: BTreeSet<char>,
+    pub(crate) preserved_active_codes: BTreeSet<u8>,
+}
+
+pub(crate) struct GlyphWorksetCodebook {
+    pub(crate) glyph_codes: BTreeMap<char, u8>,
+    pub(crate) glyph_count: usize,
+    pub(crate) conflict_edge_count: usize,
+    pub(crate) constructed_clique_glyph_count: usize,
+    pub(crate) stable_color_count: usize,
+    pub(crate) abstract_assignment_sha1: String,
+    pub(crate) physical_assignment_sha1: String,
+    pub(crate) workset_count: usize,
+    pub(crate) constrained_color_count: usize,
+    pub(crate) active_ceiling_assignment_found: bool,
+}
+
+pub(crate) fn plan_glyph_workset_codebook(
+    worksets: &[GlyphWorkset],
+) -> Result<GlyphWorksetCodebook> {
+    ensure!(!worksets.is_empty(), "glyph codebook has no worksets");
+    let families = BattleGlyphFamilies {
+        base: BTreeSet::new(),
+        player_participants: Vec::new(),
+        enemy_participants: Vec::new(),
+        terrains: Vec::new(),
+        dialogue_records: worksets
+            .iter()
+            .map(|workset| workset.target_glyphs.clone())
+            .collect(),
+    };
+    let coloring = plan_stable_coloring(&families, ACTIVE_HANGUL_SLOT_COUNT)?;
+    ensure!(
+        coloring.active_ceiling_assignment_found
+            && coloring.color_count <= ACTIVE_HANGUL_SLOT_COUNT,
+        "complete glyph worksets need {} stable colors but only {} active slots exist",
+        coloring.color_count,
+        ACTIVE_HANGUL_SLOT_COUNT
+    );
+    let constraints = worksets
+        .iter()
+        .map(|workset| ScreenCodeConstraint {
+            glyphs: workset.target_glyphs.clone(),
+            preserved_active_codes: workset.preserved_active_codes.clone(),
+        })
+        .collect::<Vec<_>>();
+    let physical = assign_physical_codes(&coloring, &constraints)?;
+    Ok(GlyphWorksetCodebook {
+        glyph_codes: physical.glyph_codes,
+        glyph_count: coloring.glyph_count,
+        conflict_edge_count: coloring.conflict_edge_count,
+        constructed_clique_glyph_count: coloring.constructed_clique_glyph_count,
+        stable_color_count: coloring.color_count,
+        abstract_assignment_sha1: coloring.assignment_sha1,
+        physical_assignment_sha1: physical.assignment_sha1,
+        workset_count: physical.constrained_screen_count,
+        constrained_color_count: physical.constrained_color_count,
+        active_ceiling_assignment_found: coloring.active_ceiling_assignment_found,
+    })
+}
+
 #[derive(Debug, Serialize)]
 struct BattleCodebookPlanReport {
     schema: u8,
@@ -521,6 +583,43 @@ fn entry_glyph_sets(plan: &FixedTextPlan, table_id: &str) -> Vec<BTreeSet<char>>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn glyphs(text: &str) -> BTreeSet<char> {
+        text.chars().collect()
+    }
+
+    #[test]
+    fn workset_codebook_reuses_codes_only_across_noncooccurring_glyphs() {
+        let active = active_hangul_codes();
+        let worksets = [
+            GlyphWorkset {
+                target_glyphs: glyphs("가나"),
+                preserved_active_codes: BTreeSet::from([active[0]]),
+            },
+            GlyphWorkset {
+                target_glyphs: glyphs("가다"),
+                preserved_active_codes: BTreeSet::from([active[1]]),
+            },
+        ];
+
+        let first = plan_glyph_workset_codebook(&worksets).unwrap();
+        let second = plan_glyph_workset_codebook(&worksets).unwrap();
+
+        assert_ne!(first.glyph_codes[&'가'], first.glyph_codes[&'나']);
+        assert_ne!(first.glyph_codes[&'가'], first.glyph_codes[&'다']);
+        assert_eq!(first.glyph_codes[&'나'], first.glyph_codes[&'다']);
+        assert_ne!(first.glyph_codes[&'가'], active[0]);
+        assert_ne!(first.glyph_codes[&'가'], active[1]);
+        assert_eq!(
+            first.abstract_assignment_sha1,
+            second.abstract_assignment_sha1
+        );
+        assert_eq!(
+            first.physical_assignment_sha1,
+            second.physical_assignment_sha1
+        );
+        assert_eq!(first.workset_count, worksets.len());
+    }
 
     #[test]
     fn report_does_not_emit_translation_content_or_private_paths() {

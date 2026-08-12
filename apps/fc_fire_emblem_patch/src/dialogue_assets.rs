@@ -35,7 +35,9 @@ pub(crate) use battle_workspace::{
     import_battle_dialogue_draft, plan_battle_dialogue_records, plan_battle_dialogue_reinsertion,
     validate_battle_dialogue_workspace,
 };
-pub(crate) use bundle::{MainDialogueBundlePlan, plan_main_dialogue_bundle};
+pub(crate) use bundle::{
+    MainDialogueBundlePlan, plan_all_main_dialogue_records, plan_main_dialogue_bundle,
+};
 pub(crate) use glyph_workset::{
     RuntimeEvidence as MaximumDialogueRuntimeEvidence, analyze_main_dialogue_glyph_workset,
     load_maximum_dialogue_runtime_evidence,

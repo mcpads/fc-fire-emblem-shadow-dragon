@@ -10,6 +10,7 @@ mod epilogue_variant_evidence;
 mod font;
 mod font_slots;
 mod front_end_menu;
+mod full_translation_install;
 mod hangul_page_plan;
 mod item_flow;
 mod japanese_encoding;
@@ -288,6 +289,32 @@ enum Command {
         #[arg(long, default_value = "out/unit-ui-text.json")]
         unit_ui_text_report: PathBuf,
         #[arg(long, default_value = "out/translation-coverage.json")]
+        report: PathBuf,
+    },
+    /// Plan every unfinished translation domain together before emitting one integrated ROM.
+    PlanFullTranslationInstallation {
+        source: PathBuf,
+        #[arg(long, default_value = "private/dialogue/main-workspace.json")]
+        main_dialogue_workspace: PathBuf,
+        #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
+        fixed_text_workspace: PathBuf,
+        #[arg(long, default_value = "assets/translation/unit-names.ko.json")]
+        unit_name_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/chapter-titles.ko.json")]
+        chapter_title_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/choice-labels.ko.json")]
+        choice_label_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/map-menu.ko.json")]
+        map_menu_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/unit-ui-labels.ko.json")]
+        unit_ui_label_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/item-action-labels.ko.json")]
+        item_action_label_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/transition-labels.ko.json")]
+        transition_label_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/location-names.ko.json")]
+        location_name_localization: PathBuf,
+        #[arg(long, default_value = "out/full-translation-installation.json")]
         report: PathBuf,
     },
     /// Bind chapter-clear, save, title, and chapter-intro screen lifetimes and producers.
@@ -1098,6 +1125,49 @@ fn main() -> Result<()> {
                 summary.domain_count,
                 summary.unresolved_source_domain_count,
                 summary.all_consumers_installed_domain_count
+            );
+        }
+        Command::PlanFullTranslationInstallation {
+            source,
+            main_dialogue_workspace,
+            fixed_text_workspace,
+            unit_name_localization,
+            chapter_title_localization,
+            choice_label_localization,
+            map_menu_localization,
+            unit_ui_label_localization,
+            item_action_label_localization,
+            transition_label_localization,
+            location_name_localization,
+            report,
+        } => {
+            let summary = full_translation_install::plan_full_translation_installation(
+                full_translation_install::FullTranslationInstallInputs {
+                    source_path: &source,
+                    main_dialogue_workspace_path: &main_dialogue_workspace,
+                    fixed_text_workspace_path: &fixed_text_workspace,
+                    unit_name_localization_path: &unit_name_localization,
+                    chapter_title_localization_path: &chapter_title_localization,
+                    choice_label_localization_path: &choice_label_localization,
+                    map_menu_localization_path: &map_menu_localization,
+                    unit_ui_label_localization_path: &unit_ui_label_localization,
+                    item_action_label_localization_path: &item_action_label_localization,
+                    transition_label_localization_path: &transition_label_localization,
+                    location_name_localization_path: &location_name_localization,
+                    report_path: &report,
+                },
+            )?;
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "full translation installation: {} required domains, {} dialogue records, {} page worksets, {} glyphs in {} stable colors, {} pointer writes, {} planned bytes",
+                summary.required_domain_count,
+                summary.dialogue_record_count,
+                summary.dialogue_page_workset_count,
+                summary.dialogue_glyph_count,
+                summary.dialogue_stable_color_count,
+                summary.dialogue_pointer_write_count,
+                summary.dialogue_planned_storage_byte_count,
             );
         }
         Command::AnalyzeChapterTransitions { source, report } => {

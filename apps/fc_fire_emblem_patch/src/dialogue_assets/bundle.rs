@@ -65,6 +65,7 @@ impl MainDialogueBundlePlan {
                     file_offset: region.file_offset,
                     source_storage: region.source_storage.clone(),
                     encoded_storage: encode_logical_bytes(&region.logical_storage, assignments)?,
+                    used_storage_byte_count: region.used_storage_byte_count,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -89,6 +90,7 @@ pub(crate) struct EncodedMainDialogueRegion {
     pub(crate) file_offset: usize,
     pub(crate) source_storage: Vec<u8>,
     pub(crate) encoded_storage: Vec<u8>,
+    pub(crate) used_storage_byte_count: usize,
 }
 
 #[derive(Clone)]
@@ -103,6 +105,7 @@ struct LogicalBundleRegion {
     file_offset: usize,
     source_storage: Vec<u8>,
     logical_storage: Vec<LogicalDialogueByte>,
+    used_storage_byte_count: usize,
     pointer_writes: Vec<MainDialoguePointerWrite>,
 }
 
@@ -146,7 +149,7 @@ pub(crate) fn plan_main_dialogue_bundle(
             .all(|record_id| record_index_by_id.contains_key(record_id)),
         "main dialogue bundle contains an unknown record ID"
     );
-    validate_target_records(&workspace, &requested)?;
+    validate_target_records(&workspace, &source_records, &requested)?;
     validate_transition_closure(rom, &source_records, &requested)?;
 
     let target_indices = requested
@@ -280,6 +283,31 @@ pub(crate) fn plan_main_dialogue_bundle(
         target_records,
         regions,
     })
+}
+
+pub(crate) fn plan_all_main_dialogue_records(
+    rom: &Rom,
+    workspace_path: &Path,
+) -> Result<MainDialogueBundlePlan> {
+    let workspace_bytes = fs::read(workspace_path)
+        .with_context(|| format!("read main dialogue workspace {}", workspace_path.display()))?;
+    let workspace: MainDialogueWorkspace = serde_json::from_slice(&workspace_bytes)
+        .with_context(|| format!("parse main dialogue workspace {}", workspace_path.display()))?;
+    ensure!(
+        workspace.records.len() == 504,
+        "all-record main dialogue installation must contain exactly 504 records"
+    );
+    let record_ids = workspace
+        .records
+        .iter()
+        .map(|record| record.id.as_str())
+        .collect::<Vec<_>>();
+    let plan = plan_main_dialogue_bundle(rom, workspace_path, &record_ids)?;
+    ensure!(
+        plan.record_ids.len() == workspace.records.len(),
+        "all-record main dialogue installation lost records"
+    );
+    Ok(plan)
 }
 
 fn record_page_worksets<'a>(

@@ -42,6 +42,7 @@ pub(super) fn plan_region(
         .collect::<Result<Vec<_>>>()?;
     let logical_refs = logical_records.iter().collect::<Vec<_>>();
     let (mut logical_storage, placements) = pack_logical_records(&logical_refs);
+    let used_storage_byte_count = logical_storage.len();
     let capacity = region.end_exclusive - region.start;
     ensure!(
         logical_storage.len() <= capacity,
@@ -83,6 +84,7 @@ pub(super) fn plan_region(
         file_offset: region.start,
         source_storage: source[region.start..region.end_exclusive].to_vec(),
         logical_storage,
+        used_storage_byte_count,
         pointer_writes,
     })
 }
