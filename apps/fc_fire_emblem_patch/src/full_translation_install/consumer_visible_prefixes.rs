@@ -29,6 +29,15 @@ pub(in crate::full_translation_install) struct ConsumerVisiblePrefixPlan {
     distinct_body_split_region_budgets: Vec<ConsumerSplitRegionBudget>,
     distinct_body_split_upper_bound_fits_every_source_bank: bool,
     distinct_body_split_bank_budgets: Vec<ConsumerSplitBankBudget>,
+    compact_normalized_prefix_payload_byte_count: usize,
+    fixed_row_normalized_prefix_payload_byte_count: usize,
+    dense_record_to_prefix_row_byte_count: usize,
+    selected_normalized_prefix_material_byte_count: usize,
+    atlas_scan_remap_and_prefix_material_byte_count: usize,
+    material_prg_8k_page_count_before_prefix_normalization: usize,
+    material_prg_8k_page_count_after_prefix_normalization: usize,
+    prefix_normalization_adds_prg_8k_pages: bool,
+    leading_candidate: &'static str,
     candidate_strategies: [&'static str; 5],
     selected_strategy: Option<&'static str>,
     direct_entry_producers_bound: bool,
@@ -60,6 +69,7 @@ pub(in crate::full_translation_install) fn plan_consumer_visible_prefixes(
     dialogue: &MainDialogueBundlePlan,
     source_owned_storage_byte_count: usize,
     planned_storage_byte_count: usize,
+    atlas_scan_and_dynamic_remap_byte_count: usize,
 ) -> Result<ConsumerVisiblePrefixPlan> {
     let inspection = inspect_main_dialogue_entry_modes(source)?;
     let logical_byte_counts = dialogue.logical_record_byte_counts();
@@ -159,6 +169,38 @@ pub(in crate::full_translation_install) fn plan_consumer_visible_prefixes(
     let distinct_body_split_upper_bound_fits_every_source_bank = distinct_body_split_bank_budgets
         .iter()
         .all(|bank| bank.deficit_byte_count == 0);
+    let positive_delta_target_count = inspection
+        .transition_targets
+        .iter()
+        .filter(|target| target.transition_to_direct_body_delta > 0)
+        .count();
+    let negative_delta_target_count = inspection
+        .transition_targets
+        .iter()
+        .filter(|target| target.transition_to_direct_body_delta < 0)
+        .count();
+    ensure!(
+        positive_delta_target_count + negative_delta_target_count
+            == inspection.transition_targets.len(),
+        "main dialogue prefix normalization has a zero-delta target"
+    );
+    ensure!(
+        inspection.transition_targets.len() < usize::from(u8::MAX),
+        "main dialogue prefix rows do not fit a one-byte index with FF sentinel"
+    );
+    let compact_normalized_prefix_payload_byte_count =
+        positive_delta_target_count * 4 + negative_delta_target_count * 6;
+    let fixed_row_normalized_prefix_payload_byte_count = inspection.transition_targets.len() * 6;
+    let dense_record_to_prefix_row_byte_count = inspection.canonical_record_count;
+    let selected_normalized_prefix_material_byte_count =
+        fixed_row_normalized_prefix_payload_byte_count + dense_record_to_prefix_row_byte_count;
+    let atlas_scan_remap_and_prefix_material_byte_count = atlas_scan_and_dynamic_remap_byte_count
+        .checked_add(selected_normalized_prefix_material_byte_count)
+        .context("dialogue material size overflow after prefix normalization")?;
+    let material_prg_8k_page_count_before_prefix_normalization =
+        atlas_scan_and_dynamic_remap_byte_count.div_ceil(8 * 1024);
+    let material_prg_8k_page_count_after_prefix_normalization =
+        atlas_scan_remap_and_prefix_material_byte_count.div_ceil(8 * 1024);
 
     Ok(ConsumerVisiblePrefixPlan {
         canonical_record_count: inspection.canonical_record_count,
@@ -172,16 +214,8 @@ pub(in crate::full_translation_install) fn plan_consumer_visible_prefixes(
         direct_prefix_byte_counts,
         transition_prefix_byte_counts,
         transition_to_direct_body_deltas: transition_to_direct_body_deltas.clone(),
-        positive_delta_target_count: inspection
-            .transition_targets
-            .iter()
-            .filter(|target| target.transition_to_direct_body_delta > 0)
-            .count(),
-        negative_delta_target_count: inspection
-            .transition_targets
-            .iter()
-            .filter(|target| target.transition_to_direct_body_delta < 0)
-            .count(),
+        positive_delta_target_count,
+        negative_delta_target_count,
         single_global_transition_pointer_adjustment_possible: transition_to_direct_body_deltas
             .len()
             == 1,
@@ -208,6 +242,17 @@ pub(in crate::full_translation_install) fn plan_consumer_visible_prefixes(
         distinct_body_split_region_budgets: split_region_budgets,
         distinct_body_split_upper_bound_fits_every_source_bank,
         distinct_body_split_bank_budgets,
+        compact_normalized_prefix_payload_byte_count,
+        fixed_row_normalized_prefix_payload_byte_count,
+        dense_record_to_prefix_row_byte_count,
+        selected_normalized_prefix_material_byte_count,
+        atlas_scan_remap_and_prefix_material_byte_count,
+        material_prg_8k_page_count_before_prefix_normalization,
+        material_prg_8k_page_count_after_prefix_normalization,
+        prefix_normalization_adds_prg_8k_pages:
+            material_prg_8k_page_count_after_prefix_normalization
+                > material_prg_8k_page_count_before_prefix_normalization,
+        leading_candidate: "one canonical translated body plus a dense record-to-prefix-row index and fixed six-byte rows; direct and transition shims replay the original header or E8 effect before entering that body",
         candidate_strategies: [
             "bind direct producers, then keep only the entry modes that are actually reachable",
             "normalize relocated records and use a mode-aware transition shim that preserves E8 side effects",

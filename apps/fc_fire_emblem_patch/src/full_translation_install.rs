@@ -325,11 +325,15 @@ pub(crate) fn plan_full_translation_installation(
         planned_storage_byte_count <= source_owned_storage_byte_count,
         "complete dialogue encoded storage exceeds its source-owned regions"
     );
+    let atlas_scan_and_dynamic_remap_byte_count = composition.glyph_atlas.len()
+        + composition.scan_material_byte_count
+        + dynamic_remap.selected_dense_remap_byte_count;
     let consumer_visible_prefixes = plan_consumer_visible_prefixes(
         rom.data(),
         &dialogue,
         source_owned_storage_byte_count,
         planned_storage_byte_count,
+        atlas_scan_and_dynamic_remap_byte_count,
     )?;
     let review_complete = dialogue_validation.review_complete
         && fixed.review_complete
@@ -497,9 +501,7 @@ pub(crate) fn plan_full_translation_installation(
             scan_material_byte_count: composition.scan_material_byte_count,
             atlas_and_scan_material_byte_count: composition.glyph_atlas.len()
                 + composition.scan_material_byte_count,
-            atlas_scan_and_dynamic_remap_byte_count: composition.glyph_atlas.len()
-                + composition.scan_material_byte_count
-                + dynamic_remap.selected_dense_remap_byte_count,
+            atlas_scan_and_dynamic_remap_byte_count,
             runtime_page_scan_bound_to_control_flow: false,
             current_battle_glyph_atlas_tile_count: page_capacity.battle_glyph_atlas_tile_count,
             current_battle_maximum_ppu_write_count: page_capacity.battle_maximum_ppu_write_count,
