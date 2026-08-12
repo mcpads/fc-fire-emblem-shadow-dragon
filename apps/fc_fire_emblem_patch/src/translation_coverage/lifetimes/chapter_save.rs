@@ -178,21 +178,26 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(demands.len(), 4);
+        // 화면 역할과 그 순서는 원본 구조라 고정한다.
+        assert_eq!(
+            demands
+                .iter()
+                .map(|demand| demand.screen_role)
+                .collect::<Vec<_>>(),
+            [
+                "chapter_save_offer",
+                "chapter_save_complete_continue_prompt",
+                "chapter_save_complete_power_off_notice",
+                "suspend_message",
+            ]
+        );
+        // 슬롯 수요는 확정한 번역에 따라 달라지므로 고정하지 않는다.
+        // 지켜야 하는 것은 네 소비자가 모두 활성 페이지 예산 안에 든다는 점이다.
         assert!(demands.iter().all(|demand| demand.fits_active_page));
-        assert_eq!(demands[0].screen_role, "chapter_save_offer");
-        assert_eq!(demands[0].total_slot_demand, 209);
-        assert_eq!(
-            demands[1].screen_role,
-            "chapter_save_complete_continue_prompt"
+        assert!(
+            demands
+                .iter()
+                .all(|demand| demand.total_slot_demand <= demand.active_slot_count)
         );
-        assert_eq!(demands[1].total_slot_demand, 78);
-        assert_eq!(
-            demands[2].screen_role,
-            "chapter_save_complete_power_off_notice"
-        );
-        assert_eq!(demands[2].total_slot_demand, 209);
-        assert_eq!(demands[3].screen_role, "suspend_message");
-        assert_eq!(demands[3].total_slot_demand, 209);
     }
 }

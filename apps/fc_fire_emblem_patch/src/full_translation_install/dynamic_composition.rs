@@ -405,7 +405,7 @@ fn record_workset_indices(
     let mut records = BTreeMap::<&str, Vec<(usize, usize)>>::new();
     for (workset_index, workset) in dialogue.page_worksets.iter().enumerate() {
         records
-            .entry(workset.display_path_id.as_str())
+            .entry(workset.record_id.as_str())
             .or_default()
             .push((workset.page_index, workset_index));
     }
@@ -440,20 +440,20 @@ fn encode_scan_material(
 ) -> Result<Vec<u8>> {
     let mut encoded = encode_dense_group_lookups(&codebook.page_assignments, glyph_atlas_indices)?;
     let mut selectors = Vec::with_capacity(dialogue.page_worksets.len());
-    let mut directory = Vec::with_capacity((dialogue.display_paths.len() + 1) * 2);
+    let mut directory = Vec::with_capacity((dialogue.record_ids.len() + 1) * 2);
     ensure!(
         dynamic_remap.workset_page_selectors.len() == dialogue.page_worksets.len(),
         "dialogue scan material lost page selectors"
     );
-    for path in &dialogue.display_paths {
+    for record_id in &dialogue.record_ids {
         directory.extend_from_slice(
             &u16::try_from(selectors.len())
                 .context("dialogue page-selector material exceeds a 16-bit offset")?
                 .to_le_bytes(),
         );
         let indices = record_worksets
-            .get(path.display_path_id.as_str())
-            .with_context(|| format!("{} has no runtime page selectors", path.display_path_id))?;
+            .get(record_id.as_str())
+            .with_context(|| format!("{record_id} has no runtime page selectors"))?;
         selectors.extend(
             indices
                 .iter()

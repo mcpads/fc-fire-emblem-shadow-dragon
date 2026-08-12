@@ -12,6 +12,10 @@ const MMC3_PAGE_BYTE_COUNT: usize = 8 * 1024;
 const RUNTIME_MATERIAL_CAPACITY: usize = RUNTIME_MATERIAL_PAGE_COUNT * MMC3_PAGE_BYTE_COUNT;
 const CONTENT_EMITTED_FLAG: u8 = 1;
 const RUNTIME_CODE_SECTION_ID: u8 = 5;
+/// 세 페이지 용기 안에서 실행 코드에 남겨 두기로 한 하한이다. 아직 코드를 쓰지 않아
+/// 실제 크기는 모르지만, 이 값은 자료 배치를 정할 때 이미 확보해 둔 자리다.
+/// 자료가 커져 이 아래로 내려가면 배치를 다시 정해야 한다.
+const MINIMUM_RUNTIME_CODE_RESERVATION: usize = 1_888;
 
 pub(super) struct RuntimeMaterialInputs<'a> {
     pub(super) glyph_atlas: &'a [u8],
@@ -80,11 +84,18 @@ pub(super) fn plan_dialogue_runtime_material(
         },
     ];
     let plan = encode_runtime_material(&data_sections, RUNTIME_MATERIAL_CAPACITY)?;
+    // 용기는 세 MMC3 페이지로 고정한다. 다른 도메인의 시작점이 후속 구현에서 움직이지
+    // 않게 하려는 것이라 정확한 크기 자체가 요구사항이다.
     ensure!(
-        plan.payload_byte_count == 22_642
-            && plan.runtime_code_reserved_byte_count == 1_888
-            && plan.material.len() == RUNTIME_MATERIAL_CAPACITY,
-        "main-dialogue runtime material population changed"
+        plan.material.len() == RUNTIME_MATERIAL_CAPACITY,
+        "main-dialogue runtime material container is no longer three MMC3 pages"
+    );
+    // 반면 payload와 실행 코드 예약이 나뉘는 지점은 요구사항이 아니다. 자료가 줄면
+    // 예약이 늘어야 정상이다. 지킬 것은 예약이 확보한 하한이다. 의사결정 56번을 따른다.
+    ensure!(
+        plan.runtime_code_reserved_byte_count >= MINIMUM_RUNTIME_CODE_RESERVATION,
+        "main-dialogue runtime material left only {} bytes for runtime code, below the {MINIMUM_RUNTIME_CODE_RESERVATION}-byte reservation",
+        plan.runtime_code_reserved_byte_count
     );
     Ok(plan)
 }

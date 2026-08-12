@@ -5,6 +5,18 @@ use super::*;
 #[cfg(test)]
 mod tests;
 
+/// 지원 원본에서 센 정규 레코드 수다.
+const CANONICAL_RECORD_COUNT: usize = 504;
+
+/// 지원 원본에서 센 번역 뷰의 줄 수다.
+///
+/// 모집단이 조용히 흔들리는 것을 막는 값이므로 재추출 결과에 맞춰 자동으로 고치지 않는다.
+/// 바꿀 때는 무엇이 왜 늘거나 줄었는지 함께 기록한다. 직전 값 2,812는 레코드 프리픽스를
+/// `E5 → 창 기술자 → E8` 한 가지 순서로만 읽던 시절의 수다. 실제로는 기술자가 없는
+/// 레코드와 `E8`이 선두인 레코드가 있고, 그 자리를 기술자로 먹으면 화면에 나오는 글자가
+/// 잘린다. 세 형태를 실행으로 확인해 파서를 고치면서 2,814가 됐다. 의사결정 57번을 따른다.
+const TRANSLATION_VIEW_LINE_COUNT: usize = 2_814;
+
 pub(super) fn validate_workspace_translations(
     workspace: &MainDialogueWorkspace,
 ) -> Result<WorkspaceTranslationCounts> {
@@ -190,12 +202,12 @@ pub(super) fn build_workspace(source: &[u8]) -> Result<MainDialogueWorkspace> {
         records: workspace_records,
     };
     ensure!(
-        workspace.records.len() == 504,
-        "main dialogue workspace must contain exactly 504 canonical records"
+        workspace.records.len() == CANONICAL_RECORD_COUNT,
+        "main dialogue workspace must contain exactly {CANONICAL_RECORD_COUNT} canonical records"
     );
     ensure!(
-        line_count == 2_812,
-        "main dialogue workspace must contain exactly 2812 source lines, found {line_count}"
+        line_count == TRANSLATION_VIEW_LINE_COUNT,
+        "main dialogue workspace must contain exactly {TRANSLATION_VIEW_LINE_COUNT} source lines, found {line_count}"
     );
     ensure!(
         safe_japanese_offsets.len() == inspection.safe_japanese_translation_source_byte_count,

@@ -18,7 +18,7 @@ use crate::{
 
 mod battle_workspace;
 mod bundle;
-mod entry_mode_workspace;
+mod display_plan;
 mod glyph_workset;
 mod layout_packing;
 mod markup;
@@ -37,15 +37,10 @@ pub(crate) use battle_workspace::{
     validate_battle_dialogue_workspace,
 };
 pub(crate) use bundle::{
-    EncodedMainDialogueDisplayStorage, MainDialogueBundlePlan, MainDialogueDisplayMode,
-    MainDialogueDisplayPath, MainDialoguePageWorkset, MainDialogueTransitionMirror,
-    plan_all_main_dialogue_records, plan_main_dialogue_bundle,
+    MainDialogueBundlePlan, MainDialoguePageWorkset, plan_all_main_dialogue_records,
+    plan_main_dialogue_bundle,
 };
-pub(crate) use entry_mode_workspace::{
-    EntryModeWorkspaceValidationSummary, MainDialogueDisplayPlan,
-    extract_main_dialogue_entry_mode_workspace, import_entry_mode_draft,
-    plan_normalized_main_dialogue_display, validate_main_dialogue_entry_mode_workspace,
-};
+pub(crate) use display_plan::MainDialogueDisplayPlan;
 pub(crate) use glyph_workset::{
     RuntimeEvidence as MaximumDialogueRuntimeEvidence, analyze_main_dialogue_glyph_workset,
     bind_chapter_event_dialogue_routes, load_maximum_dialogue_runtime_evidence,

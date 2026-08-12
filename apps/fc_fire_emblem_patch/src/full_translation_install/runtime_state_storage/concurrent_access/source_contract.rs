@@ -4,7 +4,6 @@ use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
-    dialogue_assets::MainDialogueTransitionMirror,
     rom::{HEADER_SIZE, Rom},
     sha1_hex,
 };
@@ -50,7 +49,6 @@ struct ConcurrentPointerRole {
 #[derive(Serialize)]
 struct BankDirectoryDomain {
     source_bank_count: usize,
-    transition_mirror_bank_count: usize,
     pointer_base_count: usize,
     selector_count_per_base: usize,
     effective_address_count: usize,
@@ -133,7 +131,6 @@ pub(super) fn bind_concurrent_computed_accesses(
     source: &Rom,
     source_nmi: &RuntimeAccessTrace,
     source_audio: &RuntimeAccessTrace,
-    transition_mirrors: &[MainDialogueTransitionMirror],
     main_dialogue_queue_bound_proven: bool,
 ) -> Result<ConcurrentComputedAccessContract> {
     ensure!(
@@ -154,7 +151,7 @@ pub(super) fn bind_concurrent_computed_accesses(
     ensure_exact_partition("source NMI", &source_nmi.indirect_sites, &nmi_roles)?;
     ensure_exact_partition("source audio", &source_audio.indirect_sites, &audio_roles)?;
 
-    let bank_directory_domain = bind_bank_directory_domain(source, transition_mirrors)?;
+    let bank_directory_domain = bind_bank_directory_domain(source)?;
     let pointer_roles = vec![
         role(
             "bank_local_nmi_transfer_directory",
@@ -254,7 +251,6 @@ pub(super) fn bind_concurrent_computed_accesses(
 
 fn bind_bank_directory_domain(
     source: &Rom,
-    transition_mirrors: &[MainDialogueTransitionMirror],
 ) -> Result<BankDirectoryDomain> {
     const SOURCE_SWITCHABLE_BANK_COUNT: usize = 15;
     const POSITIVE_SELECTOR_COUNT: usize = 0x7F;
@@ -263,22 +259,6 @@ fn bind_bank_directory_domain(
     for bank in 0..SOURCE_SWITCHABLE_BANK_COUNT {
         let bank = u8::try_from(bank).expect("source switchable bank count fits u8");
         let bytes = source_bytes(source, bank, BANK_DIRECTORY_POINTER, 2)?;
-        pointer_bases.push(u16::from_le_bytes([bytes[0], bytes[1]]));
-    }
-    ensure!(
-        transition_mirrors.len() == 5,
-        "transition mirror population changed before NMI directory analysis"
-    );
-    for mirror in transition_mirrors {
-        ensure!(
-            mirror.material.len() == PRG_BANK_SIZE,
-            "transition mirror is not one complete 16 KiB bank"
-        );
-        let offset = usize::from(BANK_DIRECTORY_POINTER - 0x8000);
-        let bytes = mirror
-            .material
-            .get(offset..offset + 2)
-            .context("transition mirror has no NMI directory pointer cell")?;
         pointer_bases.push(u16::from_le_bytes([bytes[0], bytes[1]]));
     }
 
@@ -296,7 +276,7 @@ fn bind_bank_directory_domain(
         .all(|address| !(CANDIDATE_START..=CANDIDATE_END).contains(address));
     ensure!(
         candidate_excluded,
-        "a source or transition-mirror NMI directory target reaches the dialogue runtime state"
+        "a source NMI directory target reaches the dialogue runtime state"
     );
     let pointer_catalog = pointer_bases
         .iter()
@@ -315,7 +295,6 @@ fn bind_bank_directory_domain(
 
     Ok(BankDirectoryDomain {
         source_bank_count: SOURCE_SWITCHABLE_BANK_COUNT,
-        transition_mirror_bank_count: transition_mirrors.len(),
         pointer_base_count: pointer_bases.len(),
         selector_count_per_base: POSITIVE_SELECTOR_COUNT,
         effective_address_count: effective_addresses.len(),

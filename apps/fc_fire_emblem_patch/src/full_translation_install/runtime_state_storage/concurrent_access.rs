@@ -4,7 +4,6 @@ use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
-    dialogue_assets::MainDialogueTransitionMirror,
     mapper165::battle_codebook_plan::{BATTLE_RUNTIME_STORAGE_END, BATTLE_RUNTIME_STORAGE_START},
     rom::{HEADER_SIZE, Rom},
     sha1_hex,
@@ -71,7 +70,6 @@ struct ConcurrentTraceReport {
 
 pub(super) fn bind_concurrent_runtime_accesses(
     source: &Rom,
-    transition_mirrors: &[MainDialogueTransitionMirror],
     main_dialogue_queue_bound_proven: bool,
 ) -> Result<ConcurrentRuntimeAccessContract> {
     let vector = source_bytes(source, FIXED_BANK, SOURCE_NMI_VECTOR_ADDRESS, 2)?;
@@ -116,7 +114,6 @@ pub(super) fn bind_concurrent_runtime_accesses(
         source,
         &source_nmi,
         &source_audio,
-        transition_mirrors,
         main_dialogue_queue_bound_proven,
     )?;
     let candidate_begins_after_battle_reservation = CANDIDATE_START > BATTLE_RUNTIME_STORAGE_END;

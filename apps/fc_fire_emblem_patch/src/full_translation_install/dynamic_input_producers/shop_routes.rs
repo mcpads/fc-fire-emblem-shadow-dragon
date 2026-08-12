@@ -11,7 +11,11 @@ use crate::{
 
 const FAMILY: &str = "shop_state_machine";
 const FACILITY_DIALOGUE_TABLE_ADDRESS: u16 = 0x9A99;
-const FACILITY_DIALOGUE_COUNT: usize = 5;
+/// 시설 대사표는 시설 종류 `$77D0`으로 색인한다. 종류 5는 비밀 상점이고
+/// `0B:$A2C2`가 `$05F5` 비트로 열어 준다. 직전 값 5는 여섯 번째 항목이 가리키는
+/// 레코드 72의 `{EC:00}`이 잘린 프리픽스 안에 있어 소비처로 보이지 않던 시절의 수다.
+/// 의사결정 57번을 따른다.
+const FACILITY_DIALOGUE_COUNT: usize = 6;
 const GENERIC_NUMERIC_ROUTE: [u8; 24] = [
     0x20, 0x6E, 0xE6, 0xA9, 0x28, 0x38, 0xED, 0x81, 0x76, 0xA0, 0x00, 0x20, 0x4E, 0x9B, 0xA9, 0x2A,
     0x8D, 0xF1, 0x77, 0xEE, 0xDB, 0x05, 0xD0, 0x2C,
@@ -42,6 +46,11 @@ pub(super) fn resolve(
             "shop producer lost unique {role} sequence"
         );
     }
+    // 종류 5를 여는 판정이 사라지면 표의 여섯 번째 항목은 죽은 자리가 된다.
+    ensure!(
+        secret_shop_facility_selection(rom)? == SECRET_SHOP_FACILITY_SELECTION,
+        "secret shop facility type no longer reaches the facility dialogue table"
+    );
 
     let item_dialogue_records = source_bytes(
         rom,
@@ -60,19 +69,32 @@ pub(super) fn resolve(
         FAMILY,
     );
 
+    // 시설 대사표는 다섯 시설을 세 레코드로 보내고, 그중 몇이 품목명을 소비하는지는
+    // 대사 본문이 정한다. 개수를 고정하면 레코드 프리픽스를 바로잡을 때처럼 소비처가
+    // 하나 더 드러날 때마다 깨진다. 여기서 지킬 것은 시설 경로가 비지 않는다는 것이다.
+    ensure!(
+        !routes.is_empty(),
+        "shop facility dialogue table no longer selects an item-name consumer"
+    );
+
     let generic_numeric = source_bytes(rom, 0x9E67, GENERIC_NUMERIC_ROUTE.len())?;
     ensure!(
         generic_numeric == GENERIC_NUMERIC_ROUTE,
         "generic selector-zero numeric route changed"
     );
-    routes.extend(selected_record_routes(
+    // 이쪽은 코드가 레코드 하나와 선택자 하나를 직접 이름 부르므로 정확히 하나다.
+    let numeric_routes = selected_record_routes(
         classified,
         "shop-and-item-dialogue",
         &BTreeSet::from([usize::from(GENERIC_NUMERIC_ROUTE[15])]),
         &BTreeMap::from([(0, DynamicStringDomain::PreservedNumeric)]),
         FAMILY,
-    ));
-    ensure!(routes.len() == 2, "shop producer/consumer join changed");
+    );
+    ensure!(
+        numeric_routes.len() == 1,
+        "generic selector-zero numeric route no longer names one consumer record"
+    );
+    routes.extend(numeric_routes);
     Ok(routes)
 }
 
@@ -81,4 +103,18 @@ fn source_bytes(rom: &Rom, cpu_address: u16, byte_count: usize) -> Result<&[u8]>
     rom.data()
         .get(file_offset..file_offset + byte_count)
         .context("shop producer source is outside the ROM")
+}
+
+/// `0B:$A2C0`은 지도 물체가 든 시설 종류를 읽어 5면 진행 표식 `$05F5`의 최하위
+/// 비트를 보고, 서 있을 때만 종류 5를 `$77D0`에 남긴다. 이 열 바이트가 여섯 번째
+/// 시설을 만드는 전부다.
+const SECRET_SHOP_FACILITY_SELECTION: [u8; 10] = [
+    0xC9, 0x05, 0xD0, 0x19, 0xAD, 0xF5, 0x05, 0x4A, 0x90, 0x04,
+];
+
+fn secret_shop_facility_selection(rom: &Rom) -> Result<&[u8]> {
+    let file_offset = switchable_cpu_to_file_offset(0x0B, 0xA2C2)?;
+    rom.data()
+        .get(file_offset..file_offset + SECRET_SHOP_FACILITY_SELECTION.len())
+        .context("secret shop facility selection is outside the ROM")
 }

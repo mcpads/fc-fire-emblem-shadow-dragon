@@ -65,12 +65,6 @@ pub(crate) struct DialogueControlSpec {
     pub(super) operand_contract: &'static str,
 }
 
-impl DialogueControlSpec {
-    pub(crate) fn finishes_line(&self) -> bool {
-        self.line_effect == "finish_current_line_with_0xED"
-    }
-}
-
 pub(super) const COMPOSITE_TEXT_LAYOUT_CODES: [u8; 2] = [0x0F, 0x1F];
 
 pub(crate) const DIALOGUE_CONTROL_SPECS: [DialogueControlSpec; 15] = [

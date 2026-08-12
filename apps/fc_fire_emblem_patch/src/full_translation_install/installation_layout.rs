@@ -7,10 +7,7 @@ use crate::{rom::HEADER_SIZE, rom::Rom};
 
 use super::{
     current_candidate::DialoguePagePoolCapacity,
-    relocated_dialogue_banks::{
-        ACTIVE_FIXED_BANK, BATTLE_MATERIAL_BANK, PRG_BANK_SIZE, TRANSITION_MIRROR_BANKS,
-        transition_reader_reserved_range,
-    },
+    dialogue_bank_layout::{ACTIVE_FIXED_BANK, BATTLE_MATERIAL_BANK, PRG_BANK_SIZE},
 };
 
 const EXPECTED_MAPPER: u16 = 165;
@@ -25,7 +22,6 @@ pub(super) struct InstallationLayoutPlan {
     current_candidate_mapper: u16,
     current_candidate_prg_size: usize,
     existing_battle_material_bank: u8,
-    transition_mirror_banks: [u8; 5],
     main_dialogue_runtime_material: MaterialPageReservation,
     remaining_cross_domain_material_pool: MaterialPageReservation,
     fixed_code_reservations: Vec<FixedCodeReservation>,
@@ -72,9 +68,7 @@ pub(super) fn plan_installation_layout(
         "integrated installation layout requires the current 512 KiB mapper 165 candidate"
     );
     ensure!(
-        BATTLE_MATERIAL_BANK == 0x10
-            && TRANSITION_MIRROR_BANKS == [0x11, 0x12, 0x13, 0x14, 0x15]
-            && ACTIVE_FIXED_BANK == 0x1F,
+        BATTLE_MATERIAL_BANK == 0x10 && ACTIVE_FIXED_BANK == 0x1F,
         "expanded PRG ownership changed before integrated layout planning"
     );
 
@@ -121,9 +115,6 @@ pub(super) fn plan_installation_layout(
         "integrated material reservation no longer points to exact FF bytes"
     );
 
-    let transition_reader = transition_reader_reserved_range()?;
-    let transition_reader =
-        usize::from(transition_reader.start)..usize::from(transition_reader.end);
     let fixed_bank = candidate
         .prg()
         .get(usize::from(ACTIVE_FIXED_BANK) * PRG_BANK_SIZE..)
@@ -132,21 +123,11 @@ pub(super) fn plan_installation_layout(
         fixed_bank.len() == PRG_BANK_SIZE,
         "active fixed bank length changed"
     );
-    let transition_source = fixed_cpu_slice(fixed_bank, transition_reader.clone())?;
-    ensure!(
-        transition_source.iter().all(|byte| *byte == 0xFF),
-        "transition reader reservation is not exact FF"
-    );
-    let fixed_code_reservations = vec![FixedCodeReservation {
-        role: "main_dialogue_transition_reader",
-        cpu_start_hex: format!("{:04X}", transition_reader.start),
-        cpu_end_exclusive_hex: format!("{:04X}", transition_reader.end),
-        byte_count: transition_reader.len(),
-        source_is_exact_ff: true,
-    }];
+    // 전이 reader 예약은 이중 진입과 함께 폐기했다. 고정 뱅크의 빈 구간은 전부
+    // 후속 코드 후보로 돌려준다. 의사결정 59번을 따른다.
+    let fixed_code_reservations: Vec<FixedCodeReservation> = Vec::new();
     let remaining_fixed_code_caves = exact_ff_ranges(fixed_bank)
         .into_iter()
-        .flat_map(|range| subtract_range(range, transition_reader.clone()))
         .filter(|range| range.len() >= MINIMUM_REPORTED_FIXED_CAVE_SIZE)
         .map(|range| FixedCodeCave {
             cpu_start_hex: format!("{:04X}", range.start),
@@ -163,7 +144,6 @@ pub(super) fn plan_installation_layout(
         current_candidate_mapper: candidate.mapper(),
         current_candidate_prg_size: candidate.prg().len(),
         existing_battle_material_bank: BATTLE_MATERIAL_BANK,
-        transition_mirror_banks: TRANSITION_MIRROR_BANKS,
         main_dialogue_runtime_material: MaterialPageReservation {
             role: "main_dialogue_runtime_material",
             first_mmc3_page: MAIN_DIALOGUE_RUNTIME_FIRST_PAGE,
@@ -202,18 +182,6 @@ fn mmc3_page_file_range(first_page: u8, page_count: usize) -> Result<Range<usize
     Ok(start..end)
 }
 
-fn fixed_cpu_slice(fixed_bank: &[u8], range: Range<usize>) -> Result<&[u8]> {
-    ensure!(
-        range.start >= 0xC000 && range.end <= 0x10000,
-        "fixed code reservation is outside $C000-$FFFF"
-    );
-    let start = range.start - 0xC000;
-    let end = range.end - 0xC000;
-    fixed_bank
-        .get(start..end)
-        .context("fixed code reservation is outside active fixed bank")
-}
-
 fn exact_ff_ranges(fixed_bank: &[u8]) -> Vec<Range<usize>> {
     let mut ranges = Vec::new();
     let mut start = None;
@@ -234,20 +202,6 @@ fn cpu_range(start: usize, end: usize) -> Range<usize> {
     0xC000 + start..0xC000 + end
 }
 
-fn subtract_range(range: Range<usize>, reserved: Range<usize>) -> Vec<Range<usize>> {
-    if range.end <= reserved.start || reserved.end <= range.start {
-        return vec![range];
-    }
-    let mut remaining = Vec::new();
-    if range.start < reserved.start {
-        remaining.push(range.start..reserved.start);
-    }
-    if reserved.end < range.end {
-        remaining.push(reserved.end..range.end);
-    }
-    remaining
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -259,11 +213,4 @@ mod tests {
         assert_eq!(usize::from(LAST_SWITCHABLE_MATERIAL_PAGE + 1 - 0x2F), 15);
     }
 
-    #[test]
-    fn fixed_reservation_is_removed_without_losing_adjacent_cave_space() {
-        assert_eq!(
-            subtract_range(0xF558..0xF700, 0xF558..0xF5B6),
-            vec![0xF5B6..0xF700]
-        );
-    }
 }

@@ -645,7 +645,10 @@ fn validate_base_contract(
             && contract.color_bit_mask_byte_count == 8
             && contract.color_bit_masks_cpu_address_hex
                 == format!("0x{COLOR_BIT_MASKS_CPU_ADDRESS:04X}")
-            && contract.maximum_remap_pair_count == usize::from(MAXIMUM_REMAP_PAIR_COUNT),
+            // 보고서 값은 코드북이 실제로 요구하는 충돌 쌍 수이고 상수는 `$07E0..$07EF`
+            // 16바이트가 담을 수 있는 런타임 용량이다. 번역이 바뀌면 수요는 줄 수도 있으므로
+            // 같기를 요구하지 않고 용량 안에 드는지만 본다.
+            && contract.maximum_remap_pair_count <= usize::from(MAXIMUM_REMAP_PAIR_COUNT),
         "battle composition loader dynamic-assignment material contract changed"
     );
     ensure!(

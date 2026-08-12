@@ -16,21 +16,28 @@ const MATERIAL_SCHEMA: u8 = 1;
 const MATERIAL_HEADER_BYTE_COUNT: usize = 16;
 const SELECTOR_DIRECTORY_BYTE_COUNT: usize = 256;
 const TABLE_DESCRIPTOR_BYTE_COUNT: usize = 4;
-const ENTRY_BYTE_COUNT: usize = 4;
+/// 엔트리 하나는 표시 경로 색인 하나다. 전에는 직접·전이 두 색인을 넣어 네 바이트였다.
+/// 두 모드의 차이는 레코드 프리픽스 파서 결함이 만든 것이어서 폐기했다.
+/// 의사결정 59번을 따른다.
+const ENTRY_BYTE_COUNT: usize = 2;
 const MISSING_INDEX: u16 = u16::MAX;
+/// 지원 원본의 selector 디렉터리 수다. 원본 고정 자료라 값이 바뀌면 원본이 바뀐 것이다.
+const DIRECTORY_SELECTOR_COUNT: usize = 8;
+/// 지원 원본에서 여덟 디렉터리가 가진 포인터 슬롯 총수다.
+const POINTER_SLOT_COUNT: usize = 523;
+/// 그중 실제로 레코드가 걸린 슬롯 수다. 나머지는 핸들러 빈칸이다.
+const ENTRY_BINDING_COUNT: usize = 517;
 
 #[derive(Serialize)]
 pub(super) struct DialogueRuntimeIdentityPlan {
     lookup_state: RuntimeLookupState,
     canonical_record_count: usize,
-    display_path_count: usize,
+    addressable_record_count: usize,
     directory_selector_count: usize,
     pointer_slot_count: usize,
-    direct_entry_binding_count: usize,
+    entry_binding_count: usize,
     handler_hole_count: usize,
-    transition_record_count: usize,
-    transition_entry_binding_count: usize,
-    every_display_path_addressable: bool,
+    every_canonical_record_addressable: bool,
     material_schema: u8,
     material_byte_count: usize,
     material_sha1: String,
@@ -43,19 +50,11 @@ pub(super) struct DialogueRuntimeIdentityPlan {
 struct RuntimeLookupState {
     directory_selector_address_hex: &'static str,
     entry_index_address_hex: &'static str,
-    transition_marker_address_hex: &'static str,
-    transition_marker_mask_hex: &'static str,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct EntryIdentity {
-    direct_path_index: u16,
-    transition_path_index: u16,
 }
 
 struct IdentityTable {
     selector: u8,
-    entries: Vec<Option<EntryIdentity>>,
+    entries: Vec<Option<u16>>,
 }
 
 pub(super) fn plan_dialogue_runtime_identity(
@@ -69,15 +68,9 @@ pub(super) fn plan_dialogue_runtime_identity(
     );
     let plan = build_runtime_identity_plan(&bindings, display)?;
     ensure!(
-        plan.canonical_record_count == 504
-            && plan.display_path_count == 643
-            && plan.directory_selector_count == 8
-            && plan.pointer_slot_count == 523
-            && plan.direct_entry_binding_count == 517
-            && plan.handler_hole_count == 6
-            && plan.transition_record_count == 139
-            && plan.transition_entry_binding_count == 140
-            && plan.material_byte_count == 2_396,
+        plan.directory_selector_count == DIRECTORY_SELECTOR_COUNT
+            && plan.pointer_slot_count == POINTER_SLOT_COUNT
+            && plan.entry_binding_count == ENTRY_BINDING_COUNT,
         "main-dialogue runtime identity population changed"
     );
     Ok(plan)
@@ -87,20 +80,20 @@ fn build_runtime_identity_plan(
     bindings: &[MainDialogueRuntimeIdentityBinding],
     display: &MainDialogueDisplayPlan,
 ) -> Result<DialogueRuntimeIdentityPlan> {
-    let path_indices = display
-        .display_paths
+    let record_indices = display
+        .record_ids
         .iter()
         .enumerate()
-        .map(|(index, path)| {
+        .map(|(index, record_id)| {
             Ok((
-                path.display_path_id.as_str(),
-                u16::try_from(index).context("dialogue display-path index does not fit u16")?,
+                record_id.as_str(),
+                u16::try_from(index).context("dialogue record index does not fit u16")?,
             ))
         })
         .collect::<Result<BTreeMap<_, _>>>()?;
     ensure!(
-        path_indices.len() == display.display_paths.len(),
-        "dialogue runtime identity has duplicate display-path IDs"
+        record_indices.len() == display.record_ids.len(),
+        "dialogue runtime identity has duplicate record IDs"
     );
 
     let mut table_sizes = BTreeMap::<u8, usize>::new();
@@ -128,35 +121,11 @@ fn build_runtime_identity_plan(
         .map(|(index, table)| (table.selector, index))
         .collect::<BTreeMap<_, _>>();
 
-    let mut transition_path_indices = BTreeSet::new();
-    let mut transition_entry_binding_count = 0usize;
     for binding in bindings {
-        let canonical_path_id = binding.record_id.as_str();
-        let direct_path_id = format!("{}@direct", binding.record_id);
-        let transition_path_id = format!("{}@transition", binding.record_id);
-        let direct_path_index = path_indices
-            .get(direct_path_id.as_str())
-            .or_else(|| path_indices.get(canonical_path_id))
+        let identity = record_indices
+            .get(binding.record_id.as_str())
             .copied()
-            .with_context(|| format!("{} has no direct display path", binding.record_id))?;
-        let transition_path_index = path_indices
-            .get(transition_path_id.as_str())
-            .copied()
-            .unwrap_or(MISSING_INDEX);
-        ensure!(
-            transition_path_index != MISSING_INDEX
-                || !path_indices.contains_key(direct_path_id.as_str()),
-            "{} has a direct mode path but no transition mode path",
-            binding.record_id
-        );
-        if transition_path_index != MISSING_INDEX {
-            transition_path_indices.insert(transition_path_index);
-            transition_entry_binding_count += binding.entry_indices.len();
-        }
-        let identity = EntryIdentity {
-            direct_path_index,
-            transition_path_index,
-        };
+            .with_context(|| format!("{} has no display order index", binding.record_id))?;
         let table_index = *table_indices
             .get(&binding.directory_selector)
             .context("runtime identity selector lost its table")?;
@@ -182,25 +151,21 @@ fn build_runtime_identity_plan(
         .iter()
         .map(|table| table.entries.len())
         .sum::<usize>();
-    let direct_entry_binding_count = tables
+    let entry_binding_count = tables
         .iter()
         .flat_map(|table| &table.entries)
         .filter(|entry| entry.is_some())
         .count();
-    let handler_hole_count = pointer_slot_count - direct_entry_binding_count;
-    let referenced_path_indices = tables
+    let handler_hole_count = pointer_slot_count - entry_binding_count;
+    let referenced_record_indices = tables
         .iter()
         .flat_map(|table| &table.entries)
         .flatten()
-        .flat_map(|entry| {
-            [entry.direct_path_index, entry.transition_path_index]
-                .into_iter()
-                .filter(|index| *index != MISSING_INDEX)
-        })
+        .copied()
         .collect::<BTreeSet<_>>();
     ensure!(
-        referenced_path_indices.len() == path_indices.len(),
-        "runtime identity table does not address every dialogue display path"
+        referenced_record_indices.len() == record_indices.len(),
+        "runtime identity table does not address every canonical dialogue record"
     );
 
     let material = encode_identity_material(&tables)?;
@@ -208,18 +173,14 @@ fn build_runtime_identity_plan(
         lookup_state: RuntimeLookupState {
             directory_selector_address_hex: "$77F4",
             entry_index_address_hex: "$77F1",
-            transition_marker_address_hex: "$77F2",
-            transition_marker_mask_hex: "$80",
         },
         canonical_record_count: bindings.len(),
-        display_path_count: path_indices.len(),
+        addressable_record_count: record_indices.len(),
         directory_selector_count: tables.len(),
         pointer_slot_count,
-        direct_entry_binding_count,
+        entry_binding_count,
         handler_hole_count,
-        transition_record_count: transition_path_indices.len(),
-        transition_entry_binding_count,
-        every_display_path_addressable: true,
+        every_canonical_record_addressable: true,
         material_schema: MATERIAL_SCHEMA,
         material_byte_count: material.len(),
         material_sha1: sha1_hex(&material),
@@ -303,12 +264,7 @@ fn encode_identity_material(tables: &[IdentityTable]) -> Result<Vec<u8>> {
     }
     for table in tables {
         for entry in &table.entries {
-            let identity = entry.unwrap_or(EntryIdentity {
-                direct_path_index: MISSING_INDEX,
-                transition_path_index: MISSING_INDEX,
-            });
-            material.extend_from_slice(&identity.direct_path_index.to_le_bytes());
-            material.extend_from_slice(&identity.transition_path_index.to_le_bytes());
+            material.extend_from_slice(&entry.unwrap_or(MISSING_INDEX).to_le_bytes());
         }
     }
     ensure!(
@@ -336,20 +292,11 @@ mod tests {
         let tables = vec![
             IdentityTable {
                 selector: 0x41,
-                entries: vec![
-                    Some(EntryIdentity {
-                        direct_path_index: 2,
-                        transition_path_index: MISSING_INDEX,
-                    }),
-                    None,
-                ],
+                entries: vec![Some(2), None],
             },
             IdentityTable {
                 selector: 0x80,
-                entries: vec![Some(EntryIdentity {
-                    direct_path_index: 7,
-                    transition_path_index: 8,
-                })],
+                entries: vec![Some(7)],
             },
         ];
 
@@ -363,9 +310,11 @@ mod tests {
         assert_eq!(material[MATERIAL_HEADER_BYTE_COUNT + 0x41], 0);
         assert_eq!(material[MATERIAL_HEADER_BYTE_COUNT + 0x80], 1);
         assert_eq!(material[MATERIAL_HEADER_BYTE_COUNT], u8::MAX);
+        // 빈칸은 값이 없는 것이 아니라 `MISSING_INDEX`를 명시적으로 적는다.
+        // 런타임이 빈칸을 읽고도 경로를 고르지 않게 하려면 자리가 있어야 한다.
         assert_eq!(
-            &material[entries_offset..entries_offset + 12],
-            &[2, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 7, 0, 8, 0]
+            &material[entries_offset..entries_offset + 6],
+            &[2, 0, 0xFF, 0xFF, 7, 0]
         );
     }
 

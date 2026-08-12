@@ -50,7 +50,7 @@
       "source_bytes_hex": "34 5B 5A 30 5F 19 21 15 21",
       "source_sha1": "96e128101e406c281e4fc5b406f607f3925b3816",
       "japanese_markup": "オレルアンのみなみ",
-      "korean_markup": "오렐리앙남부",
+      "korean_markup": "오렐르앙남부",
       "status": "needs_human_review"
     },
     {
@@ -62,7 +62,7 @@
       "source_bytes_hex": "34 5B 5A 30 5F 19 06 10",
       "source_sha1": "37e85881dd823621217075b8a8473b2ece0c307e",
       "japanese_markup": "オレルアンのきた",
-      "korean_markup": "오렐리앙북부",
+      "korean_markup": "오렐르앙북부",
       "status": "needs_human_review"
     },
     {
@@ -74,7 +74,7 @@
       "source_bytes_hex": "34 5B 5A 30 5F 0B 0F 87 02",
       "source_sha1": "a7088d4556d391f8d3a4d0be8c1fd1038f7b0bad",
       "japanese_markup": "オレルアンし゛ょう",
-      "korean_markup": "오렐리앙성",
+      "korean_markup": "오렐르앙성",
       "status": "needs_human_review"
     },
     {
@@ -98,7 +98,7 @@
       "source_bytes_hex": "5D 3F 5B 5F",
       "source_sha1": "d5193d46a8b935bd248ead731717a978ace43906",
       "japanese_markup": "ワーレン",
-      "korean_markup": "워런",
+      "korean_markup": "워렌",
       "status": "needs_human_review"
     },
     {
@@ -110,7 +110,7 @@
       "source_bytes_hex": "4D 1F 58 43 A7",
       "source_sha1": "13469b0ae25701e554a635527ab687c512675e23",
       "japanese_markup": "ヘ゜ラティ",
-      "korean_markup": "펠라티",
+      "korean_markup": "페라티",
       "status": "needs_human_review"
     },
     {
@@ -122,7 +122,7 @@
       "source_bytes_hex": "43 0F A7 3F 5A",
       "source_sha1": "a33dabb914afa8ee295b719a804352943d0f6ac3",
       "japanese_markup": "テ゛ィール",
-      "korean_markup": "디르",
+      "korean_markup": "딜",
       "status": "needs_human_review"
     },
     {
@@ -290,7 +290,7 @@
       "source_bytes_hex": "44 0F 5A 3F 30",
       "source_sha1": "f76733ecd4219522f1a103bae7b3bf6ced2e348c",
       "japanese_markup": "ト゛ルーア",
-      "korean_markup": "돌루아",
+      "korean_markup": "도루아",
       "status": "needs_human_review"
     }
   ]
