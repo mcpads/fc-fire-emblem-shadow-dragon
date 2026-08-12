@@ -1,22 +1,30 @@
+use std::collections::BTreeMap;
+
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
-use crate::{rom::Rom, sha1_hex};
+use crate::{dialogue_assets::EncodedMainDialogueDisplayStorage, rom::Rom, sha1_hex};
 
-use super::NormalizedStorageBudgetPlan;
+mod transition_reader;
+
+use transition_reader::{
+    SELECTOR_CAVE_END_EXCLUSIVE, SELECTOR_CAVE_START, SOURCE_POINTER_RESOLVER,
+    TRANSITION_BANK_MARKER, TRANSITION_BANK_SELECTOR, TRANSITION_POINTER_RESOLVER,
+    assemble_transition_reader_routines,
+};
 
 const EXPECTED_MAPPER: u16 = 165;
 const EXPANDED_PRG_SIZE: usize = 512 * 1024;
 const PRG_BANK_SIZE: usize = 16 * 1024;
-const SOURCE_BANKS: [u8; 2] = [0x07, 0x08];
-const TRANSLATION_BANKS: [u8; 2] = [0x11, 0x12];
+const SOURCE_DIALOGUE_BANK: u8 = 0x0A;
+const TRANSITION_SOURCE_BANKS: [u8; 5] = [0x04, 0x07, 0x08, 0x0B, 0x0C];
+const TRANSITION_MIRROR_BANKS: [u8; 5] = [0x11, 0x12, 0x13, 0x14, 0x15];
 const BATTLE_MATERIAL_BANK: u8 = 0x10;
 const ACTIVE_FIXED_BANK: u8 = 0x1F;
 const DIALOGUE_BYTE_BANK_SELECT_CALL: u16 = 0xE6A1;
 const DIALOGUE_BYTE_BANK_RESTORE_CALL: u16 = 0xE6AB;
 const SOURCE_PRG_SELECTOR: u16 = 0xFA20;
-const SELECTOR_CAVE_START: u16 = 0xF558;
-const SELECTOR_CAVE_END_EXCLUSIVE: u16 = 0xF600;
+const TRANSITION_POINTER_RESOLVER_CALLS: [u16; 2] = [0x85F8, 0x865F];
 
 #[derive(Serialize)]
 pub(super) struct RelocatedDialogueBankPlan {
@@ -26,89 +34,112 @@ pub(super) struct RelocatedDialogueBankPlan {
     current_candidate_prg_size: usize,
     battle_material_bank: u8,
     active_fixed_bank: u8,
-    mappings: Vec<RelocatedDialogueBankMapping>,
+    transition_bank_marker: u8,
+    transition_bank_marker_hex: String,
+    mappings: Vec<TransitionMirrorBankMapping>,
+    direct_source_region_count: usize,
+    direct_storage_byte_count: usize,
+    canonical_pointer_write_count: usize,
+    normalized_record_count: usize,
+    transition_payload_byte_count: usize,
     all_selected_banks_are_exact_ff: bool,
-    all_selected_banks_fit: bool,
     dialogue_byte_bank_select_call_cpu_address_hex: String,
     dialogue_byte_bank_restore_call_cpu_address_hex: String,
     source_prg_selector_cpu_address_hex: String,
     source_selector_masks_to_low_nibble: bool,
-    reader_only_selector_required: bool,
-    indexed_pointer_table_selection_remains_on_source_banks: bool,
+    transition_pointer_resolver_call_cpu_addresses_hex: Vec<String>,
+    transition_pointer_resolver_cpu_address_hex: String,
+    transition_pointer_resolver_byte_count: usize,
+    transition_pointer_resolver_sha1: String,
+    transition_bank_selector_cpu_address_hex: String,
+    transition_bank_selector_byte_count: usize,
+    transition_bank_selector_sha1: String,
     selector_cave_cpu_start_hex: String,
     selector_cave_cpu_end_exclusive_hex: String,
     selector_cave_byte_count: usize,
     selector_cave_sha1: String,
     selector_cave_is_exact_ff: bool,
     canonical_pointer_binding_planned: bool,
-    transition_operand_binding_planned: bool,
-    selector_assembled: bool,
+    transition_operands_preserved: bool,
+    transition_mode_hooks_planned: bool,
+    reader_selector_assembled: bool,
+    writes_installed: bool,
 }
 
 #[derive(Serialize)]
-struct RelocatedDialogueBankMapping {
+struct TransitionMirrorBankMapping {
     source_prg_bank: u8,
     source_prg_bank_hex: String,
-    translation_prg_bank: u8,
-    translation_prg_bank_hex: String,
+    transition_prg_bank: u8,
+    transition_prg_bank_hex: String,
     first_mmc3_page: u8,
     second_mmc3_page: u8,
-    planned_storage_upper_bound_byte_count: usize,
-    capacity_byte_count: usize,
-    remaining_byte_count: usize,
+    record_count: usize,
+    payload_byte_count: usize,
+    material_byte_count: usize,
+    material_sha1: String,
     candidate_bank_sha1: String,
     candidate_bank_is_exact_ff: bool,
 }
 
 pub(super) fn plan_relocated_dialogue_banks(
     candidate: &Rom,
-    storage: &NormalizedStorageBudgetPlan,
+    storage: &EncodedMainDialogueDisplayStorage,
 ) -> Result<RelocatedDialogueBankPlan> {
     ensure!(
         candidate.mapper() == EXPECTED_MAPPER && candidate.prg().len() == EXPANDED_PRG_SIZE,
-        "relocated dialogue banks require the current 512 KiB mapper 165 candidate"
+        "transition mirror banks require the current 512 KiB mapper 165 candidate"
     );
     ensure!(
-        TRANSLATION_BANKS
+        TRANSITION_MIRROR_BANKS
             .iter()
             .all(|bank| *bank != BATTLE_MATERIAL_BANK && *bank != ACTIVE_FIXED_BANK),
-        "relocated dialogue banks overlap reserved expanded PRG banks"
+        "transition mirror banks overlap reserved expanded PRG banks"
     );
-
-    let mappings = SOURCE_BANKS
+    let mirrors = storage
+        .transition_mirrors
+        .iter()
+        .map(|mirror| (mirror.source_prg_bank, mirror))
+        .collect::<BTreeMap<_, _>>();
+    ensure!(
+        mirrors.keys().copied().collect::<Vec<_>>() == TRANSITION_SOURCE_BANKS,
+        "transition mirror source-bank population changed"
+    );
+    let mappings = TRANSITION_SOURCE_BANKS
         .into_iter()
-        .zip(TRANSLATION_BANKS)
-        .map(|(source_prg_bank, translation_prg_bank)| {
-            let planned = storage.planned_byte_count_for_bank(source_prg_bank)?;
-            let bank = prg_bank(candidate, translation_prg_bank)?;
-            let exact_ff = bank.iter().all(|byte| *byte == 0xFF);
+        .zip(TRANSITION_MIRROR_BANKS)
+        .map(|(source_prg_bank, transition_prg_bank)| {
+            let mirror = mirrors[&source_prg_bank];
+            ensure!(
+                mirror.material.len() == PRG_BANK_SIZE,
+                "source dialogue bank {source_prg_bank:02X} transition mirror is not 16 KiB"
+            );
+            let candidate_bank = prg_bank(candidate, transition_prg_bank)?;
+            let exact_ff = candidate_bank.iter().all(|byte| *byte == 0xFF);
             ensure!(
                 exact_ff,
-                "selected translation PRG bank {translation_prg_bank:02X} is not empty"
+                "selected transition PRG bank {transition_prg_bank:02X} is not empty"
             );
-            ensure!(
-                planned <= bank.len(),
-                "source dialogue bank {source_prg_bank:02X} needs {planned} bytes but selected translation bank {translation_prg_bank:02X} has only {}",
-                bank.len()
-            );
-            let first_mmc3_page = translation_prg_bank
+            let first_mmc3_page = transition_prg_bank
                 .checked_mul(2)
-                .context("translation PRG bank MMC3 page overflow")?;
-            Ok(RelocatedDialogueBankMapping {
+                .context("transition PRG bank MMC3 page overflow")?;
+            Ok(TransitionMirrorBankMapping {
                 source_prg_bank,
                 source_prg_bank_hex: format!("{source_prg_bank:02X}"),
-                translation_prg_bank,
-                translation_prg_bank_hex: format!("{translation_prg_bank:02X}"),
+                transition_prg_bank,
+                transition_prg_bank_hex: format!("{transition_prg_bank:02X}"),
                 first_mmc3_page,
                 second_mmc3_page: first_mmc3_page + 1,
-                planned_storage_upper_bound_byte_count: planned,
-                capacity_byte_count: bank.len(),
-                remaining_byte_count: bank.len() - planned,
-                candidate_bank_sha1: sha1_hex(bank),
+                record_count: mirror.record_count,
+                payload_byte_count: mirror.payload_byte_count,
+                material_byte_count: mirror.material.len(),
+                material_sha1: sha1_hex(&mirror.material),
+                candidate_bank_sha1: sha1_hex(candidate_bank),
                 candidate_bank_is_exact_ff: exact_ff,
             })
         })
         .collect::<Result<Vec<_>>>()?;
+
     let expected_source_selector_call = [
         0x20,
         SOURCE_PRG_SELECTOR as u8,
@@ -129,6 +160,18 @@ pub(super) fn plan_relocated_dialogue_banks(
         source_selector == [0x08, 0x48, 0x29, 0x0F, 0x0A, 0x48],
         "source mapper 165 PRG selector no longer masks to the low nibble"
     );
+    let source_resolver_call = [
+        0x20,
+        SOURCE_POINTER_RESOLVER as u8,
+        (SOURCE_POINTER_RESOLVER >> 8) as u8,
+    ];
+    for address in TRANSITION_POINTER_RESOLVER_CALLS {
+        ensure!(
+            switchable_cpu_bytes(candidate, SOURCE_DIALOGUE_BANK, address, 3)?
+                == source_resolver_call,
+            "transition pointer resolver call at {address:04X} changed"
+        );
+    }
     let selector_cave = fixed_cpu_bytes(
         candidate,
         SELECTOR_CAVE_START,
@@ -137,23 +180,37 @@ pub(super) fn plan_relocated_dialogue_banks(
     let selector_cave_is_exact_ff = selector_cave.iter().all(|byte| *byte == 0xFF);
     ensure!(
         selector_cave_is_exact_ff,
-        "relocated dialogue selector cave is no longer exact FF"
+        "transition mirror selector cave is no longer exact FF"
+    );
+    let routines = assemble_transition_reader_routines()?;
+    ensure!(
+        usize::from(TRANSITION_POINTER_RESOLVER - SELECTOR_CAVE_START)
+            + routines.pointer_resolver.len()
+            <= usize::from(TRANSITION_BANK_SELECTOR - SELECTOR_CAVE_START)
+            && usize::from(TRANSITION_BANK_SELECTOR - SELECTOR_CAVE_START)
+                + routines.bank_selector.len()
+                <= selector_cave.len(),
+        "transition mirror routines do not fit their checked fixed-bank cave"
     );
 
     Ok(RelocatedDialogueBankPlan {
         strategy_selected: true,
-        strategy: "relocate complete normalized dialogue payloads for overflowing source banks into dedicated expanded 16 KiB banks and remap only the fixed-bank dialogue byte reader",
+        strategy: "store every direct path in its source-owned region, mirror each dual-entry transition path at the same CPU address in one expanded bank per source bank, and mark only transition reads",
         current_candidate_mapper: candidate.mapper(),
         current_candidate_prg_size: candidate.prg().len(),
         battle_material_bank: BATTLE_MATERIAL_BANK,
         active_fixed_bank: ACTIVE_FIXED_BANK,
+        transition_bank_marker: TRANSITION_BANK_MARKER,
+        transition_bank_marker_hex: format!("{TRANSITION_BANK_MARKER:02X}"),
         all_selected_banks_are_exact_ff: mappings
             .iter()
             .all(|mapping| mapping.candidate_bank_is_exact_ff),
-        all_selected_banks_fit: mappings.iter().all(|mapping| {
-            mapping.planned_storage_upper_bound_byte_count <= mapping.capacity_byte_count
-        }),
         mappings,
+        direct_source_region_count: storage.direct_regions.len(),
+        direct_storage_byte_count: storage.direct_used_storage_byte_count,
+        canonical_pointer_write_count: storage.pointer_writes.len(),
+        normalized_record_count: storage.normalized_record_count,
+        transition_payload_byte_count: storage.transition_payload_byte_count,
         dialogue_byte_bank_select_call_cpu_address_hex: format!(
             "{DIALOGUE_BYTE_BANK_SELECT_CALL:04X}"
         ),
@@ -162,16 +219,25 @@ pub(super) fn plan_relocated_dialogue_banks(
         ),
         source_prg_selector_cpu_address_hex: format!("{SOURCE_PRG_SELECTOR:04X}"),
         source_selector_masks_to_low_nibble: true,
-        reader_only_selector_required: true,
-        indexed_pointer_table_selection_remains_on_source_banks: true,
+        transition_pointer_resolver_call_cpu_addresses_hex: TRANSITION_POINTER_RESOLVER_CALLS
+            .map(|address| format!("{address:04X}"))
+            .to_vec(),
+        transition_pointer_resolver_cpu_address_hex: format!("{TRANSITION_POINTER_RESOLVER:04X}"),
+        transition_pointer_resolver_byte_count: routines.pointer_resolver.len(),
+        transition_pointer_resolver_sha1: sha1_hex(&routines.pointer_resolver),
+        transition_bank_selector_cpu_address_hex: format!("{TRANSITION_BANK_SELECTOR:04X}"),
+        transition_bank_selector_byte_count: routines.bank_selector.len(),
+        transition_bank_selector_sha1: sha1_hex(&routines.bank_selector),
         selector_cave_cpu_start_hex: format!("{SELECTOR_CAVE_START:04X}"),
         selector_cave_cpu_end_exclusive_hex: format!("{SELECTOR_CAVE_END_EXCLUSIVE:04X}"),
         selector_cave_byte_count: selector_cave.len(),
         selector_cave_sha1: sha1_hex(selector_cave),
         selector_cave_is_exact_ff,
-        canonical_pointer_binding_planned: false,
-        transition_operand_binding_planned: false,
-        selector_assembled: false,
+        canonical_pointer_binding_planned: true,
+        transition_operands_preserved: true,
+        transition_mode_hooks_planned: true,
+        reader_selector_assembled: true,
+        writes_installed: false,
     })
 }
 
@@ -198,4 +264,18 @@ fn fixed_cpu_bytes(rom: &Rom, address: u16, len: usize) -> Result<&[u8]> {
     rom.prg()
         .get(start..start + len)
         .context("expanded fixed-bank range is outside the current candidate")
+}
+
+fn switchable_cpu_bytes(rom: &Rom, bank: u8, address: u16, len: usize) -> Result<&[u8]> {
+    ensure!(
+        (0x8000..0xC000).contains(&address),
+        "expanded switchable-bank address is outside $8000-$BFFF"
+    );
+    let start = usize::from(bank)
+        .checked_mul(PRG_BANK_SIZE)
+        .and_then(|offset| offset.checked_add(usize::from(address - 0x8000)))
+        .context("expanded switchable-bank offset overflow")?;
+    rom.prg()
+        .get(start..start + len)
+        .context("expanded switchable-bank range is outside the current candidate")
 }

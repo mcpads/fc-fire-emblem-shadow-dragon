@@ -37,7 +37,8 @@ pub(crate) use battle_workspace::{
     validate_battle_dialogue_workspace,
 };
 pub(crate) use bundle::{
-    MainDialogueBundlePlan, MainDialoguePageWorkset, plan_all_main_dialogue_records,
+    EncodedMainDialogueDisplayStorage, MainDialogueBundlePlan, MainDialogueDisplayMode,
+    MainDialogueDisplayPath, MainDialoguePageWorkset, plan_all_main_dialogue_records,
     plan_main_dialogue_bundle,
 };
 pub(crate) use entry_mode_workspace::{

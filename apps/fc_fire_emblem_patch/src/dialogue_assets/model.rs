@@ -182,7 +182,7 @@ pub(super) struct LayoutRecordReport {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum LogicalDialogueByte {
+pub(crate) enum LogicalDialogueByte {
     Encoded(u8),
     TargetGlyph(char),
 }

@@ -30,18 +30,6 @@ pub(super) struct NormalizedStorageBudgetPlan {
     storage_strategy_status: &'static str,
 }
 
-impl NormalizedStorageBudgetPlan {
-    pub(super) fn planned_byte_count_for_bank(&self, source_prg_bank: u8) -> Result<usize> {
-        self.bank_budgets
-            .iter()
-            .find(|bank| bank.source_prg_bank == source_prg_bank)
-            .map(|bank| bank.planned_storage_upper_bound_byte_count)
-            .with_context(|| {
-                format!("normalized storage budget has no source PRG bank {source_prg_bank:02X}")
-            })
-    }
-}
-
 #[derive(Serialize)]
 struct NormalizedStorageRegionBudget {
     source_prg_bank: u8,

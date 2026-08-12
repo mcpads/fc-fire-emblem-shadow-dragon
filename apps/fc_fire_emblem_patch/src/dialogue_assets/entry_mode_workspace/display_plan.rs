@@ -10,6 +10,15 @@ const DIRECT_MODE: &str = "direct";
 const TRANSITION_MODE: &str = "transition";
 const DIALOGUE_PREFIX_OUTPUT_CODES: [u8; 2] = [0x9E, 0xAB];
 
+struct DisplayPathSpec<'a> {
+    mode_label: &'static str,
+    mode: MainDialogueDisplayMode,
+    source_prg_bank: u8,
+    prefix: &'a [u8],
+    leading: &'a EntryModePart,
+    common: &'a EntryModePart,
+}
+
 pub(crate) struct MainDialogueDisplayPlan {
     pub(crate) canonical_record_count: usize,
     pub(crate) display_path_count: usize,
@@ -18,6 +27,7 @@ pub(crate) struct MainDialogueDisplayPlan {
     pub(crate) direct_display_path_count: usize,
     pub(crate) transition_display_path_count: usize,
     pub(crate) page_worksets: Vec<MainDialoguePageWorkset>,
+    pub(crate) display_paths: Vec<MainDialogueDisplayPath>,
     pub(crate) normalized_record_storage: Vec<NormalizedDisplayRecordStorage>,
 }
 
@@ -33,8 +43,8 @@ pub(crate) struct NormalizedDisplayRecordStorage {
 }
 
 impl MainDialogueDisplayPlan {
-    pub(crate) fn from_canonical_bundle(dialogue: &MainDialogueBundlePlan) -> Self {
-        Self {
+    pub(crate) fn from_canonical_bundle(dialogue: &MainDialogueBundlePlan) -> Result<Self> {
+        Ok(Self {
             canonical_record_count: dialogue.record_ids.len(),
             display_path_count: dialogue.record_ids.len(),
             ordinary_record_count: dialogue.record_ids.len(),
@@ -42,8 +52,9 @@ impl MainDialogueDisplayPlan {
             direct_display_path_count: 0,
             transition_display_path_count: 0,
             page_worksets: dialogue.page_worksets.clone(),
+            display_paths: dialogue.canonical_display_paths()?,
             normalized_record_storage: Vec::new(),
-        }
+        })
     }
 
     pub(crate) fn unique_glyphs(&self) -> BTreeSet<char> {
@@ -86,15 +97,40 @@ pub(crate) fn plan_normalized_main_dialogue_display(
             .all(|record_id| dialogue.record_ids.iter().any(|id| id == record_id)),
         "normalized main-dialogue display contains a record outside the canonical bundle"
     );
+    let entry_modes = crate::dialogue_inventory::inspect_main_dialogue_entry_modes(source)?
+        .transition_targets
+        .into_iter()
+        .map(|target| (target.record_id.clone(), target))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    ensure!(
+        entry_modes.len() == workspace.records.len(),
+        "normalized main-dialogue display lost entry-mode source bindings"
+    );
 
+    let canonical_paths = dialogue.canonical_display_paths()?;
+    let source_banks = canonical_paths
+        .iter()
+        .map(|path| (path.record_id.clone(), path.source_prg_bank))
+        .collect::<std::collections::BTreeMap<_, _>>();
     let mut page_worksets = dialogue
         .page_worksets
         .iter()
         .filter(|workset| !normalized_ids.contains(workset.record_id.as_str()))
         .cloned()
         .collect::<Vec<_>>();
+    let mut display_paths = canonical_paths
+        .into_iter()
+        .filter(|path| !normalized_ids.contains(path.record_id.as_str()))
+        .collect::<Vec<_>>();
     let mut normalized_record_storage = Vec::with_capacity(workspace.records.len());
     for record in &workspace.records {
+        let entry_mode = entry_modes
+            .get(&record.id)
+            .with_context(|| format!("{} has no entry-mode source binding", record.id))?;
+        let source_prg_bank = source_banks
+            .get(&record.id)
+            .copied()
+            .with_context(|| format!("{} has no canonical source bank", record.id))?;
         let inherited_prefix_codes = dialogue
             .page_worksets
             .iter()
@@ -137,22 +173,36 @@ pub(crate) fn plan_normalized_main_dialogue_display(
             )?
             .len(),
         });
-        page_worksets.extend(display_path_worksets(
+        let (direct_path, direct_worksets) = display_path(
             record,
-            DIRECT_MODE,
-            &record.direct_leading,
-            &record.common_body,
+            DisplayPathSpec {
+                mode_label: DIRECT_MODE,
+                mode: MainDialogueDisplayMode::Direct,
+                source_prg_bank,
+                prefix: &entry_mode.leading_source_bytes[..record.direct_prefix_byte_count],
+                leading: &record.direct_leading,
+                common: &record.common_body,
+            },
             &inherited_prefix_codes,
             &source_reclaimable_active_codes,
-        )?);
-        page_worksets.extend(display_path_worksets(
+        )?;
+        display_paths.push(direct_path);
+        page_worksets.extend(direct_worksets);
+        let (transition_path, transition_worksets) = display_path(
             record,
-            TRANSITION_MODE,
-            &record.transition_leading,
-            &record.common_body,
+            DisplayPathSpec {
+                mode_label: TRANSITION_MODE,
+                mode: MainDialogueDisplayMode::Transition,
+                source_prg_bank,
+                prefix: &entry_mode.leading_source_bytes[..record.transition_prefix_byte_count],
+                leading: &record.transition_leading,
+                common: &record.common_body,
+            },
             &inherited_prefix_codes,
             &source_reclaimable_active_codes,
-        )?);
+        )?;
+        display_paths.push(transition_path);
+        page_worksets.extend(transition_worksets);
     }
 
     let ordinary_record_count = dialogue.record_ids.len() - workspace.records.len();
@@ -166,6 +216,16 @@ pub(crate) fn plan_normalized_main_dialogue_display(
             == display_path_count,
         "normalized main-dialogue display path population changed"
     );
+    ensure!(
+        display_paths.len() == display_path_count
+            && display_paths
+                .iter()
+                .map(|path| path.display_path_id.as_str())
+                .collect::<BTreeSet<_>>()
+                .len()
+                == display_path_count,
+        "normalized main-dialogue display path storage population changed"
+    );
     Ok(MainDialogueDisplayPlan {
         canonical_record_count: dialogue.record_ids.len(),
         display_path_count,
@@ -174,29 +234,28 @@ pub(crate) fn plan_normalized_main_dialogue_display(
         direct_display_path_count: workspace.records.len(),
         transition_display_path_count: workspace.records.len(),
         page_worksets,
+        display_paths,
         normalized_record_storage,
     })
 }
 
-fn display_path_worksets(
+fn display_path(
     record: &EntryModeRecord,
-    mode: &str,
-    leading: &EntryModePart,
-    common: &EntryModePart,
+    spec: DisplayPathSpec<'_>,
     inherited_prefix_codes: &BTreeSet<u8>,
     source_reclaimable_active_codes: &BTreeSet<u8>,
-) -> Result<Vec<MainDialoguePageWorkset>> {
-    let mut logical = target_logical_bytes(leading)?;
-    logical.extend(target_logical_bytes(common)?);
-    let line_ranges = visible_line_ranges(&record.id, mode, &logical)?;
-    let display_path_id = format!("{}@{mode}", record.id);
-    line_ranges
+) -> Result<(MainDialogueDisplayPath, Vec<MainDialoguePageWorkset>)> {
+    let mut visible_logical = target_logical_bytes(spec.leading)?;
+    visible_logical.extend(target_logical_bytes(spec.common)?);
+    let line_ranges = visible_line_ranges(&record.id, spec.mode_label, &visible_logical)?;
+    let display_path_id = format!("{}@{}", record.id, spec.mode_label);
+    let worksets = line_ranges
         .chunks(MAIN_DIALOGUE_VISIBLE_LINES_PER_PAGE)
         .enumerate()
         .map(|(page_index, page_lines)| {
             let start = page_lines.first().expect("line chunks are nonempty").start;
             let end = page_lines.last().expect("line chunks are nonempty").end;
-            let page_bytes = &logical[start..end];
+            let page_bytes = &visible_logical[start..end];
             let dynamic_string_selector_counts =
                 super::super::bundle::dynamic_string_controls(page_bytes)?;
             let dynamic_string_control_count =
@@ -235,7 +294,53 @@ fn display_path_worksets(
                 preserved_target_active_codes,
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>>>()?;
+    let prefix_byte_count = spec.prefix.len();
+    let mut logical_bytes = spec
+        .prefix
+        .iter()
+        .copied()
+        .map(LogicalDialogueByte::Encoded)
+        .collect::<Vec<_>>();
+    logical_bytes.extend(visible_logical);
+    let visible_page_ranges = line_ranges
+        .chunks(MAIN_DIALOGUE_VISIBLE_LINES_PER_PAGE)
+        .enumerate()
+        .map(|(page_index, page_lines)| {
+            let first = page_lines.first().expect("line chunks are nonempty");
+            let last = page_lines.last().expect("line chunks are nonempty");
+            if page_index == 0 {
+                0..prefix_byte_count + last.end
+            } else {
+                prefix_byte_count + first.start..prefix_byte_count + last.end
+            }
+        })
+        .collect::<Vec<_>>();
+    ensure!(
+        visible_page_ranges
+            .first()
+            .is_some_and(|range| range.start == 0)
+            && visible_page_ranges
+                .last()
+                .is_some_and(|range| range.end == logical_bytes.len())
+            && visible_page_ranges
+                .windows(2)
+                .all(|pair| pair[0].end == pair[1].start),
+        "{} {} visible pages do not partition its stored display path",
+        record.id,
+        spec.mode_label,
+    );
+    Ok((
+        MainDialogueDisplayPath {
+            record_id: record.id.clone(),
+            display_path_id,
+            source_prg_bank: spec.source_prg_bank,
+            mode: spec.mode,
+            logical_bytes,
+            visible_page_ranges,
+        },
+        worksets,
+    ))
 }
 
 fn target_logical_bytes(part: &EntryModePart) -> Result<Vec<LogicalDialogueByte>> {
@@ -336,20 +441,30 @@ mod tests {
             ),
         };
 
-        let direct = display_path_worksets(
+        let (_, direct) = display_path(
             &record,
-            DIRECT_MODE,
-            &record.direct_leading,
-            &record.common_body,
+            DisplayPathSpec {
+                mode_label: DIRECT_MODE,
+                mode: MainDialogueDisplayMode::Direct,
+                source_prg_bank: 0x07,
+                prefix: &[0x10, 0x11, 0x12, 0x13],
+                leading: &record.direct_leading,
+                common: &record.common_body,
+            },
             &BTreeSet::new(),
             &BTreeSet::new(),
         )
         .unwrap();
-        let transition = display_path_worksets(
+        let (_, transition) = display_path(
             &record,
-            TRANSITION_MODE,
-            &record.transition_leading,
-            &record.common_body,
+            DisplayPathSpec {
+                mode_label: TRANSITION_MODE,
+                mode: MainDialogueDisplayMode::Transition,
+                source_prg_bank: 0x07,
+                prefix: &[],
+                leading: &record.transition_leading,
+                common: &record.common_body,
+            },
             &BTreeSet::new(),
             &BTreeSet::new(),
         )

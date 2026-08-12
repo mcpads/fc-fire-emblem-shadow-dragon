@@ -201,7 +201,7 @@ fn page_groups_by_record_id<'a>(
         .collect()
 }
 
-fn encode_page_bound_record(
+pub(super) fn encode_page_bound_record(
     record_id: &str,
     logical_bytes: &[LogicalDialogueByte],
     page_ranges: &[Range<usize>],

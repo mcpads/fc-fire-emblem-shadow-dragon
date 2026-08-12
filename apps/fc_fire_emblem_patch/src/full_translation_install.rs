@@ -244,6 +244,8 @@ struct DialogueStorage {
     source_owned_storage_byte_count: usize,
     planned_storage_byte_count: usize,
     remaining_storage_byte_count: usize,
+    transition_mirror_bank_count: usize,
+    transition_mirror_payload_byte_count: usize,
     every_pointer_within_source_owned_regions: bool,
     normalized_entry_mode_bodies_bound: bool,
     duplicated_mode_path_upper_bound: NormalizedStorageBudgetPlan,
@@ -319,7 +321,7 @@ pub(crate) fn plan_full_translation_installation(
     );
 
     let baseline_display =
-        crate::dialogue_assets::MainDialogueDisplayPlan::from_canonical_bundle(&dialogue);
+        crate::dialogue_assets::MainDialogueDisplayPlan::from_canonical_bundle(&dialogue)?;
     let baseline_dynamic_inputs = plan_dynamic_dialogue_inputs(
         &baseline_display,
         &fixed.entries,
@@ -364,24 +366,29 @@ pub(crate) fn plan_full_translation_installation(
     );
     let composition =
         plan_dialogue_runtime_composition(&display, &codebook, source_font_page, &font_page_pack)?;
+    let encoded_display = dialogue.encoded_display_storage_by_page_groups(
+        &display,
+        &codebook.workset_page_indices,
+        &codebook.page_assignments,
+    )?;
     let source_owned_storage_byte_count = baseline_encoded
         .regions
         .iter()
         .map(|region| region.source_storage.len())
         .sum::<usize>();
-    let planned_storage_byte_count = baseline_encoded
+    let baseline_planned_storage_byte_count = baseline_encoded
         .regions
         .iter()
         .map(|region| region.used_storage_byte_count)
         .sum::<usize>();
+    let planned_storage_byte_count = encoded_display.direct_used_storage_byte_count;
     let normalized_storage_budget = plan_normalized_storage_budget(&dialogue, &display)?;
     let current_candidate = Rom::from_path(inputs.current_candidate_path)?;
     ensure!(
         sha1_hex(current_candidate.data()) == page_capacity.current_candidate_sha1,
         "relocated dialogue bank plan and page-pool plan use different current candidates"
     );
-    let relocated_bank_plan =
-        plan_relocated_dialogue_banks(&current_candidate, &normalized_storage_budget)?;
+    let relocated_bank_plan = plan_relocated_dialogue_banks(&current_candidate, &encoded_display)?;
     ensure!(
         planned_storage_byte_count <= source_owned_storage_byte_count,
         "complete dialogue encoded storage exceeds its source-owned regions"
@@ -394,7 +401,7 @@ pub(crate) fn plan_full_translation_installation(
         &dialogue,
         &entry_mode_validation,
         source_owned_storage_byte_count,
-        planned_storage_byte_count,
+        baseline_planned_storage_byte_count,
         atlas_scan_and_dynamic_remap_byte_count,
     )?;
     let translation_input_complete = entry_mode_validation.translation_input_complete
@@ -413,7 +420,7 @@ pub(crate) fn plan_full_translation_installation(
         && entry_mode_validation.review_complete
         && translation_input_complete;
     let next_gate = if translation_input_complete && relocated_bank_plan.strategy_selected {
-        "pack every bank-07 and bank-08 normalized display path into the selected dedicated expanded PRG banks, rewrite canonical and transition pointers, and assemble the dialogue-reader-only bank selector; do not emit or run a partial ROM until every other domain is ready"
+        "bind the exact 643-path dialogue storage, five transition mirrors, 517 pointer writes, two transition-mode hooks, and reader selector to the cumulative Expected Write plan together with the remaining text domains and runtime page composer; do not emit or run a partial ROM"
     } else if translation_input_complete {
         "bind the already packed normalized display paths to shared common-body storage and mode-aware entry shims, then recalculate exact encoded storage; do not emit or run a partial ROM"
     } else {
@@ -421,7 +428,7 @@ pub(crate) fn plan_full_translation_installation(
     };
 
     let report = FullTranslationInstallReport {
-        schema: 3,
+        schema: 4,
         source_sha1: EXPECTED_SOURCE_SHA1,
         strategy: "install all remaining translation domains in one cumulative candidate, run complete static gates, then run consumer-path dynamic regression on that same ROM",
         required_domain_count: REQUIRED_DOMAIN_COUNT,
@@ -489,7 +496,7 @@ pub(crate) fn plan_full_translation_installation(
             static_page_upper_bound_count: codebook.page_assignments.len(),
             static_page_pack_sha1: sha1_hex(&font_page_pack),
             normalized_display_paths_connected: true,
-            page_local_bundle_encoding_connected: false,
+            page_local_bundle_encoding_connected: true,
             glyph_characters_emitted: false,
         },
         dialogue_page_pool: DialoguePagePool {
@@ -602,26 +609,28 @@ pub(crate) fn plan_full_translation_installation(
             current_battle_runtime_bound_to_build: page_capacity.battle_runtime_bound_to_build,
             battle_compositor_is_directly_reusable: false,
             main_dialogue_page_identity_bound: false,
-            main_dialogue_transition_hook_planned: false,
+            main_dialogue_transition_hook_planned: true,
         },
         dialogue_storage: DialogueStorage {
-            region_count: baseline_encoded.regions.len(),
+            region_count: encoded_display.direct_regions.len(),
             record_count: dialogue.record_ids.len(),
-            pointer_write_count: baseline_encoded.pointer_writes.len(),
+            pointer_write_count: encoded_display.pointer_writes.len(),
             source_owned_storage_byte_count,
             planned_storage_byte_count,
             remaining_storage_byte_count: source_owned_storage_byte_count
                 - planned_storage_byte_count,
+            transition_mirror_bank_count: encoded_display.transition_mirrors.len(),
+            transition_mirror_payload_byte_count: encoded_display.transition_payload_byte_count,
             every_pointer_within_source_owned_regions: true,
-            normalized_entry_mode_bodies_bound: false,
+            normalized_entry_mode_bodies_bound: true,
             duplicated_mode_path_upper_bound: normalized_storage_budget,
             selected_relocated_bank_plan: relocated_bank_plan,
         },
         installation_gates: InstallationGates {
             all_translation_inputs_loaded: translation_input_complete,
-            all_dialogue_records_encoded: false,
-            all_visible_dialogue_text_encoded: false,
-            all_dialogue_pointers_planned: false,
+            all_dialogue_records_encoded: true,
+            all_visible_dialogue_text_encoded: true,
+            all_dialogue_pointers_planned: true,
             all_dialogue_page_code_assignments_found: true,
             all_dialogue_page_worksets_packed: true,
             static_prebuilt_dialogue_page_pool_fits: codebook.page_assignments.len()
@@ -651,7 +660,7 @@ pub(crate) fn plan_full_translation_installation(
         dialogue_glyph_count: codebook.glyph_count,
         dialogue_maximum_page_slot_demand: codebook.maximum_page_slot_demand,
         dialogue_static_page_upper_bound_count: codebook.page_assignments.len(),
-        dialogue_pointer_write_count: baseline_encoded.pointer_writes.len(),
+        dialogue_pointer_write_count: encoded_display.pointer_writes.len(),
         dialogue_planned_storage_byte_count: planned_storage_byte_count,
     })
 }
