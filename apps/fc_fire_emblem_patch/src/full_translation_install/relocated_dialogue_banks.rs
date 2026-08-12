@@ -6,12 +6,14 @@ use serde::Serialize;
 use crate::{dialogue_assets::EncodedMainDialogueDisplayStorage, rom::Rom, sha1_hex};
 
 mod transition_reader;
+mod write_set;
 
 use transition_reader::{
     SELECTOR_CAVE_END_EXCLUSIVE, SELECTOR_CAVE_START, SOURCE_POINTER_RESOLVER,
     TRANSITION_BANK_MARKER, TRANSITION_BANK_SELECTOR, TRANSITION_POINTER_RESOLVER,
     assemble_transition_reader_routines,
 };
+use write_set::{CompleteDialogueWriteSetPlan, validate_complete_dialogue_write_set};
 
 const EXPECTED_MAPPER: u16 = 165;
 const EXPANDED_PRG_SIZE: usize = 512 * 1024;
@@ -63,6 +65,7 @@ pub(super) struct RelocatedDialogueBankPlan {
     transition_operands_preserved: bool,
     transition_mode_hooks_planned: bool,
     reader_selector_assembled: bool,
+    complete_dialogue_write_set: CompleteDialogueWriteSetPlan,
     writes_installed: bool,
 }
 
@@ -192,6 +195,8 @@ pub(super) fn plan_relocated_dialogue_banks(
                 <= selector_cave.len(),
         "transition mirror routines do not fit their checked fixed-bank cave"
     );
+    let complete_dialogue_write_set =
+        validate_complete_dialogue_write_set(candidate, storage, &routines)?;
 
     Ok(RelocatedDialogueBankPlan {
         strategy_selected: true,
@@ -237,6 +242,7 @@ pub(super) fn plan_relocated_dialogue_banks(
         transition_operands_preserved: true,
         transition_mode_hooks_planned: true,
         reader_selector_assembled: true,
+        complete_dialogue_write_set,
         writes_installed: false,
     })
 }
