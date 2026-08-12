@@ -302,7 +302,7 @@ pub(crate) fn plan_full_translation_installation(
     let dialogue = plan_all_main_dialogue_records(&rom, inputs.main_dialogue_workspace_path)?;
     // 표시 계획은 정규 레코드에서 바로 만든다. 직접 진입과 전이 진입을 나누던 구조는
     // 프리픽스 파서 결함이 만든 것이어서 폐기했다. 의사결정 59번을 따른다.
-    let display = crate::dialogue_assets::MainDialogueDisplayPlan::from_canonical_bundle(&dialogue)?;
+    let display = crate::dialogue_assets::MainDialogueDisplayPlan::from_canonical_bundle(&dialogue);
     let fixed = plan_fixed_text(&rom, inputs.fixed_text_workspace_path)?;
     let unit_names = plan_unit_names(&rom, inputs.unit_name_localization_path)?;
     let chapter_titles = plan_chapter_titles(&rom, inputs.chapter_title_localization_path)?;

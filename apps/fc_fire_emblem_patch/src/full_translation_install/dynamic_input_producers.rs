@@ -9,6 +9,7 @@ use crate::{dialogue_inventory::switchable_cpu_to_file_offset, rom::Rom, sha1_he
 mod arena_routes;
 mod epilogue_routes;
 mod item_routes;
+mod overflow_routes;
 mod shop_routes;
 mod village_routes;
 
@@ -255,6 +256,7 @@ fn resolve_producer_routes(
         arena_routes::resolve(rom, classified)?,
         epilogue_routes::resolve(rom, classified)?,
         item_routes::resolve(rom, classified)?,
+        overflow_routes::resolve(rom, classified)?,
         shop_routes::resolve(rom, classified)?,
         village_routes::resolve(rom, classified)?,
     ];

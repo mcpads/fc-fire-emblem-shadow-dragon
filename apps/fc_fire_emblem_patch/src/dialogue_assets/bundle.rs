@@ -52,22 +52,6 @@ pub(crate) struct MainDialoguePageWorkset {
 }
 
 impl MainDialogueBundlePlan {
-    /// 레코드마다 가시 페이지 구간이 하나씩 있는지 확인한다.
-    /// 전에는 이 자리에서 직접·전이 두 표시 경로를 펼쳤다. 두 모드의 차이는 레코드
-    /// 프리픽스 파서 결함이 만든 것이어서 폐기했다. 의사결정 59번을 따른다.
-    pub(crate) fn canonical_visible_page_ranges(&self) -> Result<Vec<Vec<Range<usize>>>> {
-        self.target_records
-            .iter()
-            .map(|record| {
-                Ok(self
-                    .visible_page_ranges_by_record_id
-                    .get(&record.id)
-                    .with_context(|| format!("{} has no canonical visible pages", record.id))?
-                    .clone())
-            })
-            .collect()
-    }
-
     pub(crate) fn unique_glyphs(&self) -> BTreeSet<char> {
         self.target_records
             .iter()
