@@ -17,16 +17,27 @@ use write_set::{CompleteDialogueWriteSetPlan, validate_complete_dialogue_write_s
 
 const EXPECTED_MAPPER: u16 = 165;
 const EXPANDED_PRG_SIZE: usize = 512 * 1024;
-const PRG_BANK_SIZE: usize = 16 * 1024;
+pub(super) const PRG_BANK_SIZE: usize = 16 * 1024;
 const SOURCE_DIALOGUE_BANK: u8 = 0x0A;
 const TRANSITION_SOURCE_BANKS: [u8; 5] = [0x04, 0x07, 0x08, 0x0B, 0x0C];
-const TRANSITION_MIRROR_BANKS: [u8; 5] = [0x11, 0x12, 0x13, 0x14, 0x15];
-const BATTLE_MATERIAL_BANK: u8 = 0x10;
-const ACTIVE_FIXED_BANK: u8 = 0x1F;
+pub(super) const TRANSITION_MIRROR_BANKS: [u8; 5] = [0x11, 0x12, 0x13, 0x14, 0x15];
+pub(super) const BATTLE_MATERIAL_BANK: u8 = 0x10;
+pub(super) const ACTIVE_FIXED_BANK: u8 = 0x1F;
 const DIALOGUE_BYTE_BANK_SELECT_CALL: u16 = 0xE6A1;
 const DIALOGUE_BYTE_BANK_RESTORE_CALL: u16 = 0xE6AB;
 const SOURCE_PRG_SELECTOR: u16 = 0xFA20;
 const TRANSITION_POINTER_RESOLVER_CALLS: [u16; 2] = [0x85F8, 0x865F];
+
+pub(super) fn transition_reader_reserved_range() -> Result<std::ops::Range<u16>> {
+    let routines = assemble_transition_reader_routines()?;
+    let end = TRANSITION_BANK_SELECTOR
+        .checked_add(
+            u16::try_from(routines.bank_selector.len())
+                .context("transition bank selector length does not fit u16")?,
+        )
+        .context("transition bank selector range overflow")?;
+    Ok(TRANSITION_POINTER_RESOLVER..end)
+}
 
 #[derive(Serialize)]
 pub(super) struct RelocatedDialogueBankPlan {

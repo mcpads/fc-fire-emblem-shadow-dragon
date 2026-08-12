@@ -28,6 +28,7 @@ mod current_candidate;
 mod dynamic_composition;
 mod dynamic_input_producers;
 mod dynamic_inputs;
+mod installation_layout;
 mod normalized_storage_budget;
 mod relocated_dialogue_banks;
 
@@ -36,6 +37,7 @@ use current_candidate::{CurrentCandidateInputs, inspect_dialogue_page_pool_capac
 use dynamic_composition::plan_dialogue_runtime_composition;
 use dynamic_input_producers::{DynamicInputProducerPlan, inspect_dynamic_input_producers};
 use dynamic_inputs::{plan_dynamic_dialogue_inputs, plan_dynamic_string_remap};
+use installation_layout::{InstallationLayoutPlan, plan_installation_layout};
 use normalized_storage_budget::{NormalizedStorageBudgetPlan, plan_normalized_storage_budget};
 use relocated_dialogue_banks::{RelocatedDialogueBankPlan, plan_relocated_dialogue_banks};
 
@@ -81,6 +83,7 @@ struct FullTranslationInstallReport {
     translation_inputs: TranslationInputs,
     dialogue_codebook: DialogueCodebook,
     dialogue_page_pool: DialoguePagePool,
+    installation_layout: InstallationLayoutPlan,
     dialogue_runtime_composition: DialogueRuntimeComposition,
     dialogue_storage: DialogueStorage,
     installation_gates: InstallationGates,
@@ -396,6 +399,11 @@ pub(crate) fn plan_full_translation_installation(
     let atlas_scan_and_dynamic_remap_byte_count = composition.glyph_atlas.len()
         + composition.scan_material_byte_count
         + dynamic_remap.selected_dense_remap_byte_count;
+    let installation_layout = plan_installation_layout(
+        &current_candidate,
+        &page_capacity,
+        atlas_scan_and_dynamic_remap_byte_count,
+    )?;
     let consumer_visible_prefixes = plan_consumer_visible_prefixes(
         rom.data(),
         &dialogue,
@@ -428,7 +436,7 @@ pub(crate) fn plan_full_translation_installation(
     };
 
     let report = FullTranslationInstallReport {
-        schema: 4,
+        schema: 5,
         source_sha1: EXPECTED_SOURCE_SHA1,
         strategy: "install all remaining translation domains in one cumulative candidate, run complete static gates, then run consumer-path dynamic regression on that same ROM",
         required_domain_count: REQUIRED_DOMAIN_COUNT,
@@ -514,6 +522,7 @@ pub(crate) fn plan_full_translation_installation(
             mapper_capacity_bound: true,
             current_candidate_bound: true,
         },
+        installation_layout,
         dialogue_runtime_composition: DialogueRuntimeComposition {
             strategy_selected: true,
             glyph_atlas_tile_count: composition.glyph_atlas_tile_count,
