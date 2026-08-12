@@ -82,8 +82,10 @@ pub(super) fn plan_region(
 
     Ok(LogicalBundleRegion {
         file_offset: region.start,
+        source_prg_bank: region.source_prg_bank,
         source_storage: source[region.start..region.end_exclusive].to_vec(),
         logical_storage,
+        logical_records,
         used_storage_byte_count,
         pointer_writes,
     })

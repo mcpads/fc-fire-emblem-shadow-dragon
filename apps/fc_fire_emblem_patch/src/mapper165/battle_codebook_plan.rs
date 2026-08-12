@@ -108,41 +108,6 @@ pub(crate) struct GlyphWorkset {
     pub(crate) preserved_active_codes: BTreeSet<u8>,
 }
 
-/// Assign one-byte placeholders only to validate dialogue storage and pointer layout.
-/// Runtime rendering uses page-local codebooks instead of this cross-page projection.
-pub(crate) fn plan_storage_layout_glyph_codes(
-    worksets: &[GlyphWorkset],
-) -> Result<BTreeMap<char, u8>> {
-    ensure!(!worksets.is_empty(), "glyph codebook has no worksets");
-    let families = BattleGlyphFamilies {
-        base: BTreeSet::new(),
-        player_participants: Vec::new(),
-        enemy_participants: Vec::new(),
-        terrains: Vec::new(),
-        dialogue_records: worksets
-            .iter()
-            .map(|workset| workset.target_glyphs.clone())
-            .collect(),
-    };
-    let coloring = plan_stable_coloring(&families, ACTIVE_HANGUL_SLOT_COUNT)?;
-    ensure!(
-        coloring.active_ceiling_assignment_found
-            && coloring.color_count <= ACTIVE_HANGUL_SLOT_COUNT,
-        "complete glyph worksets need {} stable colors but only {} active slots exist",
-        coloring.color_count,
-        ACTIVE_HANGUL_SLOT_COUNT
-    );
-    let constraints = worksets
-        .iter()
-        .map(|workset| ScreenCodeConstraint {
-            glyphs: workset.target_glyphs.clone(),
-            preserved_active_codes: workset.preserved_active_codes.clone(),
-        })
-        .collect::<Vec<_>>();
-    let physical = assign_physical_codes(&coloring, &constraints)?;
-    Ok(physical.glyph_codes)
-}
-
 #[derive(Debug, Serialize)]
 struct BattleCodebookPlanReport {
     schema: u8,
@@ -577,35 +542,6 @@ fn entry_glyph_sets(plan: &FixedTextPlan, table_id: &str) -> Vec<BTreeSet<char>>
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn glyphs(text: &str) -> BTreeSet<char> {
-        text.chars().collect()
-    }
-
-    #[test]
-    fn storage_layout_codes_reuse_only_across_noncooccurring_glyphs() {
-        let active = active_hangul_codes();
-        let worksets = [
-            GlyphWorkset {
-                target_glyphs: glyphs("가나"),
-                preserved_active_codes: BTreeSet::from([active[0]]),
-            },
-            GlyphWorkset {
-                target_glyphs: glyphs("가다"),
-                preserved_active_codes: BTreeSet::from([active[1]]),
-            },
-        ];
-
-        let first = plan_storage_layout_glyph_codes(&worksets).unwrap();
-        let second = plan_storage_layout_glyph_codes(&worksets).unwrap();
-
-        assert_ne!(first[&'가'], first[&'나']);
-        assert_ne!(first[&'가'], first[&'다']);
-        assert_eq!(first[&'나'], first[&'다']);
-        assert_ne!(first[&'가'], active[0]);
-        assert_ne!(first[&'가'], active[1]);
-        assert_eq!(first, second);
-    }
 
     #[test]
     fn report_does_not_emit_translation_content_or_private_paths() {

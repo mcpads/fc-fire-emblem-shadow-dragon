@@ -12,7 +12,6 @@ use crate::{
     map_menu::plan_map_menu,
     mapper165::battle_codebook_plan::{
         GlyphWorkset, build_glyph_workset_font_page_pack, plan_glyph_workset_page_upper_bound,
-        plan_storage_layout_glyph_codes,
     },
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
@@ -271,8 +270,8 @@ pub(crate) fn plan_full_translation_installation(
     );
     let composition =
         plan_dialogue_runtime_composition(&dialogue, &codebook, source_font_page, &font_page_pack)?;
-    let storage_layout_codes = plan_storage_layout_glyph_codes(&worksets)?;
-    let encoded = dialogue.encoded(&storage_layout_codes)?;
+    let encoded = dialogue
+        .encoded_by_page_groups(&codebook.workset_page_indices, &codebook.page_assignments)?;
     ensure!(
         encoded.regions.len() == 11 && encoded.pointer_writes.len() == 517,
         "complete dialogue encoded layout changed"
@@ -353,7 +352,7 @@ pub(crate) fn plan_full_translation_installation(
             page_assignment_sha1: codebook.page_assignment_sha1,
             static_page_upper_bound_count: codebook.page_assignments.len(),
             static_page_pack_sha1: sha1_hex(&font_page_pack),
-            page_local_bundle_encoding_connected: false,
+            page_local_bundle_encoding_connected: true,
             glyph_characters_emitted: false,
         },
         dialogue_page_pool: DialoguePagePool {
@@ -445,7 +444,7 @@ pub(crate) fn plan_full_translation_installation(
         },
         installation_gates: InstallationGates {
             all_translation_inputs_loaded: true,
-            all_dialogue_records_encoded: false,
+            all_dialogue_records_encoded: true,
             all_dialogue_pointers_planned: true,
             all_dialogue_page_code_assignments_found: true,
             all_dialogue_page_worksets_packed: true,
@@ -457,7 +456,7 @@ pub(crate) fn plan_full_translation_installation(
         },
         rom_emitted: false,
         dynamic_verification_started: false,
-        next_gate: "generalize the proven battle atlas compositor for main-dialogue page identity and completed-page transitions, then bind each logical dialogue page to its page-local codebook; do not emit or run a partial ROM",
+        next_gate: "bind the encoded-page scan and atlas compositor to main-dialogue page identity and completed-page transitions; do not emit or run a partial ROM",
     };
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize full translation install plan")?;

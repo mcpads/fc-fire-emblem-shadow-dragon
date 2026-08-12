@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
+    ops::Range,
     path::Path,
 };
 
@@ -13,9 +14,11 @@ use crate::{
 
 use super::*;
 
+mod page_encoding;
 mod region;
 mod validation;
 
+use page_encoding::visible_page_ranges;
 use region::plan_region;
 use validation::{validate_target_records, validate_transition_closure};
 
@@ -32,6 +35,7 @@ pub(crate) struct MainDialogueBundlePlan {
     pub(crate) source_reclaimable_active_codes: BTreeSet<u8>,
     pub(crate) page_worksets: Vec<MainDialoguePageWorkset>,
     target_records: Vec<LogicalDialogueRecord>,
+    visible_page_ranges_by_record_id: BTreeMap<String, Vec<Range<usize>>>,
     regions: Vec<LogicalBundleRegion>,
 }
 
@@ -105,8 +109,10 @@ pub(crate) struct MainDialoguePointerWrite {
 
 struct LogicalBundleRegion {
     file_offset: usize,
+    source_prg_bank: u8,
     source_storage: Vec<u8>,
     logical_storage: Vec<LogicalDialogueByte>,
+    logical_records: Vec<LogicalDialogueRecord>,
     used_storage_byte_count: usize,
     pointer_writes: Vec<MainDialoguePointerWrite>,
 }
@@ -168,6 +174,20 @@ pub(crate) fn plan_main_dialogue_bundle(
             )
         })
         .collect::<Result<Vec<_>>>()?;
+    let visible_page_ranges_by_record_id = target_indices
+        .iter()
+        .zip(&target_records)
+        .map(|(index, record)| {
+            Ok((
+                record.id.clone(),
+                visible_page_ranges(
+                    &source_records[*index],
+                    &workspace.records[*index],
+                    record.bytes.len(),
+                )?,
+            ))
+        })
+        .collect::<Result<BTreeMap<_, _>>>()?;
     let page_worksets = target_indices
         .iter()
         .flat_map(|index| {
@@ -283,6 +303,7 @@ pub(crate) fn plan_main_dialogue_bundle(
         source_reclaimable_active_codes,
         page_worksets,
         target_records,
+        visible_page_ranges_by_record_id,
         regions,
     })
 }
