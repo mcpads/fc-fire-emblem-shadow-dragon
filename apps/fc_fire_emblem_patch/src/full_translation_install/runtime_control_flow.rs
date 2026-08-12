@@ -263,10 +263,13 @@ pub(super) fn plan_dialogue_runtime_control_flow(
                 .context("runtime code offset does not fit the A000 window")?,
         )
         .context("runtime code CPU start overflow")?;
+    // 실행 코드는 페이지 `2E`의 꼬리이고 창의 끝 `$C000`에서 끝난다. 시작 주소는
+    // 앞선 자료가 얼마나 차지하는지에 따라 움직이는 결과값이지 지킬 값이 아니다.
+    // 자료가 줄면 시작이 내려가 코드 자리가 넓어지는 것이 정상이다.
     ensure!(
-        runtime_code_cpu_start == 0xB8A0
+        runtime_code_cpu_start >= RUNTIME_CODE_WINDOW_START
             && usize::from(0xC000 - runtime_code_cpu_start) == inputs.runtime_code_byte_count,
-        "dialogue runtime code CPU reservation changed"
+        "dialogue runtime code is no longer the tail of the A000 window"
     );
 
     let source_page = mmc3_page_bytes(
@@ -476,14 +479,17 @@ fn mmc3_page_bytes(rom: &Rom, page: u8, len: usize) -> Result<&[u8]> {
 mod tests {
     use super::*;
 
+    /// 자료가 끝나는 자리가 어디든 실행 코드는 창의 끝에서 끝나야 한다.
+    /// 자료가 줄면 코드 자리는 넓어지고, 늘면 좁아진다.
     #[test]
-    fn runtime_code_tail_maps_to_b8a0_through_bfff() {
-        let offset = 22_688usize;
+    fn runtime_code_occupies_the_window_tail_whatever_the_material_size() {
         let page_offset = usize::from(RUNTIME_CODE_MMC3_PAGE - 0x2C) * 8 * 1024;
-        let cpu = RUNTIME_CODE_WINDOW_START + u16::try_from(offset - page_offset).unwrap();
+        for offset in [22_688usize, 21_642, 16_384] {
+            let cpu = RUNTIME_CODE_WINDOW_START + u16::try_from(offset - page_offset).unwrap();
 
-        assert_eq!(cpu, 0xB8A0);
-        assert_eq!(usize::from(0xC000 - cpu), 1_888);
+            assert!(cpu >= RUNTIME_CODE_WINDOW_START && cpu < 0xC000);
+            assert_eq!(usize::from(0xC000 - cpu), 3 * 8 * 1024 - offset);
+        }
     }
 
     #[test]

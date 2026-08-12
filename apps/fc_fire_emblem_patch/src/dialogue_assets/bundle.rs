@@ -40,18 +40,8 @@ pub(crate) struct MainDialogueBundlePlan {
 }
 
 #[derive(Clone)]
-pub(crate) struct MainDialogueDisplayPath {
-    pub(crate) record_id: String,
-    pub(crate) display_path_id: String,
-    pub(crate) source_prg_bank: u8,
-    pub(crate) logical_bytes: Vec<LogicalDialogueByte>,
-    pub(crate) visible_page_ranges: Vec<Range<usize>>,
-}
-
-#[derive(Clone)]
 pub(crate) struct MainDialoguePageWorkset {
     pub(crate) record_id: String,
-    pub(crate) display_path_id: String,
     pub(crate) page_index: usize,
     pub(crate) target_glyphs: BTreeSet<char>,
     pub(crate) dynamic_string_selectors: BTreeSet<u8>,
@@ -62,27 +52,21 @@ pub(crate) struct MainDialoguePageWorkset {
 }
 
 impl MainDialogueBundlePlan {
-    pub(crate) fn canonical_display_paths(&self) -> Result<Vec<MainDialogueDisplayPath>> {
+    /// 레코드마다 가시 페이지 구간이 하나씩 있는지 확인한다.
+    /// 전에는 이 자리에서 직접·전이 두 표시 경로를 펼쳤다. 두 모드의 차이는 레코드
+    /// 프리픽스 파서 결함이 만든 것이어서 폐기했다. 의사결정 59번을 따른다.
+    pub(crate) fn canonical_visible_page_ranges(&self) -> Result<Vec<Vec<Range<usize>>>> {
         self.target_records
             .iter()
             .map(|record| {
-                let visible_page_ranges = self
+                Ok(self
                     .visible_page_ranges_by_record_id
                     .get(&record.id)
                     .with_context(|| format!("{} has no canonical visible pages", record.id))?
-                    .clone();
-                Ok(MainDialogueDisplayPath {
-                    record_id: record.id.clone(),
-                    display_path_id: record.id.clone(),
-                    source_prg_bank: record.source_prg_bank,
-                    logical_bytes: record.bytes.clone(),
-                    visible_page_ranges,
-                })
+                    .clone())
             })
             .collect()
     }
-
-
 
     pub(crate) fn unique_glyphs(&self) -> BTreeSet<char> {
         self.target_records
@@ -436,7 +420,6 @@ fn record_page_worksets<'a>(
                 .retain(|code| !preserved_target_active_codes.contains(code));
             Ok(MainDialoguePageWorkset {
                 record_id: workspace_record.id.clone(),
-                display_path_id: workspace_record.id.clone(),
                 page_index,
                 target_glyphs,
                 dynamic_string_selectors: dynamic_string_selector_counts.keys().copied().collect(),

@@ -215,9 +215,30 @@ impl DynamicStringDomain {
     ];
 }
 
+/// 인물 후일담은 엔트리 하나가 아군 하나를 가리키고, 전부 같은 형태로 시작한다.
+/// `{E2}{E9:05}{EC:00}` 뒤에 그 인물의 결말이 이어진다. 후일담 표는 53분기이고
+/// 라우팅 표가 그중 하나로 합류하므로 항목을 낱낱이 세지 않고 규칙으로 둔다.
+fn epilogue_entry_names_a_playable_unit(record_id: &str, selector: u8) -> bool {
+    if selector != 0 {
+        return false;
+    }
+    let Some((table, entry)) = record_id.rsplit_once(':') else {
+        return false;
+    };
+    let entry = entry.parse::<usize>().unwrap_or(usize::MAX);
+    match table {
+        // 0번은 인물이 아니라 전사 장소를 넣는다. 그쪽은 지명으로 따로 결속돼 있다.
+        "epilogue-dialogue" => (1..=53).contains(&entry),
+        "epilogue-routing-dialogue" => (2..=53).contains(&entry),
+        _ => false,
+    }
+}
+
 fn dynamic_string_domain(record_id: &str, selector: u8) -> Option<DynamicStringDomain> {
     let binding = (record_id, selector);
-    if ITEM_NAME_BINDINGS.contains(&binding) {
+    if epilogue_entry_names_a_playable_unit(record_id, selector) {
+        Some(DynamicStringDomain::PlayableUnitName)
+    } else if ITEM_NAME_BINDINGS.contains(&binding) {
         Some(DynamicStringDomain::ItemName)
     } else if PLAYABLE_UNIT_NAME_BINDINGS.contains(&binding) {
         Some(DynamicStringDomain::PlayableUnitName)
@@ -255,10 +276,32 @@ pub(super) fn classified_dynamic_string_bindings()
             );
         }
     }
+    for (table, entries) in [
+        ("epilogue-dialogue", 1..=53usize),
+        ("epilogue-routing-dialogue", 2..=53usize),
+    ] {
+        for entry in entries {
+            let record_id: &'static str =
+                Box::leak(format!("{table}:{entry:03}").into_boxed_str());
+            assert!(
+                bindings
+                    .insert((record_id, 0), DynamicStringDomain::PlayableUnitName)
+                    .is_none(),
+                "duplicate epilogue dynamic dialogue binding {record_id}"
+            );
+        }
+    }
     bindings
 }
 
-const ITEM_NAME_BINDINGS: [(&str, u8); 7] = [
+const ITEM_NAME_BINDINGS: [(&str, u8); 12] = [
+    // 레코드 프리픽스 파서를 고치기 전에는 이 다섯 결속이 잘린 네 바이트 안에 있어
+    // 분류표가 볼 수 없었다. 의사결정 57번을 따른다.
+    ("shop-and-item-dialogue:001", 0),
+    ("shop-and-item-dialogue:067", 0),
+    ("shop-and-item-dialogue:069", 1),
+    ("shop-and-item-dialogue:070", 0),
+    ("shop-and-item-dialogue:072", 0),
     ("village-and-outro-dialogue:014", 0),
     ("village-and-outro-dialogue:021", 0),
     ("shop-and-item-dialogue:008", 0),
@@ -319,6 +362,54 @@ mod tests {
             Some(DynamicStringDomain::ItemName)
         );
         assert_eq!(dynamic_string_domain("unknown", 0), None);
-        assert_eq!(classified_dynamic_string_bindings().len(), 32);
+    }
+
+    /// 인물 후일담은 항목마다 결속을 나열하지 않고 규칙으로 둔다. 규칙이 표를 벗어나
+    /// 다른 표까지 삼키면 엉뚱한 레코드에 아군 이름이 들어가므로 경계를 확인한다.
+    #[test]
+    fn epilogue_unit_name_rule_covers_only_character_branches() {
+        for (record_id, expected) in [
+            // 0번은 인물이 아니라 전사 장소를 넣는다. 선택자도 0이 아니라 1이다.
+            ("epilogue-dialogue:000", None),
+            (
+                "epilogue-dialogue:001",
+                Some(DynamicStringDomain::PlayableUnitName),
+            ),
+            (
+                "epilogue-dialogue:053",
+                Some(DynamicStringDomain::PlayableUnitName),
+            ),
+            ("epilogue-dialogue:054", None),
+            ("epilogue-routing-dialogue:001", None),
+            (
+                "epilogue-routing-dialogue:002",
+                Some(DynamicStringDomain::PlayableUnitName),
+            ),
+            ("chapter-intro-dialogue:001", None),
+        ] {
+            assert_eq!(dynamic_string_domain(record_id, 0), expected, "{record_id}");
+        }
+        // 선택자 0만 이름을 받는다. 후일담의 다른 선택자는 규칙 밖이다.
+        assert_eq!(dynamic_string_domain("epilogue-dialogue:001", 1), None);
+        assert_eq!(
+            dynamic_string_domain("epilogue-dialogue:000", 1),
+            Some(DynamicStringDomain::LocationName)
+        );
+    }
+
+    /// 분류표는 소비처마다 하나씩만 있어야 한다. 규칙과 나열이 겹치면 조립이 실패한다.
+    #[test]
+    fn every_classified_binding_is_unique() {
+        let bindings = classified_dynamic_string_bindings();
+
+        assert_eq!(
+            bindings.len(),
+            ITEM_NAME_BINDINGS.len()
+                + PLAYABLE_UNIT_NAME_BINDINGS.len()
+                + LOCATION_NAME_BINDINGS.len()
+                + PRESERVED_NUMERIC_BINDINGS.len()
+                + 53
+                + 52
+        );
     }
 }

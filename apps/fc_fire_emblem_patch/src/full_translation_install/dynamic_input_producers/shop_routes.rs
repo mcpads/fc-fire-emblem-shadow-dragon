@@ -60,19 +60,32 @@ pub(super) fn resolve(
         FAMILY,
     );
 
+    // 시설 대사표는 다섯 시설을 세 레코드로 보내고, 그중 몇이 품목명을 소비하는지는
+    // 대사 본문이 정한다. 개수를 고정하면 레코드 프리픽스를 바로잡을 때처럼 소비처가
+    // 하나 더 드러날 때마다 깨진다. 여기서 지킬 것은 시설 경로가 비지 않는다는 것이다.
+    ensure!(
+        !routes.is_empty(),
+        "shop facility dialogue table no longer selects an item-name consumer"
+    );
+
     let generic_numeric = source_bytes(rom, 0x9E67, GENERIC_NUMERIC_ROUTE.len())?;
     ensure!(
         generic_numeric == GENERIC_NUMERIC_ROUTE,
         "generic selector-zero numeric route changed"
     );
-    routes.extend(selected_record_routes(
+    // 이쪽은 코드가 레코드 하나와 선택자 하나를 직접 이름 부르므로 정확히 하나다.
+    let numeric_routes = selected_record_routes(
         classified,
         "shop-and-item-dialogue",
         &BTreeSet::from([usize::from(GENERIC_NUMERIC_ROUTE[15])]),
         &BTreeMap::from([(0, DynamicStringDomain::PreservedNumeric)]),
         FAMILY,
-    ));
-    ensure!(routes.len() == 2, "shop producer/consumer join changed");
+    );
+    ensure!(
+        numeric_routes.len() == 1,
+        "generic selector-zero numeric route no longer names one consumer record"
+    );
+    routes.extend(numeric_routes);
     Ok(routes)
 }
 

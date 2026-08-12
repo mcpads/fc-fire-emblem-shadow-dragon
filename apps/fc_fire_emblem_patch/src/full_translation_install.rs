@@ -136,8 +136,6 @@ struct TranslationInputs {
 #[derive(Serialize)]
 struct DialogueCodebook {
     canonical_record_count: usize,
-    display_path_count: usize,
-    ordinary_record_count: usize,
     page_workset_count: usize,
     unique_workset_count: usize,
     literal_glyph_count: usize,
@@ -153,7 +151,7 @@ struct DialogueCodebook {
     page_assignment_sha1: String,
     static_page_upper_bound_count: usize,
     static_page_pack_sha1: String,
-    normalized_display_paths_connected: bool,
+    canonical_records_connected: bool,
     page_local_bundle_encoding_connected: bool,
     glyph_characters_emitted: bool,
 }
@@ -492,8 +490,6 @@ pub(crate) fn plan_full_translation_installation(
         },
         dialogue_codebook: DialogueCodebook {
             canonical_record_count: display.canonical_record_count,
-            display_path_count: display.display_path_count,
-            ordinary_record_count: display.ordinary_record_count,
             page_workset_count: display.page_worksets.len(),
             unique_workset_count: codebook.unique_workset_count,
             literal_glyph_count: display.unique_glyphs().len(),
@@ -509,7 +505,7 @@ pub(crate) fn plan_full_translation_installation(
             page_assignment_sha1: codebook.page_assignment_sha1,
             static_page_upper_bound_count: codebook.page_assignments.len(),
             static_page_pack_sha1: sha1_hex(&font_page_pack),
-            normalized_display_paths_connected: true,
+            canonical_records_connected: true,
             page_local_bundle_encoding_connected: true,
             glyph_characters_emitted: false,
         },
