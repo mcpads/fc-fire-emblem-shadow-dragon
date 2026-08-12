@@ -3,7 +3,9 @@ use std::collections::BTreeMap;
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
-use crate::{dialogue_assets::EncodedMainDialogueDisplayStorage, rom::Rom, sha1_hex};
+use crate::{
+    dialogue_assets::EncodedMainDialogueDisplayStorage, rom::Rom, sha1_hex, tracked::TrackedImage,
+};
 
 mod transition_reader;
 mod write_set;
@@ -37,6 +39,21 @@ pub(super) fn transition_reader_reserved_range() -> Result<std::ops::Range<u16>>
         )
         .context("transition bank selector range overflow")?;
     Ok(TRANSITION_POINTER_RESOLVER..end)
+}
+
+impl RelocatedDialogueBankPlan {
+    pub(super) fn expected_write_count(&self) -> usize {
+        self.complete_dialogue_write_set.expected_write_count
+    }
+}
+
+pub(super) fn append_relocated_dialogue_writes(
+    image: &mut TrackedImage,
+    candidate: &Rom,
+    storage: &EncodedMainDialogueDisplayStorage,
+) -> Result<()> {
+    let routines = assemble_transition_reader_routines()?;
+    write_set::append_complete_dialogue_writes(image, candidate, storage, &routines)
 }
 
 #[derive(Serialize)]

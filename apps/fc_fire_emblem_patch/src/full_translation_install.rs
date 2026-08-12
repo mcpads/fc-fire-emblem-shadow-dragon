@@ -29,6 +29,7 @@ mod dynamic_composition;
 mod dynamic_input_producers;
 mod dynamic_inputs;
 mod installation_layout;
+mod integrated_write_set;
 mod normalized_storage_budget;
 mod relocated_dialogue_banks;
 
@@ -38,10 +39,26 @@ use dynamic_composition::plan_dialogue_runtime_composition;
 use dynamic_input_producers::{DynamicInputProducerPlan, inspect_dynamic_input_producers};
 use dynamic_inputs::{plan_dynamic_dialogue_inputs, plan_dynamic_string_remap};
 use installation_layout::{InstallationLayoutPlan, plan_installation_layout};
+use integrated_write_set::{IntegratedWriteSetPlan, plan_integrated_write_set};
 use normalized_storage_budget::{NormalizedStorageBudgetPlan, plan_normalized_storage_budget};
 use relocated_dialogue_banks::{RelocatedDialogueBankPlan, plan_relocated_dialogue_banks};
 
 const REQUIRED_DOMAIN_COUNT: usize = 13;
+const REQUIRED_DOMAINS: [&str; REQUIRED_DOMAIN_COUNT] = [
+    "chapter_save_offer_label",
+    "chapter_titles",
+    "choice_labels",
+    "class_names",
+    "ending_record_labels",
+    "enemy_names",
+    "item_action_labels",
+    "item_names",
+    "location_names",
+    "main_dialogue",
+    "map_menu_labels",
+    "unit_names",
+    "unit_ui_labels",
+];
 
 pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) source_path: &'a Path,
@@ -84,6 +101,7 @@ struct FullTranslationInstallReport {
     dialogue_codebook: DialogueCodebook,
     dialogue_page_pool: DialoguePagePool,
     installation_layout: InstallationLayoutPlan,
+    integrated_write_set: IntegratedWriteSetPlan,
     dialogue_runtime_composition: DialogueRuntimeComposition,
     dialogue_storage: DialogueStorage,
     installation_gates: InstallationGates,
@@ -392,6 +410,12 @@ pub(crate) fn plan_full_translation_installation(
         "relocated dialogue bank plan and page-pool plan use different current candidates"
     );
     let relocated_bank_plan = plan_relocated_dialogue_banks(&current_candidate, &encoded_display)?;
+    let integrated_write_set = plan_integrated_write_set(
+        &current_candidate,
+        &encoded_display,
+        &REQUIRED_DOMAINS,
+        relocated_bank_plan.expected_write_count(),
+    )?;
     ensure!(
         planned_storage_byte_count <= source_owned_storage_byte_count,
         "complete dialogue encoded storage exceeds its source-owned regions"
@@ -440,21 +464,7 @@ pub(crate) fn plan_full_translation_installation(
         source_sha1: EXPECTED_SOURCE_SHA1,
         strategy: "install all remaining translation domains in one cumulative candidate, run complete static gates, then run consumer-path dynamic regression on that same ROM",
         required_domain_count: REQUIRED_DOMAIN_COUNT,
-        required_domains: [
-            "chapter_save_offer_label",
-            "chapter_titles",
-            "choice_labels",
-            "class_names",
-            "ending_record_labels",
-            "enemy_names",
-            "item_action_labels",
-            "item_names",
-            "location_names",
-            "main_dialogue",
-            "map_menu_labels",
-            "unit_names",
-            "unit_ui_labels",
-        ],
+        required_domains: REQUIRED_DOMAINS,
         translation_inputs: TranslationInputs {
             main_dialogue_record_count: dialogue.record_ids.len(),
             fixed_text_physical_entry_count: fixed.entries.len(),
@@ -523,6 +533,7 @@ pub(crate) fn plan_full_translation_installation(
             current_candidate_bound: true,
         },
         installation_layout,
+        integrated_write_set,
         dialogue_runtime_composition: DialogueRuntimeComposition {
             strategy_selected: true,
             glyph_atlas_tile_count: composition.glyph_atlas_tile_count,

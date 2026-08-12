@@ -23,7 +23,7 @@ pub(super) struct CompleteDialogueWriteSetPlan {
     transition_mode_hook_write_count: usize,
     dialogue_reader_hook_write_count: usize,
     fixed_routine_write_count: usize,
-    expected_write_count: usize,
+    pub(super) expected_write_count: usize,
     changed_byte_count: usize,
     every_change_tracked: bool,
     output_materialized_in_memory_only: bool,
