@@ -20,10 +20,12 @@ use crate::{
     unit_ui_text::plan_unit_ui_labels,
 };
 
+mod consumer_visible_prefixes;
 mod current_candidate;
 mod dynamic_composition;
 mod dynamic_inputs;
 
+use consumer_visible_prefixes::{ConsumerVisiblePrefixPlan, plan_consumer_visible_prefixes};
 use current_candidate::{CurrentCandidateInputs, inspect_dialogue_page_pool_capacity};
 use dynamic_composition::plan_dialogue_runtime_composition;
 use dynamic_inputs::{plan_dynamic_dialogue_inputs, plan_dynamic_string_remap};
@@ -192,7 +194,7 @@ struct DialogueRuntimeComposition {
     page_selector_remap_flag_sufficient: bool,
     every_translated_dynamic_page_remappable: bool,
     dynamic_string_producers_bound: bool,
-    consumer_specific_visible_prefixes_bound: bool,
+    consumer_visible_prefixes: ConsumerVisiblePrefixPlan,
     dense_group_lookup_byte_count: usize,
     record_page_group_selector_byte_count: usize,
     record_selector_directory_byte_count: usize,
@@ -323,6 +325,12 @@ pub(crate) fn plan_full_translation_installation(
         planned_storage_byte_count <= source_owned_storage_byte_count,
         "complete dialogue encoded storage exceeds its source-owned regions"
     );
+    let consumer_visible_prefixes = plan_consumer_visible_prefixes(
+        rom.data(),
+        &dialogue,
+        source_owned_storage_byte_count,
+        planned_storage_byte_count,
+    )?;
     let review_complete = dialogue_validation.review_complete
         && fixed.review_complete
         && unit_names.review_complete
@@ -481,7 +489,7 @@ pub(crate) fn plan_full_translation_installation(
             every_translated_dynamic_page_remappable: dynamic_remap
                 .every_translated_dynamic_page_remappable,
             dynamic_string_producers_bound: false,
-            consumer_specific_visible_prefixes_bound: false,
+            consumer_visible_prefixes,
             dense_group_lookup_byte_count: composition.dense_group_lookup_byte_count,
             record_page_group_selector_byte_count: composition
                 .record_page_group_selector_byte_count,

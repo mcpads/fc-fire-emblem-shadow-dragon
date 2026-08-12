@@ -50,7 +50,37 @@ pub(crate) struct MainDialoguePageWorkset {
     pub(crate) preserved_target_active_codes: BTreeSet<u8>,
 }
 
+pub(crate) struct MainDialogueRegionStorageBudget {
+    pub(crate) source_prg_bank: u8,
+    pub(crate) capacity_byte_count: usize,
+    pub(crate) used_byte_count: usize,
+    pub(crate) logical_record_byte_counts: BTreeMap<String, usize>,
+}
+
 impl MainDialogueBundlePlan {
+    pub(crate) fn logical_record_byte_counts(&self) -> BTreeMap<&str, usize> {
+        self.target_records
+            .iter()
+            .map(|record| (record.id.as_str(), record.bytes.len()))
+            .collect()
+    }
+
+    pub(crate) fn region_storage_budgets(&self) -> Vec<MainDialogueRegionStorageBudget> {
+        self.regions
+            .iter()
+            .map(|region| MainDialogueRegionStorageBudget {
+                source_prg_bank: region.source_prg_bank,
+                capacity_byte_count: region.source_storage.len(),
+                used_byte_count: region.used_storage_byte_count,
+                logical_record_byte_counts: region
+                    .logical_records
+                    .iter()
+                    .map(|record| (record.id.clone(), record.bytes.len()))
+                    .collect(),
+            })
+            .collect()
+    }
+
     pub(crate) fn unique_glyphs(&self) -> BTreeSet<char> {
         self.target_records
             .iter()
