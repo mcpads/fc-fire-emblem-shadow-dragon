@@ -61,7 +61,7 @@
 
 이 과제는 스크립트로 하지 않는다. 앞선 시도에서 정규식 삭제가 `enum Command` 헤더까지 지웠다. 편집기로 블록을 눈으로 확인하며 지운다.
 
-- [ ] **1단계: 현재 상태를 확인한다**
+- [x] **1단계: 현재 상태를 확인한다**
 
 ```bash
 grep -n "EntryMode" apps/fc_fire_emblem_patch/src/main.rs
@@ -69,19 +69,19 @@ grep -n "EntryMode" apps/fc_fire_emblem_patch/src/main.rs
 
 기대: 6곳. variant 정의 3곳과 match 팔 3곳이다.
 
-- [ ] **2단계: `Command` enum에서 variant 세 개를 지운다**
+- [x] **2단계: `Command` enum에서 variant 세 개를 지운다**
 
 각 variant는 `/// ...` 주석 줄부터 닫는 `},`까지가 한 덩어리다. 세 개를 지운다. `enum Command {` 헤더와 다른 variant는 건드리지 않는다.
 
-- [ ] **3단계: `match` 팔 세 개를 지운다**
+- [x] **3단계: `match` 팔 세 개를 지운다**
 
 `Command::ExtractMainDialogueEntryModeWorkspace { .. } => { .. }` 형태다. 여는 중괄호와 닫는 중괄호가 맞는지 세면서 지운다.
 
-- [ ] **4단계: `PlanFullTranslationInstallation`에서 인자를 뗀다**
+- [x] **4단계: `PlanFullTranslationInstallation`에서 인자를 뗀다**
 
 variant 정의의 `#[arg(long, default_value = "private/dialogue/entry-mode-workspace.json")]`와 그 아래 `main_dialogue_entry_mode_workspace: PathBuf,`를 지운다. match 팔의 구조 분해 목록에서 `main_dialogue_entry_mode_workspace,`를 지우고, `FullTranslationInstallInputs` 생성부에서 `main_dialogue_entry_mode_workspace_path: &main_dialogue_entry_mode_workspace,`를 지운다.
 
-- [ ] **5단계: 컴파일을 확인한다**
+- [x] **5단계: 컴파일을 확인한다**
 
 ```bash
 cargo build -p fc-fire-emblem-patch 2>&1 | head -30
@@ -89,11 +89,11 @@ cargo build -p fc-fire-emblem-patch 2>&1 | head -30
 
 기대: `full_translation_install`이 아직 그 필드를 요구하므로 `FullTranslationInstallInputs` 관련 오류만 난다. 다른 오류가 나면 2~4단계에서 잘못 지운 것이므로 `git checkout -- apps/fc_fire_emblem_patch/src/main.rs`로 되돌리고 다시 한다.
 
-- [ ] **6단계: 입력 구조체에서 필드를 뗀다**
+- [x] **6단계: 입력 구조체에서 필드를 뗀다**
 
 `full_translation_install.rs`의 `FullTranslationInstallInputs`에서 `pub(crate) main_dialogue_entry_mode_workspace_path: &'a Path,`를 지운다. 그 필드를 쓰던 `validate_main_dialogue_entry_mode_workspace`와 `plan_normalized_main_dialogue_display` 호출은 다음 과제에서 지우므로, 지금은 컴파일이 통과하도록 임시로 `inputs.main_dialogue_workspace_path`를 넘기지 않는다. 대신 두 호출을 지우고 그 결과를 쓰는 자리를 과제 2에서 정리한다. 이 과제에서는 컴파일이 깨진 채로 두지 않기 위해 과제 2와 함께 한 커밋으로 묶는다.
 
-- [ ] **7단계: 커밋하지 않고 과제 2로 넘어간다**
+- [x] **7단계: 커밋하지 않고 과제 2로 넘어간다**
 
 CLI만 떼면 컴파일이 통과하지 않는다. 과제 2 끝에서 함께 커밋한다.
 
@@ -111,7 +111,7 @@ CLI만 떼면 컴파일이 통과하지 않는다. 과제 2 끝에서 함께 커
 - 소비: 과제 1의 `FullTranslationInstallInputs`(이중 진입 필드 없음)
 - 생산: `FullTranslationInstallReport`에서 `normalized_entry_mode_*` 다섯 필드, `consumer_visible_prefixes`, `selected_relocated_bank_plan`, `normalized_entry_mode_bodies_bound`가 사라진다. `dialogue_codebook.display_path_count`는 643이 아니라 일반 365경로만 센다.
 
-- [ ] **1단계: 호출을 지운다**
+- [x] **1단계: 호출을 지운다**
 
 `full_translation_install.rs`의 다음을 지운다.
 
@@ -126,11 +126,11 @@ let display = plan_normalized_main_dialogue_display(
 
 `display`를 쓰던 자리는 `MainDialogueDisplayPlan::from_canonical_bundle(&dialogue)?`가 이미 만드는 값으로 대체한다. 그 줄은 367행에 있다.
 
-- [ ] **2단계: 보고서 필드를 지운다**
+- [x] **2단계: 보고서 필드를 지운다**
 
 `TranslationInputs`에서 `normalized_entry_mode_record_count`, `normalized_entry_mode_part_count`, `normalized_entry_mode_leading_japanese_occurrence_count`, `normalized_entry_mode_common_body_japanese_source_byte_count`, `normalized_entry_mode_untranslated_japanese_part_count`, `mode_specific_visible_prefix_japanese_source_byte_count`, `mode_specific_visible_prefix_translation_input_complete`를 지운다. `DialogueStorage`에서 `normalized_entry_mode_bodies_bound`와 `selected_relocated_bank_plan`을 지운다. 최상위 보고서에서 `consumer_visible_prefixes`를 지운다.
 
-- [ ] **3단계: 게이트에서 이중 진입 항을 뗀다**
+- [x] **3단계: 게이트에서 이중 진입 항을 뗀다**
 
 ```rust
 let translation_input_complete = entry_mode_validation.translation_input_complete
@@ -139,15 +139,15 @@ let translation_input_complete = entry_mode_validation.translation_input_complet
 
 를 대사 워크스페이스의 입력 완료 판정만 쓰도록 바꾼다. `review_complete` 판정에서도 `entry_mode_validation.review_complete` 항을 뺀다.
 
-- [ ] **4단계: 미러 뱅크 배치를 뗀다**
+- [x] **4단계: 미러 뱅크 배치를 뗀다**
 
 `installation_layout.rs`에서 `transition_mirror_banks` 필드와 그 계산을 지운다. `integrated_write_set.rs`에서 전이 미러 Expected Write 항목을 지운다. `runtime_state_storage.rs`에서 미러 뱅크 참조를 지운다.
 
-- [ ] **5단계: 모듈 선언과 use를 지운다**
+- [x] **5단계: 모듈 선언과 use를 지운다**
 
 `full_translation_install.rs`에서 `mod consumer_visible_prefixes;`, `mod relocated_dialogue_banks;`와 대응하는 `use` 두 줄을 지운다.
 
-- [ ] **6단계: 컴파일과 테스트**
+- [x] **6단계: 컴파일과 테스트**
 
 ```bash
 cargo build -p fc-fire-emblem-patch 2>&1 | head -30
@@ -156,7 +156,7 @@ cargo test --workspace 2>&1 | tail -3
 
 기대: 컴파일 통과. 테스트는 이중 진입을 참조하던 것이 남아 있으면 실패하므로, 실패한 테스트를 읽고 그 테스트가 폐기 대상 동작만 검증하는지 확인한 뒤 지운다. 다른 동작도 함께 보고 있으면 그 부분만 남긴다.
 
-- [ ] **7단계: 왕복 검증**
+- [x] **7단계: 왕복 검증**
 
 ```bash
 cargo run -q -p fc-fire-emblem-patch -- verify-main-dialogue-source-roundtrip \
@@ -165,7 +165,7 @@ cargo run -q -p fc-fire-emblem-patch -- verify-main-dialogue-source-roundtrip \
 
 기대: `output SHA-1: 0179c550d424e0397496078789e7b116601d120c`
 
-- [ ] **8단계: 커밋**
+- [x] **8단계: 커밋**
 
 ```bash
 git add apps/fc_fire_emblem_patch/src/main.rs apps/fc_fire_emblem_patch/src/full_translation_install.rs apps/fc_fire_emblem_patch/src/full_translation_install/
@@ -181,11 +181,11 @@ git commit -m "Stop binding the install plan to dual dialogue entry modes"
 **파일:**
 - 수정: `full_translation_install.rs`, `full_translation_install/installation_layout.rs`, `full_translation_install/integrated_write_set.rs`
 
-- [ ] **1단계: 호출과 사용을 지운다**
+- [x] **1단계: 호출과 사용을 지운다**
 
 `full_translation_install.rs`의 `plan_relocated_dialogue_banks(...)` 호출과 그 결과를 쓰는 `expected_dialogue_storage_write_count`를 정리한다. `installation_layout.rs`에서 미러 뱅크 배치를, `integrated_write_set.rs`에서 `append_relocated_dialogue_writes`를 뗀다.
 
-- [ ] **2단계: 컴파일·테스트·왕복을 확인한다**
+- [x] **2단계: 컴파일·테스트·왕복을 확인한다**
 
 ### 과제 3b: `MainDialogueDisplayPlan`을 이중 진입 밖으로 옮긴다
 
@@ -195,13 +195,13 @@ git commit -m "Stop binding the install plan to dual dialogue entry modes"
 - 생성: `apps/fc_fire_emblem_patch/src/dialogue_assets/display_plan.rs`
 - 수정: `dialogue_assets.rs`
 
-- [ ] **1단계: 살아 있는 부분만 새 모듈로 옮긴다**
+- [x] **1단계: 살아 있는 부분만 새 모듈로 옮긴다**
 
 `MainDialogueDisplayPlan` struct에서 `dual_entry_record_count`, `direct_display_path_count`, `transition_display_path_count`, `normalized_record_storage` 네 필드를 뺀다. 소비자가 읽지 않는 것을 확인했다. `from_canonical_bundle`과 `unique_glyphs`만 남긴다.
 
-- [ ] **2단계: 재수출을 새 모듈로 돌린다**
+- [x] **2단계: 재수출을 새 모듈로 돌린다**
 
-- [ ] **3단계: 컴파일·테스트·왕복을 확인한다**
+- [x] **3단계: 컴파일·테스트·왕복을 확인한다**
 
 ### 과제 3: 이중 진입 모듈을 지운다
 
@@ -217,7 +217,7 @@ git commit -m "Stop binding the install plan to dual dialogue entry modes"
 - 소비: 과제 2의 상태(아무도 이 모듈들을 부르지 않음)
 - 생산: 없음. 순수 제거다.
 
-- [ ] **1단계: 부르는 곳이 없는지 확인한다**
+- [x] **1단계: 부르는 곳이 없는지 확인한다**
 
 ```bash
 grep -rn "entry_mode\|EntryMode\|paired_entry\|PairedEntry\|consumer_visible_prefixes\|relocated_dialogue_banks" apps/fc_fire_emblem_patch/src/ | grep -v "^apps/fc_fire_emblem_patch/src/dialogue_assets/entry_mode_workspace" | grep -v "^apps/fc_fire_emblem_patch/src/full_translation_install/relocated_dialogue_banks" | grep -v "^apps/fc_fire_emblem_patch/src/full_translation_install/consumer_visible_prefixes"
@@ -225,11 +225,11 @@ grep -rn "entry_mode\|EntryMode\|paired_entry\|PairedEntry\|consumer_visible_pre
 
 기대: 모듈 선언(`mod ...;`)과 재수출(`pub(crate) use ...`)만 남는다. 실제 호출이 남아 있으면 과제 2가 덜 끝난 것이므로 돌아간다.
 
-- [ ] **2단계: 모듈 선언과 재수출을 지운다**
+- [x] **2단계: 모듈 선언과 재수출을 지운다**
 
 `dialogue_assets.rs`의 `mod entry_mode_workspace;`와 44~48행의 `pub(crate) use entry_mode_workspace::{ ... };`를 지운다. `dialogue_assets/bundle.rs`의 `paired_entry_storage` 선언을 지운다. `dialogue_inventory.rs`의 `main_dialogue_entry_modes` 선언과 호출을 지운다.
 
-- [ ] **3단계: 파일을 지운다**
+- [x] **3단계: 파일을 지운다**
 
 ```bash
 git rm -r apps/fc_fire_emblem_patch/src/dialogue_assets/entry_mode_workspace.rs \
@@ -241,7 +241,7 @@ git rm -r apps/fc_fire_emblem_patch/src/dialogue_assets/entry_mode_workspace.rs 
           apps/fc_fire_emblem_patch/src/full_translation_install/relocated_dialogue_banks
 ```
 
-- [ ] **4단계: 컴파일·테스트·clippy**
+- [x] **4단계: 컴파일·테스트·clippy**
 
 ```bash
 cargo build -p fc-fire-emblem-patch 2>&1 | head -20
@@ -251,7 +251,7 @@ cargo clippy --workspace --all-targets 2>&1 | grep generated
 
 기대: 컴파일 통과, 테스트 실패 0, clippy 경고 6건 이하.
 
-- [ ] **5단계: 커밋**
+- [x] **5단계: 커밋**
 
 ```bash
 git add -A
@@ -270,7 +270,7 @@ git commit -m "Remove the dual dialogue entry-mode modules"
 - 소비: 과제 3의 상태
 - 생산: 문서가 폐기 사실을 반영한다.
 
-- [ ] **1단계: 자산을 옮긴다**
+- [x] **1단계: 자산을 옮긴다**
 
 지우기 전에 백업 디렉터리로 옮긴다. `private/`는 git 무시 대상이라 복구 수단이 백업뿐이다.
 
@@ -279,19 +279,19 @@ mkdir -p private/dialogue/retired
 mv private/dialogue/entry-mode-workspace*.json private/dialogue/retired/
 ```
 
-- [ ] **2단계: `docs/status.md`를 고친다**
+- [x] **2단계: `docs/status.md`를 고친다**
 
 이중 진입 417파트, 미러 뱅크 `11`~`15`, 전이 resolver·reader·NMI 복귀 routine, 643개 표시 경로, 최대 대사 수요 `187/210`을 서술한 문단을 찾아 폐기 사실과 재계산 필요로 바꾼다. 의사결정 59번을 참조한다.
 
-- [ ] **3단계: `docs/roadmap.md`를 고친다**
+- [x] **3단계: `docs/roadmap.md`를 고친다**
 
 「즉시 실행할 작업」 12~14번의 이중 진입 항목을 폐기 표시로 바꾸고, G4·G5 서술에서 417파트와 `187/210`을 뺀다.
 
-- [ ] **4단계: `docs/build-pipeline.md`를 고친다**
+- [x] **4단계: `docs/build-pipeline.md`를 고친다**
 
 전이 미러 뱅크와 네 routine을 서술한 문단을 지운다.
 
-- [ ] **5단계: 커밋**
+- [x] **5단계: 커밋**
 
 ```bash
 git add docs/
@@ -309,7 +309,7 @@ git commit -m "Record the retired dual entry-mode structure in the project docs"
 - 소비: 과제 3의 상태
 - 생산: `dialogue_codebook.display_path_count`가 일반 경로만 세고, `maximum_workset_slot_demand`가 그 경로 집합에서 다시 나온다.
 
-- [ ] **1단계: 현재 값을 기록한다**
+- [x] **1단계: 현재 값을 기록한다**
 
 ```bash
 cargo run -q -p fc-fire-emblem-patch -- plan-full-translation-installation \
@@ -318,7 +318,7 @@ cargo run -q -p fc-fire-emblem-patch -- plan-full-translation-installation \
 
 기대: 과제 2에서 이중 진입 항을 뺐으므로 실행은 되지만 경로 수가 643이 아닌 값으로 나온다. 그 값을 적어 둔다.
 
-- [ ] **2단계: 보고서에서 경로 수와 수요를 확인한다**
+- [x] **2단계: 보고서에서 경로 수와 수요를 확인한다**
 
 ```bash
 python3 -c "
@@ -332,11 +332,11 @@ for k in ['display_path_count','ordinary_record_count','page_workset_count','max
 
 기대: `display_path_count`가 365(일반 경로)와 같고 `direct_display_path_count`·`transition_display_path_count`가 사라졌다.
 
-- [ ] **3단계: 새 최대 수요를 문서에 적는다**
+- [x] **3단계: 새 최대 수요를 문서에 적는다**
 
 `docs/status.md`의 최대 대사 수요를 2단계에서 읽은 `maximum_workset_slot_demand`로 바꾸고, 그 값이 전역 최악 `209/210`을 넘지 않는지 함께 적는다. 넘으면 그 사실을 적고 다음 관문으로 남긴다.
 
-- [ ] **4단계: 커밋**
+- [x] **4단계: 커밋**
 
 ```bash
 git add docs/status.md out/full-translation-installation.json 2>/dev/null || git add docs/status.md
@@ -354,3 +354,17 @@ git commit -m "Recount dialogue display paths without the dual entry modes"
 **이름 일관성:** `FullTranslationInstallInputs`, `MainDialogueDisplayPlan::from_canonical_bundle`, `validate_main_dialogue_entry_mode_workspace`, `plan_normalized_main_dialogue_display`는 현재 코드에 있는 이름 그대로다.
 
 **위험 지점:** 과제 1과 과제 2는 중간에 컴파일이 깨지므로 한 커밋으로 묶는다. 계획에 그렇게 적었다. 과제 1의 5단계에서 예상 밖 오류가 나면 `git checkout`으로 되돌리고 다시 하라고 명시했다.
+
+---
+
+## 실행 기록
+
+계획대로 다섯 과제를 모두 마쳤다. 실행 중에 계획에 없던 일 세 가지가 나왔다.
+
+**표시 경로 어휘가 남아 있었다.** 과제 3까지 모듈을 지우고 나서도 `MainDialogueDisplayPath`와 런타임 식별표의 직접·전이 두 색인이 살아 있었다. 실체가 없는 이름이므로 표시 단위를 정규 레코드로 되돌렸다. 식별표 엔트리는 4바이트에서 2바이트가 됐다.
+
+**프리픽스 수정이 EC 소비처 111개를 드러냈다.** 잘린 네 바이트 안에 있던 `{EC:xx}`가 보이면서 설치 계획이 「미분류 EC 선택자」로 멈췄다. 세 무리를 각각 원본 코드로 따라가 생산자에 결속했다. 의사결정 60번에 적었다.
+
+**값을 고정하던 단언 다섯 개가 개선을 실패로 만들었다.** 자료가 줄면 실행 코드 자리가 넓어지는 것이 정상인데 등식으로 묶여 있었다. 하한이나 관계식으로 바꿨다. 의사결정 61번에 적었다.
+
+최종 재계수: 표시 단위 643 → 504, 페이지 작업집합 1,170 → 928, 고유 글리프 715 → 713, 정적 페이지 상한 36 → 35, 저장 30,224 → 29,792바이트, 식별표 2,396 → 1,350바이트, 실행 코드 예약 1,888 → 3,791바이트, 최대 페이지 슬롯 수요 `187/210` → `188/210`. 동적 문자열 소비 수요 142개가 공급 142개와 맞물린다.
