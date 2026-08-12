@@ -33,6 +33,7 @@ mod integrated_write_set;
 mod normalized_storage_budget;
 mod relocated_dialogue_banks;
 mod runtime_identity;
+mod runtime_material;
 
 use consumer_visible_prefixes::{ConsumerVisiblePrefixPlan, plan_consumer_visible_prefixes};
 use current_candidate::{CurrentCandidateInputs, inspect_dialogue_page_pool_capacity};
@@ -46,6 +47,9 @@ use integrated_write_set::{
 use normalized_storage_budget::{NormalizedStorageBudgetPlan, plan_normalized_storage_budget};
 use relocated_dialogue_banks::{RelocatedDialogueBankPlan, plan_relocated_dialogue_banks};
 use runtime_identity::{DialogueRuntimeIdentityPlan, plan_dialogue_runtime_identity};
+use runtime_material::{
+    DialogueRuntimeMaterialPlan, RuntimeMaterialInputs, plan_dialogue_runtime_material,
+};
 
 const REQUIRED_DOMAIN_COUNT: usize = 13;
 const REQUIRED_DOMAINS: [&str; REQUIRED_DOMAIN_COUNT] = [
@@ -255,6 +259,7 @@ struct DialogueRuntimeComposition {
     atlas_scan_and_dynamic_remap_byte_count: usize,
     dialogue_runtime_identity: DialogueRuntimeIdentityPlan,
     atlas_scan_remap_and_identity_byte_count: usize,
+    runtime_material: DialogueRuntimeMaterialPlan,
     runtime_page_scan_bound_to_control_flow: bool,
     current_battle_glyph_atlas_tile_count: usize,
     current_battle_maximum_ppu_write_count: usize,
@@ -435,25 +440,21 @@ pub(crate) fn plan_full_translation_installation(
     let atlas_scan_remap_and_identity_byte_count = atlas_scan_and_dynamic_remap_byte_count
         .checked_add(runtime_identity.material.len())
         .context("dialogue runtime material length overflow")?;
-    let mut dialogue_runtime_material =
-        Vec::with_capacity(atlas_scan_remap_and_identity_byte_count);
-    dialogue_runtime_material.extend_from_slice(&composition.glyph_atlas);
-    dialogue_runtime_material.extend_from_slice(&composition.scan_material);
-    dialogue_runtime_material.extend_from_slice(&dynamic_remap.selected_dense_material);
-    dialogue_runtime_material.extend_from_slice(&runtime_identity.material);
-    ensure!(
-        dialogue_runtime_material.len() == atlas_scan_remap_and_identity_byte_count,
-        "dialogue runtime material assembly changed"
-    );
+    let runtime_material = plan_dialogue_runtime_material(RuntimeMaterialInputs {
+        glyph_atlas: &composition.glyph_atlas,
+        page_scan: &composition.scan_material,
+        dynamic_remap: &dynamic_remap.selected_dense_material,
+        runtime_identity: &runtime_identity.material,
+    })?;
     let installation_layout = plan_installation_layout(
         &current_candidate,
         &page_capacity,
-        atlas_scan_remap_and_identity_byte_count,
+        runtime_material.material.len(),
     )?;
     let integrated_write_set = plan_integrated_write_set(IntegratedWriteSetInputs {
         candidate: &current_candidate,
         dialogue_storage: &encoded_display,
-        dialogue_runtime_material: &dialogue_runtime_material,
+        dialogue_runtime_material: &runtime_material.material,
         required_domains: &REQUIRED_DOMAINS,
         expected_dialogue_storage_write_count: relocated_bank_plan.expected_write_count(),
     })?;
@@ -489,7 +490,7 @@ pub(crate) fn plan_full_translation_installation(
     };
 
     let report = FullTranslationInstallReport {
-        schema: 6,
+        schema: 7,
         source_sha1: EXPECTED_SOURCE_SHA1,
         strategy: "install all remaining translation domains in one cumulative candidate, run complete static gates, then run consumer-path dynamic regression on that same ROM",
         required_domain_count: REQUIRED_DOMAIN_COUNT,
@@ -654,6 +655,7 @@ pub(crate) fn plan_full_translation_installation(
             atlas_scan_and_dynamic_remap_byte_count,
             dialogue_runtime_identity: runtime_identity,
             atlas_scan_remap_and_identity_byte_count,
+            runtime_material,
             runtime_page_scan_bound_to_control_flow: false,
             current_battle_glyph_atlas_tile_count: page_capacity.battle_glyph_atlas_tile_count,
             current_battle_maximum_ppu_write_count: page_capacity.battle_maximum_ppu_write_count,
