@@ -372,6 +372,11 @@ pub(crate) fn plan_full_translation_installation(
         && locations.review_complete
         && entry_mode_validation.review_complete
         && translation_input_complete;
+    let next_gate = if translation_input_complete {
+        "replace every dual-entry first-line body with the normalized direct/common/transition translations and recalculate complete glyph lifetimes before binding shims; do not emit or run a partial ROM"
+    } else {
+        "author Korean for every untranslated Japanese part in the closed 139-record direct/common/transition workspace, then recalculate complete glyph lifetimes before binding normalized bodies or shims; do not emit or run a partial ROM"
+    };
 
     let report = FullTranslationInstallReport {
         schema: 2,
@@ -575,7 +580,7 @@ pub(crate) fn plan_full_translation_installation(
         },
         rom_emitted: false,
         dynamic_verification_started: false,
-        next_gate: "author Korean for every untranslated Japanese part in the closed 139-record direct/common/transition workspace, then recalculate complete glyph lifetimes before binding normalized bodies or shims; do not emit or run a partial ROM",
+        next_gate,
     };
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize full translation install plan")?;

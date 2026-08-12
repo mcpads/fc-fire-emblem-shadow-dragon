@@ -452,6 +452,14 @@ enum Command {
         #[arg(long, default_value = "private/dialogue/entry-mode-workspace.json")]
         workspace: PathBuf,
     },
+    /// Import an assistant-authored first pass for every untranslated dual-entry part.
+    ImportMainDialogueEntryModeDraft {
+        source: PathBuf,
+        #[arg(long, default_value = "private/dialogue/entry-mode-workspace.json")]
+        workspace: PathBuf,
+        #[arg(long, default_value = "private/dialogue/entry-mode-draft.tsv")]
+        draft: PathBuf,
+    },
     /// Count reviewed Korean glyphs without emitting dialogue or glyph characters.
     AnalyzeMainDialogueGlyphWorkset {
         source: PathBuf,
@@ -1486,6 +1494,19 @@ fn main() -> Result<()> {
                 summary.target_glyph_count,
                 summary.translation_input_complete,
                 summary.review_complete,
+            );
+        }
+        Command::ImportMainDialogueEntryModeDraft {
+            source,
+            workspace,
+            draft,
+        } => {
+            let summary = dialogue_assets::import_entry_mode_draft(&source, &workspace, &draft)?;
+            println!("updated {}", workspace.display());
+            println!("workspace SHA-1: {}", summary.workspace_sha1);
+            println!(
+                "imported {} main-dialogue entry-mode draft parts",
+                summary.imported_part_count
             );
         }
         Command::AnalyzeMainDialogueGlyphWorkset {

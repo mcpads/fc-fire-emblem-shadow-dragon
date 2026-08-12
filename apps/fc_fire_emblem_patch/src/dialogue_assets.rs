@@ -41,7 +41,7 @@ pub(crate) use bundle::{
 };
 pub(crate) use entry_mode_workspace::{
     EntryModeWorkspaceValidationSummary, extract_main_dialogue_entry_mode_workspace,
-    validate_main_dialogue_entry_mode_workspace,
+    import_entry_mode_draft, validate_main_dialogue_entry_mode_workspace,
 };
 pub(crate) use glyph_workset::{
     RuntimeEvidence as MaximumDialogueRuntimeEvidence, analyze_main_dialogue_glyph_workset,

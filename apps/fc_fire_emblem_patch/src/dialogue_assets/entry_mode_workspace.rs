@@ -4,12 +4,14 @@ use anyhow::{Context, Result, ensure};
 
 use super::*;
 
+mod draft_import;
 mod model;
 mod source_split;
 #[cfg(test)]
 mod tests;
 mod validation;
 
+pub(crate) use draft_import::import_entry_mode_draft;
 use model::*;
 use source_split::{build_entry_mode_workspace_without_seed, seed_entry_mode_translations};
 use validation::{
@@ -47,6 +49,12 @@ pub struct EntryModeWorkspaceValidationSummary {
     pub target_glyph_count: usize,
     pub translation_input_complete: bool,
     pub review_complete: bool,
+}
+
+#[derive(Debug)]
+pub struct EntryModeDraftImportSummary {
+    pub workspace_sha1: String,
+    pub imported_part_count: usize,
 }
 
 pub(crate) fn extract_main_dialogue_entry_mode_workspace(
