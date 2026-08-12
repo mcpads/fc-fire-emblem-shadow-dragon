@@ -28,12 +28,16 @@ mod current_candidate;
 mod dynamic_composition;
 mod dynamic_input_producers;
 mod dynamic_inputs;
+mod normalized_storage_budget;
+mod relocated_dialogue_banks;
 
 use consumer_visible_prefixes::{ConsumerVisiblePrefixPlan, plan_consumer_visible_prefixes};
 use current_candidate::{CurrentCandidateInputs, inspect_dialogue_page_pool_capacity};
 use dynamic_composition::plan_dialogue_runtime_composition;
 use dynamic_input_producers::{DynamicInputProducerPlan, inspect_dynamic_input_producers};
 use dynamic_inputs::{plan_dynamic_dialogue_inputs, plan_dynamic_string_remap};
+use normalized_storage_budget::{NormalizedStorageBudgetPlan, plan_normalized_storage_budget};
+use relocated_dialogue_banks::{RelocatedDialogueBankPlan, plan_relocated_dialogue_banks};
 
 const REQUIRED_DOMAIN_COUNT: usize = 13;
 
@@ -242,6 +246,8 @@ struct DialogueStorage {
     remaining_storage_byte_count: usize,
     every_pointer_within_source_owned_regions: bool,
     normalized_entry_mode_bodies_bound: bool,
+    duplicated_mode_path_upper_bound: NormalizedStorageBudgetPlan,
+    selected_relocated_bank_plan: RelocatedDialogueBankPlan,
 }
 
 #[derive(Serialize)]
@@ -368,6 +374,14 @@ pub(crate) fn plan_full_translation_installation(
         .iter()
         .map(|region| region.used_storage_byte_count)
         .sum::<usize>();
+    let normalized_storage_budget = plan_normalized_storage_budget(&dialogue, &display)?;
+    let current_candidate = Rom::from_path(inputs.current_candidate_path)?;
+    ensure!(
+        sha1_hex(current_candidate.data()) == page_capacity.current_candidate_sha1,
+        "relocated dialogue bank plan and page-pool plan use different current candidates"
+    );
+    let relocated_bank_plan =
+        plan_relocated_dialogue_banks(&current_candidate, &normalized_storage_budget)?;
     ensure!(
         planned_storage_byte_count <= source_owned_storage_byte_count,
         "complete dialogue encoded storage exceeds its source-owned regions"
@@ -398,7 +412,9 @@ pub(crate) fn plan_full_translation_installation(
         && locations.review_complete
         && entry_mode_validation.review_complete
         && translation_input_complete;
-    let next_gate = if translation_input_complete {
+    let next_gate = if translation_input_complete && relocated_bank_plan.strategy_selected {
+        "pack every bank-07 and bank-08 normalized display path into the selected dedicated expanded PRG banks, rewrite canonical and transition pointers, and assemble the dialogue-reader-only bank selector; do not emit or run a partial ROM until every other domain is ready"
+    } else if translation_input_complete {
         "bind the already packed normalized display paths to shared common-body storage and mode-aware entry shims, then recalculate exact encoded storage; do not emit or run a partial ROM"
     } else {
         "author Korean for every untranslated Japanese part in the closed 139-record direct/common/transition workspace, then recalculate complete glyph lifetimes before binding normalized bodies or shims; do not emit or run a partial ROM"
@@ -598,6 +614,8 @@ pub(crate) fn plan_full_translation_installation(
                 - planned_storage_byte_count,
             every_pointer_within_source_owned_regions: true,
             normalized_entry_mode_bodies_bound: false,
+            duplicated_mode_path_upper_bound: normalized_storage_budget,
+            selected_relocated_bank_plan: relocated_bank_plan,
         },
         installation_gates: InstallationGates {
             all_translation_inputs_loaded: translation_input_complete,

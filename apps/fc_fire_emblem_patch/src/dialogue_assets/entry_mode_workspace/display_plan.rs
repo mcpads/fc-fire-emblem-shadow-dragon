@@ -18,6 +18,18 @@ pub(crate) struct MainDialogueDisplayPlan {
     pub(crate) direct_display_path_count: usize,
     pub(crate) transition_display_path_count: usize,
     pub(crate) page_worksets: Vec<MainDialoguePageWorkset>,
+    pub(crate) normalized_record_storage: Vec<NormalizedDisplayRecordStorage>,
+}
+
+pub(crate) struct NormalizedDisplayRecordStorage {
+    pub(crate) record_id: String,
+    pub(crate) direct_storage_byte_count: usize,
+    pub(crate) transition_storage_byte_count: usize,
+    pub(crate) direct_leading_target_byte_count: usize,
+    pub(crate) transition_leading_target_byte_count: usize,
+    pub(crate) common_body_target_byte_count: usize,
+    pub(crate) direct_leading_line_count: usize,
+    pub(crate) transition_leading_line_count: usize,
 }
 
 impl MainDialogueDisplayPlan {
@@ -30,6 +42,7 @@ impl MainDialogueDisplayPlan {
             direct_display_path_count: 0,
             transition_display_path_count: 0,
             page_worksets: dialogue.page_worksets.clone(),
+            normalized_record_storage: Vec::new(),
         }
     }
 
@@ -80,6 +93,7 @@ pub(crate) fn plan_normalized_main_dialogue_display(
         .filter(|workset| !normalized_ids.contains(workset.record_id.as_str()))
         .cloned()
         .collect::<Vec<_>>();
+    let mut normalized_record_storage = Vec::with_capacity(workspace.records.len());
     for record in &workspace.records {
         let inherited_prefix_codes = dialogue
             .page_worksets
@@ -96,6 +110,33 @@ pub(crate) fn plan_normalized_main_dialogue_display(
             .filter(|workset| workset.record_id == record.id)
             .flat_map(|workset| workset.source_reclaimable_active_codes.iter().copied())
             .collect::<BTreeSet<_>>();
+        let direct_leading = target_logical_bytes(&record.direct_leading)?;
+        let transition_leading = target_logical_bytes(&record.transition_leading)?;
+        let common_body = target_logical_bytes(&record.common_body)?;
+        normalized_record_storage.push(NormalizedDisplayRecordStorage {
+            record_id: record.id.clone(),
+            direct_storage_byte_count: record.direct_prefix_byte_count
+                + direct_leading.len()
+                + common_body.len(),
+            transition_storage_byte_count: record.transition_prefix_byte_count
+                + transition_leading.len()
+                + common_body.len(),
+            direct_leading_target_byte_count: direct_leading.len(),
+            transition_leading_target_byte_count: transition_leading.len(),
+            common_body_target_byte_count: common_body.len(),
+            direct_leading_line_count: visible_line_ranges(
+                &record.id,
+                DIRECT_MODE,
+                &direct_leading,
+            )?
+            .len(),
+            transition_leading_line_count: visible_line_ranges(
+                &record.id,
+                TRANSITION_MODE,
+                &transition_leading,
+            )?
+            .len(),
+        });
         page_worksets.extend(display_path_worksets(
             record,
             DIRECT_MODE,
@@ -133,6 +174,7 @@ pub(crate) fn plan_normalized_main_dialogue_display(
         direct_display_path_count: workspace.records.len(),
         transition_display_path_count: workspace.records.len(),
         page_worksets,
+        normalized_record_storage,
     })
 }
 
