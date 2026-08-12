@@ -32,6 +32,7 @@ mod installation_layout;
 mod integrated_write_set;
 mod normalized_storage_budget;
 mod relocated_dialogue_banks;
+mod runtime_identity;
 
 use consumer_visible_prefixes::{ConsumerVisiblePrefixPlan, plan_consumer_visible_prefixes};
 use current_candidate::{CurrentCandidateInputs, inspect_dialogue_page_pool_capacity};
@@ -44,6 +45,7 @@ use integrated_write_set::{
 };
 use normalized_storage_budget::{NormalizedStorageBudgetPlan, plan_normalized_storage_budget};
 use relocated_dialogue_banks::{RelocatedDialogueBankPlan, plan_relocated_dialogue_banks};
+use runtime_identity::{DialogueRuntimeIdentityPlan, plan_dialogue_runtime_identity};
 
 const REQUIRED_DOMAIN_COUNT: usize = 13;
 const REQUIRED_DOMAINS: [&str; REQUIRED_DOMAIN_COUNT] = [
@@ -251,12 +253,15 @@ struct DialogueRuntimeComposition {
     scan_material_serialized: bool,
     atlas_and_scan_material_byte_count: usize,
     atlas_scan_and_dynamic_remap_byte_count: usize,
+    dialogue_runtime_identity: DialogueRuntimeIdentityPlan,
+    atlas_scan_remap_and_identity_byte_count: usize,
     runtime_page_scan_bound_to_control_flow: bool,
     current_battle_glyph_atlas_tile_count: usize,
     current_battle_maximum_ppu_write_count: usize,
     current_battle_runtime_routine_byte_count: usize,
     current_battle_runtime_bound_to_build: bool,
     battle_compositor_is_directly_reusable: bool,
+    main_dialogue_page_identity_material_serialized: bool,
     main_dialogue_page_identity_bound: bool,
     main_dialogue_transition_hook_planned: bool,
 }
@@ -426,18 +431,24 @@ pub(crate) fn plan_full_translation_installation(
     let atlas_scan_and_dynamic_remap_byte_count = composition.glyph_atlas.len()
         + composition.scan_material.len()
         + dynamic_remap.selected_dense_material.len();
-    let mut dialogue_runtime_material = Vec::with_capacity(atlas_scan_and_dynamic_remap_byte_count);
+    let runtime_identity = plan_dialogue_runtime_identity(rom.data(), &display)?;
+    let atlas_scan_remap_and_identity_byte_count = atlas_scan_and_dynamic_remap_byte_count
+        .checked_add(runtime_identity.material.len())
+        .context("dialogue runtime material length overflow")?;
+    let mut dialogue_runtime_material =
+        Vec::with_capacity(atlas_scan_remap_and_identity_byte_count);
     dialogue_runtime_material.extend_from_slice(&composition.glyph_atlas);
     dialogue_runtime_material.extend_from_slice(&composition.scan_material);
     dialogue_runtime_material.extend_from_slice(&dynamic_remap.selected_dense_material);
+    dialogue_runtime_material.extend_from_slice(&runtime_identity.material);
     ensure!(
-        dialogue_runtime_material.len() == atlas_scan_and_dynamic_remap_byte_count,
+        dialogue_runtime_material.len() == atlas_scan_remap_and_identity_byte_count,
         "dialogue runtime material assembly changed"
     );
     let installation_layout = plan_installation_layout(
         &current_candidate,
         &page_capacity,
-        atlas_scan_and_dynamic_remap_byte_count,
+        atlas_scan_remap_and_identity_byte_count,
     )?;
     let integrated_write_set = plan_integrated_write_set(IntegratedWriteSetInputs {
         candidate: &current_candidate,
@@ -478,7 +489,7 @@ pub(crate) fn plan_full_translation_installation(
     };
 
     let report = FullTranslationInstallReport {
-        schema: 5,
+        schema: 6,
         source_sha1: EXPECTED_SOURCE_SHA1,
         strategy: "install all remaining translation domains in one cumulative candidate, run complete static gates, then run consumer-path dynamic regression on that same ROM",
         required_domain_count: REQUIRED_DOMAIN_COUNT,
@@ -641,6 +652,8 @@ pub(crate) fn plan_full_translation_installation(
             atlas_and_scan_material_byte_count: composition.glyph_atlas.len()
                 + composition.scan_material_byte_count,
             atlas_scan_and_dynamic_remap_byte_count,
+            dialogue_runtime_identity: runtime_identity,
+            atlas_scan_remap_and_identity_byte_count,
             runtime_page_scan_bound_to_control_flow: false,
             current_battle_glyph_atlas_tile_count: page_capacity.battle_glyph_atlas_tile_count,
             current_battle_maximum_ppu_write_count: page_capacity.battle_maximum_ppu_write_count,
@@ -648,6 +661,7 @@ pub(crate) fn plan_full_translation_installation(
                 .battle_runtime_routine_byte_count,
             current_battle_runtime_bound_to_build: page_capacity.battle_runtime_bound_to_build,
             battle_compositor_is_directly_reusable: false,
+            main_dialogue_page_identity_material_serialized: true,
             main_dialogue_page_identity_bound: false,
             main_dialogue_transition_hook_planned: true,
         },

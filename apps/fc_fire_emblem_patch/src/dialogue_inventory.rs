@@ -17,9 +17,11 @@ pub(crate) use main_dialogue_entry_modes::{
 use main_dialogue_graph::*;
 use main_dialogue_record::*;
 use main_dialogue_state::*;
-pub(crate) use main_dialogue_translation_view::inspect_main_dialogue_storage;
 use main_dialogue_translation_view::{
     build_main_dialogue_storage_records, safe_main_dialogue_japanese_literal_offsets,
+};
+pub(crate) use main_dialogue_translation_view::{
+    inspect_main_dialogue_runtime_identities, inspect_main_dialogue_storage,
 };
 pub(crate) use report::*;
 use source_binding::{

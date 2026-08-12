@@ -25,6 +25,14 @@ pub(crate) struct MainDialogueStorageInspection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MainDialogueRuntimeIdentityBinding {
+    pub(crate) record_id: String,
+    pub(crate) directory_selector: u8,
+    pub(crate) pointer_count: usize,
+    pub(crate) entry_indices: Vec<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MainDialogueStorageLine {
     pub file_offset: usize,
     pub storage_byte_count: usize,

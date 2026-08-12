@@ -18,6 +18,61 @@ pub(crate) fn inspect_main_dialogue_storage(
     })
 }
 
+pub(crate) fn inspect_main_dialogue_runtime_identities(
+    source: &[u8],
+) -> Result<Vec<MainDialogueRuntimeIdentityBinding>> {
+    let report = build_report(source)?;
+    let records =
+        build_main_dialogue_storage_records(source, &report.tables, &report.main_dialogue_graph)?;
+    let tables = report
+        .tables
+        .iter()
+        .filter_map(|table| {
+            table
+                .directory_binding
+                .as_ref()
+                .map(|directory| (table.id, (directory.selector, table.pointer_count)))
+        })
+        .collect::<BTreeMap<_, _>>();
+    ensure!(
+        tables.len() == 8,
+        "main dialogue runtime identity table population changed"
+    );
+    let bindings = records
+        .iter()
+        .map(|record| {
+            let (directory_selector, pointer_count) =
+                tables.get(record.table_id).copied().with_context(|| {
+                    format!("{} has no runtime directory selector", record.table_id)
+                })?;
+            ensure!(
+                record
+                    .entry_indices
+                    .iter()
+                    .all(|index| *index < pointer_count),
+                "{} runtime entry index exceeds its pointer table",
+                record.table_id
+            );
+            Ok(MainDialogueRuntimeIdentityBinding {
+                record_id: format!("{}:{:03}", record.table_id, record.canonical_entry_index),
+                directory_selector,
+                pointer_count,
+                entry_indices: record.entry_indices.clone(),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    ensure!(
+        bindings.len() == 504
+            && bindings
+                .iter()
+                .map(|binding| binding.entry_indices.len())
+                .sum::<usize>()
+                == 517,
+        "main dialogue runtime identity binding population changed"
+    );
+    Ok(bindings)
+}
+
 pub(super) fn build_main_dialogue_storage_records(
     source: &[u8],
     tables: &[DialogueTableReport],
