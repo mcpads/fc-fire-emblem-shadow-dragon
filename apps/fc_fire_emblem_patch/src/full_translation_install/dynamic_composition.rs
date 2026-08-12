@@ -9,8 +9,12 @@ use crate::{
     mapper165::battle_codebook_plan::GlyphWorksetPagePlan,
 };
 
+use super::dynamic_inputs::DynamicStringRemapPlan;
+
 pub(super) struct DialogueRuntimeCompositionPlan {
     pub(super) glyph_atlas: Vec<u8>,
+    pub(super) scan_material: Vec<u8>,
+    pub(super) scan_material_sha1: String,
     pub(super) glyph_atlas_tile_count: usize,
     pub(super) four_by_four_block_count: usize,
     pub(super) four_by_four_block_index_bit_count: usize,
@@ -53,6 +57,7 @@ struct VisiblePageRecipe {
 pub(super) fn plan_dialogue_runtime_composition(
     dialogue: &MainDialogueDisplayPlan,
     codebook: &GlyphWorksetPagePlan,
+    dynamic_remap: &DynamicStringRemapPlan,
     source_font_page: &[u8],
     static_page_pack: &[u8],
 ) -> Result<DialogueRuntimeCompositionPlan> {
@@ -84,6 +89,12 @@ pub(super) fn plan_dialogue_runtime_composition(
         "dialogue static-page groups do not fit one-byte selectors"
     );
     let font = load_dalmoori()?;
+    let glyph_atlas_indices = dialogue_glyphs
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, glyph)| (glyph, index))
+        .collect::<BTreeMap<_, _>>();
     let mut glyph_atlas = Vec::with_capacity(dialogue_glyphs.len() * 8);
     for glyph in &dialogue_glyphs {
         let tile = rasterize_glyph(&font, *glyph)?;
@@ -240,6 +251,17 @@ pub(super) fn plan_dialogue_runtime_composition(
     let scan_material_byte_count = dense_group_lookup_byte_count
         + record_page_group_selector_byte_count
         + record_selector_directory_byte_count;
+    let scan_material = encode_scan_material(
+        dialogue,
+        codebook,
+        dynamic_remap,
+        &glyph_atlas_indices,
+        &record_worksets,
+    )?;
+    ensure!(
+        scan_material.len() == scan_material_byte_count,
+        "dialogue scan material measurement differs from its encoding"
+    );
     let dynamic_string_control_count = dialogue
         .page_worksets
         .iter()
@@ -259,6 +281,8 @@ pub(super) fn plan_dialogue_runtime_composition(
 
     Ok(DialogueRuntimeCompositionPlan {
         glyph_atlas,
+        scan_material_sha1: crate::sha1_hex(&scan_material),
+        scan_material,
         glyph_atlas_tile_count: dialogue_glyphs.len(),
         four_by_four_block_count: quadrant_compression.block_count,
         four_by_four_block_index_bit_count: quadrant_compression.index_bit_count,
@@ -407,6 +431,78 @@ fn record_workset_indices(
         .collect()
 }
 
+fn encode_scan_material(
+    dialogue: &MainDialogueDisplayPlan,
+    codebook: &GlyphWorksetPagePlan,
+    dynamic_remap: &DynamicStringRemapPlan,
+    glyph_atlas_indices: &BTreeMap<char, usize>,
+    record_worksets: &BTreeMap<&str, Vec<usize>>,
+) -> Result<Vec<u8>> {
+    let mut encoded = encode_dense_group_lookups(&codebook.page_assignments, glyph_atlas_indices)?;
+    let mut selectors = Vec::with_capacity(dialogue.page_worksets.len());
+    let mut directory = Vec::with_capacity((dialogue.display_paths.len() + 1) * 2);
+    ensure!(
+        dynamic_remap.workset_page_selectors.len() == dialogue.page_worksets.len(),
+        "dialogue scan material lost page selectors"
+    );
+    for path in &dialogue.display_paths {
+        directory.extend_from_slice(
+            &u16::try_from(selectors.len())
+                .context("dialogue page-selector material exceeds a 16-bit offset")?
+                .to_le_bytes(),
+        );
+        let indices = record_worksets
+            .get(path.display_path_id.as_str())
+            .with_context(|| format!("{} has no runtime page selectors", path.display_path_id))?;
+        selectors.extend(
+            indices
+                .iter()
+                .map(|index| dynamic_remap.workset_page_selectors[*index]),
+        );
+    }
+    directory.extend_from_slice(
+        &u16::try_from(selectors.len())
+            .context("dialogue page-selector end exceeds a 16-bit offset")?
+            .to_le_bytes(),
+    );
+    ensure!(
+        selectors.len() == dialogue.page_worksets.len(),
+        "dialogue scan material did not serialize every page selector exactly once"
+    );
+    encoded.extend_from_slice(&selectors);
+    encoded.extend_from_slice(&directory);
+    Ok(encoded)
+}
+
+fn encode_dense_group_lookups(
+    page_assignments: &[BTreeMap<char, u8>],
+    glyph_atlas_indices: &BTreeMap<char, usize>,
+) -> Result<Vec<u8>> {
+    let mut encoded = Vec::with_capacity(page_assignments.len() * (256 + 64));
+    for (group_index, assignments) in page_assignments.iter().enumerate() {
+        let mut low_indices = vec![0u8; 256];
+        let mut high_classes = vec![0xFFu8; 64];
+        for (glyph, code) in assignments {
+            let atlas_index = glyph_atlas_indices.get(glyph).copied().with_context(|| {
+                format!("dialogue page group {group_index} lost atlas glyph {glyph:?}")
+            })?;
+            ensure!(
+                atlas_index < 3 * 256,
+                "dialogue atlas index does not fit the two-bit lookup class"
+            );
+            low_indices[usize::from(*code)] = atlas_index as u8;
+            let packed_index = usize::from(*code) / 4;
+            let shift = usize::from(*code % 4) * 2;
+            let mask = !(0b11 << shift);
+            high_classes[packed_index] = (high_classes[packed_index] & mask)
+                | (u8::try_from(atlas_index >> 8).expect("atlas class is below three") << shift);
+        }
+        encoded.extend_from_slice(&low_indices);
+        encoded.extend_from_slice(&high_classes);
+    }
+    Ok(encoded)
+}
+
 fn changed_tile_count(from: &[u8], to: &[u8]) -> Result<usize> {
     ensure!(
         from.len() == FONT_PAGE_SIZE && to.len() == FONT_PAGE_SIZE,
@@ -498,5 +594,21 @@ mod tests {
         assert_eq!(measured.block_count, 1);
         assert_eq!(measured.index_bit_count, 1);
         assert_eq!(measured.byte_count, 3);
+    }
+
+    #[test]
+    fn dense_group_lookup_uses_class_three_as_the_unassigned_sentinel() {
+        let assignments = vec![BTreeMap::from([('가', 0x42), ('나', 0x43)])];
+        let atlas = BTreeMap::from([('가', 5usize), ('나', 0x105usize)]);
+
+        let encoded = encode_dense_group_lookups(&assignments, &atlas).unwrap();
+
+        assert_eq!(encoded.len(), 320);
+        assert_eq!(encoded[0x42], 5);
+        assert_eq!(encoded[0x43], 5);
+        let classes = encoded[256 + usize::from(0x42u8) / 4];
+        assert_eq!((classes >> ((0x42 % 4) * 2)) & 0b11, 0);
+        assert_eq!((classes >> ((0x43 % 4) * 2)) & 0b11, 1);
+        assert_eq!(encoded[256] & 0b11, 0b11);
     }
 }

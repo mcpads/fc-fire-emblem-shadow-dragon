@@ -10,7 +10,9 @@ use crate::{
 
 mod remap;
 
-pub(in crate::full_translation_install) use remap::plan_dynamic_string_remap;
+pub(in crate::full_translation_install) use remap::{
+    DynamicStringRemapPlan, plan_dynamic_string_remap,
+};
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]

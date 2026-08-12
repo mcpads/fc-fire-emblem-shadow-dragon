@@ -188,6 +188,10 @@ pub(super) fn plan_installation_layout(
     })
 }
 
+pub(super) fn main_dialogue_runtime_material_file_offset() -> Result<usize> {
+    Ok(mmc3_page_file_range(MAIN_DIALOGUE_RUNTIME_FIRST_PAGE, 1)?.start)
+}
+
 fn mmc3_page_file_range(first_page: u8, page_count: usize) -> Result<Range<usize>> {
     let start = HEADER_SIZE
         .checked_add(usize::from(first_page) * PRG_PAGE_SIZE)

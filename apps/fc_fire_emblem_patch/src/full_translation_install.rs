@@ -39,7 +39,9 @@ use dynamic_composition::plan_dialogue_runtime_composition;
 use dynamic_input_producers::{DynamicInputProducerPlan, inspect_dynamic_input_producers};
 use dynamic_inputs::{plan_dynamic_dialogue_inputs, plan_dynamic_string_remap};
 use installation_layout::{InstallationLayoutPlan, plan_installation_layout};
-use integrated_write_set::{IntegratedWriteSetPlan, plan_integrated_write_set};
+use integrated_write_set::{
+    IntegratedWriteSetInputs, IntegratedWriteSetPlan, plan_integrated_write_set,
+};
 use normalized_storage_budget::{NormalizedStorageBudgetPlan, plan_normalized_storage_budget};
 use relocated_dialogue_banks::{RelocatedDialogueBankPlan, plan_relocated_dialogue_banks};
 
@@ -245,6 +247,8 @@ struct DialogueRuntimeComposition {
     record_page_group_selector_byte_count: usize,
     record_selector_directory_byte_count: usize,
     scan_material_byte_count: usize,
+    scan_material_sha1: String,
+    scan_material_serialized: bool,
     atlas_and_scan_material_byte_count: usize,
     atlas_scan_and_dynamic_remap_byte_count: usize,
     runtime_page_scan_bound_to_control_flow: bool,
@@ -385,8 +389,13 @@ pub(crate) fn plan_full_translation_installation(
         font_page_pack.len() == codebook.page_assignments.len() * FONT_PAGE_SIZE,
         "dialogue font page pack length changed after rasterization"
     );
-    let composition =
-        plan_dialogue_runtime_composition(&display, &codebook, source_font_page, &font_page_pack)?;
+    let composition = plan_dialogue_runtime_composition(
+        &display,
+        &codebook,
+        &dynamic_remap,
+        source_font_page,
+        &font_page_pack,
+    )?;
     let encoded_display = dialogue.encoded_display_storage_by_page_groups(
         &display,
         &codebook.workset_page_indices,
@@ -410,24 +419,33 @@ pub(crate) fn plan_full_translation_installation(
         "relocated dialogue bank plan and page-pool plan use different current candidates"
     );
     let relocated_bank_plan = plan_relocated_dialogue_banks(&current_candidate, &encoded_display)?;
-    let integrated_write_set = plan_integrated_write_set(
-        &current_candidate,
-        &encoded_display,
-        &REQUIRED_DOMAINS,
-        relocated_bank_plan.expected_write_count(),
-    )?;
     ensure!(
         planned_storage_byte_count <= source_owned_storage_byte_count,
         "complete dialogue encoded storage exceeds its source-owned regions"
     );
     let atlas_scan_and_dynamic_remap_byte_count = composition.glyph_atlas.len()
-        + composition.scan_material_byte_count
-        + dynamic_remap.selected_dense_remap_byte_count;
+        + composition.scan_material.len()
+        + dynamic_remap.selected_dense_material.len();
+    let mut dialogue_runtime_material = Vec::with_capacity(atlas_scan_and_dynamic_remap_byte_count);
+    dialogue_runtime_material.extend_from_slice(&composition.glyph_atlas);
+    dialogue_runtime_material.extend_from_slice(&composition.scan_material);
+    dialogue_runtime_material.extend_from_slice(&dynamic_remap.selected_dense_material);
+    ensure!(
+        dialogue_runtime_material.len() == atlas_scan_and_dynamic_remap_byte_count,
+        "dialogue runtime material assembly changed"
+    );
     let installation_layout = plan_installation_layout(
         &current_candidate,
         &page_capacity,
         atlas_scan_and_dynamic_remap_byte_count,
     )?;
+    let integrated_write_set = plan_integrated_write_set(IntegratedWriteSetInputs {
+        candidate: &current_candidate,
+        dialogue_storage: &encoded_display,
+        dialogue_runtime_material: &dialogue_runtime_material,
+        required_domains: &REQUIRED_DOMAINS,
+        expected_dialogue_storage_write_count: relocated_bank_plan.expected_write_count(),
+    })?;
     let consumer_visible_prefixes = plan_consumer_visible_prefixes(
         rom.data(),
         &dialogue,
@@ -618,6 +636,8 @@ pub(crate) fn plan_full_translation_installation(
                 .record_page_group_selector_byte_count,
             record_selector_directory_byte_count: composition.record_selector_directory_byte_count,
             scan_material_byte_count: composition.scan_material_byte_count,
+            scan_material_sha1: composition.scan_material_sha1,
+            scan_material_serialized: true,
             atlas_and_scan_material_byte_count: composition.glyph_atlas.len()
                 + composition.scan_material_byte_count,
             atlas_scan_and_dynamic_remap_byte_count,

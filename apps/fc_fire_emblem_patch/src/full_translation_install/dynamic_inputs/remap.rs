@@ -17,6 +17,8 @@ pub(in crate::full_translation_install) struct DynamicStringRemapPlan {
     pub(in crate::full_translation_install) selected_dense_remap_byte_count: usize,
     pub(in crate::full_translation_install) selected_strategy: &'static str,
     pub(in crate::full_translation_install) remap_material_sha1: String,
+    pub(in crate::full_translation_install) selected_dense_material: Vec<u8>,
+    pub(in crate::full_translation_install) workset_page_selectors: Vec<u8>,
     pub(in crate::full_translation_install) page_selector_remap_flag_sufficient: bool,
     pub(in crate::full_translation_install) every_translated_dynamic_page_remappable: bool,
 }
@@ -76,6 +78,25 @@ pub(in crate::full_translation_install) fn plan_dynamic_string_remap(
         "dynamic dialogue dense remap measurement differs from its encoding"
     );
 
+    let workset_page_selectors = codebook
+        .workset_page_indices
+        .iter()
+        .zip(&dynamic_inputs.translated_dynamic_by_workset)
+        .map(|(group_index, translated_dynamic)| {
+            let group_index = u8::try_from(*group_index)
+                .context("dynamic dialogue page-group selector does not fit u8")?;
+            if *translated_dynamic {
+                ensure!(
+                    remaps_by_group.contains_key(&usize::from(group_index)),
+                    "translated dynamic page has no remap table"
+                );
+                Ok(group_index | 0x80)
+            } else {
+                Ok(group_index)
+            }
+        })
+        .collect::<Result<Vec<_>>>()?;
+
     Ok(DynamicStringRemapPlan {
         canonical_code_count: dynamic_inputs.canonical_dynamic_codes.len(),
         remapped_page_group_count: remaps_by_group.len(),
@@ -87,6 +108,8 @@ pub(in crate::full_translation_install) fn plan_dynamic_string_remap(
         selected_dense_remap_byte_count: selected_dense.len(),
         selected_strategy: "page-selector high-bit remap flag plus group-indexed 256-byte canonical-to-physical lookup",
         remap_material_sha1: sha1_hex(&selected_dense),
+        selected_dense_material: selected_dense,
+        workset_page_selectors,
         page_selector_remap_flag_sufficient,
         every_translated_dynamic_page_remappable: true,
     })

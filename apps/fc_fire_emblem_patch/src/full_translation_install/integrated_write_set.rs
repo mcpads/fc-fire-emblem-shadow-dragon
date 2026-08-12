@@ -3,7 +3,16 @@ use serde::Serialize;
 
 use crate::{dialogue_assets::EncodedMainDialogueDisplayStorage, rom::Rom, tracked::TrackedImage};
 
+use super::installation_layout::main_dialogue_runtime_material_file_offset;
 use super::relocated_dialogue_banks::append_relocated_dialogue_writes;
+
+pub(super) struct IntegratedWriteSetInputs<'a> {
+    pub(super) candidate: &'a Rom,
+    pub(super) dialogue_storage: &'a EncodedMainDialogueDisplayStorage,
+    pub(super) dialogue_runtime_material: &'a [u8],
+    pub(super) required_domains: &'a [&'static str],
+    pub(super) expected_dialogue_storage_write_count: usize,
+}
 
 #[derive(Serialize)]
 pub(super) struct IntegratedWriteSetPlan {
@@ -26,6 +35,7 @@ struct DomainWriteContribution {
     translation_input_loaded: bool,
     glyph_lifetime_bound: bool,
     storage_and_address_writes_contributed: bool,
+    runtime_material_writes_contributed: bool,
     font_supply_writes_contributed: bool,
     all_consumer_writes_contributed: bool,
     expected_write_count: usize,
@@ -33,28 +43,48 @@ struct DomainWriteContribution {
 }
 
 pub(super) fn plan_integrated_write_set(
-    candidate: &Rom,
-    dialogue_storage: &EncodedMainDialogueDisplayStorage,
-    required_domains: &[&'static str],
-    expected_dialogue_write_count: usize,
+    inputs: IntegratedWriteSetInputs<'_>,
 ) -> Result<IntegratedWriteSetPlan> {
-    let mut image = TrackedImage::new(candidate.data().to_vec());
-    append_relocated_dialogue_writes(&mut image, candidate, dialogue_storage)?;
+    let mut image = TrackedImage::new(inputs.candidate.data().to_vec());
+    append_relocated_dialogue_writes(&mut image, inputs.candidate, inputs.dialogue_storage)?;
     ensure!(
-        image.writes().len() == expected_dialogue_write_count,
+        image.writes().len() == inputs.expected_dialogue_storage_write_count,
         "integrated write set and complete dialogue write set disagree"
     );
-    image.verify_all_changes_tracked(candidate.data())?;
+    let runtime_material_offset = main_dialogue_runtime_material_file_offset()?;
+    let runtime_material_end = runtime_material_offset
+        .checked_add(inputs.dialogue_runtime_material.len())
+        .ok_or_else(|| anyhow::anyhow!("dialogue runtime material range overflow"))?;
+    let expected_runtime_material = inputs
+        .candidate
+        .data()
+        .get(runtime_material_offset..runtime_material_end)
+        .ok_or_else(|| anyhow::anyhow!("dialogue runtime material is outside candidate"))?;
+    ensure!(
+        expected_runtime_material.iter().all(|byte| *byte == 0xFF),
+        "dialogue runtime material destination is not exact FF"
+    );
+    image.write_expected(
+        "main dialogue runtime material",
+        runtime_material_offset,
+        expected_runtime_material,
+        inputs.dialogue_runtime_material,
+    )?;
+    image.verify_all_changes_tracked(inputs.candidate.data())?;
     let expected_write_count = image.writes().len();
     let output = image.into_data();
-    let changed_byte_count = candidate
+    let changed_byte_count = inputs
+        .candidate
         .data()
         .iter()
         .zip(&output)
         .filter(|(before, after)| before != after)
         .count();
 
-    let domains = domain_contributions(required_domains, expected_dialogue_write_count)?;
+    let domains = domain_contributions(
+        inputs.required_domains,
+        inputs.expected_dialogue_storage_write_count + 1,
+    )?;
     let contributing_domain_count = domains
         .iter()
         .filter(|domain| domain.expected_write_count != 0)
@@ -69,7 +99,7 @@ pub(super) fn plan_integrated_write_set(
     );
 
     Ok(IntegratedWriteSetPlan {
-        required_domain_count: required_domains.len(),
+        required_domain_count: inputs.required_domains.len(),
         domains,
         contributing_domain_count,
         fully_planned_domain_count,
@@ -107,6 +137,7 @@ fn domain_contributions(
                 translation_input_loaded: true,
                 glyph_lifetime_bound: true,
                 storage_and_address_writes_contributed: dialogue,
+                runtime_material_writes_contributed: dialogue,
                 font_supply_writes_contributed: false,
                 all_consumer_writes_contributed: false,
                 expected_write_count: if dialogue {
