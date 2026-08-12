@@ -22,7 +22,8 @@ use report::{
 use screen_lifetimes::observed_screen_lifetime_reports;
 
 pub(crate) use maximum_source::{
-    RuntimeEvidence, load_runtime_evidence as load_maximum_dialogue_runtime_evidence,
+    RuntimeEvidence, bind_chapter_event_dialogue_routes,
+    load_runtime_evidence as load_maximum_dialogue_runtime_evidence,
 };
 
 pub(crate) struct MainDialogueGlyphWorksetSummary {

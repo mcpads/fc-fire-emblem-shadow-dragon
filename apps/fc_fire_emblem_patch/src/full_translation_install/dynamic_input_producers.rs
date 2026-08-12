@@ -4,10 +4,13 @@ use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use super::dynamic_inputs::{DynamicStringDomain, classified_dynamic_string_bindings};
-use crate::{
-    dialogue_inventory::switchable_cpu_to_file_offset, item_flow::validate_item_lifetime_source,
-    rom::Rom, sha1_hex,
-};
+use crate::{dialogue_inventory::switchable_cpu_to_file_offset, rom::Rom, sha1_hex};
+
+mod arena_routes;
+mod epilogue_routes;
+mod item_routes;
+mod shop_routes;
+mod village_routes;
 
 const DYNAMIC_STRING_END_CODE: u8 = 0xEF;
 const SELECTOR_DIRECTORY_PRG_BANK: u8 = 0x0A;
@@ -27,23 +30,23 @@ pub(in crate::full_translation_install) struct DynamicInputProducerPlan {
     generic_slot_selecting_writer_count: usize,
     direct_absolute_writer_count: usize,
     every_dynamic_domain_has_a_source_writer: bool,
-    item_action_record_routes_bound: bool,
-    epilogue_location_record_route_bound: bool,
-    classified_record_selector_count: usize,
-    bound_record_selector_count: usize,
-    remaining_record_selector_count: usize,
-    remaining_record_selector_counts_by_domain: Vec<RemainingDomainRouteCount>,
-    every_record_selector_route_bound: bool,
+    producer_families: Vec<ProducerFamilySummary>,
+    consumer_demand_count: usize,
+    resolved_supply_count: usize,
+    missing_consumer_demands: Vec<ProducerRouteReport>,
+    mismatched_consumer_demands: Vec<ProducerRouteMismatch>,
+    unexpected_producer_supplies: Vec<ProducerRouteSupply>,
+    exact_consumer_producer_match: bool,
 }
 
 impl DynamicInputProducerPlan {
     pub(super) fn every_record_selector_route_bound(&self) -> bool {
-        self.every_record_selector_route_bound
+        self.exact_consumer_producer_match
     }
 }
 
 #[derive(Serialize)]
-struct SourceRegionBinding {
+pub(super) struct SourceRegionBinding {
     role: &'static str,
     source_prg_bank: u8,
     source_prg_bank_hex: String,
@@ -55,14 +58,55 @@ struct SourceRegionBinding {
     source_sha1: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ResolvedProducerRoute {
+    pub(super) record_id: &'static str,
+    pub(super) selector: u8,
+    pub(super) domain: DynamicStringDomain,
+    pub(super) family: &'static str,
+}
+
 #[derive(Serialize)]
-struct RemainingDomainRouteCount {
+struct ProducerFamilySummary {
+    family: &'static str,
+    resolved_route_count: usize,
+}
+
+#[derive(Serialize)]
+struct ProducerRouteReport {
+    record_id: &'static str,
+    selector: u8,
     domain: DynamicStringDomain,
-    count: usize,
+}
+
+#[derive(Serialize)]
+struct ProducerRouteMismatch {
+    record_id: &'static str,
+    selector: u8,
+    demanded_domain: DynamicStringDomain,
+    supplied_domain: DynamicStringDomain,
+    producer_family: &'static str,
+}
+
+#[derive(Serialize)]
+struct ProducerRouteSupply {
+    record_id: &'static str,
+    selector: u8,
+    supplied_domain: DynamicStringDomain,
+    producer_family: &'static str,
+}
+
+struct ProducerRouteResolution {
+    producer_families: Vec<ProducerFamilySummary>,
+    resolved_supply_count: usize,
+    missing_consumer_demands: Vec<ProducerRouteReport>,
+    mismatched_consumer_demands: Vec<ProducerRouteMismatch>,
+    unexpected_producer_supplies: Vec<ProducerRouteSupply>,
+    exact_consumer_producer_match: bool,
 }
 
 #[derive(Clone, Copy)]
-struct SourceRegionSpec {
+pub(super) struct SourceRegionSpec {
     role: &'static str,
     source_prg_bank: u8,
     cpu_address: u16,
@@ -130,19 +174,6 @@ const SELECTOR_DIRECTORY: SourceRegionSpec = source_region(
     "18a98567b249fa71252e7bb9b2572919d982db12",
 );
 
-const BOUND_RECORD_SELECTORS: [(&str, u8); 10] = [
-    ("shop-and-item-dialogue:025", 0),
-    ("shop-and-item-dialogue:025", 1),
-    ("shop-and-item-dialogue:026", 0),
-    ("shop-and-item-dialogue:026", 1),
-    ("shop-and-item-dialogue:027", 0),
-    ("shop-and-item-dialogue:027", 1),
-    ("shop-and-item-dialogue:027", 2),
-    ("shop-and-item-dialogue:028", 0),
-    ("shop-and-item-dialogue:028", 1),
-    ("epilogue-dialogue:000", 1),
-];
-
 pub(in crate::full_translation_install) fn inspect_dynamic_input_producers(
     rom: &Rom,
 ) -> Result<DynamicInputProducerPlan> {
@@ -164,7 +195,6 @@ pub(in crate::full_translation_install) fn inspect_dynamic_input_producers(
         .map(|spec| bind_source_region(source, spec))
         .collect::<Result<Vec<_>>>()?;
     validate_writer_semantics(source)?;
-    validate_item_action_routes(rom)?;
 
     let classified = classified_dynamic_string_bindings();
     let used_selectors = classified
@@ -183,28 +213,7 @@ pub(in crate::full_translation_install) fn inspect_dynamic_input_producers(
         "current dialogue selector-three lifetime changed"
     );
 
-    let bound = BOUND_RECORD_SELECTORS.into_iter().collect::<BTreeSet<_>>();
-    ensure!(
-        bound.iter().all(|binding| classified.contains_key(binding)),
-        "source-bound dynamic producer route is absent from classified EC inputs"
-    );
-    let remaining = classified
-        .iter()
-        .filter(|(binding, _)| !bound.contains(binding))
-        .map(|(_, domain)| *domain)
-        .fold(
-            BTreeMap::<DynamicStringDomain, usize>::new(),
-            |mut counts, domain| {
-                *counts.entry(domain).or_default() += 1;
-                counts
-            },
-        );
-    let remaining_record_selector_count = remaining.values().sum::<usize>();
-    let bound_record_selector_count = bound.len();
-    ensure!(
-        bound_record_selector_count + remaining_record_selector_count == classified.len(),
-        "dynamic producer route accounting lost record-selector bindings"
-    );
+    let route_resolution = resolve_producer_routes(rom, &classified)?;
 
     let used_selectors = used_selectors.into_iter().collect::<Vec<_>>();
     let used_selector_destinations = used_selectors
@@ -228,17 +237,134 @@ pub(in crate::full_translation_install) fn inspect_dynamic_input_producers(
         generic_slot_selecting_writer_count: 3,
         direct_absolute_writer_count: SOURCE_WRITERS.len() - 3,
         every_dynamic_domain_has_a_source_writer: true,
-        item_action_record_routes_bound: true,
-        epilogue_location_record_route_bound: true,
-        classified_record_selector_count: classified.len(),
-        bound_record_selector_count,
-        remaining_record_selector_count,
-        remaining_record_selector_counts_by_domain: remaining
-            .into_iter()
-            .map(|(domain, count)| RemainingDomainRouteCount { domain, count })
-            .collect(),
-        every_record_selector_route_bound: remaining_record_selector_count == 0,
+        producer_families: route_resolution.producer_families,
+        consumer_demand_count: classified.len(),
+        resolved_supply_count: route_resolution.resolved_supply_count,
+        missing_consumer_demands: route_resolution.missing_consumer_demands,
+        mismatched_consumer_demands: route_resolution.mismatched_consumer_demands,
+        unexpected_producer_supplies: route_resolution.unexpected_producer_supplies,
+        exact_consumer_producer_match: route_resolution.exact_consumer_producer_match,
     })
+}
+
+fn resolve_producer_routes(
+    rom: &Rom,
+    classified: &BTreeMap<(&'static str, u8), DynamicStringDomain>,
+) -> Result<ProducerRouteResolution> {
+    let family_routes = [
+        arena_routes::resolve(rom, classified)?,
+        epilogue_routes::resolve(rom, classified)?,
+        item_routes::resolve(rom, classified)?,
+        shop_routes::resolve(rom, classified)?,
+        village_routes::resolve(rom, classified)?,
+    ];
+    compare_producer_routes(classified, family_routes)
+}
+
+fn compare_producer_routes<const FAMILY_COUNT: usize>(
+    classified: &BTreeMap<(&'static str, u8), DynamicStringDomain>,
+    family_routes: [Vec<ResolvedProducerRoute>; FAMILY_COUNT],
+) -> Result<ProducerRouteResolution> {
+    let producer_families = family_routes
+        .iter()
+        .map(|routes| ProducerFamilySummary {
+            family: routes.first().map_or("empty", |route| route.family),
+            resolved_route_count: routes.len(),
+        })
+        .collect::<Vec<_>>();
+    ensure!(
+        producer_families
+            .iter()
+            .all(|family| family.family != "empty"),
+        "dynamic producer resolver returned an empty family"
+    );
+
+    let mut supplied = BTreeMap::new();
+    for route in family_routes.into_iter().flatten() {
+        ensure!(
+            supplied
+                .insert((route.record_id, route.selector), route)
+                .is_none(),
+            "multiple producer families resolved {} selector {}",
+            route.record_id,
+            route.selector
+        );
+    }
+
+    let missing_consumer_demands = classified
+        .iter()
+        .filter(|(binding, _)| !supplied.contains_key(binding))
+        .map(|(&(record_id, selector), &domain)| ProducerRouteReport {
+            record_id,
+            selector,
+            domain,
+        })
+        .collect::<Vec<_>>();
+    let mismatched_consumer_demands = classified
+        .iter()
+        .filter_map(|(&(record_id, selector), &demanded_domain)| {
+            let route = supplied.get(&(record_id, selector))?;
+            (route.domain != demanded_domain).then_some(ProducerRouteMismatch {
+                record_id,
+                selector,
+                demanded_domain,
+                supplied_domain: route.domain,
+                producer_family: route.family,
+            })
+        })
+        .collect::<Vec<_>>();
+    let unexpected_producer_supplies = supplied
+        .iter()
+        .filter(|(binding, _)| !classified.contains_key(binding))
+        .map(|(&(record_id, selector), route)| ProducerRouteSupply {
+            record_id,
+            selector,
+            supplied_domain: route.domain,
+            producer_family: route.family,
+        })
+        .collect::<Vec<_>>();
+    let exact_consumer_producer_match = missing_consumer_demands.is_empty()
+        && mismatched_consumer_demands.is_empty()
+        && unexpected_producer_supplies.is_empty()
+        && supplied.len() == classified.len();
+
+    Ok(ProducerRouteResolution {
+        producer_families,
+        resolved_supply_count: supplied.len(),
+        missing_consumer_demands,
+        mismatched_consumer_demands,
+        unexpected_producer_supplies,
+        exact_consumer_producer_match,
+    })
+}
+
+pub(super) fn selected_record_routes(
+    classified: &BTreeMap<(&'static str, u8), DynamicStringDomain>,
+    table_id: &str,
+    selected_record_indices: &BTreeSet<usize>,
+    produced_domains_by_selector: &BTreeMap<u8, DynamicStringDomain>,
+    family: &'static str,
+) -> Vec<ResolvedProducerRoute> {
+    classified
+        .iter()
+        .filter_map(|(&(record_id, selector), _)| {
+            let (record_table_id, index) = parse_record_id(record_id)?;
+            let produced_domain = produced_domains_by_selector.get(&selector)?;
+            (record_table_id == table_id && selected_record_indices.contains(&index)).then_some(
+                ResolvedProducerRoute {
+                    record_id,
+                    selector,
+                    domain: *produced_domain,
+                    family,
+                },
+            )
+        })
+        .collect()
+}
+
+fn parse_record_id(record_id: &str) -> Option<(&str, usize)> {
+    let (table_id, index) = record_id.rsplit_once(':')?;
+    Some((table_id, index.parse().ok()?))
 }
 
 fn validate_writer_semantics(source: &[u8]) -> Result<()> {
@@ -274,51 +400,17 @@ fn validate_writer_semantics(source: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn validate_item_action_routes(rom: &Rom) -> Result<()> {
-    validate_item_lifetime_source(rom)?;
-    let file_offset = switchable_cpu_to_file_offset(0x06, 0x944C)?;
-    let execute_item_action = rom
-        .data()
-        .get(file_offset..file_offset + 202)
-        .context("item action producer source range is outside the ROM")?;
-    for (role, sequence) in [
-        (
-            "transfer recipient in selector two",
-            &[0xA0, 0x02, 0xAD, 0x15, 0x77, 0x20, 0x1D, 0x9B][..],
-        ),
-        (
-            "acting unit in selector zero",
-            &[0xA0, 0x00, 0xAD, 0xF4, 0x76, 0x20, 0x1D, 0x9B][..],
-        ),
-        (
-            "selected item in selector one",
-            &[0xA0, 0x01, 0xAD, 0xB0, 0x77, 0x20, 0xEC, 0x9A][..],
-        ),
-        (
-            "action-indexed result dialogue",
-            &[0xAC, 0xB2, 0x77, 0xB9, 0x16, 0x95, 0x8D, 0xF1, 0x77][..],
-        ),
-    ] {
-        ensure!(
-            execute_item_action
-                .windows(sequence.len())
-                .filter(|bytes| *bytes == sequence)
-                .count()
-                == 1,
-            "item action dynamic producer lost unique {role} sequence"
-        );
-    }
-    Ok(())
-}
-
-fn source_region_bytes(source: &[u8], spec: SourceRegionSpec) -> Result<&[u8]> {
+pub(super) fn source_region_bytes(source: &[u8], spec: SourceRegionSpec) -> Result<&[u8]> {
     let file_offset = switchable_cpu_to_file_offset(spec.source_prg_bank, spec.cpu_address)?;
     source
         .get(file_offset..file_offset + spec.byte_count)
         .with_context(|| format!("{} source range is outside the ROM", spec.role))
 }
 
-fn bind_source_region(source: &[u8], spec: SourceRegionSpec) -> Result<SourceRegionBinding> {
+pub(super) fn bind_source_region(
+    source: &[u8],
+    spec: SourceRegionSpec,
+) -> Result<SourceRegionBinding> {
     let file_offset = switchable_cpu_to_file_offset(spec.source_prg_bank, spec.cpu_address)?;
     let bytes = source_region_bytes(source, spec)?;
     let source_sha1 = sha1_hex(bytes);
@@ -341,7 +433,7 @@ fn bind_source_region(source: &[u8], spec: SourceRegionSpec) -> Result<SourceReg
     })
 }
 
-const fn source_region(
+pub(super) const fn source_region(
     role: &'static str,
     source_prg_bank: u8,
     cpu_address: u16,
@@ -377,5 +469,52 @@ mod tests {
 
         source[file_offset + 1] ^= 0xFF;
         assert!(bind_source_region(&source, spec).is_err());
+    }
+
+    #[test]
+    fn producer_supply_must_exactly_equal_consumer_demand() {
+        let classified =
+            BTreeMap::from([(("test-dialogue:000", 0), DynamicStringDomain::ItemName)]);
+        let matching = ResolvedProducerRoute {
+            record_id: "test-dialogue:000",
+            selector: 0,
+            domain: DynamicStringDomain::ItemName,
+            family: "test_family",
+        };
+        let matched = compare_producer_routes(&classified, [vec![matching]]).unwrap();
+        assert!(matched.exact_consumer_producer_match);
+
+        let classified_with_missing = BTreeMap::from([
+            (("test-dialogue:000", 0), DynamicStringDomain::ItemName),
+            (("test-dialogue:001", 0), DynamicStringDomain::ItemName),
+        ]);
+        let missing = compare_producer_routes(&classified_with_missing, [vec![matching]]).unwrap();
+        assert!(!missing.exact_consumer_producer_match);
+        assert_eq!(missing.missing_consumer_demands.len(), 1);
+
+        let mismatched = compare_producer_routes(
+            &classified,
+            [vec![ResolvedProducerRoute {
+                domain: DynamicStringDomain::PreservedNumeric,
+                ..matching
+            }]],
+        )
+        .unwrap();
+        assert!(!mismatched.exact_consumer_producer_match);
+        assert_eq!(mismatched.mismatched_consumer_demands.len(), 1);
+
+        let unexpected = compare_producer_routes(
+            &classified,
+            [vec![
+                matching,
+                ResolvedProducerRoute {
+                    record_id: "test-dialogue:001",
+                    ..matching
+                },
+            ]],
+        )
+        .unwrap();
+        assert!(!unexpected.exact_consumer_producer_match);
+        assert_eq!(unexpected.unexpected_producer_supplies.len(), 1);
     }
 }

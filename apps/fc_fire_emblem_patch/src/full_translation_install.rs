@@ -544,7 +544,7 @@ pub(crate) fn plan_full_translation_installation(
         },
         rom_emitted: false,
         dynamic_verification_started: false,
-        next_gate: "bind EC dynamic-string producers and consumer-specific visible prefixes, then choose a scan boundary that sees the complete rendered line before binding the atlas compositor; do not emit or run a partial ROM",
+        next_gate: "bind normalized common-body encoding and the direct/transition entry-mode shims, then choose a scan boundary that sees the complete rendered line before binding the atlas compositor; do not emit or run a partial ROM",
     };
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize full translation install plan")?;

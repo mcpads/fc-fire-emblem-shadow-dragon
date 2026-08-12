@@ -40,7 +40,7 @@ pub(crate) use bundle::{
 };
 pub(crate) use glyph_workset::{
     RuntimeEvidence as MaximumDialogueRuntimeEvidence, analyze_main_dialogue_glyph_workset,
-    load_maximum_dialogue_runtime_evidence,
+    bind_chapter_event_dialogue_routes, load_maximum_dialogue_runtime_evidence,
 };
 use layout_packing::*;
 use markup::*;

@@ -256,9 +256,10 @@ pub(super) fn classified_dynamic_string_bindings()
     bindings
 }
 
-const ITEM_NAME_BINDINGS: [(&str, u8); 6] = [
+const ITEM_NAME_BINDINGS: [(&str, u8); 7] = [
     ("village-and-outro-dialogue:014", 0),
     ("village-and-outro-dialogue:021", 0),
+    ("shop-and-item-dialogue:008", 0),
     ("shop-and-item-dialogue:025", 1),
     ("shop-and-item-dialogue:026", 1),
     ("shop-and-item-dialogue:027", 1),
@@ -275,13 +276,12 @@ const PLAYABLE_UNIT_NAME_BINDINGS: [(&str, u8); 5] = [
 
 const LOCATION_NAME_BINDINGS: [(&str, u8); 1] = [("epilogue-dialogue:000", 1)];
 
-const PRESERVED_NUMERIC_BINDINGS: [(&str, u8); 20] = [
+const PRESERVED_NUMERIC_BINDINGS: [(&str, u8); 19] = [
     ("village-and-outro-dialogue:000", 0),
     ("village-and-outro-dialogue:004", 0),
     ("village-and-outro-dialogue:008", 0),
     ("village-and-outro-dialogue:017", 0),
     ("village-and-outro-dialogue:020", 0),
-    ("shop-and-item-dialogue:008", 0),
     ("shop-and-item-dialogue:015", 1),
     ("shop-and-item-dialogue:021", 1),
     ("shop-and-item-dialogue:029", 2),
@@ -310,6 +310,10 @@ mod tests {
         );
         assert_eq!(
             dynamic_string_domain("shop-and-item-dialogue:025", 1),
+            Some(DynamicStringDomain::ItemName)
+        );
+        assert_eq!(
+            dynamic_string_domain("shop-and-item-dialogue:008", 0),
             Some(DynamicStringDomain::ItemName)
         );
         assert_eq!(dynamic_string_domain("unknown", 0), None);

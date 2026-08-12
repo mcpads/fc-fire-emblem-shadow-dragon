@@ -100,6 +100,14 @@ pub(crate) fn inspect_chapter_transition_translation_population(
     })
 }
 
+pub(crate) fn validate_ending_character_epilogue_source(rom: &Rom) -> Result<()> {
+    for spec in ending_epilogue::SOURCE_REGIONS {
+        bind_source_region(rom, *spec)?;
+    }
+    bind_translation_surfaces(rom)?;
+    Ok(())
+}
+
 pub fn analyze_chapter_transitions(
     source_path: &Path,
     report_path: &Path,

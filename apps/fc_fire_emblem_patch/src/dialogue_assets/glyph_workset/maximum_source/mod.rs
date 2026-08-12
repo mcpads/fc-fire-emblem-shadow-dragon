@@ -15,7 +15,8 @@ pub(super) use runtime_lifetime::bind_runtime_lifetime;
 pub(crate) use runtime_lifetime::{RuntimeEvidence, load_runtime_evidence};
 
 use chapter_events::{
-    ChapterEventRecord, DataRegionBinding, bind_chapter_event_directory, bind_chapter_map_pointers,
+    ChapterEventRecord, DataRegionBinding, bind_all_chapter_map_pointers,
+    bind_chapter_event_directory, bind_chapter_event_tile_code, bind_chapter_map_pointers,
     bind_chapter_map_sample,
 };
 use source_regions::{SourceRegionBinding, bind_source_regions};
@@ -43,6 +44,33 @@ const OTHER_SELECTOR_MAP_HEADER: [u8; 4] = [0x18, 0x1F, 0x0A, 0x00];
 const OTHER_SELECTOR_TILE_CODE: u8 = 0x46;
 const OTHER_MAIN_STATE: u8 = 0x37;
 const OTHER_DIRECTORY_SELECTOR: u8 = 0x30;
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ChapterEventDialogueRoute {
+    pub(crate) chapter_number: u8,
+    pub(crate) event_code: u8,
+    pub(crate) dialogue_entry: u8,
+    pub(crate) tile_code: u8,
+}
+
+pub(crate) fn bind_chapter_event_dialogue_routes(
+    prg: &[u8],
+) -> Result<Vec<ChapterEventDialogueRoute>> {
+    bind_source_regions(prg)?;
+    let (records, _) = bind_chapter_event_directory(prg)?;
+    let map_pointers = bind_all_chapter_map_pointers(prg)?;
+    records
+        .iter()
+        .map(|record| {
+            Ok(ChapterEventDialogueRoute {
+                chapter_number: record.chapter_number,
+                event_code: record.event_code,
+                dialogue_entry: record.dialogue_entry,
+                tile_code: bind_chapter_event_tile_code(prg, &map_pointers, record)?,
+            })
+        })
+        .collect()
+}
 
 #[derive(Debug, Serialize)]
 pub(super) struct MaximumDialogueSourceBinding {

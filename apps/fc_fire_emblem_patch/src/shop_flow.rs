@@ -45,6 +45,21 @@ pub fn analyze_shop_flow(source_path: &Path, report_path: &Path) -> Result<ShopF
         next_screen_role: report.unresolved_downstream_roles[0],
     })
 }
+
+pub(crate) fn validate_shop_lifetime_source(rom: &Rom) -> Result<()> {
+    for spec in SOURCE_REGIONS {
+        bind_source_region(rom, spec)?;
+    }
+    validate_state_tables(rom)?;
+    validate_item_eligibility_case(rom)?;
+    let dialogue_table = inspect_shop_dialogue_table(rom.data())?;
+    ensure!(
+        dialogue_table.directory_selector == 0xB1,
+        "shop dialogue directory selector changed"
+    );
+    Ok(())
+}
+
 fn build_report(rom: &Rom) -> Result<ShopFlowReport> {
     let source_regions = SOURCE_REGIONS
         .iter()

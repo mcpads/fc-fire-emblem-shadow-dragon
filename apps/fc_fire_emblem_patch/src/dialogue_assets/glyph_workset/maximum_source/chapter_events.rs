@@ -22,6 +22,12 @@ pub(super) const CHAPTER_MAP_POINTERS: [u16; CHAPTER_MAP_POINTER_COUNT] = [
     0x801A, 0x81FE, 0x83E2, 0x86A6, 0x896A, 0x8C2E, 0x8F12, 0x90F6, 0x94BA, 0x987E, 0x9C42, 0x9F66,
     0xA32A,
 ];
+const LATE_CHAPTER_MAP_BANK: u8 = 0x09;
+const LATE_CHAPTER_MAP_POINTER_ADDRESS: u16 = 0x8000;
+const LATE_CHAPTER_MAP_POINTER_COUNT: usize = 12;
+const LATE_CHAPTER_MAP_POINTERS: [u16; LATE_CHAPTER_MAP_POINTER_COUNT] = [
+    0x8018, 0x83DC, 0x87A0, 0x8B64, 0x8F28, 0x92EC, 0x94D0, 0x9894, 0x9C58, 0xA01C, 0xA3E0, 0xA7A4,
+];
 
 #[derive(Debug, Serialize)]
 pub(super) struct DataRegionBinding {
@@ -52,6 +58,12 @@ pub(super) struct ChapterMapSample {
     pub(super) pointer: u16,
     pub(super) tile_code: u8,
     pub(super) map_sha1: String,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct ChapterMapPointer {
+    prg_bank: u8,
+    cpu_address: u16,
 }
 
 pub(super) fn bind_chapter_event_directory(
@@ -155,6 +167,72 @@ pub(super) fn bind_chapter_map_pointers(prg: &[u8]) -> Result<(Vec<u16>, DataReg
             pointer_byte_count,
         )?,
     ))
+}
+
+pub(super) fn bind_all_chapter_map_pointers(prg: &[u8]) -> Result<Vec<ChapterMapPointer>> {
+    let (early_pointers, _) = bind_chapter_map_pointers(prg)?;
+    let late_pointer_offset = prg_offset(LATE_CHAPTER_MAP_BANK, LATE_CHAPTER_MAP_POINTER_ADDRESS)?;
+    let late_pointer_byte_count = LATE_CHAPTER_MAP_POINTER_COUNT * 2;
+    let late_pointer_bytes = prg
+        .get(late_pointer_offset..late_pointer_offset + late_pointer_byte_count)
+        .context("late chapter-map pointer table is outside PRG")?;
+    let late_pointers = late_pointer_bytes
+        .chunks_exact(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .collect::<Vec<_>>();
+    ensure!(
+        late_pointers == LATE_CHAPTER_MAP_POINTERS,
+        "late chapter-map pointer table changed"
+    );
+
+    let pointers = early_pointers
+        .into_iter()
+        .map(|cpu_address| ChapterMapPointer {
+            prg_bank: CHAPTER_MAP_BANK,
+            cpu_address,
+        })
+        .chain(
+            late_pointers
+                .into_iter()
+                .map(|cpu_address| ChapterMapPointer {
+                    prg_bank: LATE_CHAPTER_MAP_BANK,
+                    cpu_address,
+                }),
+        )
+        .collect::<Vec<_>>();
+    ensure!(
+        pointers.len() == CHAPTER_COUNT,
+        "combined chapter-map pointer population changed"
+    );
+    Ok(pointers)
+}
+
+pub(super) fn bind_chapter_event_tile_code(
+    prg: &[u8],
+    map_pointers: &[ChapterMapPointer],
+    record: &ChapterEventRecord,
+) -> Result<u8> {
+    let pointer = *map_pointers
+        .get(usize::from(record.chapter_number) - 1)
+        .context("chapter event has no map pointer")?;
+    let map_offset = prg_offset(pointer.prg_bank, pointer.cpu_address)?;
+    let header = prg
+        .get(map_offset..map_offset + 4)
+        .context("chapter map header is outside PRG")?;
+    let row_count = usize::from(header[0]) + 1;
+    let column_count = usize::from(header[1]) + 1;
+    ensure!(
+        usize::from(record.row) < row_count && usize::from(record.column) < column_count,
+        "chapter-event coordinate is outside its map"
+    );
+    let payload_len = row_count
+        .checked_mul(column_count)
+        .context("chapter map dimensions overflow")?;
+    let map = prg
+        .get(map_offset..map_offset + 4 + payload_len)
+        .context("chapter map payload is outside PRG")?;
+    let tile_offset = 4 + usize::from(record.row) * column_count + usize::from(record.column);
+    Ok(map[tile_offset])
 }
 
 pub(super) fn bind_chapter_map_sample(
