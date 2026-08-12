@@ -10,6 +10,7 @@ pub(crate) struct MainDialogueEntryModeInspection {
 #[derive(Debug)]
 pub(crate) struct MainDialogueTransitionTargetMode {
     pub(crate) record_id: String,
+    pub(crate) leading_source_bytes: [u8; 6],
     pub(crate) incoming_transition_edge_count: usize,
     pub(crate) direct_prefix_byte_count: usize,
     pub(crate) transition_prefix_byte_count: usize,
@@ -65,8 +66,18 @@ pub(crate) fn inspect_main_dialogue_entry_modes(
             transition_to_direct_body_delta != 0,
             "transition target {table_id}:{canonical_entry_index:03} has no consumer-entry delta"
         );
+        let leading_source_bytes = source
+            .get(entry.file_offset..entry.file_offset + 6)
+            .with_context(|| {
+                format!(
+                    "transition target {table_id}:{canonical_entry_index:03} leading bytes are outside the source"
+                )
+            })?
+            .try_into()
+            .expect("six-byte source range has exact array length");
         transition_targets.push(MainDialogueTransitionTargetMode {
             record_id: format!("{table_id}:{canonical_entry_index:03}"),
+            leading_source_bytes,
             incoming_transition_edge_count,
             direct_prefix_byte_count,
             transition_prefix_byte_count,

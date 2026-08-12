@@ -5,7 +5,13 @@ use serde::Serialize;
 
 use crate::{
     dialogue_assets::MainDialogueBundlePlan, dialogue_inventory::inspect_main_dialogue_entry_modes,
+    sha1_hex,
 };
+
+const NO_PREFIX_ROW: u8 = 0xFF;
+const PREFIX_ROW_BYTE_COUNT: usize = 6;
+const E8_PREFIX_CODE: u8 = 0xE8;
+const NORMALIZED_PREFIX_STRATEGY: &str = "normalize each dual-entry record at the later body boundary; replay entry-mode metadata effects and inject only the bytes visible to that consumer";
 
 #[derive(Serialize)]
 pub(in crate::full_translation_install) struct ConsumerVisiblePrefixPlan {
@@ -32,7 +38,12 @@ pub(in crate::full_translation_install) struct ConsumerVisiblePrefixPlan {
     compact_normalized_prefix_payload_byte_count: usize,
     fixed_row_normalized_prefix_payload_byte_count: usize,
     dense_record_to_prefix_row_byte_count: usize,
+    prefix_row_byte_count: usize,
+    normalized_common_body_skip_byte_counts: Vec<usize>,
+    direct_visible_prefix_byte_count: usize,
+    transition_visible_prefix_byte_count: usize,
     selected_normalized_prefix_material_byte_count: usize,
+    normalized_prefix_material_sha1: String,
     atlas_scan_remap_and_prefix_material_byte_count: usize,
     material_prg_8k_page_count_before_prefix_normalization: usize,
     material_prg_8k_page_count_after_prefix_normalization: usize,
@@ -40,8 +51,10 @@ pub(in crate::full_translation_install) struct ConsumerVisiblePrefixPlan {
     leading_candidate: &'static str,
     candidate_strategies: [&'static str; 5],
     selected_strategy: Option<&'static str>,
-    direct_entry_producers_bound: bool,
-    consumer_specific_visible_prefixes_bound: bool,
+    every_transition_target_has_normalization_row: bool,
+    consumer_specific_visible_prefix_material_built: bool,
+    normalized_body_encoding_bound: bool,
+    entry_mode_shims_bound: bool,
 }
 
 #[derive(Serialize)]
@@ -188,12 +201,90 @@ pub(in crate::full_translation_install) fn plan_consumer_visible_prefixes(
         inspection.transition_targets.len() < usize::from(u8::MAX),
         "main dialogue prefix rows do not fit a one-byte index with FF sentinel"
     );
+    ensure!(
+        dialogue.record_ids.len() == inspection.canonical_record_count,
+        "canonical dialogue record directory size changed"
+    );
+    let record_indices = dialogue
+        .record_ids
+        .iter()
+        .enumerate()
+        .map(|(index, record_id)| (record_id.as_str(), index))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    ensure!(
+        record_indices.len() == dialogue.record_ids.len(),
+        "canonical dialogue record directory contains duplicate IDs"
+    );
+    let mut record_to_prefix_row = vec![NO_PREFIX_ROW; inspection.canonical_record_count];
+    let mut prefix_rows =
+        Vec::with_capacity(inspection.transition_targets.len() * PREFIX_ROW_BYTE_COUNT);
+    let mut normalized_common_body_skip_byte_counts = BTreeSet::new();
+    let mut direct_visible_prefix_byte_count = 0;
+    let mut transition_visible_prefix_byte_count = 0;
+    for (row_index, target) in inspection.transition_targets.iter().enumerate() {
+        let record_index = record_indices
+            .get(target.record_id.as_str())
+            .copied()
+            .with_context(|| format!("missing canonical index for {}", target.record_id))?;
+        ensure!(
+            record_to_prefix_row[record_index] == NO_PREFIX_ROW,
+            "{} received multiple prefix rows",
+            target.record_id
+        );
+        let row_index = u8::try_from(row_index).context("prefix row index exceeds one byte")?;
+        record_to_prefix_row[record_index] = row_index;
+        prefix_rows.extend_from_slice(&target.leading_source_bytes);
+
+        match (
+            target.direct_prefix_byte_count,
+            target.transition_prefix_byte_count,
+            target.transition_to_direct_body_delta,
+        ) {
+            (4, 0, 4) => {
+                ensure!(
+                    target.leading_source_bytes[0] != E8_PREFIX_CODE,
+                    "{} transition-visible prefix unexpectedly starts with E8",
+                    target.record_id
+                );
+                normalized_common_body_skip_byte_counts.insert(4);
+                transition_visible_prefix_byte_count += 4;
+            }
+            (4, 6, -2) => {
+                ensure!(
+                    target.leading_source_bytes[0] == E8_PREFIX_CODE,
+                    "{} six-byte transition prefix no longer starts with E8",
+                    target.record_id
+                );
+                normalized_common_body_skip_byte_counts.insert(6);
+                direct_visible_prefix_byte_count += 2;
+            }
+            mode => anyhow::bail!(
+                "{} has unsupported direct/transition prefix mode {mode:?}",
+                target.record_id
+            ),
+        }
+    }
+    ensure!(
+        record_to_prefix_row
+            .iter()
+            .filter(|row| **row != NO_PREFIX_ROW)
+            .count()
+            == inspection.transition_targets.len(),
+        "dense prefix directory lost transition targets"
+    );
+    let mut normalized_prefix_material = record_to_prefix_row;
+    normalized_prefix_material.extend_from_slice(&prefix_rows);
     let compact_normalized_prefix_payload_byte_count =
         positive_delta_target_count * 4 + negative_delta_target_count * 6;
-    let fixed_row_normalized_prefix_payload_byte_count = inspection.transition_targets.len() * 6;
+    let fixed_row_normalized_prefix_payload_byte_count =
+        inspection.transition_targets.len() * PREFIX_ROW_BYTE_COUNT;
     let dense_record_to_prefix_row_byte_count = inspection.canonical_record_count;
     let selected_normalized_prefix_material_byte_count =
         fixed_row_normalized_prefix_payload_byte_count + dense_record_to_prefix_row_byte_count;
+    ensure!(
+        normalized_prefix_material.len() == selected_normalized_prefix_material_byte_count,
+        "normalized prefix material size changed"
+    );
     let atlas_scan_remap_and_prefix_material_byte_count = atlas_scan_and_dynamic_remap_byte_count
         .checked_add(selected_normalized_prefix_material_byte_count)
         .context("dialogue material size overflow after prefix normalization")?;
@@ -245,14 +336,21 @@ pub(in crate::full_translation_install) fn plan_consumer_visible_prefixes(
         compact_normalized_prefix_payload_byte_count,
         fixed_row_normalized_prefix_payload_byte_count,
         dense_record_to_prefix_row_byte_count,
+        prefix_row_byte_count: PREFIX_ROW_BYTE_COUNT,
+        normalized_common_body_skip_byte_counts: normalized_common_body_skip_byte_counts
+            .into_iter()
+            .collect(),
+        direct_visible_prefix_byte_count,
+        transition_visible_prefix_byte_count,
         selected_normalized_prefix_material_byte_count,
+        normalized_prefix_material_sha1: sha1_hex(&normalized_prefix_material),
         atlas_scan_remap_and_prefix_material_byte_count,
         material_prg_8k_page_count_before_prefix_normalization,
         material_prg_8k_page_count_after_prefix_normalization,
         prefix_normalization_adds_prg_8k_pages:
             material_prg_8k_page_count_after_prefix_normalization
                 > material_prg_8k_page_count_before_prefix_normalization,
-        leading_candidate: "one canonical translated body plus a dense record-to-prefix-row index and fixed six-byte rows; direct and transition shims replay the original header or E8 effect before entering that body",
+        leading_candidate: NORMALIZED_PREFIX_STRATEGY,
         candidate_strategies: [
             "bind direct producers, then keep only the entry modes that are actually reachable",
             "normalize relocated records and use a mode-aware transition shim that preserves E8 side effects",
@@ -260,9 +358,11 @@ pub(in crate::full_translation_install) fn plan_consumer_visible_prefixes(
             "redirect transition controls to consumer-specific pointer aliases when unused table slots are proven",
             "recover split cost with dialogue token compression only if regional storage still overflows",
         ],
-        selected_strategy: None,
-        direct_entry_producers_bound: false,
-        consumer_specific_visible_prefixes_bound: false,
+        selected_strategy: Some(NORMALIZED_PREFIX_STRATEGY),
+        every_transition_target_has_normalization_row: true,
+        consumer_specific_visible_prefix_material_built: true,
+        normalized_body_encoding_bound: false,
+        entry_mode_shims_bound: false,
     })
 }
 
@@ -277,5 +377,11 @@ mod tests {
 
         let mixed = [4, 10].into_iter().collect::<BTreeSet<_>>();
         assert_ne!(mixed.len(), 1);
+    }
+
+    #[test]
+    fn fixed_rows_have_a_sentinel_outside_the_valid_row_range() {
+        assert!(139 < usize::from(NO_PREFIX_ROW));
+        assert_eq!(PREFIX_ROW_BYTE_COUNT, 6);
     }
 }

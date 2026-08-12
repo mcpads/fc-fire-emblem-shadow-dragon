@@ -602,7 +602,7 @@ pub(crate) fn switchable_file_to_cpu(bank: u8, file_offset: usize) -> Result<u16
     Ok(SWITCHABLE_CPU_START + relative as u16)
 }
 
-pub(super) fn switchable_cpu_to_file_offset(bank: u8, cpu_address: u16) -> Result<usize> {
+pub(crate) fn switchable_cpu_to_file_offset(bank: u8, cpu_address: u16) -> Result<usize> {
     ensure!(
         (SWITCHABLE_CPU_START..SWITCHABLE_CPU_END_EXCLUSIVE).contains(&cpu_address),
         "CPU address {cpu_address:04X} is outside the switchable PRG window"

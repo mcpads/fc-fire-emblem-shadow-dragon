@@ -23,11 +23,13 @@ use crate::{
 mod consumer_visible_prefixes;
 mod current_candidate;
 mod dynamic_composition;
+mod dynamic_input_producers;
 mod dynamic_inputs;
 
 use consumer_visible_prefixes::{ConsumerVisiblePrefixPlan, plan_consumer_visible_prefixes};
 use current_candidate::{CurrentCandidateInputs, inspect_dialogue_page_pool_capacity};
 use dynamic_composition::plan_dialogue_runtime_composition;
+use dynamic_input_producers::{DynamicInputProducerPlan, inspect_dynamic_input_producers};
 use dynamic_inputs::{plan_dynamic_dialogue_inputs, plan_dynamic_string_remap};
 
 const REQUIRED_DOMAIN_COUNT: usize = 13;
@@ -194,6 +196,7 @@ struct DialogueRuntimeComposition {
     page_selector_remap_flag_sufficient: bool,
     every_translated_dynamic_page_remappable: bool,
     dynamic_string_producers_bound: bool,
+    dynamic_string_producers: DynamicInputProducerPlan,
     consumer_visible_prefixes: ConsumerVisiblePrefixPlan,
     dense_group_lookup_byte_count: usize,
     record_page_group_selector_byte_count: usize,
@@ -287,6 +290,9 @@ pub(crate) fn plan_full_translation_installation(
         &unit_names.entries,
         &locations.entries,
     )?;
+    let dynamic_input_producers = inspect_dynamic_input_producers(&rom)?;
+    let dynamic_string_producers_bound =
+        dynamic_input_producers.every_record_selector_route_bound();
     let codebook = plan_glyph_workset_page_upper_bound(&dynamic_inputs.augmented_worksets)?;
     let dynamic_remap = plan_dynamic_string_remap(&dynamic_inputs, &codebook)?;
     ensure!(
@@ -492,7 +498,8 @@ pub(crate) fn plan_full_translation_installation(
             page_selector_remap_flag_sufficient: dynamic_remap.page_selector_remap_flag_sufficient,
             every_translated_dynamic_page_remappable: dynamic_remap
                 .every_translated_dynamic_page_remappable,
-            dynamic_string_producers_bound: false,
+            dynamic_string_producers_bound,
+            dynamic_string_producers: dynamic_input_producers,
             consumer_visible_prefixes,
             dense_group_lookup_byte_count: composition.dense_group_lookup_byte_count,
             record_page_group_selector_byte_count: composition

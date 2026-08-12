@@ -20,11 +20,10 @@ use main_dialogue_translation_view::{
     build_main_dialogue_storage_records, safe_main_dialogue_japanese_literal_offsets,
 };
 pub(crate) use report::*;
-pub(crate) use source_binding::switchable_file_to_cpu;
 use source_binding::{
     extract_dialogue_table, fixed_cpu_to_file_offset, switchable_bank_file_start,
-    switchable_cpu_to_file_offset,
 };
+pub(crate) use source_binding::{switchable_cpu_to_file_offset, switchable_file_to_cpu};
 use source_spec::*;
 
 use std::{

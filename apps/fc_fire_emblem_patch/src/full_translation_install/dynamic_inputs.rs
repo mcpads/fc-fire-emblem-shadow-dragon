@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Result, ensure};
+use serde::Serialize;
 
 use crate::{
     dialogue_assets::MainDialogueBundlePlan, font_slots::active_hangul_codes,
@@ -11,8 +12,9 @@ mod remap;
 
 pub(in crate::full_translation_install) use remap::plan_dynamic_string_remap;
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-enum DynamicStringDomain {
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum DynamicStringDomain {
     PreservedNumeric,
     ItemName,
     PlayableUnitName,
@@ -226,6 +228,34 @@ fn dynamic_string_domain(record_id: &str, selector: u8) -> Option<DynamicStringD
     }
 }
 
+pub(super) fn classified_dynamic_string_bindings()
+-> BTreeMap<(&'static str, u8), DynamicStringDomain> {
+    let mut bindings = BTreeMap::new();
+    for (domain, entries) in [
+        (DynamicStringDomain::ItemName, ITEM_NAME_BINDINGS.as_slice()),
+        (
+            DynamicStringDomain::PlayableUnitName,
+            PLAYABLE_UNIT_NAME_BINDINGS.as_slice(),
+        ),
+        (
+            DynamicStringDomain::LocationName,
+            LOCATION_NAME_BINDINGS.as_slice(),
+        ),
+        (
+            DynamicStringDomain::PreservedNumeric,
+            PRESERVED_NUMERIC_BINDINGS.as_slice(),
+        ),
+    ] {
+        for binding in entries {
+            assert!(
+                bindings.insert(*binding, domain).is_none(),
+                "duplicate dynamic dialogue binding {binding:?}"
+            );
+        }
+    }
+    bindings
+}
+
 const ITEM_NAME_BINDINGS: [(&str, u8); 6] = [
     ("village-and-outro-dialogue:014", 0),
     ("village-and-outro-dialogue:021", 0),
@@ -283,5 +313,6 @@ mod tests {
             Some(DynamicStringDomain::ItemName)
         );
         assert_eq!(dynamic_string_domain("unknown", 0), None);
+        assert_eq!(classified_dynamic_string_bindings().len(), 32);
     }
 }
