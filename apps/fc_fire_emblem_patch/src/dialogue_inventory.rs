@@ -11,7 +11,9 @@ mod source_spec;
 mod tests;
 
 use battle_dialogue::*;
-pub(crate) use main_dialogue_entry_modes::inspect_main_dialogue_entry_modes;
+pub(crate) use main_dialogue_entry_modes::{
+    MainDialogueTransitionTargetMode, inspect_main_dialogue_entry_modes,
+};
 use main_dialogue_graph::*;
 use main_dialogue_record::*;
 use main_dialogue_state::*;

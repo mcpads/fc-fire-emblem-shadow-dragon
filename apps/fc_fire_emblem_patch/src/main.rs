@@ -296,6 +296,8 @@ enum Command {
         source: PathBuf,
         #[arg(long, default_value = "private/dialogue/main-workspace.json")]
         main_dialogue_workspace: PathBuf,
+        #[arg(long, default_value = "private/dialogue/entry-mode-workspace.json")]
+        main_dialogue_entry_mode_workspace: PathBuf,
         #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
         fixed_text_workspace: PathBuf,
         #[arg(long, default_value = "assets/translation/unit-names.ko.json")]
@@ -393,6 +395,14 @@ enum Command {
         #[arg(long, default_value = "private/dialogue/main-workspace.json")]
         output: PathBuf,
     },
+    /// Split every dual-entry first line into direct-leading, common, and transition-leading translation parts.
+    ExtractMainDialogueEntryModeWorkspace {
+        source: PathBuf,
+        #[arg(long, default_value = "private/dialogue/main-workspace.json")]
+        main_workspace: PathBuf,
+        #[arg(long, default_value = "private/dialogue/entry-mode-workspace.json")]
+        output: PathBuf,
+    },
     /// Create a private Japanese-to-Korean battle-dialogue translation workspace.
     ExtractBattleDialogueWorkspace {
         source: PathBuf,
@@ -434,6 +444,12 @@ enum Command {
     ValidateMainDialogueWorkspace {
         source: PathBuf,
         #[arg(long, default_value = "private/dialogue/main-workspace.json")]
+        workspace: PathBuf,
+    },
+    /// Validate the closed 139-record dual-entry translation workspace without writing a ROM.
+    ValidateMainDialogueEntryModeWorkspace {
+        source: PathBuf,
+        #[arg(long, default_value = "private/dialogue/entry-mode-workspace.json")]
         workspace: PathBuf,
     },
     /// Count reviewed Korean glyphs without emitting dialogue or glyph characters.
@@ -1134,6 +1150,7 @@ fn main() -> Result<()> {
         Command::PlanFullTranslationInstallation {
             source,
             main_dialogue_workspace,
+            main_dialogue_entry_mode_workspace,
             fixed_text_workspace,
             unit_name_localization,
             chapter_title_localization,
@@ -1151,6 +1168,7 @@ fn main() -> Result<()> {
                 full_translation_install::FullTranslationInstallInputs {
                     source_path: &source,
                     main_dialogue_workspace_path: &main_dialogue_workspace,
+                    main_dialogue_entry_mode_workspace_path: &main_dialogue_entry_mode_workspace,
                     fixed_text_workspace_path: &fixed_text_workspace,
                     unit_name_localization_path: &unit_name_localization,
                     chapter_title_localization_path: &chapter_title_localization,
@@ -1333,6 +1351,28 @@ fn main() -> Result<()> {
                 summary.preserved_translation_line_count
             );
         }
+        Command::ExtractMainDialogueEntryModeWorkspace {
+            source,
+            main_workspace,
+            output,
+        } => {
+            let summary = dialogue_assets::extract_main_dialogue_entry_mode_workspace(
+                &source,
+                &main_workspace,
+                &output,
+            )?;
+            println!("wrote {}", output.display());
+            println!("workspace SHA-1: {}", summary.workspace_sha1);
+            println!(
+                "main dialogue entry modes: {} records, {} normalized parts, {} differing entry-start Japanese bytes, {} normalized leading Japanese occurrences, {} common-body Japanese bytes, {} translations preserved",
+                summary.record_count,
+                summary.part_count,
+                summary.differing_entry_start_japanese_source_byte_count,
+                summary.leading_japanese_source_byte_count,
+                summary.common_body_japanese_source_byte_count,
+                summary.preserved_translation_part_count,
+            );
+        }
         Command::ExtractBattleDialogueWorkspace { source, output } => {
             let summary = dialogue_assets::extract_battle_dialogue_workspace(&source, &output)?;
             println!("wrote {}", output.display());
@@ -1426,6 +1466,26 @@ fn main() -> Result<()> {
                 summary.target_glyph_count,
                 summary.translation_input_complete,
                 summary.review_complete
+            );
+        }
+        Command::ValidateMainDialogueEntryModeWorkspace { source, workspace } => {
+            let summary =
+                dialogue_assets::validate_main_dialogue_entry_mode_workspace(&source, &workspace)?;
+            println!("validated {}", workspace.display());
+            println!("workspace SHA-1: {}", summary.workspace_sha1);
+            println!(
+                "main dialogue entry modes: {} records, {} parts, {} differing entry-start Japanese bytes, {} normalized leading Japanese occurrences, {} common-body Japanese bytes, {} filled, {} complete, {} untranslated Japanese parts, {} target glyphs, input complete: {}, review complete: {}",
+                summary.record_count,
+                summary.part_count,
+                summary.differing_entry_start_japanese_source_byte_count,
+                summary.leading_japanese_source_byte_count,
+                summary.common_body_japanese_source_byte_count,
+                summary.filled_part_count,
+                summary.complete_part_count,
+                summary.untranslated_japanese_part_count,
+                summary.target_glyph_count,
+                summary.translation_input_complete,
+                summary.review_complete,
             );
         }
         Command::AnalyzeMainDialogueGlyphWorkset {

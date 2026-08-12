@@ -18,6 +18,7 @@ use crate::{
 
 mod battle_workspace;
 mod bundle;
+mod entry_mode_workspace;
 mod glyph_workset;
 mod layout_packing;
 mod markup;
@@ -37,6 +38,10 @@ pub(crate) use battle_workspace::{
 };
 pub(crate) use bundle::{
     MainDialogueBundlePlan, plan_all_main_dialogue_records, plan_main_dialogue_bundle,
+};
+pub(crate) use entry_mode_workspace::{
+    EntryModeWorkspaceValidationSummary, extract_main_dialogue_entry_mode_workspace,
+    validate_main_dialogue_entry_mode_workspace,
 };
 pub(crate) use glyph_workset::{
     RuntimeEvidence as MaximumDialogueRuntimeEvidence, analyze_main_dialogue_glyph_workset,

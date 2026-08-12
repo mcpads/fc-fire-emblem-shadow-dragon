@@ -1,26 +1,35 @@
 use super::*;
 
 pub(super) fn validate_translation_markup(line: &WorkspaceLine) -> Result<usize> {
-    let source = inspect_markup(&line.source_markup, MarkupRole::Source)
-        .with_context(|| format!("inspect protected source markup at {}", line.id))?;
-    let target = inspect_markup(&line.korean, MarkupRole::KoreanTarget)
-        .with_context(|| format!("inspect korean markup at {}", line.id))?;
+    validate_translation_markup_pair(&line.id, &line.source_markup, &line.korean, true)
+}
+
+pub(super) fn validate_translation_markup_pair(
+    id: &str,
+    source_markup: &str,
+    korean_markup: &str,
+    requires_final_control: bool,
+) -> Result<usize> {
+    let source = inspect_markup(source_markup, MarkupRole::Source)
+        .with_context(|| format!("inspect protected source markup at {id}"))?;
+    let target = inspect_markup(korean_markup, MarkupRole::KoreanTarget)
+        .with_context(|| format!("inspect korean markup at {id}"))?;
     ensure!(
         target.protected_items == source.protected_items,
-        "{} changed, removed, or added a protected control token or existing English character",
-        line.id
+        "{id} changed, removed, or added a protected control token or existing English character"
     );
-    validate_neutral_variable_postpositions(&line.id, &line.korean, |_, _| false)?;
-    let final_control = source
-        .protected_items
-        .last()
-        .filter(|item| item.starts_with('{'))
-        .context("source line does not end in a protected control token")?;
-    ensure!(
-        line.korean.ends_with(final_control),
-        "{} must keep its line-end control token at the end",
-        line.id
-    );
+    validate_neutral_variable_postpositions(id, korean_markup, |_, _| false)?;
+    if requires_final_control {
+        let final_control = source
+            .protected_items
+            .last()
+            .filter(|item| item.starts_with('{'))
+            .context("source line does not end in a protected control token")?;
+        ensure!(
+            korean_markup.ends_with(final_control),
+            "{id} must keep its line-end control token at the end"
+        );
+    }
     Ok(target.editable_glyph_count)
 }
 

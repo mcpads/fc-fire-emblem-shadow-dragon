@@ -6,7 +6,10 @@ use serde::Serialize;
 use crate::{
     chapter_transition::{plan_chapter_titles, plan_transition_labels},
     choice_labels::plan_choice_labels,
-    dialogue_assets::{plan_all_main_dialogue_records, validate_main_dialogue_workspace},
+    dialogue_assets::{
+        plan_all_main_dialogue_records, validate_main_dialogue_entry_mode_workspace,
+        validate_main_dialogue_workspace,
+    },
     font_slots::{FONT_PAGE_SIZE, FONT_TILE_SIZE},
     item_flow::plan_item_action_labels,
     map_menu::plan_map_menu,
@@ -37,6 +40,7 @@ const REQUIRED_DOMAIN_COUNT: usize = 13;
 pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) source_path: &'a Path,
     pub(crate) main_dialogue_workspace_path: &'a Path,
+    pub(crate) main_dialogue_entry_mode_workspace_path: &'a Path,
     pub(crate) fixed_text_workspace_path: &'a Path,
     pub(crate) unit_name_localization_path: &'a Path,
     pub(crate) chapter_title_localization_path: &'a Path,
@@ -94,6 +98,11 @@ struct TranslationInputs {
     transition_label_count: usize,
     location_name_count: usize,
     mode_specific_visible_prefix_japanese_source_byte_count: usize,
+    normalized_entry_mode_record_count: usize,
+    normalized_entry_mode_part_count: usize,
+    normalized_entry_mode_leading_japanese_occurrence_count: usize,
+    normalized_entry_mode_common_body_japanese_source_byte_count: usize,
+    normalized_entry_mode_untranslated_japanese_part_count: usize,
     mode_specific_visible_prefix_translation_input_complete: bool,
     translation_input_complete: bool,
     review_complete: bool,
@@ -258,6 +267,10 @@ pub(crate) fn plan_full_translation_installation(
         dialogue_validation.translation_input_complete,
         "all-record main dialogue installation still has untranslated Japanese"
     );
+    let entry_mode_validation = validate_main_dialogue_entry_mode_workspace(
+        inputs.source_path,
+        inputs.main_dialogue_entry_mode_workspace_path,
+    )?;
     let dialogue = plan_all_main_dialogue_records(&rom, inputs.main_dialogue_workspace_path)?;
     let fixed = plan_fixed_text(&rom, inputs.fixed_text_workspace_path)?;
     let unit_names = plan_unit_names(&rom, inputs.unit_name_localization_path)?;
@@ -339,11 +352,13 @@ pub(crate) fn plan_full_translation_installation(
     let consumer_visible_prefixes = plan_consumer_visible_prefixes(
         rom.data(),
         &dialogue,
+        &entry_mode_validation,
         source_owned_storage_byte_count,
         planned_storage_byte_count,
         atlas_scan_and_dynamic_remap_byte_count,
     )?;
-    let translation_input_complete = consumer_visible_prefixes.translation_input_complete();
+    let translation_input_complete = entry_mode_validation.translation_input_complete
+        && consumer_visible_prefixes.translation_input_complete();
     let review_complete = dialogue_validation.review_complete
         && fixed.review_complete
         && unit_names.review_complete
@@ -355,6 +370,7 @@ pub(crate) fn plan_full_translation_installation(
         && transitions.save_offer.review_complete
         && transitions.ending_record.review_complete
         && locations.review_complete
+        && entry_mode_validation.review_complete
         && translation_input_complete;
 
     let report = FullTranslationInstallReport {
@@ -391,6 +407,14 @@ pub(crate) fn plan_full_translation_installation(
             location_name_count: locations.entries.len(),
             mode_specific_visible_prefix_japanese_source_byte_count: consumer_visible_prefixes
                 .japanese_source_byte_count(),
+            normalized_entry_mode_record_count: entry_mode_validation.record_count,
+            normalized_entry_mode_part_count: entry_mode_validation.part_count,
+            normalized_entry_mode_leading_japanese_occurrence_count: entry_mode_validation
+                .leading_japanese_source_byte_count,
+            normalized_entry_mode_common_body_japanese_source_byte_count: entry_mode_validation
+                .common_body_japanese_source_byte_count,
+            normalized_entry_mode_untranslated_japanese_part_count: entry_mode_validation
+                .untranslated_japanese_part_count,
             mode_specific_visible_prefix_translation_input_complete: translation_input_complete,
             translation_input_complete,
             review_complete,
@@ -551,7 +575,7 @@ pub(crate) fn plan_full_translation_installation(
         },
         rom_emitted: false,
         dynamic_verification_started: false,
-        next_gate: "prove direct and transition reachability for every differing entry mode and translate every reachable mode-specific Japanese fragment before binding normalized bodies or shims; do not emit or run a partial ROM",
+        next_gate: "author Korean for every untranslated Japanese part in the closed 139-record direct/common/transition workspace, then recalculate complete glyph lifetimes before binding normalized bodies or shims; do not emit or run a partial ROM",
     };
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize full translation install plan")?;

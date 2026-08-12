@@ -10,11 +10,15 @@ pub(crate) struct MainDialogueEntryModeInspection {
 #[derive(Debug)]
 pub(crate) struct MainDialogueTransitionTargetMode {
     pub(crate) record_id: String,
+    pub(crate) record_file_offset: usize,
     pub(crate) leading_source_bytes: [u8; 6],
     pub(crate) incoming_transition_edge_count: usize,
     pub(crate) direct_prefix_byte_count: usize,
     pub(crate) transition_prefix_byte_count: usize,
     pub(crate) transition_to_direct_body_delta: isize,
+    pub(crate) record_end_file_offset_exclusive: usize,
+    pub(crate) direct_lines: Vec<MainDialogueStorageLine>,
+    pub(crate) transition_lines: Vec<MainDialogueStorageLine>,
 }
 
 pub(crate) fn inspect_main_dialogue_entry_modes(
@@ -50,6 +54,10 @@ pub(crate) fn inspect_main_dialogue_entry_modes(
             .as_ref()
             .context("main dialogue transition target has no direct-entry prefix")?
             .total_prefix_byte_count;
+        let direct_segment = entry
+            .main_linear_segment
+            .as_ref()
+            .context("main dialogue transition target has no direct-entry segment")?;
         let bank_end = switchable_bank_file_start(table.source_prg_bank)
             .checked_add(PRG_BANK_SIZE)
             .context("main dialogue transition-target bank range overflow")?;
@@ -60,6 +68,32 @@ pub(crate) fn inspect_main_dialogue_entry_modes(
             table.id,
             entry.index,
         )?;
+        let transition_segment = scan_main_linear_segment(
+            source,
+            entry
+                .file_offset
+                .checked_add(transition_prefix_byte_count)
+                .context("main dialogue transition first-line range overflow")?,
+            bank_end,
+            table.id,
+            entry.index,
+        )?;
+        let direct_end = direct_segment
+            .start_file_offset
+            .checked_add(direct_segment.storage_byte_count)
+            .context("main dialogue direct segment range overflow")?;
+        let transition_end = transition_segment
+            .start_file_offset
+            .checked_add(transition_segment.storage_byte_count)
+            .context("main dialogue transition segment range overflow")?;
+        ensure!(
+            direct_end == transition_end,
+            "transition target {table_id}:{canonical_entry_index:03} entry modes do not converge at the record end"
+        );
+        ensure!(
+            direct_segment.boundary_control == transition_segment.boundary_control,
+            "transition target {table_id}:{canonical_entry_index:03} entry modes change the record boundary"
+        );
         let transition_to_direct_body_delta =
             signed_body_delta(direct_prefix_byte_count, transition_prefix_byte_count)?;
         ensure!(
@@ -77,11 +111,15 @@ pub(crate) fn inspect_main_dialogue_entry_modes(
             .expect("six-byte source range has exact array length");
         transition_targets.push(MainDialogueTransitionTargetMode {
             record_id: format!("{table_id}:{canonical_entry_index:03}"),
+            record_file_offset: entry.file_offset,
             leading_source_bytes,
             incoming_transition_edge_count,
             direct_prefix_byte_count,
             transition_prefix_byte_count,
             transition_to_direct_body_delta,
+            record_end_file_offset_exclusive: direct_end,
+            direct_lines: direct_segment.lines.iter().map(storage_line).collect(),
+            transition_lines: transition_segment.lines.iter().map(storage_line).collect(),
         });
     }
     transition_targets.sort_unstable_by(|left, right| left.record_id.cmp(&right.record_id));
@@ -99,6 +137,16 @@ pub(crate) fn inspect_main_dialogue_entry_modes(
         transition_edge_count: report.main_dialogue_graph.transition_edge_count,
         transition_targets,
     })
+}
+
+fn storage_line(line: &MainLineReport) -> MainDialogueStorageLine {
+    MainDialogueStorageLine {
+        file_offset: line.file_offset,
+        storage_byte_count: line.storage_byte_count,
+        storage_sha1: line.storage_sha1.clone(),
+        line_end_control: line.line_end_control,
+        literal_file_offsets: line.literal_file_offsets.clone(),
+    }
 }
 
 fn signed_body_delta(direct: usize, transition: usize) -> Result<isize> {

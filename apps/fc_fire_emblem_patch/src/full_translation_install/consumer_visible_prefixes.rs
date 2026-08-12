@@ -4,8 +4,10 @@ use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
-    dialogue_assets::MainDialogueBundlePlan, dialogue_inventory::inspect_main_dialogue_entry_modes,
-    japanese_encoding::is_japanese_text_code, sha1_hex,
+    dialogue_assets::{EntryModeWorkspaceValidationSummary, MainDialogueBundlePlan},
+    dialogue_inventory::inspect_main_dialogue_entry_modes,
+    japanese_encoding::is_japanese_text_code,
+    sha1_hex,
 };
 
 const NO_PREFIX_ROW: u8 = 0xFF;
@@ -48,6 +50,8 @@ pub(in crate::full_translation_install) struct ConsumerVisiblePrefixPlan {
     transition_visible_prefix_japanese_record_count: usize,
     mode_specific_visible_prefix_japanese_byte_count: usize,
     mode_specific_visible_prefix_translation_input_complete: bool,
+    normalized_entry_mode_part_count: usize,
+    normalized_entry_mode_untranslated_japanese_part_count: usize,
     source_entry_mode_material_byte_count: usize,
     source_entry_mode_material_sha1: String,
     atlas_scan_remap_and_prefix_material_byte_count: usize,
@@ -97,11 +101,17 @@ struct ConsumerSplitBankBudget {
 pub(in crate::full_translation_install) fn plan_consumer_visible_prefixes(
     source: &[u8],
     dialogue: &MainDialogueBundlePlan,
+    entry_mode_workspace: &EntryModeWorkspaceValidationSummary,
     source_owned_storage_byte_count: usize,
     planned_storage_byte_count: usize,
     atlas_scan_and_dynamic_remap_byte_count: usize,
 ) -> Result<ConsumerVisiblePrefixPlan> {
     let inspection = inspect_main_dialogue_entry_modes(source)?;
+    ensure!(
+        entry_mode_workspace.record_count == inspection.transition_targets.len()
+            && entry_mode_workspace.part_count == inspection.transition_targets.len() * 3,
+        "entry-mode translation workspace does not close the transition-target population"
+    );
     let logical_byte_counts = dialogue.logical_record_byte_counts();
     let target_ids = inspection
         .transition_targets
@@ -319,6 +329,11 @@ pub(in crate::full_translation_install) fn plan_consumer_visible_prefixes(
         atlas_scan_and_dynamic_remap_byte_count.div_ceil(8 * 1024);
     let material_prg_8k_page_count_after_prefix_normalization =
         atlas_scan_remap_and_prefix_material_byte_count.div_ceil(8 * 1024);
+    ensure!(
+        direct_visible_prefix_japanese_byte_count + transition_visible_prefix_japanese_byte_count
+            == entry_mode_workspace.differing_entry_start_japanese_source_byte_count,
+        "entry-mode translation workspace disagrees with the differing Japanese source population"
+    );
 
     Ok(ConsumerVisiblePrefixPlan {
         canonical_record_count: inspection.canonical_record_count,
@@ -375,9 +390,11 @@ pub(in crate::full_translation_install) fn plan_consumer_visible_prefixes(
         transition_visible_prefix_japanese_record_count,
         mode_specific_visible_prefix_japanese_byte_count: direct_visible_prefix_japanese_byte_count
             + transition_visible_prefix_japanese_byte_count,
-        mode_specific_visible_prefix_translation_input_complete:
-            direct_visible_prefix_japanese_byte_count == 0
-                && transition_visible_prefix_japanese_byte_count == 0,
+        mode_specific_visible_prefix_translation_input_complete: entry_mode_workspace
+            .translation_input_complete,
+        normalized_entry_mode_part_count: entry_mode_workspace.part_count,
+        normalized_entry_mode_untranslated_japanese_part_count: entry_mode_workspace
+            .untranslated_japanese_part_count,
         source_entry_mode_material_byte_count,
         source_entry_mode_material_sha1: sha1_hex(&normalized_prefix_material),
         atlas_scan_remap_and_prefix_material_byte_count,
@@ -394,7 +411,9 @@ pub(in crate::full_translation_install) fn plan_consumer_visible_prefixes(
             "redirect transition controls to consumer-specific pointer aliases when unused table slots are proven",
             "recover split cost with dialogue token compression only if regional storage still overflows",
         ],
-        selected_strategy: None,
+        selected_strategy: Some(
+            "normalize each dual-entry record at its first shared line boundary and author both required leading segments",
+        ),
         every_transition_target_has_source_mode_row: true,
         source_entry_mode_material_built: true,
         consumer_specific_visible_prefix_material_built: false,
