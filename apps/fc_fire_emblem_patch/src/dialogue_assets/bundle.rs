@@ -15,7 +15,6 @@ use crate::{
 use super::*;
 
 mod page_encoding;
-mod paired_entry_storage;
 mod region;
 mod validation;
 
@@ -40,19 +39,11 @@ pub(crate) struct MainDialogueBundlePlan {
     regions: Vec<LogicalBundleRegion>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum MainDialogueDisplayMode {
-    Canonical,
-    Direct,
-    Transition,
-}
-
 #[derive(Clone)]
 pub(crate) struct MainDialogueDisplayPath {
     pub(crate) record_id: String,
     pub(crate) display_path_id: String,
     pub(crate) source_prg_bank: u8,
-    pub(crate) mode: MainDialogueDisplayMode,
     pub(crate) logical_bytes: Vec<LogicalDialogueByte>,
     pub(crate) visible_page_ranges: Vec<Range<usize>>,
 }
@@ -70,13 +61,6 @@ pub(crate) struct MainDialoguePageWorkset {
     pub(crate) preserved_target_active_codes: BTreeSet<u8>,
 }
 
-pub(crate) struct MainDialogueRegionStorageBudget {
-    pub(crate) source_prg_bank: u8,
-    pub(crate) capacity_byte_count: usize,
-    pub(crate) used_byte_count: usize,
-    pub(crate) logical_record_byte_counts: BTreeMap<String, usize>,
-}
-
 impl MainDialogueBundlePlan {
     pub(crate) fn canonical_display_paths(&self) -> Result<Vec<MainDialogueDisplayPath>> {
         self.target_records
@@ -91,7 +75,6 @@ impl MainDialogueBundlePlan {
                     record_id: record.id.clone(),
                     display_path_id: record.id.clone(),
                     source_prg_bank: record.source_prg_bank,
-                    mode: MainDialogueDisplayMode::Canonical,
                     logical_bytes: record.bytes.clone(),
                     visible_page_ranges,
                 })
@@ -99,28 +82,7 @@ impl MainDialogueBundlePlan {
             .collect()
     }
 
-    pub(crate) fn logical_record_byte_counts(&self) -> BTreeMap<&str, usize> {
-        self.target_records
-            .iter()
-            .map(|record| (record.id.as_str(), record.bytes.len()))
-            .collect()
-    }
 
-    pub(crate) fn region_storage_budgets(&self) -> Vec<MainDialogueRegionStorageBudget> {
-        self.regions
-            .iter()
-            .map(|region| MainDialogueRegionStorageBudget {
-                source_prg_bank: region.source_prg_bank,
-                capacity_byte_count: region.source_storage.len(),
-                used_byte_count: region.used_storage_byte_count,
-                logical_record_byte_counts: region
-                    .logical_records
-                    .iter()
-                    .map(|record| (record.id.clone(), record.bytes.len()))
-                    .collect(),
-            })
-            .collect()
-    }
 
     pub(crate) fn unique_glyphs(&self) -> BTreeSet<char> {
         self.target_records
@@ -171,23 +133,6 @@ pub(crate) struct EncodedMainDialogueRegion {
     pub(crate) source_storage: Vec<u8>,
     pub(crate) encoded_storage: Vec<u8>,
     pub(crate) used_storage_byte_count: usize,
-}
-
-pub(crate) struct EncodedMainDialogueDisplayStorage {
-    pub(crate) direct_regions: Vec<EncodedMainDialogueRegion>,
-    pub(crate) pointer_writes: Vec<MainDialoguePointerWrite>,
-    pub(crate) transition_mirrors: Vec<MainDialogueTransitionMirror>,
-    pub(crate) direct_used_storage_byte_count: usize,
-    pub(crate) transition_payload_byte_count: usize,
-    pub(crate) normalized_record_count: usize,
-}
-
-pub(crate) struct MainDialogueTransitionMirror {
-    pub(crate) source_prg_bank: u8,
-    pub(crate) material: Vec<u8>,
-    pub(crate) payload_ranges: Vec<Range<usize>>,
-    pub(crate) payload_byte_count: usize,
-    pub(crate) record_count: usize,
 }
 
 #[derive(Clone)]

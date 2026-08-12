@@ -4,7 +4,6 @@ use anyhow::Result;
 use serde::Serialize;
 
 use crate::{
-    dialogue_assets::EncodedMainDialogueDisplayStorage,
     dialogue_inventory::main_dialogue_runtime_handler_roots,
     mapper165::battle_codebook_plan::BATTLE_RUNTIME_STORAGE_END, rom::Rom, sha1_hex,
 };
@@ -72,7 +71,6 @@ struct MemoryAccessSite {
 
 pub(super) fn plan_dialogue_runtime_state_storage(
     source: &Rom,
-    encoded_display: &EncodedMainDialogueDisplayStorage,
 ) -> Result<DialogueRuntimeStateStoragePlan> {
     let roots = main_dialogue_runtime_handler_roots();
     let trace = trace_main_dialogue_accesses(source, &roots)?;
@@ -88,11 +86,10 @@ pub(super) fn plan_dialogue_runtime_state_storage(
     let main_dialogue_queue_bound_proven = source_access_contract.queue_bound_proven();
     let main_dialogue_indirect_access_ranges_proven =
         source_access_contract.indirect_access_ranges_proven();
-    let concurrent_access_contract = bind_concurrent_runtime_accesses(
-        source,
-        &encoded_display.transition_mirrors,
-        main_dialogue_queue_bound_proven,
-    )?;
+    // 전이 미러 뱅크는 이중 진입과 함께 폐기했으므로 동시 접근을 만들 미러가 없다.
+    // 의사결정 59번을 따른다.
+    let concurrent_access_contract =
+        bind_concurrent_runtime_accesses(source, main_dialogue_queue_bound_proven)?;
     let battle_reservation_excludes_candidate = CANDIDATE_START > BATTLE_RUNTIME_STORAGE_END;
     let selection_complete = direct_accesses_exclude_candidate
         && source_lifetime_accesses_exclude_candidate

@@ -1,14 +1,12 @@
 use anyhow::{Result, ensure};
 use serde::Serialize;
 
-use crate::{dialogue_assets::EncodedMainDialogueDisplayStorage, rom::Rom, tracked::TrackedImage};
+use crate::{rom::Rom, tracked::TrackedImage};
 
 use super::installation_layout::main_dialogue_runtime_material_file_offset;
-use super::relocated_dialogue_banks::append_relocated_dialogue_writes;
 
 pub(super) struct IntegratedWriteSetInputs<'a> {
     pub(super) candidate: &'a Rom,
-    pub(super) dialogue_storage: &'a EncodedMainDialogueDisplayStorage,
     pub(super) dialogue_runtime_material: &'a [u8],
     pub(super) required_domains: &'a [&'static str],
     pub(super) expected_dialogue_storage_write_count: usize,
@@ -46,7 +44,6 @@ pub(super) fn plan_integrated_write_set(
     inputs: IntegratedWriteSetInputs<'_>,
 ) -> Result<IntegratedWriteSetPlan> {
     let mut image = TrackedImage::new(inputs.candidate.data().to_vec());
-    append_relocated_dialogue_writes(&mut image, inputs.candidate, inputs.dialogue_storage)?;
     ensure!(
         image.writes().len() == inputs.expected_dialogue_storage_write_count,
         "integrated write set and complete dialogue write set disagree"

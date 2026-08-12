@@ -174,6 +174,35 @@ git commit -m "Stop binding the install plan to dual dialogue entry modes"
 
 ---
 
+### 과제 3a: 미러 뱅크 계산 경로를 끊는다
+
+과제 2를 실행하며 확인한 사실이다. 보고서 필드만 지웠을 뿐 `plan_relocated_dialogue_banks` 호출과 `installation_layout`·`integrated_write_set`의 사용이 남아 있다. 모듈을 지우기 전에 이 셋을 먼저 끊는다.
+
+**파일:**
+- 수정: `full_translation_install.rs`, `full_translation_install/installation_layout.rs`, `full_translation_install/integrated_write_set.rs`
+
+- [ ] **1단계: 호출과 사용을 지운다**
+
+`full_translation_install.rs`의 `plan_relocated_dialogue_banks(...)` 호출과 그 결과를 쓰는 `expected_dialogue_storage_write_count`를 정리한다. `installation_layout.rs`에서 미러 뱅크 배치를, `integrated_write_set.rs`에서 `append_relocated_dialogue_writes`를 뗀다.
+
+- [ ] **2단계: 컴파일·테스트·왕복을 확인한다**
+
+### 과제 3b: `MainDialogueDisplayPlan`을 이중 진입 밖으로 옮긴다
+
+과제 2를 실행하며 확인한 사실이다. 이 타입은 `entry_mode_workspace/display_plan.rs` 안에 있지만 이중 진입과 무관하고, 6개 모듈 12곳이 쓴다. `from_canonical_bundle`은 이미 이중 진입 필드를 0과 빈 벡터로 채우므로 분리가 깨끗하다.
+
+**파일:**
+- 생성: `apps/fc_fire_emblem_patch/src/dialogue_assets/display_plan.rs`
+- 수정: `dialogue_assets.rs`
+
+- [ ] **1단계: 살아 있는 부분만 새 모듈로 옮긴다**
+
+`MainDialogueDisplayPlan` struct에서 `dual_entry_record_count`, `direct_display_path_count`, `transition_display_path_count`, `normalized_record_storage` 네 필드를 뺀다. 소비자가 읽지 않는 것을 확인했다. `from_canonical_bundle`과 `unique_glyphs`만 남긴다.
+
+- [ ] **2단계: 재수출을 새 모듈로 돌린다**
+
+- [ ] **3단계: 컴파일·테스트·왕복을 확인한다**
+
 ### 과제 3: 이중 진입 모듈을 지운다
 
 **파일:**
