@@ -64,7 +64,13 @@ pub(super) fn plan_dialogue_runtime_composition(
         static_page_pack.len() == codebook.page_assignments.len() * FONT_PAGE_SIZE,
         "dialogue runtime composition static page pack length changed"
     );
-    let dialogue_glyphs = dialogue.unique_glyphs().into_iter().collect::<Vec<_>>();
+    let dialogue_glyphs = codebook
+        .page_assignments
+        .iter()
+        .flat_map(|assignments| assignments.keys().copied())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
     ensure!(
         dialogue_glyphs.len() == codebook.glyph_count,
         "dialogue runtime composition lost glyph-atlas entries"

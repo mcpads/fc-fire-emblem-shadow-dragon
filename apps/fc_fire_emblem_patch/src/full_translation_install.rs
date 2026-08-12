@@ -11,7 +11,7 @@ use crate::{
     item_flow::plan_item_action_labels,
     map_menu::plan_map_menu,
     mapper165::battle_codebook_plan::{
-        GlyphWorkset, build_glyph_workset_font_page_pack, plan_glyph_workset_page_upper_bound,
+        build_glyph_workset_font_page_pack, plan_glyph_workset_page_upper_bound,
     },
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
@@ -22,9 +22,11 @@ use crate::{
 
 mod current_candidate;
 mod dynamic_composition;
+mod dynamic_inputs;
 
 use current_candidate::{CurrentCandidateInputs, inspect_dialogue_page_pool_capacity};
 use dynamic_composition::plan_dialogue_runtime_composition;
+use dynamic_inputs::plan_dynamic_dialogue_inputs;
 
 const REQUIRED_DOMAIN_COUNT: usize = 13;
 
@@ -95,6 +97,7 @@ struct TranslationInputs {
 struct DialogueCodebook {
     page_workset_count: usize,
     unique_workset_count: usize,
+    literal_glyph_count: usize,
     unique_glyph_count: usize,
     active_slot_count: usize,
     maximum_workset_slot_demand: usize,
@@ -165,6 +168,16 @@ struct DialogueRuntimeComposition {
     dynamic_string_control_count: usize,
     dynamic_string_page_count: usize,
     dynamic_string_selector_count: usize,
+    dynamic_string_domain_count: usize,
+    translated_dynamic_page_count: usize,
+    preserved_numeric_page_count: usize,
+    translated_dynamic_glyph_count: usize,
+    combined_dialogue_glyph_count: usize,
+    maximum_possible_domain_glyph_count: usize,
+    maximum_augmented_workset_slot_demand: usize,
+    maximum_rendered_target_glyph_upper_bound: usize,
+    dynamic_string_domains_classified: bool,
+    dynamic_augmented_worksets_fit: bool,
     dynamic_string_producers_bound: bool,
     consumer_specific_visible_prefixes_bound: bool,
     dense_group_lookup_byte_count: usize,
@@ -252,15 +265,13 @@ pub(crate) fn plan_full_translation_installation(
         "full translation installation input population changed"
     );
 
-    let worksets = dialogue
-        .page_worksets
-        .iter()
-        .map(|workset| GlyphWorkset {
-            target_glyphs: workset.target_glyphs.clone(),
-            preserved_active_codes: workset.preserved_target_active_codes.clone(),
-        })
-        .collect::<Vec<_>>();
-    let codebook = plan_glyph_workset_page_upper_bound(&worksets)?;
+    let dynamic_inputs = plan_dynamic_dialogue_inputs(
+        &dialogue,
+        &fixed.entries,
+        &unit_names.entries,
+        &locations.entries,
+    )?;
+    let codebook = plan_glyph_workset_page_upper_bound(&dynamic_inputs.augmented_worksets)?;
     ensure!(
         codebook.workset_count == dialogue.page_worksets.len()
             && codebook.workset_page_indices.len() == dialogue.page_worksets.len(),
@@ -347,6 +358,7 @@ pub(crate) fn plan_full_translation_installation(
         dialogue_codebook: DialogueCodebook {
             page_workset_count: dialogue.page_worksets.len(),
             unique_workset_count: codebook.unique_workset_count,
+            literal_glyph_count: dialogue.unique_glyphs().len(),
             unique_glyph_count: codebook.glyph_count,
             active_slot_count: crate::font_slots::ACTIVE_HANGUL_SLOT_COUNT,
             maximum_workset_slot_demand: codebook.maximum_workset_slot_demand,
@@ -426,6 +438,18 @@ pub(crate) fn plan_full_translation_installation(
             dynamic_string_control_count: composition.dynamic_string_control_count,
             dynamic_string_page_count: composition.dynamic_string_page_count,
             dynamic_string_selector_count: composition.dynamic_string_selector_count,
+            dynamic_string_domain_count: dynamic_inputs.declared_domain_count,
+            translated_dynamic_page_count: dynamic_inputs.translated_dynamic_page_count,
+            preserved_numeric_page_count: dynamic_inputs.preserved_numeric_page_count,
+            translated_dynamic_glyph_count: dynamic_inputs.translated_dynamic_glyph_count,
+            combined_dialogue_glyph_count: dynamic_inputs.combined_dialogue_glyph_count,
+            maximum_possible_domain_glyph_count: dynamic_inputs.maximum_possible_domain_glyph_count,
+            maximum_augmented_workset_slot_demand: dynamic_inputs
+                .maximum_augmented_workset_slot_demand,
+            maximum_rendered_target_glyph_upper_bound: dynamic_inputs
+                .maximum_rendered_target_glyph_upper_bound,
+            dynamic_string_domains_classified: dynamic_inputs.every_dynamic_control_classified,
+            dynamic_augmented_worksets_fit: dynamic_inputs.every_augmented_workset_fits,
             dynamic_string_producers_bound: false,
             consumer_specific_visible_prefixes_bound: false,
             dense_group_lookup_byte_count: composition.dense_group_lookup_byte_count,
