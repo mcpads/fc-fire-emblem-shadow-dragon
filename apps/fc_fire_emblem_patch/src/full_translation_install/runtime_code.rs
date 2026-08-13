@@ -7,6 +7,7 @@ use anyhow::{Context, Result, ensure};
 
 use crate::rp2a03::{Instruction, assemble_at};
 
+pub(super) mod dispatcher_gate;
 pub(super) mod trampoline;
 pub(super) mod transport;
 
@@ -28,6 +29,7 @@ fn budgeted_transport_cycles(trampoline_reserve: u32) -> u32 {
 }
 
 /// ROM의 한 자리에 놓이는 실행 코드 조각이다.
+#[derive(Debug)]
 pub(super) struct RuntimeRoutine {
     pub(super) role: &'static str,
     pub(super) address: u16,
