@@ -121,6 +121,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     atlas_page: u8,
     code_page: u8,
     layout: resolve_request::MaterialLayout,
+    cold_request_mapper_register: u8,
 ) -> Result<DialogueRuntimeCodePlan> {
     let bank_restore = bind_bank_restore_contract(candidate)?;
     bind_quiet_frame_gate(source, candidate)?;
@@ -131,8 +132,34 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     chr_ram_ownership::bind_shared_chr_ram_ownership_boundary(candidate)?;
     let chr_source_state = chr_source_state::bind_chr_source_state(candidate)?;
 
+    let selector = chr_selector::build_chr_selector(
+        chr_selector::SELECTOR_CAVE_ORIGIN,
+        CHR_BANK_SELECT_REGISTER,
+        CHR_BANK_VALUE_REGISTER,
+        cold_request_mapper_register,
+    )?;
+    let cold_presentation_selector_origin = selector.address
+        + u16::try_from(selector.bytes.len()).context("dialogue selector length overflow")?;
+    let cold_presentation_selector = chr_selector::build_cold_request_presentation_selector(
+        cold_presentation_selector_origin,
+        CHR_BANK_SELECT_REGISTER,
+        CHR_BANK_VALUE_REGISTER,
+        cold_request_mapper_register,
+    )?;
+    let cold_presentation_selector_address = cold_presentation_selector.address;
+    let ownership_transfer_origin = cold_presentation_selector.address
+        + u16::try_from(cold_presentation_selector.bytes.len())
+            .context("cold-request presentation selector length overflow")?;
+    let ownership_transfer =
+        chr_ram_ownership::build_battle_composition_ownership_transfer(ownership_transfer_origin)?;
+    let ownership_transfer_address = ownership_transfer.address;
+
     let chr_restore_callee_cycles = chr_source_state.restore_callee_cycles();
-    let transport = transport::build_transport_routine(runtime_code_cpu_start, atlas_page)?;
+    let transport = transport::build_transport_routine(
+        runtime_code_cpu_start,
+        atlas_page,
+        cold_request_mapper_register,
+    )?;
     let resolver_origin = transport.address
         + u16::try_from(transport.bytes.len()).context("transport routine length overflow")?;
     let resolver = resolve_request::build_resolve_request(resolver_origin, layout)?;
@@ -147,8 +174,10 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     let gate_address = gate.address;
     let publication_origin = gate.address
         + u16::try_from(gate.bytes.len()).context("dialogue dispatcher gate length overflow")?;
-    let resolved_page_publication =
-        resolved_page_publication::build_resolved_page_publication(publication_origin)?;
+    let resolved_page_publication = resolved_page_publication::build_resolved_page_publication(
+        publication_origin,
+        cold_presentation_selector_address,
+    )?;
     let resolved_page_publication_address = resolved_page_publication.address;
     ensure_disjoint(
         &[&gate, &resolved_page_publication],
@@ -185,25 +214,18 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     // 의사결정 62번을 따른다.
     let reserve = trampoline::worst_case_reserve_cycles(bank_restore)?;
     let budget = budgeted_transport_cycles(reserve);
-    let frame_cycles =
-        transport::worst_case_frame_cycles(runtime_code_cpu_start, atlas_page, chr_source_state)?;
+    let frame_cycles = transport::worst_case_frame_cycles(
+        runtime_code_cpu_start,
+        atlas_page,
+        chr_source_state,
+        cold_request_mapper_register,
+    )?;
     ensure!(
         frame_cycles <= budget,
         "one transport frame costs {frame_cycles} cycles but only {budget} of the measured \
          {MEASURED_VBLANK_REMAINDER}-cycle vblank remainder are budgeted after the \
          {SAFETY_MARGIN_PERCENT}% margin and the {reserve}-cycle trampoline reserve"
     );
-
-    let selector = chr_selector::build_chr_selector(
-        chr_selector::SELECTOR_CAVE_ORIGIN,
-        CHR_BANK_SELECT_REGISTER,
-        CHR_BANK_VALUE_REGISTER,
-    )?;
-    let ownership_transfer_origin = selector.address
-        + u16::try_from(selector.bytes.len()).context("dialogue selector length overflow")?;
-    let ownership_transfer =
-        chr_ram_ownership::build_battle_composition_ownership_transfer(ownership_transfer_origin)?;
-    let ownership_transfer_address = ownership_transfer.address;
 
     let publisher_address = publisher.address;
     let selector_address = selector.address;
@@ -212,10 +234,16 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         trampoline::TRAMPOLINE_CAVE_END,
     )?;
     ensure_disjoint(
-        &[&selector, &ownership_transfer],
+        &[&selector, &cold_presentation_selector, &ownership_transfer],
         chr_selector::SELECTOR_CAVE_END,
     )?;
-    let fixed_routines = vec![trampoline_routine, publisher, selector, ownership_transfer];
+    let fixed_routines = vec![
+        trampoline_routine,
+        publisher,
+        selector,
+        cold_presentation_selector,
+        ownership_transfer,
+    ];
     let code_routines = vec![transport, resolver, next_page_resolver];
     let lifecycle = lifecycle::build_lifecycle_suite(
         next_page_resolver_address,

@@ -33,7 +33,10 @@ const PPU_CONTROL: u16 = 0x2000;
 pub(super) const NO_RESIDENT_PAGE_GROUP: u8 = 0xFF;
 
 /// 해석 결과를 게시하고 마지막에만 NMI 제어값을 하드웨어로 되돌린다.
-pub(super) fn build_resolved_page_publication(origin: u16) -> Result<RuntimeRoutine> {
+pub(super) fn build_resolved_page_publication(
+    origin: u16,
+    cold_request_presentation_selector: u16,
+) -> Result<RuntimeRoutine> {
     let mut instructions = Vec::new();
 
     // 실패면 생산자가 미리 써 둔 inactive를 유지한다.
@@ -56,6 +59,7 @@ pub(super) fn build_resolved_page_publication(origin: u16) -> Result<RuntimeRout
 
     let cold = next_address(origin, &instructions)?;
     instructions[cold_for_different_group] = Instruction::BneAbsolute(cold);
+    instructions.push(Instruction::JsrAbsolute(cold_request_presentation_selector));
     instructions.push(Instruction::LdaImmediate(STATE_COLD_REQUESTED));
 
     let publish = next_address(origin, &instructions)?;
@@ -83,9 +87,17 @@ pub(super) fn build_resolved_page_publication(origin: u16) -> Result<RuntimeRout
 mod tests {
     use super::*;
 
+    const PUBLICATION_ORIGIN: u16 = 0xF354;
+    const COLD_REQUEST_PRESENTATION_SELECTOR: u16 = 0xF5A0;
+
+    fn publication() -> RuntimeRoutine {
+        build_resolved_page_publication(PUBLICATION_ORIGIN, COLD_REQUEST_PRESENTATION_SELECTOR)
+            .unwrap()
+    }
+
     #[test]
     fn readiness_is_published_before_nmi_is_restored() {
-        let routine = build_resolved_page_publication(0xF354).unwrap();
+        let routine = publication();
         let publish = routine
             .bytes
             .windows(3)
@@ -101,8 +113,32 @@ mod tests {
     }
 
     #[test]
+    fn a_cold_request_selects_its_presentation_before_nmi_resumes() {
+        let routine = publication();
+        let select = routine
+            .bytes
+            .windows(3)
+            .position(|window| {
+                window
+                    == [
+                        0x20,
+                        COLD_REQUEST_PRESENTATION_SELECTOR as u8,
+                        (COLD_REQUEST_PRESENTATION_SELECTOR >> 8) as u8,
+                    ]
+            })
+            .expect("cold publication selects its presentation page");
+        let restore_ppu = routine
+            .bytes
+            .windows(3)
+            .position(|window| window == [0x8D, 0x00, 0x20])
+            .expect("publication restores PPU control");
+
+        assert!(select < restore_ppu);
+    }
+
+    #[test]
     fn same_group_reuse_republishes_both_source_identity_bytes() {
-        let routine = build_resolved_page_publication(0xF354).unwrap();
+        let routine = publication();
         for (source, published) in [
             (
                 SOURCE_DIRECTORY_SELECTOR,
@@ -130,7 +166,7 @@ mod tests {
 
     #[test]
     fn resolved_group_comparison_can_publish_ready_or_cold() {
-        let routine = build_resolved_page_publication(0xF354).unwrap();
+        let routine = publication();
 
         assert!(
             routine

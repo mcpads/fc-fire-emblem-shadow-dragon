@@ -8,7 +8,8 @@
 //! 때는 표본 뒤의 실제 기존 소비자 `$FB80`으로 직접 넘긴다.
 //!
 //! 준비되지 않았을 때 CHR RAM을 고르면 아직 올라가지 않은 타일이 화면에 나온다.
-//! 그것이 설계의 안전 성질 위반이므로 `ready`가 아닌 모든 값은 기존 사슬로 넘긴다.
+//! `cold_requested`는 한글 슬롯만 빈 전용 CHR-ROM 페이지를 고르고, 그 밖의 알 수 없는
+//! 상태는 기존 사슬로 넘긴다.
 //!
 //! 실행에서 맵 타일 자리에 한글이 나온 원인은 CHR RAM의 내용이 아니라 **표시 선택이
 //! FD와 FE를 모두 RAM으로 바꾼 것**이었다. mapper165의 레지스터 2는 오른쪽 FD,
@@ -41,7 +42,7 @@ use super::{
         CHR_RAM_BANK_VALUE, CHR_SOURCE_HIGH_BITS, DIALOGUE_FD_SOURCE_PAGE, RIGHT_FD_CHR_REGISTER,
         RIGHT_FD_SOURCE_SHADOW,
     },
-    dispatcher_gate::DISPATCHER_STATE,
+    dispatcher_gate::{DISPATCHER_STATE, STATE_COLD_REQUESTED},
     lifecycle::TERMINAL_STATE,
     next_address,
     transport::{REQUEST_STATE, STATE_READY},
@@ -129,6 +130,7 @@ pub(super) fn build_chr_selector(
     origin: u16,
     bank_select_register: u16,
     bank_value_register: u16,
+    cold_request_mapper_register: u8,
 ) -> Result<RuntimeRoutine> {
     let mut instructions = vec![
         // 사슬이 나르는 누산기와 상태를 밀어 둔다.
@@ -137,8 +139,13 @@ pub(super) fn build_chr_selector(
         Instruction::LdaAbsolute(REQUEST_STATE),
         Instruction::CmpImmediate(STATE_READY),
     ];
-    let not_ready_placeholder = instructions.len();
+    let ready_placeholder = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(origin));
+    instructions.push(Instruction::CmpImmediate(STATE_COLD_REQUESTED));
+    let unsupported_state_placeholder = instructions.len();
     instructions.push(Instruction::BneAbsolute(origin));
+    let eligible_state = next_address(origin, &instructions)?;
+    instructions[ready_placeholder] = Instruction::BeqAbsolute(eligible_state);
     instructions.extend([
         Instruction::LdaAbsolute(DISPATCHER_STATE),
         Instruction::CmpImmediate(TERMINAL_STATE),
@@ -154,6 +161,12 @@ pub(super) fn build_chr_selector(
     let wrong_fd_source_placeholder = instructions.len();
     instructions.push(Instruction::BneAbsolute(origin));
     instructions.extend([
+        Instruction::LdaAbsolute(REQUEST_STATE),
+        Instruction::CmpImmediate(STATE_READY),
+    ]);
+    let cold_request_placeholder = instructions.len();
+    instructions.push(Instruction::BneAbsolute(origin));
+    instructions.extend([
         Instruction::Pla,
         Instruction::Plp,
         Instruction::LdaImmediate(RIGHT_FD_CHR_REGISTER),
@@ -162,10 +175,21 @@ pub(super) fn build_chr_selector(
         Instruction::StaAbsolute(bank_value_register),
         Instruction::Rts,
     ]);
-    let not_ready = next_address(origin, &instructions)?;
-    instructions[not_ready_placeholder] = Instruction::BneAbsolute(not_ready);
-    instructions[terminal_placeholder] = Instruction::BcsAbsolute(not_ready);
-    instructions[wrong_fd_source_placeholder] = Instruction::BneAbsolute(not_ready);
+    let cold_request = next_address(origin, &instructions)?;
+    instructions[cold_request_placeholder] = Instruction::BneAbsolute(cold_request);
+    instructions.extend([
+        Instruction::Pla,
+        Instruction::Plp,
+        Instruction::LdaImmediate(RIGHT_FD_CHR_REGISTER),
+        Instruction::StaAbsolute(bank_select_register),
+        Instruction::LdaImmediate(cold_request_mapper_register),
+        Instruction::StaAbsolute(bank_value_register),
+        Instruction::Rts,
+    ]);
+    let unsupported_state = next_address(origin, &instructions)?;
+    instructions[unsupported_state_placeholder] = Instruction::BneAbsolute(unsupported_state);
+    instructions[terminal_placeholder] = Instruction::BcsAbsolute(unsupported_state);
+    instructions[wrong_fd_source_placeholder] = Instruction::BneAbsolute(unsupported_state);
     instructions.extend([
         Instruction::Pla,
         Instruction::Plp,
@@ -179,15 +203,35 @@ pub(super) fn build_chr_selector(
     })
 }
 
+/// 요청 발행기가 NMI를 다시 켜기 전에 냉간 표시 페이지를 원자적으로 고른다.
+pub(super) fn build_cold_request_presentation_selector(
+    origin: u16,
+    bank_select_register: u16,
+    bank_value_register: u16,
+    cold_request_mapper_register: u8,
+) -> Result<RuntimeRoutine> {
+    let instructions = [
+        Instruction::LdaImmediate(RIGHT_FD_CHR_REGISTER),
+        Instruction::StaAbsolute(bank_select_register),
+        Instruction::LdaImmediate(cold_request_mapper_register),
+        Instruction::StaAbsolute(bank_value_register),
+        Instruction::Rts,
+    ];
+    Ok(RuntimeRoutine {
+        role: "cold-request dialogue presentation selector",
+        address: origin,
+        bytes: assemble_at(origin, &instructions)?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// 준비되지 않았는데 CHR RAM을 고르면 아직 올라가지 않은 타일이 화면에 나온다.
-    /// 그러므로 `ready`가 아닌 모든 값은 기존 사슬로 넘겨야 한다.
+    /// 알 수 없는 상태에서 새 페이지를 고르면 원본의 다른 화면을 침범할 수 있다.
     #[test]
-    fn an_unready_state_hands_the_existing_chain_control() {
-        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001).unwrap();
+    fn an_unsupported_state_hands_the_existing_chain_control() {
+        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8).unwrap();
 
         assert_eq!(
             &routine.bytes[routine.bytes.len() - 3..],
@@ -203,7 +247,7 @@ mod tests {
     /// 다른 값이므로 selector가 그것을 읽으면 준비된 페이지를 영원히 고르지 못한다.
     #[test]
     fn prg_bank_shadow_is_not_used_as_the_dialogue_lifetime() {
-        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001).unwrap();
+        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8).unwrap();
 
         assert!(!routine.bytes.windows(2).any(|window| window
             == [
@@ -226,7 +270,7 @@ mod tests {
     /// 안 된다. 수명 이탈 훅과 소비자 양쪽이 같은 경계를 지킨다.
     #[test]
     fn terminal_dialogue_state_falls_through_to_the_existing_chain() {
-        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001).unwrap();
+        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8).unwrap();
 
         assert!(routine.bytes.windows(5).any(|window| {
             window
@@ -245,7 +289,7 @@ mod tests {
     /// MMC3는 «레지스터를 고른 뒤 값을 쓴다»는 순서도 함께 지킨다.
     #[test]
     fn the_ready_path_selects_only_fd_chr_ram_and_keeps_fe_on_source_rom() {
-        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001).unwrap();
+        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8).unwrap();
 
         let mut selections = Vec::new();
         let mut index = 0;
@@ -262,7 +306,13 @@ mod tests {
             index += 1;
         }
 
-        assert_eq!(selections, [(RIGHT_FD_CHR_REGISTER, CHR_RAM_BANK_VALUE)]);
+        assert_eq!(
+            selections,
+            [
+                (RIGHT_FD_CHR_REGISTER, CHR_RAM_BANK_VALUE),
+                (RIGHT_FD_CHR_REGISTER, 0xC8),
+            ]
+        );
         assert!(!selections.iter().any(|(register, _)| *register == 4));
     }
 
@@ -270,7 +320,7 @@ mod tests {
     /// 페이지면 준비 표식만 믿지 않고 기존 selector 사슬로 넘겨야 한다.
     #[test]
     fn the_ready_path_is_guarded_by_the_dialogue_fd_source_page() {
-        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001).unwrap();
+        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8).unwrap();
 
         assert!(routine.bytes.windows(8).any(|window| {
             window
@@ -291,7 +341,7 @@ mod tests {
     /// 소비자가 남의 값을 페이지로 읽어 화면이 깨진다.
     #[test]
     fn the_chain_accumulator_survives_both_paths() {
-        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001).unwrap();
+        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8).unwrap();
 
         // 진입에서 `PHP PHA`, 두 갈래 모두 `PLA PLP`로 되돌린다.
         assert_eq!(&routine.bytes[..2], [0x08, 0x48]);
@@ -300,7 +350,67 @@ mod tests {
             .windows(2)
             .filter(|window| *window == [0x68, 0x28])
             .count();
-        assert_eq!(restores, 2, "both paths must hand the accumulator back");
+        assert_eq!(restores, 3, "all paths must hand the accumulator back");
+    }
+
+    #[test]
+    fn cold_request_selection_uses_chr_rom_instead_of_partial_chr_ram() {
+        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8).unwrap();
+
+        assert_eq!(
+            &routine.bytes[2..7],
+            [
+                0xAD,
+                REQUEST_STATE as u8,
+                (REQUEST_STATE >> 8) as u8,
+                0xC9,
+                STATE_READY,
+            ]
+        );
+        assert_eq!(routine.bytes[7], 0xF0, "ready must enter the guarded path");
+        assert_eq!(
+            &routine.bytes[9..11],
+            [0xC9, STATE_COLD_REQUESTED],
+            "the same state load must next admit only cold_requested"
+        );
+        assert!(routine.bytes.windows(10).any(|window| {
+            window
+                == [
+                    0xA9,
+                    RIGHT_FD_CHR_REGISTER,
+                    0x8D,
+                    0x00,
+                    0x80,
+                    0xA9,
+                    0xC8,
+                    0x8D,
+                    0x01,
+                    0x80,
+                ]
+        }));
+    }
+
+    #[test]
+    fn atomic_cold_selector_maps_only_the_fd_window() {
+        let routine =
+            build_cold_request_presentation_selector(0xF5A0, 0x8000, 0x8001, 0xC8).unwrap();
+
+        assert_eq!(
+            routine.bytes,
+            [
+                0xA9,
+                RIGHT_FD_CHR_REGISTER,
+                0x8D,
+                0x00,
+                0x80,
+                0xA9,
+                0xC8,
+                0x8D,
+                0x01,
+                0x80,
+                0x60
+            ]
+        );
     }
 
     /// 사슬 자리가 이미 바뀌었으면 이 selector가 무엇 앞에 끼어드는지 알 수 없다.

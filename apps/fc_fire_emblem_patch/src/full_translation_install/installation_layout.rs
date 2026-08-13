@@ -6,6 +6,7 @@ use serde::Serialize;
 use crate::{rom::HEADER_SIZE, rom::Rom};
 
 use super::{
+    cold_request_presentation::ColdRequestPresentationPage,
     current_candidate::DialoguePagePoolCapacity,
     dialogue_bank_layout::{ACTIVE_FIXED_BANK, BATTLE_MATERIAL_BANK, PRG_BANK_SIZE},
 };
@@ -26,8 +27,9 @@ pub(super) struct InstallationLayoutPlan {
     remaining_cross_domain_material_pool: MaterialPageReservation,
     fixed_code_reservations: Vec<FixedCodeReservation>,
     remaining_fixed_code_caves: Vec<FixedCodeCave>,
-    reclaimable_chr_page_first: u8,
-    reclaimable_chr_page_count: usize,
+    cold_request_presentation_chr_page: ChrPageReservation,
+    remaining_reclaimable_chr_page_first: u8,
+    remaining_reclaimable_chr_page_count: usize,
     all_reserved_material_bytes_are_exact_ff: bool,
     reservations_are_disjoint: bool,
     cross_domain_material_capacity_bound: bool,
@@ -58,10 +60,21 @@ struct FixedCodeCave {
     byte_count: usize,
 }
 
+#[derive(Serialize)]
+struct ChrPageReservation {
+    role: &'static str,
+    physical_page: u8,
+    mapper_register: u8,
+    byte_count: usize,
+    blanked_code_count: usize,
+    sha1: String,
+}
+
 pub(super) fn plan_installation_layout(
     candidate: &Rom,
     page_pool: &DialoguePagePoolCapacity,
     main_dialogue_runtime_material_byte_count: usize,
+    cold_request_presentation: &ColdRequestPresentationPage,
 ) -> Result<InstallationLayoutPlan> {
     ensure!(
         candidate.mapper() == EXPECTED_MAPPER && candidate.prg().len() == EXPECTED_PRG_SIZE,
@@ -139,6 +152,19 @@ pub(super) fn plan_installation_layout(
         !remaining_fixed_code_caves.is_empty(),
         "integrated layout found no remaining fixed-bank code cave"
     );
+    ensure!(
+        page_pool.available_page_count > 0
+            && cold_request_presentation.physical_page == page_pool.first_installable_physical_page,
+        "cold-request presentation does not reserve the first reclaimable CHR page"
+    );
+    let remaining_reclaimable_chr_page_first = cold_request_presentation
+        .physical_page
+        .checked_add(1)
+        .context("remaining reclaimable CHR page range overflow")?;
+    let remaining_reclaimable_chr_page_count = page_pool
+        .available_page_count
+        .checked_sub(1)
+        .context("cold-request presentation exhausted the reclaimable CHR page pool")?;
 
     Ok(InstallationLayoutPlan {
         current_candidate_mapper: candidate.mapper(),
@@ -160,8 +186,16 @@ pub(super) fn plan_installation_layout(
         },
         fixed_code_reservations,
         remaining_fixed_code_caves,
-        reclaimable_chr_page_first: page_pool.first_installable_physical_page,
-        reclaimable_chr_page_count: page_pool.available_page_count,
+        cold_request_presentation_chr_page: ChrPageReservation {
+            role: "cold_request_dialogue_presentation",
+            physical_page: cold_request_presentation.physical_page,
+            mapper_register: cold_request_presentation.mapper_register,
+            byte_count: cold_request_presentation.bytes.len(),
+            blanked_code_count: cold_request_presentation.blanked_code_count,
+            sha1: cold_request_presentation.sha1.clone(),
+        },
+        remaining_reclaimable_chr_page_first,
+        remaining_reclaimable_chr_page_count,
         all_reserved_material_bytes_are_exact_ff: true,
         reservations_are_disjoint: true,
         cross_domain_material_capacity_bound: false,

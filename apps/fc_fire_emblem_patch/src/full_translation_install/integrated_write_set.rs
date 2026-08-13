@@ -1,10 +1,16 @@
 use anyhow::{Result, ensure};
 use serde::Serialize;
 
-use crate::{dialogue_assets::EncodedMainDialogueBundle, rom::Rom, tracked::TrackedImage};
+use crate::{
+    dialogue_assets::EncodedMainDialogueBundle,
+    font_slots::FONT_PAGE_SIZE,
+    rom::{HEADER_SIZE, Rom},
+    tracked::TrackedImage,
+};
 
 use super::{
     chapter_intro_residency::EncodedChapterTitle,
+    cold_request_presentation::ColdRequestPresentationPage,
     installation_layout::main_dialogue_runtime_material_file_offset,
     runtime_code::{DialogueRuntimeCodePlan, DialogueRuntimeHookRole, DialogueRuntimeHookSite},
 };
@@ -18,6 +24,7 @@ pub(super) struct IntegratedWriteSetInputs<'a> {
     pub(super) dialogue_runtime_material: &'a [u8],
     pub(super) dialogue_runtime_code: &'a DialogueRuntimeCodePlan,
     pub(super) encoded_chapter_titles: &'a [EncodedChapterTitle],
+    pub(super) cold_request_presentation: &'a ColdRequestPresentationPage,
     pub(super) required_domains: &'a [&'static str],
 }
 
@@ -35,6 +42,8 @@ pub(super) struct IntegratedWriteSetPlan {
     dialogue_storage_region_count: usize,
     dialogue_pointer_write_count: usize,
     chapter_title_storage_write_count: usize,
+    cold_request_presentation_write_count: usize,
+    installed_cold_request_presentation_matches_plan: bool,
     changed_byte_count: usize,
     installed_dialogue_matches_current_encoding: bool,
     installed_chapter_titles_match_resident_encoding: bool,
@@ -70,6 +79,11 @@ pub(super) fn plan_integrated_write_set(
         image.writes().len() == dialogue_storage_write_count + inputs.encoded_chapter_titles.len(),
         "integrated write set and dialogue/title storage write sets disagree"
     );
+    install_cold_request_presentation(
+        &mut image,
+        inputs.candidate,
+        inputs.cold_request_presentation,
+    )?;
     let runtime_material_offset = main_dialogue_runtime_material_file_offset()?;
     let runtime_material_end = runtime_material_offset
         .checked_add(inputs.dialogue_runtime_material.len())
@@ -168,6 +182,11 @@ pub(super) fn plan_integrated_write_set(
     let output = image.into_data();
     verify_installed_dialogue(&output, inputs.encoded_dialogue)?;
     verify_installed_chapter_titles(&output, inputs.encoded_chapter_titles)?;
+    verify_installed_cold_request_presentation(
+        &output,
+        inputs.candidate,
+        inputs.cold_request_presentation,
+    )?;
     let installed_image = output.clone();
     let changed_byte_count = inputs
         .candidate
@@ -179,7 +198,7 @@ pub(super) fn plan_integrated_write_set(
 
     let domains = domain_contributions(
         inputs.required_domains,
-        dialogue_storage_write_count + 1,
+        dialogue_storage_write_count + 2,
         inputs.encoded_chapter_titles.len(),
     )?;
     let contributing_domain_count = domains
@@ -211,6 +230,8 @@ pub(super) fn plan_integrated_write_set(
             dialogue_storage_region_count: inputs.encoded_dialogue.regions.len(),
             dialogue_pointer_write_count: inputs.encoded_dialogue.pointer_writes.len(),
             chapter_title_storage_write_count: inputs.encoded_chapter_titles.len(),
+            cold_request_presentation_write_count: 1,
+            installed_cold_request_presentation_matches_plan: true,
             changed_byte_count,
             installed_dialogue_matches_current_encoding: true,
             installed_chapter_titles_match_resident_encoding: true,
@@ -221,6 +242,54 @@ pub(super) fn plan_integrated_write_set(
             rom_emitted: false,
         },
     ))
+}
+
+fn cold_request_presentation_file_offset(
+    candidate: &Rom,
+    page: &ColdRequestPresentationPage,
+) -> Result<usize> {
+    let chr_offset = HEADER_SIZE
+        .checked_add(candidate.prg().len())
+        .ok_or_else(|| anyhow::anyhow!("candidate CHR offset overflow"))?;
+    chr_offset
+        .checked_add(usize::from(page.physical_page) * FONT_PAGE_SIZE)
+        .ok_or_else(|| anyhow::anyhow!("cold-request presentation offset overflow"))
+}
+
+fn install_cold_request_presentation(
+    image: &mut TrackedImage,
+    candidate: &Rom,
+    page: &ColdRequestPresentationPage,
+) -> Result<()> {
+    ensure!(
+        page.bytes.len() == FONT_PAGE_SIZE,
+        "cold-request presentation is not one 4 KiB CHR page"
+    );
+    let offset = cold_request_presentation_file_offset(candidate, page)?;
+    let expected = candidate
+        .data()
+        .get(offset..offset + FONT_PAGE_SIZE)
+        .ok_or_else(|| anyhow::anyhow!("cold-request presentation page is outside candidate"))?;
+    image.write_expected(
+        "cold-request dialogue presentation CHR page",
+        offset,
+        expected,
+        &page.bytes,
+    )?;
+    Ok(())
+}
+
+fn verify_installed_cold_request_presentation(
+    installed: &[u8],
+    candidate: &Rom,
+    page: &ColdRequestPresentationPage,
+) -> Result<()> {
+    let offset = cold_request_presentation_file_offset(candidate, page)?;
+    ensure!(
+        installed.get(offset..offset + FONT_PAGE_SIZE) == Some(page.bytes.as_slice()),
+        "installed cold-request presentation page does not match its plan"
+    );
+    Ok(())
 }
 
 fn install_encoded_chapter_titles(
@@ -377,7 +446,7 @@ fn domain_contributions(
                 glyph_lifetime_bound: true,
                 storage_and_address_writes_contributed: dialogue || chapter_titles,
                 runtime_material_writes_contributed: dialogue,
-                font_supply_writes_contributed: chapter_titles,
+                font_supply_writes_contributed: dialogue || chapter_titles,
                 all_consumer_writes_contributed: false,
                 expected_write_count: if dialogue {
                     expected_dialogue_write_count

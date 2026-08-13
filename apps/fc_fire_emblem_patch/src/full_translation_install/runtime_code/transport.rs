@@ -321,7 +321,10 @@ fn restore_body(loop_start: u16) -> Result<Vec<Instruction>> {
 ///
 /// 돌려주는 색인들은 «루틴 끝»을 가리켜야 하는 분기들이다. 끝 주소는 이 조각의 길이가
 /// 정해진 뒤에야 나오므로 부르는 쪽이 되메운다.
-fn frame_epilogue(origin: u16) -> Result<(Vec<Instruction>, Vec<usize>)> {
+fn frame_epilogue(
+    origin: u16,
+    cold_request_mapper_register: u8,
+) -> Result<(Vec<Instruction>, Vec<usize>)> {
     let mut instructions = vec![
         Instruction::LdaZeroPage(ENTRY_POINTER_LOW),
         Instruction::StaAbsolute(CURSOR_ENTRY_LOW),
@@ -341,6 +344,25 @@ fn frame_epilogue(origin: u16) -> Result<(Vec<Instruction>, Vec<usize>)> {
     for address in BORROWED_SCRATCH.iter().rev() {
         instructions.extend([Instruction::Pla, Instruction::StaZeroPage(*address)]);
     }
+
+    // 원천 FD가 합성 기반인 페이지 0일 때만 냉간 표시 페이지를 고른다. 전송 시작에서
+    // 잠시 RAM으로 바꾼 창을 원본으로 복원한 뒤 같은 vblank 안에서 다시 고르므로,
+    // 렌더링은 중간 상태를 보지 않는다. 원천이 달라졌으면 아래 실패 경로가 원본 FD를
+    // 그대로 둔 채 요청을 내린다.
+    instructions.extend([
+        Instruction::LdaZeroPage(super::chr_source_state::RIGHT_FD_SOURCE_SHADOW),
+        Instruction::OraZeroPage(super::chr_source_state::CHR_SOURCE_HIGH_BITS),
+        Instruction::AndImmediate(0x1F),
+        Instruction::CmpImmediate(super::chr_source_state::DIALOGUE_FD_SOURCE_PAGE),
+    ]);
+    let wrong_fd_source_placeholder = instructions.len();
+    instructions.push(Instruction::BneAbsolute(origin));
+    instructions.extend([
+        Instruction::LdaImmediate(super::chr_source_state::RIGHT_FD_CHR_REGISTER),
+        Instruction::StaAbsolute(BANK_SELECT_REGISTER),
+        Instruction::LdaImmediate(cold_request_mapper_register),
+        Instruction::StaAbsolute(BANK_VALUE_REGISTER),
+    ]);
 
     let mut needs_done = Vec::new();
     instructions.push(Instruction::LdaAbsolute(CURSOR_REMAINING_TILES));
@@ -362,16 +384,6 @@ fn frame_epilogue(origin: u16) -> Result<(Vec<Instruction>, Vec<usize>)> {
 
     let publish = next_address(origin, &instructions)?;
     instructions[publish_placeholder] = Instruction::BneAbsolute(publish);
-    // 원천 FD가 이 RAM의 기반인 페이지 0일 때만 표시한다. 다른 원천이면 잘못된
-    // 페이지를 보여 주지 않고 요청을 무효화해 원본 경로로 실패 닫힘한다.
-    instructions.extend([
-        Instruction::LdaZeroPage(super::chr_source_state::RIGHT_FD_SOURCE_SHADOW),
-        Instruction::OraZeroPage(super::chr_source_state::CHR_SOURCE_HIGH_BITS),
-        Instruction::AndImmediate(0x1F),
-        Instruction::CmpImmediate(super::chr_source_state::DIALOGUE_FD_SOURCE_PAGE),
-    ]);
-    let wrong_fd_source_placeholder = instructions.len();
-    instructions.push(Instruction::BneAbsolute(origin));
     // FE는 위에서 원본으로 복원한 채 두고, FD만 완성된 RAM으로 게시한다. 같은 NMI
     // 안에서 하드웨어 선택이 끝난 뒤에만 `ready`를 공개한다.
     instructions.extend([
@@ -397,10 +409,16 @@ fn frame_epilogue(origin: u16) -> Result<(Vec<Instruction>, Vec<usize>)> {
         Instruction::LdaImmediate(0),
         Instruction::StaAbsolute(REQUEST_STATE),
     ]);
+    needs_done.push(instructions.len());
+    instructions.push(Instruction::JmpAbsolute(origin));
     Ok((instructions, needs_done))
 }
 
-pub(super) fn build_transport_routine(origin: u16, atlas_page: u8) -> Result<RuntimeRoutine> {
+pub(super) fn build_transport_routine(
+    origin: u16,
+    atlas_page: u8,
+    cold_request_mapper_register: u8,
+) -> Result<RuntimeRoutine> {
     let (mut instructions, finished_jump) = frame_prologue(origin)?;
     // 단계에 따라 다른 루프로 간다. 복원 몸통이 상대 분기 사거리보다 길어 조건을
     // 뒤집어 `JMP` 하나를 건너뛴다.
@@ -428,7 +446,7 @@ pub(super) fn build_transport_routine(origin: u16, atlas_page: u8) -> Result<Run
     let epilogue_start_index = instructions.len();
     let epilogue_address = next_address(origin, &instructions)?;
     instructions[after_restore_placeholder] = Instruction::JmpAbsolute(epilogue_address);
-    let (epilogue, needs_done) = frame_epilogue(epilogue_address)?;
+    let (epilogue, needs_done) = frame_epilogue(epilogue_address, cold_request_mapper_register)?;
     instructions.extend(epilogue);
     let done = next_address(origin, &instructions)?;
     for index in needs_done {
@@ -459,12 +477,13 @@ pub(super) fn worst_case_frame_cycles(
     origin: u16,
     atlas_page: u8,
     chr_source_state: super::chr_source_state::ChrSourceStateContract,
+    cold_request_mapper_register: u8,
 ) -> Result<u32> {
     let (prologue, _) = frame_prologue(origin)?;
     let loop_start = next_address(origin, &prologue)?;
     let fixed = worst_case_cycles(&prologue)?
         + worst_case_cycles_with_calls(
-            &frame_epilogue(origin)?.0,
+            &frame_epilogue(origin, cold_request_mapper_register)?.0,
             &chr_source_state.restore_callee_cycles(),
         )?
         + u32::from(Instruction::Rts.worst_case_cycles());
@@ -482,6 +501,7 @@ mod tests {
     use super::*;
 
     const ATLAS_PAGE: u8 = 0x2C;
+    const COLD_REQUEST_MAPPER_REGISTER: u8 = 0xC8;
 
     fn trampoline_reserve() -> u32 {
         worst_case_reserve_cycles(BankRestoreContract {
@@ -504,7 +524,13 @@ mod tests {
     fn one_frame_of_transport_fits_the_measured_vblank_remainder() {
         let allowed = super::super::budgeted_transport_cycles(trampoline_reserve());
 
-        let worst_case = worst_case_frame_cycles(0xA000, ATLAS_PAGE, chr_source_state()).unwrap();
+        let worst_case = worst_case_frame_cycles(
+            0xA000,
+            ATLAS_PAGE,
+            chr_source_state(),
+            COLD_REQUEST_MAPPER_REGISTER,
+        )
+        .unwrap();
 
         assert!(
             worst_case <= allowed,
@@ -520,8 +546,14 @@ mod tests {
         let loop_start = next_address(0xA000, &prologue).unwrap();
         let per_tile = worst_case_cycles(&tile_body(loop_start, ATLAS_PAGE).unwrap()).unwrap();
 
-        let one_more =
-            worst_case_frame_cycles(0xA000, ATLAS_PAGE, chr_source_state()).unwrap() + per_tile;
+        let one_more = worst_case_frame_cycles(
+            0xA000,
+            ATLAS_PAGE,
+            chr_source_state(),
+            COLD_REQUEST_MAPPER_REGISTER,
+        )
+        .unwrap()
+            + per_tile;
 
         assert!(
             one_more > allowed,
@@ -559,7 +591,7 @@ mod tests {
                 _ => None,
             })
             .collect();
-        let restored: Vec<u8> = frame_epilogue(0xA000)
+        let restored: Vec<u8> = frame_epilogue(0xA000, COLD_REQUEST_MAPPER_REGISTER)
             .unwrap()
             .0
             .iter()
@@ -582,7 +614,9 @@ mod tests {
     /// 그림자를 두 helper에 재사용하거나 두 값을 갱신하면 원래 래치 쌍을 잃는다.
     #[test]
     fn fd_and_fe_are_restored_from_distinct_read_only_source_state() {
-        let epilogue = frame_epilogue(0xA000).unwrap().0;
+        let epilogue = frame_epilogue(0xA000, COLD_REQUEST_MAPPER_REGISTER)
+            .unwrap()
+            .0;
         let fd_restore = [
             Instruction::LdaZeroPage(super::super::chr_source_state::RIGHT_FD_SOURCE_SHADOW),
             Instruction::OraZeroPage(super::super::chr_source_state::CHR_SOURCE_HIGH_BITS),
@@ -615,12 +649,41 @@ mod tests {
         )));
     }
 
+    /// 전송 프레임이 끝날 때 원본 FD를 그대로 두면 직전 한글 코드가 원본 일본어
+    /// 타일로 해석된다. 원본 복원 뒤 렌더링이 재개되기 전에 냉간 표시 페이지를 다시
+    /// 골라야 한다.
+    #[test]
+    fn an_incomplete_frame_reselects_the_cold_presentation_after_source_restore() {
+        let epilogue = frame_epilogue(0xA000, COLD_REQUEST_MAPPER_REGISTER)
+            .unwrap()
+            .0;
+        let fd_restore = Instruction::JsrAbsolute(super::super::chr_source_state::RIGHT_FD_HELPER);
+        let cold_selection = [
+            Instruction::LdaImmediate(super::super::chr_source_state::RIGHT_FD_CHR_REGISTER),
+            Instruction::StaAbsolute(BANK_SELECT_REGISTER),
+            Instruction::LdaImmediate(COLD_REQUEST_MAPPER_REGISTER),
+            Instruction::StaAbsolute(BANK_VALUE_REGISTER),
+        ];
+        let restore_at = epilogue
+            .iter()
+            .position(|instruction| *instruction == fd_restore)
+            .expect("the epilogue restores source FD");
+        let cold_at = epilogue
+            .windows(cold_selection.len())
+            .position(|window| window == cold_selection)
+            .expect("the epilogue reselects cold presentation FD");
+
+        assert!(restore_at < cold_at);
+    }
+
     /// 표시 selector는 준비 완료를 보는 순간 FD만 RAM으로 바꾸고 FE는 이 이탈에서
     /// 복원한 원본을 그대로 쓴다. FE 복원보다 먼저 준비 완료를 게시하면 그 사이에
     /// 한 프레임이라도 전송용 RAM 페이지가 배경으로 보일 수 있다.
     #[test]
     fn native_fe_is_restored_before_readiness_is_published() {
-        let epilogue = frame_epilogue(0xA000).unwrap().0;
+        let epilogue = frame_epilogue(0xA000, COLD_REQUEST_MAPPER_REGISTER)
+            .unwrap()
+            .0;
         let fe_restore = [
             Instruction::LdaZeroPage(super::super::chr_source_state::RIGHT_FE_SOURCE_SHADOW),
             Instruction::OraZeroPage(super::super::chr_source_state::CHR_SOURCE_HIGH_BITS),
@@ -643,7 +706,9 @@ mod tests {
     /// 준비 완료를 알려야 첫 완성 프레임부터 올바른 두 래치가 보인다.
     #[test]
     fn the_completed_page_publishes_fd_ram_before_readiness() {
-        let epilogue = frame_epilogue(0xA000).unwrap().0;
+        let epilogue = frame_epilogue(0xA000, COLD_REQUEST_MAPPER_REGISTER)
+            .unwrap()
+            .0;
         let fe_restore = Instruction::JsrAbsolute(super::super::chr_source_state::RIGHT_FE_HELPER);
         let select_fd = [
             Instruction::LdaImmediate(super::super::chr_source_state::RIGHT_FD_CHR_REGISTER),
@@ -676,7 +741,9 @@ mod tests {
     /// 모두 저장한 뒤에 준비 완료를 알려야 중간 상태를 같은 요청으로 오인하지 않는다.
     #[test]
     fn published_source_identity_is_complete_before_readiness() {
-        let epilogue = frame_epilogue(0xA000).unwrap().0;
+        let epilogue = frame_epilogue(0xA000, COLD_REQUEST_MAPPER_REGISTER)
+            .unwrap()
+            .0;
         let directory = [
             Instruction::LdaAbsolute(SOURCE_DIRECTORY_SELECTOR),
             Instruction::StaAbsolute(PUBLISHED_SOURCE_DIRECTORY_SELECTOR),
@@ -706,7 +773,9 @@ mod tests {
     /// 상태로 요청을 0으로 내려 원본 표시 경로가 계속되게 한다.
     #[test]
     fn a_non_dialogue_fd_source_invalidates_instead_of_publishing_ram() {
-        let epilogue = frame_epilogue(0xA000).unwrap().0;
+        let epilogue = frame_epilogue(0xA000, COLD_REQUEST_MAPPER_REGISTER)
+            .unwrap()
+            .0;
         let guard_prefix = [
             Instruction::LdaZeroPage(super::super::chr_source_state::RIGHT_FD_SOURCE_SHADOW),
             Instruction::OraZeroPage(super::super::chr_source_state::CHR_SOURCE_HIGH_BITS),
@@ -755,7 +824,8 @@ mod tests {
     /// 다 올리기 전에 준비 완료를 알리면 아직 없는 글자가 화면에 나온다.
     #[test]
     fn readiness_is_published_only_after_the_last_tile() {
-        let routine = build_transport_routine(0xA000, ATLAS_PAGE).unwrap();
+        let routine =
+            build_transport_routine(0xA000, ATLAS_PAGE, COLD_REQUEST_MAPPER_REGISTER).unwrap();
         let ready_store = [0x8D, REQUEST_STATE as u8, (REQUEST_STATE >> 8) as u8];
         let ready_at = routine
             .bytes
@@ -774,7 +844,8 @@ mod tests {
     /// 전송 루틴은 실행 코드 페이지 안에 들어가야 한다.
     #[test]
     fn the_routine_fits_the_runtime_code_page() {
-        let routine = build_transport_routine(0xA000, ATLAS_PAGE).unwrap();
+        let routine =
+            build_transport_routine(0xA000, ATLAS_PAGE, COLD_REQUEST_MAPPER_REGISTER).unwrap();
 
         assert!(
             routine.bytes.len() <= 8 * 1024,

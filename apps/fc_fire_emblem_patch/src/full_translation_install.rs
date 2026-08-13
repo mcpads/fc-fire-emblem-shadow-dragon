@@ -21,6 +21,7 @@ use crate::{
 };
 
 mod chapter_intro_residency;
+mod cold_request_presentation;
 mod current_candidate;
 mod dialogue_bank_layout;
 mod dynamic_composition;
@@ -38,6 +39,7 @@ mod runtime_nmi_contract;
 mod runtime_state_storage;
 
 use chapter_intro_residency::plan_chapter_intro_residency;
+use cold_request_presentation::plan_cold_request_presentation_page;
 use current_candidate::{CurrentCandidateInputs, inspect_dialogue_page_pool_capacity};
 use dynamic_composition::plan_dialogue_runtime_composition;
 use dynamic_input_producers::{DynamicInputProducerPlan, inspect_dynamic_input_producers};
@@ -196,6 +198,8 @@ struct DialoguePagePool {
     superseded_maximum_dialogue_page_count: usize,
     appendable_page_count: usize,
     available_page_count: usize,
+    cold_request_presentation_page_count: usize,
+    remaining_available_page_count: usize,
     prebuilt_font_page_upper_bound: usize,
     prebuilt_upper_bound_fits_available_pages: bool,
     exact_available_page_fit_decided: bool,
@@ -313,6 +317,8 @@ struct InstallationGates {
     all_dialogue_page_worksets_packed: bool,
     all_chapter_titles_encoded_with_resident_codes: bool,
     all_chapter_title_storage_writes_planned: bool,
+    cold_request_presentation_page_planned: bool,
+    cold_request_presentation_write_planned: bool,
     static_prebuilt_dialogue_page_pool_fits: bool,
     dialogue_runtime_composition_planned: bool,
     cross_domain_consumer_writes_planned: bool,
@@ -411,6 +417,14 @@ pub(crate) fn plan_full_translation_installation(
         .chr()
         .get(..FONT_PAGE_SIZE)
         .context("source dialogue font page is outside CHR")?;
+    let cold_request_presentation = plan_cold_request_presentation_page(
+        source_font_page,
+        page_capacity.first_installable_physical_page,
+    )?;
+    let remaining_available_page_count = page_capacity
+        .available_page_count
+        .checked_sub(1)
+        .context("cold-request presentation exhausted the reclaimable CHR page pool")?;
     let font_page_pack = build_glyph_workset_font_page_pack(source_font_page, &codebook)?;
     ensure!(
         font_page_pack.len() == codebook.page_assignments.len() * FONT_PAGE_SIZE,
@@ -500,6 +514,7 @@ pub(crate) fn plan_full_translation_installation(
         page(atlas_offset)?,
         runtime_material.runtime_code_mmc3_page(),
         layout,
+        cold_request_presentation.mapper_register,
     )?;
     for routine in &dialogue_runtime_code.code_routines {
         runtime_material.place_runtime_code(routine.address, &routine.bytes)?;
@@ -529,6 +544,7 @@ pub(crate) fn plan_full_translation_installation(
         &current_candidate,
         &page_capacity,
         runtime_material.material.len(),
+        &cold_request_presentation,
     )?;
     let (installed_image, integrated_write_set) =
         plan_integrated_write_set(IntegratedWriteSetInputs {
@@ -537,6 +553,7 @@ pub(crate) fn plan_full_translation_installation(
             dialogue_runtime_material: &runtime_material.material,
             dialogue_runtime_code: &dialogue_runtime_code,
             encoded_chapter_titles: &chapter_intro_residency.encoded_titles,
+            cold_request_presentation: &cold_request_presentation,
             required_domains: &REQUIRED_DOMAINS,
         })?;
     let translation_input_complete = dialogue_validation.translation_input_complete;
@@ -553,7 +570,7 @@ pub(crate) fn plan_full_translation_installation(
         && locations.review_complete
         && translation_input_complete;
     let next_gate = if translation_input_complete && runtime_state_storage.selection_complete() {
-        "cold-boot the exact emitted probe through chapter one and verify the resident Korean title, original EA marker, readable dialogue body, map, window, and portrait on the first presented ready frame before advancing to the chapter-seven multi-page route"
+        "cold-boot the exact emitted probe and verify that every mandatory cold interval shows the protected English and UI over blank target slots, never Japanese or partial Hangul, before the completed Korean page is presented"
     } else if translation_input_complete {
         "close the exact volatile runtime-state storage selection against source access, queue, save/load, and battle lifetimes; do not emit or run a partial ROM"
     } else {
@@ -561,7 +578,7 @@ pub(crate) fn plan_full_translation_installation(
     };
 
     let report = FullTranslationInstallReport {
-        schema: 10,
+        schema: 11,
         source_sha1: EXPECTED_SOURCE_SHA1,
         strategy: "install all remaining translation domains in one cumulative candidate, run complete static gates, then run consumer-path dynamic regression on that same ROM",
         required_domain_count: REQUIRED_DOMAIN_COUNT,
@@ -622,9 +639,11 @@ pub(crate) fn plan_full_translation_installation(
                 .superseded_maximum_dialogue_page_count,
             appendable_page_count: page_capacity.appendable_page_count,
             available_page_count: page_capacity.available_page_count,
+            cold_request_presentation_page_count: 1,
+            remaining_available_page_count,
             prebuilt_font_page_upper_bound: codebook.page_assignments.len(),
             prebuilt_upper_bound_fits_available_pages: codebook.page_assignments.len()
-                <= page_capacity.available_page_count,
+                <= remaining_available_page_count,
             exact_available_page_fit_decided: false,
             mapper_capacity_bound: true,
             current_candidate_bound: true,
@@ -757,8 +776,10 @@ pub(crate) fn plan_full_translation_installation(
             all_dialogue_page_worksets_packed: true,
             all_chapter_titles_encoded_with_resident_codes: true,
             all_chapter_title_storage_writes_planned: true,
+            cold_request_presentation_page_planned: true,
+            cold_request_presentation_write_planned: true,
             static_prebuilt_dialogue_page_pool_fits: codebook.page_assignments.len()
-                <= page_capacity.available_page_count,
+                <= remaining_available_page_count,
             dialogue_runtime_composition_planned: true,
             cross_domain_consumer_writes_planned: false,
             integrated_candidate_ready: false,
