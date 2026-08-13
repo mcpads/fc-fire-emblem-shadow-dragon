@@ -31,6 +31,7 @@ mod runtime_bank_contract;
 mod runtime_control_flow;
 mod runtime_identity;
 mod runtime_material;
+mod runtime_nmi_contract;
 mod runtime_state_storage;
 
 use current_candidate::{CurrentCandidateInputs, inspect_dialogue_page_pool_capacity};

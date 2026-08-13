@@ -1,7 +1,9 @@
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
-use super::runtime_bank_contract::bind_bank_restore_contract;
+use super::{
+    runtime_bank_contract::bind_bank_restore_contract, runtime_nmi_contract::bind_quiet_frame_gate,
+};
 use crate::{
     dialogue_inventory::switchable_cpu_to_file_offset,
     font_slots::FONT_PAGE_SIZE,
@@ -51,6 +53,8 @@ pub(super) struct DialogueRuntimeControlFlowPlan {
     /// `$FA20`이 닿을 수 있는 8 KiB 페이지 수다. 실행 코드 페이지가 이 밖이라
     /// 소비자는 뱅크 레지스터를 직접 쓴다.
     source_bank_helper_reachable_page_count: u16,
+    /// 소비자가 «조용한 프레임»에만 도는 근거인 원본 분기 수다.
+    quiet_frame_gated_branch_count: usize,
     runtime_material_execution_address_bound: bool,
     runtime_state_storage_bound: bool,
     runtime_code_emitted: bool,
@@ -318,6 +322,8 @@ pub(super) fn plan_dialogue_runtime_control_flow(
     // 소비자가 실행 코드 페이지를 `$A000`에 잠깐 걸고 되돌리는 계약이다. 되돌릴 값의
     // 출처가 원본에 있어야 하므로 코드를 방출하기 전에 먼저 확인한다.
     let bank_restore = bind_bank_restore_contract(inputs.candidate)?;
+    // 소비자가 들어갈 자리와, «조용한 프레임»의 뜻을 지키는 원본 분기들이다.
+    let quiet_frame_gate = bind_quiet_frame_gate(inputs.source, inputs.candidate)?;
 
     let producers = producer_specs
         .into_iter()
@@ -452,6 +458,7 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         existing_nmi_owner_preserved: true,
         prg_bank_restore_bound: true,
         source_bank_helper_reachable_page_count: bank_restore.helper_reachable_page_count,
+        quiet_frame_gated_branch_count: quiet_frame_gate.gated_branch_count,
         runtime_material_execution_address_bound: true,
         runtime_state_storage_bound: true,
         runtime_code_emitted: false,
