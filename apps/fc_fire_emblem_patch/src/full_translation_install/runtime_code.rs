@@ -4,6 +4,7 @@
 //! 예산이 바뀌면 바뀌고, 트램폴린은 원본 NMI 계약이 바뀌면 바뀐다.
 
 use anyhow::{Context, Result, ensure};
+use serde::Serialize;
 
 use super::{
     runtime_bank_contract::bind_bank_restore_contract, runtime_nmi_contract::bind_quiet_frame_gate,
@@ -19,6 +20,40 @@ pub(in crate::full_translation_install) mod dispatcher_gate;
 pub(in crate::full_translation_install) mod resolve_request;
 pub(super) mod trampoline;
 pub(in crate::full_translation_install) mod transport;
+
+/// 대사 런타임이 원본 제어 흐름에 끼어드는 각 자리의 의미다.
+///
+/// 개수만 비교하면 selector나 관측 훅을 생산자 훅으로 잘못 셀 수 있다. 설치와 완료
+/// 판정은 이 역할을 따라가며, 주소는 별도의 `DialogueRuntimeHookSite`가 맡는다.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(in crate::full_translation_install) enum DialogueRuntimeHookRole {
+    InitialDirectEntryRequest,
+    E4TransitionEntryRequest,
+    E6TransitionEntryRequest,
+    E7CallerResumeRequest,
+    CompletedPageAdvanceOrLifetimeEnd,
+    E7CallerHandoffInvalidation,
+    NmiPageComposer,
+    DispatcherGate,
+    ChrRamSelector,
+    ChrFdPageObservation,
+    ChrFePageObservation,
+}
+
+/// 훅이 가져가는 원본 자리다.
+pub(in crate::full_translation_install) enum DialogueRuntimeHookSite {
+    Fixed(u16),
+    Switchable { bank: u8, address: u16 },
+}
+
+/// 역할, 원본 자리, 쓸 바이트를 함께 들고 다니는 설치 단위다.
+pub(in crate::full_translation_install) struct DialogueRuntimeHook {
+    pub(in crate::full_translation_install) role: DialogueRuntimeHookRole,
+    pub(in crate::full_translation_install) write_role: &'static str,
+    pub(in crate::full_translation_install) site: DialogueRuntimeHookSite,
+    pub(in crate::full_translation_install) bytes: [u8; 3],
+}
 
 /// `$C179` 진입 시점에 남아 있는 vblank다. 앞에 NMI 진입 오버헤드와 OAM DMA밖에
 /// 없고 둘 다 고정 비용이라 이 값은 표본이 아니라 상수다. 에뮬레이터 실측으로
@@ -47,16 +82,14 @@ pub(in crate::full_translation_install) struct DialogueRuntimeCodePlan {
     pub(in crate::full_translation_install) code_routines: Vec<RuntimeRoutine>,
     /// 고정 뱅크 동굴에 놓이는 조각들이다.
     pub(in crate::full_translation_install) fixed_routines: Vec<RuntimeRoutine>,
-    /// `$C179`에 쓸 소비자 훅이다.
-    pub(in crate::full_translation_install) consumer_hook: [u8; 3],
-    /// `0A:$8000`에 쓸 디스패처 훅이다.
-    pub(in crate::full_translation_install) dispatcher_hook: [u8; 3],
-    /// `0A:$809B`에 쓸 콜드 초기화 훅이다.
-    pub(in crate::full_translation_install) cold_hook: [u8; 3],
-    /// `$FF40`에 쓸 CHR selector 훅이다.
-    pub(in crate::full_translation_install) selector_hook: [u8; 3],
-    /// `$FA80`에 쓸 CHR 페이지 관측 훅이다.
-    pub(in crate::full_translation_install) chr_helper_hook: [u8; 3],
+    /// 원본에 실제로 설치할 훅이다. 역할과 주소와 바이트가 한 단위라 따로 세지 않는다.
+    pub(in crate::full_translation_install) hooks: Vec<DialogueRuntimeHook>,
+}
+
+impl DialogueRuntimeCodePlan {
+    pub(in crate::full_translation_install) fn hook_roles(&self) -> Vec<DialogueRuntimeHookRole> {
+        self.hooks.iter().map(|hook| hook.role).collect()
+    }
 }
 
 /// 실행 코드를 전부 조립한다.
@@ -125,14 +158,49 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         trampoline::TRAMPOLINE_CAVE_END,
     )?;
 
+    let hooks = vec![
+        DialogueRuntimeHook {
+            role: DialogueRuntimeHookRole::ChrFdPageObservation,
+            write_role: "dialogue CHR FD page observer hook",
+            site: DialogueRuntimeHookSite::Fixed(chr_page_shadow::CHR_HELPER_SITE),
+            bytes: chr_page_shadow::helper_hook_bytes(fixed_routines[4].address),
+        },
+        DialogueRuntimeHook {
+            role: DialogueRuntimeHookRole::ChrRamSelector,
+            write_role: "dialogue CHR RAM selector hook",
+            site: DialogueRuntimeHookSite::Fixed(chr_selector::SELECTOR_CHAIN_SITE),
+            bytes: chr_selector::selector_hook_bytes(fixed_routines[3].address),
+        },
+        DialogueRuntimeHook {
+            role: DialogueRuntimeHookRole::NmiPageComposer,
+            write_role: "dialogue NMI page composer hook",
+            site: DialogueRuntimeHookSite::Fixed(super::runtime_nmi_contract::CONSUMER_HOOK),
+            bytes: trampoline::hook_bytes(),
+        },
+        DialogueRuntimeHook {
+            role: DialogueRuntimeHookRole::DispatcherGate,
+            write_role: "dialogue dispatcher gate hook",
+            site: DialogueRuntimeHookSite::Switchable {
+                bank: 0x0A,
+                address: dispatcher_gate::DISPATCHER_ENTRY,
+            },
+            bytes: dispatcher_gate::dispatcher_hook_bytes(fixed_routines[1].address),
+        },
+        DialogueRuntimeHook {
+            role: DialogueRuntimeHookRole::InitialDirectEntryRequest,
+            write_role: "dialogue initial direct-entry request hook",
+            site: DialogueRuntimeHookSite::Switchable {
+                bank: 0x0A,
+                address: dispatcher_gate::COLD_ENTRY,
+            },
+            bytes: dispatcher_gate::cold_hook_bytes(fixed_routines[2].address),
+        },
+    ];
+
     Ok(DialogueRuntimeCodePlan {
-        consumer_hook: trampoline::hook_bytes(),
-        dispatcher_hook: dispatcher_gate::dispatcher_hook_bytes(fixed_routines[1].address),
-        cold_hook: dispatcher_gate::cold_hook_bytes(fixed_routines[2].address),
-        selector_hook: chr_selector::selector_hook_bytes(fixed_routines[3].address),
-        chr_helper_hook: chr_page_shadow::helper_hook_bytes(fixed_routines[4].address),
         code_routines,
         fixed_routines,
+        hooks,
     })
 }
 

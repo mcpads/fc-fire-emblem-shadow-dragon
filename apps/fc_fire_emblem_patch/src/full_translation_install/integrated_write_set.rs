@@ -5,16 +5,10 @@ use crate::{rom::Rom, tracked::TrackedImage};
 
 use super::{
     installation_layout::main_dialogue_runtime_material_file_offset,
-    runtime_code::DialogueRuntimeCodePlan,
-    runtime_code::chr_page_shadow::CHR_HELPER_SITE,
-    runtime_code::chr_selector::SELECTOR_CHAIN_SITE,
-    runtime_code::dispatcher_gate::{COLD_ENTRY, DISPATCHER_ENTRY},
-    runtime_nmi_contract::CONSUMER_HOOK,
+    runtime_code::{DialogueRuntimeCodePlan, DialogueRuntimeHookRole, DialogueRuntimeHookSite},
 };
 use crate::dialogue_inventory::switchable_cpu_to_file_offset;
 
-/// 대사 뱅크다.
-const MAIN_DIALOGUE_BANK: u8 = 0x0A;
 const FIXED_BANK_SIZE: usize = 16 * 1024;
 
 pub(super) struct IntegratedWriteSetInputs<'a> {
@@ -33,6 +27,7 @@ pub(super) struct IntegratedWriteSetPlan {
     fully_planned_domain_count: usize,
     expected_write_count: usize,
     dialogue_runtime_hook_count: usize,
+    dialogue_runtime_hook_roles: Vec<DialogueRuntimeHookRole>,
     dialogue_runtime_fixed_routine_count: usize,
     dialogue_runtime_code_routine_count: usize,
     changed_byte_count: usize,
@@ -99,45 +94,34 @@ pub(super) fn plan_integrated_write_set(
         image.write_expected(routine.role, offset, existing, &routine.bytes)?;
     }
 
-    // 훅 셋이다. 각각 밀어낼 원본 호출을 정확히 알고 있어야 한다.
-    let hooks: [(&str, usize, [u8; 3]); 5] = [
-        (
-            "dialogue CHR page observer hook",
-            fixed_file_offset(inputs.candidate, CHR_HELPER_SITE)?,
-            inputs.dialogue_runtime_code.chr_helper_hook,
-        ),
-        (
-            "dialogue CHR selector hook",
-            fixed_file_offset(inputs.candidate, SELECTOR_CHAIN_SITE)?,
-            inputs.dialogue_runtime_code.selector_hook,
-        ),
-        (
-            "dialogue consumer hook",
-            fixed_file_offset(inputs.candidate, CONSUMER_HOOK)?,
-            inputs.dialogue_runtime_code.consumer_hook,
-        ),
-        (
-            "dialogue dispatcher hook",
-            switchable_cpu_to_file_offset(MAIN_DIALOGUE_BANK, DISPATCHER_ENTRY)?,
-            inputs.dialogue_runtime_code.dispatcher_hook,
-        ),
-        (
-            "dialogue cold initializer hook",
-            switchable_cpu_to_file_offset(MAIN_DIALOGUE_BANK, COLD_ENTRY)?,
-            inputs.dialogue_runtime_code.cold_hook,
-        ),
-    ];
-    for (role, offset, bytes) in hooks {
+    // 훅 역할과 원본 자리와 쓸 바이트는 코드 계획이 한 단위로 제공한다. 설치자가
+    // 별도 배열로 다시 세면 새 훅을 추가할 때 보고서와 실제 쓰기가 갈라진다.
+    let mut hook_roles = std::collections::BTreeSet::new();
+    for hook in &inputs.dialogue_runtime_code.hooks {
+        ensure!(
+            hook_roles.insert(hook.role),
+            "dialogue runtime hook role {:?} is emitted more than once",
+            hook.role
+        );
+        let offset = match hook.site {
+            DialogueRuntimeHookSite::Fixed(address) => {
+                fixed_file_offset(inputs.candidate, address)?
+            }
+            DialogueRuntimeHookSite::Switchable { bank, address } => {
+                switchable_cpu_to_file_offset(bank, address)?
+            }
+        };
         let existing = inputs
             .candidate
             .data()
-            .get(offset..offset + bytes.len())
-            .ok_or_else(|| anyhow::anyhow!("{role} is outside the candidate"))?;
+            .get(offset..offset + hook.bytes.len())
+            .ok_or_else(|| anyhow::anyhow!("{} is outside the candidate", hook.write_role))?;
         ensure!(
-            existing != bytes,
-            "{role} is already installed; the candidate is not a clean base"
+            existing != hook.bytes,
+            "{} is already installed; the candidate is not a clean base",
+            hook.write_role
         );
-        image.write_expected(role, offset, existing, &bytes)?;
+        image.write_expected(hook.write_role, offset, existing, &hook.bytes)?;
     }
 
     image.verify_all_changes_tracked(inputs.candidate.data())?;
@@ -169,22 +153,26 @@ pub(super) fn plan_integrated_write_set(
         "integrated write gate advanced without every domain layer"
     );
 
-    Ok((installed_image, IntegratedWriteSetPlan {
-        required_domain_count: inputs.required_domains.len(),
-        domains,
-        contributing_domain_count,
-        fully_planned_domain_count,
-        expected_write_count,
-        dialogue_runtime_hook_count: 5,
-        dialogue_runtime_fixed_routine_count: inputs.dialogue_runtime_code.fixed_routines.len(),
-        dialogue_runtime_code_routine_count: inputs.dialogue_runtime_code.code_routines.len(),
-        changed_byte_count,
-        every_change_tracked: true,
-        one_shared_image: true,
-        all_domains_contribute_expected_writes: false,
-        output_materialized_in_memory_only: true,
-        rom_emitted: false,
-    }))
+    Ok((
+        installed_image,
+        IntegratedWriteSetPlan {
+            required_domain_count: inputs.required_domains.len(),
+            domains,
+            contributing_domain_count,
+            fully_planned_domain_count,
+            expected_write_count,
+            dialogue_runtime_hook_count: hook_roles.len(),
+            dialogue_runtime_hook_roles: hook_roles.into_iter().collect(),
+            dialogue_runtime_fixed_routine_count: inputs.dialogue_runtime_code.fixed_routines.len(),
+            dialogue_runtime_code_routine_count: inputs.dialogue_runtime_code.code_routines.len(),
+            changed_byte_count,
+            every_change_tracked: true,
+            one_shared_image: true,
+            all_domains_contribute_expected_writes: false,
+            output_materialized_in_memory_only: true,
+            rom_emitted: false,
+        },
+    ))
 }
 
 fn fixed_file_offset(rom: &Rom, address: u16) -> Result<usize> {

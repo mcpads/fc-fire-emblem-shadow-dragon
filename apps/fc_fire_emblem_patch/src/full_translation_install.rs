@@ -58,9 +58,6 @@ use runtime_state_storage::{DialogueRuntimeStateStoragePlan, plan_dialogue_runti
 const MAIN_DIALOGUE_MATERIAL_FIRST_PAGE: u8 = 0x2C;
 /// MMC3 페이지 하나다.
 const MMC3_PAGE_BYTE_COUNT: usize = 8 * 1024;
-/// 대사 런타임이 지금 거는 훅 수다. 소비자, 디스패처 게이트, 콜드 초기화,
-/// CHR selector, CHR 페이지 관측 다섯이다.
-const DIALOGUE_RUNTIME_HOOK_COUNT: usize = 5;
 /// 런타임 식별표 헤더의 길이다.
 const IDENTITY_HEADER_BYTE_COUNT: usize = 16;
 /// 그 뒤 selector 디렉터리의 길이다.
@@ -492,6 +489,7 @@ pub(crate) fn plan_full_translation_installation(
     let selected_runtime_state_cpu_range = runtime_state_storage
         .selected_cpu_range_hex()
         .context("dialogue runtime-state selection has no CPU range")?;
+    let emitted_hook_roles = dialogue_runtime_code.hook_roles();
     let runtime_control_flow = plan_dialogue_runtime_control_flow(RuntimeControlFlowInputs {
         source: &rom,
         candidate: &current_candidate,
@@ -500,7 +498,7 @@ pub(crate) fn plan_full_translation_installation(
             - runtime_material.runtime_code_offset,
         selected_runtime_state_cpu_range,
         runtime_code_emitted: true,
-        emitted_hook_count: DIALOGUE_RUNTIME_HOOK_COUNT,
+        emitted_hook_roles: &emitted_hook_roles,
     })?;
     let installation_layout = plan_installation_layout(
         &current_candidate,

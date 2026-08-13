@@ -1,8 +1,11 @@
+use std::collections::BTreeSet;
+
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use super::{
-    runtime_bank_contract::bind_bank_restore_contract, runtime_nmi_contract::bind_quiet_frame_gate,
+    runtime_bank_contract::bind_bank_restore_contract, runtime_code::DialogueRuntimeHookRole,
+    runtime_nmi_contract::bind_quiet_frame_gate,
 };
 use crate::{
     dialogue_inventory::switchable_cpu_to_file_offset,
@@ -29,9 +32,25 @@ const SAMPLE_GROUP_SELECTOR_END: u16 = 0xF378;
 const SAMPLE_INITIAL_SELECTOR_START: u16 = 0xF990;
 const SAMPLE_INITIAL_SELECTOR_END: u16 = 0xFA00;
 const CENTRAL_SELECTOR_FALLBACK: u16 = 0xFF40;
-/// 생산자 다섯 곳, NMI 소비자 하나, 디스패처 게이트 하나다.
-const PLANNED_HOOK_COUNT: usize = 7;
-use super::runtime_material::{RUNTIME_CODE_MMC3_PAGE, RUNTIME_MATERIAL_FIRST_PAGE, RUNTIME_MATERIAL_PAGE_COUNT};
+/// 완성된 대사 수명이 원본 제어 흐름에 끼어들어야 하는 모든 역할이다.
+///
+/// 주소의 개수가 아니다. 완료 판정은 이 역할 집합에서 빠진 것이 없는지를 본다.
+const PLANNED_HOOK_ROLES: [DialogueRuntimeHookRole; 11] = [
+    DialogueRuntimeHookRole::InitialDirectEntryRequest,
+    DialogueRuntimeHookRole::E4TransitionEntryRequest,
+    DialogueRuntimeHookRole::E6TransitionEntryRequest,
+    DialogueRuntimeHookRole::E7CallerResumeRequest,
+    DialogueRuntimeHookRole::CompletedPageAdvanceOrLifetimeEnd,
+    DialogueRuntimeHookRole::E7CallerHandoffInvalidation,
+    DialogueRuntimeHookRole::NmiPageComposer,
+    DialogueRuntimeHookRole::DispatcherGate,
+    DialogueRuntimeHookRole::ChrRamSelector,
+    DialogueRuntimeHookRole::ChrFdPageObservation,
+    DialogueRuntimeHookRole::ChrFePageObservation,
+];
+use super::runtime_material::{
+    RUNTIME_CODE_MMC3_PAGE, RUNTIME_MATERIAL_FIRST_PAGE, RUNTIME_MATERIAL_PAGE_COUNT,
+};
 const RUNTIME_CODE_WINDOW_START: u16 = 0xA000;
 const BATTLE_SOURCE_PAGE_MMC3_PAGE: u8 = 0x21;
 const EXPECTED_COMPLETED_PAGE_SOURCE_SHA1: &str = "8c2a9f5a6e028a59409f9cc254add2b81f318b21";
@@ -63,11 +82,9 @@ pub(super) struct DialogueRuntimeControlFlowPlan {
     runtime_material_execution_address_bound: bool,
     runtime_state_storage_bound: bool,
     runtime_code_emitted: bool,
-    /// 이 설계가 결국 걸어야 할 훅 수다. 생산자 다섯, NMI 소비자 하나, 디스패처
-    /// 게이트 하나다.
-    planned_hook_count: usize,
-    /// 지금 실제로 걸린 훅 수다. 나머지는 후속 계획이 건다.
-    emitted_hook_count: usize,
+    planned_hook_roles: Vec<DialogueRuntimeHookRole>,
+    emitted_hook_roles: Vec<DialogueRuntimeHookRole>,
+    missing_hook_roles: Vec<DialogueRuntimeHookRole>,
     runtime_hooks_contributed: bool,
     complete: bool,
 }
@@ -166,13 +183,36 @@ pub(super) struct RuntimeControlFlowInputs<'a> {
     pub(super) selected_runtime_state_cpu_range: &'a str,
     /// 전송 루틴이 재료 용기의 예약 자리에 들어갔는지다.
     pub(super) runtime_code_emitted: bool,
-    /// 이번 빌드가 실제로 건 훅 수다.
-    pub(super) emitted_hook_count: usize,
+    /// 이번 빌드가 실제로 건 훅의 역할이다.
+    pub(super) emitted_hook_roles: &'a [DialogueRuntimeHookRole],
+}
+
+fn classify_emitted_hook_roles(
+    emitted_hook_roles: &[DialogueRuntimeHookRole],
+) -> Result<(Vec<DialogueRuntimeHookRole>, Vec<DialogueRuntimeHookRole>)> {
+    let emitted = emitted_hook_roles.iter().copied().collect::<BTreeSet<_>>();
+    ensure!(
+        emitted.len() == emitted_hook_roles.len(),
+        "dialogue runtime emitted the same hook role more than once"
+    );
+    let planned = PLANNED_HOOK_ROLES.into_iter().collect::<BTreeSet<_>>();
+    ensure!(
+        planned.len() == PLANNED_HOOK_ROLES.len(),
+        "dialogue runtime planned the same hook role more than once"
+    );
+    ensure!(
+        emitted.is_subset(&planned),
+        "dialogue runtime emitted a hook role outside the planned control flow"
+    );
+    let missing = planned.difference(&emitted).copied().collect();
+    Ok((emitted.into_iter().collect(), missing))
 }
 
 pub(super) fn plan_dialogue_runtime_control_flow(
     inputs: RuntimeControlFlowInputs<'_>,
 ) -> Result<DialogueRuntimeControlFlowPlan> {
+    let (emitted_hook_roles, missing_hook_roles) =
+        classify_emitted_hook_roles(inputs.emitted_hook_roles)?;
     let producer_specs = [
         (
             "initial_direct_entry",
@@ -478,9 +518,10 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         runtime_material_execution_address_bound: true,
         runtime_state_storage_bound: true,
         runtime_code_emitted: inputs.runtime_code_emitted,
-        planned_hook_count: PLANNED_HOOK_COUNT,
-        emitted_hook_count: inputs.emitted_hook_count,
-        runtime_hooks_contributed: inputs.emitted_hook_count == PLANNED_HOOK_COUNT,
+        planned_hook_roles: PLANNED_HOOK_ROLES.to_vec(),
+        emitted_hook_roles,
+        runtime_hooks_contributed: missing_hook_roles.is_empty(),
+        missing_hook_roles,
         complete: false,
     })
 }
@@ -515,6 +556,40 @@ fn mmc3_page_bytes(rom: &Rom, page: u8, len: usize) -> Result<&[u8]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 설치된 훅 수가 어떤 목표 수와 같아도 역할이 빠졌다면 완료가 아니다. 현재 방출
+    /// 집합은 전이·수명 종료·FE 관측이 빠졌음을 그대로 드러내야 한다.
+    #[test]
+    fn partial_hook_roles_report_what_is_missing() {
+        let emitted = [
+            DialogueRuntimeHookRole::InitialDirectEntryRequest,
+            DialogueRuntimeHookRole::NmiPageComposer,
+            DialogueRuntimeHookRole::DispatcherGate,
+            DialogueRuntimeHookRole::ChrRamSelector,
+            DialogueRuntimeHookRole::ChrFdPageObservation,
+        ];
+
+        let (classified, missing) = classify_emitted_hook_roles(&emitted).unwrap();
+
+        assert_eq!(classified.len(), emitted.len());
+        assert!(missing.contains(&DialogueRuntimeHookRole::E4TransitionEntryRequest));
+        assert!(missing.contains(&DialogueRuntimeHookRole::E7CallerHandoffInvalidation));
+        assert!(missing.contains(&DialogueRuntimeHookRole::ChrFePageObservation));
+        assert!(!missing.contains(&DialogueRuntimeHookRole::ChrFdPageObservation));
+    }
+
+    /// 같은 역할을 두 번 세어 빠진 역할을 메운 척할 수 없어야 한다.
+    #[test]
+    fn duplicate_hook_roles_are_not_counted_as_progress() {
+        let emitted = [
+            DialogueRuntimeHookRole::NmiPageComposer,
+            DialogueRuntimeHookRole::NmiPageComposer,
+        ];
+
+        let error = classify_emitted_hook_roles(&emitted).unwrap_err();
+
+        assert!(error.to_string().contains("same hook role more than once"));
+    }
 
     /// 자료가 끝나는 자리가 어디든 실행 코드는 창의 끝에서 끝나야 한다.
     /// 자료가 줄면 코드 자리는 넓어지고, 늘면 좁아진다.
