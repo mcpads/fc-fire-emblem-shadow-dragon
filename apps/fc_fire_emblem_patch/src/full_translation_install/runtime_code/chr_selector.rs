@@ -9,6 +9,11 @@
 //!
 //! 준비되지 않았을 때 CHR RAM을 고르면 아직 올라가지 않은 타일이 화면에 나온다.
 //! 그것이 설계의 안전 성질 위반이므로 `ready`가 아닌 모든 값은 기존 사슬로 넘긴다.
+//!
+//! **사슬은 누산기에 값을 싣고 다닌다.** `$FF1D`가 `PHP PHA`로 시작해 그 값을 페이지
+//! 번호로 쓰므로, 끼어드는 쪽이 `LDA`로 누산기를 덮으면 뒤따르는 소비자가 남의 값을
+//! 페이지로 읽는다. 실행하면 화면 전체가 깨진다 — 그렇게 확인했다. 그래서 이 selector는
+//! 판정하기 전에 누산기와 상태를 밀어 두고 넘기기 전에 되돌린다.
 
 use anyhow::{Context, Result, ensure};
 
@@ -77,11 +82,15 @@ pub(super) fn build_chr_selector(
     bank_value_register: u16,
 ) -> Result<RuntimeRoutine> {
     let mut instructions = vec![
+        // 사슬이 나르는 누산기와 상태를 밀어 둔다.
+        Instruction::Php,
+        Instruction::Pha,
         Instruction::LdaAbsolute(REQUEST_STATE),
         Instruction::CmpImmediate(STATE_READY),
     ];
     let not_ready_placeholder = instructions.len();
     instructions.push(Instruction::BneAbsolute(origin));
+    instructions.extend([Instruction::Pla, Instruction::Plp]);
     for register in CHR_BANK_REGISTERS {
         instructions.extend([
             Instruction::LdaImmediate(register),
@@ -93,7 +102,11 @@ pub(super) fn build_chr_selector(
     instructions.push(Instruction::Rts);
     let not_ready = next_address(origin, &instructions)?;
     instructions[not_ready_placeholder] = Instruction::BneAbsolute(not_ready);
-    instructions.push(Instruction::JmpAbsolute(SELECTOR_CHAIN_FALLBACK));
+    instructions.extend([
+        Instruction::Pla,
+        Instruction::Plp,
+        Instruction::JmpAbsolute(SELECTOR_CHAIN_FALLBACK),
+    ]);
 
     Ok(RuntimeRoutine {
         role: "dialogue CHR RAM selector",
@@ -153,6 +166,22 @@ mod tests {
                 .map(|register| (*register, CHR_RAM_BANK_VALUE))
                 .collect::<Vec<_>>()
         );
+    }
+
+    /// 사슬은 누산기에 페이지 값을 싣고 다닌다. 끼어드는 쪽이 그것을 덮으면 뒤따르는
+    /// 소비자가 남의 값을 페이지로 읽어 화면이 깨진다.
+    #[test]
+    fn the_chain_accumulator_survives_both_paths() {
+        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001).unwrap();
+
+        // 진입에서 `PHP PHA`, 두 갈래 모두 `PLA PLP`로 되돌린다.
+        assert_eq!(&routine.bytes[..2], [0x08, 0x48]);
+        let restores = routine
+            .bytes
+            .windows(2)
+            .filter(|window| *window == [0x68, 0x28])
+            .count();
+        assert_eq!(restores, 2, "both paths must hand the accumulator back");
     }
 
     /// 사슬 자리가 이미 바뀌었으면 이 selector가 무엇 앞에 끼어드는지 알 수 없다.
