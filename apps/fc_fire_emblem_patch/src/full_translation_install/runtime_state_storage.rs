@@ -22,6 +22,14 @@ pub(super) const CANDIDATE_START: u16 = 0x07F0;
 /// 같으므로 같은 증명 아래 둔다. 증명을 둘로 나누면 약한 쪽이 생긴다.
 pub(super) const CANDIDATE_END: u16 = 0x07FA;
 
+/// 생산자와 소비자가 공유하는 런타임 정체성이다. 앞의 네 바이트가 모두 세워진
+/// 뒤에만 `REQUEST_STATE`를 요청 또는 준비 상태로 올린다.
+pub(super) const RECORD_INDEX_LOW: u16 = CANDIDATE_START;
+pub(super) const RECORD_INDEX_HIGH: u16 = RECORD_INDEX_LOW + 1;
+pub(super) const VISIBLE_PAGE_INDEX: u16 = RECORD_INDEX_HIGH + 1;
+pub(super) const CURRENT_PAGE_GROUP: u16 = VISIBLE_PAGE_INDEX + 1;
+pub(super) const REQUEST_STATE: u16 = CURRENT_PAGE_GROUP + 1;
+
 #[derive(Serialize)]
 pub(super) struct DialogueRuntimeStateStoragePlan {
     strategy: &'static str,
@@ -186,6 +194,15 @@ mod tests {
             CANDIDATE_END - CANDIDATE_START + 1,
             SHARED_CONTRACT_BYTES + TRANSPORT_CURSOR_BYTES
         );
+    }
+
+    #[test]
+    fn shared_identity_fields_fill_the_first_five_bytes_in_order() {
+        assert_eq!(RECORD_INDEX_LOW, CANDIDATE_START);
+        assert_eq!(RECORD_INDEX_HIGH, RECORD_INDEX_LOW + 1);
+        assert_eq!(VISIBLE_PAGE_INDEX, RECORD_INDEX_HIGH + 1);
+        assert_eq!(CURRENT_PAGE_GROUP, VISIBLE_PAGE_INDEX + 1);
+        assert_eq!(REQUEST_STATE, CURRENT_PAGE_GROUP + 1);
     }
 
     /// 색인 판정은 보수적이어야 한다. 기준 주소가 예약보다 아래여도 색인이

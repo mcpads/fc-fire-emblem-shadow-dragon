@@ -114,6 +114,10 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     let resolver_origin = transport.address
         + u16::try_from(transport.bytes.len()).context("transport routine length overflow")?;
     let resolver = resolve_request::build_resolve_request(resolver_origin, layout)?;
+    let next_page_resolver_origin = resolver.address
+        + u16::try_from(resolver.bytes.len()).context("initial resolver length overflow")?;
+    let next_page_resolver =
+        resolve_request::build_resolve_next_page_request(next_page_resolver_origin, layout)?;
     let trampoline_routine = trampoline::build_trampoline(bank_restore, transport.address)?;
 
     let gate_origin = trampoline_routine.address
@@ -152,7 +156,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     let observer = chr_page_shadow::build_chr_page_observer(observer_origin)?;
 
     let fixed_routines = vec![trampoline_routine, gate, initializer, selector, observer];
-    let code_routines = vec![transport, resolver];
+    let code_routines = vec![transport, resolver, next_page_resolver];
     ensure_disjoint(
         &fixed_routines.iter().collect::<Vec<_>>(),
         trampoline::TRAMPOLINE_CAVE_END,

@@ -22,6 +22,10 @@ use super::super::runtime_cursor_storage::{
     CURSOR_ENTRY_HIGH, CURSOR_ENTRY_LOW, CURSOR_GROUP_PAGE, CURSOR_OVERLAY_TILES, CURSOR_PHASE,
     CURSOR_REMAINING_TILES,
 };
+use super::super::runtime_state_storage::{
+    CANDIDATE_END, CANDIDATE_START, CURRENT_PAGE_GROUP, RECORD_INDEX_HIGH, RECORD_INDEX_LOW,
+    REQUEST_STATE, VISIBLE_PAGE_INDEX,
+};
 use super::transport::{PHASE_RESTORE, RESTORE_CHUNK_COUNT};
 use super::{RuntimeRoutine, next_address};
 use crate::rp2a03::{Instruction, assemble_at};
@@ -103,79 +107,28 @@ fn map_page(page: Instruction) -> [Instruction; 4] {
     ]
 }
 
-/// 캐리를 세워 성공, 지워서 실패를 알린다.
-pub(in crate::full_translation_install) fn build_resolve_request(
-    origin: u16,
-    layout: MaterialLayout,
-) -> Result<RuntimeRoutine> {
-    let mut instructions = Vec::new();
-    let mut failure_branches = Vec::new();
-
-    // 이 루틴은 주 흐름에서 돈다. 제로 페이지는 무엇이 살아 있는지 알 수 없으므로
-    // 밀고 되돌린다. NMI 안이 아니라서 스택 깊이도 여유가 있다.
+fn save_scratch(instructions: &mut Vec<Instruction>) {
     for address in BORROWED_SCRATCH {
         instructions.extend([Instruction::LdaZeroPage(address), Instruction::Pha]);
     }
+}
 
-    // 1. 식별표에서 레코드 색인을 얻는다.
-    instructions.extend(map_page(Instruction::LdaImmediate(layout.identity_page)));
-    instructions.extend([
-        Instruction::LdxAbsolute(SOURCE_DIRECTORY_SELECTOR),
-        Instruction::LdaAbsoluteX(layout.identity_selector_directory),
-        Instruction::CmpImmediate(MISSING_TABLE),
-    ]);
-    failure_branches.push(branch_to_failure(
-        &mut instructions,
-        origin,
-        Instruction::BneAbsolute,
-    )?);
+fn clear_runtime_state(instructions: &mut Vec<Instruction>) {
+    instructions.push(Instruction::LdaImmediate(0));
+    for address in CANDIDATE_START..=CANDIDATE_END {
+        instructions.push(Instruction::StaAbsolute(address));
+    }
+}
 
-    // 표 서술자는 네 바이트씩이다. 표 번호를 네 배 해서 자리를 찾는다.
-    instructions.extend([
-        Instruction::AslAccumulator,
-        Instruction::AslAccumulator,
-        Instruction::Tax,
-        // 서술자는 `[선택자][엔트리 수][엔트리 오프셋 하위][상위]`다.
-        Instruction::LdaAbsoluteX(layout.identity_table_descriptors + 1),
-        Instruction::CmpAbsolute(SOURCE_ENTRY_INDEX),
-    ]);
-    // 엔트리 색인이 엔트리 수 이상이면 그 표에 없는 항목이다.
-    failure_branches.push(branch_to_failure(
-        &mut instructions,
-        origin,
-        Instruction::BcsAbsolute,
-    )?);
-    failure_branches.push(branch_to_failure(
-        &mut instructions,
-        origin,
-        Instruction::BneAbsolute,
-    )?);
-
-    // 엔트리 오프셋에 색인×2를 더해 레코드 색인 두 바이트를 읽는다.
-    instructions.extend([
-        Instruction::LdaAbsoluteX(layout.identity_table_descriptors + 2),
-        Instruction::StaZeroPage(0x00),
-        Instruction::LdaAbsoluteX(layout.identity_table_descriptors + 3),
-        Instruction::StaZeroPage(0x01),
-        Instruction::LdaAbsolute(SOURCE_ENTRY_INDEX),
-        Instruction::AslAccumulator,
-        Instruction::Tay,
-        Instruction::LdaIndirectY(0x00),
-        Instruction::StaZeroPage(0x02),
-        Instruction::Iny,
-        Instruction::LdaIndirectY(0x00),
-        Instruction::StaZeroPage(0x03),
-        // 레코드 색인 `FFFF`는 «없음»이다.
-        Instruction::AndZeroPage(0x02),
-        Instruction::CmpImmediate(0xFF),
-    ]);
-    failure_branches.push(branch_to_failure(
-        &mut instructions,
-        origin,
-        Instruction::BneAbsolute,
-    )?);
-
-    // 2. 레코드 디렉터리에서 그 레코드의 첫 페이지 선택자를 읽는다.
+/// 영속 레코드 색인 `$07F0/1`과 가시 페이지 색인 `$07F2`를 사용해 페이지 그룹과
+/// 전송 커서를 세운다. 레코드 디렉터리의 다음 항목이 현재 레코드의 끝이므로, 선택할
+/// 페이지 오프셋이 그 끝보다 작은지도 함께 확인한다.
+fn append_page_request_resolution(
+    instructions: &mut Vec<Instruction>,
+    failure_branches: &mut Vec<usize>,
+    origin: u16,
+    layout: MaterialLayout,
+) -> Result<()> {
     instructions.extend(map_page(Instruction::LdaImmediate(layout.scan_page)));
     instructions.extend([
         // 레코드 색인 × 2가 디렉터리 안의 자리다.
@@ -191,13 +144,55 @@ pub(in crate::full_translation_install) fn build_resolve_request(
         Instruction::LdaZeroPage(0x03),
         Instruction::AdcImmediate((layout.record_directory >> 8) as u8),
         Instruction::StaZeroPage(0x01),
+        // 현재 레코드의 페이지 선택자 시작 오프셋이다.
         Instruction::LdyImmediate(0),
         Instruction::LdaIndirectY(0x00),
         Instruction::StaZeroPage(0x04),
         Instruction::Iny,
         Instruction::LdaIndirectY(0x00),
         Instruction::StaZeroPage(0x05),
-        // 첫 가시 페이지의 선택자를 읽는다.
+        // 현재 가시 페이지를 더한다.
+        Instruction::Clc,
+        Instruction::LdaZeroPage(0x04),
+        Instruction::AdcAbsolute(VISIBLE_PAGE_INDEX),
+        Instruction::StaZeroPage(0x04),
+        Instruction::LdaZeroPage(0x05),
+        Instruction::AdcImmediate(0),
+        Instruction::StaZeroPage(0x05),
+        // 다음 디렉터리 항목은 현재 레코드의 끝 오프셋이다.
+        Instruction::LdyImmediate(2),
+        Instruction::LdaIndirectY(0x00),
+        Instruction::StaZeroPage(0x02),
+        Instruction::Iny,
+        Instruction::LdaIndirectY(0x00),
+        Instruction::StaZeroPage(0x03),
+        Instruction::LdaZeroPage(0x05),
+        Instruction::CmpZeroPage(0x03),
+    ]);
+    let lower_high_byte = instructions.len();
+    let lower_high_byte_placeholder = next_address(origin, instructions)?;
+    instructions.push(Instruction::BccAbsolute(lower_high_byte_placeholder));
+    // 상위 바이트가 같지 않으면서 작지도 않으면 선택 오프셋이 끝을 넘었다.
+    failure_branches.push(branch_to_failure(
+        instructions,
+        origin,
+        Instruction::BeqAbsolute,
+    )?);
+    instructions.extend([
+        Instruction::LdaZeroPage(0x04),
+        Instruction::CmpZeroPage(0x02),
+    ]);
+    // 같은 상위 바이트에서 하위 바이트가 끝 이상이어도 범위 밖이다.
+    failure_branches.push(branch_to_failure(
+        instructions,
+        origin,
+        Instruction::BccAbsolute,
+    )?);
+    let selected_page_is_bounded = next_address(origin, instructions)?;
+    instructions[lower_high_byte] = Instruction::BccAbsolute(selected_page_is_bounded);
+
+    instructions.extend([
+        // 페이지 선택자 배열 안의 정확한 한 바이트를 읽는다.
         Instruction::Clc,
         Instruction::LdaZeroPage(0x04),
         Instruction::AdcImmediate(layout.page_selectors as u8),
@@ -207,7 +202,8 @@ pub(in crate::full_translation_install) fn build_resolve_request(
         Instruction::StaZeroPage(0x01),
         Instruction::LdyImmediate(0),
         Instruction::LdaIndirectY(0x00),
-        // 3. 그룹 선택자 × 2가 덩이 오프셋 표의 자리다.
+        Instruction::StaAbsolute(CURRENT_PAGE_GROUP),
+        // 그룹 선택자 × 2가 덩이 오프셋 표의 자리다.
         Instruction::AslAccumulator,
         Instruction::Tax,
         Instruction::LdaAbsoluteX(layout.group_directory),
@@ -237,7 +233,7 @@ pub(in crate::full_translation_install) fn build_resolve_request(
         Instruction::StaZeroPage(0x03),
     ]);
 
-    // 4. 덩이의 첫 바이트가 항목 수다. 항목은 그다음부터다.
+    // 덩이의 첫 바이트가 항목 수다. 항목은 그다음부터다.
     instructions.extend(map_page(Instruction::LdaAbsolute(CURSOR_GROUP_PAGE)));
     instructions.extend([
         Instruction::LdaZeroPage(0x02),
@@ -249,9 +245,8 @@ pub(in crate::full_translation_install) fn build_resolve_request(
         // 덮기 몫은 보관해 둔다. 먼저 도는 것은 복원 단계다.
         Instruction::StaAbsolute(CURSOR_OVERLAY_TILES),
     ]);
-    // 항목 수가 0인 그룹은 올릴 것이 없다. 요청을 세우지 않는다.
     failure_branches.push(branch_to_failure(
-        &mut instructions,
+        instructions,
         origin,
         Instruction::BneAbsolute,
     )?);
@@ -263,13 +258,21 @@ pub(in crate::full_translation_install) fn build_resolve_request(
         Instruction::LdaZeroPage(0x03),
         Instruction::AdcImmediate(0),
         Instruction::StaAbsolute(CURSOR_ENTRY_HIGH),
-        // 합성은 원본 배경 페이지를 되살리는 것부터다. 덮기만 하면 맵 타일이 사라진다.
         Instruction::LdaImmediate(PHASE_RESTORE),
         Instruction::StaAbsolute(CURSOR_PHASE),
         Instruction::LdaImmediate(RESTORE_CHUNK_COUNT),
         Instruction::StaAbsolute(CURSOR_REMAINING_TILES),
-        Instruction::Sec,
     ]);
+    Ok(())
+}
+
+fn finish_resolver(
+    origin: u16,
+    mut instructions: Vec<Instruction>,
+    failure_branches: Vec<usize>,
+    role: &'static str,
+) -> Result<RuntimeRoutine> {
+    instructions.push(Instruction::Sec);
     restore_scratch(&mut instructions);
     instructions.push(Instruction::Rts);
 
@@ -282,12 +285,114 @@ pub(in crate::full_translation_install) fn build_resolve_request(
     instructions.push(Instruction::Rts);
 
     let bytes = assemble_at(origin, &instructions)
-        .context("cannot assemble the dialogue cold request resolver")?;
+        .with_context(|| format!("cannot assemble {role}"))?;
     Ok(RuntimeRoutine {
-        role: "dialogue cold request resolver",
+        role,
         address: origin,
         bytes,
     })
+}
+
+/// 새 레코드의 0번 가시 페이지를 찾는다. 모든 휘발 상태를 먼저 지우므로 실패해도
+/// selector가 이전 수명의 `ready`를 볼 수 없다.
+pub(in crate::full_translation_install) fn build_resolve_request(
+    origin: u16,
+    layout: MaterialLayout,
+) -> Result<RuntimeRoutine> {
+    let mut instructions = Vec::new();
+    let mut failure_branches = Vec::new();
+    clear_runtime_state(&mut instructions);
+    save_scratch(&mut instructions);
+
+    // 1. 식별표에서 레코드 색인을 얻는다.
+    instructions.extend(map_page(Instruction::LdaImmediate(layout.identity_page)));
+    instructions.extend([
+        Instruction::LdxAbsolute(SOURCE_DIRECTORY_SELECTOR),
+        Instruction::LdaAbsoluteX(layout.identity_selector_directory),
+        Instruction::CmpImmediate(MISSING_TABLE),
+    ]);
+    failure_branches.push(branch_to_failure(
+        &mut instructions,
+        origin,
+        Instruction::BneAbsolute,
+    )?);
+    instructions.extend([
+        Instruction::AslAccumulator,
+        Instruction::AslAccumulator,
+        Instruction::Tax,
+        Instruction::LdaAbsoluteX(layout.identity_table_descriptors + 1),
+        Instruction::CmpAbsolute(SOURCE_ENTRY_INDEX),
+    ]);
+    failure_branches.push(branch_to_failure(
+        &mut instructions,
+        origin,
+        Instruction::BcsAbsolute,
+    )?);
+    failure_branches.push(branch_to_failure(
+        &mut instructions,
+        origin,
+        Instruction::BneAbsolute,
+    )?);
+    instructions.extend([
+        Instruction::LdaAbsoluteX(layout.identity_table_descriptors + 2),
+        Instruction::StaZeroPage(0x00),
+        Instruction::LdaAbsoluteX(layout.identity_table_descriptors + 3),
+        Instruction::StaZeroPage(0x01),
+        Instruction::LdaAbsolute(SOURCE_ENTRY_INDEX),
+        Instruction::AslAccumulator,
+        Instruction::Tay,
+        Instruction::LdaIndirectY(0x00),
+        Instruction::StaZeroPage(0x02),
+        Instruction::StaAbsolute(RECORD_INDEX_LOW),
+        Instruction::Iny,
+        Instruction::LdaIndirectY(0x00),
+        Instruction::StaZeroPage(0x03),
+        Instruction::StaAbsolute(RECORD_INDEX_HIGH),
+        // 레코드 색인 `FFFF`는 «없음»이다.
+        Instruction::AndZeroPage(0x02),
+        Instruction::CmpImmediate(0xFF),
+    ]);
+    failure_branches.push(branch_to_failure(
+        &mut instructions,
+        origin,
+        Instruction::BneAbsolute,
+    )?);
+
+    append_page_request_resolution(&mut instructions, &mut failure_branches, origin, layout)?;
+    finish_resolver(
+        origin,
+        instructions,
+        failure_branches,
+        "dialogue initial-page request resolver",
+    )
+}
+
+/// 같은 레코드의 다음 가시 페이지를 찾는다. 디렉터리의 끝을 넘으면 실패하며 요청은
+/// `inactive`로 남는다.
+pub(in crate::full_translation_install) fn build_resolve_next_page_request(
+    origin: u16,
+    layout: MaterialLayout,
+) -> Result<RuntimeRoutine> {
+    let mut instructions = vec![
+        Instruction::LdaImmediate(0),
+        Instruction::StaAbsolute(REQUEST_STATE),
+    ];
+    let mut failure_branches = Vec::new();
+    save_scratch(&mut instructions);
+    instructions.extend([
+        Instruction::IncAbsolute(VISIBLE_PAGE_INDEX),
+        Instruction::LdaAbsolute(RECORD_INDEX_LOW),
+        Instruction::StaZeroPage(0x02),
+        Instruction::LdaAbsolute(RECORD_INDEX_HIGH),
+        Instruction::StaZeroPage(0x03),
+    ]);
+    append_page_request_resolution(&mut instructions, &mut failure_branches, origin, layout)?;
+    finish_resolver(
+        origin,
+        instructions,
+        failure_branches,
+        "dialogue next-page request resolver",
+    )
 }
 
 #[cfg(test)]
@@ -305,6 +410,62 @@ mod tests {
             group_directory: 0x9E08,
             group_block_container_base: 7_758,
             container_first_page: 0x2C,
+        }
+    }
+
+    /// 새 대사 수명은 조회 성공 여부와 관계없이 이전 정체성과 전송 커서를 먼저
+    /// 지운다. 하나라도 남으면 실패 경로가 이전 `ready`를 재사용할 수 있다.
+    #[test]
+    fn an_initial_request_clears_the_whole_volatile_reservation_first() {
+        let routine = build_resolve_request(0xA400, layout()).unwrap();
+        let mut expected = vec![0xA9, 0x00];
+        for address in CANDIDATE_START..=CANDIDATE_END {
+            expected.extend([0x8D, address as u8, (address >> 8) as u8]);
+        }
+
+        assert!(routine.bytes.starts_with(&expected));
+    }
+
+    /// 다음 페이지는 레코드 정체성을 새로 찾지 않고 현재 페이지 색인만 하나 올린다.
+    /// 레코드 색인을 덮으면 디렉터리의 다른 레코드를 읽게 된다.
+    #[test]
+    fn a_next_page_request_advances_only_the_visible_page_identity() {
+        let routine = build_resolve_next_page_request(0xA700, layout()).unwrap();
+        let increment = [
+            0xEE,
+            VISIBLE_PAGE_INDEX as u8,
+            (VISIBLE_PAGE_INDEX >> 8) as u8,
+        ];
+
+        assert!(routine.bytes.windows(3).any(|window| window == increment));
+        for identity in [RECORD_INDEX_LOW, RECORD_INDEX_HIGH] {
+            let store = [0x8D, identity as u8, (identity >> 8) as u8];
+            assert!(
+                !routine.bytes.windows(3).any(|window| window == store),
+                "next-page resolution overwrites record identity {identity:04X}"
+            );
+        }
+    }
+
+    /// 레코드 디렉터리의 다음 16비트 항목이 현재 레코드의 끝이다. 다음 페이지
+    /// resolver도 그 끝을 읽고 비교해야 마지막 페이지 다음의 레코드로 새지 않는다.
+    #[test]
+    fn both_resolvers_bound_the_page_against_the_next_directory_entry() {
+        for routine in [
+            build_resolve_request(0xA400, layout()).unwrap(),
+            build_resolve_next_page_request(0xA700, layout()).unwrap(),
+        ] {
+            assert!(
+                routine.bytes.windows(2).any(|window| window == [0xA0, 0x02]),
+                "{} never reads the next record-directory entry",
+                routine.role
+            );
+            assert!(
+                routine.bytes.windows(2).any(|window| window == [0xC5, 0x03])
+                    && routine.bytes.windows(2).any(|window| window == [0xC5, 0x02]),
+                "{} never compares the selected page offset with the 16-bit end",
+                routine.role
+            );
         }
     }
 
