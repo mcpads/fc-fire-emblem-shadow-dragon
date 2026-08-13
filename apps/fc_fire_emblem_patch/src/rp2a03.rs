@@ -37,6 +37,7 @@ pub enum Instruction {
     IncAbsolute(u16),
     IncZeroPage(u8),
     DecAbsolute(u16),
+    DecZeroPage(u8),
     Inx,
     Dex,
     Iny,
@@ -107,6 +108,7 @@ impl Instruction {
             | Self::OraImmediate(_)
             | Self::OraZeroPage(_)
             | Self::IncZeroPage(_)
+            | Self::DecZeroPage(_)
             | Self::BeqAbsolute(_)
             | Self::BccAbsolute(_)
             | Self::BcsAbsolute(_)
@@ -167,6 +169,7 @@ impl Instruction {
             Self::IncAbsolute(address) => absolute(Mnemonic::Inc, address),
             Self::IncZeroPage(address) => zero_page(Mnemonic::Inc, address),
             Self::DecAbsolute(address) => absolute(Mnemonic::Dec, address),
+            Self::DecZeroPage(address) => zero_page(Mnemonic::Dec, address),
             Self::Inx => implied(Mnemonic::Inx, AddressingMode::Implied),
             Self::Dex => implied(Mnemonic::Dex, AddressingMode::Implied),
             Self::Iny => implied(Mnemonic::Iny, AddressingMode::Implied),
@@ -359,6 +362,15 @@ mod tests {
         .unwrap();
 
         assert_eq!(bytes, [0xB1, 0x6E, 0x7D, 0xD8, 0x93, 0xC8]);
+    }
+
+    /// 전송 루프는 제로 페이지 카운터를 줄인다. 절대 형식으로도 같은 자리에 닿지만
+    /// vblank 예산 안에서 도는 코드라 명령마다 1사이클이 의미가 있다.
+    #[test]
+    fn encodes_the_zero_page_decrement_the_transport_loop_uses() {
+        let bytes = assemble_at(0xB000, &[Instruction::DecZeroPage(0x00)]).unwrap();
+
+        assert_eq!(bytes, [0xC6, 0x00]);
     }
 
     #[test]
