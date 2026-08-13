@@ -18,7 +18,9 @@ use anyhow::{Result, ensure};
 
 use crate::rom::Rom;
 
-/// PRG `$A000` 창을 고르는 MMC3 레지스터 번호다.
+/// PRG `$8000` 창을 고르는 MMC3 레지스터 번호다. 소비자는 여기에 읽을 자료를 건다.
+pub(super) const PRG_8000_REGISTER: u8 = 6;
+/// PRG `$A000` 창을 고르는 MMC3 레지스터 번호다. 소비자는 여기에 실행 코드를 건다.
 pub(super) const PRG_A000_REGISTER: u8 = 7;
 /// 현재 16 KiB PRG 뱅크의 제로 페이지 그림자다.
 pub(super) const PRG_BANK_SHADOW: u8 = 0x29;
@@ -46,6 +48,7 @@ const BANK_SHADOW_RESTORE_ADDRESS: u16 = 0xC1FB;
 /// 단일 출처이므로 여기서 다시 나르지 않는다.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct BankRestoreContract {
+    pub(super) prg_8000_register: u8,
     pub(super) prg_a000_register: u8,
     pub(super) prg_bank_shadow: u8,
     /// `$FA20`으로 닿을 수 있는 8 KiB 페이지의 개수다. 실행 코드 페이지가 이보다
@@ -67,6 +70,7 @@ pub(super) fn bind_bank_restore_contract(candidate: &Rom) -> Result<BankRestoreC
         "the NMI bank shadow restore at $C1FB changed"
     );
     Ok(BankRestoreContract {
+        prg_8000_register: PRG_8000_REGISTER,
         prg_a000_register: PRG_A000_REGISTER,
         prg_bank_shadow: PRG_BANK_SHADOW,
         helper_reachable_page_count: u16::from(BANK_INDEX_MASK) .wrapping_add(1) * 2,
@@ -97,6 +101,7 @@ mod tests {
 
         assert_eq!(contract.prg_bank_shadow, BANK_SHADOW_RESTORE[9]);
         assert_eq!(contract.prg_a000_register, PAIRED_BANK_SETTER[17]);
+        assert_eq!(contract.prg_8000_register, PAIRED_BANK_SETTER[7]);
     }
 
     /// 원본 도우미로는 실행 코드 페이지에 닿지 못한다. 소비자가 레지스터를 직접

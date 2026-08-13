@@ -191,12 +191,25 @@ pub(super) fn worst_case_frame_cycles(origin: u16) -> Result<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::trampoline::worst_case_reserve_cycles;
+    use super::super::super::runtime_bank_contract::BankRestoreContract;
+
+    /// 훅 호출과 트램폴린이 실제로 쓰는 몫이다. 방출한 명령에서 센다.
+    fn trampoline_reserve() -> u32 {
+        worst_case_reserve_cycles(BankRestoreContract {
+            prg_8000_register: 6,
+            prg_a000_register: 7,
+            prg_bank_shadow: 0x29,
+            helper_reachable_page_count: 32,
+        })
+        .unwrap()
+    }
 
     /// 한 프레임이 vblank를 넘지 않아야 한다. 넘으면 렌더링 중에 `$2007`을 쓰게 되고
     /// 그것은 에뮬레이터에서는 대체로 보이지 않는 실기 손상이다.
     #[test]
     fn one_frame_of_transport_fits_the_measured_vblank_remainder() {
-        let allowed = super::super::budgeted_transport_cycles();
+        let allowed = super::super::budgeted_transport_cycles(trampoline_reserve());
 
         let worst_case = worst_case_frame_cycles(0xB000).unwrap();
 
@@ -210,7 +223,7 @@ mod tests {
     /// 이 단언이 깨지면 예산을 늘릴 여지가 생긴 것이므로 다시 유도한다.
     #[test]
     fn the_budget_is_the_largest_batch_that_still_fits() {
-        let allowed = super::super::budgeted_transport_cycles();
+        let allowed = super::super::budgeted_transport_cycles(trampoline_reserve());
         let prologue = frame_prologue(0xB000).unwrap().0;
         let loop_start = next_address(0xB000, &prologue).unwrap();
         let per_tile = worst_case_cycles(&tile_body(loop_start));

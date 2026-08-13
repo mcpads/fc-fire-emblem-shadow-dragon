@@ -18,13 +18,13 @@ const MEASURED_VBLANK_REMAINDER: u32 = 1_704;
 const SAFETY_MARGIN_PERCENT: u32 = 20;
 /// `$C179`의 `JSR`가 쓰는 몫이다.
 const CONSUMER_HOOK_CALL_CYCLES: u32 = 6;
-/// 트램폴린이 게이트·뱅크 전환·복원에 쓰는 몫이다. 트램폴린 쪽 시험이 이 값을
-/// 실제로 지키는지 확인한다.
-const TRAMPOLINE_RESERVE_CYCLES: u32 = 120;
-
 /// 전송 루틴이 한 프레임에 쓸 수 있는 사이클이다.
-const fn budgeted_transport_cycles() -> u32 {
-    MEASURED_VBLANK_REMAINDER * (100 - SAFETY_MARGIN_PERCENT) / 100 - TRAMPOLINE_RESERVE_CYCLES
+///
+/// `trampoline_reserve`는 훅 호출과 트램폴린이 실제로 쓰는 최악 사이클이고 방출한
+/// 명령에서 센 값이다. 임의의 여백을 따로 두지 않는다. 안전 여유는 위의 20% 하나뿐이고,
+/// 여백을 두 겹으로 쌓으면 어느 쪽이 실제 근거인지 알 수 없게 된다.
+fn budgeted_transport_cycles(trampoline_reserve: u32) -> u32 {
+    MEASURED_VBLANK_REMAINDER * (100 - SAFETY_MARGIN_PERCENT) / 100 - trampoline_reserve
 }
 
 /// ROM의 한 자리에 놓이는 실행 코드 조각이다.
