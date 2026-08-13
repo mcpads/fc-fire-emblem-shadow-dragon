@@ -239,25 +239,25 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         (
             "initial_direct_entry",
             0x809B,
-            "reuse_same_ready_page_zero_otherwise_cold_rebuild",
+            "seed_from_live_identity_or_promote_published_lookahead_then_reuse_or_compose",
             "new dialogue lifetime",
         ),
         (
             "E4_transition_entry",
             0x85F8,
-            "reuse_same_ready_page_zero_otherwise_cold_rebuild",
+            "promote_published_lookahead_then_reuse_or_compose",
             "same visible dialogue lifetime",
         ),
         (
             "E6_transition_entry",
             0x865F,
-            "reuse_same_ready_page_zero_otherwise_cold_rebuild",
+            "promote_published_lookahead_then_reuse_or_compose",
             "same visible dialogue lifetime",
         ),
         (
             "E7_caller_resume",
             0x871C,
-            "reuse_same_ready_page_zero_otherwise_cold_rebuild",
+            "seed_or_promote_identity_after_caller_resume_then_reuse_or_compose",
             "reuse is allowed only while no shared CHR-RAM writer invalidated residency",
         ),
     ];
@@ -425,7 +425,7 @@ pub(super) fn plan_dialogue_runtime_control_flow(
                 prg_bank_hex: "0x0A",
                 cpu_address_hex: "0x85C9",
                 source_span_byte_count: 29,
-                request: "cold_rebuild_next_page_if_present_otherwise_leave_page_ready_until_boundary",
+                request: "advance_one_page_only_for_the_original_09_continue_outcome_and_preserve_0F_or_10_lifetime_boundaries",
                 continuity: "same display path",
             },
             RuntimeProducer {
@@ -448,7 +448,7 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         .collect();
 
     Ok(DialogueRuntimeControlFlowPlan {
-        strategy: "derive every request from the original main-dialogue state machine, retain the resident group through E6 and E7 non-dialogue states, invalidate it at the actual battle CHR-RAM writer, reuse a ready page for the same source identity or the same resolved page group, cold-compose only a different or invalidated group, and replace only the FD latch after that exact request is ready",
+        strategy: "treat the original selector and entry as a one-record lookahead pipeline: seed a new lifetime from the live identity, promote the previously published identity on a changed producer call, freeze the new live identity for the following transition, advance exactly one four-line workset only when the original completed-page state chooses 09 continue, retain the transition-stable resident group through E6 and E7 non-dialogue states, invalidate it at the actual battle CHR-RAM writer, reuse an unchanged group without skipping the displaced source resolver, overlay a changed resident group without restoring 4 KiB, and cold-compose only without valid residency",
         states: vec![
             RuntimeState {
                 id: "inactive",
@@ -457,6 +457,10 @@ pub(super) fn plan_dialogue_runtime_control_flow(
             RuntimeState {
                 id: "cold_requested",
                 meaning: "build the source font page and the requested group before selection",
+            },
+            RuntimeState {
+                id: "resident_group_overlay_requested",
+                meaning: "keep the completed source page, hide it from display, and overlay every glyph in the changed current group",
             },
             RuntimeState {
                 id: "ready",
@@ -494,7 +498,7 @@ pub(super) fn plan_dialogue_runtime_control_flow(
             runtime_code_cpu_end_exclusive_hex: "0xC000",
             runtime_code_capacity_byte_count: inputs.runtime_code_byte_count,
             cold_request_action: "copy all 4096 original font bytes then overlay every assigned target glyph in the selected page group",
-            continuous_request_action: "a repeated producer reuses the completed page when ready, page zero, and both raw source-identity bytes match; a changed record resolves its group and republishes ready without CHR writes when that group remains resident; only a different group cold-rebuilds",
+            continuous_request_action: "the original completed-page 09 outcome advances exactly one workset; a repeated producer reuses that selected page when ready and both lookahead bytes match but still executes the displaced source resolver; a changed producer promotes the previously published lookahead to the current record while freezing the new live lookahead; an unchanged group republishes ready without CHR writes, while a changed resident group overlays all target glyphs without restoring the source page",
             dynamic_values_covered_by_page_group: true,
         },
         selector_consumer: SelectorConsumer {
@@ -526,7 +530,7 @@ pub(super) fn plan_dialogue_runtime_control_flow(
                 "display_path_index_high",
                 "visible_page_index",
                 "page_group_selector",
-                "inactive_cold_or_ready_state",
+                "inactive_cold_overlay_or_ready_state",
             ],
             ownership_rule: "select no address until every direct and indirect source access, save lifetime, PPU queue lifetime, and existing battle runtime reservation excludes it",
             selected_cpu_range_hex: Some(inputs.selected_runtime_state_cpu_range.to_owned()),
@@ -604,6 +608,8 @@ mod tests {
 
         assert_eq!(classified.len(), emitted.len());
         assert!(missing.contains(&DialogueRuntimeHookRole::E4TransitionEntryRequest));
+        assert!(missing.contains(&DialogueRuntimeHookRole::E6TransitionEntryRequest));
+        assert!(missing.contains(&DialogueRuntimeHookRole::CompletedPageAdvanceOrLifetimeEnd));
         assert!(missing.contains(&DialogueRuntimeHookRole::E7CallerHandoffResidencySuspension));
         assert!(
             missing.contains(&DialogueRuntimeHookRole::BattleComposerInvalidatesDialogueResidency)

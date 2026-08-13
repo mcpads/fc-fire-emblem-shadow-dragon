@@ -20,7 +20,8 @@ use anyhow::{Context, Result};
 
 use super::super::runtime_cursor_storage::{
     CURSOR_ENTRY_HIGH, CURSOR_ENTRY_LOW, CURSOR_GROUP_PAGE, CURSOR_OVERLAY_TILES, CURSOR_PHASE,
-    CURSOR_REMAINING_TILES,
+    CURSOR_REMAINING_TILES, PUBLISHED_SOURCE_DIRECTORY_SELECTOR, PUBLISHED_SOURCE_ENTRY_INDEX,
+    REQUEST_SOURCE_DIRECTORY_SELECTOR, REQUEST_SOURCE_ENTRY_INDEX,
 };
 use super::super::runtime_state_storage::{
     CANDIDATE_END, CANDIDATE_START, CURRENT_PAGE_GROUP, RECORD_INDEX_HIGH, RECORD_INDEX_LOW,
@@ -36,6 +37,10 @@ pub(super) const SOURCE_DIRECTORY_SELECTOR: u16 = 0x77F4;
 pub(super) const SOURCE_ENTRY_INDEX: u16 = 0x77F1;
 /// 식별표에서 «없는 선택자»를 뜻하는 값이다.
 const MISSING_TABLE: u8 = 0xFF;
+/// 새 대사 수명에서 살아 있는 원본 selector/index를 현재 레코드로 해석한다.
+pub(super) const LOOKUP_LIVE_SOURCE_IDENTITY: u8 = 0;
+/// 연속 대사에서 직전에 게시한 선행 조회값을 현재 레코드로 승격한다.
+pub(super) const LOOKUP_PUBLISHED_SOURCE_IDENTITY: u8 = 1;
 
 const BANK_SELECT_REGISTER: u16 = 0x8000;
 const BANK_VALUE_REGISTER: u16 = 0x8001;
@@ -50,6 +55,9 @@ const DATA_WINDOW_SIZE: u16 = 0x2000;
 pub(in crate::full_translation_install) struct MaterialLayout {
     /// 런타임 식별표가 들어 있는 MMC3 페이지다.
     pub(in crate::full_translation_install) identity_page: u8,
+    /// 런타임 식별 자료가 그 페이지의 `$8000` 창 안에서 시작하는 주소다. 식별표
+    /// 서술자의 엔트리 오프셋은 이 기준점에 상대적이다.
+    pub(in crate::full_translation_install) identity_material_base: u16,
     /// 그 페이지 안에서 selector 디렉터리가 시작하는 CPU 주소다.
     pub(in crate::full_translation_install) identity_selector_directory: u16,
     /// 표 서술자가 시작하는 CPU 주소다.
@@ -293,8 +301,11 @@ fn finish_resolver(
     })
 }
 
-/// 새 레코드의 0번 가시 페이지를 찾는다. 모든 휘발 상태를 먼저 지우므로 실패해도
-/// selector가 이전 수명의 `ready`를 볼 수 없다.
+/// 새 레코드의 0번 가시 페이지를 찾는다. X는 현재 레코드를 식별할 원천을 고른다.
+/// 새 수명은 살아 있는 원본 정체성을 쓰고, 연속 수명은 직전에 게시한 선행 조회값을
+/// 현재 레코드로 승격한다. 어느 쪽이든 살아 있는 값은 다음 호출의 승격 후보로 따로
+/// 고정한다. 모든 휘발 상태를 먼저 지우므로 실패해도 selector가 이전 수명의
+/// `ready`를 볼 수 없다.
 pub(in crate::full_translation_install) fn build_resolve_request(
     origin: u16,
     layout: MaterialLayout,
@@ -302,12 +313,39 @@ pub(in crate::full_translation_install) fn build_resolve_request(
     let mut instructions = Vec::new();
     let mut failure_branches = Vec::new();
     clear_runtime_state(&mut instructions);
+    instructions.extend([
+        Instruction::LdaAbsolute(SOURCE_DIRECTORY_SELECTOR),
+        Instruction::StaAbsolute(REQUEST_SOURCE_DIRECTORY_SELECTOR),
+        Instruction::LdaAbsolute(SOURCE_ENTRY_INDEX),
+        Instruction::StaAbsolute(REQUEST_SOURCE_ENTRY_INDEX),
+    ]);
     save_scratch(&mut instructions);
+
+    instructions.push(Instruction::CpxImmediate(LOOKUP_PUBLISHED_SOURCE_IDENTITY));
+    let use_published_identity = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(origin));
+    instructions.extend([
+        Instruction::LdxAbsolute(SOURCE_DIRECTORY_SELECTOR),
+        Instruction::LdaAbsolute(SOURCE_ENTRY_INDEX),
+        Instruction::StaZeroPage(0x05),
+    ]);
+    let identity_selected = instructions.len();
+    instructions.push(Instruction::JmpAbsolute(origin));
+
+    let published_identity = next_address(origin, &instructions)?;
+    instructions[use_published_identity] = Instruction::BeqAbsolute(published_identity);
+    instructions.extend([
+        Instruction::LdxAbsolute(PUBLISHED_SOURCE_DIRECTORY_SELECTOR),
+        Instruction::LdaAbsolute(PUBLISHED_SOURCE_ENTRY_INDEX),
+        Instruction::StaZeroPage(0x05),
+    ]);
+
+    let resolve_identity = next_address(origin, &instructions)?;
+    instructions[identity_selected] = Instruction::JmpAbsolute(resolve_identity);
 
     // 1. 식별표에서 레코드 색인을 얻는다.
     instructions.extend(map_page(Instruction::LdaImmediate(layout.identity_page)));
     instructions.extend([
-        Instruction::LdxAbsolute(SOURCE_DIRECTORY_SELECTOR),
         Instruction::LdaAbsoluteX(layout.identity_selector_directory),
         Instruction::CmpImmediate(MISSING_TABLE),
     ]);
@@ -321,7 +359,7 @@ pub(in crate::full_translation_install) fn build_resolve_request(
         Instruction::AslAccumulator,
         Instruction::Tax,
         Instruction::LdaAbsoluteX(layout.identity_table_descriptors + 1),
-        Instruction::CmpAbsolute(SOURCE_ENTRY_INDEX),
+        Instruction::CmpZeroPage(0x05),
     ]);
     failure_branches.push(branch_to_failure(
         &mut instructions,
@@ -335,10 +373,13 @@ pub(in crate::full_translation_install) fn build_resolve_request(
     )?);
     instructions.extend([
         Instruction::LdaAbsoluteX(layout.identity_table_descriptors + 2),
+        Instruction::Clc,
+        Instruction::AdcImmediate(layout.identity_material_base as u8),
         Instruction::StaZeroPage(0x00),
         Instruction::LdaAbsoluteX(layout.identity_table_descriptors + 3),
+        Instruction::AdcImmediate((layout.identity_material_base >> 8) as u8),
         Instruction::StaZeroPage(0x01),
-        Instruction::LdaAbsolute(SOURCE_ENTRY_INDEX),
+        Instruction::LdaZeroPage(0x05),
         Instruction::AslAccumulator,
         Instruction::Tay,
         Instruction::LdaIndirectY(0x00),
@@ -367,13 +408,18 @@ pub(in crate::full_translation_install) fn build_resolve_request(
     )
 }
 
-/// 같은 레코드의 다음 가시 페이지를 찾는다. 디렉터리의 끝을 넘으면 실패하며 요청은
-/// `inactive`로 남는다.
+/// 같은 레코드의 다음 가시 페이지를 찾는다. 호출자는 원본 완료 상태가 실제로
+/// `09` 계속을 선택한 경계이므로, 이 루틴은 페이지를 정확히 한 칸만 올린다.
+/// 디렉터리의 끝을 넘으면 실패하며 요청은 `inactive`로 남는다.
 pub(in crate::full_translation_install) fn build_resolve_next_page_request(
     origin: u16,
     layout: MaterialLayout,
 ) -> Result<RuntimeRoutine> {
     let mut instructions = vec![
+        Instruction::LdaAbsolute(PUBLISHED_SOURCE_DIRECTORY_SELECTOR),
+        Instruction::StaAbsolute(REQUEST_SOURCE_DIRECTORY_SELECTOR),
+        Instruction::LdaAbsolute(PUBLISHED_SOURCE_ENTRY_INDEX),
+        Instruction::StaAbsolute(REQUEST_SOURCE_ENTRY_INDEX),
         Instruction::LdaImmediate(0),
         Instruction::StaAbsolute(REQUEST_STATE),
     ];
@@ -402,6 +448,7 @@ mod tests {
     fn layout() -> MaterialLayout {
         MaterialLayout {
             identity_page: 0x2F,
+            identity_material_base: 0x9800,
             identity_selector_directory: 0x9424,
             identity_table_descriptors: 0x9524,
             scan_page: 0x2C,
@@ -424,6 +471,127 @@ mod tests {
         }
 
         assert!(routine.bytes.starts_with(&expected));
+    }
+
+    #[test]
+    fn a_request_freezes_the_live_lookahead_identity_for_the_next_transition() {
+        let routine = build_resolve_request(0xA400, layout()).unwrap();
+        let capture = assemble_at(
+            0x8000,
+            &[
+                Instruction::LdaAbsolute(SOURCE_DIRECTORY_SELECTOR),
+                Instruction::StaAbsolute(REQUEST_SOURCE_DIRECTORY_SELECTOR),
+                Instruction::LdaAbsolute(SOURCE_ENTRY_INDEX),
+                Instruction::StaAbsolute(REQUEST_SOURCE_ENTRY_INDEX),
+            ],
+        )
+        .unwrap();
+
+        assert!(
+            routine
+                .bytes
+                .windows(capture.len())
+                .any(|window| window == capture)
+        );
+    }
+
+    #[test]
+    fn a_continuing_request_resolves_the_previously_published_identity() {
+        let routine = build_resolve_request(0xA400, layout()).unwrap();
+        let selection = assemble_at(
+            0x8000,
+            &[
+                Instruction::CpxImmediate(LOOKUP_PUBLISHED_SOURCE_IDENTITY),
+                Instruction::BeqAbsolute(0x8005),
+            ],
+        )
+        .unwrap();
+        let published = assemble_at(
+            0x8000,
+            &[
+                Instruction::LdxAbsolute(PUBLISHED_SOURCE_DIRECTORY_SELECTOR),
+                Instruction::LdaAbsolute(PUBLISHED_SOURCE_ENTRY_INDEX),
+                Instruction::StaZeroPage(0x05),
+            ],
+        )
+        .unwrap();
+
+        assert!(routine.bytes.windows(selection.len()).any(|window| {
+            window[0] == selection[0] && window[1] == selection[1] && window[2] == 0xF0
+        }));
+        assert!(
+            routine
+                .bytes
+                .windows(published.len())
+                .any(|window| window == published)
+        );
+    }
+
+    /// 원본 엔트리 0도 유효하다. 엔트리를 임시 저장한 직후 Z 플래그에 기대어
+    /// `BNE`로 합류하면 0번만 게시 정체성 경로로 잘못 떨어진다.
+    #[test]
+    fn the_live_identity_path_joins_unconditionally_for_entry_zero() {
+        let routine = build_resolve_request(0xA400, layout()).unwrap();
+        let mut live_identity = assemble_at(
+            0x8000,
+            &[
+                Instruction::LdxAbsolute(SOURCE_DIRECTORY_SELECTOR),
+                Instruction::LdaAbsolute(SOURCE_ENTRY_INDEX),
+                Instruction::StaZeroPage(0x05),
+            ],
+        )
+        .unwrap();
+        live_identity.push(0x4C);
+
+        assert!(
+            routine
+                .bytes
+                .windows(live_identity.len())
+                .any(|window| window == live_identity),
+            "the live identity path must not make entry zero control flow"
+        );
+    }
+
+    #[test]
+    fn identity_entry_offsets_are_relative_to_the_mapped_material_base() {
+        let routine = build_resolve_request(0xA400, layout()).unwrap();
+        let address = assemble_at(
+            0x8000,
+            &[
+                Instruction::LdaAbsoluteX(layout().identity_table_descriptors + 2),
+                Instruction::Clc,
+                Instruction::AdcImmediate(layout().identity_material_base as u8),
+                Instruction::StaZeroPage(0x00),
+                Instruction::LdaAbsoluteX(layout().identity_table_descriptors + 3),
+                Instruction::AdcImmediate((layout().identity_material_base >> 8) as u8),
+                Instruction::StaZeroPage(0x01),
+            ],
+        )
+        .unwrap();
+
+        assert!(
+            routine
+                .bytes
+                .windows(address.len())
+                .any(|window| window == address)
+        );
+    }
+
+    #[test]
+    fn a_next_page_request_keeps_the_published_record_identity() {
+        let routine = build_resolve_next_page_request(0xA700, layout()).unwrap();
+        let capture = assemble_at(
+            0x8000,
+            &[
+                Instruction::LdaAbsolute(PUBLISHED_SOURCE_DIRECTORY_SELECTOR),
+                Instruction::StaAbsolute(REQUEST_SOURCE_DIRECTORY_SELECTOR),
+                Instruction::LdaAbsolute(PUBLISHED_SOURCE_ENTRY_INDEX),
+                Instruction::StaAbsolute(REQUEST_SOURCE_ENTRY_INDEX),
+            ],
+        )
+        .unwrap();
+
+        assert!(routine.bytes.starts_with(&capture));
     }
 
     /// 다음 페이지는 레코드 정체성을 새로 찾지 않고 현재 페이지 색인만 하나 올린다.
@@ -533,9 +701,14 @@ mod tests {
     /// 남의 자료를 표로 읽는다.
     #[test]
     fn the_resolver_maps_every_page_it_reads() {
-        let routine = build_resolve_request(0xA400, layout()).unwrap();
+        let initial = build_resolve_request(0xA400, layout()).unwrap();
+        let next = build_resolve_next_page_request(0xA700, layout()).unwrap();
 
-        for page in [layout().identity_page, layout().scan_page] {
+        for (routine, page) in [
+            (&initial, layout().identity_page),
+            (&initial, layout().scan_page),
+            (&next, layout().scan_page),
+        ] {
             let select = [0xA9, PRG_8000_REGISTER, 0x8D, 0x00, 0x80, 0xA9, page];
             assert!(
                 routine.bytes.windows(7).any(|window| window == select),

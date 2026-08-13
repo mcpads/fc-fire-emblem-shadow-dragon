@@ -343,6 +343,13 @@ fn record_page_worksets<'a>(
     workspace_record: &'a WorkspaceRecord,
 ) -> impl Iterator<Item = Result<MainDialoguePageWorkset>> + 'a {
     let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
+    // 글꼴 타일로는 쓸 수 있어도 대사 바이트로 읽히면 명령이 되는 코드들이다.
+    // 페이지마다 등장한 제어만 막으면 다른 페이지의 한글이 E4/E5/E6 같은 명령으로
+    // 실행될 수 있으므로, 주 대사 코드북에서는 활성 제어 코드 전체를 예약한다.
+    let script_control_codes = DIALOGUE_SCRIPT_CONTROL_CODES
+        .into_iter()
+        .filter(|code| active_codes.contains(code))
+        .collect::<BTreeSet<_>>();
     let prefix_uses_dynamic_output = source
         .get(source_record.file_offset..source_record.file_offset + source_record.prefix_byte_count)
         .is_some_and(|prefix| prefix.contains(&DIALOGUE_PREFIX_CONTROL_CODE));
@@ -364,7 +371,7 @@ fn record_page_worksets<'a>(
             let mut target_glyphs = BTreeSet::new();
             let mut dynamic_string_selector_counts = BTreeMap::new();
             let mut dynamic_string_control_count = 0;
-            let mut preserved_target_active_codes = BTreeSet::new();
+            let mut preserved_target_active_codes = script_control_codes.clone();
             let mut source_reclaimable_active_codes = BTreeSet::new();
             for (source_line, workspace_line) in source_lines.iter().zip(workspace_lines) {
                 if workspace_line.status == TranslationStatus::Untranslated {

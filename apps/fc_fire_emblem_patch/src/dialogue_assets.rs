@@ -12,7 +12,7 @@ use crate::{
     japanese_encoding::{is_japanese_text_code, japanese_text_glyph},
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
-    text_inventory::DIALOGUE_CONTROL_SPECS,
+    text_inventory::{DIALOGUE_CONTROL_SPECS, DIALOGUE_SCRIPT_CONTROL_CODES},
     tracked::TrackedImage,
 };
 

@@ -76,14 +76,9 @@ pub(super) fn bind_quiet_frame_gate(
         BLOCK_INTERPRETER_ADDRESS,
         "block interpreter gate",
     )?;
-    decode_rp2a03_sequence(
-        &ROW_UPLOAD_GATE,
-        ROW_UPLOAD_ADDRESS,
-        "row upload gate",
-    )?;
+    decode_rp2a03_sequence(&ROW_UPLOAD_GATE, ROW_UPLOAD_ADDRESS, "row upload gate")?;
     ensure!(
-        fixed_bytes(candidate, CONTROL_RESTORE_ADDRESS, CONTROL_RESTORE.len())?
-            == CONTROL_RESTORE,
+        fixed_bytes(candidate, CONTROL_RESTORE_ADDRESS, CONTROL_RESTORE.len())? == CONTROL_RESTORE,
         "the PPU control restore at $C733 changed; the increment shadow is unproven"
     );
     decode_rp2a03_sequence(

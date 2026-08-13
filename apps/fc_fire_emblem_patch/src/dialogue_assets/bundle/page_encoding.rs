@@ -231,14 +231,18 @@ pub(super) fn encode_page_bound_record(
         for byte in &logical_bytes[range.clone()] {
             encoded.push(match byte {
                 LogicalDialogueByte::Encoded(value) => *value,
-                LogicalDialogueByte::TargetGlyph(glyph) => assignments
-                    .get(glyph)
-                    .copied()
-                    .with_context(|| {
+                LogicalDialogueByte::TargetGlyph(glyph) => {
+                    let code = assignments.get(glyph).copied().with_context(|| {
                         format!(
                             "{record_id} page {page_index} group {page_group} has no code for {glyph:?}"
                         )
-                    })?,
+                    })?;
+                    ensure!(
+                        !DIALOGUE_SCRIPT_CONTROL_CODES.contains(&code),
+                        "{record_id} page {page_index} assigns dialogue control {code:02X} to target glyph {glyph:?}"
+                    );
+                    code
+                }
             });
         }
     }
@@ -306,5 +310,16 @@ mod tests {
 
         assert_eq!(storage, [0x10, 0xEF, 0x20, 0xEF]);
         assert_eq!(placements, [0, 2]);
+    }
+
+    #[test]
+    fn target_glyph_cannot_encode_as_a_dialogue_control() {
+        let logical = vec![LogicalDialogueByte::TargetGlyph('가')];
+        let assignments = [BTreeMap::from([('가', 0xE0)])];
+
+        let error =
+            encode_page_bound_record("record", &logical, &[0..1], &[0], &assignments).unwrap_err();
+
+        assert!(error.to_string().contains("dialogue control E0"));
     }
 }

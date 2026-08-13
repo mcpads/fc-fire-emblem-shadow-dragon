@@ -147,9 +147,18 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         cold_request_mapper_register,
     )?;
     let cold_presentation_selector_address = cold_presentation_selector.address;
-    let ownership_transfer_origin = cold_presentation_selector.address
+    let changed_group_request_initializer_origin = cold_presentation_selector.address
         + u16::try_from(cold_presentation_selector.bytes.len())
             .context("cold-request presentation selector length overflow")?;
+    let changed_group_request_initializer =
+        resolved_page_publication::build_changed_group_request_initializer(
+            changed_group_request_initializer_origin,
+            cold_presentation_selector_address,
+        )?;
+    let changed_group_request_initializer_address = changed_group_request_initializer.address;
+    let ownership_transfer_origin = changed_group_request_initializer.address
+        + u16::try_from(changed_group_request_initializer.bytes.len())
+            .context("changed-group request initializer length overflow")?;
     let ownership_transfer =
         chr_ram_ownership::build_battle_composition_ownership_transfer(ownership_transfer_origin)?;
     let ownership_transfer_address = ownership_transfer.address;
@@ -167,24 +176,37 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         + u16::try_from(resolver.bytes.len()).context("initial resolver length overflow")?;
     let next_page_resolver =
         resolve_request::build_resolve_next_page_request(next_page_resolver_origin, layout)?;
-    let next_page_resolver_address = next_page_resolver.address;
     let trampoline_routine = trampoline::build_trampoline(bank_restore, transport.address)?;
 
     let gate = dispatcher_gate::build_dispatcher_gate(dispatcher_gate::RECLAIMED_GATE_CAVE_ORIGIN)?;
     let gate_address = gate.address;
-    let publication_origin = gate.address
-        + u16::try_from(gate.bytes.len()).context("dialogue dispatcher gate length overflow")?;
+    // 게시기는 selector·요청 조각과 같은 역할군이다. remap 비트와 물리 그룹을
+    // 분리하면서 커졌으므로 작은 dispatcher 회수 구간에 억지로 두지 않는다.
+    let publication_origin = ownership_transfer.address
+        + u16::try_from(ownership_transfer.bytes.len())
+            .context("ownership-transfer routine length overflow")?;
     let resolved_page_publication = resolved_page_publication::build_resolved_page_publication(
         publication_origin,
-        cold_presentation_selector_address,
+        changed_group_request_initializer_address,
     )?;
     let resolved_page_publication_address = resolved_page_publication.address;
-    ensure_disjoint(
-        &[&gate, &resolved_page_publication],
-        dispatcher_gate::RECLAIMED_GATE_CAVE_END,
+    let initial_request_publisher_origin = resolved_page_publication.address
+        + u16::try_from(resolved_page_publication.bytes.len())
+            .context("resolved-page publication length overflow")?;
+    let initial_request_publisher = dispatcher_gate::build_initial_request_publisher(
+        initial_request_publisher_origin,
+        resolver.address,
+        code_page,
+        resolved_page_publication_address,
     )?;
+    let initial_request_publisher_address = initial_request_publisher.address;
+    let lifecycle = lifecycle::build_lifecycle_suite(
+        next_page_resolver.address,
+        code_page,
+        resolved_page_publication_address,
+    )?;
+    ensure_disjoint(&[&gate], dispatcher_gate::RECLAIMED_GATE_CAVE_END)?;
     let mut fixed_support_bytes = gate.bytes;
-    fixed_support_bytes.extend_from_slice(&resolved_page_publication.bytes);
     let fixed_support_capacity = usize::from(
         dispatcher_gate::RECLAIMED_GATE_CAVE_END - dispatcher_gate::RECLAIMED_GATE_CAVE_ORIGIN,
     );
@@ -234,7 +256,14 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         trampoline::TRAMPOLINE_CAVE_END,
     )?;
     ensure_disjoint(
-        &[&selector, &cold_presentation_selector, &ownership_transfer],
+        &[
+            &selector,
+            &cold_presentation_selector,
+            &changed_group_request_initializer,
+            &ownership_transfer,
+            &resolved_page_publication,
+            &initial_request_publisher,
+        ],
         chr_selector::SELECTOR_CAVE_END,
     )?;
     let fixed_routines = vec![
@@ -242,14 +271,12 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         publisher,
         selector,
         cold_presentation_selector,
+        changed_group_request_initializer,
         ownership_transfer,
+        resolved_page_publication,
+        initial_request_publisher,
     ];
     let code_routines = vec![transport, resolver, next_page_resolver];
-    let lifecycle = lifecycle::build_lifecycle_suite(
-        next_page_resolver_address,
-        code_page,
-        resolved_page_publication_address,
-    )?;
     let completed_page_entry = lifecycle.completed_page_entry;
     let handoff_residency_suspension_entry = lifecycle.handoff_residency_suspension_entry;
     let reclaimed_fixed_routines = vec![
@@ -294,7 +321,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
                 bank: 0x0A,
                 address: dispatcher_gate::COLD_ENTRY,
             },
-            bytes: dispatcher_gate::request_hook_bytes(publisher_address).to_vec(),
+            bytes: dispatcher_gate::request_hook_bytes(initial_request_publisher_address).to_vec(),
         },
     ];
     for (role, write_role, address) in [

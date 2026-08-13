@@ -1,4 +1,4 @@
-//! 소비자만 쓰는 전송 커서와, 완성 뒤 생산자가 읽는 게시 정체성의 자리다.
+//! 소비자만 쓰는 전송 커서와, 요청·완성 정체성의 자리다.
 //!
 //! 휘발 상태 `$07F0..=$07F4`는 생산자와 소비자가 공유하는 계약이라 커서를 넣지
 //! 않는다. 커서는 NMI 안에서만 살아 있고 NMI 밖에서 읽는 곳이 없다.
@@ -46,21 +46,28 @@ pub(super) const CURSOR_PHASE: u16 = CURSOR_ENTRY_LOW + 4;
 /// 복원 단계 동안 보관해 두는 덮기 타일 수다. 두 단계가 같은 «남은 몫» 바이트를
 /// 쓰기 때문에 따로 담아 둔다.
 pub(super) const CURSOR_OVERLAY_TILES: u16 = CURSOR_ENTRY_LOW + 5;
+/// 생산자 호출 시점에 살아 있던 원문 디렉터리 선택자다. 연속 대사에서는 현재
+/// 레코드가 아니라 다음에 승격할 선행 조회값이다. 전송 중 원본이 또 바꿀 수 있으므로
+/// 완료 시점에 살아 있는 값을 다시 읽지 않는다.
+pub(super) const REQUEST_SOURCE_DIRECTORY_SELECTOR: u16 = CURSOR_OVERLAY_TILES + 1;
+/// 생산자 호출 시점에 살아 있던 원문 엔트리 색인이다.
+pub(super) const REQUEST_SOURCE_ENTRY_INDEX: u16 = REQUEST_SOURCE_DIRECTORY_SELECTOR + 1;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// 커서는 공유 계약 뒤에 붙고 예약 범위 안에서 끝나야 한다. 밖으로 나가면
-    /// 그 바이트는 아무 증명도 받지 못한 채 쓰이게 된다.
+    /// 커서와 요청 정체성은 공유 계약 뒤에 붙고 예약 범위 안에서 끝나야 한다. 밖으로
+    /// 나가면 그 바이트는 아무 증명도 받지 못한 채 쓰이게 된다.
     #[test]
     fn the_cursor_lives_inside_the_proven_reservation() {
         assert_eq!(
             CURSOR_ENTRY_LOW,
             CANDIDATE_START + SHARED_CONTRACT_BYTE_COUNT
         );
+        assert!(CURSOR_OVERLAY_TILES < super::super::runtime_state_storage::CANDIDATE_END);
         assert_eq!(
-            CURSOR_OVERLAY_TILES,
+            REQUEST_SOURCE_ENTRY_INDEX,
             super::super::runtime_state_storage::CANDIDATE_END
         );
     }
@@ -76,9 +83,11 @@ mod tests {
             CURSOR_REMAINING_TILES,
             CURSOR_PHASE,
             CURSOR_OVERLAY_TILES,
+            REQUEST_SOURCE_DIRECTORY_SELECTOR,
+            REQUEST_SOURCE_ENTRY_INDEX,
         ];
 
-        assert_eq!(slots.len(), 6);
+        assert_eq!(slots.len(), 8);
         for pair in slots.windows(2) {
             assert_eq!(pair[1], pair[0] + 1, "cursor slots must be contiguous");
         }
@@ -90,5 +99,13 @@ mod tests {
     fn published_source_identity_reuses_cursor_slots_only_after_readiness() {
         assert_eq!(PUBLISHED_SOURCE_DIRECTORY_SELECTOR, CURSOR_ENTRY_LOW);
         assert_eq!(PUBLISHED_SOURCE_ENTRY_INDEX, CURSOR_ENTRY_HIGH);
+    }
+
+    #[test]
+    fn request_source_identity_ends_the_proven_reservation() {
+        assert_eq!(
+            REQUEST_SOURCE_ENTRY_INDEX,
+            super::super::runtime_state_storage::CANDIDATE_END
+        );
     }
 }

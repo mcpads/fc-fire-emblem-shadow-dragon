@@ -44,12 +44,9 @@ use anyhow::{Context, Result, ensure};
 use super::super::runtime_cursor_storage::{
     CURSOR_ENTRY_HIGH, CURSOR_ENTRY_LOW, CURSOR_GROUP_PAGE, CURSOR_OVERLAY_TILES, CURSOR_PHASE,
     CURSOR_REMAINING_TILES, PUBLISHED_SOURCE_DIRECTORY_SELECTOR, PUBLISHED_SOURCE_ENTRY_INDEX,
+    REQUEST_SOURCE_DIRECTORY_SELECTOR, REQUEST_SOURCE_ENTRY_INDEX,
 };
-use super::{
-    RuntimeRoutine, next_address,
-    resolve_request::{SOURCE_DIRECTORY_SELECTOR, SOURCE_ENTRY_INDEX},
-    worst_case_cycles, worst_case_cycles_with_calls,
-};
+use super::{RuntimeRoutine, next_address, worst_case_cycles, worst_case_cycles_with_calls};
 use crate::rp2a03::{Instruction, assemble_at};
 
 /// 한 프레임에 올리는 타일 수다. 사이클 예산에서 유도한 값이므로 늘리려면
@@ -345,18 +342,10 @@ fn frame_epilogue(
         instructions.extend([Instruction::Pla, Instruction::StaZeroPage(*address)]);
     }
 
-    // 원천 FD가 합성 기반인 페이지 0일 때만 냉간 표시 페이지를 고른다. 전송 시작에서
-    // 잠시 RAM으로 바꾼 창을 원본으로 복원한 뒤 같은 vblank 안에서 다시 고르므로,
-    // 렌더링은 중간 상태를 보지 않는다. 원천이 달라졌으면 아래 실패 경로가 원본 FD를
-    // 그대로 둔 채 요청을 내린다.
-    instructions.extend([
-        Instruction::LdaZeroPage(super::chr_source_state::RIGHT_FD_SOURCE_SHADOW),
-        Instruction::OraZeroPage(super::chr_source_state::CHR_SOURCE_HIGH_BITS),
-        Instruction::AndImmediate(0x1F),
-        Instruction::CmpImmediate(super::chr_source_state::DIALOGUE_FD_SOURCE_PAGE),
-    ]);
-    let wrong_fd_source_placeholder = instructions.len();
-    instructions.push(Instruction::BneAbsolute(origin));
+    // 전송 시작에서 잠시 RAM으로 바꾼 창을 각 원천 그림자대로 복원한 뒤 같은 vblank
+    // 안에서 냉간 표시 페이지를 다시 고르므로 렌더링은 중간 상태를 보지 않는다.
+    // 그림자는 이 프레임의 복귀값이지 전송 자격 조건이 아니다. 중앙 selector가 같은
+    // 프레임 뒤쪽에서 다음 표시 원천을 갱신할 수 있기 때문이다.
     instructions.extend([
         Instruction::LdaImmediate(super::chr_source_state::RIGHT_FD_CHR_REGISTER),
         Instruction::StaAbsolute(BANK_SELECT_REGISTER),
@@ -389,9 +378,9 @@ fn frame_epilogue(
     instructions.extend([
         // 전송 커서는 이제 필요 없다. `ready`를 게시하기 전에 같은 두 칸을 이
         // 완성 페이지의 원문 정체성으로 바꿔 반복 생산자가 재사용할 수 있게 한다.
-        Instruction::LdaAbsolute(SOURCE_DIRECTORY_SELECTOR),
+        Instruction::LdaAbsolute(REQUEST_SOURCE_DIRECTORY_SELECTOR),
         Instruction::StaAbsolute(PUBLISHED_SOURCE_DIRECTORY_SELECTOR),
-        Instruction::LdaAbsolute(SOURCE_ENTRY_INDEX),
+        Instruction::LdaAbsolute(REQUEST_SOURCE_ENTRY_INDEX),
         Instruction::StaAbsolute(PUBLISHED_SOURCE_ENTRY_INDEX),
         Instruction::LdaImmediate(super::chr_source_state::RIGHT_FD_CHR_REGISTER),
         Instruction::StaAbsolute(BANK_SELECT_REGISTER),
@@ -403,14 +392,6 @@ fn frame_epilogue(
     needs_done.push(instructions.len());
     instructions.push(Instruction::JmpAbsolute(origin));
 
-    let wrong_fd_source = next_address(origin, &instructions)?;
-    instructions[wrong_fd_source_placeholder] = Instruction::BneAbsolute(wrong_fd_source);
-    instructions.extend([
-        Instruction::LdaImmediate(0),
-        Instruction::StaAbsolute(REQUEST_STATE),
-    ]);
-    needs_done.push(instructions.len());
-    instructions.push(Instruction::JmpAbsolute(origin));
     Ok((instructions, needs_done))
 }
 
@@ -730,26 +711,31 @@ mod tests {
             .expect("the epilogue publishes readiness");
 
         assert!(fe_restore_at < select_fd_at && select_fd_at + select_fd.len() <= ready_at);
-        assert!(
-            !epilogue
-                .iter()
-                .any(|instruction| { *instruction == Instruction::LdaImmediate(4) })
-        );
+        assert!(!epilogue.windows(4).any(|window| {
+            window
+                == [
+                    Instruction::LdaImmediate(4),
+                    Instruction::StaAbsolute(BANK_SELECT_REGISTER),
+                    Instruction::LdaImmediate(CHR_RAM_BANK_VALUE),
+                    Instruction::StaAbsolute(BANK_VALUE_REGISTER),
+                ]
+        }));
     }
 
-    /// 반복 생산자는 `ready`에서만 커서 두 칸을 게시 원문 정체성으로 읽는다. 두 값을
-    /// 모두 저장한 뒤에 준비 완료를 알려야 중간 상태를 같은 요청으로 오인하지 않는다.
+    /// 반복 생산자는 `ready`에서만 커서 두 칸을 게시 원문 정체성으로 읽는다. 전송
+    /// 완료 시점의 원본 상태는 이미 다음 레코드를 가리킬 수 있으므로 요청 때 고정한
+    /// 두 값을 모두 저장한 뒤에만 준비 완료를 알린다.
     #[test]
-    fn published_source_identity_is_complete_before_readiness() {
+    fn delayed_completion_publishes_the_request_time_source_identity() {
         let epilogue = frame_epilogue(0xA000, COLD_REQUEST_MAPPER_REGISTER)
             .unwrap()
             .0;
         let directory = [
-            Instruction::LdaAbsolute(SOURCE_DIRECTORY_SELECTOR),
+            Instruction::LdaAbsolute(REQUEST_SOURCE_DIRECTORY_SELECTOR),
             Instruction::StaAbsolute(PUBLISHED_SOURCE_DIRECTORY_SELECTOR),
         ];
         let entry = [
-            Instruction::LdaAbsolute(SOURCE_ENTRY_INDEX),
+            Instruction::LdaAbsolute(REQUEST_SOURCE_ENTRY_INDEX),
             Instruction::StaAbsolute(PUBLISHED_SOURCE_ENTRY_INDEX),
         ];
         let directory_at = epilogue
@@ -767,37 +753,6 @@ mod tests {
 
         assert!(directory_at + directory.len() <= entry_at);
         assert!(entry_at + entry.len() <= ready_at);
-    }
-
-    /// RAM의 기반과 다른 FD 원천에서는 준비 완료를 게시하지 않는다. 원본 FD를 복원한
-    /// 상태로 요청을 0으로 내려 원본 표시 경로가 계속되게 한다.
-    #[test]
-    fn a_non_dialogue_fd_source_invalidates_instead_of_publishing_ram() {
-        let epilogue = frame_epilogue(0xA000, COLD_REQUEST_MAPPER_REGISTER)
-            .unwrap()
-            .0;
-        let guard_prefix = [
-            Instruction::LdaZeroPage(super::super::chr_source_state::RIGHT_FD_SOURCE_SHADOW),
-            Instruction::OraZeroPage(super::super::chr_source_state::CHR_SOURCE_HIGH_BITS),
-            Instruction::AndImmediate(0x1F),
-            Instruction::CmpImmediate(super::super::chr_source_state::DIALOGUE_FD_SOURCE_PAGE),
-        ];
-        let guard_at = epilogue
-            .windows(guard_prefix.len())
-            .position(|window| window == guard_prefix)
-            .expect("the epilogue guards the FD source page");
-
-        assert!(matches!(
-            epilogue[guard_at + guard_prefix.len()],
-            Instruction::BneAbsolute(_)
-        ));
-        assert!(epilogue.windows(2).any(|window| {
-            window
-                == [
-                    Instruction::LdaImmediate(0),
-                    Instruction::StaAbsolute(REQUEST_STATE),
-                ]
-        }));
     }
 
     /// 항목은 그룹 덩이 페이지에서, 타일 자료는 atlas 페이지에서 읽어야 한다.

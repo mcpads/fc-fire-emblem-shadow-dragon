@@ -6,7 +6,8 @@ use super::{ResolvedProducerRoute, selected_record_routes};
 use crate::{
     chapter_transition::validate_ending_character_epilogue_source,
     dialogue_inventory::{inspect_main_dialogue_graph, switchable_cpu_to_file_offset},
-    full_translation_install::dynamic_inputs::DynamicStringDomain, rom::Rom,
+    full_translation_install::dynamic_inputs::DynamicStringDomain,
+    rom::Rom,
 };
 
 const FAMILY: &str = "ending_character_epilogue";
@@ -16,9 +17,7 @@ const UNIT_CURSOR_START: [u8; 5] = [0xA9, 0x35, 0x8D, 0x3B, 0x77];
 /// `04:$A165`. 한 명을 처리하기 전에 색인을 하나 내리고, 그 아군의 이름을 슬롯 0에
 /// 쓴 다음, 색인이 음수가 되면 순회를 끝낸다. 그래서 이름을 쓰는 일은 화면을
 /// 고르는 일보다 반드시 앞선다.
-const UNIT_CURSOR_STEP: [u8; 9] = [
-    0xCE, 0x3B, 0x77, 0x20, 0x66, 0xA3, 0xAD, 0x3B, 0x77,
-];
+const UNIT_CURSOR_STEP: [u8; 9] = [0xCE, 0x3B, 0x77, 0x20, 0x66, 0xA3, 0xAD, 0x3B, 0x77];
 /// `04:$A366`. 색인이 음수가 아니면 아군명 포인터 표 `$DE2B`에서 이름을 꺼내
 /// 동적 슬롯 0 `$78F2`에 `EF`까지 옮긴다.
 const UNIT_NAME_WRITER: [u8; 29] = [
@@ -54,7 +53,11 @@ fn resolve_unit_names(
         ("unit cursor start", 0xA12Cu16, &UNIT_CURSOR_START[..]),
         ("unit cursor step", 0xA165, &UNIT_CURSOR_STEP[..]),
         ("unit name writer", 0xA366, &UNIT_NAME_WRITER[..]),
-        ("record from unit cursor", 0xA195, &RECORD_FROM_UNIT_CURSOR[..]),
+        (
+            "record from unit cursor",
+            0xA195,
+            &RECORD_FROM_UNIT_CURSOR[..],
+        ),
     ] {
         ensure!(
             source_bytes(rom, cpu_address, expected.len())? == expected,

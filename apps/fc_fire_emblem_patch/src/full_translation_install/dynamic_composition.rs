@@ -7,6 +7,7 @@ use super::runtime_material::{
 };
 use crate::{
     dialogue_assets::MainDialogueDisplayPlan,
+    dialogue_inventory::MainDialogueGraphReport,
     font::{load_dalmoori, rasterize_glyph},
     font_slots::{FONT_PAGE_SIZE, FONT_TILE_SIZE},
     mapper165::battle_codebook_plan::GlyphWorksetPagePlan,
@@ -39,6 +40,10 @@ pub(super) struct DialogueRuntimeCompositionPlan {
     pub(super) sequential_page_transition_count: usize,
     pub(super) distinct_visible_page_recipe_transition_count: usize,
     pub(super) unchanged_visible_page_recipe_transition_count: usize,
+    pub(super) resident_group_transition_count: usize,
+    pub(super) resident_group_change_count: usize,
+    pub(super) resident_group_reuse_count: usize,
+    pub(super) maximum_resident_group_overlay_tile_count: usize,
     pub(super) maximum_delta_tile_count: usize,
     pub(super) maximum_delta_ppu_write_count: usize,
     pub(super) total_delta_ppu_write_count: usize,
@@ -56,6 +61,7 @@ pub(super) struct DialogueRuntimeCompositionPlan {
     pub(super) group_block_byte_count: usize,
     /// 스캔 재료 안에서 그룹 덩이 오프셋 표가 시작하는 자리다.
     pub(super) group_block_directory_offset: usize,
+    pub(super) group_block_container_offset: usize,
     /// 그룹마다 그 덩이가 재료 용기 안에서 시작하는 자리다. 소비자가 걸 MMC3 페이지와
     /// `$8000` 창 안의 주소가 여기서 나온다.
     pub(super) group_block_container_offsets: Vec<usize>,
@@ -75,6 +81,7 @@ struct VisiblePageRecipe {
 
 pub(super) fn plan_dialogue_runtime_composition(
     dialogue: &MainDialogueDisplayPlan,
+    transition_graph: &MainDialogueGraphReport,
     codebook: &GlyphWorksetPagePlan,
     dynamic_remap: &DynamicStringRemapPlan,
     source_font_page: &[u8],
@@ -244,6 +251,32 @@ pub(super) fn plan_dialogue_runtime_composition(
         .collect::<Result<Vec<_>>>()?
         .into_iter()
         .sum::<usize>();
+    let resident_transitions = resident_group_transitions(
+        transition_graph,
+        &record_worksets,
+        &dynamic_remap.workset_page_selectors,
+    )?;
+    let resident_group_transition_count = resident_transitions.len();
+    let resident_group_change_count = resident_transitions
+        .iter()
+        .filter(|transition| transition.from_selector & 0x7F != transition.to_selector & 0x7F)
+        .count();
+    let resident_group_reuse_count = resident_group_transition_count - resident_group_change_count;
+    let maximum_resident_group_overlay_tile_count = resident_transitions
+        .iter()
+        .filter(|transition| transition.from_selector & 0x7F != transition.to_selector & 0x7F)
+        .map(|transition| {
+            let group = usize::from(transition.to_selector & 0x7F);
+            codebook
+                .page_assignments
+                .get(group)
+                .map(BTreeMap::len)
+                .with_context(|| format!("resident transition selects missing page group {group}"))
+        })
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .max()
+        .unwrap_or(0);
 
     let rebuild_every_visible_page_ppu_write_count = dialogue.page_worksets.len() * FONT_PAGE_SIZE
         + visible_page_overlay_reference_count * FONT_TILE_SIZE;
@@ -279,9 +312,7 @@ pub(super) fn plan_dialogue_runtime_composition(
         .context("glyph atlas CPU base does not fit the 8000 window")?;
     let scan_section_container_offset = atlas_container_offset + glyph_atlas.len();
     let group_block_directory_byte_count = codebook.page_assignments.len() * 2;
-    let group_block_directory_offset =
-        record_page_group_selector_byte_count + record_selector_directory_byte_count;
-    let scan_material = encode_scan_material(
+    let encoded_scan = encode_scan_material(
         dialogue,
         codebook,
         dynamic_remap,
@@ -290,10 +321,11 @@ pub(super) fn plan_dialogue_runtime_composition(
         atlas_cpu_base,
         scan_section_container_offset,
     )?;
+    let scan_material = encoded_scan.bytes;
+    let group_block_directory_offset = encoded_scan.group_block_directory_offset;
+    let group_block_container_offset = encoded_scan.group_block_container_offset;
     let scan_material_byte_count = scan_material.len();
-    let group_block_base = scan_section_container_offset
-        + group_block_directory_offset
-        + group_block_directory_byte_count;
+    let group_block_base = scan_section_container_offset + group_block_container_offset;
     let group_block_container_offsets = (0..codebook.page_assignments.len())
         .map(|group| {
             let entry = scan_material
@@ -303,8 +335,7 @@ pub(super) fn plan_dialogue_runtime_composition(
             Ok(group_block_base + usize::from(u16::from_le_bytes([entry[0], entry[1]])))
         })
         .collect::<Result<Vec<_>>>()?;
-    let group_block_byte_count =
-        scan_material_byte_count - group_block_directory_offset - group_block_directory_byte_count;
+    let group_block_byte_count = scan_material_byte_count - group_block_container_offset;
     let dynamic_string_control_count = dialogue
         .page_worksets
         .iter()
@@ -340,6 +371,10 @@ pub(super) fn plan_dialogue_runtime_composition(
         sequential_page_transition_count,
         distinct_visible_page_recipe_transition_count: distinct_recipe_transitions.len(),
         unchanged_visible_page_recipe_transition_count,
+        resident_group_transition_count,
+        resident_group_change_count,
+        resident_group_reuse_count,
+        maximum_resident_group_overlay_tile_count,
         maximum_delta_tile_count,
         maximum_delta_ppu_write_count,
         total_delta_ppu_write_count,
@@ -354,6 +389,7 @@ pub(super) fn plan_dialogue_runtime_composition(
         group_block_directory_byte_count,
         group_block_byte_count,
         group_block_directory_offset,
+        group_block_container_offset,
         group_block_container_offsets,
         record_page_group_selector_byte_count,
         record_selector_directory_byte_count,
@@ -362,6 +398,74 @@ pub(super) fn plan_dialogue_runtime_composition(
         dynamic_string_page_count,
         dynamic_string_selector_count,
     })
+}
+
+struct ResidentGroupTransition {
+    from_selector: u8,
+    to_selector: u8,
+}
+
+/// 상주권을 유지하는 실제 생산자 전이를 빠짐없이 같은 모집단으로 만든다. 한 레코드
+/// 안의 다음 페이지와 E4/E6 그래프 간선은 모두 직전 완성 그룹을 입력으로 넘긴다.
+/// 독립 수명 진입은 상주권이 없으므로 여기 넣지 않는다.
+fn resident_group_transitions(
+    graph: &MainDialogueGraphReport,
+    record_worksets: &BTreeMap<&str, Vec<usize>>,
+    workset_page_selectors: &[u8],
+) -> Result<Vec<ResidentGroupTransition>> {
+    let selector = |workset_index: usize| {
+        workset_page_selectors
+            .get(workset_index)
+            .copied()
+            .context("resident transition workset selector is missing")
+    };
+    let mut transitions = Vec::new();
+    for worksets in record_worksets.values() {
+        for pair in worksets.windows(2) {
+            transitions.push(ResidentGroupTransition {
+                from_selector: selector(pair[0])?,
+                to_selector: selector(pair[1])?,
+            });
+        }
+    }
+    for edge in &graph.transition_edges {
+        let source_id = format!(
+            "{}:{:03}",
+            edge.source_table_id, edge.source_canonical_entry_index
+        );
+        let target_id = format!(
+            "{}:{:03}",
+            edge.target_table_id, edge.target_canonical_entry_index
+        );
+        let source_worksets = record_worksets
+            .get(source_id.as_str())
+            .with_context(|| format!("resident transition source {source_id} is missing"))?;
+        let target_worksets = record_worksets
+            .get(target_id.as_str())
+            .with_context(|| format!("resident transition target {target_id} is missing"))?;
+        transitions.push(ResidentGroupTransition {
+            from_selector: selector(
+                *source_worksets
+                    .last()
+                    .context("resident transition source has no visible page")?,
+            )?,
+            to_selector: selector(
+                *target_worksets
+                    .first()
+                    .context("resident transition target has no visible page")?,
+            )?,
+        });
+    }
+    ensure!(
+        transitions.len()
+            == record_worksets
+                .values()
+                .map(|worksets| worksets.len().saturating_sub(1))
+                .sum::<usize>()
+                + graph.transition_edges.len(),
+        "resident transition inventory is incomplete"
+    );
+    Ok(transitions)
 }
 
 struct BlockAtlasMeasurement {
@@ -478,6 +582,12 @@ fn record_workset_indices(
         .collect()
 }
 
+struct EncodedScanMaterial {
+    bytes: Vec<u8>,
+    group_block_directory_offset: usize,
+    group_block_container_offset: usize,
+}
+
 fn encode_scan_material(
     dialogue: &MainDialogueDisplayPlan,
     codebook: &GlyphWorksetPagePlan,
@@ -486,7 +596,7 @@ fn encode_scan_material(
     record_worksets: &BTreeMap<&str, Vec<usize>>,
     atlas_cpu_base: u16,
     section_container_offset: usize,
-) -> Result<Vec<u8>> {
+) -> Result<EncodedScanMaterial> {
     let mut encoded = Vec::new();
     let mut selectors = Vec::with_capacity(dialogue.page_worksets.len());
     let mut directory = Vec::with_capacity((dialogue.record_ids.len() + 1) * 2);
@@ -521,11 +631,13 @@ fn encode_scan_material(
     encoded.extend_from_slice(&selectors);
     encoded.extend_from_slice(&directory);
     let group_directory_length = codebook.page_assignments.len() * 2;
+    let group_block_directory_offset = encoded.len();
+    let group_block_container_offset = encoded.len() + group_directory_length;
     let (group_directory, group_blocks) = encode_group_blocks(
         &codebook.page_assignments,
         glyph_atlas_indices,
         atlas_cpu_base,
-        section_container_offset + encoded.len() + group_directory_length,
+        section_container_offset + group_block_container_offset,
     )?;
     ensure!(
         group_directory.len() == group_directory_length,
@@ -533,7 +645,11 @@ fn encode_scan_material(
     );
     encoded.extend_from_slice(&group_directory);
     encoded.extend_from_slice(&group_blocks);
-    Ok(encoded)
+    Ok(EncodedScanMaterial {
+        bytes: encoded,
+        group_block_directory_offset,
+        group_block_container_offset,
+    })
 }
 
 /// 그룹 하나가 런타임에 필요한 전부를 한 덩이로 묶는다.

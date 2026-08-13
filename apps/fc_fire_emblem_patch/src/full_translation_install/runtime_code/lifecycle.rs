@@ -3,7 +3,9 @@
 //! `$85C9`의 세 결과는 서로 다른 의미다. `09`는 같은 레코드의 다음 가시 페이지를
 //! 찾고, `10`은 E6가 지정한 다음 레코드로 넘어가는 짧은 비표시 상태이며, `0F`는 대사
 //! 수명을 끝낸다. `10`에서도 selector는 원본으로 돌아가지만 CHR RAM의 상주 그룹은
-//! 다음 생산자가 곧바로 재사용할 수 있게 유지한다. E7 외부 호출 중에는 selector가
+//! 원본 state-10 처리기가 다음 레코드 포인터와 화면 메타데이터를 먼저 준비할 때까지
+//! 유지한다. 그 처리기 안의 E4/E6 생산자가 준비가 끝난 경계에서 요청을 발행한다.
+//! E7 외부 호출 중에는 selector가
 //! 원본 경로로 물러나되 CHR 상주권은 보류하고, 실제 전투 합성기가 RAM을 덮을 때만
 //! 별도 소유권 경계에서 폐기한다. 이 구분 없이 매번 초기 페이지를 해석하면
 //! 여러 쪽 대사가 영원히 0번 페이지로 돌아가거나 같은 그룹을 화면 위에서 다시 만든다.
@@ -11,8 +13,7 @@
 use anyhow::{Context, Result, ensure};
 
 use super::super::{
-    runtime_bank_contract::{PRG_A000_REGISTER, PRG_BANK_SHADOW},
-    runtime_nmi_contract::PPU_CONTROL_SHADOW,
+    runtime_bank_contract::PRG_A000_REGISTER, runtime_nmi_contract::PPU_CONTROL_SHADOW,
     runtime_state_storage::CURRENT_PAGE_GROUP,
 };
 use super::transport::{REQUEST_STATE, STATE_READY};
@@ -39,7 +40,7 @@ pub(super) const E7_RESUME_SITE: u16 = 0x871C;
 const MAIN_DIALOGUE_BANK: u8 = 0x0A;
 const DIALOGUE_STATE: u16 = 0x77F7;
 pub(super) const TERMINAL_STATE: u8 = 0x0F;
-const IDLE_STATE: u8 = 0x10;
+pub(super) const IDLE_STATE: u8 = 0x10;
 const CONTINUE_STATE: u8 = 0x09;
 const FIRST_COMPLETION_FLAG: u16 = 0x7802;
 const SECOND_COMPLETION_FLAG: u16 = 0x780A;
@@ -136,6 +137,8 @@ pub(super) fn bind_lifecycle_sites(source: &Rom, candidate: &Rom) -> Result<()> 
     Ok(())
 }
 
+/// A에 든 상주 그룹을 보존한 채 다음 페이지 resolver를 실행하고, 빌린 뱅크를
+/// 되돌린 뒤 공통 발행기까지 마친다. 원본 줄 포인터가 전진한 직후에만 호출한다.
 fn append_guarded_banked_resolver_call(
     instructions: &mut Vec<Instruction>,
     resolver: u16,
@@ -143,10 +146,8 @@ fn append_guarded_banked_resolver_call(
     resolved_page_publication: u16,
 ) {
     instructions.extend([
-        // NMI 비활성화 직전의 좁은 경계에서도 이전 페이지를 `ready`로 선택하지 않는다.
         Instruction::LdaImmediate(0),
         Instruction::StaAbsolute(REQUEST_STATE),
-        // NMI가 `$A000`을 원래 뱅크로 되돌려 실행 중인 resolver를 바꾸지 못하게 한다.
         Instruction::LdaZeroPage(PPU_CONTROL_SHADOW),
         Instruction::Pha,
         Instruction::AndImmediate(!NMI_ENABLE_MASK),
@@ -158,11 +159,12 @@ fn append_guarded_banked_resolver_call(
         Instruction::StaAbsolute(BANK_VALUE_REGISTER),
         Instruction::JsrAbsolute(resolver),
         Instruction::Php,
-        Instruction::LdaZeroPage(PRG_BANK_SHADOW),
+        // 완료 훅의 복귀 주소도 주 대사 뱅크 0A에 있다. 바깥 상태가 `$29=03`
+        // 같은 지도 뱅크를 보존하는 동안 그 그림자를 복귀값으로 쓰면 같은 CPU
+        // 주소의 다른 바이트를 실행한다.
+        Instruction::LdaImmediate(MAIN_DIALOGUE_BANK),
         Instruction::JsrAbsolute(PAIRED_BANK_HELPER),
         Instruction::Plp,
-        // resolver의 캐리는 `PLA`와 `STA`를 지나도 그대로다. 해석 전 상주 그룹을
-        // 다시 A에 놓고 공통 발행기가 상태를 게시한 뒤 NMI를 되살리게 한다.
         Instruction::Pla,
         Instruction::StaZeroPage(PPU_CONTROL_SHADOW),
         Instruction::Pla,
@@ -207,6 +209,7 @@ pub(super) fn build_lifecycle_suite(
     let unowned_page = instructions.len();
     instructions.push(Instruction::BneAbsolute(origin));
     instructions.extend([
+        // 원본 완료 상태가 다음 표시 페이지를 요구할 때만 가시 페이지를 올린다.
         Instruction::LdaAbsolute(CURRENT_PAGE_GROUP),
         Instruction::Pha,
     ]);
@@ -233,10 +236,11 @@ pub(super) fn build_lifecycle_suite(
         Instruction::Pla,
     ]);
 
-    // E6의 state 10은 이미 정해진 다음 레코드 생산자로 곧바로 이어진다. 표시 selector는
-    // DIALOGUE_STATE가 0F 이상이면 원본으로 돌아가므로, ready를 유지해도 중간 화면이
-    // CHR RAM을 고르지 않는다. 다음 생산자는 이 상주 그룹을 비교해 같은 그룹이면
-    // 실제 CHR 쓰기 없이 새 정체성만 게시한다.
+    // state 10에서는 상주권만 보존하고 원본 처리기로 돌아간다. 완료 훅에서 요청을
+    // 먼저 발행하면 dispatcher gate가 원본 state-10 처리기를 막는다. 그러면 그
+    // 처리기가 채워야 하는 `$7825+X` 화면 메타데이터가 비어 있는 동안 바깥 렌더러가
+    // 길이 0을 256바이트로 해석해 `$0451..$0550`을 덮는다. 다음 요청은 원본 포인터와
+    // 메타데이터를 준비하는 E4/E6 훅에서만 발행한다.
     let retain_residency_and_store_state = next_address(origin, &instructions)?;
     instructions[idle_placeholder] = Instruction::BneAbsolute(retain_residency_and_store_state);
     instructions.extend([Instruction::StaAbsolute(DIALOGUE_STATE), Instruction::Rts]);
@@ -315,10 +319,13 @@ mod tests {
     use super::*;
 
     const RESOLVED_PAGE_PUBLICATION: u16 = 0xF354;
+    fn lifecycle_suite() -> LifecycleSuite {
+        build_lifecycle_suite(0xB400, 0x2E, RESOLVED_PAGE_PUBLICATION).unwrap()
+    }
 
     #[test]
     fn page_completion_preserves_all_three_source_outcomes() {
-        let suite = build_lifecycle_suite(0xB400, 0x2E, RESOLVED_PAGE_PUBLICATION).unwrap();
+        let suite = lifecycle_suite();
         for state in [TERMINAL_STATE, IDLE_STATE, CONTINUE_STATE] {
             assert!(
                 suite
@@ -341,7 +348,7 @@ mod tests {
 
     #[test]
     fn e6_idle_transition_retains_the_resident_page_while_terminal_invalidates_it() {
-        let suite = build_lifecycle_suite(0xB400, 0x2E, RESOLVED_PAGE_PUBLICATION).unwrap();
+        let suite = lifecycle_suite();
         let bytes = &suite.routine.bytes;
         let idle_load = bytes
             .windows(2)
@@ -355,7 +362,7 @@ mod tests {
         let idle_target = relative_branch_target(suite.routine.address, bytes, idle_load + 2);
         let terminal_target =
             relative_branch_target(suite.routine.address, bytes, terminal_load + 2);
-        let store_dialogue_state = [
+        let store_and_return = [
             0x8D,
             DIALOGUE_STATE as u8,
             (DIALOGUE_STATE >> 8) as u8,
@@ -370,13 +377,46 @@ mod tests {
             (REQUEST_STATE >> 8) as u8,
         ];
 
-        assert_eq!(&bytes[idle_target..idle_target + 4], store_dialogue_state);
+        assert_eq!(&bytes[idle_target..idle_target + 4], store_and_return);
         assert_eq!(&bytes[terminal_target..terminal_target + 6], invalidate);
     }
 
     #[test]
+    fn page_completion_advances_pages_but_leaves_record_transitions_to_the_source_handler() {
+        let suite = lifecycle_suite();
+        let boundary =
+            usize::from(suite.handoff_residency_suspension_entry - suite.routine.address);
+        let bytes = &suite.routine.bytes[..boundary];
+        assert!(bytes.windows(3).any(|window| window == [0x20, 0x00, 0xB4]));
+        let idle_load = bytes
+            .windows(2)
+            .position(|window| window == [0xA9, IDLE_STATE])
+            .expect("the record-transition state is emitted");
+        let idle_target = relative_branch_target(suite.routine.address, bytes, idle_load + 2);
+        assert_eq!(
+            &bytes[idle_target..idle_target + 4],
+            [
+                0x8D,
+                DIALOGUE_STATE as u8,
+                (DIALOGUE_STATE >> 8) as u8,
+                0x60,
+            ]
+        );
+        assert!(bytes.windows(5).any(|window| {
+            window
+                == [
+                    0xA9,
+                    CONTINUE_STATE,
+                    0x8D,
+                    DIALOGUE_STATE as u8,
+                    (DIALOGUE_STATE >> 8) as u8,
+                ]
+        }));
+    }
+
+    #[test]
     fn next_page_resolution_is_nmi_guarded_until_the_bank_is_restored() {
-        let suite = build_lifecycle_suite(0xB400, 0x2E, RESOLVED_PAGE_PUBLICATION).unwrap();
+        let suite = lifecycle_suite();
         let bytes = &suite.routine.bytes;
         let disable = bytes
             .windows(2)
@@ -400,9 +440,29 @@ mod tests {
                         (RESOLVED_PAGE_PUBLICATION >> 8) as u8,
                     ]
             })
-            .expect("the lifecycle delegates publication and PPU restore");
+            .expect("the lifecycle delegates publication");
 
         assert!(disable < resolver && resolver < bank_restore && bank_restore < publication);
+    }
+
+    #[test]
+    fn page_completion_restores_the_dialogue_bank_even_when_the_outer_shadow_differs() {
+        let suite = lifecycle_suite();
+        let restore = [
+            0xA9,
+            MAIN_DIALOGUE_BANK,
+            0x20,
+            PAIRED_BANK_HELPER as u8,
+            (PAIRED_BANK_HELPER >> 8) as u8,
+        ];
+
+        assert!(
+            suite
+                .routine
+                .bytes
+                .windows(restore.len())
+                .any(|window| window == restore)
+        );
     }
 
     #[test]
@@ -416,7 +476,7 @@ mod tests {
 
     #[test]
     fn e7_handoff_suspends_selection_without_discarding_residency() {
-        let suite = build_lifecycle_suite(0xB400, 0x2E, RESOLVED_PAGE_PUBLICATION).unwrap();
+        let suite = lifecycle_suite();
         let start = usize::from(suite.handoff_residency_suspension_entry - LIFECYCLE_ORIGIN);
         let handoff = &suite.routine.bytes[start..start + 4];
 

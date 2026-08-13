@@ -60,20 +60,26 @@ pub(super) struct BankRestoreContract {
 /// 뱅크 레지스터가 아니므로 여기서 볼 대상이 아니다.
 pub(super) fn bind_bank_restore_contract(candidate: &Rom) -> Result<BankRestoreContract> {
     ensure!(
-        fixed_bytes(candidate, PAIRED_BANK_SETTER_ADDRESS, PAIRED_BANK_SETTER.len())?
-            == PAIRED_BANK_SETTER,
+        fixed_bytes(
+            candidate,
+            PAIRED_BANK_SETTER_ADDRESS,
+            PAIRED_BANK_SETTER.len()
+        )? == PAIRED_BANK_SETTER,
         "the paired PRG bank setter at $FA20 changed"
     );
     ensure!(
-        fixed_bytes(candidate, BANK_SHADOW_RESTORE_ADDRESS, BANK_SHADOW_RESTORE.len())?
-            == BANK_SHADOW_RESTORE,
+        fixed_bytes(
+            candidate,
+            BANK_SHADOW_RESTORE_ADDRESS,
+            BANK_SHADOW_RESTORE.len()
+        )? == BANK_SHADOW_RESTORE,
         "the NMI bank shadow restore at $C1FB changed"
     );
     Ok(BankRestoreContract {
         prg_8000_register: PRG_8000_REGISTER,
         prg_a000_register: PRG_A000_REGISTER,
         prg_bank_shadow: PRG_BANK_SHADOW,
-        helper_reachable_page_count: u16::from(BANK_INDEX_MASK) .wrapping_add(1) * 2,
+        helper_reachable_page_count: u16::from(BANK_INDEX_MASK).wrapping_add(1) * 2,
     })
 }
 

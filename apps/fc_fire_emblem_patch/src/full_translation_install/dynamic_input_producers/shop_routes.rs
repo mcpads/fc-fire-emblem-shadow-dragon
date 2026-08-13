@@ -108,9 +108,8 @@ fn source_bytes(rom: &Rom, cpu_address: u16, byte_count: usize) -> Result<&[u8]>
 /// `0B:$A2C0`은 지도 물체가 든 시설 종류를 읽어 5면 진행 표식 `$05F5`의 최하위
 /// 비트를 보고, 서 있을 때만 종류 5를 `$77D0`에 남긴다. 이 열 바이트가 여섯 번째
 /// 시설을 만드는 전부다.
-const SECRET_SHOP_FACILITY_SELECTION: [u8; 10] = [
-    0xC9, 0x05, 0xD0, 0x19, 0xAD, 0xF5, 0x05, 0x4A, 0x90, 0x04,
-];
+const SECRET_SHOP_FACILITY_SELECTION: [u8; 10] =
+    [0xC9, 0x05, 0xD0, 0x19, 0xAD, 0xF5, 0x05, 0x4A, 0x90, 0x04];
 
 fn secret_shop_facility_selection(rom: &Rom) -> Result<&[u8]> {
     let file_offset = switchable_cpu_to_file_offset(0x0B, 0xA2C2)?;

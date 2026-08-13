@@ -98,7 +98,10 @@ fn shift_nibble(byte_count: usize) -> Result<u8> {
         "NES 2.0 RAM size {byte_count} is not a shift of 64"
     );
     let shift = byte_count.trailing_zeros() - 6;
-    ensure!(shift <= 0x0F, "NES 2.0 RAM size {byte_count} does not fit a nibble");
+    ensure!(
+        shift <= 0x0F,
+        "NES 2.0 RAM size {byte_count} does not fit a nibble"
+    );
     Ok(shift as u8)
 }
 
@@ -136,10 +139,7 @@ pub(crate) fn build_release_image(cumulative: &Rom) -> Result<(Vec<u8>, ReleaseI
         rebuilt.mapper() == EXPECTED_MAPPER,
         "release header lost the mapper number"
     );
-    ensure!(
-        rebuilt.prg() == prg,
-        "release packaging changed a PRG byte"
-    );
+    ensure!(rebuilt.prg() == prg, "release packaging changed a PRG byte");
     ensure!(
         &rebuilt.chr()[..chr.len()] == chr
             && rebuilt.chr()[chr.len()..].iter().all(|byte| *byte == 0),

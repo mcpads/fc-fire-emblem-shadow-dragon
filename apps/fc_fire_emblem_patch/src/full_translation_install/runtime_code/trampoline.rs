@@ -18,12 +18,13 @@
 use anyhow::{Result, ensure};
 
 use super::super::{
-    runtime_bank_contract::{BankRestoreContract, BANK_INDEX_MASK},
+    runtime_bank_contract::{BANK_INDEX_MASK, BankRestoreContract},
     runtime_nmi_contract::{DISPLACED_CALL, PPU_CONTROL_SHADOW, QUEUE_FLAGS},
 };
 use super::{
-    CONSUMER_HOOK_CALL_CYCLES, RuntimeRoutine, next_address, worst_case_cycles_with_calls,
+    CONSUMER_HOOK_CALL_CYCLES, RuntimeRoutine, next_address,
     transport::{REQUEST_STATE, STATE_READY},
+    worst_case_cycles_with_calls,
 };
 use crate::rp2a03::{Instruction, assemble_at};
 
@@ -163,8 +164,7 @@ mod tests {
 
         assert_eq!(
             reserve + budget,
-            super::super::MEASURED_VBLANK_REMAINDER
-                * (100 - super::super::SAFETY_MARGIN_PERCENT)
+            super::super::MEASURED_VBLANK_REMAINDER * (100 - super::super::SAFETY_MARGIN_PERCENT)
                 / 100
         );
     }
@@ -233,12 +233,10 @@ mod tests {
             .expect("the trampoline calls the transport routine");
 
         assert!(
-            listing[call..]
-                .iter()
-                .any(|instruction| matches!(
-                    instruction,
-                    Instruction::LdaZeroPage(shadow) if *shadow == contract().prg_bank_shadow
-                )),
+            listing[call..].iter().any(|instruction| matches!(
+                instruction,
+                Instruction::LdaZeroPage(shadow) if *shadow == contract().prg_bank_shadow
+            )),
             "the trampoline never reads the bank shadow after the transport call"
         );
     }
@@ -248,8 +246,7 @@ mod tests {
         let routine = build_trampoline(contract(), 0xB000).unwrap();
 
         assert!(
-            usize::from(routine.address) + routine.bytes.len()
-                <= usize::from(TRAMPOLINE_CAVE_END)
+            usize::from(routine.address) + routine.bytes.len() <= usize::from(TRAMPOLINE_CAVE_END)
         );
     }
 }

@@ -42,7 +42,9 @@ use super::{
         CHR_RAM_BANK_VALUE, CHR_SOURCE_HIGH_BITS, DIALOGUE_FD_SOURCE_PAGE, RIGHT_FD_CHR_REGISTER,
         RIGHT_FD_SOURCE_SHADOW,
     },
-    dispatcher_gate::{DISPATCHER_STATE, STATE_COLD_REQUESTED},
+    dispatcher_gate::{
+        DISPATCHER_STATE, STATE_COLD_REQUESTED, STATE_RESIDENT_GROUP_OVERLAY_REQUESTED,
+    },
     lifecycle::TERMINAL_STATE,
     next_address,
     transport::{REQUEST_STATE, STATE_READY},
@@ -70,7 +72,6 @@ const SELECTOR_CHAIN_CODE: [u8; 3] = [
 /// 이어 붙이면 반복 요청 판정이 커질 때 서로를 침범하므로 역할별로 분리한다.
 pub(super) const SELECTOR_CAVE_ORIGIN: u16 = 0xF558;
 pub(super) const SELECTOR_CAVE_END: u16 = 0xF700;
-
 /// selector가 그 자리를 가져가기 전에 아직 그대로인지 확인한다.
 ///
 /// 후보만 본다. `$FF40`의 사슬은 매퍼 165 변환이 세운 구조물이라 원본 일본어 ROM에는
@@ -142,10 +143,19 @@ pub(super) fn build_chr_selector(
     let ready_placeholder = instructions.len();
     instructions.push(Instruction::BeqAbsolute(origin));
     instructions.push(Instruction::CmpImmediate(STATE_COLD_REQUESTED));
+    let cold_state_placeholder = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(origin));
+    instructions.push(Instruction::CmpImmediate(
+        STATE_RESIDENT_GROUP_OVERLAY_REQUESTED,
+    ));
+    let resident_overlay_state_placeholder = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(origin));
     let unsupported_state_placeholder = instructions.len();
     instructions.push(Instruction::BneAbsolute(origin));
     let eligible_state = next_address(origin, &instructions)?;
     instructions[ready_placeholder] = Instruction::BeqAbsolute(eligible_state);
+    instructions[cold_state_placeholder] = Instruction::BeqAbsolute(eligible_state);
+    instructions[resident_overlay_state_placeholder] = Instruction::BeqAbsolute(eligible_state);
     instructions.extend([
         Instruction::LdaAbsolute(DISPATCHER_STATE),
         Instruction::CmpImmediate(TERMINAL_STATE),
@@ -164,8 +174,12 @@ pub(super) fn build_chr_selector(
         Instruction::LdaAbsolute(REQUEST_STATE),
         Instruction::CmpImmediate(STATE_READY),
     ]);
-    let cold_request_placeholder = instructions.len();
+    let complete_request_placeholder = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(origin));
+    let incomplete_request_placeholder = instructions.len();
     instructions.push(Instruction::BneAbsolute(origin));
+    let complete_request = next_address(origin, &instructions)?;
+    instructions[complete_request_placeholder] = Instruction::BeqAbsolute(complete_request);
     instructions.extend([
         Instruction::Pla,
         Instruction::Plp,
@@ -175,8 +189,8 @@ pub(super) fn build_chr_selector(
         Instruction::StaAbsolute(bank_value_register),
         Instruction::Rts,
     ]);
-    let cold_request = next_address(origin, &instructions)?;
-    instructions[cold_request_placeholder] = Instruction::BneAbsolute(cold_request);
+    let incomplete_request = next_address(origin, &instructions)?;
+    instructions[incomplete_request_placeholder] = Instruction::BneAbsolute(incomplete_request);
     instructions.extend([
         Instruction::Pla,
         Instruction::Plp,
@@ -371,7 +385,34 @@ mod tests {
         assert_eq!(
             &routine.bytes[9..11],
             [0xC9, STATE_COLD_REQUESTED],
-            "the same state load must next admit only cold_requested"
+            "the same state load must next admit cold_requested"
+        );
+        assert!(routine.bytes.windows(10).any(|window| {
+            window
+                == [
+                    0xA9,
+                    RIGHT_FD_CHR_REGISTER,
+                    0x8D,
+                    0x00,
+                    0x80,
+                    0xA9,
+                    0xC8,
+                    0x8D,
+                    0x01,
+                    0x80,
+                ]
+        }));
+    }
+
+    #[test]
+    fn resident_group_overlay_uses_the_same_safe_presentation() {
+        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8).unwrap();
+
+        assert!(
+            routine
+                .bytes
+                .windows(3)
+                .any(|window| { window == [0xC9, STATE_RESIDENT_GROUP_OVERLAY_REQUESTED, 0xF0] })
         );
         assert!(routine.bytes.windows(10).any(|window| {
             window

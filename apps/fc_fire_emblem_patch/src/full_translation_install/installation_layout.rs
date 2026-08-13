@@ -246,5 +246,4 @@ mod tests {
         assert_eq!(MAIN_DIALOGUE_RUNTIME_FIRST_PAGE + 3, 0x2F);
         assert_eq!(usize::from(LAST_SWITCHABLE_MATERIAL_PAGE + 1 - 0x2F), 15);
     }
-
 }

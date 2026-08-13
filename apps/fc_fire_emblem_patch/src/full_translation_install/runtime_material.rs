@@ -148,7 +148,14 @@ fn encode_runtime_material(
     let runtime_code_offset = capacity - MMC3_PAGE_BYTE_COUNT;
     ensure!(
         payload_end <= runtime_code_offset,
-        "runtime material payload reaches {payload_end} and overruns the runtime code page at {runtime_code_offset}"
+        "runtime material payload reaches {payload_end} and overruns the runtime code page at {runtime_code_offset}; section byte counts: {:?}",
+        data_sections
+            .iter()
+            .map(|section| (
+                section.role,
+                section.content.expect("data sections have content").len()
+            ))
+            .collect::<Vec<_>>()
     );
     let runtime_code_byte_count = MMC3_PAGE_BYTE_COUNT;
 
@@ -258,8 +265,7 @@ impl DialogueRuntimeMaterialPlan {
     /// 위치가 된다.
     pub(super) fn runtime_code_cpu_start(&self) -> Result<u16> {
         ensure!(
-            self.runtime_code_offset
-                == (RUNTIME_MATERIAL_PAGE_COUNT - 1) * MMC3_PAGE_BYTE_COUNT,
+            self.runtime_code_offset == (RUNTIME_MATERIAL_PAGE_COUNT - 1) * MMC3_PAGE_BYTE_COUNT,
             "runtime code no longer starts at the last container page"
         );
         u16::try_from(RUNTIME_CODE_WINDOW_START)

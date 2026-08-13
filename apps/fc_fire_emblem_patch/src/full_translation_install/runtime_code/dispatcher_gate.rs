@@ -36,12 +36,13 @@ pub(in crate::full_translation_install) const COLD_ENTRY: u16 = 0x809B;
 /// 초기 진입이 부르는 원본 포인터 resolver다.
 pub(in crate::full_translation_install) const SOURCE_POINTER_RESOLVER: u16 = 0xE6B2;
 
-use super::super::runtime_bank_contract::{PRG_A000_REGISTER, PRG_BANK_SHADOW};
+use super::super::runtime_bank_contract::PRG_A000_REGISTER;
 use super::super::runtime_cursor_storage::{
     PUBLISHED_SOURCE_DIRECTORY_SELECTOR, PUBLISHED_SOURCE_ENTRY_INDEX,
 };
 use super::super::runtime_nmi_contract::PPU_CONTROL_SHADOW;
-use super::super::runtime_state_storage::{CURRENT_PAGE_GROUP, VISIBLE_PAGE_INDEX};
+use super::super::runtime_state_storage::CURRENT_PAGE_GROUP;
+use super::resolve_request::{LOOKUP_LIVE_SOURCE_IDENTITY, LOOKUP_PUBLISHED_SOURCE_IDENTITY};
 use super::resolve_request::{SOURCE_DIRECTORY_SELECTOR, SOURCE_ENTRY_INDEX};
 use super::resolved_page_publication::NO_RESIDENT_PAGE_GROUP;
 use super::transport::{REQUEST_STATE, STATE_READY};
@@ -62,6 +63,9 @@ const PAIRED_BANK_HELPER: u16 = 0xFA20;
 
 /// 합성을 기다리는 중이라는 요청이다.
 pub(in crate::full_translation_install) const STATE_COLD_REQUESTED: u8 = 1;
+/// 완성된 이전 그룹 위에 새 그룹 전체를 덮는 요청이다. 원본 4 KiB 복원은 생략하지만
+/// 대상 그룹의 모든 글리프를 다시 써 같은 그룹의 후속 페이지까지 상주시킨다.
+pub(in crate::full_translation_install) const STATE_RESIDENT_GROUP_OVERLAY_REQUESTED: u8 = 2;
 
 /// 대사 뱅크다.
 const MAIN_DIALOGUE_BANK: u8 = 0x0A;
@@ -131,16 +135,17 @@ pub(super) fn build_dispatcher_gate(origin: u16) -> Result<RuntimeRoutine> {
     })
 }
 
-/// 같은 원문의 준비된 0페이지는 재사용하고, 그 밖에는 해석기로 새 요청을 발행한다.
+/// 직접 진입과 E7 재개에서 같은 원문의 준비된 현재 페이지는 재사용하고, 그 밖에는
+/// 해석기로 새 요청을 발행한다.
 ///
 /// 해석기는 실행 코드 페이지에 있으므로 그 페이지를 `$A000`에 걸어야 부를 수 있다.
 /// 걸면 원본이 기대하던 뱅크가 사라지므로 돌아오기 전에 되돌린다. 되돌리는 값은
 /// `$29` 그림자와 원본 도우미 `$FA20`이 준다 — `$C1FB`가 매 프레임 쓰는 방식이다.
 ///
-/// E4 전환 생산자는 같은 호출 자리를 여러 프레임 다시 지난다. 이미 준비된 같은
-/// 원문 0페이지를 매번 무효화하면 소비자가 완성 직후부터 영원히 다시 시작한다.
-/// `ready + page zero + published source identity`가 모두 같을 때만 기존 페이지를
-/// 재사용한다. 다음 페이지, 다른 원문, 수명 이탈 뒤 요청은 모두 냉합성한다.
+/// 같은 정체성의 반복 생산은 준비된 한글 페이지를 그대로 쓰되, 훅이 가져간 원본
+/// resolver에는 제어를 넘긴다. 가시 페이지 전환은 각 줄의 원본 포인터 전진 경계에서
+/// 처리하고, E4/E6가 미리 결속한 다음 레코드는 현재 화면의 완료 상태가 10이 된 뒤
+/// 별도 생산자가 맡는다.
 ///
 /// 실패하면 커서도 요청도 남기지 않는다. 그 경우 원본 일본어 경로가 그대로 돈다.
 pub(super) fn build_source_identity_request_publisher(
@@ -153,11 +158,21 @@ pub(super) fn build_source_identity_request_publisher(
         Instruction::LdaAbsolute(REQUEST_STATE),
         Instruction::CmpImmediate(STATE_READY),
     ];
-    let rebuild_for_state = instructions.len();
-    instructions.push(Instruction::BneAbsolute(origin));
-    instructions.push(Instruction::LdaAbsolute(VISIBLE_PAGE_INDEX));
-    let rebuild_for_page = instructions.len();
-    instructions.push(Instruction::BneAbsolute(origin));
+    let completed_page = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(origin));
+
+    instructions.extend([
+        Instruction::LdaImmediate(NO_RESIDENT_PAGE_GROUP),
+        // 새 수명에는 게시된 선행 조회값이 없으므로 살아 있는 원본 정체성이 현재
+        // 레코드다.
+        Instruction::LdxImmediate(LOOKUP_LIVE_SOURCE_IDENTITY),
+    ]);
+    let preserve_resident_group = instructions.len();
+    instructions.push(Instruction::JmpAbsolute(origin));
+
+    let ready_identity_comparison = next_address(origin, &instructions)?;
+    instructions[completed_page] = Instruction::BeqAbsolute(ready_identity_comparison);
+    instructions.push(Instruction::LdxImmediate(LOOKUP_PUBLISHED_SOURCE_IDENTITY));
     instructions.extend([
         Instruction::LdaAbsolute(SOURCE_DIRECTORY_SELECTOR),
         Instruction::CmpAbsolute(PUBLISHED_SOURCE_DIRECTORY_SELECTOR),
@@ -170,23 +185,77 @@ pub(super) fn build_source_identity_request_publisher(
     ]);
     let rebuild_for_entry = instructions.len();
     instructions.push(Instruction::BneAbsolute(origin));
-    // 밀어낸 원본 호출로 바로 넘겨 반복 생산자의 원본 부작용을 진행시킨다.
+    // 같은 전이 생산자가 반복돼도 한글 페이지는 그대로 재사용한다. 하지만 훅이
+    // 가져간 원본 resolver 호출까지 생략하면 안 된다. E6 전이에서는 그 호출의
+    // 복귀 A/플래그가 바깥 렌더러를 제어하고, 뒤이은 상태 처리가 새 더블버퍼의
+    // `$7825+X` 메타데이터를 채울 수 있게 한다. 이를 RTS로 줄이면 길이 0인 새
+    // 버퍼를 즉시 소비해 256바이트를 덮는다.
     instructions.push(Instruction::JmpAbsolute(SOURCE_POINTER_RESOLVER));
 
-    let no_resident_group = next_address(origin, &instructions)?;
-    instructions[rebuild_for_state] = Instruction::BneAbsolute(no_resident_group);
-    instructions.push(Instruction::LdaImmediate(NO_RESIDENT_PAGE_GROUP));
-    let preserve_resident_group = instructions.len();
-    instructions.push(Instruction::BneAbsolute(origin));
-
     let ready_rebuild = next_address(origin, &instructions)?;
-    for index in [rebuild_for_page, rebuild_for_selector, rebuild_for_entry] {
+    for index in [rebuild_for_selector, rebuild_for_entry] {
         instructions[index] = Instruction::BneAbsolute(ready_rebuild);
     }
-    instructions.push(Instruction::LdaAbsolute(CURRENT_PAGE_GROUP));
+    instructions.extend([
+        Instruction::LdaAbsolute(CURRENT_PAGE_GROUP),
+        // 준비된 수명의 전이는 직전에 게시한 선행 조회값을 현재 레코드로 승격한다.
+    ]);
 
     let preserve_group = next_address(origin, &instructions)?;
-    instructions[preserve_resident_group] = Instruction::BneAbsolute(preserve_group);
+    instructions[preserve_resident_group] = Instruction::JmpAbsolute(preserve_group);
+    append_guarded_resolver_publication(
+        &mut instructions,
+        resolver,
+        code_page,
+        resolved_page_publication,
+    );
+    // 밀어낸 원본 호출로 넘긴다.
+    instructions.push(Instruction::JmpAbsolute(SOURCE_POINTER_RESOLVER));
+
+    Ok(RuntimeRoutine {
+        role: "dialogue source-identity request publisher",
+        address: origin,
+        bytes: assemble_at(origin, &instructions)?,
+    })
+}
+
+/// 직접 진입은 휘발 RAM의 이전 값을 상태로 해석하지 않고 반드시 새 수명을 연다.
+/// `$07F4`가 우연히 `ready`인 채 시작해도 resolver가 열세 바이트 전체를 먼저 지우며,
+/// 완성 기반이 없다는 `FF` 입력 때문에 첫 그룹은 항상 원본 4 KiB 복원부터 합성한다.
+pub(super) fn build_initial_request_publisher(
+    origin: u16,
+    resolver: u16,
+    code_page: u8,
+    resolved_page_publication: u16,
+) -> Result<RuntimeRoutine> {
+    let mut instructions = vec![
+        Instruction::LdaImmediate(NO_RESIDENT_PAGE_GROUP),
+        Instruction::LdxImmediate(LOOKUP_LIVE_SOURCE_IDENTITY),
+    ];
+    append_guarded_resolver_publication(
+        &mut instructions,
+        resolver,
+        code_page,
+        resolved_page_publication,
+    );
+    instructions.push(Instruction::JmpAbsolute(SOURCE_POINTER_RESOLVER));
+
+    Ok(RuntimeRoutine {
+        role: "dialogue initial-entry request publisher",
+        address: origin,
+        bytes: assemble_at(origin, &instructions)?,
+    })
+}
+
+/// A에 든 기존 상주 그룹을 보존하고, NMI가 `$A000` 실행 코드를 바꾸지 못하게 한
+/// 채 resolver와 공통 발행기를 호출한다. 발행기가 요청 상태를 정한 뒤에만 NMI를
+/// 되살린다.
+fn append_guarded_resolver_publication(
+    instructions: &mut Vec<Instruction>,
+    resolver: u16,
+    code_page: u8,
+    resolved_page_publication: u16,
+) {
     instructions.extend([
         Instruction::Pha,
         // NMI를 끄기 직전 한 프레임이 끼어도 이전 수명의 `ready`를 고르지 않는다.
@@ -208,7 +277,10 @@ pub(super) fn build_source_identity_request_publisher(
         // 캐리를 뱅크 복원 너머로 나른다. `$FA20`은 상태를 보존하지만 그 사실에
         // 기대는 대신 여기서 명시적으로 밀어 둔다.
         Instruction::Php,
-        Instruction::LdaZeroPage(PRG_BANK_SHADOW),
+        // 이 루틴의 복귀 주소는 항상 주 대사 뱅크 0A에 있다. `$29`는 바깥 지도
+        // 상태의 NMI 복귀 그림자일 수 있으므로 여기서 사용하면 다른 뱅크의 같은
+        // CPU 주소로 돌아간다.
+        Instruction::LdaImmediate(MAIN_DIALOGUE_BANK),
         Instruction::JsrAbsolute(PAIRED_BANK_HELPER),
         Instruction::Plp,
         // 발행기가 상태를 결정할 때까지 하드웨어 NMI는 꺼 둔다. `PLA`와 `STA`는
@@ -219,14 +291,6 @@ pub(super) fn build_source_identity_request_publisher(
         Instruction::Pla,
         Instruction::JsrAbsolute(resolved_page_publication),
     ]);
-    // 밀어낸 원본 호출로 넘긴다.
-    instructions.push(Instruction::JmpAbsolute(SOURCE_POINTER_RESOLVER));
-
-    Ok(RuntimeRoutine {
-        role: "dialogue source-identity request publisher",
-        address: origin,
-        bytes: assemble_at(origin, &instructions)?,
-    })
 }
 
 #[cfg(test)]
@@ -391,6 +455,25 @@ mod tests {
         assert!(routine.bytes.contains(&0x28), "the carry is never restored");
     }
 
+    #[test]
+    fn a_dialogue_producer_restores_its_call_site_bank_instead_of_the_outer_shadow() {
+        let routine = publisher();
+        let restore = [
+            0xA9,
+            MAIN_DIALOGUE_BANK,
+            0x20,
+            PAIRED_BANK_HELPER as u8,
+            (PAIRED_BANK_HELPER >> 8) as u8,
+        ];
+
+        assert!(
+            routine
+                .bytes
+                .windows(restore.len())
+                .any(|window| window == restore)
+        );
+    }
+
     /// 주 흐름이 `$A000`의 임시 코드를 실행할 때 NMI가 뱅크를 되돌리면 복귀 주소의
     /// 코드가 바뀐다. NMI는 매핑 전에 꺼지고 뱅크 복원 뒤에만 돌아와야 한다.
     #[test]
@@ -476,33 +559,21 @@ mod tests {
         );
     }
 
-    /// E4 전환 생산자는 같은 원문을 여러 프레임 다시 요청한다. 준비된 0페이지의
-    /// 정체성이 같으면 무효화보다 먼저 원본 resolver로 넘겨야 전환이 진행된다.
+    /// 같은 원문의 반복 생산은 이미 결정된 한글 페이지를 재사용하되, 훅이 밀어낸
+    /// 원본 포인터 resolver는 반드시 실행한다.
     #[test]
-    fn a_repeated_ready_page_zero_request_reuses_the_published_source_identity() {
+    fn a_repeated_ready_identity_reuses_the_page_and_executes_the_displaced_resolver() {
         let routine = publisher();
-        let reuse = [
+        let source_rebind = [
             0x4C,
             SOURCE_POINTER_RESOLVER as u8,
             (SOURCE_POINTER_RESOLVER >> 8) as u8,
         ];
-        let reuse_at = routine
+        routine
             .bytes
-            .windows(reuse.len())
-            .position(|window| window == reuse)
-            .expect("same ready identity can reuse the completed page");
-        let invalidate = [
-            0xA9,
-            0x00,
-            0x8D,
-            REQUEST_STATE as u8,
-            (REQUEST_STATE >> 8) as u8,
-        ];
-        let invalidate_at = routine
-            .bytes
-            .windows(invalidate.len())
-            .position(|window| window == invalidate)
-            .expect("different requests still rebuild");
+            .windows(source_rebind.len())
+            .position(|window| window == source_rebind)
+            .expect("a changed identity still performs the displaced source rebind");
 
         assert!(routine.bytes.windows(5).any(|window| {
             window
@@ -514,14 +585,17 @@ mod tests {
                     STATE_READY,
                 ]
         }));
-        assert!(routine.bytes.windows(3).any(|window| {
-            window
-                == [
-                    0xAD,
-                    VISIBLE_PAGE_INDEX as u8,
-                    (VISIBLE_PAGE_INDEX >> 8) as u8,
-                ]
-        }));
+        assert!(
+            !routine.bytes.windows(3).any(|window| {
+                window
+                    == [
+                        0xAD,
+                        super::super::super::runtime_state_storage::VISIBLE_PAGE_INDEX as u8,
+                        (super::super::super::runtime_state_storage::VISIBLE_PAGE_INDEX >> 8) as u8,
+                    ]
+            }),
+            "the repeated producer must not reset a completed next page to page zero"
+        );
         assert!(routine.bytes.windows(6).any(|window| {
             window
                 == [
@@ -533,6 +607,22 @@ mod tests {
                     (PUBLISHED_SOURCE_DIRECTORY_SELECTOR >> 8) as u8,
                 ]
         }));
+        assert!(
+            routine.bytes.windows(11).any(|window| {
+                window[..6]
+                    == [
+                        0xAD,
+                        SOURCE_ENTRY_INDEX as u8,
+                        (SOURCE_ENTRY_INDEX >> 8) as u8,
+                        0xCD,
+                        PUBLISHED_SOURCE_ENTRY_INDEX as u8,
+                        (PUBLISHED_SOURCE_ENTRY_INDEX >> 8) as u8,
+                    ]
+                    && window[6] == 0xD0
+                    && window[8..11] == source_rebind
+            }),
+            "a repeated identity must skip Korean page rebuilding but still execute the displaced source resolver"
+        );
         assert!(routine.bytes.windows(6).any(|window| {
             window
                 == [
@@ -544,6 +634,73 @@ mod tests {
                     (PUBLISHED_SOURCE_ENTRY_INDEX >> 8) as u8,
                 ]
         }));
-        assert!(reuse_at < invalidate_at);
+        assert!(
+            !routine
+                .bytes
+                .windows(3)
+                .any(|window| window == [0x20, 0x00, 0xA7]),
+            "the repeated producer must not decide a page after automatic line decoding"
+        );
+    }
+
+    /// 새 수명은 살아 있는 정체성을 바로 해석하지만, 준비된 수명의 다음 선행 조회는
+    /// 직전에 게시한 정체성을 현재 레코드로 승격해야 한다. 이 모드를 뒤집으면
+    /// `80:03`을 보고 아직 표시 중인 레코드 002 대신 레코드 003의 코드북을 올린다.
+    #[test]
+    fn new_and_continuing_lifetimes_select_different_identity_sources() {
+        let routine = publisher();
+
+        let new_lifetime = [
+            0xA9,
+            NO_RESIDENT_PAGE_GROUP,
+            0xA2,
+            LOOKUP_LIVE_SOURCE_IDENTITY,
+            0x4C,
+        ];
+        assert!(
+            routine
+                .bytes
+                .windows(new_lifetime.len())
+                .any(|window| window == new_lifetime),
+            "new-lifetime mode must be followed by an unconditional JMP because LDX #0 sets Z"
+        );
+        assert!(
+            routine
+                .bytes
+                .windows(2)
+                .any(|window| { window == [0xA2, LOOKUP_PUBLISHED_SOURCE_IDENTITY] })
+        );
+        assert_eq!(
+            routine
+                .bytes
+                .windows(2)
+                .filter(|window| *window == [0xA2, LOOKUP_LIVE_SOURCE_IDENTITY])
+                .count(),
+            1,
+            "only a new lifetime resolves the live identity"
+        );
+    }
+
+    #[test]
+    fn an_initial_entry_never_trusts_a_preexisting_ready_byte() {
+        let routine =
+            build_initial_request_publisher(0xF650, 0xA400, 0x30, RESOLVED_PAGE_PUBLICATION)
+                .unwrap();
+
+        assert_eq!(
+            &routine.bytes[..4],
+            [
+                0xA9,
+                NO_RESIDENT_PAGE_GROUP,
+                0xA2,
+                LOOKUP_LIVE_SOURCE_IDENTITY,
+            ]
+        );
+        assert!(
+            !routine.bytes.windows(3).any(|window| {
+                window == [0xAD, REQUEST_STATE as u8, (REQUEST_STATE >> 8) as u8]
+            }),
+            "the initial entry must not branch on unowned RAM"
+        );
     }
 }

@@ -7,6 +7,7 @@ use crate::{
     chapter_transition::{plan_chapter_titles, plan_transition_labels},
     choice_labels::plan_choice_labels,
     dialogue_assets::{plan_all_main_dialogue_records, validate_main_dialogue_workspace},
+    dialogue_inventory::inspect_main_dialogue_graph,
     font_slots::{FONT_PAGE_SIZE, FONT_TILE_SIZE},
     item_flow::plan_item_action_labels,
     map_menu::plan_map_menu,
@@ -37,6 +38,7 @@ mod runtime_identity;
 mod runtime_material;
 mod runtime_nmi_contract;
 mod runtime_state_storage;
+mod transition_residency;
 
 use chapter_intro_residency::plan_chapter_intro_residency;
 use cold_request_presentation::plan_cold_request_presentation_page;
@@ -57,6 +59,7 @@ use runtime_material::{
     DialogueRuntimeMaterialPlan, RuntimeMaterialInputs, plan_dialogue_runtime_material,
 };
 use runtime_state_storage::{DialogueRuntimeStateStoragePlan, plan_dialogue_runtime_state_storage};
+use transition_residency::plan_transition_residency;
 
 /// 대사 런타임 재료 용기가 시작하는 MMC3 8 KiB 페이지다.
 const MAIN_DIALOGUE_MATERIAL_FIRST_PAGE: u8 = 0x2C;
@@ -175,6 +178,12 @@ struct DialogueCodebook {
     canonical_records_connected: bool,
     page_local_bundle_encoding_connected: bool,
     glyph_characters_emitted: bool,
+    transition_stable_lifetime_count: usize,
+    multi_record_transition_stable_lifetime_count: usize,
+    maximum_transition_stable_lifetime_record_count: usize,
+    maximum_transition_stable_lifetime_workset_count: usize,
+    maximum_transition_stable_lifetime_slot_demand: usize,
+    every_resident_transition_uses_one_codebook: bool,
 }
 
 #[derive(Serialize)]
@@ -234,6 +243,11 @@ struct DialogueRuntimeComposition {
     sequential_page_transition_count: usize,
     distinct_visible_page_recipe_transition_count: usize,
     unchanged_visible_page_recipe_transition_count: usize,
+    resident_group_transition_count: usize,
+    resident_group_change_count: usize,
+    resident_group_reuse_count: usize,
+    maximum_resident_group_overlay_tile_count: usize,
+    maximum_resident_group_overlay_frame_count: usize,
     maximum_delta_tile_count: usize,
     maximum_delta_ppu_write_count: usize,
     total_delta_ppu_write_count: usize,
@@ -315,6 +329,7 @@ struct InstallationGates {
     all_dialogue_pointers_planned: bool,
     all_dialogue_page_code_assignments_found: bool,
     all_dialogue_page_worksets_packed: bool,
+    all_resident_dialogue_transitions_use_one_codebook: bool,
     all_chapter_titles_encoded_with_resident_codes: bool,
     all_chapter_title_storage_writes_planned: bool,
     cold_request_presentation_page_planned: bool,
@@ -405,8 +420,13 @@ pub(crate) fn plan_full_translation_installation(
         &chapter_titles,
         &dynamic_inputs.augmented_worksets,
     )?;
-    let codebook =
-        plan_glyph_workset_page_upper_bound(&chapter_intro_residency.augmented_worksets)?;
+    let dialogue_graph = inspect_main_dialogue_graph(rom.data())?;
+    let transition_residency = plan_transition_residency(
+        &display,
+        &dialogue_graph,
+        &chapter_intro_residency.augmented_worksets,
+    )?;
+    let codebook = plan_glyph_workset_page_upper_bound(&transition_residency.augmented_worksets)?;
     let dynamic_remap = plan_dynamic_string_remap(&dynamic_inputs, &codebook)?;
     ensure!(
         codebook.workset_count == display.page_worksets.len()
@@ -430,17 +450,24 @@ pub(crate) fn plan_full_translation_installation(
         font_page_pack.len() == codebook.page_assignments.len() * FONT_PAGE_SIZE,
         "dialogue font page pack length changed after rasterization"
     );
+    // 전이 미러를 함께 내던 인코딩은 이중 진입과 함께 폐기했다. 정규 레코드의
+    // 원천 소유 구간과 포인터만 낸다. 의사결정 59번을 따른다.
+    let encoded_display = dialogue
+        .encoded_by_page_groups(&codebook.workset_page_indices, &codebook.page_assignments)?;
     let composition = plan_dialogue_runtime_composition(
         &display,
+        &dialogue_graph,
         &codebook,
         &dynamic_remap,
         source_font_page,
         &font_page_pack,
     )?;
-    // 전이 미러를 함께 내던 인코딩은 이중 진입과 함께 폐기했다. 정규 레코드의
-    // 원천 소유 구간과 포인터만 낸다. 의사결정 59번을 따른다.
-    let encoded_display = dialogue
-        .encoded_by_page_groups(&codebook.workset_page_indices, &codebook.page_assignments)?;
+    ensure!(
+        composition.resident_group_change_count == 0
+            && composition.resident_group_reuse_count
+                == composition.resident_group_transition_count,
+        "a visible dialogue transition changes its resident codebook"
+    );
     let source_owned_storage_byte_count = baseline_encoded
         .regions
         .iter()
@@ -480,6 +507,11 @@ pub(crate) fn plan_full_translation_installation(
     let atlas_offset = runtime_material.glyph_atlas_offset()?;
     let scan_offset = runtime_material.section_offset("page_scan")?;
     let identity_offset = runtime_material.section_offset("runtime_identity")?;
+    ensure!(
+        identity_offset / MMC3_PAGE_BYTE_COUNT
+            == (identity_offset + runtime_identity.material.len() - 1) / MMC3_PAGE_BYTE_COUNT,
+        "runtime identity material crosses its mapped MMC3 page"
+    );
     let page = |offset: usize| -> Result<u8> {
         Ok(MAIN_DIALOGUE_MATERIAL_FIRST_PAGE
             + u8::try_from(offset / MMC3_PAGE_BYTE_COUNT)
@@ -491,6 +523,7 @@ pub(crate) fn plan_full_translation_installation(
     };
     let layout = MaterialLayout {
         identity_page: page(identity_offset)?,
+        identity_material_base: window(identity_offset)?,
         identity_selector_directory: window(identity_offset + IDENTITY_HEADER_BYTE_COUNT)?,
         identity_table_descriptors: window(
             identity_offset + IDENTITY_HEADER_BYTE_COUNT + IDENTITY_SELECTOR_DIRECTORY_BYTE_COUNT,
@@ -500,9 +533,7 @@ pub(crate) fn plan_full_translation_installation(
         record_directory: window(scan_offset + composition.record_page_group_selector_byte_count)?,
         group_directory: window(scan_offset + composition.group_block_directory_offset)?,
         group_block_container_base: u16::try_from(
-            scan_offset
-                + composition.group_block_directory_offset
-                + composition.group_block_directory_byte_count,
+            scan_offset + composition.group_block_container_offset,
         )
         .context("page group block base does not fit a 16-bit container offset")?,
         container_first_page: MAIN_DIALOGUE_MATERIAL_FIRST_PAGE,
@@ -618,6 +649,16 @@ pub(crate) fn plan_full_translation_installation(
             canonical_records_connected: true,
             page_local_bundle_encoding_connected: true,
             glyph_characters_emitted: false,
+            transition_stable_lifetime_count: transition_residency.lifetime_count,
+            multi_record_transition_stable_lifetime_count: transition_residency
+                .multi_record_lifetime_count,
+            maximum_transition_stable_lifetime_record_count: transition_residency
+                .maximum_lifetime_record_count,
+            maximum_transition_stable_lifetime_workset_count: transition_residency
+                .maximum_lifetime_workset_count,
+            maximum_transition_stable_lifetime_slot_demand: transition_residency
+                .maximum_lifetime_slot_demand,
+            every_resident_transition_uses_one_codebook: true,
         },
         chapter_intro_residency: ChapterIntroResidency {
             chapter_context_count: chapter_intro_residency.chapter_context_count,
@@ -684,6 +725,14 @@ pub(crate) fn plan_full_translation_installation(
                 .distinct_visible_page_recipe_transition_count,
             unchanged_visible_page_recipe_transition_count: composition
                 .unchanged_visible_page_recipe_transition_count,
+            resident_group_transition_count: composition.resident_group_transition_count,
+            resident_group_change_count: composition.resident_group_change_count,
+            resident_group_reuse_count: composition.resident_group_reuse_count,
+            maximum_resident_group_overlay_tile_count: composition
+                .maximum_resident_group_overlay_tile_count,
+            maximum_resident_group_overlay_frame_count: composition
+                .maximum_resident_group_overlay_tile_count
+                .div_ceil(usize::from(runtime_code::transport::TILES_PER_FRAME)),
             maximum_delta_tile_count: composition.maximum_delta_tile_count,
             maximum_delta_ppu_write_count: composition.maximum_delta_ppu_write_count,
             total_delta_ppu_write_count: composition.total_delta_ppu_write_count,
@@ -774,6 +823,7 @@ pub(crate) fn plan_full_translation_installation(
             all_dialogue_pointers_planned: true,
             all_dialogue_page_code_assignments_found: true,
             all_dialogue_page_worksets_packed: true,
+            all_resident_dialogue_transitions_use_one_codebook: true,
             all_chapter_titles_encoded_with_resident_codes: true,
             all_chapter_title_storage_writes_planned: true,
             cold_request_presentation_page_planned: true,

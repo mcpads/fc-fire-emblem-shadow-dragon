@@ -249,9 +249,7 @@ pub(super) fn bind_concurrent_computed_accesses(
     })
 }
 
-fn bind_bank_directory_domain(
-    source: &Rom,
-) -> Result<BankDirectoryDomain> {
+fn bind_bank_directory_domain(source: &Rom) -> Result<BankDirectoryDomain> {
     const SOURCE_SWITCHABLE_BANK_COUNT: usize = 15;
     const POSITIVE_SELECTOR_COUNT: usize = 0x7F;
 
