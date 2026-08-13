@@ -86,6 +86,41 @@ pub(crate) fn inspect_main_dialogue_graph(source: &[u8]) -> Result<MainDialogueG
     Ok(build_report(source)?.main_dialogue_graph)
 }
 
+pub(crate) fn main_dialogue_transition_chain_record_ids(
+    graph: &MainDialogueGraphReport,
+    root_table_id: &str,
+    root_entry_index: usize,
+) -> Result<Vec<String>> {
+    let mut next = BTreeMap::new();
+    for edge in &graph.transition_edges {
+        ensure!(
+            next.insert(
+                (edge.source_table_id, edge.source_canonical_entry_index),
+                (edge.target_table_id, edge.target_canonical_entry_index),
+            )
+            .is_none(),
+            "main-dialogue record has multiple transition targets"
+        );
+    }
+    let mut chain = Vec::new();
+    let mut current = (root_table_id, root_entry_index);
+    loop {
+        ensure!(
+            !chain.contains(&current),
+            "main-dialogue transition chain contains a cycle"
+        );
+        chain.push(current);
+        let Some(target) = next.get(&current).copied() else {
+            break;
+        };
+        current = target;
+    }
+    Ok(chain
+        .into_iter()
+        .map(|(table_id, entry_index)| format!("{table_id}:{entry_index:03}"))
+        .collect())
+}
+
 pub(crate) const fn main_dialogue_runtime_handler_roots() -> [u16; 18] {
     MAIN_DIALOGUE_STATE_HANDLERS
 }

@@ -104,9 +104,12 @@ pub(super) struct CanonicalBattleCodebook {
     pub(super) maximum_remap_pair_count: usize,
 }
 
+#[derive(Clone)]
 pub(crate) struct GlyphWorkset {
     pub(crate) target_glyphs: BTreeSet<char>,
     pub(crate) preserved_active_codes: BTreeSet<u8>,
+    /// 여러 페이지에서 같은 저장 바이트를 공유하는 글리프의 고정 코드다.
+    pub(crate) fixed_glyph_codes: BTreeMap<char, u8>,
 }
 
 #[derive(Debug, Serialize)]

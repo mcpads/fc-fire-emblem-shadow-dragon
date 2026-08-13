@@ -37,6 +37,7 @@ pub(crate) struct GlyphWorksetPagePlan {
 struct WorksetSignature {
     target_glyphs: Vec<char>,
     preserved_codes: Vec<u8>,
+    fixed_glyph_codes: Vec<(char, u8)>,
 }
 
 struct WorksetDemand {
@@ -48,6 +49,7 @@ struct WorksetDemand {
 struct FontPageDemand {
     target_glyphs: BTreeSet<char>,
     preserved_codes: BTreeSet<u8>,
+    fixed_glyph_codes: BTreeMap<char, u8>,
 }
 
 impl FontPageDemand {
@@ -63,7 +65,28 @@ impl FontPageDemand {
         merged
             .preserved_codes
             .extend(workset.preserved_codes.iter().copied());
-        (merged.slot_demand() <= ACTIVE_HANGUL_SLOT_COUNT).then_some(merged)
+        for (glyph, code) in &workset.fixed_glyph_codes {
+            if merged
+                .fixed_glyph_codes
+                .get(glyph)
+                .is_some_and(|existing| existing != code)
+                || merged
+                    .fixed_glyph_codes
+                    .iter()
+                    .any(|(existing_glyph, existing_code)| {
+                        existing_glyph != glyph && existing_code == code
+                    })
+            {
+                return None;
+            }
+            merged.fixed_glyph_codes.insert(*glyph, *code);
+        }
+        (merged.slot_demand() <= ACTIVE_HANGUL_SLOT_COUNT
+            && merged
+                .fixed_glyph_codes
+                .values()
+                .all(|code| !merged.preserved_codes.contains(code)))
+        .then_some(merged)
     }
 }
 
@@ -85,9 +108,38 @@ pub(crate) fn plan_glyph_workset_pages(
             workset.preserved_active_codes.is_subset(&active_codes),
             "glyph page workset preserves a reserved font code"
         );
+        ensure!(
+            workset
+                .fixed_glyph_codes
+                .keys()
+                .all(|glyph| workset.target_glyphs.contains(glyph)),
+            "glyph page workset fixes a code for a glyph outside its target set"
+        );
+        let fixed_codes = workset
+            .fixed_glyph_codes
+            .values()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        ensure!(
+            fixed_codes.len() == workset.fixed_glyph_codes.len(),
+            "glyph page workset assigns one fixed code to multiple glyphs"
+        );
+        ensure!(
+            fixed_codes.is_subset(&active_codes),
+            "glyph page workset fixes a reserved font code"
+        );
+        ensure!(
+            fixed_codes.is_disjoint(&workset.preserved_active_codes),
+            "glyph page workset fixes a code that the same page preserves"
+        );
         let signature = WorksetSignature {
             target_glyphs: workset.target_glyphs.iter().copied().collect(),
             preserved_codes: workset.preserved_active_codes.iter().copied().collect(),
+            fixed_glyph_codes: workset
+                .fixed_glyph_codes
+                .iter()
+                .map(|(glyph, code)| (*glyph, *code))
+                .collect(),
         };
         let slot_demand = signature.target_glyphs.len() + signature.preserved_codes.len();
         ensure!(
@@ -161,20 +213,33 @@ pub(crate) fn plan_glyph_workset_pages(
     let page_assignments = pages
         .iter()
         .map(|page| {
+            let fixed_codes = page
+                .fixed_glyph_codes
+                .values()
+                .copied()
+                .collect::<BTreeSet<_>>();
             let available_codes = active_codes
                 .difference(&page.preserved_codes)
+                .filter(|code| !fixed_codes.contains(code))
                 .copied()
                 .collect::<Vec<_>>();
             ensure!(
-                page.target_glyphs.len() <= available_codes.len(),
+                page.target_glyphs.len() - page.fixed_glyph_codes.len() <= available_codes.len(),
                 "glyph page lost capacity after packing"
             );
-            Ok(page
-                .target_glyphs
-                .iter()
-                .copied()
-                .zip(available_codes)
-                .collect::<BTreeMap<_, _>>())
+            let mut assignments = page.fixed_glyph_codes.clone();
+            assignments.extend(
+                page.target_glyphs
+                    .iter()
+                    .filter(|glyph| !page.fixed_glyph_codes.contains_key(glyph))
+                    .copied()
+                    .zip(available_codes),
+            );
+            ensure!(
+                assignments.len() == page.target_glyphs.len(),
+                "glyph page assignment lost target glyphs"
+            );
+            Ok(assignments)
         })
         .collect::<Result<Vec<_>>>()?;
     let maximum_page_slot_demand = pages
@@ -230,10 +295,11 @@ fn greedy_pack(demands: &[WorksetDemand]) -> (Vec<FontPageDemand>, Vec<usize>) {
             pages[page_index] = merged;
             page_index
         } else {
-            pages.push(FontPageDemand {
-                target_glyphs: demand.signature.target_glyphs.iter().copied().collect(),
-                preserved_codes: demand.signature.preserved_codes.iter().copied().collect(),
-            });
+            pages.push(
+                FontPageDemand::default()
+                    .merged(&demand.signature)
+                    .expect("validated workset must fit an empty font page"),
+            );
             pages.len() - 1
         };
         page_indices.push(page_index);
@@ -269,6 +335,13 @@ fn workset_slot_demand(workset: &WorksetSignature) -> usize {
     workset.target_glyphs.len() + workset.preserved_codes.len()
 }
 
+fn worksets_can_share_page(left: &WorksetSignature, right: &WorksetSignature) -> bool {
+    FontPageDemand::default()
+        .merged(left)
+        .and_then(|page| page.merged(right))
+        .is_some()
+}
+
 fn compare_page_choices(
     left: &(usize, FontPageDemand, usize, usize),
     right: &(usize, FontPageDemand, usize, usize),
@@ -292,6 +365,11 @@ fn packing_sha1(pages: &[FontPageDemand], workset_page_indices: &[usize]) -> Str
         }
         bytes.extend_from_slice(&(page.preserved_codes.len() as u64).to_le_bytes());
         bytes.extend(page.preserved_codes.iter());
+        bytes.extend_from_slice(&(page.fixed_glyph_codes.len() as u64).to_le_bytes());
+        for (glyph, code) in &page.fixed_glyph_codes {
+            bytes.extend_from_slice(&u32::from(*glyph).to_le_bytes());
+            bytes.push(*code);
+        }
     }
     bytes.extend_from_slice(&(workset_page_indices.len() as u64).to_le_bytes());
     for page_index in workset_page_indices {
@@ -321,6 +399,15 @@ mod tests {
         GlyphWorkset {
             target_glyphs: target_glyphs.chars().collect(),
             preserved_active_codes: preserved_codes.iter().copied().collect(),
+            fixed_glyph_codes: BTreeMap::new(),
+        }
+    }
+
+    fn fixed_workset(target_glyphs: &str, assignments: &[(char, u8)]) -> GlyphWorkset {
+        GlyphWorkset {
+            target_glyphs: target_glyphs.chars().collect(),
+            preserved_active_codes: BTreeSet::new(),
+            fixed_glyph_codes: assignments.iter().copied().collect(),
         }
     }
 
@@ -396,5 +483,42 @@ mod tests {
         assert_eq!(first.page_assignment_sha1, second.page_assignment_sha1);
         assert_eq!(first.workset_page_indices, second.workset_page_indices);
         assert_eq!(first.page_assignments, second.page_assignments);
+    }
+
+    #[test]
+    fn fixed_glyph_keeps_its_code_in_the_emitted_page_assignment() {
+        let code = active_hangul_codes()[17];
+
+        let plan = plan_glyph_workset_pages(&[fixed_workset("가나", &[('가', code)])], 1).unwrap();
+
+        assert_eq!(plan.page_assignments[0][&'가'], code);
+        assert_ne!(plan.page_assignments[0][&'나'], code);
+    }
+
+    #[test]
+    fn incompatible_fixed_codes_force_distinct_pages() {
+        let code = active_hangul_codes()[17];
+        let plan = plan_glyph_workset_pages(
+            &[
+                fixed_workset("가", &[('가', code)]),
+                fixed_workset("나", &[('나', code)]),
+            ],
+            2,
+        )
+        .unwrap();
+
+        assert_ne!(plan.workset_page_indices[0], plan.workset_page_indices[1]);
+    }
+
+    #[test]
+    fn fixed_code_cannot_share_a_page_that_preserves_it() {
+        let code = active_hangul_codes()[17];
+        let plan = plan_glyph_workset_pages(
+            &[fixed_workset("가", &[('가', code)]), workset("나", &[code])],
+            2,
+        )
+        .unwrap();
+
+        assert_ne!(plan.workset_page_indices[0], plan.workset_page_indices[1]);
     }
 }

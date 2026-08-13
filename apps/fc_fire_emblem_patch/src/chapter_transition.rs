@@ -40,7 +40,8 @@ pub(crate) use source_binding::bind_chapter_intro_lifetime_contexts;
 use source_binding::*;
 use source_spec::*;
 pub(crate) use title_localization::{
-    ChapterTitlePlannedEntry, extract_chapter_title_workspace, plan_chapter_titles,
+    ChapterTitlePlan, ChapterTitlePlannedEntry, extract_chapter_title_workspace,
+    plan_chapter_titles,
 };
 use translation_surfaces::{TranslationSurfaceContracts, bind_translation_surfaces};
 pub(crate) use translation_workspace::plan_transition_labels;

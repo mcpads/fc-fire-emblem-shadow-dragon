@@ -136,6 +136,7 @@ pub(super) fn plan_dynamic_dialogue_inputs(
         augmented_worksets.push(GlyphWorkset {
             target_glyphs,
             preserved_active_codes: workset.preserved_target_active_codes.clone(),
+            fixed_glyph_codes: BTreeMap::new(),
         });
         dynamic_glyphs_by_workset.push(possible_domain_glyphs);
         translated_dynamic_by_workset.push(has_translated_domain);
@@ -281,8 +282,7 @@ pub(super) fn classified_dynamic_string_bindings()
         ("epilogue-routing-dialogue", 2..=53usize),
     ] {
         for entry in entries {
-            let record_id: &'static str =
-                Box::leak(format!("{table}:{entry:03}").into_boxed_str());
+            let record_id: &'static str = Box::leak(format!("{table}:{entry:03}").into_boxed_str());
             assert!(
                 bindings
                     .insert((record_id, 0), DynamicStringDomain::PlayableUnitName)

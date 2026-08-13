@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::font_slots::ACTIVE_HANGUL_SLOT_COUNT;
 
-use super::WorksetDemand;
+use super::{WorksetDemand, worksets_can_share_page};
 
 const SOLVER_TIMEOUT_SECONDS: u64 = 120;
 
@@ -47,6 +47,7 @@ struct HighsInput {
     maximum_page_count: usize,
     timeout_seconds: u64,
     worksets: Vec<HighsWorkset>,
+    incompatible_workset_pairs: Vec<[usize; 2]>,
 }
 
 #[derive(Serialize)]
@@ -90,6 +91,7 @@ fn solve_page_capacity_with_highs(
                 preserved_codes: demand.signature.preserved_codes.clone(),
             })
             .collect(),
+        incompatible_workset_pairs: incompatible_workset_pairs(demands),
     };
     let input_bytes = serde_json::to_vec(&input).context("serialize HiGHS page model")?;
     let solver_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -247,6 +249,9 @@ fn build_smt_model(demands: &[WorksetDemand], maximum_page_count: usize) -> Stri
             "(assert (<= page_{index} (+ {previous_maximum} 1)))\n"
         ));
     }
+    for [left, right] in incompatible_workset_pairs(demands) {
+        model.push_str(&format!("(assert (not (= page_{left} page_{right})))\n"));
+    }
     for page in 0..maximum_page_count {
         let mut capacity_variables = Vec::new();
         for (glyph, glyph_index) in &glyph_indices {
@@ -339,8 +344,33 @@ fn verify_assignment(
             glyphs.len() + codes.len() <= ACTIVE_HANGUL_SLOT_COUNT,
             "Z3 dialogue page {page} exceeds the active slot capacity"
         );
+        let members = page_indices
+            .iter()
+            .enumerate()
+            .filter_map(|(index, assigned_page)| (*assigned_page == page).then_some(index))
+            .collect::<Vec<_>>();
+        for (position, left) in members.iter().enumerate() {
+            for right in &members[position + 1..] {
+                ensure!(
+                    worksets_can_share_page(&demands[*left].signature, &demands[*right].signature,),
+                    "Z3 dialogue page {page} merges incompatible fixed glyph codes"
+                );
+            }
+        }
     }
     Ok(())
+}
+
+fn incompatible_workset_pairs(demands: &[WorksetDemand]) -> Vec<[usize; 2]> {
+    let mut pairs = Vec::new();
+    for left in 0..demands.len() {
+        for right in left + 1..demands.len() {
+            if !worksets_can_share_page(&demands[left].signature, &demands[right].signature) {
+                pairs.push([left, right]);
+            }
+        }
+    }
+    pairs
 }
 
 #[cfg(test)]
@@ -353,6 +383,7 @@ mod tests {
             signature: WorksetSignature {
                 target_glyphs: glyphs.chars().collect(),
                 preserved_codes: preserved_codes.to_vec(),
+                fixed_glyph_codes: Vec::new(),
             },
             original_indices: Vec::new(),
         }
@@ -366,6 +397,19 @@ mod tests {
         assert!(model.contains("(assert (= page_0 0))"));
         assert!(model.contains("(assert (<= page_1 (+ page_0 1)))"));
         assert!(model.contains("(check-sat)"));
+    }
+
+    #[test]
+    fn smt_model_separates_incompatible_fixed_assignments() {
+        let code = crate::font_slots::active_hangul_codes()[0];
+        let mut first = demand("가", &[]);
+        first.signature.fixed_glyph_codes = vec![('가', code)];
+        let mut second = demand("나", &[]);
+        second.signature.fixed_glyph_codes = vec![('나', code)];
+
+        let model = build_smt_model(&[first, second], 2);
+
+        assert!(model.contains("(assert (not (= page_0 page_1)))"));
     }
 
     #[test]

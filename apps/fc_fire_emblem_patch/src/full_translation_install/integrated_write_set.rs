@@ -1,11 +1,10 @@
 use anyhow::{Result, ensure};
 use serde::Serialize;
 
-use crate::{
-    dialogue_assets::EncodedMainDialogueBundle, rom::Rom, tracked::TrackedImage,
-};
+use crate::{dialogue_assets::EncodedMainDialogueBundle, rom::Rom, tracked::TrackedImage};
 
 use super::{
+    chapter_intro_residency::EncodedChapterTitle,
     installation_layout::main_dialogue_runtime_material_file_offset,
     runtime_code::{DialogueRuntimeCodePlan, DialogueRuntimeHookRole, DialogueRuntimeHookSite},
 };
@@ -18,6 +17,7 @@ pub(super) struct IntegratedWriteSetInputs<'a> {
     pub(super) encoded_dialogue: &'a EncodedMainDialogueBundle,
     pub(super) dialogue_runtime_material: &'a [u8],
     pub(super) dialogue_runtime_code: &'a DialogueRuntimeCodePlan,
+    pub(super) encoded_chapter_titles: &'a [EncodedChapterTitle],
     pub(super) required_domains: &'a [&'static str],
 }
 
@@ -34,8 +34,10 @@ pub(super) struct IntegratedWriteSetPlan {
     dialogue_runtime_code_routine_count: usize,
     dialogue_storage_region_count: usize,
     dialogue_pointer_write_count: usize,
+    chapter_title_storage_write_count: usize,
     changed_byte_count: usize,
     installed_dialogue_matches_current_encoding: bool,
+    installed_chapter_titles_match_resident_encoding: bool,
     every_change_tracked: bool,
     one_shared_image: bool,
     all_domains_contribute_expected_writes: bool,
@@ -60,16 +62,13 @@ pub(super) fn plan_integrated_write_set(
     inputs: IntegratedWriteSetInputs<'_>,
 ) -> Result<(Vec<u8>, IntegratedWriteSetPlan)> {
     let mut image = TrackedImage::new(inputs.candidate.data().to_vec());
-    let dialogue_storage_write_count = inputs.encoded_dialogue.regions.len()
-        + inputs.encoded_dialogue.pointer_writes.len();
-    install_encoded_dialogue(
-        &mut image,
-        inputs.candidate,
-        inputs.encoded_dialogue,
-    )?;
+    let dialogue_storage_write_count =
+        inputs.encoded_dialogue.regions.len() + inputs.encoded_dialogue.pointer_writes.len();
+    install_encoded_dialogue(&mut image, inputs.candidate, inputs.encoded_dialogue)?;
+    install_encoded_chapter_titles(&mut image, inputs.candidate, inputs.encoded_chapter_titles)?;
     ensure!(
-        image.writes().len() == dialogue_storage_write_count,
-        "integrated write set and complete dialogue write set disagree"
+        image.writes().len() == dialogue_storage_write_count + inputs.encoded_chapter_titles.len(),
+        "integrated write set and dialogue/title storage write sets disagree"
     );
     let runtime_material_offset = main_dialogue_runtime_material_file_offset()?;
     let runtime_material_end = runtime_material_offset
@@ -168,6 +167,7 @@ pub(super) fn plan_integrated_write_set(
     let expected_write_count = image.writes().len();
     let output = image.into_data();
     verify_installed_dialogue(&output, inputs.encoded_dialogue)?;
+    verify_installed_chapter_titles(&output, inputs.encoded_chapter_titles)?;
     let installed_image = output.clone();
     let changed_byte_count = inputs
         .candidate
@@ -180,6 +180,7 @@ pub(super) fn plan_integrated_write_set(
     let domains = domain_contributions(
         inputs.required_domains,
         dialogue_storage_write_count + 1,
+        inputs.encoded_chapter_titles.len(),
     )?;
     let contributing_domain_count = domains
         .iter()
@@ -190,7 +191,7 @@ pub(super) fn plan_integrated_write_set(
         .filter(|domain| domain.complete_in_integrated_plan)
         .count();
     ensure!(
-        contributing_domain_count == 1 && fully_planned_domain_count == 0,
+        contributing_domain_count == 2 && fully_planned_domain_count == 0,
         "integrated write gate advanced without every domain layer"
     );
 
@@ -209,8 +210,10 @@ pub(super) fn plan_integrated_write_set(
             dialogue_runtime_code_routine_count: inputs.dialogue_runtime_code.code_routines.len(),
             dialogue_storage_region_count: inputs.encoded_dialogue.regions.len(),
             dialogue_pointer_write_count: inputs.encoded_dialogue.pointer_writes.len(),
+            chapter_title_storage_write_count: inputs.encoded_chapter_titles.len(),
             changed_byte_count,
             installed_dialogue_matches_current_encoding: true,
+            installed_chapter_titles_match_resident_encoding: true,
             every_change_tracked: true,
             one_shared_image: true,
             all_domains_contribute_expected_writes: false,
@@ -220,15 +223,55 @@ pub(super) fn plan_integrated_write_set(
     ))
 }
 
+fn install_encoded_chapter_titles(
+    image: &mut TrackedImage,
+    candidate: &Rom,
+    titles: &[EncodedChapterTitle],
+) -> Result<()> {
+    ensure!(
+        titles.len() == 25,
+        "integrated chapter-title write set must contain all twenty-five titles"
+    );
+    for title in titles {
+        let end = title
+            .file_offset
+            .checked_add(title.encoded_storage.len())
+            .ok_or_else(|| anyhow::anyhow!("{} storage range overflow", title.id))?;
+        let expected = candidate
+            .data()
+            .get(title.file_offset..end)
+            .ok_or_else(|| anyhow::anyhow!("{} storage is outside candidate", title.id))?;
+        image.write_expected(
+            format!("chapter title storage {}", title.id),
+            title.file_offset,
+            expected,
+            &title.encoded_storage,
+        )?;
+    }
+    Ok(())
+}
+
+fn verify_installed_chapter_titles(installed: &[u8], titles: &[EncodedChapterTitle]) -> Result<()> {
+    for title in titles {
+        let end = title
+            .file_offset
+            .checked_add(title.encoded_storage.len())
+            .ok_or_else(|| anyhow::anyhow!("{} installed range overflow", title.id))?;
+        ensure!(
+            installed.get(title.file_offset..end) == Some(title.encoded_storage.as_slice()),
+            "installed {} does not match its resident codebook encoding",
+            title.id
+        );
+    }
+    Ok(())
+}
+
 /// 최종 바이트를 다시 읽어 현재 인코딩 결과가 실제 설치됐는지 확인한다.
 ///
 /// 계획 개수나 `TrackedImage` 등록만 확인하면 런타임 재료는 새 코드북인데 본문은 이전
 /// 단계 코드북인 산출물도 만들 수 있다. 최종 산출물의 소유 구간과 포인터 바이트가
 /// 현재 번들의 결과와 하나라도 다르면 빌드를 실패시킨다.
-fn verify_installed_dialogue(
-    installed: &[u8],
-    encoded: &EncodedMainDialogueBundle,
-) -> Result<()> {
+fn verify_installed_dialogue(installed: &[u8], encoded: &EncodedMainDialogueBundle) -> Result<()> {
     for (region_index, region) in encoded.regions.iter().enumerate() {
         let end = region
             .file_offset
@@ -310,6 +353,7 @@ fn fixed_file_offset(rom: &Rom, address: u16) -> Result<usize> {
 fn domain_contributions(
     required_domains: &[&'static str],
     expected_dialogue_write_count: usize,
+    expected_chapter_title_write_count: usize,
 ) -> Result<Vec<DomainWriteContribution>> {
     ensure!(
         required_domains.len() == 13
@@ -326,16 +370,19 @@ fn domain_contributions(
         .iter()
         .map(|id| {
             let dialogue = *id == "main_dialogue";
+            let chapter_titles = *id == "chapter_titles";
             DomainWriteContribution {
                 id,
                 translation_input_loaded: true,
                 glyph_lifetime_bound: true,
-                storage_and_address_writes_contributed: dialogue,
+                storage_and_address_writes_contributed: dialogue || chapter_titles,
                 runtime_material_writes_contributed: dialogue,
-                font_supply_writes_contributed: false,
+                font_supply_writes_contributed: chapter_titles,
                 all_consumer_writes_contributed: false,
                 expected_write_count: if dialogue {
                     expected_dialogue_write_count
+                } else if chapter_titles {
+                    expected_chapter_title_write_count
                 } else {
                     0
                 },
@@ -348,9 +395,7 @@ fn domain_contributions(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dialogue_assets::{
-        EncodedMainDialogueRegion, MainDialoguePointerWrite,
-    };
+    use crate::dialogue_assets::{EncodedMainDialogueRegion, MainDialoguePointerWrite};
 
     fn synthetic_rom() -> Rom {
         let mut bytes = vec![0; crate::rom::HEADER_SIZE + 16 * 1024];
@@ -388,7 +433,27 @@ mod tests {
     }
 
     #[test]
-    fn storage_only_dialogue_contribution_does_not_count_as_a_complete_domain() {
+    fn installs_all_chapter_titles_and_verifies_their_final_bytes() {
+        let candidate = synthetic_rom();
+        let titles = (0..25)
+            .map(|index| EncodedChapterTitle {
+                id: format!("chapter-title:{:03}", index + 1),
+                file_offset: 0x100 + index * 2,
+                encoded_storage: vec![index as u8 + 1, 0xED],
+            })
+            .collect::<Vec<_>>();
+        let mut image = TrackedImage::new(candidate.data().to_vec());
+
+        install_encoded_chapter_titles(&mut image, &candidate, &titles).unwrap();
+
+        assert_eq!(image.writes().len(), 25);
+        let output = image.into_data();
+        verify_installed_chapter_titles(&output, &titles).unwrap();
+        assert_eq!(&output[0x100..0x104], [1, 0xED, 2, 0xED]);
+    }
+
+    #[test]
+    fn partial_dialogue_and_title_contributions_do_not_complete_either_domain() {
         let domains = domain_contributions(
             &[
                 "chapter_save_offer_label",
@@ -406,6 +471,7 @@ mod tests {
                 "unit_ui_labels",
             ],
             538,
+            25,
         )
         .unwrap();
 
@@ -414,7 +480,7 @@ mod tests {
                 .iter()
                 .filter(|domain| domain.expected_write_count != 0)
                 .count(),
-            1
+            2
         );
         assert!(
             domains

@@ -1,7 +1,4 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::Path,
-};
+use std::{collections::BTreeSet, path::Path};
 
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
@@ -9,7 +6,7 @@ use serde::Serialize;
 use crate::{
     chapter_transition::{bind_chapter_intro_lifetime_contexts, plan_chapter_titles},
     dialogue_assets::plan_main_dialogue_bundle,
-    dialogue_inventory::{MainDialogueGraphReport, inspect_main_dialogue_graph},
+    dialogue_inventory::{inspect_main_dialogue_graph, main_dialogue_transition_chain_record_ids},
     font_slots::ACTIVE_HANGUL_SLOT_COUNT,
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
@@ -82,7 +79,7 @@ pub(super) fn inspect(bindings: InputBindings<'_>) -> Result<TranslationLifetime
 
     let mut demands = Vec::with_capacity(CHAPTER_COUNT);
     for context in contexts {
-        let record_ids = transition_chain_record_ids(
+        let record_ids = main_dialogue_transition_chain_record_ids(
             &graph,
             "chapter-intro-dialogue",
             context.canonical_entry_index,
@@ -241,47 +238,10 @@ struct CompletedPageDemand {
     unpartitioned_slot_demand: usize,
 }
 
-type RecordKey<'a> = (&'a str, usize);
-
-fn transition_chain_record_ids(
-    graph: &MainDialogueGraphReport,
-    root_table_id: &'static str,
-    root_entry_index: usize,
-) -> Result<Vec<String>> {
-    let mut next = BTreeMap::new();
-    for edge in &graph.transition_edges {
-        ensure!(
-            next.insert(
-                (edge.source_table_id, edge.source_canonical_entry_index),
-                (edge.target_table_id, edge.target_canonical_entry_index),
-            )
-            .is_none(),
-            "main-dialogue record has multiple transition targets"
-        );
-    }
-    let mut chain = Vec::new();
-    let mut current: RecordKey<'_> = (root_table_id, root_entry_index);
-    loop {
-        ensure!(
-            !chain.contains(&current),
-            "chapter-intro dialogue transition chain contains a cycle"
-        );
-        chain.push(current);
-        let Some(target) = next.get(&current).copied() else {
-            break;
-        };
-        current = target;
-    }
-    Ok(chain
-        .into_iter()
-        .map(|(table_id, entry_index)| format!("{table_id}:{entry_index:03}"))
-        .collect())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dialogue_inventory::MainDialogueTransitionEdgeReport;
+    use crate::dialogue_inventory::{MainDialogueGraphReport, MainDialogueTransitionEdgeReport};
 
     #[test]
     fn transition_chain_follows_cross_table_targets_from_the_canonical_root() {
@@ -300,7 +260,7 @@ mod tests {
         };
 
         assert_eq!(
-            transition_chain_record_ids(&graph, "chapter-intro-dialogue", 5).unwrap(),
+            main_dialogue_transition_chain_record_ids(&graph, "chapter-intro-dialogue", 5).unwrap(),
             [
                 "chapter-intro-dialogue:005",
                 "chapter-intro-dialogue:007",

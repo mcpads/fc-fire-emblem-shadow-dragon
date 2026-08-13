@@ -73,6 +73,16 @@ def main() -> int:
             1.0,
         )
     add_constraint([(assignment(0, 0), 1.0)], 1.0, 1.0)
+    for left, right in request.get("incompatible_workset_pairs", []):
+        for page in range(page_count):
+            add_constraint(
+                [
+                    (assignment(int(left), page), 1.0),
+                    (assignment(int(right), page), 1.0),
+                ],
+                -np.inf,
+                1.0,
+            )
 
     for workset, demand in enumerate(worksets):
         for page in range(page_count):

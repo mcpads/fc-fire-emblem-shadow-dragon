@@ -416,7 +416,7 @@ fn record_page_worksets<'a>(
                 source_reclaimable_active_codes,
                 preserved_target_active_codes,
             })
-    })
+        })
 }
 
 /// 대사 바이트 자체가 아니라 제어 코드의 실행 결과로 화면에 생기는 글리프 코드를
@@ -425,10 +425,7 @@ fn preserve_runtime_generated_active_codes(
     bytes: &[LogicalDialogueByte],
     preserved_codes: &mut BTreeSet<u8>,
 ) {
-    if bytes
-        .iter()
-        .any(|byte| *byte == LogicalDialogueByte::Encoded(DIALOGUE_PREFIX_CONTROL_CODE))
-    {
+    if bytes.contains(&LogicalDialogueByte::Encoded(DIALOGUE_PREFIX_CONTROL_CODE)) {
         preserved_codes.extend(DIALOGUE_PREFIX_OUTPUT_CODES);
     }
 }

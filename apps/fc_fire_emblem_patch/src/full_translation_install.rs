@@ -20,6 +20,7 @@ use crate::{
     unit_ui_text::plan_unit_ui_labels,
 };
 
+mod chapter_intro_residency;
 mod current_candidate;
 mod dialogue_bank_layout;
 mod dynamic_composition;
@@ -36,6 +37,7 @@ mod runtime_material;
 mod runtime_nmi_contract;
 mod runtime_state_storage;
 
+use chapter_intro_residency::plan_chapter_intro_residency;
 use current_candidate::{CurrentCandidateInputs, inspect_dialogue_page_pool_capacity};
 use dynamic_composition::plan_dialogue_runtime_composition;
 use dynamic_input_producers::{DynamicInputProducerPlan, inspect_dynamic_input_producers};
@@ -120,6 +122,7 @@ struct FullTranslationInstallReport {
     required_domains: [&'static str; REQUIRED_DOMAIN_COUNT],
     translation_inputs: TranslationInputs,
     dialogue_codebook: DialogueCodebook,
+    chapter_intro_residency: ChapterIntroResidency,
     dialogue_page_pool: DialoguePagePool,
     installation_layout: InstallationLayoutPlan,
     integrated_write_set: IntegratedWriteSetPlan,
@@ -170,6 +173,19 @@ struct DialogueCodebook {
     canonical_records_connected: bool,
     page_local_bundle_encoding_connected: bool,
     glyph_characters_emitted: bool,
+}
+
+#[derive(Serialize)]
+struct ChapterIntroResidency {
+    chapter_context_count: usize,
+    resident_workset_count: usize,
+    title_glyph_count: usize,
+    fixed_code_count: usize,
+    encoded_title_count: usize,
+    maximum_augmented_workset_slot_demand: usize,
+    fixed_assignment_sha1: String,
+    every_title_glyph_has_one_stable_code: bool,
+    title_storage_connected: bool,
 }
 
 #[derive(Serialize)]
@@ -295,6 +311,8 @@ struct InstallationGates {
     all_dialogue_pointers_planned: bool,
     all_dialogue_page_code_assignments_found: bool,
     all_dialogue_page_worksets_packed: bool,
+    all_chapter_titles_encoded_with_resident_codes: bool,
+    all_chapter_title_storage_writes_planned: bool,
     static_prebuilt_dialogue_page_pool_fits: bool,
     dialogue_runtime_composition_planned: bool,
     cross_domain_consumer_writes_planned: bool,
@@ -375,7 +393,14 @@ pub(crate) fn plan_full_translation_installation(
     let dynamic_input_producers = inspect_dynamic_input_producers(&rom)?;
     let dynamic_string_producers_bound =
         dynamic_input_producers.every_record_selector_route_bound();
-    let codebook = plan_glyph_workset_page_upper_bound(&dynamic_inputs.augmented_worksets)?;
+    let chapter_intro_residency = plan_chapter_intro_residency(
+        &rom,
+        &display,
+        &chapter_titles,
+        &dynamic_inputs.augmented_worksets,
+    )?;
+    let codebook =
+        plan_glyph_workset_page_upper_bound(&chapter_intro_residency.augmented_worksets)?;
     let dynamic_remap = plan_dynamic_string_remap(&dynamic_inputs, &codebook)?;
     ensure!(
         codebook.workset_count == display.page_worksets.len()
@@ -400,10 +425,8 @@ pub(crate) fn plan_full_translation_installation(
     )?;
     // 전이 미러를 함께 내던 인코딩은 이중 진입과 함께 폐기했다. 정규 레코드의
     // 원천 소유 구간과 포인터만 낸다. 의사결정 59번을 따른다.
-    let encoded_display = dialogue.encoded_by_page_groups(
-        &codebook.workset_page_indices,
-        &codebook.page_assignments,
-    )?;
+    let encoded_display = dialogue
+        .encoded_by_page_groups(&codebook.workset_page_indices, &codebook.page_assignments)?;
     let source_owned_storage_byte_count = baseline_encoded
         .regions
         .iter()
@@ -445,7 +468,8 @@ pub(crate) fn plan_full_translation_installation(
     let identity_offset = runtime_material.section_offset("runtime_identity")?;
     let page = |offset: usize| -> Result<u8> {
         Ok(MAIN_DIALOGUE_MATERIAL_FIRST_PAGE
-            + u8::try_from(offset / MMC3_PAGE_BYTE_COUNT).context("material page index overflow")?)
+            + u8::try_from(offset / MMC3_PAGE_BYTE_COUNT)
+                .context("material page index overflow")?)
     };
     let window = |offset: usize| -> Result<u16> {
         u16::try_from(0x8000 + offset % MMC3_PAGE_BYTE_COUNT)
@@ -506,13 +530,15 @@ pub(crate) fn plan_full_translation_installation(
         &page_capacity,
         runtime_material.material.len(),
     )?;
-    let (installed_image, integrated_write_set) = plan_integrated_write_set(IntegratedWriteSetInputs {
-        candidate: &current_candidate,
-        encoded_dialogue: &encoded_display,
-        dialogue_runtime_material: &runtime_material.material,
-        dialogue_runtime_code: &dialogue_runtime_code,
-        required_domains: &REQUIRED_DOMAINS,
-    })?;
+    let (installed_image, integrated_write_set) =
+        plan_integrated_write_set(IntegratedWriteSetInputs {
+            candidate: &current_candidate,
+            encoded_dialogue: &encoded_display,
+            dialogue_runtime_material: &runtime_material.material,
+            dialogue_runtime_code: &dialogue_runtime_code,
+            encoded_chapter_titles: &chapter_intro_residency.encoded_titles,
+            required_domains: &REQUIRED_DOMAINS,
+        })?;
     let translation_input_complete = dialogue_validation.translation_input_complete;
     let review_complete = dialogue_validation.review_complete
         && fixed.review_complete
@@ -527,7 +553,7 @@ pub(crate) fn plan_full_translation_installation(
         && locations.review_complete
         && translation_input_complete;
     let next_gate = if translation_input_complete && runtime_state_storage.selection_complete() {
-        "replan main-dialogue storage from the canonical records alone, now that the transition-mirror plan is retired, then emit the shared dialogue runtime and its producer, NMI-consumer, selector, and dynamic-remap hooks; reject any implementation that does not cold-initialize the 0x07F0..0x07F4 shared contract before use, with the 0x07F5..0x07F8 transport cursor owned by the consumer alone, and do not emit or run a partial ROM"
+        "cold-boot the exact emitted probe through chapter one and verify the resident Korean title, original EA marker, readable dialogue body, map, window, and portrait on the first presented ready frame before advancing to the chapter-seven multi-page route"
     } else if translation_input_complete {
         "close the exact volatile runtime-state storage selection against source access, queue, save/load, and battle lifetimes; do not emit or run a partial ROM"
     } else {
@@ -535,7 +561,7 @@ pub(crate) fn plan_full_translation_installation(
     };
 
     let report = FullTranslationInstallReport {
-        schema: 9,
+        schema: 10,
         source_sha1: EXPECTED_SOURCE_SHA1,
         strategy: "install all remaining translation domains in one cumulative candidate, run complete static gates, then run consumer-path dynamic regression on that same ROM",
         required_domain_count: REQUIRED_DOMAIN_COUNT,
@@ -575,6 +601,18 @@ pub(crate) fn plan_full_translation_installation(
             canonical_records_connected: true,
             page_local_bundle_encoding_connected: true,
             glyph_characters_emitted: false,
+        },
+        chapter_intro_residency: ChapterIntroResidency {
+            chapter_context_count: chapter_intro_residency.chapter_context_count,
+            resident_workset_count: chapter_intro_residency.resident_workset_count,
+            title_glyph_count: chapter_intro_residency.title_glyph_count,
+            fixed_code_count: chapter_intro_residency.fixed_code_count,
+            encoded_title_count: chapter_intro_residency.encoded_titles.len(),
+            maximum_augmented_workset_slot_demand: chapter_intro_residency
+                .maximum_augmented_workset_slot_demand,
+            fixed_assignment_sha1: chapter_intro_residency.fixed_assignment_sha1.clone(),
+            every_title_glyph_has_one_stable_code: true,
+            title_storage_connected: true,
         },
         dialogue_page_pool: DialoguePagePool {
             current_candidate_sha1: page_capacity.current_candidate_sha1,
@@ -717,6 +755,8 @@ pub(crate) fn plan_full_translation_installation(
             all_dialogue_pointers_planned: true,
             all_dialogue_page_code_assignments_found: true,
             all_dialogue_page_worksets_packed: true,
+            all_chapter_titles_encoded_with_resident_codes: true,
+            all_chapter_title_storage_writes_planned: true,
             static_prebuilt_dialogue_page_pool_fits: codebook.page_assignments.len()
                 <= page_capacity.available_page_count,
             dialogue_runtime_composition_planned: true,
@@ -743,8 +783,7 @@ pub(crate) fn plan_full_translation_installation(
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
         }
-        fs::write(path, &installed_image)
-            .with_context(|| format!("write {}", path.display()))?;
+        fs::write(path, &installed_image).with_context(|| format!("write {}", path.display()))?;
     }
 
     Ok(FullTranslationInstallSummary {
