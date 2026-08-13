@@ -71,7 +71,7 @@ pub(super) struct DialogueRuntimeControlFlowPlan {
     nmi_consumer: NmiConsumer,
     font_page_builder: FontPageBuilder,
     selector_consumer: SelectorConsumer,
-    dynamic_text_projection: DynamicTextProjection,
+    dynamic_text_consumption: DynamicTextConsumption,
     runtime_state: RuntimeStateStorage,
     superseded_sample_runtime: SupersededSampleRuntime,
     source_entry_points_bound: bool,
@@ -164,12 +164,14 @@ struct SelectorConsumer {
 }
 
 #[derive(Serialize)]
-struct DynamicTextProjection {
+struct DynamicTextConsumption {
+    strategy: &'static str,
     shared_glyph_reader_cpu_address_hex: &'static str,
+    canonical_codes_are_page_physical_codes: bool,
     page_group_remap_required: bool,
-    applies_only_to_ready_main_dialogue: bool,
+    shared_glyph_reader_changed_for_main_dialogue: bool,
     original_english_latin_and_digits_use_identity_mapping: bool,
-    hook_bound: bool,
+    complete: bool,
 }
 
 #[derive(Serialize)]
@@ -204,6 +206,7 @@ pub(super) struct RuntimeControlFlowInputs<'a> {
     /// 이번 빌드가 실제로 건 훅의 역할이다.
     pub(super) emitted_hook_roles: &'a [DialogueRuntimeHookRole],
     pub(super) chr_restore_callee_cycles: [(u16, u32); 2],
+    pub(super) canonical_dynamic_codes_are_page_physical_codes: bool,
 }
 
 fn classify_emitted_hook_roles(
@@ -230,6 +233,10 @@ fn classify_emitted_hook_roles(
 pub(super) fn plan_dialogue_runtime_control_flow(
     inputs: RuntimeControlFlowInputs<'_>,
 ) -> Result<DialogueRuntimeControlFlowPlan> {
+    ensure!(
+        inputs.canonical_dynamic_codes_are_page_physical_codes,
+        "dynamic dialogue strings still need an unimplemented consumer projection"
+    );
     let (emitted_hook_roles, missing_hook_roles) =
         classify_emitted_hook_roles(inputs.emitted_hook_roles)?;
     let [
@@ -521,12 +528,14 @@ pub(super) fn plan_dialogue_runtime_control_flow(
             native_fe_latch_remains_source_rom: true,
             inactive_falls_through_to_existing_consumers: true,
         },
-        dynamic_text_projection: DynamicTextProjection {
+        dynamic_text_consumption: DynamicTextConsumption {
+            strategy: "give each dynamic glyph one canonical physical code valid across every page that can consume it",
             shared_glyph_reader_cpu_address_hex: "0xE57F",
-            page_group_remap_required: true,
-            applies_only_to_ready_main_dialogue: true,
+            canonical_codes_are_page_physical_codes: true,
+            page_group_remap_required: false,
+            shared_glyph_reader_changed_for_main_dialogue: false,
             original_english_latin_and_digits_use_identity_mapping: true,
-            hook_bound: false,
+            complete: true,
         },
         runtime_state: RuntimeStateStorage {
             required_byte_count: 5,

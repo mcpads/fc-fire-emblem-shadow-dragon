@@ -13,7 +13,7 @@ use crate::{
     mapper165::battle_codebook_plan::GlyphWorksetPagePlan,
 };
 
-use super::dynamic_inputs::DynamicStringRemapPlan;
+use super::dynamic_inputs::DynamicStringPageCodePlan;
 
 /// MMC3 뱅크 한 장이다. 그룹 덩이는 이 경계를 걸치면 안 된다.
 const MMC3_PAGE_BYTE_COUNT: usize = 8 * 1024;
@@ -83,7 +83,7 @@ pub(super) fn plan_dialogue_runtime_composition(
     dialogue: &MainDialogueDisplayPlan,
     transition_graph: &MainDialogueGraphReport,
     codebook: &GlyphWorksetPagePlan,
-    dynamic_remap: &DynamicStringRemapPlan,
+    dynamic_page_codes: &DynamicStringPageCodePlan,
     source_font_page: &[u8],
     static_page_pack: &[u8],
 ) -> Result<DialogueRuntimeCompositionPlan> {
@@ -254,12 +254,12 @@ pub(super) fn plan_dialogue_runtime_composition(
     let resident_transitions = resident_group_transitions(
         transition_graph,
         &record_worksets,
-        &dynamic_remap.workset_page_selectors,
+        &dynamic_page_codes.workset_page_selectors,
     )?;
     let resident_group_transition_count = resident_transitions.len();
     let resident_group_change_count = resident_transitions
         .iter()
-        .filter(|transition| transition.from_selector & 0x7F != transition.to_selector & 0x7F)
+        .filter(|transition| transition.from_selector != transition.to_selector)
         .count();
     let resident_group_reuse_count = resident_group_transition_count - resident_group_change_count;
     let maximum_resident_group_overlay_tile_count = resident_transitions
@@ -315,7 +315,7 @@ pub(super) fn plan_dialogue_runtime_composition(
     let encoded_scan = encode_scan_material(
         dialogue,
         codebook,
-        dynamic_remap,
+        dynamic_page_codes,
         &glyph_atlas_indices,
         &record_worksets,
         atlas_cpu_base,
@@ -591,7 +591,7 @@ struct EncodedScanMaterial {
 fn encode_scan_material(
     dialogue: &MainDialogueDisplayPlan,
     codebook: &GlyphWorksetPagePlan,
-    dynamic_remap: &DynamicStringRemapPlan,
+    dynamic_page_codes: &DynamicStringPageCodePlan,
     glyph_atlas_indices: &BTreeMap<char, usize>,
     record_worksets: &BTreeMap<&str, Vec<usize>>,
     atlas_cpu_base: u16,
@@ -601,7 +601,7 @@ fn encode_scan_material(
     let mut selectors = Vec::with_capacity(dialogue.page_worksets.len());
     let mut directory = Vec::with_capacity((dialogue.record_ids.len() + 1) * 2);
     ensure!(
-        dynamic_remap.workset_page_selectors.len() == dialogue.page_worksets.len(),
+        dynamic_page_codes.workset_page_selectors.len() == dialogue.page_worksets.len(),
         "dialogue scan material lost page selectors"
     );
     for record_id in &dialogue.record_ids {
@@ -616,7 +616,7 @@ fn encode_scan_material(
         selectors.extend(
             indices
                 .iter()
-                .map(|index| dynamic_remap.workset_page_selectors[*index]),
+                .map(|index| dynamic_page_codes.workset_page_selectors[*index]),
         );
     }
     directory.extend_from_slice(

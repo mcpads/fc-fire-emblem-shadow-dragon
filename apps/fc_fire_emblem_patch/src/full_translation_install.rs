@@ -46,8 +46,8 @@ use current_candidate::{CurrentCandidateInputs, inspect_dialogue_page_pool_capac
 use dynamic_composition::plan_dialogue_runtime_composition;
 use dynamic_input_producers::{DynamicInputProducerPlan, inspect_dynamic_input_producers};
 use dynamic_inputs::{
-    DynamicProducerEncodingPlan, bind_dynamic_producer_encoding, plan_dynamic_dialogue_inputs,
-    plan_dynamic_string_remap,
+    DynamicProducerEncodingPlan, bind_dynamic_producer_encoding, bind_dynamic_string_page_codes,
+    plan_dynamic_dialogue_inputs,
 };
 use installation_layout::{InstallationLayoutPlan, plan_installation_layout};
 use integrated_write_set::{
@@ -278,17 +278,14 @@ struct DialogueRuntimeComposition {
     dynamic_string_domains_classified: bool,
     dynamic_augmented_worksets_fit: bool,
     canonical_dynamic_code_count: usize,
-    remapped_page_group_count: usize,
-    dynamic_remap_entry_count: usize,
-    non_identity_dynamic_remap_entry_count: usize,
-    dense_dynamic_remap_byte_count: usize,
-    sparse_dynamic_remap_byte_count: usize,
-    sparse_non_identity_dynamic_remap_byte_count: usize,
-    selected_dynamic_remap_byte_count: usize,
-    selected_dynamic_remap_strategy: &'static str,
-    dynamic_remap_material_sha1: String,
-    page_selector_remap_flag_sufficient: bool,
-    every_translated_dynamic_page_remappable: bool,
+    translated_dynamic_page_group_count: usize,
+    dynamic_page_code_identity_entry_count: usize,
+    dynamic_page_code_material_byte_count: usize,
+    dynamic_page_code_strategy: &'static str,
+    dynamic_page_code_material_sha1: String,
+    canonical_dynamic_codes_are_page_physical_codes: bool,
+    page_selectors_use_plain_group_indices: bool,
+    every_translated_dynamic_page_directly_consumable: bool,
     dynamic_string_producers_bound: bool,
     dynamic_string_producers: DynamicInputProducerPlan,
     dynamic_producer_encoding: DynamicProducerEncodingPlan,
@@ -299,9 +296,8 @@ struct DialogueRuntimeComposition {
     scan_material_sha1: String,
     scan_material_serialized: bool,
     atlas_and_scan_material_byte_count: usize,
-    atlas_scan_and_dynamic_remap_byte_count: usize,
     dialogue_runtime_identity: DialogueRuntimeIdentityPlan,
-    atlas_scan_remap_and_identity_byte_count: usize,
+    atlas_scan_and_identity_byte_count: usize,
     runtime_material: DialogueRuntimeMaterialPlan,
     runtime_page_scan_bound_to_control_flow: bool,
     current_battle_glyph_atlas_tile_count: usize,
@@ -441,7 +437,7 @@ pub(crate) fn plan_full_translation_installation(
         &chapter_intro_residency.augmented_worksets,
     )?;
     let codebook = plan_glyph_workset_page_upper_bound(&transition_residency.augmented_worksets)?;
-    let dynamic_remap = plan_dynamic_string_remap(&dynamic_inputs, &codebook)?;
+    let dynamic_page_codes = bind_dynamic_string_page_codes(&dynamic_inputs, &codebook)?;
     ensure!(
         codebook.workset_count == display.page_worksets.len()
             && codebook.workset_page_indices.len() == display.page_worksets.len(),
@@ -472,7 +468,7 @@ pub(crate) fn plan_full_translation_installation(
         &display,
         &dialogue_graph,
         &codebook,
-        &dynamic_remap,
+        &dynamic_page_codes,
         source_font_page,
         &font_page_pack,
     )?;
@@ -496,17 +492,14 @@ pub(crate) fn plan_full_translation_installation(
         planned_storage_byte_count <= source_owned_storage_byte_count,
         "complete dialogue encoded storage exceeds its source-owned regions"
     );
-    let atlas_scan_and_dynamic_remap_byte_count = composition.glyph_atlas.len()
-        + composition.scan_material.len()
-        + dynamic_remap.selected_dense_material.len();
+    let atlas_and_scan_byte_count = composition.glyph_atlas.len() + composition.scan_material.len();
     let runtime_identity = plan_dialogue_runtime_identity(rom.data(), &display)?;
-    let atlas_scan_remap_and_identity_byte_count = atlas_scan_and_dynamic_remap_byte_count
+    let atlas_scan_and_identity_byte_count = atlas_and_scan_byte_count
         .checked_add(runtime_identity.material.len())
         .context("dialogue runtime material length overflow")?;
     let mut runtime_material = plan_dialogue_runtime_material(RuntimeMaterialInputs {
         glyph_atlas: &composition.glyph_atlas,
         page_scan: &composition.scan_material,
-        dynamic_remap: &dynamic_remap.selected_dense_material,
         runtime_identity: &runtime_identity.material,
         dynamic_producer_encoding: &dynamic_producer_encoding.material,
     })?;
@@ -602,6 +595,8 @@ pub(crate) fn plan_full_translation_installation(
         runtime_code_emitted: true,
         emitted_hook_roles: &emitted_hook_roles,
         chr_restore_callee_cycles: dialogue_runtime_code.chr_restore_callee_cycles,
+        canonical_dynamic_codes_are_page_physical_codes: dynamic_page_codes
+            .canonical_codes_are_page_physical_codes,
     })?;
     let installation_layout = plan_installation_layout(
         &current_candidate,
@@ -798,20 +793,19 @@ pub(crate) fn plan_full_translation_installation(
             mixed_dynamic_domain_page_count: dynamic_inputs.mixed_dynamic_domain_page_count,
             dynamic_string_domains_classified: dynamic_inputs.every_dynamic_control_classified,
             dynamic_augmented_worksets_fit: dynamic_inputs.every_augmented_workset_fits,
-            canonical_dynamic_code_count: dynamic_remap.canonical_code_count,
-            remapped_page_group_count: dynamic_remap.remapped_page_group_count,
-            dynamic_remap_entry_count: dynamic_remap.remap_entry_count,
-            non_identity_dynamic_remap_entry_count: dynamic_remap.non_identity_remap_entry_count,
-            dense_dynamic_remap_byte_count: dynamic_remap.dense_remap_byte_count,
-            sparse_dynamic_remap_byte_count: dynamic_remap.sparse_remap_byte_count,
-            sparse_non_identity_dynamic_remap_byte_count: dynamic_remap
-                .sparse_non_identity_remap_byte_count,
-            selected_dynamic_remap_byte_count: dynamic_remap.selected_dense_remap_byte_count,
-            selected_dynamic_remap_strategy: dynamic_remap.selected_strategy,
-            dynamic_remap_material_sha1: dynamic_remap.remap_material_sha1,
-            page_selector_remap_flag_sufficient: dynamic_remap.page_selector_remap_flag_sufficient,
-            every_translated_dynamic_page_remappable: dynamic_remap
-                .every_translated_dynamic_page_remappable,
+            canonical_dynamic_code_count: dynamic_page_codes.canonical_code_count,
+            translated_dynamic_page_group_count: dynamic_page_codes
+                .translated_dynamic_page_group_count,
+            dynamic_page_code_identity_entry_count: dynamic_page_codes.identity_entry_count,
+            dynamic_page_code_material_byte_count: dynamic_page_codes.selected_material_byte_count,
+            dynamic_page_code_strategy: dynamic_page_codes.selected_strategy,
+            dynamic_page_code_material_sha1: dynamic_page_codes.material_sha1,
+            canonical_dynamic_codes_are_page_physical_codes: dynamic_page_codes
+                .canonical_codes_are_page_physical_codes,
+            page_selectors_use_plain_group_indices: dynamic_page_codes
+                .page_selectors_use_plain_group_indices,
+            every_translated_dynamic_page_directly_consumable: dynamic_page_codes
+                .every_translated_dynamic_page_directly_consumable,
             dynamic_string_producers_bound,
             dynamic_string_producers: dynamic_input_producers,
             dynamic_producer_encoding,
@@ -824,9 +818,8 @@ pub(crate) fn plan_full_translation_installation(
             scan_material_serialized: true,
             atlas_and_scan_material_byte_count: composition.glyph_atlas.len()
                 + composition.scan_material_byte_count,
-            atlas_scan_and_dynamic_remap_byte_count,
             dialogue_runtime_identity: runtime_identity,
-            atlas_scan_remap_and_identity_byte_count,
+            atlas_scan_and_identity_byte_count,
             runtime_material,
             runtime_page_scan_bound_to_control_flow: false,
             current_battle_glyph_atlas_tile_count: page_capacity.battle_glyph_atlas_tile_count,

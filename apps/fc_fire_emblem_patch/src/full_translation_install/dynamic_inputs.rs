@@ -8,14 +8,14 @@ use crate::{
     mapper165::battle_codebook_plan::GlyphWorkset, text_inventory::FixedTextPlannedEntry,
 };
 
+mod page_code_identity;
 mod producer_encoding;
-mod remap;
 
+pub(in crate::full_translation_install) use page_code_identity::{
+    DynamicStringPageCodePlan, bind_dynamic_string_page_codes,
+};
 pub(in crate::full_translation_install) use producer_encoding::{
     DynamicProducerEncodingPlan, bind_dynamic_producer_encoding,
-};
-pub(in crate::full_translation_install) use remap::{
-    DynamicStringRemapPlan, plan_dynamic_string_remap,
 };
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -68,16 +68,11 @@ pub(super) fn plan_dynamic_dialogue_inputs(
     let combined_dialogue_glyph_count = literal_dialogue_glyphs
         .union(&translated_dynamic_glyphs)
         .count();
-    let active_codes = active_hangul_codes();
+    let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
     ensure!(
         translated_dynamic_glyphs.len() <= active_codes.len(),
         "dynamic dialogue canonical domain exceeds one physical codebook"
     );
-    let canonical_dynamic_codes = translated_dynamic_glyphs
-        .iter()
-        .copied()
-        .zip(active_codes)
-        .collect::<BTreeMap<_, _>>();
 
     let mut augmented_worksets = Vec::with_capacity(dialogue.page_worksets.len());
     let mut dynamic_glyphs_by_workset = Vec::with_capacity(dialogue.page_worksets.len());
@@ -147,6 +142,43 @@ pub(super) fn plan_dynamic_dialogue_inputs(
         preserved_numeric_by_workset.push(has_preserved_numeric);
     }
 
+    // `{EC}` 생산 바이트를 페이지마다 다시 해석하지 않는다. 각 동적 글리프가
+    // 나타날 수 있는 모든 페이지의 보존 코드를 먼저 모은 뒤, 그 어느 것과도
+    // 충돌하지 않는 물리 코드를 하나씩 배정한다. 이후 페이지 packer가 이 배정을
+    // 고정 조건으로 받으므로 생산자가 쓴 canonical 바이트가 곧 소비 바이트다.
+    let mut forbidden_codes_by_glyph = translated_dynamic_glyphs
+        .iter()
+        .copied()
+        .map(|glyph| (glyph, BTreeSet::new()))
+        .collect::<BTreeMap<_, _>>();
+    for (workset, dynamic_glyphs) in augmented_worksets.iter().zip(&dynamic_glyphs_by_workset) {
+        for glyph in dynamic_glyphs {
+            forbidden_codes_by_glyph
+                .get_mut(glyph)
+                .expect("dynamic glyph belongs to the canonical domain")
+                .extend(workset.preserved_active_codes.iter().copied());
+        }
+    }
+    let canonical_dynamic_codes =
+        assign_canonical_dynamic_codes(&forbidden_codes_by_glyph, &active_codes)?;
+    for (workset, dynamic_glyphs) in augmented_worksets
+        .iter_mut()
+        .zip(&dynamic_glyphs_by_workset)
+    {
+        workset.fixed_glyph_codes = dynamic_glyphs
+            .iter()
+            .copied()
+            .map(|glyph| (glyph, canonical_dynamic_codes[&glyph]))
+            .collect();
+        ensure!(
+            workset
+                .fixed_glyph_codes
+                .values()
+                .all(|code| !workset.preserved_active_codes.contains(code)),
+            "dynamic dialogue canonical code collides with a preserved page code"
+        );
+    }
+
     let dynamic_control_count = dialogue
         .page_worksets
         .iter()
@@ -182,6 +214,70 @@ pub(super) fn plan_dynamic_dialogue_inputs(
         every_dynamic_control_classified: true,
         every_augmented_workset_fits,
     })
+}
+
+fn assign_canonical_dynamic_codes(
+    forbidden_codes_by_glyph: &BTreeMap<char, BTreeSet<u8>>,
+    active_codes: &BTreeSet<u8>,
+) -> Result<BTreeMap<char, u8>> {
+    let candidates = forbidden_codes_by_glyph
+        .iter()
+        .map(|(glyph, forbidden)| {
+            let allowed = active_codes
+                .difference(forbidden)
+                .copied()
+                .collect::<BTreeSet<_>>();
+            ensure!(
+                !allowed.is_empty(),
+                "dynamic dialogue glyph {glyph:?} has no code valid across its pages"
+            );
+            Ok((*glyph, allowed))
+        })
+        .collect::<Result<BTreeMap<_, _>>>()?;
+    let mut glyph_order = candidates.keys().copied().collect::<Vec<_>>();
+    glyph_order.sort_by_key(|glyph| (candidates[glyph].len(), *glyph));
+
+    let mut glyph_by_code = BTreeMap::<u8, char>::new();
+    for glyph in glyph_order {
+        let mut visited_codes = BTreeSet::new();
+        ensure!(
+            assign_dynamic_glyph_code(glyph, &candidates, &mut glyph_by_code, &mut visited_codes),
+            "dynamic dialogue glyphs have no injective code assignment across all pages"
+        );
+    }
+    let assignments = glyph_by_code
+        .into_iter()
+        .map(|(code, glyph)| (glyph, code))
+        .collect::<BTreeMap<_, _>>();
+    ensure!(
+        assignments.len() == candidates.len()
+            && assignments
+                .iter()
+                .all(|(glyph, code)| candidates[glyph].contains(code)),
+        "dynamic dialogue matching returned an invalid canonical assignment"
+    );
+    Ok(assignments)
+}
+
+fn assign_dynamic_glyph_code(
+    glyph: char,
+    candidates: &BTreeMap<char, BTreeSet<u8>>,
+    glyph_by_code: &mut BTreeMap<u8, char>,
+    visited_codes: &mut BTreeSet<u8>,
+) -> bool {
+    for code in &candidates[&glyph] {
+        if !visited_codes.insert(*code) {
+            continue;
+        }
+        let displaced = glyph_by_code.get(code).copied();
+        if displaced.is_none_or(|other| {
+            assign_dynamic_glyph_code(other, candidates, glyph_by_code, visited_codes)
+        }) {
+            glyph_by_code.insert(*code, glyph);
+            return true;
+        }
+    }
+    false
 }
 
 struct DomainGlyphs {
@@ -415,5 +511,26 @@ mod tests {
                 + 53
                 + 52
         );
+    }
+
+    #[test]
+    fn canonical_matching_reserves_the_scarce_code_for_the_constrained_glyph() {
+        let active = BTreeSet::from([1, 2]);
+        let forbidden = BTreeMap::from([('가', BTreeSet::new()), ('나', BTreeSet::from([2]))]);
+
+        let assignments = assign_canonical_dynamic_codes(&forbidden, &active).unwrap();
+
+        assert_eq!(assignments[&'나'], 1);
+        assert_eq!(assignments[&'가'], 2);
+    }
+
+    #[test]
+    fn canonical_matching_fails_when_two_glyphs_have_only_one_code() {
+        let active = BTreeSet::from([1]);
+        let forbidden = BTreeMap::from([('가', BTreeSet::new()), ('나', BTreeSet::new())]);
+
+        let error = assign_canonical_dynamic_codes(&forbidden, &active).unwrap_err();
+
+        assert!(error.to_string().contains("no injective code assignment"));
     }
 }

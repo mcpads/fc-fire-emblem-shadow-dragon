@@ -25,10 +25,10 @@ pub(super) const RUNTIME_CODE_MMC3_PAGE: u8 =
 const MMC3_PAGE_BYTE_COUNT: usize = 8 * 1024;
 const RUNTIME_MATERIAL_CAPACITY: usize = RUNTIME_MATERIAL_PAGE_COUNT * MMC3_PAGE_BYTE_COUNT;
 const CONTENT_EMITTED_FLAG: u8 = 1;
-const RUNTIME_CODE_SECTION_ID: u8 = 6;
-/// 자료 구역 다섯과 실행 코드 예약 하나다. 용기 안에서 payload가 시작하는 자리를
+const RUNTIME_CODE_SECTION_ID: u8 = 5;
+/// 자료 구역 넷과 실행 코드 예약 하나다. 용기 안에서 payload가 시작하는 자리를
 /// 계산할 때 쓴다.
-pub(super) const MATERIAL_SECTION_COUNT: usize = 6;
+pub(super) const MATERIAL_SECTION_COUNT: usize = 5;
 /// 용기의 마지막 페이지가 걸리는 CPU 창의 시작이다.
 const RUNTIME_CODE_WINDOW_START: usize = 0xA000;
 /// 실행 코드가 받는 자리다. 마지막 페이지 전체이므로 자료 크기와 무관한 상수다.
@@ -37,7 +37,6 @@ const MINIMUM_RUNTIME_CODE_RESERVATION: usize = MMC3_PAGE_BYTE_COUNT;
 pub(super) struct RuntimeMaterialInputs<'a> {
     pub(super) glyph_atlas: &'a [u8],
     pub(super) page_scan: &'a [u8],
-    pub(super) dynamic_remap: &'a [u8],
     pub(super) runtime_identity: &'a [u8],
     pub(super) dynamic_producer_encoding: &'a [u8],
 }
@@ -92,16 +91,11 @@ pub(super) fn plan_dialogue_runtime_material(
         },
         MaterialSectionInput {
             id: 3,
-            role: "dynamic_remap",
-            content: Some(inputs.dynamic_remap),
-        },
-        MaterialSectionInput {
-            id: 4,
             role: "runtime_identity",
             content: Some(inputs.runtime_identity),
         },
         MaterialSectionInput {
-            id: 5,
+            id: 4,
             role: "dynamic_producer_encoding",
             content: Some(inputs.dynamic_producer_encoding),
         },

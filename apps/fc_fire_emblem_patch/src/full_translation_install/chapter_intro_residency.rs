@@ -41,12 +41,6 @@ pub(super) fn plan_chapter_intro_residency(
         display.page_worksets.len() == dialogue_worksets.len(),
         "chapter-intro residency lost dialogue page worksets"
     );
-    ensure!(
-        dialogue_worksets
-            .iter()
-            .all(|workset| workset.fixed_glyph_codes.is_empty()),
-        "chapter-intro residency must be the first fixed-code producer"
-    );
     let contexts = bind_chapter_intro_lifetime_contexts(rom)?;
     ensure!(
         contexts.len() == CHAPTER_COUNT
@@ -65,6 +59,7 @@ pub(super) fn plan_chapter_intro_residency(
 
     let mut title_glyphs_by_workset = vec![BTreeSet::new(); dialogue_worksets.len()];
     let mut forbidden_codes_by_glyph = BTreeMap::<char, BTreeSet<u8>>::new();
+    let mut preassigned_codes_by_glyph = BTreeMap::<char, BTreeSet<u8>>::new();
     let mut resident_workset_indices = BTreeSet::new();
     for context in &contexts {
         let title = chapter_titles.entry(context.chapter_index)?;
@@ -95,13 +90,32 @@ pub(super) fn plan_chapter_intro_residency(
                             .iter()
                             .copied(),
                     );
+                    for (fixed_glyph, fixed_code) in
+                        &dialogue_worksets[*workset_index].fixed_glyph_codes
+                    {
+                        if fixed_glyph == glyph {
+                            preassigned_codes_by_glyph
+                                .entry(*glyph)
+                                .or_default()
+                                .insert(*fixed_code);
+                        } else {
+                            forbidden_codes_by_glyph
+                                .entry(*glyph)
+                                .or_default()
+                                .insert(*fixed_code);
+                        }
+                    }
                 }
             }
         }
     }
 
     let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
-    let title_glyph_codes = assign_title_glyph_codes(&forbidden_codes_by_glyph, &active_codes)?;
+    let title_glyph_codes = assign_title_glyph_codes(
+        &forbidden_codes_by_glyph,
+        &preassigned_codes_by_glyph,
+        &active_codes,
+    )?;
     let mut augmented_worksets = dialogue_worksets.to_vec();
     let mut maximum_augmented_workset_slot_demand = 0;
     for (workset, title_glyphs) in augmented_worksets.iter_mut().zip(&title_glyphs_by_workset) {
@@ -112,10 +126,12 @@ pub(super) fn plan_chapter_intro_residency(
                 "chapter-title glyph {glyph:?} uses a code preserved by its dialogue page"
             );
             workset.target_glyphs.insert(*glyph);
-            ensure!(
-                workset.fixed_glyph_codes.insert(*glyph, code).is_none(),
-                "chapter-title fixed code was installed twice"
-            );
+            if let Some(existing) = workset.fixed_glyph_codes.insert(*glyph, code) {
+                ensure!(
+                    existing == code,
+                    "chapter-title glyph {glyph:?} changes its preassigned fixed code"
+                );
+            }
         }
         maximum_augmented_workset_slot_demand = maximum_augmented_workset_slot_demand
             .max(workset.target_glyphs.len() + workset.preserved_active_codes.len());
@@ -155,6 +171,7 @@ pub(super) fn plan_chapter_intro_residency(
 
 fn assign_title_glyph_codes(
     forbidden_codes_by_glyph: &BTreeMap<char, BTreeSet<u8>>,
+    preassigned_codes_by_glyph: &BTreeMap<char, BTreeSet<u8>>,
     active_codes: &BTreeSet<u8>,
 ) -> Result<BTreeMap<char, u8>> {
     ensure!(
@@ -164,10 +181,24 @@ fn assign_title_glyph_codes(
     let candidates = forbidden_codes_by_glyph
         .iter()
         .map(|(glyph, forbidden)| {
-            let allowed = active_codes
-                .difference(forbidden)
-                .copied()
-                .collect::<BTreeSet<_>>();
+            let preassigned = preassigned_codes_by_glyph.get(glyph);
+            ensure!(
+                preassigned.is_none_or(|codes| codes.len() == 1),
+                "chapter-title glyph {glyph:?} has conflicting preassigned codes"
+            );
+            let allowed = match preassigned.and_then(|codes| codes.first().copied()) {
+                Some(code) => {
+                    ensure!(
+                        active_codes.contains(&code) && !forbidden.contains(&code),
+                        "chapter-title glyph {glyph:?} cannot keep preassigned code {code:02X}"
+                    );
+                    BTreeSet::from([code])
+                }
+                None => active_codes
+                    .difference(forbidden)
+                    .copied()
+                    .collect::<BTreeSet<_>>(),
+            };
             ensure!(
                 !allowed.is_empty(),
                 "chapter-title glyph {glyph:?} has no code valid across its resident pages"
@@ -239,7 +270,7 @@ mod tests {
         let active = BTreeSet::from([1, 2]);
         let forbidden = BTreeMap::from([('가', BTreeSet::new()), ('나', BTreeSet::from([2]))]);
 
-        let assignments = assign_title_glyph_codes(&forbidden, &active).unwrap();
+        let assignments = assign_title_glyph_codes(&forbidden, &BTreeMap::new(), &active).unwrap();
 
         assert_eq!(assignments[&'나'], 1);
         assert_eq!(assignments[&'가'], 2);
@@ -250,8 +281,20 @@ mod tests {
         let active = BTreeSet::from([1]);
         let forbidden = BTreeMap::from([('가', BTreeSet::new()), ('나', BTreeSet::new())]);
 
-        let error = assign_title_glyph_codes(&forbidden, &active).unwrap_err();
+        let error = assign_title_glyph_codes(&forbidden, &BTreeMap::new(), &active).unwrap_err();
 
         assert!(error.to_string().contains("no injective code assignment"));
+    }
+
+    #[test]
+    fn a_preassigned_dialogue_glyph_keeps_its_code_in_the_chapter_title() {
+        let active = BTreeSet::from([1, 2]);
+        let forbidden = BTreeMap::from([('가', BTreeSet::new()), ('나', BTreeSet::new())]);
+        let preassigned = BTreeMap::from([('가', BTreeSet::from([2]))]);
+
+        let assignments = assign_title_glyph_codes(&forbidden, &preassigned, &active).unwrap();
+
+        assert_eq!(assignments[&'가'], 2);
+        assert_eq!(assignments[&'나'], 1);
     }
 }
