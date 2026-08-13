@@ -5,8 +5,8 @@ use crate::sha1_hex;
 
 const MATERIAL_MAGIC: &[u8; 4] = b"FDRM";
 const MATERIAL_SCHEMA: u8 = 1;
-const MATERIAL_HEADER_BYTE_COUNT: usize = 16;
-const SECTION_DESCRIPTOR_BYTE_COUNT: usize = 6;
+pub(super) const MATERIAL_HEADER_BYTE_COUNT: usize = 16;
+pub(super) const SECTION_DESCRIPTOR_BYTE_COUNT: usize = 6;
 /// 용기가 차지하는 MMC3 8 KiB 페이지 수다.
 ///
 /// 셋이었다가 넷이 됐다. 그룹별 타일 목록이 스캔 재료에 들어오면서 세 페이지로는
@@ -22,6 +22,9 @@ const MMC3_PAGE_BYTE_COUNT: usize = 8 * 1024;
 const RUNTIME_MATERIAL_CAPACITY: usize = RUNTIME_MATERIAL_PAGE_COUNT * MMC3_PAGE_BYTE_COUNT;
 const CONTENT_EMITTED_FLAG: u8 = 1;
 const RUNTIME_CODE_SECTION_ID: u8 = 5;
+/// 자료 구역 넷과 실행 코드 예약 하나다. 용기 안에서 payload가 시작하는 자리를
+/// 계산할 때 쓴다.
+pub(super) const MATERIAL_SECTION_COUNT: usize = 5;
 /// 용기의 마지막 페이지가 걸리는 CPU 창의 시작이다.
 const RUNTIME_CODE_WINDOW_START: usize = 0xA000;
 /// 세 페이지 용기 안에서 실행 코드에 남겨 두기로 한 하한이다. 아직 코드를 쓰지 않아

@@ -54,7 +54,7 @@ use runtime_material::{
     DialogueRuntimeMaterialPlan, RuntimeMaterialInputs, plan_dialogue_runtime_material,
 };
 use runtime_state_storage::{DialogueRuntimeStateStoragePlan, plan_dialogue_runtime_state_storage};
-pub(crate) use transport_probe::{DialogueTransportProbePlan, build_dialogue_transport_probe};
+pub(crate) use transport_probe::build_dialogue_transport_probe;
 
 /// 대사 런타임 재료 용기가 시작하는 MMC3 8 KiB 페이지다.
 const MAIN_DIALOGUE_MATERIAL_FIRST_PAGE: u8 = 0x2C;
@@ -195,9 +195,9 @@ struct DialogueRuntimeComposition {
     four_by_four_block_index_bit_count: usize,
     four_by_four_block_atlas_byte_count: usize,
     static_page_group_count: usize,
-    group_tile_list_directory_byte_count: usize,
-    group_tile_list_byte_count: usize,
-    group_tile_list_directory_offset: usize,
+    group_block_directory_byte_count: usize,
+    group_block_byte_count: usize,
+    group_block_directory_offset: usize,
     static_page_group_overlay_reference_count: usize,
     maximum_static_page_group_overlay_tile_count: usize,
     visible_page_recipe_count: usize,
@@ -571,9 +571,9 @@ pub(crate) fn plan_full_translation_installation(
             glyph_atlas_prg_8k_page_count: composition.glyph_atlas.len().div_ceil(8 * 1024),
             glyph_atlas_sha1: sha1_hex(&composition.glyph_atlas),
             generated_high_bitplane_is_zero: true,
-            group_tile_list_directory_byte_count: composition.group_tile_list_directory_byte_count,
-            group_tile_list_byte_count: composition.group_tile_list_byte_count,
-            group_tile_list_directory_offset: composition.group_tile_list_directory_offset,
+            group_block_directory_byte_count: composition.group_block_directory_byte_count,
+            group_block_byte_count: composition.group_block_byte_count,
+            group_block_directory_offset: composition.group_block_directory_offset,
             four_by_four_block_count: composition.four_by_four_block_count,
             four_by_four_block_index_bit_count: composition.four_by_four_block_index_bit_count,
             four_by_four_block_atlas_byte_count: composition.four_by_four_block_atlas_byte_count,

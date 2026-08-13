@@ -2,6 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, ensure};
 
+use super::runtime_material::{
+    MATERIAL_HEADER_BYTE_COUNT, MATERIAL_SECTION_COUNT, SECTION_DESCRIPTOR_BYTE_COUNT,
+};
 use crate::{
     dialogue_assets::MainDialogueDisplayPlan,
     font::{load_dalmoori, rasterize_glyph},
@@ -10,6 +13,9 @@ use crate::{
 };
 
 use super::dynamic_inputs::DynamicStringRemapPlan;
+
+/// MMC3 뱅크 한 장이다. 그룹 덩이는 이 경계를 걸치면 안 된다.
+const MMC3_PAGE_BYTE_COUNT: usize = 8 * 1024;
 
 pub(super) struct DialogueRuntimeCompositionPlan {
     pub(super) glyph_atlas: Vec<u8>,
@@ -40,12 +46,12 @@ pub(super) struct DialogueRuntimeCompositionPlan {
     pub(super) direct_delta_recipe_byte_count: usize,
     pub(super) bitpacked_delta_recipe_byte_count: usize,
     pub(super) dense_group_lookup_byte_count: usize,
-    /// 그룹마다 «이 그룹이 실제로 쓰는 코드» 목록의 시작 오프셋 표다.
-    pub(super) group_tile_list_directory_byte_count: usize,
-    /// 그 목록들의 총 길이다. 코드 한 바이트씩이다.
-    pub(super) group_tile_list_byte_count: usize,
-    /// 스캔 재료 안에서 목록 오프셋 표가 시작하는 자리다.
-    pub(super) group_tile_list_directory_offset: usize,
+    /// 그룹 덩이 오프셋 표의 길이다. 그룹마다 2바이트다.
+    pub(super) group_block_directory_byte_count: usize,
+    /// 그룹 덩이 전체의 길이다. 페이지 정렬 여백을 포함한다.
+    pub(super) group_block_byte_count: usize,
+    /// 스캔 재료 안에서 그룹 덩이 오프셋 표가 시작하는 자리다.
+    pub(super) group_block_directory_offset: usize,
     pub(super) record_page_group_selector_byte_count: usize,
     pub(super) record_selector_directory_byte_count: usize,
     pub(super) scan_material_byte_count: usize,
@@ -254,29 +260,25 @@ pub(super) fn plan_dialogue_runtime_composition(
     let dense_group_lookup_byte_count = codebook.page_assignments.len() * (256 + 64);
     let record_page_group_selector_byte_count = dialogue.page_worksets.len();
     let record_selector_directory_byte_count = (record_worksets.len() + 1) * 2;
-    let group_tile_list_directory_byte_count = (codebook.page_assignments.len() + 1) * 2;
-    let group_tile_list_byte_count = codebook
-        .page_assignments
-        .iter()
-        .map(|assignments| assignments.len())
-        .sum::<usize>();
-    let group_tile_list_directory_offset = dense_group_lookup_byte_count
-        + record_page_group_selector_byte_count
-        + record_selector_directory_byte_count;
-    let scan_material_byte_count = group_tile_list_directory_offset
-        + group_tile_list_directory_byte_count
-        + group_tile_list_byte_count;
+    // 스캔 재료는 용기 안에서 헤더·구역 표·글리프 atlas 뒤에 놓인다. 그룹 덩이의
+    // 페이지 정렬은 이 절대 위치를 알아야 정해진다.
+    let scan_section_container_offset = MATERIAL_HEADER_BYTE_COUNT
+        + MATERIAL_SECTION_COUNT * SECTION_DESCRIPTOR_BYTE_COUNT
+        + glyph_atlas.len();
+    let group_block_directory_byte_count = codebook.page_assignments.len() * 2;
+    let group_block_directory_offset =
+        record_page_group_selector_byte_count + record_selector_directory_byte_count;
     let scan_material = encode_scan_material(
         dialogue,
         codebook,
         dynamic_remap,
         &glyph_atlas_indices,
         &record_worksets,
+        scan_section_container_offset,
     )?;
-    ensure!(
-        scan_material.len() == scan_material_byte_count,
-        "dialogue scan material measurement differs from its encoding"
-    );
+    let scan_material_byte_count = scan_material.len();
+    let group_block_byte_count =
+        scan_material_byte_count - group_block_directory_offset - group_block_directory_byte_count;
     let dynamic_string_control_count = dialogue
         .page_worksets
         .iter()
@@ -323,9 +325,9 @@ pub(super) fn plan_dialogue_runtime_composition(
         direct_delta_recipe_byte_count,
         bitpacked_delta_recipe_byte_count,
         dense_group_lookup_byte_count,
-        group_tile_list_directory_byte_count,
-        group_tile_list_byte_count,
-        group_tile_list_directory_offset,
+        group_block_directory_byte_count,
+        group_block_byte_count,
+        group_block_directory_offset,
         record_page_group_selector_byte_count,
         record_selector_directory_byte_count,
         scan_material_byte_count,
@@ -455,8 +457,9 @@ fn encode_scan_material(
     dynamic_remap: &DynamicStringRemapPlan,
     glyph_atlas_indices: &BTreeMap<char, usize>,
     record_worksets: &BTreeMap<&str, Vec<usize>>,
+    section_container_offset: usize,
 ) -> Result<Vec<u8>> {
-    let mut encoded = encode_dense_group_lookups(&codebook.page_assignments, glyph_atlas_indices)?;
+    let mut encoded = Vec::new();
     let mut selectors = Vec::with_capacity(dialogue.page_worksets.len());
     let mut directory = Vec::with_capacity((dialogue.record_ids.len() + 1) * 2);
     ensure!(
@@ -489,33 +492,70 @@ fn encode_scan_material(
     );
     encoded.extend_from_slice(&selectors);
     encoded.extend_from_slice(&directory);
-    let (group_directory, group_lists) = encode_group_tile_lists(&codebook.page_assignments);
+    let group_directory_length = codebook.page_assignments.len() * 2;
+    let (group_directory, group_blocks) = encode_group_blocks(
+        &codebook.page_assignments,
+        glyph_atlas_indices,
+        section_container_offset + encoded.len() + group_directory_length,
+    )?;
+    ensure!(
+        group_directory.len() == group_directory_length,
+        "page group directory length changed"
+    );
     encoded.extend_from_slice(&group_directory);
-    encoded.extend_from_slice(&group_lists);
+    encoded.extend_from_slice(&group_blocks);
     Ok(encoded)
 }
 
-/// 그룹마다 실제로 쓰는 코드 목록을 만든다.
+/// 그룹 하나가 런타임에 필요한 전부를 한 덩이로 묶는다.
 ///
-/// 런타임이 조밀 조회표의 클래스 비트를 훑어 존재 여부를 가리면 프레임마다 코드
-/// 256개를 가변 시프트로 풀어야 한다. 그 비용은 타일 수에 비례하지 않아 예산에
-/// 들어가지 않는다. 그래서 빌드가 미리 세운다.
+/// 덩이는 조밀 조회표 320바이트 뒤에 «이 그룹이 쓰는 코드» 목록이 붙은 모양이다.
+/// 둘을 붙여 두는 이유는 소비자가 한 타일을 옮길 때 둘 다 읽기 때문이다. 재료의
+/// 다른 구역에 흩어져 있으면 타일마다 MMC3 페이지를 두 번이 아니라 세 번 바꿔야
+/// 한다.
 ///
-/// atlas 색인은 담지 않는다. 기존 조밀 조회표가 코드로 곧바로 주기 때문이고,
-/// 색인을 함께 담으면 세 배가 되어 용기에 들어가지 않는다.
-fn encode_group_tile_lists(page_assignments: &[BTreeMap<char, u8>]) -> (Vec<u8>, Vec<u8>) {
-    let mut directory = Vec::with_capacity((page_assignments.len() + 1) * 2);
-    let mut lists = Vec::new();
-    for assignments in page_assignments {
-        directory.extend_from_slice(&(lists.len() as u16).to_le_bytes());
-        // 코드 오름차순으로 담는다. 순서가 정해져 있어야 목록을 다시 만들었을 때
-        // 같은 바이트가 나오고, 런타임 커서가 중간에서 이어받을 수 있다.
+/// 덩이가 8 KiB 페이지 경계를 걸치면 같은 문제가 생기므로, 걸칠 자리에서는 다음
+/// 페이지로 밀어 정렬한다. 버리는 바이트는 경계마다 최대 한 덩이 크기다.
+///
+/// 런타임이 존재 여부를 스스로 가리지 않는 것이 목록을 두는 이유다. 클래스 비트는
+/// 코드 4개당 1바이트에 2비트씩 들어 있어, 훑으려면 프레임마다 코드 256개를 가변
+/// 시프트로 풀어야 한다. 그 비용은 타일 수에 비례하지 않아 예산에 들어가지 않는다.
+fn encode_group_blocks(
+    page_assignments: &[BTreeMap<char, u8>],
+    glyph_atlas_indices: &BTreeMap<char, usize>,
+    section_container_offset: usize,
+) -> Result<(Vec<u8>, Vec<u8>)> {
+    let mut directory = Vec::with_capacity(page_assignments.len() * 2);
+    let mut blocks: Vec<u8> = Vec::new();
+    for (group_index, assignments) in page_assignments.iter().enumerate() {
+        let lookup = encode_dense_group_lookups(
+            std::slice::from_ref(assignments),
+            glyph_atlas_indices,
+        )?;
         let mut codes: Vec<u8> = assignments.values().copied().collect();
+        // 코드 오름차순이라야 다시 만들었을 때 같은 바이트가 나오고, 커서가 중간에서
+        // 이어받을 수 있다.
         codes.sort_unstable();
-        lists.extend_from_slice(&codes);
+        let block_length = lookup.len() + 1 + codes.len();
+        ensure!(
+            block_length <= MMC3_PAGE_BYTE_COUNT,
+            "page group {group_index} needs {block_length} bytes and cannot fit one MMC3 page"
+        );
+        let start = section_container_offset + blocks.len();
+        if start / MMC3_PAGE_BYTE_COUNT != (start + block_length - 1) / MMC3_PAGE_BYTE_COUNT {
+            let next_page = (start / MMC3_PAGE_BYTE_COUNT + 1) * MMC3_PAGE_BYTE_COUNT;
+            blocks.resize(blocks.len() + (next_page - start), 0xFF);
+        }
+        directory.extend_from_slice(
+            &u16::try_from(blocks.len())
+                .context("page group block offset exceeds a 16-bit offset")?
+                .to_le_bytes(),
+        );
+        blocks.extend_from_slice(&lookup);
+        blocks.push(u8::try_from(codes.len()).context("page group code count does not fit u8")?);
+        blocks.extend_from_slice(&codes);
     }
-    directory.extend_from_slice(&(lists.len() as u16).to_le_bytes());
-    (directory, lists)
+    Ok((directory, blocks))
 }
 
 fn encode_dense_group_lookups(
@@ -656,42 +696,47 @@ mod tests {
         assert_eq!(encoded[256] & 0b11, 0b11);
     }
 
-    /// 목록은 그 그룹이 쓰는 코드를 하나도 빠뜨리지 않고, 쓰지 않는 코드를 담지
+    /// 덩이는 그 그룹이 쓰는 코드를 하나도 빠뜨리지 않고, 쓰지 않는 코드를 담지
     /// 않아야 한다. 빠지면 그 글자가 CHR RAM에 안 올라가고, 남으면 원본 글꼴 타일을
     /// 덮는다. 둘 다 화면에 잘못된 글자를 낸다.
     #[test]
-    fn every_group_list_holds_exactly_the_codes_that_group_assigns() {
+    fn every_group_block_holds_exactly_the_codes_that_group_assigns() {
         let assignments = vec![
             BTreeMap::from([('가', 0x42u8), ('나', 0x10)]),
             BTreeMap::from([('다', 0x80u8)]),
         ];
+        let atlas = BTreeMap::from([('가', 0usize), ('나', 1), ('다', 2)]);
 
-        let (directory, lists) = encode_group_tile_lists(&assignments);
+        let (directory, blocks) = encode_group_blocks(&assignments, &atlas, 0).unwrap();
 
-        assert_eq!(directory.len(), (assignments.len() + 1) * 2);
+        assert_eq!(directory.len(), assignments.len() * 2);
         for (group, expected) in assignments.iter().enumerate() {
             let start = usize::from(u16::from_le_bytes([
                 directory[group * 2],
                 directory[group * 2 + 1],
             ]));
-            let end = usize::from(u16::from_le_bytes([
-                directory[group * 2 + 2],
-                directory[group * 2 + 3],
-            ]));
+            let count = usize::from(blocks[start + 320]);
+            let codes = &blocks[start + 321..start + 321 + count];
             let mut wanted: Vec<u8> = expected.values().copied().collect();
             wanted.sort_unstable();
-            assert_eq!(&lists[start..end], wanted.as_slice());
+
+            assert_eq!(codes, wanted.as_slice());
         }
     }
 
-    /// 오프셋 표의 마지막 항목이 전체 길이여야 마지막 그룹의 끝을 알 수 있다.
+    /// 소비자는 한 타일에 조회표와 목록을 함께 읽는다. 덩이가 페이지 경계를 걸치면
+    /// 그 사이에 뱅크를 한 번 더 바꿔야 하므로, 걸칠 자리에서는 다음 페이지로 민다.
     #[test]
-    fn the_group_directory_brackets_the_last_list() {
-        let assignments = vec![BTreeMap::from([('가', 1u8), ('나', 2u8)])];
+    fn a_block_that_would_straddle_a_page_boundary_moves_to_the_next_page() {
+        let assignments = vec![BTreeMap::from([('가', 1u8)])];
+        let atlas = BTreeMap::from([('가', 0usize)]);
+        // 덩이가 322바이트이므로 페이지 끝 100바이트 앞에서는 걸친다.
+        let section_offset = MMC3_PAGE_BYTE_COUNT - 100;
 
-        let (directory, lists) = encode_group_tile_lists(&assignments);
+        let (directory, blocks) = encode_group_blocks(&assignments, &atlas, section_offset).unwrap();
 
-        let end = usize::from(u16::from_le_bytes([directory[2], directory[3]]));
-        assert_eq!(end, lists.len());
+        let start = section_offset + usize::from(u16::from_le_bytes([directory[0], directory[1]]));
+        assert_eq!(start % MMC3_PAGE_BYTE_COUNT, 0);
+        assert!(blocks[..100].iter().all(|byte| *byte == 0xFF));
     }
 }
