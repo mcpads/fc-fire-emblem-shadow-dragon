@@ -314,6 +314,8 @@ enum Command {
     /// Plan every unfinished translation domain together before emitting one integrated ROM.
     PlanFullTranslationInstallation {
         source: PathBuf,
+        #[arg(long)]
+        transport_probe: Option<PathBuf>,
         #[arg(long, default_value = "private/dialogue/main-workspace.json")]
         main_dialogue_workspace: PathBuf,
         #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
@@ -1208,6 +1210,7 @@ fn main() -> Result<()> {
         }
         Command::PlanFullTranslationInstallation {
             source,
+            transport_probe,
             main_dialogue_workspace,
             fixed_text_workspace,
             unit_name_localization,
@@ -1238,6 +1241,7 @@ fn main() -> Result<()> {
                     current_candidate_path: &current_candidate,
                     current_build_report_path: &current_build_report,
                     report_path: &report,
+                    transport_probe_path: transport_probe.as_deref(),
                 },
             )?;
             println!("wrote {}", report.display());

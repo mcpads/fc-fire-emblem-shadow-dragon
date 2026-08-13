@@ -14,7 +14,6 @@ use anyhow::{Context, Result, ensure};
 
 use super::{RuntimeRoutine, next_address, transport::{REQUEST_STATE, STATE_READY}};
 use crate::{
-    mapper165::encode_chr_page_register,
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
     typed_source::decode_rp2a03_sequence,
@@ -24,8 +23,13 @@ use crate::{
 pub(in crate::full_translation_install) const SELECTOR_CHAIN_SITE: u16 = 0xFF40;
 /// 그 자리가 지금 넘기는 곳이다. selector는 통과할 때 여기로 그대로 넘긴다.
 pub(in crate::full_translation_install) const SELECTOR_CHAIN_FALLBACK: u16 = 0xF990;
-/// CHR RAM을 고르는 물리 페이지 번호다. 매퍼 165는 값 0이 보드의 CHR RAM이다.
-const CHR_RAM_PHYSICAL_PAGE: u8 = 0;
+/// CHR RAM을 고르는 뱅크 값이다. 매퍼 165는 값 0이 보드의 CHR RAM이고, CHR ROM의
+/// 물리 페이지 0은 `encode_chr_page_register`가 1로 인코딩해 이 값과 구분한다.
+/// 그러므로 여기서는 그 함수를 쓰지 않는다.
+const CHR_RAM_BANK_VALUE: u8 = 0;
+/// 매퍼 165가 4 KiB CHR 창 둘에 쓰는 MMC3 레지스터다. 전투 합성이 CHR RAM을 고를 때
+/// 쓰는 것과 같다. 하나만 쓰면 나머지 창이 CHR ROM을 계속 본다.
+const CHR_BANK_REGISTERS: [u8; 2] = [2, 4];
 
 /// `$FF40`: `JMP $F990`.
 const SELECTOR_CHAIN_CODE: [u8; 3] = [
@@ -67,18 +71,26 @@ pub(super) fn selector_hook_bytes(selector: u16) -> [u8; 3] {
     [0x4C, selector as u8, (selector >> 8) as u8]
 }
 
-pub(super) fn build_chr_selector(origin: u16, chr_bank_register: u16) -> Result<RuntimeRoutine> {
+pub(super) fn build_chr_selector(
+    origin: u16,
+    bank_select_register: u16,
+    bank_value_register: u16,
+) -> Result<RuntimeRoutine> {
     let mut instructions = vec![
         Instruction::LdaAbsolute(REQUEST_STATE),
         Instruction::CmpImmediate(STATE_READY),
     ];
     let not_ready_placeholder = instructions.len();
     instructions.push(Instruction::BneAbsolute(origin));
-    instructions.extend([
-        Instruction::LdaImmediate(encode_chr_page_register(CHR_RAM_PHYSICAL_PAGE)?),
-        Instruction::StaAbsolute(chr_bank_register),
-        Instruction::Rts,
-    ]);
+    for register in CHR_BANK_REGISTERS {
+        instructions.extend([
+            Instruction::LdaImmediate(register),
+            Instruction::StaAbsolute(bank_select_register),
+            Instruction::LdaImmediate(CHR_RAM_BANK_VALUE),
+            Instruction::StaAbsolute(bank_value_register),
+        ]);
+    }
+    instructions.push(Instruction::Rts);
     let not_ready = next_address(origin, &instructions)?;
     instructions[not_ready_placeholder] = Instruction::BneAbsolute(not_ready);
     instructions.push(Instruction::JmpAbsolute(SELECTOR_CHAIN_FALLBACK));
@@ -98,7 +110,7 @@ mod tests {
     /// 그러므로 `ready`가 아닌 모든 값은 기존 사슬로 넘겨야 한다.
     #[test]
     fn an_unready_state_hands_the_existing_chain_control() {
-        let routine = build_chr_selector(0xF4A0, 0x8001).unwrap();
+        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001).unwrap();
 
         assert_eq!(
             &routine.bytes[routine.bytes.len() - 3..],
@@ -110,20 +122,36 @@ mod tests {
         );
     }
 
-    /// CHR RAM을 고르는 것은 매퍼 165에서 레지스터 값 0이다. 다른 값이면 CHR ROM의
-    /// 어느 페이지를 골라 원본 글꼴이 그대로 나온다.
+    /// CHR 창이 둘이므로 레지스터도 둘 다 골라야 한다. 하나만 쓰면 나머지 창이
+    /// CHR ROM을 계속 봐서 화면 절반이 원본 글꼴로 남는다.
+    ///
+    /// MMC3는 «레지스터를 고른 뒤 값을 쓴다». 값만 쓰면 직전에 누가 골라 둔
+    /// 레지스터가 바뀌므로 무엇이 망가질지 알 수 없다.
     #[test]
-    fn the_ready_path_selects_the_boards_chr_ram() {
-        let routine = build_chr_selector(0xF4A0, 0x8001).unwrap();
-        let load_immediate = routine
-            .bytes
-            .windows(2)
-            .position(|window| window[0] == 0xA9)
-            .expect("the selector loads a bank value");
+    fn the_ready_path_selects_both_chr_windows_register_first() {
+        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001).unwrap();
+
+        let mut selections = Vec::new();
+        let mut index = 0;
+        while index + 9 < routine.bytes.len() {
+            if routine.bytes[index] == 0xA9
+                && routine.bytes[index + 2..index + 5] == [0x8D, 0x00, 0x80]
+                && routine.bytes[index + 5] == 0xA9
+                && routine.bytes[index + 7..index + 10] == [0x8D, 0x01, 0x80]
+            {
+                selections.push((routine.bytes[index + 1], routine.bytes[index + 6]));
+                index += 10;
+                continue;
+            }
+            index += 1;
+        }
 
         assert_eq!(
-            routine.bytes[load_immediate + 1],
-            encode_chr_page_register(CHR_RAM_PHYSICAL_PAGE).unwrap()
+            selections,
+            CHR_BANK_REGISTERS
+                .iter()
+                .map(|register| (*register, CHR_RAM_BANK_VALUE))
+                .collect::<Vec<_>>()
         );
     }
 

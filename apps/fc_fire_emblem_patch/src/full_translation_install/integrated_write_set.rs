@@ -56,7 +56,7 @@ struct DomainWriteContribution {
 
 pub(super) fn plan_integrated_write_set(
     inputs: IntegratedWriteSetInputs<'_>,
-) -> Result<IntegratedWriteSetPlan> {
+) -> Result<(Vec<u8>, IntegratedWriteSetPlan)> {
     let mut image = TrackedImage::new(inputs.candidate.data().to_vec());
     ensure!(
         image.writes().len() == inputs.expected_dialogue_storage_write_count,
@@ -136,6 +136,7 @@ pub(super) fn plan_integrated_write_set(
     image.verify_all_changes_tracked(inputs.candidate.data())?;
     let expected_write_count = image.writes().len();
     let output = image.into_data();
+    let installed_image = output.clone();
     let changed_byte_count = inputs
         .candidate
         .data()
@@ -161,7 +162,7 @@ pub(super) fn plan_integrated_write_set(
         "integrated write gate advanced without every domain layer"
     );
 
-    Ok(IntegratedWriteSetPlan {
+    Ok((installed_image, IntegratedWriteSetPlan {
         required_domain_count: inputs.required_domains.len(),
         domains,
         contributing_domain_count,
@@ -175,7 +176,7 @@ pub(super) fn plan_integrated_write_set(
         all_domains_contribute_expected_writes: false,
         output_materialized_in_memory_only: true,
         rom_emitted: false,
-    })
+    }))
 }
 
 fn fixed_file_offset(rom: &Rom, address: u16) -> Result<usize> {

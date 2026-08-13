@@ -26,7 +26,9 @@ const MEASURED_VBLANK_REMAINDER: u32 = 1_704;
 const SAFETY_MARGIN_PERCENT: u32 = 20;
 /// `$C179`의 `JSR`가 쓰는 몫이다.
 const CONSUMER_HOOK_CALL_CYCLES: u32 = 6;
-/// MMC3 뱅크 값 레지스터다. selector가 CHR RAM을 고를 때 쓴다.
+/// MMC3 뱅크 선택 레지스터다. selector가 CHR RAM을 고를 때 먼저 쓴다.
+const CHR_BANK_SELECT_REGISTER: u16 = 0x8000;
+/// MMC3 뱅크 값 레지스터다.
 const CHR_BANK_VALUE_REGISTER: u16 = 0x8001;
 /// 전송 루틴이 한 프레임에 쓸 수 있는 사이클이다.
 ///
@@ -103,7 +105,11 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
 
     let selector_origin = initializer.address
         + u16::try_from(initializer.bytes.len()).context("cold initializer length overflow")?;
-    let selector = chr_selector::build_chr_selector(selector_origin, CHR_BANK_VALUE_REGISTER)?;
+    let selector = chr_selector::build_chr_selector(
+        selector_origin,
+        CHR_BANK_SELECT_REGISTER,
+        CHR_BANK_VALUE_REGISTER,
+    )?;
 
     let fixed_routines = vec![trampoline_routine, gate, initializer, selector];
     ensure_disjoint(

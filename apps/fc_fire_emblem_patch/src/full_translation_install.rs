@@ -91,6 +91,8 @@ pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) current_candidate_path: &'a Path,
     pub(crate) current_build_report_path: &'a Path,
     pub(crate) report_path: &'a Path,
+    /// 대사 런타임만 실은 확인용 이미지를 쓸 자리다. 배포본이 아니라 탐침이다.
+    pub(crate) transport_probe_path: Option<&'a Path>,
 }
 
 pub(crate) struct FullTranslationInstallSummary {
@@ -481,7 +483,7 @@ pub(crate) fn plan_full_translation_installation(
         &page_capacity,
         runtime_material.material.len(),
     )?;
-    let integrated_write_set = plan_integrated_write_set(IntegratedWriteSetInputs {
+    let (installed_image, integrated_write_set) = plan_integrated_write_set(IntegratedWriteSetInputs {
         candidate: &current_candidate,
         dialogue_runtime_material: &runtime_material.material,
         dialogue_runtime_code: &dialogue_runtime_code,
@@ -712,6 +714,17 @@ pub(crate) fn plan_full_translation_installation(
     }
     fs::write(inputs.report_path, &report_bytes)
         .with_context(|| format!("write {}", inputs.report_path.display()))?;
+
+    // 대사 런타임과 그 재료만 실은 확인용 이미지다. 나머지 도메인이 아직 없으므로
+    // 배포본이 아니고, 이름과 별도 요청으로 그 구분을 남긴다. vblank 불변 조건과
+    // 합성 결과는 실행해 봐야만 확인되고, 그 확인이 나머지 도메인을 기다릴 이유가 없다.
+    if let Some(path) = inputs.transport_probe_path {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+        }
+        fs::write(path, &installed_image)
+            .with_context(|| format!("write {}", path.display()))?;
+    }
 
     Ok(FullTranslationInstallSummary {
         report_sha1: sha1_hex(&report_bytes),
