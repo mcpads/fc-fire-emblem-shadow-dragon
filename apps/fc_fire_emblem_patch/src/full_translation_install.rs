@@ -27,6 +27,7 @@ mod dynamic_input_producers;
 mod dynamic_inputs;
 mod installation_layout;
 mod integrated_write_set;
+mod runtime_bank_contract;
 mod runtime_control_flow;
 mod runtime_identity;
 mod runtime_material;

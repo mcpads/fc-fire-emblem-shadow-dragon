@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
+use super::runtime_bank_contract::bind_bank_restore_contract;
 use crate::{
     dialogue_inventory::switchable_cpu_to_file_offset,
     font_slots::FONT_PAGE_SIZE,
@@ -45,6 +46,11 @@ pub(super) struct DialogueRuntimeControlFlowPlan {
     superseded_sample_runtime: SupersededSampleRuntime,
     source_entry_points_bound: bool,
     existing_nmi_owner_preserved: bool,
+    /// 소비자가 실행 코드 페이지를 빌려 쓰고 되돌리는 계약이 원본 바이트에 걸려 있다.
+    prg_bank_restore_bound: bool,
+    /// `$FA20`이 닿을 수 있는 8 KiB 페이지 수다. 실행 코드 페이지가 이 밖이라
+    /// 소비자는 뱅크 레지스터를 직접 쓴다.
+    source_bank_helper_reachable_page_count: u16,
     runtime_material_execution_address_bound: bool,
     runtime_state_storage_bound: bool,
     runtime_code_emitted: bool,
@@ -309,6 +315,10 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         "sample-specific maximum-dialogue selector ownership changed"
     );
 
+    // 소비자가 실행 코드 페이지를 `$A000`에 잠깐 걸고 되돌리는 계약이다. 되돌릴 값의
+    // 출처가 원본에 있어야 하므로 코드를 방출하기 전에 먼저 확인한다.
+    let bank_restore = bind_bank_restore_contract(inputs.candidate)?;
+
     let producers = producer_specs
         .into_iter()
         .map(|(role, address, request, continuity)| RuntimeProducer {
@@ -440,6 +450,8 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         },
         source_entry_points_bound: true,
         existing_nmi_owner_preserved: true,
+        prg_bank_restore_bound: true,
+        source_bank_helper_reachable_page_count: bank_restore.helper_reachable_page_count,
         runtime_material_execution_address_bound: true,
         runtime_state_storage_bound: true,
         runtime_code_emitted: false,
