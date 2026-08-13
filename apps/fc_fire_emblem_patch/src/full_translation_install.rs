@@ -29,6 +29,7 @@ mod installation_layout;
 mod integrated_write_set;
 mod runtime_bank_contract;
 mod runtime_control_flow;
+mod runtime_cursor_storage;
 mod runtime_identity;
 mod runtime_material;
 mod runtime_nmi_contract;
@@ -462,7 +463,7 @@ pub(crate) fn plan_full_translation_installation(
         && locations.review_complete
         && translation_input_complete;
     let next_gate = if translation_input_complete && runtime_state_storage.selection_complete() {
-        "replan main-dialogue storage from the canonical records alone, now that the transition-mirror plan is retired, then emit the shared dialogue runtime and its producer, NMI-consumer, selector, and dynamic-remap hooks; reject any implementation that does not cold-initialize 0x07F0..0x07F4 before use, and do not emit or run a partial ROM"
+        "replan main-dialogue storage from the canonical records alone, now that the transition-mirror plan is retired, then emit the shared dialogue runtime and its producer, NMI-consumer, selector, and dynamic-remap hooks; reject any implementation that does not cold-initialize the 0x07F0..0x07F4 shared contract before use, with the 0x07F5..0x07F8 transport cursor owned by the consumer alone, and do not emit or run a partial ROM"
     } else if translation_input_complete {
         "close the exact volatile runtime-state storage selection against source access, queue, save/load, and battle lifetimes; do not emit or run a partial ROM"
     } else {
