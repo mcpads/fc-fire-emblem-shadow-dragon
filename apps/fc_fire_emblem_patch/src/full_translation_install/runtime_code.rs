@@ -20,6 +20,7 @@ pub(in crate::full_translation_install) mod dispatcher_gate;
 mod fixed_cfg_cycles;
 pub(in crate::full_translation_install) mod lifecycle;
 pub(in crate::full_translation_install) mod resolve_request;
+mod resolved_page_publication;
 pub(super) mod trampoline;
 pub(in crate::full_translation_install) mod transport;
 
@@ -141,7 +142,17 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
 
     let gate = dispatcher_gate::build_dispatcher_gate(dispatcher_gate::RECLAIMED_GATE_CAVE_ORIGIN)?;
     let gate_address = gate.address;
+    let publication_origin = gate.address
+        + u16::try_from(gate.bytes.len()).context("dialogue dispatcher gate length overflow")?;
+    let resolved_page_publication =
+        resolved_page_publication::build_resolved_page_publication(publication_origin)?;
+    let resolved_page_publication_address = resolved_page_publication.address;
+    ensure_disjoint(
+        &[&gate, &resolved_page_publication],
+        dispatcher_gate::RECLAIMED_GATE_CAVE_END,
+    )?;
     let mut fixed_support_bytes = gate.bytes;
+    fixed_support_bytes.extend_from_slice(&resolved_page_publication.bytes);
     let fixed_support_capacity = usize::from(
         dispatcher_gate::RECLAIMED_GATE_CAVE_END - dispatcher_gate::RECLAIMED_GATE_CAVE_ORIGIN,
     );
@@ -163,6 +174,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         publisher_origin,
         resolver.address,
         code_page,
+        resolved_page_publication_address,
     )?;
 
     // 예산은 시험만이 아니라 빌드가 지킨다. vblank를 넘기는 코드는 ROM에 들어가면
@@ -194,7 +206,11 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     ensure_disjoint(&[&selector], chr_selector::SELECTOR_CAVE_END)?;
     let fixed_routines = vec![trampoline_routine, publisher, selector];
     let code_routines = vec![transport, resolver, next_page_resolver];
-    let lifecycle = lifecycle::build_lifecycle_suite(next_page_resolver_address, code_page)?;
+    let lifecycle = lifecycle::build_lifecycle_suite(
+        next_page_resolver_address,
+        code_page,
+        resolved_page_publication_address,
+    )?;
     let completed_page_entry = lifecycle.completed_page_entry;
     let handoff_invalidation_entry = lifecycle.handoff_invalidation_entry;
     let reclaimed_fixed_routines = vec![

@@ -436,18 +436,18 @@ pub(super) fn plan_dialogue_runtime_control_flow(
                 continuity: "external caller owns the intervening screen",
             },
             RuntimeProducer {
-                role: "terminal_or_idle",
+                role: "terminal_or_E6_idle",
                 prg_bank_hex: "0x0A",
                 cpu_address_hex: "0x85C9",
                 source_span_byte_count: 29,
-                request: "invalidate_and_fall_through_to_original_terminal_state",
-                continuity: "dialogue lifetime ends",
+                request: "invalidate_terminal_but_retain_resident_page_through_E6_idle_transition",
+                continuity: "terminal ends the lifetime; E6 idle immediately enters its declared next record",
             },
         ])
         .collect();
 
     Ok(DialogueRuntimeControlFlowPlan {
-        strategy: "derive every request from the original main-dialogue state machine, reuse an already-ready page only for the same source identity at page zero, otherwise cold-compose the dialogue FD page in the quiet-frame NMI consumer, and replace only the FD latch after that exact request is ready",
+        strategy: "derive every request from the original main-dialogue state machine, retain the resident group through E6's non-displaying state 10, reuse a ready page for the same source identity or the same resolved page group, cold-compose only a different group, and replace only the FD latch after that exact request is ready",
         states: vec![
             RuntimeState {
                 id: "inactive",
@@ -493,7 +493,7 @@ pub(super) fn plan_dialogue_runtime_control_flow(
             runtime_code_cpu_end_exclusive_hex: "0xC000",
             runtime_code_capacity_byte_count: inputs.runtime_code_byte_count,
             cold_request_action: "copy all 4096 original font bytes then overlay every assigned target glyph in the selected page group",
-            continuous_request_action: "a repeated producer reuses the completed page only when ready, page zero, and both raw source-identity bytes still match; every other request cold-rebuilds",
+            continuous_request_action: "a repeated producer reuses the completed page when ready, page zero, and both raw source-identity bytes match; a changed record resolves its group and republishes ready without CHR writes when that group remains resident; only a different group cold-rebuilds",
             dynamic_values_covered_by_page_group: true,
         },
         selector_consumer: SelectorConsumer {

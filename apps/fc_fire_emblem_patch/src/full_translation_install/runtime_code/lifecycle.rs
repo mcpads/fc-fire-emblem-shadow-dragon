@@ -1,18 +1,21 @@
 //! 원본 주 대사 상태 머신의 수명 경계에서 요청을 만들거나 폐기한다.
 //!
-//! `$85C9`의 세 결과는 서로 다른 의미다. `09`만 같은 레코드의 다음 가시 페이지를
-//! 찾고, `0F`와 `10`은 대사 수명을 끝낸다. E7 외부 호출도 화면 소유자가 바뀌므로
-//! 넘기기 전에 요청을 폐기한다. 이 구분 없이 매번 초기 페이지를 해석하면 여러 쪽
-//! 대사가 영원히 0번 페이지로 돌아간다.
+//! `$85C9`의 세 결과는 서로 다른 의미다. `09`는 같은 레코드의 다음 가시 페이지를
+//! 찾고, `10`은 E6가 지정한 다음 레코드로 넘어가는 짧은 비표시 상태이며, `0F`는 대사
+//! 수명을 끝낸다. `10`에서도 selector는 원본으로 돌아가지만 CHR RAM의 상주 그룹은
+//! 다음 생산자가 곧바로 재사용할 수 있게 유지한다. E7 외부 호출은 화면 소유자가
+//! 바뀌므로 넘기기 전에 요청을 폐기한다. 이 구분 없이 매번 초기 페이지를 해석하면
+//! 여러 쪽 대사가 영원히 0번 페이지로 돌아가거나 같은 그룹을 화면 위에서 다시 만든다.
 
 use anyhow::{Context, Result, ensure};
 
 use super::super::{
     runtime_bank_contract::{PRG_A000_REGISTER, PRG_BANK_SHADOW},
     runtime_nmi_contract::PPU_CONTROL_SHADOW,
+    runtime_state_storage::CURRENT_PAGE_GROUP,
 };
+use super::transport::{REQUEST_STATE, STATE_READY};
 use super::{RuntimeRoutine, next_address};
-use super::{dispatcher_gate::STATE_COLD_REQUESTED, transport::REQUEST_STATE};
 use crate::{
     dialogue_inventory::switchable_cpu_to_file_offset,
     rom::Rom,
@@ -136,6 +139,7 @@ fn append_guarded_banked_resolver_call(
     instructions: &mut Vec<Instruction>,
     resolver: u16,
     code_page: u8,
+    resolved_page_publication: u16,
 ) {
     instructions.extend([
         // NMI 비활성화 직전의 좁은 경계에서도 이전 페이지를 `ready`로 선택하지 않는다.
@@ -156,10 +160,12 @@ fn append_guarded_banked_resolver_call(
         Instruction::LdaZeroPage(PRG_BANK_SHADOW),
         Instruction::JsrAbsolute(PAIRED_BANK_HELPER),
         Instruction::Plp,
-        // resolver의 캐리는 `PLA`와 `STA`를 지나도 그대로다.
+        // resolver의 캐리는 `PLA`와 `STA`를 지나도 그대로다. 해석 전 상주 그룹을
+        // 다시 A에 놓고 공통 발행기가 상태를 게시한 뒤 NMI를 되살리게 한다.
         Instruction::Pla,
         Instruction::StaZeroPage(PPU_CONTROL_SHADOW),
-        Instruction::StaAbsolute(PPU_CONTROL),
+        Instruction::Pla,
+        Instruction::JsrAbsolute(resolved_page_publication),
     ]);
 }
 
@@ -167,6 +173,7 @@ fn append_guarded_banked_resolver_call(
 pub(super) fn build_lifecycle_suite(
     next_page_resolver: u16,
     code_page: u8,
+    resolved_page_publication: u16,
 ) -> Result<LifecycleSuite> {
     let origin = LIFECYCLE_ORIGIN;
     let mut instructions = vec![Instruction::LdaAbsolute(FIRST_COMPLETION_FLAG)];
@@ -191,15 +198,25 @@ pub(super) fn build_lifecycle_suite(
 
     let continue_page = next_address(origin, &instructions)?;
     instructions[second_flag_clear_placeholder] = Instruction::BeqAbsolute(continue_page);
-    append_guarded_banked_resolver_call(&mut instructions, next_page_resolver, code_page);
-    let no_page_placeholder = instructions.len();
-    instructions.push(Instruction::BccAbsolute(origin));
     instructions.extend([
-        Instruction::LdaImmediate(STATE_COLD_REQUESTED),
-        Instruction::StaAbsolute(REQUEST_STATE),
+        // 전역 런타임이 소유하지 않는 원본 fallback 수명은 그대로 진행시킨다.
+        Instruction::LdaAbsolute(REQUEST_STATE),
+        Instruction::CmpImmediate(STATE_READY),
     ]);
+    let unowned_page = instructions.len();
+    instructions.push(Instruction::BneAbsolute(origin));
+    instructions.extend([
+        Instruction::LdaAbsolute(CURRENT_PAGE_GROUP),
+        Instruction::Pha,
+    ]);
+    append_guarded_banked_resolver_call(
+        &mut instructions,
+        next_page_resolver,
+        code_page,
+        resolved_page_publication,
+    );
     let store_continue = next_address(origin, &instructions)?;
-    instructions[no_page_placeholder] = Instruction::BccAbsolute(store_continue);
+    instructions[unowned_page] = Instruction::BneAbsolute(store_continue);
     instructions.extend([
         Instruction::LdaImmediate(CONTINUE_STATE),
         Instruction::StaAbsolute(DIALOGUE_STATE),
@@ -208,15 +225,20 @@ pub(super) fn build_lifecycle_suite(
 
     let invalidate_and_store_state = next_address(origin, &instructions)?;
     instructions[terminal_placeholder] = Instruction::BneAbsolute(invalidate_and_store_state);
-    instructions[idle_placeholder] = Instruction::BneAbsolute(invalidate_and_store_state);
     instructions.extend([
         Instruction::Pha,
         Instruction::LdaImmediate(0),
         Instruction::StaAbsolute(REQUEST_STATE),
         Instruction::Pla,
-        Instruction::StaAbsolute(DIALOGUE_STATE),
-        Instruction::Rts,
     ]);
+
+    // E6의 state 10은 이미 정해진 다음 레코드 생산자로 곧바로 이어진다. 표시 selector는
+    // DIALOGUE_STATE가 0F 이상이면 원본으로 돌아가므로, ready를 유지해도 중간 화면이
+    // CHR RAM을 고르지 않는다. 다음 생산자는 이 상주 그룹을 비교해 같은 그룹이면
+    // 실제 CHR 쓰기 없이 새 정체성만 게시한다.
+    let retain_residency_and_store_state = next_address(origin, &instructions)?;
+    instructions[idle_placeholder] = Instruction::BneAbsolute(retain_residency_and_store_state);
+    instructions.extend([Instruction::StaAbsolute(DIALOGUE_STATE), Instruction::Rts]);
 
     let handoff_invalidation_entry = next_address(origin, &instructions)?;
     instructions.extend([
@@ -292,9 +314,11 @@ fn fixed_bytes(rom: &Rom, start: u16, end: u16) -> Result<&[u8]> {
 mod tests {
     use super::*;
 
+    const RESOLVED_PAGE_PUBLICATION: u16 = 0xF354;
+
     #[test]
     fn page_completion_preserves_all_three_source_outcomes() {
-        let suite = build_lifecycle_suite(0xB400, 0x2E).unwrap();
+        let suite = build_lifecycle_suite(0xB400, 0x2E, RESOLVED_PAGE_PUBLICATION).unwrap();
         for state in [TERMINAL_STATE, IDLE_STATE, CONTINUE_STATE] {
             assert!(
                 suite
@@ -316,8 +340,43 @@ mod tests {
     }
 
     #[test]
+    fn e6_idle_transition_retains_the_resident_page_while_terminal_invalidates_it() {
+        let suite = build_lifecycle_suite(0xB400, 0x2E, RESOLVED_PAGE_PUBLICATION).unwrap();
+        let bytes = &suite.routine.bytes;
+        let idle_load = bytes
+            .windows(2)
+            .position(|window| window == [0xA9, IDLE_STATE])
+            .expect("the E6 idle state is emitted");
+        let terminal_load = bytes
+            .windows(2)
+            .position(|window| window == [0xA9, TERMINAL_STATE])
+            .expect("the terminal state is emitted");
+
+        let idle_target = relative_branch_target(suite.routine.address, bytes, idle_load + 2);
+        let terminal_target =
+            relative_branch_target(suite.routine.address, bytes, terminal_load + 2);
+        let store_dialogue_state = [
+            0x8D,
+            DIALOGUE_STATE as u8,
+            (DIALOGUE_STATE >> 8) as u8,
+            0x60,
+        ];
+        let invalidate = [
+            0x48,
+            0xA9,
+            0x00,
+            0x8D,
+            REQUEST_STATE as u8,
+            (REQUEST_STATE >> 8) as u8,
+        ];
+
+        assert_eq!(&bytes[idle_target..idle_target + 4], store_dialogue_state);
+        assert_eq!(&bytes[terminal_target..terminal_target + 6], invalidate);
+    }
+
+    #[test]
     fn next_page_resolution_is_nmi_guarded_until_the_bank_is_restored() {
-        let suite = build_lifecycle_suite(0xB400, 0x2E).unwrap();
+        let suite = build_lifecycle_suite(0xB400, 0x2E, RESOLVED_PAGE_PUBLICATION).unwrap();
         let bytes = &suite.routine.bytes;
         let disable = bytes
             .windows(2)
@@ -331,12 +390,19 @@ mod tests {
             .windows(3)
             .position(|window| window == [0x20, 0x20, 0xFA])
             .expect("the lifecycle restores the source bank");
-        let ppu_restore = bytes
+        let publication = bytes
             .windows(3)
-            .rposition(|window| window == [0x8D, 0x00, 0x20])
-            .expect("the lifecycle restores PPU control");
+            .position(|window| {
+                window
+                    == [
+                        0x20,
+                        RESOLVED_PAGE_PUBLICATION as u8,
+                        (RESOLVED_PAGE_PUBLICATION >> 8) as u8,
+                    ]
+            })
+            .expect("the lifecycle delegates publication and PPU restore");
 
-        assert!(disable < resolver && resolver < bank_restore && bank_restore < ppu_restore);
+        assert!(disable < resolver && resolver < bank_restore && bank_restore < publication);
     }
 
     #[test]
@@ -350,7 +416,7 @@ mod tests {
 
     #[test]
     fn handoff_invalidation_replays_the_displaced_load_last() {
-        let suite = build_lifecycle_suite(0xB400, 0x2E).unwrap();
+        let suite = build_lifecycle_suite(0xB400, 0x2E, RESOLVED_PAGE_PUBLICATION).unwrap();
         let start = usize::from(suite.handoff_invalidation_entry - LIFECYCLE_ORIGIN);
         let handoff = &suite.routine.bytes[start..start + 9];
 
@@ -394,5 +460,12 @@ mod tests {
                 (SOURCE_POINTER_RESOLVER >> 8) as u8
             ]
         );
+    }
+
+    fn relative_branch_target(origin: u16, bytes: &[u8], opcode_index: usize) -> usize {
+        assert_eq!(bytes[opcode_index], 0xD0, "expected BNE");
+        let after_branch = i32::from(origin) + i32::try_from(opcode_index).unwrap() + 2;
+        let target = after_branch + i32::from(bytes[opcode_index + 1] as i8);
+        usize::try_from(target - i32::from(origin)).unwrap()
     }
 }

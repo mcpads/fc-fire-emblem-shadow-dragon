@@ -41,8 +41,9 @@ use super::super::runtime_cursor_storage::{
     PUBLISHED_SOURCE_DIRECTORY_SELECTOR, PUBLISHED_SOURCE_ENTRY_INDEX,
 };
 use super::super::runtime_nmi_contract::PPU_CONTROL_SHADOW;
-use super::super::runtime_state_storage::VISIBLE_PAGE_INDEX;
+use super::super::runtime_state_storage::{CURRENT_PAGE_GROUP, VISIBLE_PAGE_INDEX};
 use super::resolve_request::{SOURCE_DIRECTORY_SELECTOR, SOURCE_ENTRY_INDEX};
+use super::resolved_page_publication::NO_RESIDENT_PAGE_GROUP;
 use super::transport::{REQUEST_STATE, STATE_READY};
 
 /// 폐기된 표본 그룹 selector가 차지한 동굴이다. 전역 런타임에서는 그 selector를
@@ -146,6 +147,7 @@ pub(super) fn build_source_identity_request_publisher(
     origin: u16,
     resolver: u16,
     code_page: u8,
+    resolved_page_publication: u16,
 ) -> Result<RuntimeRoutine> {
     let mut instructions = vec![
         Instruction::LdaAbsolute(REQUEST_STATE),
@@ -171,16 +173,22 @@ pub(super) fn build_source_identity_request_publisher(
     // 밀어낸 원본 호출로 바로 넘겨 반복 생산자의 원본 부작용을 진행시킨다.
     instructions.push(Instruction::JmpAbsolute(SOURCE_POINTER_RESOLVER));
 
-    let rebuild = next_address(origin, &instructions)?;
-    for index in [
-        rebuild_for_state,
-        rebuild_for_page,
-        rebuild_for_selector,
-        rebuild_for_entry,
-    ] {
-        instructions[index] = Instruction::BneAbsolute(rebuild);
+    let no_resident_group = next_address(origin, &instructions)?;
+    instructions[rebuild_for_state] = Instruction::BneAbsolute(no_resident_group);
+    instructions.push(Instruction::LdaImmediate(NO_RESIDENT_PAGE_GROUP));
+    let preserve_resident_group = instructions.len();
+    instructions.push(Instruction::BneAbsolute(origin));
+
+    let ready_rebuild = next_address(origin, &instructions)?;
+    for index in [rebuild_for_page, rebuild_for_selector, rebuild_for_entry] {
+        instructions[index] = Instruction::BneAbsolute(ready_rebuild);
     }
+    instructions.push(Instruction::LdaAbsolute(CURRENT_PAGE_GROUP));
+
+    let preserve_group = next_address(origin, &instructions)?;
+    instructions[preserve_resident_group] = Instruction::BneAbsolute(preserve_group);
     instructions.extend([
+        Instruction::Pha,
         // NMI를 끄기 직전 한 프레임이 끼어도 이전 수명의 `ready`를 고르지 않는다.
         Instruction::LdaImmediate(0),
         Instruction::StaAbsolute(REQUEST_STATE),
@@ -203,21 +211,14 @@ pub(super) fn build_source_identity_request_publisher(
         Instruction::LdaZeroPage(PRG_BANK_SHADOW),
         Instruction::JsrAbsolute(PAIRED_BANK_HELPER),
         Instruction::Plp,
-        // 뱅크가 원래대로 돌아온 뒤에만 NMI를 원래 상태로 되돌린다. `PLA`와
-        // `STA`는 resolver의 캐리를 바꾸지 않는다.
+        // 발행기가 상태를 결정할 때까지 하드웨어 NMI는 꺼 둔다. `PLA`와 `STA`는
+        // resolver의 캐리를 바꾸지 않는다.
         Instruction::Pla,
         Instruction::StaZeroPage(PPU_CONTROL_SHADOW),
-        Instruction::StaAbsolute(PPU_CONTROL),
+        // 해석 전 상주 그룹을 A로 넘긴다. 캐리는 그대로 성공 여부다.
+        Instruction::Pla,
+        Instruction::JsrAbsolute(resolved_page_publication),
     ]);
-    let failed_placeholder = instructions.len();
-    instructions.push(Instruction::BccAbsolute(origin));
-    instructions.extend([
-        // 요청은 커서가 다 선 뒤에만 발행한다.
-        Instruction::LdaImmediate(STATE_COLD_REQUESTED),
-        Instruction::StaAbsolute(REQUEST_STATE),
-    ]);
-    let failed = next_address(origin, &instructions)?;
-    instructions[failed_placeholder] = Instruction::BccAbsolute(failed);
     // 밀어낸 원본 호출로 넘긴다.
     instructions.push(Instruction::JmpAbsolute(SOURCE_POINTER_RESOLVER));
 
@@ -231,6 +232,13 @@ pub(super) fn build_source_identity_request_publisher(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const RESOLVED_PAGE_PUBLICATION: u16 = 0xF354;
+
+    fn publisher() -> RuntimeRoutine {
+        build_source_identity_request_publisher(0xF446, 0xA400, 0x30, RESOLVED_PAGE_PUBLICATION)
+            .unwrap()
+    }
 
     /// 요청이 걸린 동안 처리기가 돌면 아직 CHR RAM에 없는 글자가 화면에 나온다.
     /// 그것이 0원칙 위반이므로 게이트는 반드시 먼저 되돌아가야 한다.
@@ -311,22 +319,37 @@ mod tests {
         );
     }
 
-    /// 해석기가 실패하면 요청을 발행하지 않아야 한다. 발행하면 소비자가 세워지지
-    /// 않은 커서를 읽고 남의 자료를 CHR RAM에 올린다.
+    /// 해석 결과의 성공·실패와 상주 그룹 비교는 고정 발행기 하나가 맡아야 한다.
+    /// 생산자가 그 판단 전에 cold를 직접 게시하면 실패한 커서를 소비자가 읽는다.
     #[test]
-    fn a_failed_resolve_publishes_no_request() {
-        let routine = build_source_identity_request_publisher(0xF446, 0xA400, 0x30).unwrap();
-        let publish = publish_position(&routine.bytes, REQUEST_STATE)
-            .expect("the initializer publishes a request");
-        let branch = routine
+    fn resolver_result_is_delegated_without_direct_cold_publication() {
+        let routine = publisher();
+        let delegate = routine
             .bytes
-            .iter()
-            .position(|byte| *byte == 0x90)
-            .expect("the initializer branches on the resolver's carry");
+            .windows(3)
+            .position(|window| {
+                window
+                    == [
+                        0x20,
+                        RESOLVED_PAGE_PUBLICATION as u8,
+                        (RESOLVED_PAGE_PUBLICATION >> 8) as u8,
+                    ]
+            })
+            .expect("the initializer delegates resolved-page publication");
+        let direct_cold = [
+            0xA9,
+            STATE_COLD_REQUESTED,
+            0x8D,
+            REQUEST_STATE as u8,
+            (REQUEST_STATE >> 8) as u8,
+        ];
 
+        assert!(delegate > 0);
         assert!(
-            branch < publish,
-            "the request is published before the carry is read"
+            !routine
+                .bytes
+                .windows(direct_cold.len())
+                .any(|window| window == direct_cold)
         );
     }
 
@@ -334,7 +357,7 @@ mod tests {
     /// 읽기 전에 끝나야 하므로 그 사이에 `PHP`/`PLP`가 있어야 한다.
     #[test]
     fn the_borrowed_banks_are_handed_back_before_the_carry_decides() {
-        let routine = build_source_identity_request_publisher(0xF446, 0xA400, 0x30).unwrap();
+        let routine = publisher();
         let restore = routine
             .bytes
             .windows(3)
@@ -347,13 +370,20 @@ mod tests {
                     ]
             })
             .expect("the initializer restores the bank pair");
-        let branch = routine
+        let publication = routine
             .bytes
-            .iter()
-            .position(|byte| *byte == 0x90)
-            .expect("the initializer branches on the resolver's carry");
+            .windows(3)
+            .position(|window| {
+                window
+                    == [
+                        0x20,
+                        RESOLVED_PAGE_PUBLICATION as u8,
+                        (RESOLVED_PAGE_PUBLICATION >> 8) as u8,
+                    ]
+            })
+            .expect("the initializer delegates publication");
 
-        assert!(restore < branch);
+        assert!(restore < publication);
         assert!(
             routine.bytes.contains(&0x08),
             "the carry is never saved across the restore"
@@ -365,7 +395,7 @@ mod tests {
     /// 코드가 바뀐다. NMI는 매핑 전에 꺼지고 뱅크 복원 뒤에만 돌아와야 한다.
     #[test]
     fn the_banked_resolver_cannot_be_interrupted_by_bank_restoring_nmi() {
-        let routine = build_source_identity_request_publisher(0xF446, 0xA400, 0x30).unwrap();
+        let routine = publisher();
         let disable = routine
             .bytes
             .windows(2)
@@ -388,19 +418,26 @@ mod tests {
                     ]
             })
             .expect("the initializer restores the bank pair");
-        let restore_ppu = routine
+        let publication = routine
             .bytes
             .windows(3)
-            .rposition(|window| window == [0x8D, 0x00, 0x20])
-            .expect("the initializer restores PPU control");
+            .position(|window| {
+                window
+                    == [
+                        0x20,
+                        RESOLVED_PAGE_PUBLICATION as u8,
+                        (RESOLVED_PAGE_PUBLICATION >> 8) as u8,
+                    ]
+            })
+            .expect("the initializer delegates publication and PPU restore");
 
         assert!(disable < map_code_page);
-        assert!(restore_bank < restore_ppu);
+        assert!(restore_bank < publication);
     }
 
     #[test]
     fn a_rebuild_invalidates_the_previous_page_before_disabling_nmi() {
-        let routine = build_source_identity_request_publisher(0xF446, 0xA400, 0x30).unwrap();
+        let routine = publisher();
         let invalidate = [
             0xA9,
             0x00,
@@ -427,7 +464,7 @@ mod tests {
     /// 초기화도 밀어낸 원본 호출로 끝나야 대사가 이어진다.
     #[test]
     fn the_initializer_reaches_the_displaced_source_resolver() {
-        let routine = build_source_identity_request_publisher(0xF446, 0xA400, 0x30).unwrap();
+        let routine = publisher();
 
         assert_eq!(
             &routine.bytes[routine.bytes.len() - 3..],
@@ -443,7 +480,7 @@ mod tests {
     /// 정체성이 같으면 무효화보다 먼저 원본 resolver로 넘겨야 전환이 진행된다.
     #[test]
     fn a_repeated_ready_page_zero_request_reuses_the_published_source_identity() {
-        let routine = build_source_identity_request_publisher(0xF446, 0xA400, 0x30).unwrap();
+        let routine = publisher();
         let reuse = [
             0x4C,
             SOURCE_POINTER_RESOLVER as u8,
@@ -508,18 +545,5 @@ mod tests {
                 ]
         }));
         assert!(reuse_at < invalidate_at);
-    }
-
-    fn publish_position(bytes: &[u8], address: u16) -> Option<usize> {
-        let publish = [
-            0xA9,
-            STATE_COLD_REQUESTED,
-            0x8D,
-            address as u8,
-            (address >> 8) as u8,
-        ];
-        bytes
-            .windows(publish.len())
-            .position(|window| window == publish)
     }
 }
