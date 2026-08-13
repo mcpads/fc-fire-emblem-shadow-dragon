@@ -45,7 +45,10 @@ use cold_request_presentation::plan_cold_request_presentation_page;
 use current_candidate::{CurrentCandidateInputs, inspect_dialogue_page_pool_capacity};
 use dynamic_composition::plan_dialogue_runtime_composition;
 use dynamic_input_producers::{DynamicInputProducerPlan, inspect_dynamic_input_producers};
-use dynamic_inputs::{plan_dynamic_dialogue_inputs, plan_dynamic_string_remap};
+use dynamic_inputs::{
+    DynamicProducerEncodingPlan, bind_dynamic_producer_encoding, plan_dynamic_dialogue_inputs,
+    plan_dynamic_string_remap,
+};
 use installation_layout::{InstallationLayoutPlan, plan_installation_layout};
 use integrated_write_set::{
     IntegratedWriteSetInputs, IntegratedWriteSetPlan, plan_integrated_write_set,
@@ -288,6 +291,7 @@ struct DialogueRuntimeComposition {
     every_translated_dynamic_page_remappable: bool,
     dynamic_string_producers_bound: bool,
     dynamic_string_producers: DynamicInputProducerPlan,
+    dynamic_producer_encoding: DynamicProducerEncodingPlan,
     dense_group_lookup_byte_count: usize,
     record_page_group_selector_byte_count: usize,
     record_selector_directory_byte_count: usize,
@@ -350,6 +354,11 @@ pub(crate) fn plan_full_translation_installation(
         candidate_path: inputs.current_candidate_path,
         build_report_path: inputs.current_build_report_path,
     })?;
+    let current_candidate = Rom::from_path(inputs.current_candidate_path)?;
+    ensure!(
+        sha1_hex(current_candidate.data()) == page_capacity.current_candidate_sha1,
+        "relocated dialogue bank plan and page-pool plan use different current candidates"
+    );
 
     let dialogue_validation =
         validate_main_dialogue_workspace(inputs.source_path, inputs.main_dialogue_workspace_path)?;
@@ -373,8 +382,8 @@ pub(crate) fn plan_full_translation_installation(
 
     ensure!(
         dialogue.record_ids.len() == 504
-            && fixed.entries.len() == 272
-            && unit_names.entries.len() == 52
+            && fixed.entries.len() == 273
+            && unit_names.entries.len() == 53
             && chapter_titles.entry_count == 25
             && chapter_titles.translated_entry_count == 25
             && choices.entries.len() == 2
@@ -412,8 +421,13 @@ pub(crate) fn plan_full_translation_installation(
         &locations.entries,
     )?;
     let dynamic_input_producers = inspect_dynamic_input_producers(&rom)?;
-    let dynamic_string_producers_bound =
-        dynamic_input_producers.every_record_selector_route_bound();
+    let mut dynamic_producer_encoding = bind_dynamic_producer_encoding(
+        &current_candidate,
+        &dynamic_inputs,
+        &fixed.entries,
+        &unit_names.entries,
+        &locations.entries,
+    )?;
     let chapter_intro_residency = plan_chapter_intro_residency(
         &rom,
         &display,
@@ -478,11 +492,6 @@ pub(crate) fn plan_full_translation_installation(
         .iter()
         .map(|region| region.used_storage_byte_count)
         .sum::<usize>();
-    let current_candidate = Rom::from_path(inputs.current_candidate_path)?;
-    ensure!(
-        sha1_hex(current_candidate.data()) == page_capacity.current_candidate_sha1,
-        "relocated dialogue bank plan and page-pool plan use different current candidates"
-    );
     ensure!(
         planned_storage_byte_count <= source_owned_storage_byte_count,
         "complete dialogue encoded storage exceeds its source-owned regions"
@@ -499,6 +508,7 @@ pub(crate) fn plan_full_translation_installation(
         page_scan: &composition.scan_material,
         dynamic_remap: &dynamic_remap.selected_dense_material,
         runtime_identity: &runtime_identity.material,
+        dynamic_producer_encoding: &dynamic_producer_encoding.material,
     })?;
     // 실행 코드는 자료 배치가 끝난 뒤에 조립한다. 놓일 주소가 자료 길이에서 나오기
     // 때문이다. 코드 길이는 그 주소에 영향을 주지 않으므로 한 번에 정해진다.
@@ -507,10 +517,17 @@ pub(crate) fn plan_full_translation_installation(
     let atlas_offset = runtime_material.glyph_atlas_offset()?;
     let scan_offset = runtime_material.section_offset("page_scan")?;
     let identity_offset = runtime_material.section_offset("runtime_identity")?;
+    let producer_encoding_offset = runtime_material.section_offset("dynamic_producer_encoding")?;
     ensure!(
         identity_offset / MMC3_PAGE_BYTE_COUNT
             == (identity_offset + runtime_identity.material.len() - 1) / MMC3_PAGE_BYTE_COUNT,
         "runtime identity material crosses its mapped MMC3 page"
+    );
+    ensure!(
+        producer_encoding_offset / MMC3_PAGE_BYTE_COUNT
+            == (producer_encoding_offset + dynamic_producer_encoding.material.len() - 1)
+                / MMC3_PAGE_BYTE_COUNT,
+        "dynamic producer encoding material crosses its mapped MMC3 page"
     );
     let page = |offset: usize| -> Result<u8> {
         Ok(MAIN_DIALOGUE_MATERIAL_FIRST_PAGE
@@ -537,6 +554,17 @@ pub(crate) fn plan_full_translation_installation(
         )
         .context("page group block base does not fit a 16-bit container offset")?,
         container_first_page: MAIN_DIALOGUE_MATERIAL_FIRST_PAGE,
+        producer_encoding_page: page(producer_encoding_offset)?,
+        producer_item_directory: window(
+            producer_encoding_offset + dynamic_producer_encoding.item_directory_offset,
+        )?,
+        producer_unit_directory: window(
+            producer_encoding_offset + dynamic_producer_encoding.unit_directory_offset,
+        )?,
+        producer_location_directory: window(
+            producer_encoding_offset + dynamic_producer_encoding.location_directory_offset,
+        )?,
+        producer_encoding_base: window(producer_encoding_offset)?,
     };
     let dialogue_runtime_code = plan_dialogue_runtime_code(
         &rom,
@@ -547,6 +575,11 @@ pub(crate) fn plan_full_translation_installation(
         layout,
         cold_request_presentation.mapper_register,
     )?;
+    let emitted_hook_roles = dialogue_runtime_code.hook_roles();
+    dynamic_producer_encoding.bind_runtime_hooks(&emitted_hook_roles)?;
+    let dynamic_string_producers_bound = dynamic_input_producers
+        .every_record_selector_route_bound()
+        && dynamic_producer_encoding.canonical_outputs_ready();
     for routine in &dialogue_runtime_code.code_routines {
         runtime_material.place_runtime_code(routine.address, &routine.bytes)?;
     }
@@ -559,7 +592,6 @@ pub(crate) fn plan_full_translation_installation(
     let selected_runtime_state_cpu_range = runtime_state_storage
         .selected_cpu_range_hex()
         .context("dialogue runtime-state selection has no CPU range")?;
-    let emitted_hook_roles = dialogue_runtime_code.hook_roles();
     let runtime_control_flow = plan_dialogue_runtime_control_flow(RuntimeControlFlowInputs {
         source: &rom,
         candidate: &current_candidate,
@@ -782,6 +814,7 @@ pub(crate) fn plan_full_translation_installation(
                 .every_translated_dynamic_page_remappable,
             dynamic_string_producers_bound,
             dynamic_string_producers: dynamic_input_producers,
+            dynamic_producer_encoding,
             dense_group_lookup_byte_count: composition.dense_group_lookup_byte_count,
             record_page_group_selector_byte_count: composition
                 .record_page_group_selector_byte_count,

@@ -35,7 +35,7 @@ const CENTRAL_SELECTOR_FALLBACK: u16 = 0xFF40;
 /// 완성된 대사 수명이 원본 제어 흐름에 끼어들어야 하는 모든 역할이다.
 ///
 /// 주소의 개수가 아니다. 완료 판정은 이 역할 집합에서 빠진 것이 없는지를 본다.
-const PLANNED_HOOK_ROLES: [DialogueRuntimeHookRole; 10] = [
+const PLANNED_HOOK_ROLES: [DialogueRuntimeHookRole; 15] = [
     DialogueRuntimeHookRole::InitialDirectEntryRequest,
     DialogueRuntimeHookRole::E4TransitionEntryRequest,
     DialogueRuntimeHookRole::E6TransitionEntryRequest,
@@ -46,6 +46,11 @@ const PLANNED_HOOK_ROLES: [DialogueRuntimeHookRole; 10] = [
     DialogueRuntimeHookRole::NmiPageComposer,
     DialogueRuntimeHookRole::DispatcherGate,
     DialogueRuntimeHookRole::ChrRamSelector,
+    DialogueRuntimeHookRole::DynamicItemSlotProducer,
+    DialogueRuntimeHookRole::DynamicUnitSlotProducer,
+    DialogueRuntimeHookRole::DynamicVillageItemProducer,
+    DialogueRuntimeHookRole::DynamicEpilogueUnitProducer,
+    DialogueRuntimeHookRole::DynamicEpilogueLocationProducer,
 ];
 use super::runtime_material::{
     RUNTIME_CODE_MMC3_PAGE, RUNTIME_MATERIAL_FIRST_PAGE, RUNTIME_MATERIAL_PAGE_COUNT,
@@ -351,7 +356,7 @@ pub(super) fn plan_dialogue_runtime_control_flow(
                 .context("runtime code offset does not fit the A000 window")?,
         )
         .context("runtime code CPU start overflow")?;
-    // 실행 코드는 페이지 `2E`의 꼬리이고 창의 끝 `$C000`에서 끝난다. 시작 주소는
+    // 실행 코드는 재료 용기의 마지막 MMC3 페이지이고 창의 끝 `$C000`에서 끝난다. 시작 주소는
     // 앞선 자료가 얼마나 차지하는지에 따라 움직이는 결과값이지 지킬 값이 아니다.
     // 자료가 줄면 시작이 내려가 코드 자리가 넓어지는 것이 정상이다.
     ensure!(

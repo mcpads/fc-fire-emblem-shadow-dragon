@@ -159,11 +159,11 @@ impl FixedTextPlan {
 }
 
 pub(crate) fn plan_fixed_text(rom: &Rom, workspace_path: &Path) -> Result<FixedTextPlan> {
-    plan_workspace(rom, workspace_path, &BATTLE_TABLE_IDS, true, 272)
+    plan_workspace(rom, workspace_path, &BATTLE_TABLE_IDS, true, 273)
 }
 
 pub(crate) fn plan_unit_name_text(rom: &Rom, workspace_path: &Path) -> Result<FixedTextPlan> {
-    plan_workspace(rom, workspace_path, &["unit-names"], false, 52)
+    plan_workspace(rom, workspace_path, &["unit-names"], false, 53)
 }
 
 pub(crate) fn plan_location_name_text(rom: &Rom, workspace_path: &Path) -> Result<FixedTextPlan> {
@@ -263,14 +263,14 @@ pub(crate) fn extract_fixed_text_workspace(
     source_path: &Path,
     workspace_path: &Path,
 ) -> Result<FixedTextWorkspaceSummary> {
-    extract_workspace(source_path, workspace_path, &BATTLE_TABLE_IDS, true, 272)
+    extract_workspace(source_path, workspace_path, &BATTLE_TABLE_IDS, true, 273)
 }
 
 pub(crate) fn extract_unit_name_workspace(
     source_path: &Path,
     workspace_path: &Path,
 ) -> Result<FixedTextWorkspaceSummary> {
-    extract_workspace(source_path, workspace_path, &["unit-names"], false, 52)
+    extract_workspace(source_path, workspace_path, &["unit-names"], false, 53)
 }
 
 pub(crate) fn extract_location_name_workspace(

@@ -7,7 +7,7 @@ use crate::{
     text_inventory::{FixedTextPlannedEntry, plan_unit_name_text},
 };
 
-pub(crate) const UNIT_NAME_ENTRY_COUNT: usize = 52;
+pub(crate) const UNIT_NAME_ENTRY_COUNT: usize = 53;
 
 pub(crate) struct UnitNamePlan {
     pub(crate) workspace_sha1: String,

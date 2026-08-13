@@ -8,8 +8,12 @@ use crate::{
     mapper165::battle_codebook_plan::GlyphWorkset, text_inventory::FixedTextPlannedEntry,
 };
 
+mod producer_encoding;
 mod remap;
 
+pub(in crate::full_translation_install) use producer_encoding::{
+    DynamicProducerEncodingPlan, bind_dynamic_producer_encoding,
+};
 pub(in crate::full_translation_install) use remap::{
     DynamicStringRemapPlan, plan_dynamic_string_remap,
 };

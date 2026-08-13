@@ -568,7 +568,9 @@ pub(super) const TEXT_TABLE_SPECS: [TextTableSpec; 7] = [
         id: "unit-names",
         role: "playable unit names",
         table_file_offset: 0x3DE3B,
-        pointer_count: 0x34,
+        // ID 35의 가토까지 0..52다. 0x34로 자르면 후일담 생산자 `$A366`이
+        // 실제로 읽는 마지막 포인터가 번역 모집단에서 빠진다.
+        pointer_count: 0x35,
         terminator: 0xEF,
         consumer_file_offset: 0x19B48,
         consumer_bytes: [0xB9, 0x2B, 0xDE, 0x85, 0x00, 0xB9, 0x2C, 0xDE, 0x85, 0x01],

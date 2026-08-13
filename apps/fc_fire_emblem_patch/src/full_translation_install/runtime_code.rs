@@ -18,6 +18,7 @@ mod chr_ram_ownership;
 pub(in crate::full_translation_install) mod chr_selector;
 pub(in crate::full_translation_install) mod chr_source_state;
 pub(in crate::full_translation_install) mod dispatcher_gate;
+mod dynamic_producer;
 mod fixed_cfg_cycles;
 pub(in crate::full_translation_install) mod lifecycle;
 pub(in crate::full_translation_install) mod resolve_request;
@@ -42,6 +43,11 @@ pub(in crate::full_translation_install) enum DialogueRuntimeHookRole {
     NmiPageComposer,
     DispatcherGate,
     ChrRamSelector,
+    DynamicItemSlotProducer,
+    DynamicUnitSlotProducer,
+    DynamicVillageItemProducer,
+    DynamicEpilogueUnitProducer,
+    DynamicEpilogueLocationProducer,
 }
 
 /// 훅이 가져가는 원본 자리다.
@@ -130,6 +136,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     chr_selector::bind_selector_chain_site(candidate)?;
     chr_selector::bind_selector_cave(candidate)?;
     chr_ram_ownership::bind_shared_chr_ram_ownership_boundary(candidate)?;
+    dynamic_producer::bind_hook_sites(source, candidate)?;
     let chr_source_state = chr_source_state::bind_chr_source_state(candidate)?;
 
     let selector = chr_selector::build_chr_selector(
@@ -205,6 +212,14 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         code_page,
         resolved_page_publication_address,
     )?;
+    let dynamic_producer_code_origin = next_page_resolver.address
+        + u16::try_from(next_page_resolver.bytes.len())
+            .context("next-page resolver length overflow")?;
+    let dynamic_producers = dynamic_producer::build_dynamic_producer_runtime(
+        dynamic_producer_code_origin,
+        code_page,
+        layout,
+    )?;
     ensure_disjoint(&[&gate], dispatcher_gate::RECLAIMED_GATE_CAVE_END)?;
     let mut fixed_support_bytes = gate.bytes;
     let fixed_support_capacity = usize::from(
@@ -266,7 +281,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         ],
         chr_selector::SELECTOR_CAVE_END,
     )?;
-    let fixed_routines = vec![
+    let mut fixed_routines = vec![
         trampoline_routine,
         publisher,
         selector,
@@ -276,7 +291,9 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         resolved_page_publication,
         initial_request_publisher,
     ];
-    let code_routines = vec![transport, resolver, next_page_resolver];
+    fixed_routines.extend(dynamic_producers.fixed_routines);
+    let mut code_routines = vec![transport, resolver, next_page_resolver];
+    code_routines.extend(dynamic_producers.code_routines);
     let completed_page_entry = lifecycle.completed_page_entry;
     let handoff_residency_suspension_entry = lifecycle.handoff_residency_suspension_entry;
     let reclaimed_fixed_routines = vec![
@@ -381,6 +398,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
                 .to_vec(),
         },
     ]);
+    hooks.extend(dynamic_producers.hooks);
 
     Ok(DialogueRuntimeCodePlan {
         code_routines,

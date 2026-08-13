@@ -25,10 +25,10 @@ pub(super) const RUNTIME_CODE_MMC3_PAGE: u8 =
 const MMC3_PAGE_BYTE_COUNT: usize = 8 * 1024;
 const RUNTIME_MATERIAL_CAPACITY: usize = RUNTIME_MATERIAL_PAGE_COUNT * MMC3_PAGE_BYTE_COUNT;
 const CONTENT_EMITTED_FLAG: u8 = 1;
-const RUNTIME_CODE_SECTION_ID: u8 = 5;
-/// 자료 구역 넷과 실행 코드 예약 하나다. 용기 안에서 payload가 시작하는 자리를
+const RUNTIME_CODE_SECTION_ID: u8 = 6;
+/// 자료 구역 다섯과 실행 코드 예약 하나다. 용기 안에서 payload가 시작하는 자리를
 /// 계산할 때 쓴다.
-pub(super) const MATERIAL_SECTION_COUNT: usize = 5;
+pub(super) const MATERIAL_SECTION_COUNT: usize = 6;
 /// 용기의 마지막 페이지가 걸리는 CPU 창의 시작이다.
 const RUNTIME_CODE_WINDOW_START: usize = 0xA000;
 /// 실행 코드가 받는 자리다. 마지막 페이지 전체이므로 자료 크기와 무관한 상수다.
@@ -39,6 +39,7 @@ pub(super) struct RuntimeMaterialInputs<'a> {
     pub(super) page_scan: &'a [u8],
     pub(super) dynamic_remap: &'a [u8],
     pub(super) runtime_identity: &'a [u8],
+    pub(super) dynamic_producer_encoding: &'a [u8],
 }
 
 #[derive(Debug, Serialize)]
@@ -53,7 +54,7 @@ pub(super) struct DialogueRuntimeMaterialPlan {
     pub(super) runtime_code_offset: usize,
     runtime_code_reserved_byte_count: usize,
     runtime_code_emitted: bool,
-    stable_three_page_layout: bool,
+    stable_fixed_page_layout: bool,
     material_sha1: String,
     #[serde(skip)]
     pub(super) material: Vec<u8>,
@@ -99,13 +100,18 @@ pub(super) fn plan_dialogue_runtime_material(
             role: "runtime_identity",
             content: Some(inputs.runtime_identity),
         },
+        MaterialSectionInput {
+            id: 5,
+            role: "dynamic_producer_encoding",
+            content: Some(inputs.dynamic_producer_encoding),
+        },
     ];
     let plan = encode_runtime_material(&data_sections, RUNTIME_MATERIAL_CAPACITY)?;
-    // 용기는 세 MMC3 페이지로 고정한다. 다른 도메인의 시작점이 후속 구현에서 움직이지
+    // 용기는 다섯 MMC3 페이지로 고정한다. 다른 도메인의 시작점이 후속 구현에서 움직이지
     // 않게 하려는 것이라 정확한 크기 자체가 요구사항이다.
     ensure!(
         plan.material.len() == RUNTIME_MATERIAL_CAPACITY,
-        "main-dialogue runtime material container is no longer three MMC3 pages"
+        "main-dialogue runtime material container is no longer five MMC3 pages"
     );
     // 반면 payload와 실행 코드 예약이 나뉘는 지점은 요구사항이 아니다. 자료가 줄면
     // 예약이 늘어야 정상이다. 지킬 것은 예약이 확보한 하한이다. 의사결정 56번을 따른다.
@@ -253,14 +259,14 @@ fn encode_runtime_material(
         runtime_code_offset,
         runtime_code_reserved_byte_count: runtime_code_byte_count,
         runtime_code_emitted: false,
-        stable_three_page_layout: capacity == RUNTIME_MATERIAL_CAPACITY,
+        stable_fixed_page_layout: capacity == RUNTIME_MATERIAL_CAPACITY,
         material_sha1: sha1_hex(&material),
         material,
     })
 }
 
 impl DialogueRuntimeMaterialPlan {
-    /// 실행 코드가 놓이는 CPU 주소다. 용기는 페이지 `2C`부터 세 장이고 `$A000` 창에
+    /// 실행 코드가 놓이는 CPU 주소다. 용기는 페이지 `2C`부터 다섯 장이고 `$A000` 창에
     /// 걸리는 것은 마지막 장이므로, 예약 시작에서 그 장의 시작을 뺀 만큼이 창 안의
     /// 위치가 된다.
     pub(super) fn runtime_code_cpu_start(&self) -> Result<u16> {

@@ -556,7 +556,7 @@ mod tests {
             dialogue_workspace_sha1: "dialogue".to_owned(),
             cooccurrence_model: "family coverage",
             message_template_entry_count: 22,
-            unit_name_entry_count: 52,
+            unit_name_entry_count: 53,
             enemy_name_entry_count: 69,
             class_entry_count: 22,
             item_entry_count: 64,

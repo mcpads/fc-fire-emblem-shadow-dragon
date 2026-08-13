@@ -1290,7 +1290,7 @@ pub(crate) fn build_cumulative_patch(
         translation_input_complete: dialogue_workspace.translation_input_complete
             && chapter_title_plan.translated_entry_count == chapter_title_plan.entry_count
             && front_end_menu_plan.entries.len() == 7
-            && unit_name_plan.entries.len() == 52
+            && unit_name_plan.entries.len() == 53
             && class_profile_plan.entries.len() == 22
             && weapon_shop_shared_text_stage
                 .plan

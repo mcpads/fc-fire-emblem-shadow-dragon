@@ -423,7 +423,7 @@ fn validate_title_logo_lifetime(report: &CurrentBuildReport) -> Result<()> {
 fn validate_unit_roster_lifetime(report: &CurrentBuildReport) -> Result<()> {
     let names = &report.playable_unit_names;
     ensure!(
-        names.workspace_entry_count == 52
+        names.workspace_entry_count == 53
             && names.roster_projection_installed
             && names.roster_page_target_glyph_count > 0
             && names.roster_page_preserved_active_code_count > 0
@@ -899,7 +899,7 @@ mod tests {
                 "capacity_bound_to_build": true
             },
             "playable_unit_names": {
-                "workspace_entry_count": 52,
+                "workspace_entry_count": 53,
                 "roster_page_target_glyph_count": 72,
                 "roster_page_preserved_active_code_count": 18,
                 "roster_page_total_slot_demand": 90,
@@ -980,8 +980,8 @@ mod tests {
                 "fixed_text_workspace_sha1": "fixed-workspace",
                 "dialogue_workspace_sha1": "dialogue-workspace",
                 "temporal_manifest_sha1": "temporal-manifest",
-                "installed_fixed_entry_count": 231,
-                "installed_unit_name_count": 52,
+                "installed_fixed_entry_count": 232,
+                "installed_unit_name_count": 53,
                 "installed_enemy_name_count": 55,
                 "installed_class_name_count": 22,
                 "installed_item_name_count": 64,
@@ -1000,7 +1000,7 @@ mod tests {
         validate_weapon_shop_lifetime(&report).unwrap();
         let installations = collect_domain_installations(&report).unwrap();
         let unit_names = &installations["unit_names"];
-        assert_eq!(unit_names.installed_target_unit_count, 52);
+        assert_eq!(unit_names.installed_target_unit_count, 53);
         assert_eq!(
             unit_names.installed_screen_roles,
             [

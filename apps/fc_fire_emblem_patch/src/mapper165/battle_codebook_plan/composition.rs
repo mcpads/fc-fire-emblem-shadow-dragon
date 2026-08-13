@@ -322,7 +322,7 @@ pub(super) fn plan_cache_composition(
         RecipeRole::UnitName,
         fixed,
         "unit-names",
-        0..52,
+        0..53,
         &family_encoding,
     )?;
     add_fixed_indices(
@@ -428,7 +428,7 @@ pub(super) fn plan_cache_composition(
     let plan = BattleCacheCompositionPlan {
         strategy: "rebuild one CHR-RAM page from the original source page and selected glyph recipes at battle entry",
         common_recipe_count: 1,
-        unit_name_recipe_count: 52,
+        unit_name_recipe_count: 53,
         enemy_name_recipe_count: enemy_name_source_indices.len(),
         class_recipe_count: 24,
         item_recipe_count: candidate_item_source_indices.len(),

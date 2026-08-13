@@ -9,7 +9,7 @@ use super::BattleRuntimeRecipeInput;
 const MAGIC: &[u8; 4] = b"FBRC";
 const FORMAT: u8 = 1;
 const HEADER_BYTE_COUNT: usize = 32;
-const UNIT_DIRECTORY_COUNT: usize = 52;
+const UNIT_DIRECTORY_COUNT: usize = 53;
 const ENEMY_DIRECTORY_COUNT: usize = 69;
 const CLASS_DIRECTORY_COUNT: usize = 24;
 const ITEM_DIRECTORY_COUNT: usize = 91;

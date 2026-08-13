@@ -628,6 +628,18 @@
       "japanese_markup": "セイハ゛ー",
       "korean_markup": "세이버",
       "status": "needs_human_review"
+    },
+    {
+      "id": "unit-names:052",
+      "table_id": "unit-names",
+      "source_index": 52,
+      "alias_indices": [],
+      "pointer_cpu_address_hex": "0xDF9F",
+      "source_bytes_hex": "35 0F 44 3F",
+      "source_sha1": "a83b90de5ef313eb62aabed366b339ab20dc1a2f",
+      "japanese_markup": "カ゛トー",
+      "korean_markup": "가토",
+      "status": "needs_human_review"
     }
   ]
 }

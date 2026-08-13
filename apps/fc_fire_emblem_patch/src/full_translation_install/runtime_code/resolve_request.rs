@@ -74,6 +74,13 @@ pub(in crate::full_translation_install) struct MaterialLayout {
     pub(in crate::full_translation_install) group_block_container_base: u16,
     /// 재료 용기가 시작하는 MMC3 페이지다.
     pub(in crate::full_translation_install) container_first_page: u8,
+    /// `{EC}` 생산자 전용 정규 문자열이 들어 있는 MMC3 페이지다.
+    pub(in crate::full_translation_install) producer_encoding_page: u8,
+    /// 항목별 문자열 오프셋 표와 그 기준점이다.
+    pub(in crate::full_translation_install) producer_item_directory: u16,
+    pub(in crate::full_translation_install) producer_unit_directory: u16,
+    pub(in crate::full_translation_install) producer_location_directory: u16,
+    pub(in crate::full_translation_install) producer_encoding_base: u16,
 }
 
 /// 주 흐름에서 빌려 쓰는 제로 페이지다. 밀고 되돌린다.
@@ -457,6 +464,11 @@ mod tests {
             group_directory: 0x9E08,
             group_block_container_base: 7_758,
             container_first_page: 0x2C,
+            producer_encoding_page: 0x2F,
+            producer_item_directory: 0x9000,
+            producer_unit_directory: 0x9100,
+            producer_location_directory: 0x9200,
+            producer_encoding_base: 0x8F00,
         }
     }
 
