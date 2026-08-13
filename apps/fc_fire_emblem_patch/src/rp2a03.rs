@@ -28,8 +28,10 @@ pub enum Instruction {
     AndZeroPage(u8),
     AdcImmediate(u8),
     AdcZeroPage(u8),
+    AdcAbsolute(u16),
     AdcAbsoluteX(u16),
     SbcImmediate(u8),
+    SbcZeroPage(u8),
     CmpImmediate(u8),
     CmpZeroPage(u8),
     CpxImmediate(u8),
@@ -101,6 +103,7 @@ impl Instruction {
             | Self::AdcImmediate(_)
             | Self::AdcZeroPage(_)
             | Self::SbcImmediate(_)
+            | Self::SbcZeroPage(_)
             | Self::CmpImmediate(_)
             | Self::CmpZeroPage(_)
             | Self::CpxImmediate(_)
@@ -116,6 +119,7 @@ impl Instruction {
             Self::LdaAbsolute(_)
             | Self::LdaAbsoluteX(_)
             | Self::LdaAbsoluteY(_)
+            | Self::AdcAbsolute(_)
             | Self::AdcAbsoluteX(_)
             | Self::LdyAbsoluteX(_)
             | Self::StaAbsolute(_)
@@ -124,6 +128,70 @@ impl Instruction {
             | Self::DecAbsolute(_)
             | Self::JmpAbsolute(_)
             | Self::JsrAbsolute(_) => 3,
+        }
+    }
+
+    /// 이 명령이 쓸 수 있는 가장 많은 사이클이다.
+    ///
+    /// vblank 안에서 도는 코드의 예산을 세우는 데만 쓴다. 그래서 페이지 경계를
+    /// 넘는 색인 접근과 분기 성립을 전부 «일어난다»로 본다. 실제보다 크게 잡히는
+    /// 쪽이라 예산이 낙관적으로 기울지 않는다.
+    pub fn worst_case_cycles(self) -> u8 {
+        match self {
+            Self::AslAccumulator
+            | Self::LsrAccumulator
+            | Self::Inx
+            | Self::Dex
+            | Self::Iny
+            | Self::Tax
+            | Self::Txa
+            | Self::Tay
+            | Self::Tya
+            | Self::Tsx
+            | Self::Clc
+            | Self::Sec
+            | Self::Nop
+            | Self::LdaImmediate(_)
+            | Self::LdxImmediate(_)
+            | Self::LdyImmediate(_)
+            | Self::AndImmediate(_)
+            | Self::AdcImmediate(_)
+            | Self::SbcImmediate(_)
+            | Self::CmpImmediate(_)
+            | Self::CpxImmediate(_)
+            | Self::CpyImmediate(_)
+            | Self::OraImmediate(_) => 2,
+            Self::Pha | Self::Php => 3,
+            Self::LdaZeroPage(_)
+            | Self::LdxZeroPage(_)
+            | Self::StaZeroPage(_)
+            | Self::StyZeroPage(_)
+            | Self::AndZeroPage(_)
+            | Self::AdcZeroPage(_)
+            | Self::CmpZeroPage(_)
+            | Self::OraZeroPage(_)
+            | Self::SbcZeroPage(_) => 3,
+            Self::Pla | Self::Plp => 4,
+            Self::JmpAbsolute(_) => 3,
+            Self::LdaAbsolute(_) | Self::StaAbsolute(_) | Self::AdcAbsolute(_) => 4,
+            // 색인 적재는 페이지 경계를 넘으면 한 사이클 더 쓴다.
+            Self::LdaAbsoluteX(_)
+            | Self::LdaAbsoluteY(_)
+            | Self::LdyAbsoluteX(_)
+            | Self::AdcAbsoluteX(_) => 5,
+            Self::StaAbsoluteX(_) => 5,
+            Self::AslZeroPage(_)
+            | Self::RolZeroPage(_)
+            | Self::IncZeroPage(_)
+            | Self::DecZeroPage(_) => 5,
+            Self::LdaIndirectY(_) => 6,
+            Self::StaIndirectY(_) => 6,
+            Self::IncAbsolute(_) | Self::DecAbsolute(_) | Self::JsrAbsolute(_) | Self::Rts => 6,
+            // 분기는 성립하고 페이지도 넘는 경우를 최악으로 본다.
+            Self::BeqAbsolute(_)
+            | Self::BccAbsolute(_)
+            | Self::BcsAbsolute(_)
+            | Self::BneAbsolute(_) => 4,
         }
     }
 
@@ -160,8 +228,10 @@ impl Instruction {
             Self::AndZeroPage(address) => zero_page(Mnemonic::And, address),
             Self::AdcImmediate(value) => immediate(Mnemonic::Adc, value),
             Self::AdcZeroPage(address) => zero_page(Mnemonic::Adc, address),
+            Self::AdcAbsolute(address) => absolute(Mnemonic::Adc, address),
             Self::AdcAbsoluteX(address) => absolute_x(Mnemonic::Adc, address),
             Self::SbcImmediate(value) => immediate(Mnemonic::Sbc, value),
+            Self::SbcZeroPage(address) => zero_page(Mnemonic::Sbc, address),
             Self::CmpImmediate(value) => immediate(Mnemonic::Cmp, value),
             Self::CmpZeroPage(address) => zero_page(Mnemonic::Cmp, address),
             Self::CpxImmediate(value) => immediate(Mnemonic::Cpx, value),
@@ -371,6 +441,47 @@ mod tests {
         let bytes = assemble_at(0xB000, &[Instruction::DecZeroPage(0x00)]).unwrap();
 
         assert_eq!(bytes, [0xC6, 0x00]);
+    }
+
+    /// 전송 마무리는 커서를 절대 주소로 더하고 제로 페이지로 뺀다.
+    #[test]
+    fn encodes_the_cursor_arithmetic_the_transport_epilogue_uses() {
+        let bytes = assemble_at(
+            0xB000,
+            &[
+                Instruction::AdcAbsolute(0x07F7),
+                Instruction::SbcZeroPage(0x00),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(bytes, [0x6D, 0xF7, 0x07, 0xE5, 0x00]);
+    }
+
+    /// vblank 예산은 이 값들 위에 세워진다. 실제보다 작게 잡으면 예산이 낙관적으로
+    /// 기울어 실기에서 화면이 깨지므로, 조건부 추가 사이클은 전부 «일어난다»로 본다.
+    #[test]
+    fn worst_case_cycles_never_understate_the_conditional_penalties() {
+        for (instruction, cycles) in [
+            (Instruction::Nop, 2),
+            (Instruction::LdaZeroPage(0x00), 3),
+            (Instruction::LdaAbsolute(0x2002), 4),
+            (Instruction::StaAbsolute(0x2007), 4),
+            // 페이지 경계를 넘는 색인 적재의 최악값이다.
+            (Instruction::LdaAbsoluteX(0xB0FF), 5),
+            (Instruction::LdaIndirectY(0x00), 6),
+            (Instruction::DecAbsolute(0x07F8), 6),
+            (Instruction::JsrAbsolute(0xB000), 6),
+            (Instruction::Rts, 6),
+            // 분기가 성립하고 페이지도 넘는 최악값이다.
+            (Instruction::BneAbsolute(0xB000), 4),
+        ] {
+            assert_eq!(
+                instruction.worst_case_cycles(),
+                cycles,
+                "{instruction:?} worst case"
+            );
+        }
     }
 
     #[test]
