@@ -14,6 +14,7 @@ use crate::{
     rp2a03::{Instruction, assemble_at},
 };
 
+mod chr_ram_ownership;
 pub(in crate::full_translation_install) mod chr_selector;
 pub(in crate::full_translation_install) mod chr_source_state;
 pub(in crate::full_translation_install) mod dispatcher_gate;
@@ -36,7 +37,8 @@ pub(in crate::full_translation_install) enum DialogueRuntimeHookRole {
     E6TransitionEntryRequest,
     E7CallerResumeRequest,
     CompletedPageAdvanceOrLifetimeEnd,
-    E7CallerHandoffInvalidation,
+    E7CallerHandoffResidencySuspension,
+    BattleComposerInvalidatesDialogueResidency,
     NmiPageComposer,
     DispatcherGate,
     ChrRamSelector,
@@ -126,6 +128,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     lifecycle::bind_lifecycle_sites(source, candidate)?;
     chr_selector::bind_selector_chain_site(candidate)?;
     chr_selector::bind_selector_cave(candidate)?;
+    chr_ram_ownership::bind_shared_chr_ram_ownership_boundary(candidate)?;
     let chr_source_state = chr_source_state::bind_chr_source_state(candidate)?;
 
     let chr_restore_callee_cycles = chr_source_state.restore_callee_cycles();
@@ -196,6 +199,11 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         CHR_BANK_SELECT_REGISTER,
         CHR_BANK_VALUE_REGISTER,
     )?;
+    let ownership_transfer_origin = selector.address
+        + u16::try_from(selector.bytes.len()).context("dialogue selector length overflow")?;
+    let ownership_transfer =
+        chr_ram_ownership::build_battle_composition_ownership_transfer(ownership_transfer_origin)?;
+    let ownership_transfer_address = ownership_transfer.address;
 
     let publisher_address = publisher.address;
     let selector_address = selector.address;
@@ -203,8 +211,11 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         &[&trampoline_routine, &publisher],
         trampoline::TRAMPOLINE_CAVE_END,
     )?;
-    ensure_disjoint(&[&selector], chr_selector::SELECTOR_CAVE_END)?;
-    let fixed_routines = vec![trampoline_routine, publisher, selector];
+    ensure_disjoint(
+        &[&selector, &ownership_transfer],
+        chr_selector::SELECTOR_CAVE_END,
+    )?;
+    let fixed_routines = vec![trampoline_routine, publisher, selector, ownership_transfer];
     let code_routines = vec![transport, resolver, next_page_resolver];
     let lifecycle = lifecycle::build_lifecycle_suite(
         next_page_resolver_address,
@@ -212,7 +223,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         resolved_page_publication_address,
     )?;
     let completed_page_entry = lifecycle.completed_page_entry;
-    let handoff_invalidation_entry = lifecycle.handoff_invalidation_entry;
+    let handoff_residency_suspension_entry = lifecycle.handoff_residency_suspension_entry;
     let reclaimed_fixed_routines = vec![
         ReclaimedFixedRuntimeRoutine {
             routine: fixed_support,
@@ -296,13 +307,23 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
             bytes: lifecycle::completed_page_hook_bytes(completed_page_entry)?,
         },
         DialogueRuntimeHook {
-            role: DialogueRuntimeHookRole::E7CallerHandoffInvalidation,
-            write_role: "dialogue E7 caller-handoff invalidation hook",
+            role: DialogueRuntimeHookRole::E7CallerHandoffResidencySuspension,
+            write_role: "dialogue E7 caller-handoff residency suspension hook",
             site: DialogueRuntimeHookSite::Switchable {
                 bank: 0x0A,
                 address: lifecycle::E7_HANDOFF_SITE,
             },
-            bytes: lifecycle::handoff_invalidation_hook_bytes(handoff_invalidation_entry).to_vec(),
+            bytes: lifecycle::handoff_residency_suspension_hook_bytes(
+                handoff_residency_suspension_entry,
+            )
+            .to_vec(),
+        },
+        DialogueRuntimeHook {
+            role: DialogueRuntimeHookRole::BattleComposerInvalidatesDialogueResidency,
+            write_role: "battle composer dialogue-residency invalidation hook",
+            site: DialogueRuntimeHookSite::Fixed(chr_ram_ownership::BATTLE_COMPOSITION_CALL_SITE),
+            bytes: chr_ram_ownership::ownership_transfer_hook_bytes(ownership_transfer_address)
+                .to_vec(),
         },
     ]);
 

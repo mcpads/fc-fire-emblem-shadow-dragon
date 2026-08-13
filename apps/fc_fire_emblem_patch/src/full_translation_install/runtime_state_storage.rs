@@ -109,10 +109,10 @@ pub(super) fn plan_dialogue_runtime_state_storage(
         && battle_reservation_excludes_candidate;
 
     Ok(DialogueRuntimeStateStoragePlan {
-        strategy: "own one nine-byte scratch range only from a cold-initialized main-dialogue entry through its terminal or external-caller invalidation; the first five bytes are the producer-consumer contract, the last four are the consumer-only transport cursor; inactive screens may clobber it",
+        strategy: "own one eleven-byte scratch range from a main-dialogue request through terminal invalidation; E7 suspends selection without discarding a resident page, while the actual battle CHR-RAM composer invalidates it before overwrite; the first five bytes are the producer-consumer contract and the last six are the consumer cursor; inactive screens may clobber it",
         candidate_cpu_range_hex: "0x07F0..0x07FA",
         required_byte_count: usize::from(CANDIDATE_END - CANDIDATE_START + 1),
-        ownership_lifetime: "main dialogue active, including page transitions; battle and every inactive or external-caller lifetime are excluded",
+        ownership_lifetime: "main dialogue active plus an E7-suspended resident page; battle composition invalidates before overwrite and every other inactive lifetime remains excluded",
         main_dialogue_handler_root_count: roots.len(),
         main_dialogue_reachable_instruction_count: trace.visited.len(),
         main_dialogue_reachable_instruction_catalog_sha1: sha1_hex(&catalog),
@@ -131,9 +131,9 @@ pub(super) fn plan_dialogue_runtime_state_storage(
         battle_reservation_excludes_candidate,
         inactive_lifetime_may_clobber_candidate: true,
         future_runtime_lifecycle_contract: RuntimeLifecycleContract {
-            ownership_begin: "every direct entry and every E7 resume performs one cold initialization before publishing a request",
-            ownership_continue: "E4, E6, and visible-page transitions retain ownership only while the original main-dialogue active state remains true",
-            ownership_invalidate: "E7 handoff, every terminal path, reset, save/load boundary, and every inactive selector path invalidate ownership",
+            ownership_begin: "every direct entry and E7 resume resolves a request before publishing cold or ready state",
+            ownership_continue: "E4, E6, visible-page transitions, and E7 suspension retain ownership while no shared CHR-RAM writer has invalidated it",
+            ownership_invalidate: "battle CHR-RAM composition, every terminal path, reset, save/load boundary, and unclassified inactive writers invalidate ownership",
             cold_entry_writes_all_five_bytes_before_any_selector_read: true,
             inactive_selector_ignores_all_five_bytes: true,
             implementation_required_before_rom_emission: true,

@@ -35,13 +35,14 @@ const CENTRAL_SELECTOR_FALLBACK: u16 = 0xFF40;
 /// 완성된 대사 수명이 원본 제어 흐름에 끼어들어야 하는 모든 역할이다.
 ///
 /// 주소의 개수가 아니다. 완료 판정은 이 역할 집합에서 빠진 것이 없는지를 본다.
-const PLANNED_HOOK_ROLES: [DialogueRuntimeHookRole; 9] = [
+const PLANNED_HOOK_ROLES: [DialogueRuntimeHookRole; 10] = [
     DialogueRuntimeHookRole::InitialDirectEntryRequest,
     DialogueRuntimeHookRole::E4TransitionEntryRequest,
     DialogueRuntimeHookRole::E6TransitionEntryRequest,
     DialogueRuntimeHookRole::E7CallerResumeRequest,
     DialogueRuntimeHookRole::CompletedPageAdvanceOrLifetimeEnd,
-    DialogueRuntimeHookRole::E7CallerHandoffInvalidation,
+    DialogueRuntimeHookRole::E7CallerHandoffResidencySuspension,
+    DialogueRuntimeHookRole::BattleComposerInvalidatesDialogueResidency,
     DialogueRuntimeHookRole::NmiPageComposer,
     DialogueRuntimeHookRole::DispatcherGate,
     DialogueRuntimeHookRole::ChrRamSelector,
@@ -257,7 +258,7 @@ pub(super) fn plan_dialogue_runtime_control_flow(
             "E7_caller_resume",
             0x871C,
             "reuse_same_ready_page_zero_otherwise_cold_rebuild",
-            "external caller may have changed the font lifetime",
+            "reuse is allowed only while no shared CHR-RAM writer invalidated residency",
         ),
     ];
     for (_, address, _, _) in producer_specs {
@@ -432,8 +433,8 @@ pub(super) fn plan_dialogue_runtime_control_flow(
                 prg_bank_hex: "0x0A",
                 cpu_address_hex: "0x8556",
                 source_span_byte_count: 20,
-                request: "invalidate_before_external_caller",
-                continuity: "external caller owns the intervening screen",
+                request: "suspend_selection_but_retain_residency_until_a_real_chr_ram_writer_invalidates_it",
+                continuity: "dialogue state 17 gives the intervening screen to the existing selector chain",
             },
             RuntimeProducer {
                 role: "terminal_or_E6_idle",
@@ -447,7 +448,7 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         .collect();
 
     Ok(DialogueRuntimeControlFlowPlan {
-        strategy: "derive every request from the original main-dialogue state machine, retain the resident group through E6's non-displaying state 10, reuse a ready page for the same source identity or the same resolved page group, cold-compose only a different group, and replace only the FD latch after that exact request is ready",
+        strategy: "derive every request from the original main-dialogue state machine, retain the resident group through E6 and E7 non-dialogue states, invalidate it at the actual battle CHR-RAM writer, reuse a ready page for the same source identity or the same resolved page group, cold-compose only a different or invalidated group, and replace only the FD latch after that exact request is ready",
         states: vec![
             RuntimeState {
                 id: "inactive",
@@ -603,7 +604,10 @@ mod tests {
 
         assert_eq!(classified.len(), emitted.len());
         assert!(missing.contains(&DialogueRuntimeHookRole::E4TransitionEntryRequest));
-        assert!(missing.contains(&DialogueRuntimeHookRole::E7CallerHandoffInvalidation));
+        assert!(missing.contains(&DialogueRuntimeHookRole::E7CallerHandoffResidencySuspension));
+        assert!(
+            missing.contains(&DialogueRuntimeHookRole::BattleComposerInvalidatesDialogueResidency)
+        );
     }
 
     /// 같은 역할을 두 번 세어 빠진 역할을 메운 척할 수 없어야 한다.

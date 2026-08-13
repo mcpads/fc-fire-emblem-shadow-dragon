@@ -3,8 +3,9 @@
 //! `$85C9`의 세 결과는 서로 다른 의미다. `09`는 같은 레코드의 다음 가시 페이지를
 //! 찾고, `10`은 E6가 지정한 다음 레코드로 넘어가는 짧은 비표시 상태이며, `0F`는 대사
 //! 수명을 끝낸다. `10`에서도 selector는 원본으로 돌아가지만 CHR RAM의 상주 그룹은
-//! 다음 생산자가 곧바로 재사용할 수 있게 유지한다. E7 외부 호출은 화면 소유자가
-//! 바뀌므로 넘기기 전에 요청을 폐기한다. 이 구분 없이 매번 초기 페이지를 해석하면
+//! 다음 생산자가 곧바로 재사용할 수 있게 유지한다. E7 외부 호출 중에는 selector가
+//! 원본 경로로 물러나되 CHR 상주권은 보류하고, 실제 전투 합성기가 RAM을 덮을 때만
+//! 별도 소유권 경계에서 폐기한다. 이 구분 없이 매번 초기 페이지를 해석하면
 //! 여러 쪽 대사가 영원히 0번 페이지로 돌아가거나 같은 그룹을 화면 위에서 다시 만든다.
 
 use anyhow::{Context, Result, ensure};
@@ -70,7 +71,7 @@ const E7_HANDOFF_SOURCE: [u8; 17] = [
 pub(super) struct LifecycleSuite {
     pub(super) routine: RuntimeRoutine,
     pub(super) completed_page_entry: u16,
-    pub(super) handoff_invalidation_entry: u16,
+    pub(super) handoff_residency_suspension_entry: u16,
 }
 
 /// 설치가 전제로 삼는 원본 상태 전이와 표본 코드를 한 번에 결속한다.
@@ -240,11 +241,10 @@ pub(super) fn build_lifecycle_suite(
     instructions[idle_placeholder] = Instruction::BneAbsolute(retain_residency_and_store_state);
     instructions.extend([Instruction::StaAbsolute(DIALOGUE_STATE), Instruction::Rts]);
 
-    let handoff_invalidation_entry = next_address(origin, &instructions)?;
+    let handoff_residency_suspension_entry = next_address(origin, &instructions)?;
     instructions.extend([
-        Instruction::LdaImmediate(0),
-        Instruction::StaAbsolute(REQUEST_STATE),
-        // 훅이 밀어낸 적재와 그 분기 플래그를 그대로 재현한다.
+        // state 17이 selector를 원본 경로로 물리므로 RAM 상주권은 그대로 보류한다.
+        // 훅이 밀어낸 적재와 그 분기 플래그도 그대로 재현한다.
         Instruction::LdaAbsolute(E7_DECODER_FLAG),
         Instruction::Rts,
     ]);
@@ -265,7 +265,7 @@ pub(super) fn build_lifecycle_suite(
             bytes,
         },
         completed_page_entry: origin,
-        handoff_invalidation_entry,
+        handoff_residency_suspension_entry,
     })
 }
 
@@ -282,7 +282,7 @@ pub(super) fn completed_page_hook_bytes(entry: u16) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-pub(super) fn handoff_invalidation_hook_bytes(entry: u16) -> [u8; 3] {
+pub(super) fn handoff_residency_suspension_hook_bytes(entry: u16) -> [u8; 3] {
     [0x20, entry as u8, (entry >> 8) as u8]
 }
 
@@ -415,13 +415,17 @@ mod tests {
     }
 
     #[test]
-    fn handoff_invalidation_replays_the_displaced_load_last() {
+    fn e7_handoff_suspends_selection_without_discarding_residency() {
         let suite = build_lifecycle_suite(0xB400, 0x2E, RESOLVED_PAGE_PUBLICATION).unwrap();
-        let start = usize::from(suite.handoff_invalidation_entry - LIFECYCLE_ORIGIN);
-        let handoff = &suite.routine.bytes[start..start + 9];
+        let start = usize::from(suite.handoff_residency_suspension_entry - LIFECYCLE_ORIGIN);
+        let handoff = &suite.routine.bytes[start..start + 4];
 
-        assert_eq!(&handoff[5..8], &[0xAD, 0x08, 0x78]);
-        assert_eq!(handoff[8], 0x60);
+        assert_eq!(handoff, &[0xAD, 0x08, 0x78, 0x60]);
+        assert!(
+            !handoff.windows(3).any(|window| {
+                window == [0x8D, REQUEST_STATE as u8, (REQUEST_STATE >> 8) as u8]
+            })
+        );
     }
 
     #[test]
