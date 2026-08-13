@@ -44,6 +44,7 @@ use installation_layout::{InstallationLayoutPlan, plan_installation_layout};
 use integrated_write_set::{
     IntegratedWriteSetInputs, IntegratedWriteSetPlan, plan_integrated_write_set,
 };
+use runtime_code::plan_dialogue_runtime_code;
 use runtime_control_flow::{
     DialogueRuntimeControlFlowPlan, RuntimeControlFlowInputs, plan_dialogue_runtime_control_flow,
 };
@@ -52,6 +53,9 @@ use runtime_material::{
     DialogueRuntimeMaterialPlan, RuntimeMaterialInputs, plan_dialogue_runtime_material,
 };
 use runtime_state_storage::{DialogueRuntimeStateStoragePlan, plan_dialogue_runtime_state_storage};
+
+/// 대사 런타임 재료 용기가 시작하는 MMC3 8 KiB 페이지다.
+const MAIN_DIALOGUE_MATERIAL_FIRST_PAGE: u8 = 0x2C;
 
 const REQUIRED_DOMAIN_COUNT: usize = 13;
 const REQUIRED_DOMAINS: [&str; REQUIRED_DOMAIN_COUNT] = [
@@ -415,12 +419,30 @@ pub(crate) fn plan_full_translation_installation(
     let atlas_scan_remap_and_identity_byte_count = atlas_scan_and_dynamic_remap_byte_count
         .checked_add(runtime_identity.material.len())
         .context("dialogue runtime material length overflow")?;
-    let runtime_material = plan_dialogue_runtime_material(RuntimeMaterialInputs {
+    let mut runtime_material = plan_dialogue_runtime_material(RuntimeMaterialInputs {
         glyph_atlas: &composition.glyph_atlas,
         page_scan: &composition.scan_material,
         dynamic_remap: &dynamic_remap.selected_dense_material,
         runtime_identity: &runtime_identity.material,
     })?;
+    // 실행 코드는 자료 배치가 끝난 뒤에 조립한다. 놓일 주소가 자료 길이에서 나오기
+    // 때문이다. 코드 길이는 그 주소에 영향을 주지 않으므로 한 번에 정해진다.
+    let atlas_offset = runtime_material.glyph_atlas_offset()?;
+    let atlas_page = MAIN_DIALOGUE_MATERIAL_FIRST_PAGE
+        + u8::try_from(atlas_offset / (8 * 1024)).context("glyph atlas page index overflow")?;
+    let atlas_cpu_base = u16::try_from(0x8000 + atlas_offset % (8 * 1024))
+        .context("glyph atlas CPU base does not fit the 8000 window")?;
+    let dialogue_runtime_code = plan_dialogue_runtime_code(
+        &rom,
+        &current_candidate,
+        runtime_material.runtime_code_cpu_start()?,
+        atlas_page,
+        atlas_cpu_base,
+        u8::try_from(composition.maximum_visible_page_overlay_tile_count)
+            .context("cold request tile count does not fit one byte")?,
+    )?;
+    runtime_material.place_runtime_code(&dialogue_runtime_code.transport.bytes)?;
+
     let runtime_state_storage = plan_dialogue_runtime_state_storage(&rom)?;
     ensure!(
         runtime_state_storage.selection_complete(),
@@ -436,6 +458,8 @@ pub(crate) fn plan_full_translation_installation(
         runtime_code_byte_count: runtime_material.material.len()
             - runtime_material.runtime_code_offset,
         selected_runtime_state_cpu_range,
+        runtime_code_emitted: true,
+        emitted_hook_count: 3,
     })?;
     let installation_layout = plan_installation_layout(
         &current_candidate,
@@ -445,6 +469,7 @@ pub(crate) fn plan_full_translation_installation(
     let integrated_write_set = plan_integrated_write_set(IntegratedWriteSetInputs {
         candidate: &current_candidate,
         dialogue_runtime_material: &runtime_material.material,
+        dialogue_runtime_code: &dialogue_runtime_code,
         required_domains: &REQUIRED_DOMAINS,
         // 미러 뱅크 기반 대사 저장 쓰기 계획은 이중 진입과 함께 폐기했다.
         // 정규 레코드만으로 다시 세우기 전까지 기여하는 쓰기가 없다.

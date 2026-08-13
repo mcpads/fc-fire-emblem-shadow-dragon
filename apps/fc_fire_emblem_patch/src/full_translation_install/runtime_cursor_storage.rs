@@ -15,7 +15,7 @@
 //! 커서가 네 바이트인 것은 목적지 PPU 주소를 따로 담지 않기 때문이다. CHR RAM은
 //! 타일당 16바이트라 목적지는 타일 색인에서 곧바로 만들 수 있다.
 
-use super::runtime_state_storage::{CANDIDATE_END, CANDIDATE_START};
+use super::runtime_state_storage::CANDIDATE_START;
 
 /// 공유 계약이 쓰는 바이트 수다. 커서는 그 뒤에서 시작한다.
 const SHARED_CONTRACT_BYTE_COUNT: u16 = 5;
@@ -38,7 +38,10 @@ mod tests {
     #[test]
     fn the_cursor_lives_inside_the_proven_reservation() {
         assert_eq!(CURSOR_SOURCE_LOW, CANDIDATE_START + SHARED_CONTRACT_BYTE_COUNT);
-        assert_eq!(CURSOR_REMAINING_TILES, CANDIDATE_END);
+        assert_eq!(
+            CURSOR_REMAINING_TILES,
+            super::super::runtime_state_storage::CANDIDATE_END
+        );
     }
 
     /// 네 바이트에 무엇이 들어가는지가 설계 결정이다. 목적지 주소를 담지 않는

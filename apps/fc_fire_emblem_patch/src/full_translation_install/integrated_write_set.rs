@@ -3,11 +3,22 @@ use serde::Serialize;
 
 use crate::{rom::Rom, tracked::TrackedImage};
 
-use super::installation_layout::main_dialogue_runtime_material_file_offset;
+use super::{
+    installation_layout::main_dialogue_runtime_material_file_offset,
+    runtime_code::DialogueRuntimeCodePlan,
+    runtime_code::dispatcher_gate::{COLD_ENTRY, DISPATCHER_ENTRY},
+    runtime_nmi_contract::CONSUMER_HOOK,
+};
+use crate::dialogue_inventory::switchable_cpu_to_file_offset;
+
+/// 대사 뱅크다.
+const MAIN_DIALOGUE_BANK: u8 = 0x0A;
+const FIXED_BANK_SIZE: usize = 16 * 1024;
 
 pub(super) struct IntegratedWriteSetInputs<'a> {
     pub(super) candidate: &'a Rom,
     pub(super) dialogue_runtime_material: &'a [u8],
+    pub(super) dialogue_runtime_code: &'a DialogueRuntimeCodePlan,
     pub(super) required_domains: &'a [&'static str],
     pub(super) expected_dialogue_storage_write_count: usize,
 }
@@ -19,6 +30,8 @@ pub(super) struct IntegratedWriteSetPlan {
     contributing_domain_count: usize,
     fully_planned_domain_count: usize,
     expected_write_count: usize,
+    dialogue_runtime_hook_count: usize,
+    dialogue_runtime_fixed_routine_count: usize,
     changed_byte_count: usize,
     every_change_tracked: bool,
     one_shared_image: bool,
@@ -67,6 +80,53 @@ pub(super) fn plan_integrated_write_set(
         expected_runtime_material,
         inputs.dialogue_runtime_material,
     )?;
+    // 고정 뱅크 동굴의 조각들이다. 자리가 아직 `FF`여야 원본을 덮지 않는다.
+    for routine in &inputs.dialogue_runtime_code.fixed_routines {
+        let offset = fixed_file_offset(inputs.candidate, routine.address)?;
+        let existing = inputs
+            .candidate
+            .data()
+            .get(offset..offset + routine.bytes.len())
+            .ok_or_else(|| anyhow::anyhow!("{} is outside the candidate", routine.role))?;
+        ensure!(
+            existing.iter().all(|byte| *byte == 0xFF),
+            "{} would overwrite bytes that are not reserved",
+            routine.role
+        );
+        image.write_expected(routine.role, offset, existing, &routine.bytes)?;
+    }
+
+    // 훅 셋이다. 각각 밀어낼 원본 호출을 정확히 알고 있어야 한다.
+    let hooks: [(&str, usize, [u8; 3]); 3] = [
+        (
+            "dialogue consumer hook",
+            fixed_file_offset(inputs.candidate, CONSUMER_HOOK)?,
+            inputs.dialogue_runtime_code.consumer_hook,
+        ),
+        (
+            "dialogue dispatcher hook",
+            switchable_cpu_to_file_offset(MAIN_DIALOGUE_BANK, DISPATCHER_ENTRY)?,
+            inputs.dialogue_runtime_code.dispatcher_hook,
+        ),
+        (
+            "dialogue cold initializer hook",
+            switchable_cpu_to_file_offset(MAIN_DIALOGUE_BANK, COLD_ENTRY)?,
+            inputs.dialogue_runtime_code.cold_hook,
+        ),
+    ];
+    for (role, offset, bytes) in hooks {
+        let existing = inputs
+            .candidate
+            .data()
+            .get(offset..offset + bytes.len())
+            .ok_or_else(|| anyhow::anyhow!("{role} is outside the candidate"))?;
+        ensure!(
+            existing != bytes,
+            "{role} is already installed; the candidate is not a clean base"
+        );
+        image.write_expected(role, offset, existing, &bytes)?;
+    }
+
     image.verify_all_changes_tracked(inputs.candidate.data())?;
     let expected_write_count = image.writes().len();
     let output = image.into_data();
@@ -101,6 +161,8 @@ pub(super) fn plan_integrated_write_set(
         contributing_domain_count,
         fully_planned_domain_count,
         expected_write_count,
+        dialogue_runtime_hook_count: 3,
+        dialogue_runtime_fixed_routine_count: inputs.dialogue_runtime_code.fixed_routines.len(),
         changed_byte_count,
         every_change_tracked: true,
         one_shared_image: true,
@@ -108,6 +170,16 @@ pub(super) fn plan_integrated_write_set(
         output_materialized_in_memory_only: true,
         rom_emitted: false,
     })
+}
+
+fn fixed_file_offset(rom: &Rom, address: u16) -> Result<usize> {
+    ensure!(address >= 0xC000, "fixed-bank address is below C000");
+    let base = rom
+        .prg()
+        .len()
+        .checked_sub(FIXED_BANK_SIZE)
+        .ok_or_else(|| anyhow::anyhow!("PRG is smaller than one fixed bank"))?;
+    Ok(crate::rom::HEADER_SIZE + base + usize::from(address) - 0xC000)
 }
 
 fn domain_contributions(

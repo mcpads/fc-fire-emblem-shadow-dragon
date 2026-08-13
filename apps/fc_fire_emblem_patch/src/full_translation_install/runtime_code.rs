@@ -5,7 +5,13 @@
 
 use anyhow::{Context, Result, ensure};
 
-use crate::rp2a03::{Instruction, assemble_at};
+use super::{
+    runtime_bank_contract::bind_bank_restore_contract, runtime_nmi_contract::bind_quiet_frame_gate,
+};
+use crate::{
+    rom::Rom,
+    rp2a03::{Instruction, assemble_at},
+};
 
 pub(super) mod dispatcher_gate;
 pub(super) mod trampoline;
@@ -26,6 +32,78 @@ const CONSUMER_HOOK_CALL_CYCLES: u32 = 6;
 /// 여백을 두 겹으로 쌓으면 어느 쪽이 실제 근거인지 알 수 없게 된다.
 fn budgeted_transport_cycles(trampoline_reserve: u32) -> u32 {
     MEASURED_VBLANK_REMAINDER * (100 - SAFETY_MARGIN_PERCENT) / 100 - trampoline_reserve
+}
+
+/// 대사 런타임이 ROM에 넣는 실행 코드와 훅 전체다.
+pub(super) struct DialogueRuntimeCodePlan {
+    /// 페이지 `2E` 꼬리에 놓이는 전송 루틴이다.
+    pub(super) transport: RuntimeRoutine,
+    /// 고정 뱅크 동굴에 놓이는 조각들이다.
+    pub(super) fixed_routines: Vec<RuntimeRoutine>,
+    /// `$C179`에 쓸 소비자 훅이다.
+    pub(super) consumer_hook: [u8; 3],
+    /// `0A:$8000`에 쓸 디스패처 훅이다.
+    pub(super) dispatcher_hook: [u8; 3],
+    /// `0A:$809B`에 쓸 콜드 초기화 훅이다.
+    pub(super) cold_hook: [u8; 3],
+}
+
+/// 실행 코드를 전부 조립한다.
+///
+/// 고정 뱅크 동굴의 배치는 여기서 한 번에 정한다. 조각마다 시작 주소를 따로 두면
+/// 하나가 커졌을 때 다음 조각을 덮는다.
+pub(super) fn plan_dialogue_runtime_code(
+    source: &Rom,
+    candidate: &Rom,
+    runtime_code_cpu_start: u16,
+    atlas_page: u8,
+    atlas_cpu_base: u16,
+    cold_tile_count: u8,
+) -> Result<DialogueRuntimeCodePlan> {
+    let bank_restore = bind_bank_restore_contract(candidate)?;
+    bind_quiet_frame_gate(source, candidate)?;
+    dispatcher_gate::bind_dispatcher_entry(source, candidate)?;
+
+    let transport = transport::build_transport_routine(runtime_code_cpu_start)?;
+    let trampoline_routine =
+        trampoline::build_trampoline(bank_restore, atlas_page, transport.address)?;
+
+    let gate_origin = trampoline_routine.address
+        + u16::try_from(trampoline_routine.bytes.len())
+            .context("dialogue trampoline length overflow")?;
+    let gate = dispatcher_gate::build_dispatcher_gate(gate_origin)?;
+
+    let initializer_origin = gate.address
+        + u16::try_from(gate.bytes.len()).context("dispatcher gate length overflow")?;
+    let initializer =
+        dispatcher_gate::build_cold_initializer(initializer_origin, atlas_cpu_base, cold_tile_count)?;
+
+    // 예산은 시험만이 아니라 빌드가 지킨다. vblank를 넘기는 코드는 ROM에 들어가면
+    // 안 되므로, 여기서 막지 않으면 그 판정이 시험을 돌리는 사람에게 넘어간다.
+    // 의사결정 62번을 따른다.
+    let reserve = trampoline::worst_case_reserve_cycles(bank_restore)?;
+    let budget = budgeted_transport_cycles(reserve);
+    let frame_cycles = transport::worst_case_frame_cycles(runtime_code_cpu_start)?;
+    ensure!(
+        frame_cycles <= budget,
+        "one transport frame costs {frame_cycles} cycles but only {budget} of the measured \
+         {MEASURED_VBLANK_REMAINDER}-cycle vblank remainder are budgeted after the \
+         {SAFETY_MARGIN_PERCENT}% margin and the {reserve}-cycle trampoline reserve"
+    );
+
+    let fixed_routines = vec![trampoline_routine, gate, initializer];
+    ensure_disjoint(
+        &fixed_routines.iter().collect::<Vec<_>>(),
+        trampoline::TRAMPOLINE_CAVE_END,
+    )?;
+
+    Ok(DialogueRuntimeCodePlan {
+        consumer_hook: trampoline::hook_bytes(),
+        dispatcher_hook: dispatcher_gate::dispatcher_hook_bytes(fixed_routines[1].address),
+        cold_hook: dispatcher_gate::cold_hook_bytes(fixed_routines[2].address),
+        transport,
+        fixed_routines,
+    })
 }
 
 /// ROM의 한 자리에 놓이는 실행 코드 조각이다.

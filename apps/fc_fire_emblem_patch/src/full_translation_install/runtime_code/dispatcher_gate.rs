@@ -26,15 +26,15 @@ use crate::{
 };
 
 /// 대사 디스패처 입구다. 게이트가 이 세 바이트를 가져간다.
-pub(super) const DISPATCHER_ENTRY: u16 = 0x8000;
+pub(in crate::full_translation_install) const DISPATCHER_ENTRY: u16 = 0x8000;
 /// 원본이 입구에서 읽는 상태 바이트다.
-pub(super) const DISPATCHER_STATE: u16 = 0x77F7;
+pub(in crate::full_translation_install) const DISPATCHER_STATE: u16 = 0x77F7;
 /// 표 분기 호출이다. 게이트는 통과할 때 이 자리로 되돌린다.
-pub(super) const DISPATCHER_TABLE_CALL: u16 = 0x8003;
+pub(in crate::full_translation_install) const DISPATCHER_TABLE_CALL: u16 = 0x8003;
 /// 대사 초기 진입이다. 콜드 초기화가 이 세 바이트를 가져간다.
-pub(super) const COLD_ENTRY: u16 = 0x809B;
+pub(in crate::full_translation_install) const COLD_ENTRY: u16 = 0x809B;
 /// 초기 진입이 부르는 원본 포인터 resolver다.
-pub(super) const SOURCE_POINTER_RESOLVER: u16 = 0xE6B2;
+pub(in crate::full_translation_install) const SOURCE_POINTER_RESOLVER: u16 = 0xE6B2;
 
 use super::super::runtime_cursor_storage::{
     CURSOR_NEXT_TILE_INDEX, CURSOR_REMAINING_TILES, CURSOR_SOURCE_HIGH, CURSOR_SOURCE_LOW,
@@ -42,7 +42,7 @@ use super::super::runtime_cursor_storage::{
 use super::transport::{REQUEST_STATE, STATE_READY};
 
 /// 합성을 기다리는 중이라는 요청이다.
-pub(super) const STATE_COLD_REQUESTED: u8 = 1;
+pub(in crate::full_translation_install) const STATE_COLD_REQUESTED: u8 = 1;
 
 /// 대사 뱅크다.
 const MAIN_DIALOGUE_BANK: u8 = 0x0A;
