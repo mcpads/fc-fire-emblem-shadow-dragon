@@ -499,6 +499,7 @@ pub(crate) fn plan_full_translation_installation(
         selected_runtime_state_cpu_range,
         runtime_code_emitted: true,
         emitted_hook_roles: &emitted_hook_roles,
+        chr_restore_callee_cycles: dialogue_runtime_code.chr_restore_callee_cycles,
     })?;
     let installation_layout = plan_installation_layout(
         &current_candidate,

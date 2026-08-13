@@ -17,6 +17,7 @@ use crate::{
 pub(in crate::full_translation_install) mod chr_selector;
 pub(in crate::full_translation_install) mod chr_source_state;
 pub(in crate::full_translation_install) mod dispatcher_gate;
+mod fixed_cfg_cycles;
 pub(in crate::full_translation_install) mod lifecycle;
 pub(in crate::full_translation_install) mod resolve_request;
 pub(super) mod trampoline;
@@ -96,6 +97,8 @@ pub(in crate::full_translation_install) struct DialogueRuntimeCodePlan {
         Vec<ReclaimedFixedRuntimeRoutine>,
     /// 원본에 실제로 설치할 훅이다. 역할과 주소와 바이트가 한 단위라 따로 세지 않는다.
     pub(in crate::full_translation_install) hooks: Vec<DialogueRuntimeHook>,
+    /// 후보 고정 코드의 typed CFG에서 계산한 FD/FE 복원 helper 상한이다.
+    pub(in crate::full_translation_install) chr_restore_callee_cycles: [(u16, u32); 2],
 }
 
 impl DialogueRuntimeCodePlan {
@@ -121,8 +124,9 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     dispatcher_gate::bind_dispatcher_entry(source, candidate)?;
     lifecycle::bind_lifecycle_sites(source, candidate)?;
     chr_selector::bind_selector_chain_site(candidate)?;
-    chr_source_state::bind_chr_source_state(candidate)?;
+    let chr_source_state = chr_source_state::bind_chr_source_state(candidate)?;
 
+    let chr_restore_callee_cycles = chr_source_state.restore_callee_cycles();
     let transport = transport::build_transport_routine(runtime_code_cpu_start, atlas_page)?;
     let resolver_origin = transport.address
         + u16::try_from(transport.bytes.len()).context("transport routine length overflow")?;
@@ -163,7 +167,11 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     // 의사결정 62번을 따른다.
     let reserve = trampoline::worst_case_reserve_cycles(bank_restore)?;
     let budget = budgeted_transport_cycles(reserve);
-    let frame_cycles = transport::worst_case_frame_cycles(runtime_code_cpu_start, atlas_page)?;
+    let frame_cycles = transport::worst_case_frame_cycles(
+        runtime_code_cpu_start,
+        atlas_page,
+        chr_source_state,
+    )?;
     ensure!(
         frame_cycles <= budget,
         "one transport frame costs {frame_cycles} cycles but only {budget} of the measured \
@@ -288,6 +296,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         fixed_routines,
         reclaimed_fixed_routines,
         hooks,
+        chr_restore_callee_cycles,
     })
 }
 

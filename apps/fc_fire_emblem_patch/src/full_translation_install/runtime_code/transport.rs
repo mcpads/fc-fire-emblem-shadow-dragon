@@ -103,15 +103,6 @@ const CHR_RESTORE_PATHS: [(u8, u16); 2] = [
         super::chr_source_state::RIGHT_FE_HELPER,
     ),
 ];
-/// 도우미 하나가 최악의 경우 쓰는 사이클이다.
-///
-/// 방출된 바이트를 전수로 세어 얻었다. `$FA80`은 `JMP $FEEE`(3)이고, `$FEEE`는
-/// `PHP PHA JSR $FE90` 뒤에 `$07DF` 오버라이드 분기 넷을 지나 `$FF10`의 레지스터
-/// 쓰기로 모인다. `$FE90`의 최악 경로가 40, `$FEEE`의 최악 경로가 그것을 포함해
-/// 122, 여기에 `JMP` 3과 호출한 `JSR` 6을 더해 131이다. 표본이 아니라 경로 전수라
-/// 이 값은 상한이다.
-const CHR_HELPER_WORST_CASE_CYCLES: u32 = 131;
-
 /// NMI 프롤로그 `$C173`~`$C178`이 스택에 밀어 둔 제로 페이지다. 소비자가 써도 된다.
 const ENTRY_POINTER_LOW: u8 = 0x00;
 const ENTRY_POINTER_HIGH: u8 = 0x01;
@@ -433,13 +424,17 @@ pub(super) fn build_transport_routine(origin: u16, atlas_page: u8) -> Result<Run
 
 /// 한 프레임이 최악의 경우 쓰는 사이클이다. 실제로 방출하는 명령에서 센다.
 /// 두 단계 중 비싼 쪽을 센다. 예산은 어느 단계가 돌든 지켜져야 한다.
-pub(super) fn worst_case_frame_cycles(origin: u16, atlas_page: u8) -> Result<u32> {
+pub(super) fn worst_case_frame_cycles(
+    origin: u16,
+    atlas_page: u8,
+    chr_source_state: super::chr_source_state::ChrSourceStateContract,
+) -> Result<u32> {
     let (prologue, _) = frame_prologue(origin)?;
     let loop_start = next_address(origin, &prologue)?;
     let fixed = worst_case_cycles(&prologue)?
         + worst_case_cycles_with_calls(
             &frame_epilogue(origin)?.0,
-            &CHR_RESTORE_PATHS.map(|(_, helper)| (helper, CHR_HELPER_WORST_CASE_CYCLES)),
+            &chr_source_state.restore_callee_cycles(),
         )?
         + u32::from(Instruction::Rts.worst_case_cycles());
     let overlay =
@@ -467,13 +462,18 @@ mod tests {
         .unwrap()
     }
 
+    fn chr_source_state() -> super::super::chr_source_state::ChrSourceStateContract {
+        super::super::chr_source_state::bind_chr_source_state(&crate::test_support::release_rom())
+            .unwrap()
+    }
+
     /// 한 프레임이 vblank를 넘지 않아야 한다. 넘으면 렌더링 중에 `$2007`을 쓰게 되고
     /// 그것은 에뮬레이터에서는 대체로 보이지 않는 실기 손상이다.
     #[test]
     fn one_frame_of_transport_fits_the_measured_vblank_remainder() {
         let allowed = super::super::budgeted_transport_cycles(trampoline_reserve());
 
-        let worst_case = worst_case_frame_cycles(0xA000, ATLAS_PAGE).unwrap();
+        let worst_case = worst_case_frame_cycles(0xA000, ATLAS_PAGE, chr_source_state()).unwrap();
 
         assert!(
             worst_case <= allowed,
@@ -489,7 +489,8 @@ mod tests {
         let loop_start = next_address(0xA000, &prologue).unwrap();
         let per_tile = worst_case_cycles(&tile_body(loop_start, ATLAS_PAGE).unwrap()).unwrap();
 
-        let one_more = worst_case_frame_cycles(0xA000, ATLAS_PAGE).unwrap() + per_tile;
+        let one_more =
+            worst_case_frame_cycles(0xA000, ATLAS_PAGE, chr_source_state()).unwrap() + per_tile;
 
         assert!(
             one_more > allowed,

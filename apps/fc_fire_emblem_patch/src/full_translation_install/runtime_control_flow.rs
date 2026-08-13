@@ -117,6 +117,9 @@ struct NmiConsumer {
     source_prg_bank_restored: bool,
     scroll_restore_preserved: bool,
     registers_and_status_preserved: bool,
+    chr_restore_cycle_bounds_from_typed_cfg: bool,
+    chr_fd_restore_callee_worst_case_cycles: u32,
+    chr_fe_restore_callee_worst_case_cycles: u32,
 }
 
 #[derive(Serialize)]
@@ -184,6 +187,7 @@ pub(super) struct RuntimeControlFlowInputs<'a> {
     pub(super) runtime_code_emitted: bool,
     /// 이번 빌드가 실제로 건 훅의 역할이다.
     pub(super) emitted_hook_roles: &'a [DialogueRuntimeHookRole],
+    pub(super) chr_restore_callee_cycles: [(u16, u32); 2],
 }
 
 fn classify_emitted_hook_roles(
@@ -212,6 +216,14 @@ pub(super) fn plan_dialogue_runtime_control_flow(
 ) -> Result<DialogueRuntimeControlFlowPlan> {
     let (emitted_hook_roles, missing_hook_roles) =
         classify_emitted_hook_roles(inputs.emitted_hook_roles)?;
+    let [
+        (fd_helper, fd_restore_cycles),
+        (fe_helper, fe_restore_cycles),
+    ] = inputs.chr_restore_callee_cycles;
+    ensure!(
+        fd_helper == 0xFA80 && fe_helper == 0xFAA0,
+        "dialogue CHR restore cycle bounds target different helpers"
+    );
     let producer_specs = [
         (
             "initial_direct_entry",
@@ -454,6 +466,9 @@ pub(super) fn plan_dialogue_runtime_control_flow(
             source_prg_bank_restored: true,
             scroll_restore_preserved: true,
             registers_and_status_preserved: true,
+            chr_restore_cycle_bounds_from_typed_cfg: true,
+            chr_fd_restore_callee_worst_case_cycles: fd_restore_cycles,
+            chr_fe_restore_callee_worst_case_cycles: fe_restore_cycles,
         },
         font_page_builder: FontPageBuilder {
             strategy: "cold source-page rebuild plus dense page-group atlas overlay for every current request",
