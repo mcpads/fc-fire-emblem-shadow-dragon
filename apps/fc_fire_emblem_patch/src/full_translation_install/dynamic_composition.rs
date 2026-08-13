@@ -16,6 +16,10 @@ use super::dynamic_inputs::DynamicStringRemapPlan;
 
 /// MMC3 뱅크 한 장이다. 그룹 덩이는 이 경계를 걸치면 안 된다.
 const MMC3_PAGE_BYTE_COUNT: usize = 8 * 1024;
+/// 그룹 덩이 항목 하나의 크기다. 코드 하나와 atlas CPU 주소 둘이다.
+const GROUP_BLOCK_ENTRY_BYTE_COUNT: usize = 3;
+/// atlas가 타일 하나에 쓰는 바이트다. 1bpp 8×8.
+const GLYPH_ATLAS_TILE_BYTE_COUNT: usize = 8;
 
 pub(super) struct DialogueRuntimeCompositionPlan {
     pub(super) glyph_atlas: Vec<u8>,
@@ -262,9 +266,15 @@ pub(super) fn plan_dialogue_runtime_composition(
     let record_selector_directory_byte_count = (record_worksets.len() + 1) * 2;
     // 스캔 재료는 용기 안에서 헤더·구역 표·글리프 atlas 뒤에 놓인다. 그룹 덩이의
     // 페이지 정렬은 이 절대 위치를 알아야 정해진다.
-    let scan_section_container_offset = MATERIAL_HEADER_BYTE_COUNT
-        + MATERIAL_SECTION_COUNT * SECTION_DESCRIPTOR_BYTE_COUNT
-        + glyph_atlas.len();
+    let atlas_container_offset =
+        MATERIAL_HEADER_BYTE_COUNT + MATERIAL_SECTION_COUNT * SECTION_DESCRIPTOR_BYTE_COUNT;
+    ensure!(
+        atlas_container_offset + glyph_atlas.len() <= MMC3_PAGE_BYTE_COUNT,
+        "the glyph atlas no longer fits one MMC3 page, so its address is not one constant"
+    );
+    let atlas_cpu_base = u16::try_from(0x8000 + atlas_container_offset)
+        .context("glyph atlas CPU base does not fit the 8000 window")?;
+    let scan_section_container_offset = atlas_container_offset + glyph_atlas.len();
     let group_block_directory_byte_count = codebook.page_assignments.len() * 2;
     let group_block_directory_offset =
         record_page_group_selector_byte_count + record_selector_directory_byte_count;
@@ -274,6 +284,7 @@ pub(super) fn plan_dialogue_runtime_composition(
         dynamic_remap,
         &glyph_atlas_indices,
         &record_worksets,
+        atlas_cpu_base,
         scan_section_container_offset,
     )?;
     let scan_material_byte_count = scan_material.len();
@@ -457,6 +468,7 @@ fn encode_scan_material(
     dynamic_remap: &DynamicStringRemapPlan,
     glyph_atlas_indices: &BTreeMap<char, usize>,
     record_worksets: &BTreeMap<&str, Vec<usize>>,
+    atlas_cpu_base: u16,
     section_container_offset: usize,
 ) -> Result<Vec<u8>> {
     let mut encoded = Vec::new();
@@ -496,6 +508,7 @@ fn encode_scan_material(
     let (group_directory, group_blocks) = encode_group_blocks(
         &codebook.page_assignments,
         glyph_atlas_indices,
+        atlas_cpu_base,
         section_container_offset + encoded.len() + group_directory_length,
     )?;
     ensure!(
@@ -509,34 +522,46 @@ fn encode_scan_material(
 
 /// 그룹 하나가 런타임에 필요한 전부를 한 덩이로 묶는다.
 ///
-/// 덩이는 조밀 조회표 320바이트 뒤에 «이 그룹이 쓰는 코드» 목록이 붙은 모양이다.
-/// 둘을 붙여 두는 이유는 소비자가 한 타일을 옮길 때 둘 다 읽기 때문이다. 재료의
-/// 다른 구역에 흩어져 있으면 타일마다 MMC3 페이지를 두 번이 아니라 세 번 바꿔야
-/// 한다.
+/// 덩이는 `[항목 수][코드, atlas 주소 하위, atlas 주소 상위] × n`이다. atlas 주소를
+/// 그대로 담는 이유는 소비자가 계산을 하나도 하지 않게 하려는 것이다.
 ///
-/// 덩이가 8 KiB 페이지 경계를 걸치면 같은 문제가 생기므로, 걸칠 자리에서는 다음
-/// 페이지로 밀어 정렬한다. 버리는 바이트는 경계마다 최대 한 덩이 크기다.
+/// 조밀 조회표를 쓰지 않는 이유가 여기 있다. 그 표는 atlas 색인의 상위 두 비트를
+/// 코드 4개당 1바이트에 packing해 두는데, 런타임이 그걸 풀려면 타일마다 가변 시프트를
+/// 돌려야 한다. 6502에는 가변 시프트 명령이 없어 루프가 되고, 그 루프가 타일당
+/// 40사이클 남짓을 먹는다. 빌드가 주소를 미리 더해 두면 그 비용이 0이 된다.
+/// 크기도 조회표를 함께 두는 것보다 작다.
 ///
-/// 런타임이 존재 여부를 스스로 가리지 않는 것이 목록을 두는 이유다. 클래스 비트는
-/// 코드 4개당 1바이트에 2비트씩 들어 있어, 훑으려면 프레임마다 코드 256개를 가변
-/// 시프트로 풀어야 한다. 그 비용은 타일 수에 비례하지 않아 예산에 들어가지 않는다.
+/// 덩이가 8 KiB 페이지 경계를 걸치면 소비자가 타일마다 뱅크를 한 번 더 바꿔야
+/// 하므로, 걸칠 자리에서는 다음 페이지로 밀어 정렬한다.
 fn encode_group_blocks(
     page_assignments: &[BTreeMap<char, u8>],
     glyph_atlas_indices: &BTreeMap<char, usize>,
+    atlas_cpu_base: u16,
     section_container_offset: usize,
 ) -> Result<(Vec<u8>, Vec<u8>)> {
     let mut directory = Vec::with_capacity(page_assignments.len() * 2);
     let mut blocks: Vec<u8> = Vec::new();
     for (group_index, assignments) in page_assignments.iter().enumerate() {
-        let lookup = encode_dense_group_lookups(
-            std::slice::from_ref(assignments),
-            glyph_atlas_indices,
-        )?;
-        let mut codes: Vec<u8> = assignments.values().copied().collect();
         // 코드 오름차순이라야 다시 만들었을 때 같은 바이트가 나오고, 커서가 중간에서
         // 이어받을 수 있다.
-        codes.sort_unstable();
-        let block_length = lookup.len() + 1 + codes.len();
+        let mut entries: Vec<(u8, u16)> = Vec::with_capacity(assignments.len());
+        for (glyph, code) in assignments {
+            let atlas_index = glyph_atlas_indices.get(glyph).copied().with_context(|| {
+                format!("dialogue page group {group_index} lost atlas glyph {glyph:?}")
+            })?;
+            let offset = u16::try_from(atlas_index * GLYPH_ATLAS_TILE_BYTE_COUNT)
+                .context("glyph atlas offset does not fit a 16-bit address")?;
+            let address = atlas_cpu_base
+                .checked_add(offset)
+                .context("glyph atlas address leaves the 8000 window")?;
+            ensure!(
+                address < 0xA000,
+                "glyph atlas address {address:04X} leaves the 8000 window"
+            );
+            entries.push((*code, address));
+        }
+        entries.sort_unstable();
+        let block_length = 1 + entries.len() * GROUP_BLOCK_ENTRY_BYTE_COUNT;
         ensure!(
             block_length <= MMC3_PAGE_BYTE_COUNT,
             "page group {group_index} needs {block_length} bytes and cannot fit one MMC3 page"
@@ -551,9 +576,11 @@ fn encode_group_blocks(
                 .context("page group block offset exceeds a 16-bit offset")?
                 .to_le_bytes(),
         );
-        blocks.extend_from_slice(&lookup);
-        blocks.push(u8::try_from(codes.len()).context("page group code count does not fit u8")?);
-        blocks.extend_from_slice(&codes);
+        blocks.push(u8::try_from(entries.len()).context("page group entry count does not fit u8")?);
+        for (code, address) in entries {
+            blocks.push(code);
+            blocks.extend_from_slice(&address.to_le_bytes());
+        }
     }
     Ok((directory, blocks))
 }
@@ -707,7 +734,7 @@ mod tests {
         ];
         let atlas = BTreeMap::from([('가', 0usize), ('나', 1), ('다', 2)]);
 
-        let (directory, blocks) = encode_group_blocks(&assignments, &atlas, 0).unwrap();
+        let (directory, blocks) = encode_group_blocks(&assignments, &atlas, 0x802E, 0).unwrap();
 
         assert_eq!(directory.len(), assignments.len() * 2);
         for (group, expected) in assignments.iter().enumerate() {
@@ -715,28 +742,44 @@ mod tests {
                 directory[group * 2],
                 directory[group * 2 + 1],
             ]));
-            let count = usize::from(blocks[start + 320]);
-            let codes = &blocks[start + 321..start + 321 + count];
+            let count = usize::from(blocks[start]);
+            let codes: Vec<u8> = (0..count)
+                .map(|entry| blocks[start + 1 + entry * GROUP_BLOCK_ENTRY_BYTE_COUNT])
+                .collect();
             let mut wanted: Vec<u8> = expected.values().copied().collect();
             wanted.sort_unstable();
 
-            assert_eq!(codes, wanted.as_slice());
+            assert_eq!(codes, wanted);
         }
     }
 
-    /// 소비자는 한 타일에 조회표와 목록을 함께 읽는다. 덩이가 페이지 경계를 걸치면
-    /// 그 사이에 뱅크를 한 번 더 바꿔야 하므로, 걸칠 자리에서는 다음 페이지로 민다.
+    /// 항목이 담는 주소는 그 글자의 atlas 타일을 정확히 가리켜야 한다.
+    /// 소비자는 이 주소를 그대로 포인터에 넣고 여덟 바이트를 읽는다.
+    #[test]
+    fn an_entry_addresses_the_atlas_tile_of_its_glyph() {
+        let assignments = vec![BTreeMap::from([('가', 0x42u8)])];
+        let atlas = BTreeMap::from([('가', 7usize)]);
+
+        let (_, blocks) = encode_group_blocks(&assignments, &atlas, 0x802E, 0).unwrap();
+
+        let address = u16::from_le_bytes([blocks[2], blocks[3]]);
+        assert_eq!(address, 0x802E + 7 * GLYPH_ATLAS_TILE_BYTE_COUNT as u16);
+    }
+
+    /// 소비자는 한 타일에 목록과 atlas를 읽고 뱅크를 한 번 왕복한다. 덩이가 페이지
+    /// 경계를 걸치면 왕복이 하나 더 붙으므로, 걸칠 자리에서는 다음 페이지로 민다.
     #[test]
     fn a_block_that_would_straddle_a_page_boundary_moves_to_the_next_page() {
-        let assignments = vec![BTreeMap::from([('가', 1u8)])];
-        let atlas = BTreeMap::from([('가', 0usize)]);
-        // 덩이가 322바이트이므로 페이지 끝 100바이트 앞에서는 걸친다.
-        let section_offset = MMC3_PAGE_BYTE_COUNT - 100;
+        let assignments = vec![BTreeMap::from([('가', 1u8), ('나', 2u8)])];
+        let atlas = BTreeMap::from([('가', 0usize), ('나', 1)]);
+        // 덩이가 일곱 바이트이므로 페이지 끝 세 바이트 앞에서는 걸친다.
+        let section_offset = MMC3_PAGE_BYTE_COUNT - 3;
 
-        let (directory, blocks) = encode_group_blocks(&assignments, &atlas, section_offset).unwrap();
+        let (directory, blocks) =
+            encode_group_blocks(&assignments, &atlas, 0x802E, section_offset).unwrap();
 
         let start = section_offset + usize::from(u16::from_le_bytes([directory[0], directory[1]]));
         assert_eq!(start % MMC3_PAGE_BYTE_COUNT, 0);
-        assert!(blocks[..100].iter().all(|byte| *byte == 0xFF));
+        assert!(blocks[..3].iter().all(|byte| *byte == 0xFF));
     }
 }

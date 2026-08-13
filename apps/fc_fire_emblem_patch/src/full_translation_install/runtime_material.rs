@@ -9,10 +9,14 @@ pub(super) const MATERIAL_HEADER_BYTE_COUNT: usize = 16;
 pub(super) const SECTION_DESCRIPTOR_BYTE_COUNT: usize = 6;
 /// 용기가 차지하는 MMC3 8 KiB 페이지 수다.
 ///
-/// 셋이었다가 넷이 됐다. 그룹별 타일 목록이 스캔 재료에 들어오면서 세 페이지로는
-/// 실행 코드 자리가 남지 않았다. 페이지 `2F`부터 `3D`까지가 전부 비어 있어 늘려도
-/// 밀려나는 도메인이 없다.
-pub(super) const RUNTIME_MATERIAL_PAGE_COUNT: usize = 4;
+/// 셋에서 넷, 넷에서 다섯이 됐다. 그룹 덩이가 항목마다 atlas 주소를 담으면서
+/// 커졌기 때문이다.
+///
+/// 이 교환을 받아들이는 이유는 두 자원의 여유가 다르기 때문이다. PRG는 페이지
+/// `31`부터 `3D`까지 13장이 아직 비어 있고, vblank는 프레임당 1,243사이클이 전부다.
+/// 주소를 미리 더해 두면 소비자가 타일마다 쓰는 가변 시프트 루프가 통째로 사라진다.
+/// 남는 것을 써서 모자란 것을 사는 쪽이 맞다.
+pub(super) const RUNTIME_MATERIAL_PAGE_COUNT: usize = 5;
 /// 용기가 시작하는 MMC3 페이지다.
 pub(super) const RUNTIME_MATERIAL_FIRST_PAGE: u8 = 0x2C;
 /// 실행 코드가 놓이는 페이지다. 용기의 마지막 장이고 `$A000` 창에 걸린다.
@@ -27,10 +31,8 @@ const RUNTIME_CODE_SECTION_ID: u8 = 5;
 pub(super) const MATERIAL_SECTION_COUNT: usize = 5;
 /// 용기의 마지막 페이지가 걸리는 CPU 창의 시작이다.
 const RUNTIME_CODE_WINDOW_START: usize = 0xA000;
-/// 세 페이지 용기 안에서 실행 코드에 남겨 두기로 한 하한이다. 아직 코드를 쓰지 않아
-/// 실제 크기는 모르지만, 이 값은 자료 배치를 정할 때 이미 확보해 둔 자리다.
-/// 자료가 커져 이 아래로 내려가면 배치를 다시 정해야 한다.
-const MINIMUM_RUNTIME_CODE_RESERVATION: usize = 1_888;
+/// 실행 코드가 받는 자리다. 마지막 페이지 전체이므로 자료 크기와 무관한 상수다.
+const MINIMUM_RUNTIME_CODE_RESERVATION: usize = MMC3_PAGE_BYTE_COUNT;
 
 pub(super) struct RuntimeMaterialInputs<'a> {
     pub(super) glyph_atlas: &'a [u8],
@@ -137,14 +139,18 @@ fn encode_runtime_material(
         .iter()
         .map(|section| section.content.expect("data sections have content").len())
         .sum::<usize>();
-    let runtime_code_offset = payload_offset
+    let payload_end = payload_offset
         .checked_add(payload_byte_count)
         .context("runtime material payload range overflow")?;
+    // 실행 코드는 용기의 **마지막 페이지 전체**를 쓴다. 남는 만큼 주는 방식이면
+    // 자료가 늘 때마다 코드가 놓이는 주소가 움직이고, 그러면 페이지 경계를 걸치는
+    // 순간 실행이 불가능해진다. 한 페이지로 고정하면 CPU 시작 주소가 `$A000` 상수다.
+    let runtime_code_offset = capacity - MMC3_PAGE_BYTE_COUNT;
     ensure!(
-        runtime_code_offset < capacity,
-        "runtime material leaves no capacity for runtime code"
+        payload_end <= runtime_code_offset,
+        "runtime material payload reaches {payload_end} and overruns the runtime code page at {runtime_code_offset}"
     );
-    let runtime_code_byte_count = capacity - runtime_code_offset;
+    let runtime_code_byte_count = MMC3_PAGE_BYTE_COUNT;
 
     let mut material = Vec::with_capacity(capacity);
     material.extend_from_slice(MATERIAL_MAGIC);
@@ -218,6 +224,10 @@ fn encode_runtime_material(
     }
     material.resize(capacity, 0xFF);
     ensure!(
+        material.len() == capacity,
+        "runtime material container length changed"
+    );
+    ensure!(
         material.len() == capacity
             && material[runtime_code_offset..]
                 .iter()
@@ -247,12 +257,12 @@ impl DialogueRuntimeMaterialPlan {
     /// 걸리는 것은 마지막 장이므로, 예약 시작에서 그 장의 시작을 뺀 만큼이 창 안의
     /// 위치가 된다.
     pub(super) fn runtime_code_cpu_start(&self) -> Result<u16> {
-        let last_page_offset = (RUNTIME_MATERIAL_PAGE_COUNT - 1) * MMC3_PAGE_BYTE_COUNT;
-        let within_window = self
-            .runtime_code_offset
-            .checked_sub(last_page_offset)
-            .context("runtime code reservation is not inside the last container page")?;
-        u16::try_from(RUNTIME_CODE_WINDOW_START + within_window)
+        ensure!(
+            self.runtime_code_offset
+                == (RUNTIME_MATERIAL_PAGE_COUNT - 1) * MMC3_PAGE_BYTE_COUNT,
+            "runtime code no longer starts at the last container page"
+        );
+        u16::try_from(RUNTIME_CODE_WINDOW_START)
             .context("runtime code CPU start does not fit the A000 window")
     }
 
@@ -315,8 +325,10 @@ fn push_u16(output: &mut Vec<u8>, value: usize, role: &str) -> Result<()> {
 mod tests {
     use super::*;
 
+    /// 자료와 실행 코드 자리는 겹치면 안 되고, 코드 자리는 마지막 페이지 전체여야
+    /// 한다. 남는 만큼 주면 자료가 늘 때마다 코드 주소가 움직인다.
     #[test]
-    fn container_directory_keeps_payloads_and_code_reservation_disjoint() {
+    fn the_code_reservation_is_always_the_last_page_whatever_the_payload_size() {
         let sections = [
             MaterialSectionInput {
                 id: 1,
@@ -329,8 +341,9 @@ mod tests {
                 content: Some(&[0x21]),
             },
         ];
+        let capacity = 2 * MMC3_PAGE_BYTE_COUNT;
 
-        let plan = encode_runtime_material(&sections, 64).unwrap();
+        let plan = encode_runtime_material(&sections, capacity).unwrap();
         let payload_offset = MATERIAL_HEADER_BYTE_COUNT + 3 * SECTION_DESCRIPTOR_BYTE_COUNT;
 
         assert_eq!(&plan.material[..4], MATERIAL_MAGIC);
@@ -339,10 +352,8 @@ mod tests {
             &plan.material[payload_offset..payload_offset + 3],
             &[0x11, 0x12, 0x21]
         );
-        assert_eq!(
-            plan.runtime_code_reserved_byte_count,
-            64 - payload_offset - 3
-        );
+        assert_eq!(plan.runtime_code_offset, capacity - MMC3_PAGE_BYTE_COUNT);
+        assert_eq!(plan.runtime_code_reserved_byte_count, MMC3_PAGE_BYTE_COUNT);
         assert!(
             plan.material[payload_offset + 3..]
                 .iter()
@@ -350,16 +361,19 @@ mod tests {
         );
     }
 
+    /// 자료가 코드 페이지를 침범하면 만들지 않는다. 침범한 채로 내보내면 실행 코드
+    /// 자리에 자료가 들어가 있는 ROM이 나온다.
     #[test]
-    fn container_rejects_a_payload_that_leaves_no_runtime_code_space() {
+    fn a_payload_that_reaches_the_code_page_is_refused() {
+        let oversized = vec![0x11; MMC3_PAGE_BYTE_COUNT];
         let sections = [MaterialSectionInput {
             id: 1,
             role: "only",
-            content: Some(&[0x11; 42]),
+            content: Some(&oversized),
         }];
 
-        let error = encode_runtime_material(&sections, 64).unwrap_err();
+        let error = encode_runtime_material(&sections, 2 * MMC3_PAGE_BYTE_COUNT).unwrap_err();
 
-        assert!(error.to_string().contains("leaves no capacity"));
+        assert!(error.to_string().contains("overruns the runtime code page"));
     }
 }
