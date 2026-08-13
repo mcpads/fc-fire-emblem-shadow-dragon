@@ -37,7 +37,7 @@ pub(in crate::full_translation_install) const COLD_ENTRY: u16 = 0x809B;
 pub(in crate::full_translation_install) const SOURCE_POINTER_RESOLVER: u16 = 0xE6B2;
 
 use super::super::runtime_cursor_storage::{
-    CURSOR_NEXT_TILE_INDEX, CURSOR_REMAINING_TILES, CURSOR_SOURCE_HIGH, CURSOR_SOURCE_LOW,
+    CURSOR_ENTRY_HIGH, CURSOR_ENTRY_LOW, CURSOR_GROUP_PAGE, CURSOR_REMAINING_TILES,
 };
 use super::transport::{REQUEST_STATE, STATE_READY};
 
@@ -115,20 +115,25 @@ pub(super) fn build_dispatcher_gate(origin: u16) -> Result<RuntimeRoutine> {
 /// 커서를 전부 세운 뒤에 요청을 발행한다. 순서가 요구사항이다.
 pub(super) fn build_cold_initializer(
     origin: u16,
-    atlas_base: u16,
+    entry_address: u16,
+    group_page: u8,
     tile_count: u8,
 ) -> Result<RuntimeRoutine> {
     ensure!(
         tile_count > 0,
         "a cold request with no tiles never completes and the dialogue never resumes"
     );
+    ensure!(
+        (0x8000..0xA000).contains(&entry_address),
+        "the group block entry address {entry_address:04X} is outside the 8000 window"
+    );
     let instructions = vec![
-        Instruction::LdaImmediate(atlas_base as u8),
-        Instruction::StaAbsolute(CURSOR_SOURCE_LOW),
-        Instruction::LdaImmediate((atlas_base >> 8) as u8),
-        Instruction::StaAbsolute(CURSOR_SOURCE_HIGH),
-        Instruction::LdaImmediate(0),
-        Instruction::StaAbsolute(CURSOR_NEXT_TILE_INDEX),
+        Instruction::LdaImmediate(entry_address as u8),
+        Instruction::StaAbsolute(CURSOR_ENTRY_LOW),
+        Instruction::LdaImmediate((entry_address >> 8) as u8),
+        Instruction::StaAbsolute(CURSOR_ENTRY_HIGH),
+        Instruction::LdaImmediate(group_page),
+        Instruction::StaAbsolute(CURSOR_GROUP_PAGE),
         Instruction::LdaImmediate(tile_count),
         Instruction::StaAbsolute(CURSOR_REMAINING_TILES),
         // 요청은 마지막에 발행한다. 그 전에 소비자가 깨어나면 반쯤 세워진 커서를 읽는다.
@@ -233,14 +238,14 @@ mod tests {
     /// 요청 발행이 커서 설정보다 앞서면 소비자가 반쯤 세워진 커서를 읽는다.
     #[test]
     fn the_request_is_published_after_every_cursor_byte() {
-        let routine = build_cold_initializer(0xF480, 0xA100, 40).unwrap();
+        let routine = build_cold_initializer(0xF480, 0x8100, 0x2C, 40).unwrap();
         let request_at = store_position(&routine.bytes, REQUEST_STATE)
             .expect("the initializer publishes a request");
 
         for cursor in [
-            CURSOR_SOURCE_LOW,
-            CURSOR_SOURCE_HIGH,
-            CURSOR_NEXT_TILE_INDEX,
+            CURSOR_ENTRY_LOW,
+            CURSOR_ENTRY_HIGH,
+            CURSOR_GROUP_PAGE,
             CURSOR_REMAINING_TILES,
         ] {
             let at = store_position(&routine.bytes, cursor)
@@ -252,7 +257,7 @@ mod tests {
     /// 타일이 0인 요청은 영원히 끝나지 않아 대사가 멈춘 채로 남는다.
     #[test]
     fn a_zero_tile_request_is_refused() {
-        let error = build_cold_initializer(0xF480, 0xA100, 0).unwrap_err();
+        let error = build_cold_initializer(0xF480, 0x8100, 0x2C, 0).unwrap_err();
 
         assert!(error.to_string().contains("never completes"));
     }
@@ -260,7 +265,7 @@ mod tests {
     /// 초기화도 밀어낸 원본 호출로 끝나야 대사가 이어진다.
     #[test]
     fn the_initializer_reaches_the_displaced_source_resolver() {
-        let routine = build_cold_initializer(0xF480, 0xA100, 40).unwrap();
+        let routine = build_cold_initializer(0xF480, 0x8100, 0x2C, 40).unwrap();
 
         assert_eq!(
             &routine.bytes[routine.bytes.len() - 3..],

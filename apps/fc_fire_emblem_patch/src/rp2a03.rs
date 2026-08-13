@@ -16,6 +16,7 @@ pub enum Instruction {
     LdyImmediate(u8),
     LdyAbsoluteX(u16),
     StaZeroPage(u8),
+    StxZeroPage(u8),
     StyZeroPage(u8),
     StaAbsolute(u16),
     StaAbsoluteX(u16),
@@ -94,6 +95,7 @@ impl Instruction {
             | Self::LdxZeroPage(_)
             | Self::LdyImmediate(_)
             | Self::StaZeroPage(_)
+            | Self::StxZeroPage(_)
             | Self::StyZeroPage(_)
             | Self::StaIndirectY(_)
             | Self::AslZeroPage(_)
@@ -165,6 +167,7 @@ impl Instruction {
             Self::LdaZeroPage(_)
             | Self::LdxZeroPage(_)
             | Self::StaZeroPage(_)
+            | Self::StxZeroPage(_)
             | Self::StyZeroPage(_)
             | Self::AndZeroPage(_)
             | Self::AdcZeroPage(_)
@@ -212,6 +215,7 @@ impl Instruction {
             Self::LdyImmediate(value) => immediate(Mnemonic::Ldy, value),
             Self::LdyAbsoluteX(address) => absolute_x(Mnemonic::Ldy, address),
             Self::StaZeroPage(address) => zero_page(Mnemonic::Sta, address),
+            Self::StxZeroPage(address) => zero_page(Mnemonic::Stx, address),
             Self::StyZeroPage(address) => zero_page(Mnemonic::Sty, address),
             Self::StaAbsolute(address) => absolute(Mnemonic::Sta, address),
             Self::StaAbsoluteX(address) => absolute_x(Mnemonic::Sta, address),
@@ -456,6 +460,14 @@ mod tests {
         .unwrap();
 
         assert_eq!(bytes, [0x6D, 0xF7, 0x07, 0xE5, 0x00]);
+    }
+
+    /// 전송은 이번 프레임 몫을 X에 두고 그 값을 제로 페이지로도 옮긴다.
+    #[test]
+    fn encodes_the_index_store_the_transport_batch_uses() {
+        let bytes = assemble_at(0xA000, &[Instruction::StxZeroPage(0x05)]).unwrap();
+
+        assert_eq!(bytes, [0x86, 0x05]);
     }
 
     /// vblank 예산은 이 값들 위에 세워진다. 실제보다 작게 잡으면 예산이 낙관적으로

@@ -64,9 +64,8 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     bind_quiet_frame_gate(source, candidate)?;
     dispatcher_gate::bind_dispatcher_entry(source, candidate)?;
 
-    let transport = transport::build_transport_routine(runtime_code_cpu_start)?;
-    let trampoline_routine =
-        trampoline::build_trampoline(bank_restore, atlas_page, transport.address)?;
+    let transport = transport::build_transport_routine(runtime_code_cpu_start, atlas_page)?;
+    let trampoline_routine = trampoline::build_trampoline(bank_restore, transport.address)?;
 
     let gate_origin = trampoline_routine.address
         + u16::try_from(trampoline_routine.bytes.len())
@@ -75,15 +74,19 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
 
     let initializer_origin = gate.address
         + u16::try_from(gate.bytes.len()).context("dispatcher gate length overflow")?;
-    let initializer =
-        dispatcher_gate::build_cold_initializer(initializer_origin, atlas_cpu_base, cold_tile_count)?;
+    let initializer = dispatcher_gate::build_cold_initializer(
+        initializer_origin,
+        atlas_cpu_base,
+        atlas_page,
+        cold_tile_count,
+    )?;
 
     // 예산은 시험만이 아니라 빌드가 지킨다. vblank를 넘기는 코드는 ROM에 들어가면
     // 안 되므로, 여기서 막지 않으면 그 판정이 시험을 돌리는 사람에게 넘어간다.
     // 의사결정 62번을 따른다.
     let reserve = trampoline::worst_case_reserve_cycles(bank_restore)?;
     let budget = budgeted_transport_cycles(reserve);
-    let frame_cycles = transport::worst_case_frame_cycles(runtime_code_cpu_start)?;
+    let frame_cycles = transport::worst_case_frame_cycles(runtime_code_cpu_start, atlas_page)?;
     ensure!(
         frame_cycles <= budget,
         "one transport frame costs {frame_cycles} cycles but only {budget} of the measured \

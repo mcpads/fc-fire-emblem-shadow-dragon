@@ -49,11 +49,7 @@ pub(super) fn hook_bytes() -> [u8; 3] {
     ]
 }
 
-fn instructions(
-    contract: BankRestoreContract,
-    atlas_page: u8,
-    transport_entry: u16,
-) -> Result<Vec<Instruction>> {
+fn instructions(contract: BankRestoreContract, transport_entry: u16) -> Result<Vec<Instruction>> {
     let origin = TRAMPOLINE_ORIGIN;
     let mut instructions = vec![
         // 원본이 이 프레임에 PPU 자료를 쓸 예정이면 비켜난다.
@@ -81,13 +77,9 @@ fn instructions(
         Instruction::AndImmediate(SEQUENTIAL_INCREMENT_MASK),
         Instruction::StaZeroPage(PPU_CONTROL_SHADOW),
         Instruction::StaAbsolute(PPU_CONTROL),
-        // 읽을 atlas 페이지를 `$8000`에, 실행 코드 페이지를 `$A000`에 건다.
-        // 원본 도우미 `$FA20`은 입력을 네 비트로 잘라 이 페이지들에 닿지 못하므로
-        // 레지스터를 직접 쓴다.
-        Instruction::LdaImmediate(contract.prg_8000_register),
-        Instruction::StaAbsolute(BANK_SELECT_REGISTER),
-        Instruction::LdaImmediate(atlas_page),
-        Instruction::StaAbsolute(BANK_VALUE_REGISTER),
+        // 실행 코드 페이지를 `$A000`에 건다. 원본 도우미 `$FA20`은 입력을 네 비트로
+        // 잘라 이 페이지에 닿지 못하므로 레지스터를 직접 쓴다. `$8000`은 전송 루틴이
+        // 타일마다 스스로 바꾸므로 여기서 걸지 않는다.
         Instruction::LdaImmediate(contract.prg_a000_register),
         Instruction::StaAbsolute(BANK_SELECT_REGISTER),
         Instruction::LdaImmediate(RUNTIME_CODE_MMC3_PAGE),
@@ -121,10 +113,9 @@ fn instructions(
 
 pub(super) fn build_trampoline(
     contract: BankRestoreContract,
-    atlas_page: u8,
     transport_entry: u16,
 ) -> Result<RuntimeRoutine> {
-    let instructions = instructions(contract, atlas_page, transport_entry)?;
+    let instructions = instructions(contract, transport_entry)?;
     let bytes = assemble_at(TRAMPOLINE_ORIGIN, &instructions)?;
     ensure!(
         usize::from(TRAMPOLINE_ORIGIN) + bytes.len() <= usize::from(TRAMPOLINE_CAVE_END),
@@ -142,7 +133,7 @@ pub(super) fn build_trampoline(
 /// 훅 호출과 트램폴린 자신이 최악의 경우 쓰는 사이클이다. 전송 루틴 몸통은 빼고
 /// 센다. 그쪽은 자기 예산을 따로 지킨다.
 pub(super) fn worst_case_reserve_cycles(contract: BankRestoreContract) -> Result<u32> {
-    let instructions = instructions(contract, 0x2C, 0xB000)?;
+    let instructions = instructions(contract, 0xB000)?;
     Ok(CONSUMER_HOOK_CALL_CYCLES + worst_case_cycles(&instructions))
 }
 
@@ -179,7 +170,7 @@ mod tests {
     /// 게이트가 아무것도 지키지 못한다.
     #[test]
     fn the_skip_path_touches_neither_the_ppu_nor_the_bank_registers() {
-        let listing = instructions(contract(), 0x2C, 0xB000).unwrap();
+        let listing = instructions(contract(), 0xB000).unwrap();
         let gate_branch = listing
             .iter()
             .position(|instruction| matches!(instruction, Instruction::BneAbsolute(_)))
@@ -211,7 +202,7 @@ mod tests {
     /// 영원히 비워지지 않고 화면이 갱신되지 않는다.
     #[test]
     fn every_path_reaches_the_displaced_source_call() {
-        let routine = build_trampoline(contract(), 0x2C, 0xB000).unwrap();
+        let routine = build_trampoline(contract(), 0xB000).unwrap();
         let tail = &routine.bytes[routine.bytes.len() - 3..];
 
         assert_eq!(
@@ -232,7 +223,7 @@ mod tests {
     /// 뱅크를 되돌리지 않으면 NMI가 끝난 뒤 주 흐름이 남의 코드를 실행한다.
     #[test]
     fn the_bank_is_restored_from_the_source_shadow_before_returning() {
-        let listing = instructions(contract(), 0x2C, 0xB000).unwrap();
+        let listing = instructions(contract(), 0xB000).unwrap();
         let call = listing
             .iter()
             .position(|instruction| matches!(instruction, Instruction::JsrAbsolute(_)))
@@ -251,7 +242,7 @@ mod tests {
 
     #[test]
     fn the_trampoline_fits_the_reserved_fixed_cave() {
-        let routine = build_trampoline(contract(), 0x2C, 0xB000).unwrap();
+        let routine = build_trampoline(contract(), 0xB000).unwrap();
 
         assert!(
             usize::from(routine.address) + routine.bytes.len()
