@@ -16,8 +16,11 @@ use access_trace::{AccessDirection, AccessForm, AccessSite, trace_main_dialogue_
 use concurrent_access::{ConcurrentRuntimeAccessContract, bind_concurrent_runtime_accesses};
 use source_contract::{RuntimeStateSourceAccessContract, bind_runtime_state_source_accesses};
 
-const CANDIDATE_START: u16 = 0x07F0;
-const CANDIDATE_END: u16 = 0x07F4;
+pub(super) const CANDIDATE_START: u16 = 0x07F0;
+/// 다섯 바이트는 생산자와 소비자의 공유 계약이고, 뒤의 네 바이트는 소비자만
+/// 쓰는 전송 커서다. 소유자는 다르지만 «주 대사가 활성인 동안만 산다»는 수명이
+/// 같으므로 같은 증명 아래 둔다. 증명을 둘로 나누면 약한 쪽이 생긴다.
+pub(super) const CANDIDATE_END: u16 = 0x07F8;
 
 #[derive(Serialize)]
 pub(super) struct DialogueRuntimeStateStoragePlan {
@@ -98,8 +101,8 @@ pub(super) fn plan_dialogue_runtime_state_storage(
         && battle_reservation_excludes_candidate;
 
     Ok(DialogueRuntimeStateStoragePlan {
-        strategy: "own one five-byte scratch range only from a cold-initialized main-dialogue entry through its terminal or external-caller invalidation; inactive screens may clobber it",
-        candidate_cpu_range_hex: "0x07F0..0x07F4",
+        strategy: "own one nine-byte scratch range only from a cold-initialized main-dialogue entry through its terminal or external-caller invalidation; the first five bytes are the producer-consumer contract, the last four are the consumer-only transport cursor; inactive screens may clobber it",
+        candidate_cpu_range_hex: "0x07F0..0x07F8",
         required_byte_count: usize::from(CANDIDATE_END - CANDIDATE_START + 1),
         ownership_lifetime: "main dialogue active, including page transitions; battle and every inactive or external-caller lifetime are excluded",
         main_dialogue_handler_root_count: roots.len(),
@@ -129,7 +132,7 @@ pub(super) fn plan_dialogue_runtime_state_storage(
         },
         every_entry_cold_initializes_all_bytes: false,
         runtime_initializer_emitted: false,
-        selected_cpu_range_hex: selection_complete.then_some("0x07F0..0x07F4"),
+        selected_cpu_range_hex: selection_complete.then_some("0x07F0..0x07F8"),
         selection_complete,
         complete: false,
     })
@@ -171,17 +174,29 @@ fn report_sites(sites: &BTreeSet<AccessSite>) -> Vec<MemoryAccessSite> {
 mod tests {
     use super::*;
 
+    /// 예약은 전투 예약 바로 뒤에서 시작해야 두 소유자가 겹치지 않는다.
+    /// 길이는 공유 계약 다섯 바이트와 소비자 전용 커서 네 바이트의 합이다.
     #[test]
-    fn candidate_is_exactly_five_bytes_after_the_battle_reservation() {
-        assert_eq!(CANDIDATE_END - CANDIDATE_START + 1, 5);
+    fn the_reservation_starts_after_the_battle_reservation_and_covers_both_owners() {
+        const SHARED_CONTRACT_BYTES: u16 = 5;
+        const TRANSPORT_CURSOR_BYTES: u16 = 4;
+
         assert_eq!(CANDIDATE_START, BATTLE_RUNTIME_STORAGE_END + 1);
+        assert_eq!(
+            CANDIDATE_END - CANDIDATE_START + 1,
+            SHARED_CONTRACT_BYTES + TRANSPORT_CURSOR_BYTES
+        );
     }
 
+    /// 색인 판정은 보수적이어야 한다. 기준 주소가 예약보다 아래여도 색인이
+    /// 최대 255까지 더해지므로 «닿을 수 있음»으로 봐야 놓치지 않는다.
     #[test]
     fn indexed_overlap_is_conservative_over_the_full_index_domain() {
         assert!(access_trace::indexed_form_may_overlap(0x0781));
-        assert!(access_trace::indexed_form_may_overlap(0x07F4));
-        assert!(!access_trace::indexed_form_may_overlap(0x07F5));
-        assert!(!access_trace::indexed_form_may_overlap(0x0600));
+        assert!(access_trace::indexed_form_may_overlap(CANDIDATE_END));
+        assert!(!access_trace::indexed_form_may_overlap(CANDIDATE_END + 1));
+        assert!(!access_trace::indexed_form_may_overlap(
+            CANDIDATE_START - u16::from(u8::MAX) - 1
+        ));
     }
 }

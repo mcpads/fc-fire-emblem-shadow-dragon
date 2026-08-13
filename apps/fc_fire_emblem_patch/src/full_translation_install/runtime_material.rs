@@ -12,6 +12,8 @@ const MMC3_PAGE_BYTE_COUNT: usize = 8 * 1024;
 const RUNTIME_MATERIAL_CAPACITY: usize = RUNTIME_MATERIAL_PAGE_COUNT * MMC3_PAGE_BYTE_COUNT;
 const CONTENT_EMITTED_FLAG: u8 = 1;
 const RUNTIME_CODE_SECTION_ID: u8 = 5;
+/// 용기의 마지막 페이지가 걸리는 CPU 창의 시작이다.
+const RUNTIME_CODE_WINDOW_START: usize = 0xA000;
 /// 세 페이지 용기 안에서 실행 코드에 남겨 두기로 한 하한이다. 아직 코드를 쓰지 않아
 /// 실제 크기는 모르지만, 이 값은 자료 배치를 정할 때 이미 확보해 둔 자리다.
 /// 자료가 커져 이 아래로 내려가면 배치를 다시 정해야 한다.
@@ -225,6 +227,52 @@ fn encode_runtime_material(
         material_sha1: sha1_hex(&material),
         material,
     })
+}
+
+impl DialogueRuntimeMaterialPlan {
+    /// 실행 코드가 놓이는 CPU 주소다. 용기는 페이지 `2C`부터 세 장이고 `$A000` 창에
+    /// 걸리는 것은 마지막 장이므로, 예약 시작에서 그 장의 시작을 뺀 만큼이 창 안의
+    /// 위치가 된다.
+    pub(super) fn runtime_code_cpu_start(&self) -> Result<u16> {
+        let last_page_offset = (RUNTIME_MATERIAL_PAGE_COUNT - 1) * MMC3_PAGE_BYTE_COUNT;
+        let within_window = self
+            .runtime_code_offset
+            .checked_sub(last_page_offset)
+            .context("runtime code reservation is not inside the last container page")?;
+        u16::try_from(RUNTIME_CODE_WINDOW_START + within_window)
+            .context("runtime code CPU start does not fit the A000 window")
+    }
+
+    /// 글리프 atlas가 용기 안에서 시작하는 곳이다.
+    pub(super) fn glyph_atlas_offset(&self) -> Result<usize> {
+        self.sections
+            .iter()
+            .find(|section| section.role == "glyph_atlas")
+            .map(|section| section.offset)
+            .context("runtime material has no glyph atlas section")
+    }
+
+    /// 방출한 실행 코드를 예약 자리에 넣는다.
+    pub(super) fn place_runtime_code(&mut self, code: &[u8]) -> Result<()> {
+        let reserved = self
+            .material
+            .get_mut(self.runtime_code_offset..)
+            .context("runtime code reservation is outside the container")?;
+        ensure!(
+            code.len() <= reserved.len(),
+            "runtime code is {} bytes and the reservation holds {}",
+            code.len(),
+            reserved.len()
+        );
+        ensure!(
+            reserved.iter().all(|byte| *byte == 0xFF),
+            "runtime code reservation is not exact FF before placement"
+        );
+        reserved[..code.len()].copy_from_slice(code);
+        self.runtime_code_emitted = true;
+        self.material_sha1 = sha1_hex(&self.material);
+        Ok(())
+    }
 }
 
 fn write_descriptor(

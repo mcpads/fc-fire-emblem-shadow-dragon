@@ -1,6 +1,9 @@
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
+use super::{
+    runtime_bank_contract::bind_bank_restore_contract, runtime_nmi_contract::bind_quiet_frame_gate,
+};
 use crate::{
     dialogue_inventory::switchable_cpu_to_file_offset,
     font_slots::FONT_PAGE_SIZE,
@@ -12,7 +15,10 @@ use crate::{
 const FIXED_BANK_SIZE: usize = 16 * 1024;
 const MAIN_DIALOGUE_BANK: u8 = 0x0A;
 const SOURCE_POINTER_RESOLVER: u16 = 0xE6B2;
-const NMI_HOOK: u16 = 0xC191;
+/// 대사 소비자가 들어가는 자리다. `$C191`이 아닌 이유는 의사결정 64번에 있다.
+const NMI_HOOK: u16 = 0xC179;
+/// 전투 합성이 계속 쓰는 자리다. 소유자가 다르므로 그대로 둔다.
+const BATTLE_NMI_HOOK: u16 = 0xC191;
 const SHARED_NMI_DISPATCH: u16 = 0xFC20;
 const SHARED_NMI_DISPATCH_END: u16 = 0xFC56;
 const SHARED_NMI_EXPANSION_END: u16 = 0xFC60;
@@ -23,6 +29,8 @@ const SAMPLE_GROUP_SELECTOR_END: u16 = 0xF378;
 const SAMPLE_INITIAL_SELECTOR_START: u16 = 0xF990;
 const SAMPLE_INITIAL_SELECTOR_END: u16 = 0xFA00;
 const CENTRAL_SELECTOR_FALLBACK: u16 = 0xFF40;
+/// 생산자 다섯 곳, NMI 소비자 하나, 디스패처 게이트 하나다.
+const PLANNED_HOOK_COUNT: usize = 7;
 const RUNTIME_CODE_MMC3_PAGE: u8 = 0x2E;
 const RUNTIME_CODE_WINDOW_START: u16 = 0xA000;
 const BATTLE_SOURCE_PAGE_MMC3_PAGE: u8 = 0x21;
@@ -45,9 +53,21 @@ pub(super) struct DialogueRuntimeControlFlowPlan {
     superseded_sample_runtime: SupersededSampleRuntime,
     source_entry_points_bound: bool,
     existing_nmi_owner_preserved: bool,
+    /// 소비자가 실행 코드 페이지를 빌려 쓰고 되돌리는 계약이 원본 바이트에 걸려 있다.
+    prg_bank_restore_bound: bool,
+    /// `$FA20`이 닿을 수 있는 8 KiB 페이지 수다. 실행 코드 페이지가 이 밖이라
+    /// 소비자는 뱅크 레지스터를 직접 쓴다.
+    source_bank_helper_reachable_page_count: u16,
+    /// 소비자가 «조용한 프레임»에만 도는 근거인 원본 분기 수다.
+    quiet_frame_gated_branch_count: usize,
     runtime_material_execution_address_bound: bool,
     runtime_state_storage_bound: bool,
     runtime_code_emitted: bool,
+    /// 이 설계가 결국 걸어야 할 훅 수다. 생산자 다섯, NMI 소비자 하나, 디스패처
+    /// 게이트 하나다.
+    planned_hook_count: usize,
+    /// 지금 실제로 걸린 훅 수다. 나머지는 후속 계획이 건다.
+    emitted_hook_count: usize,
     runtime_hooks_contributed: bool,
     complete: bool,
 }
@@ -144,6 +164,10 @@ pub(super) struct RuntimeControlFlowInputs<'a> {
     pub(super) runtime_code_offset: usize,
     pub(super) runtime_code_byte_count: usize,
     pub(super) selected_runtime_state_cpu_range: &'a str,
+    /// 전송 루틴이 재료 용기의 예약 자리에 들어갔는지다.
+    pub(super) runtime_code_emitted: bool,
+    /// 이번 빌드가 실제로 건 훅 수다.
+    pub(super) emitted_hook_count: usize,
 }
 
 pub(super) fn plan_dialogue_runtime_control_flow(
@@ -209,7 +233,7 @@ pub(super) fn plan_dialogue_runtime_control_flow(
     )?;
 
     ensure!(
-        fixed_bytes(inputs.candidate, NMI_HOOK, 3)?
+        fixed_bytes(inputs.candidate, BATTLE_NMI_HOOK, 3)?
             == [
                 0x20,
                 SHARED_NMI_DISPATCH as u8,
@@ -309,6 +333,12 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         "sample-specific maximum-dialogue selector ownership changed"
     );
 
+    // 소비자가 실행 코드 페이지를 `$A000`에 잠깐 걸고 되돌리는 계약이다. 되돌릴 값의
+    // 출처가 원본에 있어야 하므로 코드를 방출하기 전에 먼저 확인한다.
+    let bank_restore = bind_bank_restore_contract(inputs.candidate)?;
+    // 소비자가 들어갈 자리와, «조용한 프레임»의 뜻을 지키는 원본 분기들이다.
+    let quiet_frame_gate = bind_quiet_frame_gate(inputs.source, inputs.candidate)?;
+
     let producers = producer_specs
         .into_iter()
         .map(|(role, address, request, continuity)| RuntimeProducer {
@@ -375,7 +405,7 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         ],
         producers,
         nmi_consumer: NmiConsumer {
-            source_hook_cpu_address_hex: "0xC191",
+            source_hook_cpu_address_hex: "0xC179",
             existing_dispatch_cpu_range_hex: "0xFC20..0xFC56",
             existing_dispatch_sha1: sha1_hex(shared_dispatch),
             exact_ff_expansion_byte_count: nmi_expansion.len(),
@@ -440,10 +470,15 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         },
         source_entry_points_bound: true,
         existing_nmi_owner_preserved: true,
+        prg_bank_restore_bound: true,
+        source_bank_helper_reachable_page_count: bank_restore.helper_reachable_page_count,
+        quiet_frame_gated_branch_count: quiet_frame_gate.gated_branch_count,
         runtime_material_execution_address_bound: true,
         runtime_state_storage_bound: true,
-        runtime_code_emitted: false,
-        runtime_hooks_contributed: false,
+        runtime_code_emitted: inputs.runtime_code_emitted,
+        planned_hook_count: PLANNED_HOOK_COUNT,
+        emitted_hook_count: inputs.emitted_hook_count,
+        runtime_hooks_contributed: inputs.emitted_hook_count == PLANNED_HOOK_COUNT,
         complete: false,
     })
 }
