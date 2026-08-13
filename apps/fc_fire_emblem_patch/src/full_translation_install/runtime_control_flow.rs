@@ -128,7 +128,9 @@ struct FontPageBuilder {
     source_page_mmc3_page_hex: &'static str,
     source_page_sha1: String,
     source_page_matches_original_font: bool,
-    source_page_matches_active_fd_fe_backdrop: bool,
+    source_page_matches_dialogue_fd_page: bool,
+    native_fe_backdrop_remains_selected: bool,
+    fd_fe_namespaces_merged: bool,
     runtime_code_mmc3_page_hex: String,
     runtime_code_cpu_start_hex: String,
     runtime_code_cpu_end_exclusive_hex: &'static str,
@@ -144,6 +146,9 @@ struct SelectorConsumer {
     current_fallback_cpu_address_hex: &'static str,
     replacement_role: &'static str,
     selects_chr_ram_only_when_ready: bool,
+    source_fd_page_guard_hex: &'static str,
+    selects_chr_ram_for_fd_latch_only: bool,
+    native_fe_latch_remains_source_rom: bool,
     inactive_falls_through_to_existing_consumers: bool,
 }
 
@@ -437,7 +442,7 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         .collect();
 
     Ok(DialogueRuntimeControlFlowPlan {
-        strategy: "derive every request from the original main-dialogue state machine, cold-compose one complete page group in the quiet-frame NMI consumer, and select CHR RAM only after that exact request is ready",
+        strategy: "derive every request from the original main-dialogue state machine, cold-compose the dialogue FD page in the quiet-frame NMI consumer, and replace only the FD latch after that exact request is ready",
         states: vec![
             RuntimeState {
                 id: "inactive",
@@ -471,11 +476,13 @@ pub(super) fn plan_dialogue_runtime_control_flow(
             chr_fe_restore_callee_worst_case_cycles: fe_restore_cycles,
         },
         font_page_builder: FontPageBuilder {
-            strategy: "cold source-page rebuild plus dense page-group atlas overlay for every current request",
+            strategy: "cold dialogue-FD source-page rebuild plus dense page-group atlas overlay for every current request while native FE remains the backdrop",
             source_page_mmc3_page_hex: "0x21",
             source_page_sha1: sha1_hex(source_page),
             source_page_matches_original_font: true,
-            source_page_matches_active_fd_fe_backdrop: false,
+            source_page_matches_dialogue_fd_page: true,
+            native_fe_backdrop_remains_selected: true,
+            fd_fe_namespaces_merged: false,
             runtime_code_mmc3_page_hex: format!("0x{RUNTIME_CODE_MMC3_PAGE:02X}"),
             runtime_code_cpu_start_hex: format!("0x{runtime_code_cpu_start:04X}"),
             runtime_code_cpu_end_exclusive_hex: "0xC000",
@@ -487,8 +494,11 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         selector_consumer: SelectorConsumer {
             chain_owner_cpu_address_hex: "0xFF1D",
             current_fallback_cpu_address_hex: "0xFF40",
-            replacement_role: "global_main_dialogue_ready_selector_then_existing_roster_chain",
+            replacement_role: "global_main_dialogue_ready_fd_selector_then_existing_roster_chain",
             selects_chr_ram_only_when_ready: true,
+            source_fd_page_guard_hex: "0x00",
+            selects_chr_ram_for_fd_latch_only: true,
+            native_fe_latch_remains_source_rom: true,
             inactive_falls_through_to_existing_consumers: true,
         },
         dynamic_text_projection: DynamicTextProjection {

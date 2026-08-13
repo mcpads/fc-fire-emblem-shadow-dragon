@@ -24,16 +24,12 @@
 //! 페이지를 PRG에 복제해 두었고, 그것이 원본 글꼴과 바이트가 같다는 것은 설치가
 //! 매번 확인한다.
 //!
-//! **다만 그 페이지가 맞는 배경이 아니다.** 실행해 보니 대사 글자는 제대로 나오는데
-//! 맵 타일이 여전히 사라진다. 오른쪽 패턴 표는 mapper165의 FD/FE 원천 쌍에서 나오고,
-//! 게임이 `LDA #$00; JSR $FA80`으로 고르는 «0번»도 `$FEEE`가
-//! `(A & 0x1F) × 4 + 8`로 바꾸므로 물리 CHR 페이지 **2번**이다. PRG `21`에 복제해
-//! 둔 것은 물리 0번, 즉 원본 글꼴 페이지 하나뿐이다.
-//!
-//! 그러므로 복원이 되살리는 것은 맵이 쓰던 FD/FE 배경이 아니라 글꼴 페이지다. 다음
-//! 과제는 중앙 상태 `$5B/$5C | $52`와 화면 수명의 가시 타일을 입력으로 두 원천의
-//! 필요한 패턴을 한 CHR-RAM 페이지에 합성하고, 같은 코드가 양쪽에서 다른 패턴을
-//! 동시에 요구하면 실패 닫힘으로 막는 것이다. PRG는 아직 100 KB 넘게 비어 있다.
+//! PRG `21`의 4 KiB는 원본 대사 글꼴이 있는 **FD 원천 페이지 0**과 같다. 실행에서
+//! 맵 타일이 한글 조각으로 바뀐 원인은 이 복원 페이지가 아니라, 표시 selector가 FD와
+//! FE를 모두 같은 CHR RAM 페이지로 바꿔 래치 두 네임스페이스를 합친 것이었다.
+//! 전송 중에는 현재 래치와 무관하게 쓰기가 RAM에 닿도록 두 레지스터를 잠시 RAM으로
+//! 고르지만, 이탈에서 둘을 원천으로 되돌린다. 준비 완료 뒤 표시 selector는 FD만 RAM을
+//! 보게 하고 FE 배경은 원본 CHR ROM에 남긴다.
 //!
 //! 되돌릴 원천 페이지는 mapper165 중앙 기록기가 이미 `$5B`(FD)와 `$5C`(FE)에 따로
 //! 보존한다. 직접 기록기는 의도적으로 그 상태를 바꾸지 않으므로 설정기 훅으로
@@ -582,6 +578,29 @@ mod tests {
                 ]
                 .contains(address)
         )));
+    }
+
+    /// 표시 selector는 준비 완료를 보는 순간 FD만 RAM으로 바꾸고 FE는 이 이탈에서
+    /// 복원한 원본을 그대로 쓴다. FE 복원보다 먼저 준비 완료를 게시하면 그 사이에
+    /// 한 프레임이라도 전송용 RAM 페이지가 배경으로 보일 수 있다.
+    #[test]
+    fn native_fe_is_restored_before_readiness_is_published() {
+        let epilogue = frame_epilogue(0xA000).unwrap().0;
+        let fe_restore = [
+            Instruction::LdaZeroPage(super::super::chr_source_state::RIGHT_FE_SOURCE_SHADOW),
+            Instruction::OraZeroPage(super::super::chr_source_state::CHR_SOURCE_HIGH_BITS),
+            Instruction::JsrAbsolute(super::super::chr_source_state::RIGHT_FE_HELPER),
+        ];
+        let fe_restore_at = epilogue
+            .windows(fe_restore.len())
+            .position(|window| window == fe_restore)
+            .expect("the epilogue restores native FE");
+        let ready_at = epilogue
+            .iter()
+            .position(|instruction| *instruction == Instruction::StaAbsolute(REQUEST_STATE))
+            .expect("the epilogue publishes readiness");
+
+        assert!(fe_restore_at + fe_restore.len() <= ready_at);
     }
 
     /// 항목은 그룹 덩이 페이지에서, 타일 자료는 atlas 페이지에서 읽어야 한다.
