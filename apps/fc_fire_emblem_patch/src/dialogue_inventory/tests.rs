@@ -310,6 +310,52 @@ fn locates_transition_targets_without_a_direct_record_header() {
     );
 }
 
+/// 직접 엔트리로 해석하면 선두 네 글자를 헤더로 오인하지만, 원본 선택기가 직접
+/// 고를 수 없는 엔딩 확장 레코드는 전이 진입 해석을 써야 한다.
+#[test]
+fn a_source_bound_transition_only_entry_keeps_its_leading_text() {
+    let source_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes");
+    let rom = Rom::from_path(&source_path).unwrap();
+    let record = inspect_main_dialogue_storage(rom.data())
+        .unwrap()
+        .records
+        .into_iter()
+        .find(|record| {
+            record.table_id == "epilogue-dialogue" && record.canonical_entry_index == 0x36
+        })
+        .expect("epilogue transition-only entry 0x36");
+
+    assert_eq!(record.prefix_byte_count, 0);
+    assert!(record.literal_file_offsets.contains(&record.file_offset));
+    assert_eq!(
+        &rom.data()[record.file_offset..record.file_offset + 4],
+        [0x0E, 0x19, 0x09, 0x0F],
+        "the leading Japanese text must stay in the translatable literal set"
+    );
+}
+
+/// 프리픽스 차이를 단순 예외 목록으로 허용하면 선택기 변경 뒤에도 잘못된 해석을
+/// 계속 승인한다. 직접 도달 범위를 만드는 원본 바이트가 바뀌면 닫혀야 한다.
+#[test]
+fn a_changed_ending_selector_revokes_transition_only_prefix_handling() {
+    let source_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes");
+    let rom = Rom::from_path(&source_path).unwrap();
+    let mut source = rom.data().to_vec();
+    let cursor_initializer = switchable_cpu_to_file_offset(0x04, 0xA12C).unwrap();
+    source[cursor_initializer + 1] = 0x36;
+
+    let error = inspect_main_dialogue_storage(&source)
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        error.contains("transition-only ending entry reachability is no longer proven"),
+        "{error}"
+    );
+}
+
 #[test]
 fn scans_a_first_line_without_emitting_its_source_bytes() {
     let mut source = synthetic_source();
