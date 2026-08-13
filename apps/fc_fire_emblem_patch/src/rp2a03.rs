@@ -12,6 +12,7 @@ pub enum Instruction {
     LdaAbsoluteY(u16),
     LdaIndirectY(u8),
     LdxImmediate(u8),
+    LdxAbsolute(u16),
     LdxZeroPage(u8),
     LdyImmediate(u8),
     LdyAbsoluteX(u16),
@@ -34,6 +35,7 @@ pub enum Instruction {
     SbcImmediate(u8),
     SbcZeroPage(u8),
     CmpImmediate(u8),
+    CmpAbsolute(u16),
     CmpZeroPage(u8),
     CpxImmediate(u8),
     CpyImmediate(u8),
@@ -123,6 +125,8 @@ impl Instruction {
             | Self::LdaAbsoluteY(_)
             | Self::AdcAbsolute(_)
             | Self::AdcAbsoluteX(_)
+            | Self::LdxAbsolute(_)
+            | Self::CmpAbsolute(_)
             | Self::LdyAbsoluteX(_)
             | Self::StaAbsolute(_)
             | Self::StaAbsoluteX(_)
@@ -176,7 +180,11 @@ impl Instruction {
             | Self::SbcZeroPage(_) => 3,
             Self::Pla | Self::Plp => 4,
             Self::JmpAbsolute(_) => 3,
-            Self::LdaAbsolute(_) | Self::StaAbsolute(_) | Self::AdcAbsolute(_) => 4,
+            Self::LdaAbsolute(_)
+            | Self::StaAbsolute(_)
+            | Self::AdcAbsolute(_)
+            | Self::LdxAbsolute(_)
+            | Self::CmpAbsolute(_) => 4,
             // 색인 적재는 페이지 경계를 넘으면 한 사이클 더 쓴다.
             Self::LdaAbsoluteX(_)
             | Self::LdaAbsoluteY(_)
@@ -211,6 +219,7 @@ impl Instruction {
                 Operand::Byte(address),
             ),
             Self::LdxImmediate(value) => immediate(Mnemonic::Ldx, value),
+            Self::LdxAbsolute(address) => absolute(Mnemonic::Ldx, address),
             Self::LdxZeroPage(address) => zero_page(Mnemonic::Ldx, address),
             Self::LdyImmediate(value) => immediate(Mnemonic::Ldy, value),
             Self::LdyAbsoluteX(address) => absolute_x(Mnemonic::Ldy, address),
@@ -237,6 +246,7 @@ impl Instruction {
             Self::SbcImmediate(value) => immediate(Mnemonic::Sbc, value),
             Self::SbcZeroPage(address) => zero_page(Mnemonic::Sbc, address),
             Self::CmpImmediate(value) => immediate(Mnemonic::Cmp, value),
+            Self::CmpAbsolute(address) => absolute(Mnemonic::Cmp, address),
             Self::CmpZeroPage(address) => zero_page(Mnemonic::Cmp, address),
             Self::CpxImmediate(value) => immediate(Mnemonic::Cpx, value),
             Self::CpyImmediate(value) => immediate(Mnemonic::Cpy, value),

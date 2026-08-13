@@ -15,6 +15,7 @@ use crate::{
 
 pub(in crate::full_translation_install) mod chr_selector;
 pub(in crate::full_translation_install) mod dispatcher_gate;
+pub(in crate::full_translation_install) mod resolve_request;
 pub(super) mod trampoline;
 pub(in crate::full_translation_install) mod transport;
 
