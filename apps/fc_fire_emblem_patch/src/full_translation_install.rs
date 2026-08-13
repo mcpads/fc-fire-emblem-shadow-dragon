@@ -35,7 +35,6 @@ mod runtime_identity;
 mod runtime_material;
 mod runtime_nmi_contract;
 mod runtime_state_storage;
-mod transport_probe;
 
 use current_candidate::{CurrentCandidateInputs, inspect_dialogue_page_pool_capacity};
 use dynamic_composition::plan_dialogue_runtime_composition;
@@ -45,7 +44,7 @@ use installation_layout::{InstallationLayoutPlan, plan_installation_layout};
 use integrated_write_set::{
     IntegratedWriteSetInputs, IntegratedWriteSetPlan, plan_integrated_write_set,
 };
-use runtime_code::plan_dialogue_runtime_code;
+use runtime_code::{plan_dialogue_runtime_code, resolve_request::MaterialLayout};
 use runtime_control_flow::{
     DialogueRuntimeControlFlowPlan, RuntimeControlFlowInputs, plan_dialogue_runtime_control_flow,
 };
@@ -54,10 +53,15 @@ use runtime_material::{
     DialogueRuntimeMaterialPlan, RuntimeMaterialInputs, plan_dialogue_runtime_material,
 };
 use runtime_state_storage::{DialogueRuntimeStateStoragePlan, plan_dialogue_runtime_state_storage};
-pub(crate) use transport_probe::build_dialogue_transport_probe;
 
 /// 대사 런타임 재료 용기가 시작하는 MMC3 8 KiB 페이지다.
 const MAIN_DIALOGUE_MATERIAL_FIRST_PAGE: u8 = 0x2C;
+/// MMC3 페이지 하나다.
+const MMC3_PAGE_BYTE_COUNT: usize = 8 * 1024;
+/// 런타임 식별표 헤더의 길이다.
+const IDENTITY_HEADER_BYTE_COUNT: usize = 16;
+/// 그 뒤 selector 디렉터리의 길이다.
+const IDENTITY_SELECTOR_DIRECTORY_BYTE_COUNT: usize = 256;
 
 const REQUIRED_DOMAIN_COUNT: usize = 13;
 const REQUIRED_DOMAINS: [&str; REQUIRED_DOMAIN_COUNT] = [
@@ -434,31 +438,48 @@ pub(crate) fn plan_full_translation_installation(
     })?;
     // 실행 코드는 자료 배치가 끝난 뒤에 조립한다. 놓일 주소가 자료 길이에서 나오기
     // 때문이다. 코드 길이는 그 주소에 영향을 주지 않으므로 한 번에 정해진다.
+    // 실행 코드는 자료 배치가 끝난 뒤에 조립한다. 읽을 표들이 어느 페이지의 어느
+    // 주소에 놓이는지가 배치에서 나오기 때문이다.
     let atlas_offset = runtime_material.glyph_atlas_offset()?;
-    let atlas_page = MAIN_DIALOGUE_MATERIAL_FIRST_PAGE
-        + u8::try_from(atlas_offset / (8 * 1024)).context("glyph atlas page index overflow")?;
-    // 콜드 요청이 가리킬 그룹이다. 런타임 조회가 들어오기 전까지는 첫 그룹을 쓴다.
-    // 조회가 붙으면 이 자리는 사라진다.
-    let first_group_offset = *composition
-        .group_block_container_offsets
-        .first()
-        .context("dialogue composition produced no page groups")?;
-    let first_group_page = MAIN_DIALOGUE_MATERIAL_FIRST_PAGE
-        + u8::try_from(first_group_offset / (8 * 1024)).context("page group index overflow")?;
-    let first_group_cpu = u16::try_from(0x8000 + first_group_offset % (8 * 1024))
-        .context("page group CPU address does not fit the 8000 window")?;
+    let scan_offset = runtime_material.section_offset("page_scan")?;
+    let identity_offset = runtime_material.section_offset("runtime_identity")?;
+    let page = |offset: usize| -> Result<u8> {
+        Ok(MAIN_DIALOGUE_MATERIAL_FIRST_PAGE
+            + u8::try_from(offset / MMC3_PAGE_BYTE_COUNT).context("material page index overflow")?)
+    };
+    let window = |offset: usize| -> Result<u16> {
+        u16::try_from(0x8000 + offset % MMC3_PAGE_BYTE_COUNT)
+            .context("material CPU address does not fit the 8000 window")
+    };
+    let layout = MaterialLayout {
+        identity_page: page(identity_offset)?,
+        identity_selector_directory: window(identity_offset + IDENTITY_HEADER_BYTE_COUNT)?,
+        identity_table_descriptors: window(
+            identity_offset + IDENTITY_HEADER_BYTE_COUNT + IDENTITY_SELECTOR_DIRECTORY_BYTE_COUNT,
+        )?,
+        scan_page: page(scan_offset)?,
+        page_selectors: window(scan_offset)?,
+        record_directory: window(scan_offset + composition.record_page_group_selector_byte_count)?,
+        group_directory: window(scan_offset + composition.group_block_directory_offset)?,
+        group_block_container_base: u16::try_from(
+            scan_offset
+                + composition.group_block_directory_offset
+                + composition.group_block_directory_byte_count,
+        )
+        .context("page group block base does not fit a 16-bit container offset")?,
+        container_first_page: MAIN_DIALOGUE_MATERIAL_FIRST_PAGE,
+    };
     let dialogue_runtime_code = plan_dialogue_runtime_code(
         &rom,
         &current_candidate,
         runtime_material.runtime_code_cpu_start()?,
-        atlas_page,
-        first_group_page,
-        // 덩이의 첫 바이트가 항목 수이므로 항목은 그다음부터다.
-        first_group_cpu + 1,
-        u8::try_from(composition.maximum_static_page_group_overlay_tile_count)
-            .context("cold request tile count does not fit one byte")?,
+        page(atlas_offset)?,
+        runtime_material.runtime_code_mmc3_page(),
+        layout,
     )?;
-    runtime_material.place_runtime_code(&dialogue_runtime_code.transport.bytes)?;
+    for routine in &dialogue_runtime_code.code_routines {
+        runtime_material.place_runtime_code(routine.address, &routine.bytes)?;
+    }
 
     let runtime_state_storage = plan_dialogue_runtime_state_storage(&rom)?;
     ensure!(

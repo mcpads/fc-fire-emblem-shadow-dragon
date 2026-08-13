@@ -62,6 +62,16 @@ pub(in crate::full_translation_install) struct MaterialLayout {
     pub(in crate::full_translation_install) container_first_page: u8,
 }
 
+/// 주 흐름에서 빌려 쓰는 제로 페이지다. 밀고 되돌린다.
+const BORROWED_SCRATCH: [u8; 6] = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05];
+
+/// 빌린 제로 페이지를 민 순서의 반대로 되돌린다. 캐리는 건드리지 않는다.
+fn restore_scratch(instructions: &mut Vec<Instruction>) {
+    for address in BORROWED_SCRATCH.iter().rev() {
+        instructions.extend([Instruction::Pla, Instruction::StaZeroPage(*address)]);
+    }
+}
+
 /// 실패로 빠지는 분기를 붙인다.
 ///
 /// 루틴이 200바이트 남짓이라 앞쪽 분기가 꼬리까지 상대 주소로 닿지 못한다. 그래서
@@ -98,6 +108,12 @@ pub(in crate::full_translation_install) fn build_resolve_request(
 ) -> Result<RuntimeRoutine> {
     let mut instructions = Vec::new();
     let mut failure_branches = Vec::new();
+
+    // 이 루틴은 주 흐름에서 돈다. 제로 페이지는 무엇이 살아 있는지 알 수 없으므로
+    // 밀고 되돌린다. NMI 안이 아니라서 스택 깊이도 여유가 있다.
+    for address in BORROWED_SCRATCH {
+        instructions.extend([Instruction::LdaZeroPage(address), Instruction::Pha]);
+    }
 
     // 1. 식별표에서 레코드 색인을 얻는다.
     instructions.extend(map_page(Instruction::LdaImmediate(layout.identity_page)));
@@ -245,14 +261,17 @@ pub(in crate::full_translation_install) fn build_resolve_request(
         Instruction::AdcImmediate(0),
         Instruction::StaAbsolute(CURSOR_ENTRY_HIGH),
         Instruction::Sec,
-        Instruction::Rts,
     ]);
+    restore_scratch(&mut instructions);
+    instructions.push(Instruction::Rts);
 
     let failure = next_address(origin, &instructions)?;
     for index in failure_branches {
         instructions[index] = Instruction::JmpAbsolute(failure);
     }
-    instructions.extend([Instruction::Clc, Instruction::Rts]);
+    instructions.push(Instruction::Clc);
+    restore_scratch(&mut instructions);
+    instructions.push(Instruction::Rts);
 
     let bytes = assemble_at(origin, &instructions)
         .context("cannot assemble the dialogue cold request resolver")?;
@@ -287,18 +306,25 @@ mod tests {
     fn every_failure_path_clears_carry_without_publishing_a_request() {
         let routine = build_resolve_request(0xA400, layout()).unwrap();
 
-        // 마지막 두 바이트가 실패 꼬리다.
-        assert_eq!(&routine.bytes[routine.bytes.len() - 2..], [0x18, 0x60]);
+        // 실패 꼬리는 캐리를 지우고, 빌린 제로 페이지를 되돌리고, 돌아간다.
+        let mut expected = vec![0x18];
+        for address in BORROWED_SCRATCH.iter().rev() {
+            expected.extend([0x68, 0x85, *address]);
+        }
+        expected.push(0x60);
+
+        assert_eq!(&routine.bytes[routine.bytes.len() - expected.len()..], &expected[..]);
     }
 
     /// 성공은 캐리를 세우고 돌아간다. 생산자는 그 캐리만 보고 요청을 발행한다.
     #[test]
     fn the_success_path_sets_carry_after_writing_every_cursor_byte() {
         let routine = build_resolve_request(0xA400, layout()).unwrap();
+        // `SEC` 뒤에 되돌리기가 오고 `RTS`로 끝난다. `PLA`는 캐리를 건드리지 않는다.
         let success_end = routine
             .bytes
-            .windows(2)
-            .position(|window| window == [0x38, 0x60])
+            .iter()
+            .position(|byte| *byte == 0x38)
             .expect("the resolver has a success tail");
 
         for cursor in [

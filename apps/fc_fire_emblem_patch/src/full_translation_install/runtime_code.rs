@@ -42,8 +42,8 @@ fn budgeted_transport_cycles(trampoline_reserve: u32) -> u32 {
 
 /// 대사 런타임이 ROM에 넣는 실행 코드와 훅 전체다.
 pub(in crate::full_translation_install) struct DialogueRuntimeCodePlan {
-    /// 페이지 `2E` 꼬리에 놓이는 전송 루틴이다.
-    pub(in crate::full_translation_install) transport: RuntimeRoutine,
+    /// 실행 코드 페이지에 놓이는 조각들이다.
+    pub(in crate::full_translation_install) code_routines: Vec<RuntimeRoutine>,
     /// 고정 뱅크 동굴에 놓이는 조각들이다.
     pub(in crate::full_translation_install) fixed_routines: Vec<RuntimeRoutine>,
     /// `$C179`에 쓸 소비자 훅이다.
@@ -65,9 +65,8 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     candidate: &Rom,
     runtime_code_cpu_start: u16,
     atlas_page: u8,
-    cold_group_page: u8,
-    cold_entry_address: u16,
-    cold_tile_count: u8,
+    code_page: u8,
+    layout: resolve_request::MaterialLayout,
 ) -> Result<DialogueRuntimeCodePlan> {
     let bank_restore = bind_bank_restore_contract(candidate)?;
     bind_quiet_frame_gate(source, candidate)?;
@@ -75,6 +74,9 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     chr_selector::bind_selector_chain_site(candidate)?;
 
     let transport = transport::build_transport_routine(runtime_code_cpu_start, atlas_page)?;
+    let resolver_origin = transport.address
+        + u16::try_from(transport.bytes.len()).context("transport routine length overflow")?;
+    let resolver = resolve_request::build_resolve_request(resolver_origin, layout)?;
     let trampoline_routine = trampoline::build_trampoline(bank_restore, transport.address)?;
 
     let gate_origin = trampoline_routine.address
@@ -84,12 +86,8 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
 
     let initializer_origin = gate.address
         + u16::try_from(gate.bytes.len()).context("dispatcher gate length overflow")?;
-    let initializer = dispatcher_gate::build_cold_initializer(
-        initializer_origin,
-        cold_entry_address,
-        cold_group_page,
-        cold_tile_count,
-    )?;
+    let initializer =
+        dispatcher_gate::build_cold_initializer(initializer_origin, resolver.address, code_page)?;
 
     // 예산은 시험만이 아니라 빌드가 지킨다. vblank를 넘기는 코드는 ROM에 들어가면
     // 안 되므로, 여기서 막지 않으면 그 판정이 시험을 돌리는 사람에게 넘어간다.
@@ -113,6 +111,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     )?;
 
     let fixed_routines = vec![trampoline_routine, gate, initializer, selector];
+    let code_routines = vec![transport, resolver];
     ensure_disjoint(
         &fixed_routines.iter().collect::<Vec<_>>(),
         trampoline::TRAMPOLINE_CAVE_END,
@@ -123,7 +122,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         dispatcher_hook: dispatcher_gate::dispatcher_hook_bytes(fixed_routines[1].address),
         cold_hook: dispatcher_gate::cold_hook_bytes(fixed_routines[2].address),
         selector_hook: chr_selector::selector_hook_bytes(fixed_routines[3].address),
-        transport,
+        code_routines,
         fixed_routines,
     })
 }

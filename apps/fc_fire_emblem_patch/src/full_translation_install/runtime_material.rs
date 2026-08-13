@@ -268,30 +268,38 @@ impl DialogueRuntimeMaterialPlan {
 
     /// 글리프 atlas가 용기 안에서 시작하는 곳이다.
     pub(super) fn glyph_atlas_offset(&self) -> Result<usize> {
-        self.sections
-            .iter()
-            .find(|section| section.role == "glyph_atlas")
-            .map(|section| section.offset)
-            .context("runtime material has no glyph atlas section")
+        self.section_offset("glyph_atlas")
     }
 
-    /// 방출한 실행 코드를 예약 자리에 넣는다.
-    pub(super) fn place_runtime_code(&mut self, code: &[u8]) -> Result<()> {
-        let reserved = self
+    /// 구역 하나가 용기 안에서 시작하는 곳이다.
+    pub(super) fn section_offset(&self, role: &str) -> Result<usize> {
+        self.sections
+            .iter()
+            .find(|section| section.role == role)
+            .map(|section| section.offset)
+            .with_context(|| format!("runtime material has no {role} section"))
+    }
+
+    /// 실행 코드가 놓이는 MMC3 페이지다.
+    pub(super) fn runtime_code_mmc3_page(&self) -> u8 {
+        RUNTIME_CODE_MMC3_PAGE
+    }
+
+    /// 방출한 실행 코드 조각을 그 CPU 주소가 가리키는 예약 자리에 넣는다.
+    pub(super) fn place_runtime_code(&mut self, cpu_address: u16, code: &[u8]) -> Result<()> {
+        let within_page = usize::from(cpu_address)
+            .checked_sub(RUNTIME_CODE_WINDOW_START)
+            .context("runtime code address is outside the A000 window")?;
+        let start = self.runtime_code_offset + within_page;
+        let destination = self
             .material
-            .get_mut(self.runtime_code_offset..)
-            .context("runtime code reservation is outside the container")?;
+            .get_mut(start..start + code.len())
+            .context("runtime code does not fit the reserved page")?;
         ensure!(
-            code.len() <= reserved.len(),
-            "runtime code is {} bytes and the reservation holds {}",
-            code.len(),
-            reserved.len()
+            destination.iter().all(|byte| *byte == 0xFF),
+            "runtime code placement is not exact FF before writing"
         );
-        ensure!(
-            reserved.iter().all(|byte| *byte == 0xFF),
-            "runtime code reservation is not exact FF before placement"
-        );
-        reserved[..code.len()].copy_from_slice(code);
+        destination.copy_from_slice(code);
         self.runtime_code_emitted = true;
         self.material_sha1 = sha1_hex(&self.material);
         Ok(())

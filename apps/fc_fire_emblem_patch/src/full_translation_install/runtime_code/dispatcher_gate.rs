@@ -36,10 +36,13 @@ pub(in crate::full_translation_install) const COLD_ENTRY: u16 = 0x809B;
 /// 초기 진입이 부르는 원본 포인터 resolver다.
 pub(in crate::full_translation_install) const SOURCE_POINTER_RESOLVER: u16 = 0xE6B2;
 
-use super::super::runtime_cursor_storage::{
-    CURSOR_ENTRY_HIGH, CURSOR_ENTRY_LOW, CURSOR_GROUP_PAGE, CURSOR_REMAINING_TILES,
-};
+use super::super::runtime_bank_contract::{PRG_A000_REGISTER, PRG_BANK_SHADOW};
 use super::transport::{REQUEST_STATE, STATE_READY};
+
+const BANK_SELECT_REGISTER: u16 = 0x8000;
+const BANK_VALUE_REGISTER: u16 = 0x8001;
+/// 16 KiB 뱅크 짝을 되돌리는 원본 도우미다.
+const PAIRED_BANK_HELPER: u16 = 0xFA20;
 
 /// 합성을 기다리는 중이라는 요청이다.
 pub(in crate::full_translation_install) const STATE_COLD_REQUESTED: u8 = 1;
@@ -112,36 +115,44 @@ pub(super) fn build_dispatcher_gate(origin: u16) -> Result<RuntimeRoutine> {
     })
 }
 
-/// 커서를 전부 세운 뒤에 요청을 발행한다. 순서가 요구사항이다.
+/// 해석기를 불러 커서를 세우고, 성공했을 때만 요청을 발행한다.
+///
+/// 해석기는 실행 코드 페이지에 있으므로 그 페이지를 `$A000`에 걸어야 부를 수 있다.
+/// 걸면 원본이 기대하던 뱅크가 사라지므로 돌아오기 전에 되돌린다. 되돌리는 값은
+/// `$29` 그림자와 원본 도우미 `$FA20`이 준다 — `$C1FB`가 매 프레임 쓰는 방식이다.
+///
+/// 실패하면 커서도 요청도 남기지 않는다. 그 경우 원본 일본어 경로가 그대로 돈다.
 pub(super) fn build_cold_initializer(
     origin: u16,
-    entry_address: u16,
-    group_page: u8,
-    tile_count: u8,
+    resolver: u16,
+    code_page: u8,
 ) -> Result<RuntimeRoutine> {
-    ensure!(
-        tile_count > 0,
-        "a cold request with no tiles never completes and the dialogue never resumes"
-    );
-    ensure!(
-        (0x8000..0xA000).contains(&entry_address),
-        "the group block entry address {entry_address:04X} is outside the 8000 window"
-    );
-    let instructions = vec![
-        Instruction::LdaImmediate(entry_address as u8),
-        Instruction::StaAbsolute(CURSOR_ENTRY_LOW),
-        Instruction::LdaImmediate((entry_address >> 8) as u8),
-        Instruction::StaAbsolute(CURSOR_ENTRY_HIGH),
-        Instruction::LdaImmediate(group_page),
-        Instruction::StaAbsolute(CURSOR_GROUP_PAGE),
-        Instruction::LdaImmediate(tile_count),
-        Instruction::StaAbsolute(CURSOR_REMAINING_TILES),
-        // 요청은 마지막에 발행한다. 그 전에 소비자가 깨어나면 반쯤 세워진 커서를 읽는다.
+    let mut instructions = vec![
+        // 실행 코드 페이지를 `$A000`에 건다.
+        Instruction::LdaImmediate(PRG_A000_REGISTER),
+        Instruction::StaAbsolute(BANK_SELECT_REGISTER),
+        Instruction::LdaImmediate(code_page),
+        Instruction::StaAbsolute(BANK_VALUE_REGISTER),
+        Instruction::JsrAbsolute(resolver),
+        // 캐리를 뱅크 복원 너머로 나른다. `$FA20`은 상태를 보존하지만 그 사실에
+        // 기대는 대신 여기서 명시적으로 밀어 둔다.
+        Instruction::Php,
+        Instruction::LdaZeroPage(PRG_BANK_SHADOW),
+        Instruction::JsrAbsolute(PAIRED_BANK_HELPER),
+        Instruction::Plp,
+    ];
+    let failed_placeholder = instructions.len();
+    instructions.push(Instruction::BccAbsolute(origin));
+    instructions.extend([
+        // 요청은 커서가 다 선 뒤에만 발행한다.
         Instruction::LdaImmediate(STATE_COLD_REQUESTED),
         Instruction::StaAbsolute(REQUEST_STATE),
-        // 밀어낸 원본 호출로 넘긴다.
-        Instruction::JmpAbsolute(SOURCE_POINTER_RESOLVER),
-    ];
+    ]);
+    let failed = next_address(origin, &instructions)?;
+    instructions[failed_placeholder] = Instruction::BccAbsolute(failed);
+    // 밀어낸 원본 호출로 넘긴다.
+    instructions.push(Instruction::JmpAbsolute(SOURCE_POINTER_RESOLVER));
+
     Ok(RuntimeRoutine {
         role: "dialogue cold initializer",
         address: origin,
@@ -235,37 +246,49 @@ mod tests {
         assert!(error.to_string().contains("dispatcher entry at 0A:8000 changed"));
     }
 
-    /// 요청 발행이 커서 설정보다 앞서면 소비자가 반쯤 세워진 커서를 읽는다.
+    /// 해석기가 실패하면 요청을 발행하지 않아야 한다. 발행하면 소비자가 세워지지
+    /// 않은 커서를 읽고 남의 자료를 CHR RAM에 올린다.
     #[test]
-    fn the_request_is_published_after_every_cursor_byte() {
-        let routine = build_cold_initializer(0xF480, 0x8100, 0x2C, 40).unwrap();
-        let request_at = store_position(&routine.bytes, REQUEST_STATE)
+    fn a_failed_resolve_publishes_no_request() {
+        let routine = build_cold_initializer(0xF558, 0xA400, 0x30).unwrap();
+        let publish = store_position(&routine.bytes, REQUEST_STATE)
             .expect("the initializer publishes a request");
+        let branch = routine
+            .bytes
+            .iter()
+            .position(|byte| *byte == 0x90)
+            .expect("the initializer branches on the resolver's carry");
 
-        for cursor in [
-            CURSOR_ENTRY_LOW,
-            CURSOR_ENTRY_HIGH,
-            CURSOR_GROUP_PAGE,
-            CURSOR_REMAINING_TILES,
-        ] {
-            let at = store_position(&routine.bytes, cursor)
-                .unwrap_or_else(|| panic!("cursor {cursor:04X} is never written"));
-            assert!(at < request_at, "cursor {cursor:04X} is written too late");
-        }
+        assert!(branch < publish, "the request is published before the carry is read");
     }
 
-    /// 타일이 0인 요청은 영원히 끝나지 않아 대사가 멈춘 채로 남는다.
+    /// 빌린 뱅크를 되돌리지 않으면 원본이 남의 코드를 실행한다. 되돌리기는 캐리를
+    /// 읽기 전에 끝나야 하므로 그 사이에 `PHP`/`PLP`가 있어야 한다.
     #[test]
-    fn a_zero_tile_request_is_refused() {
-        let error = build_cold_initializer(0xF480, 0x8100, 0x2C, 0).unwrap_err();
+    fn the_borrowed_banks_are_handed_back_before_the_carry_decides() {
+        let routine = build_cold_initializer(0xF558, 0xA400, 0x30).unwrap();
+        let restore = routine
+            .bytes
+            .windows(3)
+            .position(|window| {
+                window == [0x20, PAIRED_BANK_HELPER as u8, (PAIRED_BANK_HELPER >> 8) as u8]
+            })
+            .expect("the initializer restores the bank pair");
+        let branch = routine
+            .bytes
+            .iter()
+            .position(|byte| *byte == 0x90)
+            .expect("the initializer branches on the resolver's carry");
 
-        assert!(error.to_string().contains("never completes"));
+        assert!(restore < branch);
+        assert!(routine.bytes.contains(&0x08), "the carry is never saved across the restore");
+        assert!(routine.bytes.contains(&0x28), "the carry is never restored");
     }
 
     /// 초기화도 밀어낸 원본 호출로 끝나야 대사가 이어진다.
     #[test]
     fn the_initializer_reaches_the_displaced_source_resolver() {
-        let routine = build_cold_initializer(0xF480, 0x8100, 0x2C, 40).unwrap();
+        let routine = build_cold_initializer(0xF558, 0xA400, 0x30).unwrap();
 
         assert_eq!(
             &routine.bytes[routine.bytes.len() - 3..],
