@@ -10,15 +10,13 @@
 //! 한 타일에 `$8000` 창을 두 번 바꾼다. 항목은 그룹 덩이 페이지에, 타일 자료는
 //! atlas 페이지에 있고 두 페이지를 동시에 걸 수 없기 때문이다.
 //!
-//! **아직 닫히지 않은 것.** 이 루틴이 `$2007`에 쓰는 동안 CHR RAM이 두 CHR 창에
-//! 걸려 있어야 하는데 지금은 걸지 않는다. 그래서 실행하면 쓰기가 CHR ROM으로 가
-//! 버려진다. 실행으로 확인했다 — 206항목을 정확히 걷고 `ready`까지 갔지만 CHR RAM은
-//! 그대로 0이었다.
+//! 프레임 시작에서 CHR RAM을 두 CHR 창에 걸고 끝에서 되돌린다. 걸지 않으면 `$2007`
+//! 쓰기가 CHR ROM으로 가서 버려진다 — 실행으로 확인했다. 되돌리지 않으면 아직 다
+//! 올라가지 않은 CHR RAM이 화면에 나와 안전 성질이 깨진다. 둘 다 vblank 안이라
+//! 렌더링은 그 사이를 보지 못한다.
 //!
-//! 거는 것 자체는 레지스터 네 번 쓰기로 끝난다. 문제는 **되돌리기**다. 되돌리지
-//! 않으면 반쯤 합성된 CHR RAM이 화면에 나와 안전 성질이 깨지는데, 되돌릴 값을 아는
-//! 것은 원본 도우미 `$FA80`·`$FAA0`뿐이고 그 비용이 아직 측정되지 않았다. 모르는
-//! 비용을 예산에 넣지 않는다는 것이 의사결정 62번이므로, 측정 전까지는 걸지 않는다.
+//! 되돌릴 값을 아는 것은 원본 도우미 `$FA80`·`$FAA0`뿐이다. 그 비용은 아래에 세어
+//! 두었고, 예산은 그 값을 포함해서 나온다.
 //!
 //! atlas는 타일당 8바이트 1bpp다. CHR에는 16바이트 2bpp로 펼치고 상위 bitplane은
 //! 0으로 채운다. 상위 bitplane이 전부 0이라는 것은 직렬화 시점에 검사돼 있다.
@@ -28,12 +26,12 @@ use anyhow::{Context, Result, ensure};
 use super::super::runtime_cursor_storage::{
     CURSOR_ENTRY_HIGH, CURSOR_ENTRY_LOW, CURSOR_GROUP_PAGE, CURSOR_REMAINING_TILES,
 };
-use super::{RuntimeRoutine, next_address, worst_case_cycles};
+use super::{RuntimeRoutine, next_address, worst_case_cycles, worst_case_cycles_with_calls};
 use crate::rp2a03::{Instruction, assemble_at};
 
 /// 한 프레임에 올리는 타일 수다. 사이클 예산에서 유도한 값이므로 늘리려면
 /// 아래 예산 시험이 먼저 통과해야 한다.
-pub(in crate::full_translation_install) const TILES_PER_FRAME: u8 = 4;
+pub(in crate::full_translation_install) const TILES_PER_FRAME: u8 = 3;
 /// 그룹 덩이 항목 하나의 크기다. 코드 하나와 atlas CPU 주소 둘이다.
 const GROUP_BLOCK_ENTRY_BYTE_COUNT: u8 = 3;
 /// atlas가 타일 하나에 쓰는 바이트다. 1bpp 8×8.
@@ -54,6 +52,20 @@ const PPU_DATA: u16 = 0x2007;
 const BANK_SELECT_REGISTER: u16 = 0x8000;
 const BANK_VALUE_REGISTER: u16 = 0x8001;
 const PRG_8000_REGISTER: u8 = 6;
+/// 매퍼 165가 4 KiB CHR 창 둘에 쓰는 MMC3 레지스터다.
+const CHR_BANK_REGISTERS: [u8; 2] = [2, 4];
+/// CHR RAM을 고르는 뱅크 값이다. CHR ROM의 물리 페이지 0은 다른 값으로 인코딩된다.
+const CHR_RAM_BANK_VALUE: u8 = 0;
+/// 원본의 CHR 그림자와 그 도우미다. `$C1EC`가 이 짝으로 되돌린다.
+const CHR_SHADOWS: [(u8, u16); 2] = [(0x5E, 0xFA80), (0x5F, 0xFAA0)];
+/// 도우미 하나가 최악의 경우 쓰는 사이클이다.
+///
+/// 방출된 바이트를 전수로 세어 얻었다. `$FA80`은 `JMP $FEEE`(3)이고, `$FEEE`는
+/// `PHP PHA JSR $FE90` 뒤에 `$07DF` 오버라이드 분기 넷을 지나 `$FF10`의 레지스터
+/// 쓰기로 모인다. `$FE90`의 최악 경로가 40, `$FEEE`의 최악 경로가 그것을 포함해
+/// 122, 여기에 `JMP` 3과 호출한 `JSR` 6을 더해 131이다. 표본이 아니라 경로 전수라
+/// 이 값은 상한이다.
+const CHR_HELPER_WORST_CASE_CYCLES: u32 = 131;
 
 /// NMI 프롤로그 `$C173`~`$C178`이 스택에 밀어 둔 제로 페이지다. 소비자가 써도 된다.
 const ENTRY_POINTER_LOW: u8 = 0x00;
@@ -119,6 +131,15 @@ fn frame_prologue(origin: u16) -> Result<(Vec<Instruction>, usize)> {
         Instruction::LdaAbsolute(CURSOR_ENTRY_HIGH),
         Instruction::StaZeroPage(ENTRY_POINTER_HIGH),
     ]);
+    // CHR RAM을 두 창에 건다. 걸지 않으면 `$2007` 쓰기가 CHR ROM으로 간다.
+    for register in CHR_BANK_REGISTERS {
+        instructions.extend([
+            Instruction::LdaImmediate(register),
+            Instruction::StaAbsolute(BANK_SELECT_REGISTER),
+            Instruction::LdaImmediate(CHR_RAM_BANK_VALUE),
+            Instruction::StaAbsolute(BANK_VALUE_REGISTER),
+        ]);
+    }
     Ok((instructions, finished_jump))
 }
 
@@ -199,6 +220,14 @@ fn frame_epilogue(pending_placeholder: u16) -> Vec<Instruction> {
         Instruction::LdaZeroPage(ENTRY_POINTER_HIGH),
         Instruction::StaAbsolute(CURSOR_ENTRY_HIGH),
     ];
+    // CHR 뱅크를 원본이 기대하는 값으로 되돌린다. 되돌리지 않으면 아직 다 올라가지
+    // 않은 CHR RAM이 다음 프레임 렌더링에 그대로 나온다.
+    for (shadow, helper) in CHR_SHADOWS {
+        instructions.extend([
+            Instruction::LdaZeroPage(shadow),
+            Instruction::JsrAbsolute(helper),
+        ]);
+    }
     // 민 순서의 반대로 되돌린다.
     for address in BORROWED_SCRATCH.iter().rev() {
         instructions.extend([Instruction::Pla, Instruction::StaZeroPage(*address)]);
@@ -247,7 +276,11 @@ pub(super) fn worst_case_frame_cycles(origin: u16, atlas_page: u8) -> Result<u32
     let loop_start = next_address(origin, &prologue)?;
     Ok(worst_case_cycles(&prologue)?
         + worst_case_cycles(&tile_body(loop_start, atlas_page)?)? * u32::from(TILES_PER_FRAME)
-        + worst_case_cycles(&frame_epilogue(origin))?
+        + worst_case_cycles_with_calls(
+            &frame_epilogue(origin),
+            &CHR_SHADOWS
+                .map(|(_, helper)| (helper, CHR_HELPER_WORST_CASE_CYCLES)),
+        )?
         + u32::from(Instruction::Rts.worst_case_cycles()))
 }
 
