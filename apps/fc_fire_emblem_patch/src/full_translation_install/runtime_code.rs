@@ -13,6 +13,7 @@ use crate::{
     rp2a03::{Instruction, assemble_at},
 };
 
+pub(in crate::full_translation_install) mod chr_page_shadow;
 pub(in crate::full_translation_install) mod chr_selector;
 pub(in crate::full_translation_install) mod dispatcher_gate;
 pub(in crate::full_translation_install) mod resolve_request;
@@ -54,6 +55,8 @@ pub(in crate::full_translation_install) struct DialogueRuntimeCodePlan {
     pub(in crate::full_translation_install) cold_hook: [u8; 3],
     /// `$FF40`에 쓸 CHR selector 훅이다.
     pub(in crate::full_translation_install) selector_hook: [u8; 3],
+    /// `$FA80`에 쓸 CHR 페이지 관측 훅이다.
+    pub(in crate::full_translation_install) chr_helper_hook: [u8; 3],
 }
 
 /// 실행 코드를 전부 조립한다.
@@ -72,6 +75,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     bind_quiet_frame_gate(source, candidate)?;
     dispatcher_gate::bind_dispatcher_entry(source, candidate)?;
     chr_selector::bind_selector_chain_site(candidate)?;
+    chr_page_shadow::bind_chr_helper_site(candidate)?;
 
     let transport = transport::build_transport_routine(runtime_code_cpu_start, atlas_page)?;
     let resolver_origin = transport.address
@@ -110,7 +114,11 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         CHR_BANK_VALUE_REGISTER,
     )?;
 
-    let fixed_routines = vec![trampoline_routine, gate, initializer, selector];
+    let observer_origin = selector.address
+        + u16::try_from(selector.bytes.len()).context("CHR selector length overflow")?;
+    let observer = chr_page_shadow::build_chr_page_observer(observer_origin)?;
+
+    let fixed_routines = vec![trampoline_routine, gate, initializer, selector, observer];
     let code_routines = vec![transport, resolver];
     ensure_disjoint(
         &fixed_routines.iter().collect::<Vec<_>>(),
@@ -122,6 +130,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         dispatcher_hook: dispatcher_gate::dispatcher_hook_bytes(fixed_routines[1].address),
         cold_hook: dispatcher_gate::cold_hook_bytes(fixed_routines[2].address),
         selector_hook: chr_selector::selector_hook_bytes(fixed_routines[3].address),
+        chr_helper_hook: chr_page_shadow::helper_hook_bytes(fixed_routines[4].address),
         code_routines,
         fixed_routines,
     })

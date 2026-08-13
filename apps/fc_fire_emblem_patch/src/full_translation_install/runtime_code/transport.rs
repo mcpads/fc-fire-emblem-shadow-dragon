@@ -15,18 +15,9 @@
 //! 올라가지 않은 CHR RAM이 화면에 나와 안전 성질이 깨진다. 둘 다 vblank 안이라
 //! 렌더링은 그 사이를 보지 못한다.
 //!
-//! **되돌리기가 아직 틀렸다.** 지금은 `$5E`·`$5F`를 원본 도우미에 넘겨 되돌리는데,
-//! 실행해 보니 맵이 그려지는 중에도 `$5D`·`$5E`·`$5F`가 모두 0이었다. 그 셋은
-//! «현재 CHR 뱅크의 그림자»가 아니라 «바꿔 달라는 요청»이고, `$C1EC`가 `$5D != 0`일
-//! 때만 쓰는 이유가 그것이다. 0을 되돌리면 CHR 창이 엉뚱한 페이지를 가리켜 화면이
-//! 깨진다 — 1장 맵에서 대사가 시작되는 순간 그렇게 됐다.
-//!
-//! 그러므로 다음 과제는 «현재 CHR 뱅크를 아는 방법»을 찾는 것이다. 사슬 `$FF1D`의
-//! 호출자들이 페이지를 누산기에 실어 오므로, 그 값을 어디에 담아 두는 변수가 있는지
-//! 아니면 화면 종류에서 유도되는지를 먼저 조사해야 한다.
-//!
-//! 되돌릴 값을 아는 것은 원본 도우미 `$FA80`·`$FAA0`뿐이다. 그 비용은 아래에 세어
-//! 두었고, 예산은 그 값을 포함해서 나온다.
+//! 되돌릴 페이지는 `chr_page_shadow`가 관측해 둔 값이다. 원본에는 «지금 걸려 있는
+//! 페이지»를 담아 두는 변수가 없어서 만들어 두었다. 되돌리는 일 자체는 원본 설정기
+//! `$FA80`·`$FAA0`이 하고, 그 비용은 아래에 세어 두었다.
 //!
 //! atlas는 타일당 8바이트 1bpp다. CHR에는 16바이트 2bpp로 펼치고 상위 bitplane은
 //! 0으로 채운다. 상위 bitplane이 전부 0이라는 것은 직렬화 시점에 검사돼 있다.
@@ -66,8 +57,9 @@ const PRG_8000_REGISTER: u8 = 6;
 const CHR_BANK_REGISTERS: [u8; 2] = [2, 4];
 /// CHR RAM을 고르는 뱅크 값이다. CHR ROM의 물리 페이지 0은 다른 값으로 인코딩된다.
 const CHR_RAM_BANK_VALUE: u8 = 0;
-/// 원본의 CHR 그림자와 그 도우미다. `$C1EC`가 이 짝으로 되돌린다.
-const CHR_SHADOWS: [(u8, u16); 2] = [(0x5E, 0xFA80), (0x5F, 0xFAA0)];
+/// 되돌릴 때 부르는 원본 CHR 설정기들이다. 값은 관측해 둔 페이지 하나를 함께 쓴다.
+/// 열세 곳의 호출부 중 열한 곳이 두 설정기에 같은 값을 넘기므로 그렇게 맞춘다.
+const CHR_RESTORE_HELPERS: [u16; 2] = [0xFA80, 0xFAA0];
 /// 도우미 하나가 최악의 경우 쓰는 사이클이다.
 ///
 /// 방출된 바이트를 전수로 세어 얻었다. `$FA80`은 `JMP $FEEE`(3)이고, `$FEEE`는
@@ -232,9 +224,9 @@ fn frame_epilogue(pending_placeholder: u16) -> Vec<Instruction> {
     ];
     // CHR 뱅크를 원본이 기대하는 값으로 되돌린다. 되돌리지 않으면 아직 다 올라가지
     // 않은 CHR RAM이 다음 프레임 렌더링에 그대로 나온다.
-    for (shadow, helper) in CHR_SHADOWS {
+    for helper in CHR_RESTORE_HELPERS {
         instructions.extend([
-            Instruction::LdaZeroPage(shadow),
+            Instruction::LdaAbsolute(super::chr_page_shadow::CHR_PAGE_SHADOW),
             Instruction::JsrAbsolute(helper),
         ]);
     }
@@ -288,8 +280,7 @@ pub(super) fn worst_case_frame_cycles(origin: u16, atlas_page: u8) -> Result<u32
         + worst_case_cycles(&tile_body(loop_start, atlas_page)?)? * u32::from(TILES_PER_FRAME)
         + worst_case_cycles_with_calls(
             &frame_epilogue(origin),
-            &CHR_SHADOWS
-                .map(|(_, helper)| (helper, CHR_HELPER_WORST_CASE_CYCLES)),
+            &CHR_RESTORE_HELPERS.map(|helper| (helper, CHR_HELPER_WORST_CASE_CYCLES)),
         )?
         + u32::from(Instruction::Rts.worst_case_cycles()))
 }

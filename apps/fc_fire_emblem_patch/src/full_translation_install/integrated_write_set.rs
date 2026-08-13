@@ -6,6 +6,7 @@ use crate::{rom::Rom, tracked::TrackedImage};
 use super::{
     installation_layout::main_dialogue_runtime_material_file_offset,
     runtime_code::DialogueRuntimeCodePlan,
+    runtime_code::chr_page_shadow::CHR_HELPER_SITE,
     runtime_code::chr_selector::SELECTOR_CHAIN_SITE,
     runtime_code::dispatcher_gate::{COLD_ENTRY, DISPATCHER_ENTRY},
     runtime_nmi_contract::CONSUMER_HOOK,
@@ -99,7 +100,12 @@ pub(super) fn plan_integrated_write_set(
     }
 
     // 훅 셋이다. 각각 밀어낼 원본 호출을 정확히 알고 있어야 한다.
-    let hooks: [(&str, usize, [u8; 3]); 4] = [
+    let hooks: [(&str, usize, [u8; 3]); 5] = [
+        (
+            "dialogue CHR page observer hook",
+            fixed_file_offset(inputs.candidate, CHR_HELPER_SITE)?,
+            inputs.dialogue_runtime_code.chr_helper_hook,
+        ),
         (
             "dialogue CHR selector hook",
             fixed_file_offset(inputs.candidate, SELECTOR_CHAIN_SITE)?,
@@ -169,7 +175,7 @@ pub(super) fn plan_integrated_write_set(
         contributing_domain_count,
         fully_planned_domain_count,
         expected_write_count,
-        dialogue_runtime_hook_count: 4,
+        dialogue_runtime_hook_count: 5,
         dialogue_runtime_fixed_routine_count: inputs.dialogue_runtime_code.fixed_routines.len(),
         dialogue_runtime_code_routine_count: inputs.dialogue_runtime_code.code_routines.len(),
         changed_byte_count,
