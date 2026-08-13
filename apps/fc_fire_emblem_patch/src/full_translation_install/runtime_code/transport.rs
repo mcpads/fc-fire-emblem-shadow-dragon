@@ -10,6 +10,16 @@
 //! 한 타일에 `$8000` 창을 두 번 바꾼다. 항목은 그룹 덩이 페이지에, 타일 자료는
 //! atlas 페이지에 있고 두 페이지를 동시에 걸 수 없기 때문이다.
 //!
+//! **아직 닫히지 않은 것.** 이 루틴이 `$2007`에 쓰는 동안 CHR RAM이 두 CHR 창에
+//! 걸려 있어야 하는데 지금은 걸지 않는다. 그래서 실행하면 쓰기가 CHR ROM으로 가
+//! 버려진다. 실행으로 확인했다 — 206항목을 정확히 걷고 `ready`까지 갔지만 CHR RAM은
+//! 그대로 0이었다.
+//!
+//! 거는 것 자체는 레지스터 네 번 쓰기로 끝난다. 문제는 **되돌리기**다. 되돌리지
+//! 않으면 반쯤 합성된 CHR RAM이 화면에 나와 안전 성질이 깨지는데, 되돌릴 값을 아는
+//! 것은 원본 도우미 `$FA80`·`$FAA0`뿐이고 그 비용이 아직 측정되지 않았다. 모르는
+//! 비용을 예산에 넣지 않는다는 것이 의사결정 62번이므로, 측정 전까지는 걸지 않는다.
+//!
 //! atlas는 타일당 8바이트 1bpp다. CHR에는 16바이트 2bpp로 펼치고 상위 bitplane은
 //! 0으로 채운다. 상위 bitplane이 전부 0이라는 것은 직렬화 시점에 검사돼 있다.
 
@@ -235,9 +245,9 @@ pub(super) fn build_transport_routine(origin: u16, atlas_page: u8) -> Result<Run
 pub(super) fn worst_case_frame_cycles(origin: u16, atlas_page: u8) -> Result<u32> {
     let (prologue, _) = frame_prologue(origin)?;
     let loop_start = next_address(origin, &prologue)?;
-    Ok(worst_case_cycles(&prologue)
-        + worst_case_cycles(&tile_body(loop_start, atlas_page)?) * u32::from(TILES_PER_FRAME)
-        + worst_case_cycles(&frame_epilogue(origin))
+    Ok(worst_case_cycles(&prologue)?
+        + worst_case_cycles(&tile_body(loop_start, atlas_page)?)? * u32::from(TILES_PER_FRAME)
+        + worst_case_cycles(&frame_epilogue(origin))?
         + u32::from(Instruction::Rts.worst_case_cycles()))
 }
 
@@ -279,7 +289,7 @@ mod tests {
         let allowed = super::super::budgeted_transport_cycles(trampoline_reserve());
         let prologue = frame_prologue(0xA000).unwrap().0;
         let loop_start = next_address(0xA000, &prologue).unwrap();
-        let per_tile = worst_case_cycles(&tile_body(loop_start, ATLAS_PAGE).unwrap());
+        let per_tile = worst_case_cycles(&tile_body(loop_start, ATLAS_PAGE).unwrap()).unwrap();
 
         let one_more = worst_case_frame_cycles(0xA000, ATLAS_PAGE).unwrap() + per_tile;
 
@@ -382,6 +392,16 @@ mod tests {
             "the transport routine is {} bytes",
             routine.bytes.len()
         );
+    }
+
+    /// 예산은 불려 가는 코드의 비용을 모르면 세지 않는다. 그것이 «모르는 것을
+    /// 6사이클이라고 세지 않는다»는 규칙이고, vblank에서 과소평가는 실기 손상이다.
+    #[test]
+    fn a_call_with_an_unmeasured_callee_is_refused_by_the_cycle_budget() {
+        let error = super::super::worst_case_cycles(&[Instruction::JsrAbsolute(0xFA80)])
+            .unwrap_err();
+
+        assert!(error.to_string().contains("must be measured"));
     }
 
     /// 남은 타일이 0인 프레임은 PPU를 건드리지 않고 곧바로 돌아가야 한다.

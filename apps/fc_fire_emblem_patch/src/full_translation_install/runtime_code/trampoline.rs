@@ -22,9 +22,8 @@ use super::super::{
     runtime_nmi_contract::{DISPLACED_CALL, PPU_CONTROL_SHADOW, QUEUE_FLAGS},
 };
 use super::{
-    CONSUMER_HOOK_CALL_CYCLES, RuntimeRoutine, next_address,
+    CONSUMER_HOOK_CALL_CYCLES, RuntimeRoutine, next_address, worst_case_cycles_with_calls,
     transport::{REQUEST_STATE, STATE_READY},
-    worst_case_cycles,
 };
 use crate::rp2a03::{Instruction, assemble_at};
 
@@ -133,8 +132,12 @@ pub(super) fn build_trampoline(
 /// 훅 호출과 트램폴린 자신이 최악의 경우 쓰는 사이클이다. 전송 루틴 몸통은 빼고
 /// 센다. 그쪽은 자기 예산을 따로 지킨다.
 pub(super) fn worst_case_reserve_cycles(contract: BankRestoreContract) -> Result<u32> {
-    let instructions = instructions(contract, 0xB000)?;
-    Ok(CONSUMER_HOOK_CALL_CYCLES + worst_case_cycles(&instructions))
+    let transport_entry = 0xB000;
+    let instructions = instructions(contract, transport_entry)?;
+    // 전송 루틴 호출은 트램폴린 몫에 넣지 않는다. 그쪽은 자기 예산을 따로 지키므로
+    // 여기서는 `JSR` 명령 자체만 세면 된다.
+    Ok(CONSUMER_HOOK_CALL_CYCLES
+        + worst_case_cycles_with_calls(&instructions, &[(transport_entry, 0)])?)
 }
 
 #[cfg(test)]
