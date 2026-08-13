@@ -13,6 +13,7 @@ use crate::{
     rp2a03::{Instruction, assemble_at},
 };
 
+pub(in crate::full_translation_install) mod chr_selector;
 pub(in crate::full_translation_install) mod dispatcher_gate;
 pub(super) mod trampoline;
 pub(in crate::full_translation_install) mod transport;
@@ -25,6 +26,8 @@ const MEASURED_VBLANK_REMAINDER: u32 = 1_704;
 const SAFETY_MARGIN_PERCENT: u32 = 20;
 /// `$C179`의 `JSR`가 쓰는 몫이다.
 const CONSUMER_HOOK_CALL_CYCLES: u32 = 6;
+/// MMC3 뱅크 값 레지스터다. selector가 CHR RAM을 고를 때 쓴다.
+const CHR_BANK_VALUE_REGISTER: u16 = 0x8001;
 /// 전송 루틴이 한 프레임에 쓸 수 있는 사이클이다.
 ///
 /// `trampoline_reserve`는 훅 호출과 트램폴린이 실제로 쓰는 최악 사이클이고 방출한
@@ -46,6 +49,8 @@ pub(in crate::full_translation_install) struct DialogueRuntimeCodePlan {
     pub(in crate::full_translation_install) dispatcher_hook: [u8; 3],
     /// `0A:$809B`에 쓸 콜드 초기화 훅이다.
     pub(in crate::full_translation_install) cold_hook: [u8; 3],
+    /// `$FF40`에 쓸 CHR selector 훅이다.
+    pub(in crate::full_translation_install) selector_hook: [u8; 3],
 }
 
 /// 실행 코드를 전부 조립한다.
@@ -57,12 +62,14 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     candidate: &Rom,
     runtime_code_cpu_start: u16,
     atlas_page: u8,
-    atlas_cpu_base: u16,
+    cold_group_page: u8,
+    cold_entry_address: u16,
     cold_tile_count: u8,
 ) -> Result<DialogueRuntimeCodePlan> {
     let bank_restore = bind_bank_restore_contract(candidate)?;
     bind_quiet_frame_gate(source, candidate)?;
     dispatcher_gate::bind_dispatcher_entry(source, candidate)?;
+    chr_selector::bind_selector_chain_site(candidate)?;
 
     let transport = transport::build_transport_routine(runtime_code_cpu_start, atlas_page)?;
     let trampoline_routine = trampoline::build_trampoline(bank_restore, transport.address)?;
@@ -76,8 +83,8 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         + u16::try_from(gate.bytes.len()).context("dispatcher gate length overflow")?;
     let initializer = dispatcher_gate::build_cold_initializer(
         initializer_origin,
-        atlas_cpu_base,
-        atlas_page,
+        cold_entry_address,
+        cold_group_page,
         cold_tile_count,
     )?;
 
@@ -94,7 +101,11 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
          {SAFETY_MARGIN_PERCENT}% margin and the {reserve}-cycle trampoline reserve"
     );
 
-    let fixed_routines = vec![trampoline_routine, gate, initializer];
+    let selector_origin = initializer.address
+        + u16::try_from(initializer.bytes.len()).context("cold initializer length overflow")?;
+    let selector = chr_selector::build_chr_selector(selector_origin, CHR_BANK_VALUE_REGISTER)?;
+
+    let fixed_routines = vec![trampoline_routine, gate, initializer, selector];
     ensure_disjoint(
         &fixed_routines.iter().collect::<Vec<_>>(),
         trampoline::TRAMPOLINE_CAVE_END,
@@ -104,6 +115,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         consumer_hook: trampoline::hook_bytes(),
         dispatcher_hook: dispatcher_gate::dispatcher_hook_bytes(fixed_routines[1].address),
         cold_hook: dispatcher_gate::cold_hook_bytes(fixed_routines[2].address),
+        selector_hook: chr_selector::selector_hook_bytes(fixed_routines[3].address),
         transport,
         fixed_routines,
     })

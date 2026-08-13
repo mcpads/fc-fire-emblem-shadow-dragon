@@ -435,15 +435,25 @@ pub(crate) fn plan_full_translation_installation(
     let atlas_offset = runtime_material.glyph_atlas_offset()?;
     let atlas_page = MAIN_DIALOGUE_MATERIAL_FIRST_PAGE
         + u8::try_from(atlas_offset / (8 * 1024)).context("glyph atlas page index overflow")?;
-    let atlas_cpu_base = u16::try_from(0x8000 + atlas_offset % (8 * 1024))
-        .context("glyph atlas CPU base does not fit the 8000 window")?;
+    // 콜드 요청이 가리킬 그룹이다. 런타임 조회가 들어오기 전까지는 첫 그룹을 쓴다.
+    // 조회가 붙으면 이 자리는 사라진다.
+    let first_group_offset = *composition
+        .group_block_container_offsets
+        .first()
+        .context("dialogue composition produced no page groups")?;
+    let first_group_page = MAIN_DIALOGUE_MATERIAL_FIRST_PAGE
+        + u8::try_from(first_group_offset / (8 * 1024)).context("page group index overflow")?;
+    let first_group_cpu = u16::try_from(0x8000 + first_group_offset % (8 * 1024))
+        .context("page group CPU address does not fit the 8000 window")?;
     let dialogue_runtime_code = plan_dialogue_runtime_code(
         &rom,
         &current_candidate,
         runtime_material.runtime_code_cpu_start()?,
         atlas_page,
-        atlas_cpu_base,
-        u8::try_from(composition.maximum_visible_page_overlay_tile_count)
+        first_group_page,
+        // 덩이의 첫 바이트가 항목 수이므로 항목은 그다음부터다.
+        first_group_cpu + 1,
+        u8::try_from(composition.maximum_static_page_group_overlay_tile_count)
             .context("cold request tile count does not fit one byte")?,
     )?;
     runtime_material.place_runtime_code(&dialogue_runtime_code.transport.bytes)?;

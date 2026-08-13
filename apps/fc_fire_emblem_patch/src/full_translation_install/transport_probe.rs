@@ -14,8 +14,8 @@ use serde::Serialize;
 
 use super::{
     runtime_code::{
-        DialogueRuntimeCodePlan, dispatcher_gate::{COLD_ENTRY, DISPATCHER_ENTRY},
-        plan_dialogue_runtime_code,
+        DialogueRuntimeCodePlan, chr_selector::SELECTOR_CHAIN_SITE,
+        dispatcher_gate::{COLD_ENTRY, DISPATCHER_ENTRY}, plan_dialogue_runtime_code,
     },
     runtime_nmi_contract::CONSUMER_HOOK,
 };
@@ -62,13 +62,13 @@ pub(crate) fn build_dialogue_transport_probe(
     source: &Rom,
     candidate: &Rom,
 ) -> Result<(Vec<u8>, DialogueTransportProbePlan)> {
-    let atlas_cpu_base = 0x8000 + ATLAS_CONTAINER_OFFSET;
     let code = plan_dialogue_runtime_code(
         source,
         candidate,
         RUNTIME_CODE_CPU_START,
         MATERIAL_FIRST_PAGE,
-        atlas_cpu_base,
+        MATERIAL_FIRST_PAGE,
+        0x8000 + ATLAS_CONTAINER_OFFSET,
         PROBE_TILE_COUNT,
     )?;
 
@@ -90,7 +90,7 @@ pub(crate) fn build_dialogue_transport_probe(
                 byte_count: routine.bytes.len(),
             })
             .collect(),
-        hook_count: 3,
+        hook_count: 4,
         cold_request_tile_count: PROBE_TILE_COUNT,
         frames_to_complete_one_cold_request: usize::from(PROBE_TILE_COUNT)
             .div_ceil(usize::from(super::runtime_code::transport::TILES_PER_FRAME)),
@@ -126,6 +126,11 @@ fn apply(output: &mut [u8], candidate: &Rom, code: &DialogueRuntimeCodePlan) -> 
             "dialogue cold initializer hook",
             switchable_cpu_to_file_offset(MAIN_DIALOGUE_BANK, COLD_ENTRY)?,
             code.cold_hook,
+        ),
+        (
+            "dialogue CHR selector hook",
+            fixed_file_offset(candidate, SELECTOR_CHAIN_SITE)?,
+            code.selector_hook,
         ),
     ] {
         let destination = output
@@ -190,6 +195,7 @@ mod tests {
             fixed_file_offset(&rom, CONSUMER_HOOK).unwrap(),
             switchable_cpu_to_file_offset(MAIN_DIALOGUE_BANK, DISPATCHER_ENTRY).unwrap(),
             switchable_cpu_to_file_offset(MAIN_DIALOGUE_BANK, COLD_ENTRY).unwrap(),
+            fixed_file_offset(&rom, SELECTOR_CHAIN_SITE).unwrap(),
         ];
 
         let (output, _) = build_dialogue_transport_probe(&rom, &rom).unwrap();

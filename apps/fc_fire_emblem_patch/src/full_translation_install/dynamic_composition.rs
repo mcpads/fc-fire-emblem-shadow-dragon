@@ -56,6 +56,9 @@ pub(super) struct DialogueRuntimeCompositionPlan {
     pub(super) group_block_byte_count: usize,
     /// 스캔 재료 안에서 그룹 덩이 오프셋 표가 시작하는 자리다.
     pub(super) group_block_directory_offset: usize,
+    /// 그룹마다 그 덩이가 재료 용기 안에서 시작하는 자리다. 소비자가 걸 MMC3 페이지와
+    /// `$8000` 창 안의 주소가 여기서 나온다.
+    pub(super) group_block_container_offsets: Vec<usize>,
     pub(super) record_page_group_selector_byte_count: usize,
     pub(super) record_selector_directory_byte_count: usize,
     pub(super) scan_material_byte_count: usize,
@@ -288,6 +291,18 @@ pub(super) fn plan_dialogue_runtime_composition(
         scan_section_container_offset,
     )?;
     let scan_material_byte_count = scan_material.len();
+    let group_block_base = scan_section_container_offset
+        + group_block_directory_offset
+        + group_block_directory_byte_count;
+    let group_block_container_offsets = (0..codebook.page_assignments.len())
+        .map(|group| {
+            let entry = scan_material
+                .get(group_block_directory_offset + group * 2..)
+                .and_then(|slice| slice.get(..2))
+                .context("page group directory is shorter than its group count")?;
+            Ok(group_block_base + usize::from(u16::from_le_bytes([entry[0], entry[1]])))
+        })
+        .collect::<Result<Vec<_>>>()?;
     let group_block_byte_count =
         scan_material_byte_count - group_block_directory_offset - group_block_directory_byte_count;
     let dynamic_string_control_count = dialogue
@@ -339,6 +354,7 @@ pub(super) fn plan_dialogue_runtime_composition(
         group_block_directory_byte_count,
         group_block_byte_count,
         group_block_directory_offset,
+        group_block_container_offsets,
         record_page_group_selector_byte_count,
         record_selector_directory_byte_count,
         scan_material_byte_count,
