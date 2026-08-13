@@ -508,12 +508,10 @@ pub(crate) fn plan_full_translation_installation(
     )?;
     let (installed_image, integrated_write_set) = plan_integrated_write_set(IntegratedWriteSetInputs {
         candidate: &current_candidate,
+        encoded_dialogue: &encoded_display,
         dialogue_runtime_material: &runtime_material.material,
         dialogue_runtime_code: &dialogue_runtime_code,
         required_domains: &REQUIRED_DOMAINS,
-        // 미러 뱅크 기반 대사 저장 쓰기 계획은 이중 진입과 함께 폐기했다.
-        // 정규 레코드만으로 다시 세우기 전까지 기여하는 쓰기가 없다.
-        expected_dialogue_storage_write_count: 0,
     })?;
     let translation_input_complete = dialogue_validation.translation_input_complete;
     let review_complete = dialogue_validation.review_complete

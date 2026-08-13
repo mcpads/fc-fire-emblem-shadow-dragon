@@ -18,8 +18,15 @@
 //!
 //! 전송 중에는 현재 래치와 관계없이 `$2007` 쓰기가 RAM에 닿도록 두 레지스터를 모두
 //! 잠시 RAM으로 건다. 전송 이탈은 둘을 원천 상태로 되돌린다. 이 selector가 맡는 것은
-//! 그 뒤의 **표시 상태**뿐이다. 준비된 주 대사이며 중앙 FD 원천이 페이지 0일 때
-//! 레지스터 2만 RAM으로 바꾸고, 레지스터 4는 방금 복원한 원본 FE 페이지에 둔다.
+//! 그 뒤의 **표시 상태**뿐이다. 마지막 전송 프레임이 FD를 한 번 직접 게시하고, 이후
+//! 중앙 FD 공급자가 다시 불릴 때 이 selector가 같은 선택을 유지한다. 준비 완료이고
+//! 원본 대사 상태가 종단 전이며 중앙 FD 원천이 페이지 0일 때 레지스터 2만 RAM으로
+//! 바꾸고, 레지스터 4는 방금 복원한 원본 FE 페이지에 둔다.
+//!
+//! `$29`는 이 수명의 판정값이 아니다. NMI가 임시 PRG 매핑 뒤 되돌릴 16 KiB 뱅크의
+//! 그림자이므로 실제 1장 완성 대사에서도 `06`이었다. 주 대사 코드는 뱅크 `0A`에
+//! 있지만 표시 중 주 루프가 어느 뱅크를 소유하는지는 별개다. 수명은 요청 상태와 원본
+//! 대사 종단 상태로 판정한다.
 //!
 //! **사슬은 누산기에 값을 싣고 다닌다.** `$FF1D`가 `PHP PHA`로 시작해 그 값을 페이지
 //! 번호로 쓰므로, 끼어드는 쪽이 `LDA`로 누산기를 덮으면 뒤따르는 소비자가 남의 값을
@@ -28,10 +35,14 @@
 
 use anyhow::{Context, Result, ensure};
 
-use super::super::runtime_bank_contract::{BANK_INDEX_MASK, PRG_BANK_SHADOW};
 use super::{
     RuntimeRoutine,
-    chr_source_state::{CHR_SOURCE_HIGH_BITS, RIGHT_FD_SOURCE_SHADOW},
+    chr_source_state::{
+        CHR_RAM_BANK_VALUE, CHR_SOURCE_HIGH_BITS, DIALOGUE_FD_SOURCE_PAGE, RIGHT_FD_CHR_REGISTER,
+        RIGHT_FD_SOURCE_SHADOW,
+    },
+    dispatcher_gate::DISPATCHER_STATE,
+    lifecycle::TERMINAL_STATE,
     next_address,
     transport::{REQUEST_STATE, STATE_READY},
 };
@@ -47,23 +58,17 @@ pub(in crate::full_translation_install) const SELECTOR_CHAIN_SITE: u16 = 0xFF40;
 const SELECTOR_CHAIN_SOURCE_TARGET: u16 = 0xF990;
 /// 표본 selector 뒤의 기존 소비자다. 전역 selector의 비활성 경로는 여기로 간다.
 pub(in crate::full_translation_install) const SELECTOR_CHAIN_FALLBACK: u16 = 0xFB80;
-const MAIN_DIALOGUE_BANK: u8 = 0x0A;
-/// CHR RAM을 고르는 뱅크 값이다. 매퍼 165는 값 0이 보드의 CHR RAM이고, CHR ROM의
-/// 물리 페이지 0은 `encode_chr_page_register`가 1로 인코딩해 이 값과 구분한다.
-/// 그러므로 여기서는 그 함수를 쓰지 않는다.
-const CHR_RAM_BANK_VALUE: u8 = 0;
-/// 주 대사 글꼴이 있는 원천 FD 페이지다. 다른 원천 페이지에서 같은 RAM을 보여 주면
-/// 그 화면의 FD 배경을 보존했다는 증명이 없으므로 기존 selector 사슬로 넘긴다.
-const DIALOGUE_SOURCE_FD_PAGE: u8 = 0;
-/// 매퍼 165의 오른쪽 FD 레지스터다. FE 레지스터 4는 원본 배경을 계속 본다.
-const RIGHT_FD_CHR_REGISTER: u8 = 2;
-
 /// `$FF40`: `JMP $F990`.
 const SELECTOR_CHAIN_CODE: [u8; 3] = [
     0x4C,
     SELECTOR_CHAIN_SOURCE_TARGET as u8,
     (SELECTOR_CHAIN_SOURCE_TARGET >> 8) as u8,
 ];
+
+/// 준비된 FD 표시 selector가 쓰는 별도 고정 뱅크 동굴이다. 요청 발행기와 한 동굴에
+/// 이어 붙이면 반복 요청 판정이 커질 때 서로를 침범하므로 역할별로 분리한다.
+pub(super) const SELECTOR_CAVE_ORIGIN: u16 = 0xF558;
+pub(super) const SELECTOR_CAVE_END: u16 = 0xF700;
 
 /// selector가 그 자리를 가져가기 전에 아직 그대로인지 확인한다.
 ///
@@ -93,6 +98,28 @@ pub(super) fn bind_selector_chain_site(candidate: &Rom) -> Result<()> {
     Ok(())
 }
 
+/// selector 전용 동굴 전체가 아직 예약된 `FF`인지 묶는다.
+///
+/// 설치자가 실제 쓰는 바이트도 다시 검사하지만, 여기서는 이 모듈이 소유한다고
+/// 선언한 구간의 경계 자체가 다른 생산자와 드리프트하지 않았음을 확인한다.
+pub(super) fn bind_selector_cave(candidate: &Rom) -> Result<()> {
+    let prg = candidate.prg();
+    let base = prg
+        .len()
+        .checked_sub(16 * 1024)
+        .context("PRG is smaller than one fixed bank")?;
+    let start = base + usize::from(SELECTOR_CAVE_ORIGIN) - 0xC000;
+    let end = base + usize::from(SELECTOR_CAVE_END) - 0xC000;
+    let bytes = prg
+        .get(start..end)
+        .context("CHR selector cave is outside ROM")?;
+    ensure!(
+        bytes.iter().all(|byte| *byte == 0xFF),
+        "the CHR selector cave at {SELECTOR_CAVE_ORIGIN:04X}..{SELECTOR_CAVE_END:04X} is not exact FF"
+    );
+    Ok(())
+}
+
 /// `$FF40`에 쓸 세 바이트다.
 pub(super) fn selector_hook_bytes(selector: u16) -> [u8; 3] {
     [0x4C, selector as u8, (selector >> 8) as u8]
@@ -107,26 +134,22 @@ pub(super) fn build_chr_selector(
         // 사슬이 나르는 누산기와 상태를 밀어 둔다.
         Instruction::Php,
         Instruction::Pha,
-        // 예약 RAM은 주 대사 수명 밖에서 덮여도 된다. 현재 16 KiB 뱅크가 주 대사일
-        // 때만 그 안의 요청 바이트를 읽어, 비활성 화면에서는 다섯 바이트를 전부
-        // 무시한다.
-        Instruction::LdaZeroPage(PRG_BANK_SHADOW),
-        Instruction::AndImmediate(BANK_INDEX_MASK),
-        Instruction::CmpImmediate(MAIN_DIALOGUE_BANK),
-    ];
-    let inactive_lifetime_placeholder = instructions.len();
-    instructions.push(Instruction::BneAbsolute(origin));
-    instructions.extend([
         Instruction::LdaAbsolute(REQUEST_STATE),
         Instruction::CmpImmediate(STATE_READY),
-    ]);
+    ];
     let not_ready_placeholder = instructions.len();
     instructions.push(Instruction::BneAbsolute(origin));
+    instructions.extend([
+        Instruction::LdaAbsolute(DISPATCHER_STATE),
+        Instruction::CmpImmediate(TERMINAL_STATE),
+    ]);
+    let terminal_placeholder = instructions.len();
+    instructions.push(Instruction::BcsAbsolute(origin));
     instructions.extend([
         Instruction::LdaZeroPage(RIGHT_FD_SOURCE_SHADOW),
         Instruction::OraZeroPage(CHR_SOURCE_HIGH_BITS),
         Instruction::AndImmediate(0x1F),
-        Instruction::CmpImmediate(DIALOGUE_SOURCE_FD_PAGE),
+        Instruction::CmpImmediate(DIALOGUE_FD_SOURCE_PAGE),
     ]);
     let wrong_fd_source_placeholder = instructions.len();
     instructions.push(Instruction::BneAbsolute(origin));
@@ -140,8 +163,8 @@ pub(super) fn build_chr_selector(
         Instruction::Rts,
     ]);
     let not_ready = next_address(origin, &instructions)?;
-    instructions[inactive_lifetime_placeholder] = Instruction::BneAbsolute(not_ready);
     instructions[not_ready_placeholder] = Instruction::BneAbsolute(not_ready);
+    instructions[terminal_placeholder] = Instruction::BcsAbsolute(not_ready);
     instructions[wrong_fd_source_placeholder] = Instruction::BneAbsolute(not_ready);
     instructions.extend([
         Instruction::Pla,
@@ -176,29 +199,45 @@ mod tests {
         );
     }
 
-    /// 비활성 화면은 예약 RAM이 덮였을 수 있으므로 요청 바이트 자체를 읽으면 안 된다.
-    /// 주 대사 뱅크 판정이 먼저 실패 경로로 나가야 우연한 `ready`를 신뢰하지 않는다.
+    /// `$29`는 주 대사 실행 수명이 아니라 NMI 복원용 PRG 뱅크다. 실제 표시 중에도
+    /// 다른 값이므로 selector가 그것을 읽으면 준비된 페이지를 영원히 고르지 못한다.
     #[test]
-    fn an_inactive_lifetime_never_reaches_the_request_read() {
+    fn prg_bank_shadow_is_not_used_as_the_dialogue_lifetime() {
         let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001).unwrap();
-        let bank_read = [0xA5, PRG_BANK_SHADOW];
-        let request_read = [0xAD, REQUEST_STATE as u8, (REQUEST_STATE >> 8) as u8];
-        let bank_position = routine
-            .bytes
-            .windows(bank_read.len())
-            .position(|window| window == bank_read)
-            .expect("the selector reads the active bank");
-        let request_position = routine
-            .bytes
-            .windows(request_read.len())
-            .position(|window| window == request_read)
-            .expect("the selector reads the request");
 
-        assert!(bank_position < request_position);
-        assert!(
-            routine.bytes[bank_position..request_position].contains(&0xD0),
-            "the inactive bank has no branch around the request read"
-        );
+        assert!(!routine.bytes.windows(2).any(|window| window
+            == [
+                0xA5,
+                super::super::super::runtime_bank_contract::PRG_BANK_SHADOW
+            ]));
+        assert!(routine.bytes.windows(5).any(|window| {
+            window
+                == [
+                    0xAD,
+                    REQUEST_STATE as u8,
+                    (REQUEST_STATE >> 8) as u8,
+                    0xC9,
+                    STATE_READY,
+                ]
+        }));
+    }
+
+    /// 준비 표식이 남아 있어도 원본 상태 머신이 종단·유휴 상태면 RAM을 다시 고르면
+    /// 안 된다. 수명 이탈 훅과 소비자 양쪽이 같은 경계를 지킨다.
+    #[test]
+    fn terminal_dialogue_state_falls_through_to_the_existing_chain() {
+        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001).unwrap();
+
+        assert!(routine.bytes.windows(5).any(|window| {
+            window
+                == [
+                    0xAD,
+                    DISPATCHER_STATE as u8,
+                    (DISPATCHER_STATE >> 8) as u8,
+                    0xC9,
+                    TERMINAL_STATE,
+                ]
+        }));
     }
 
     /// 표시 중에는 FD만 CHR RAM을 보고 FE는 원본 배경을 계속 봐야 한다. 둘 다 RAM으로
@@ -243,7 +282,7 @@ mod tests {
                     0x29,
                     0x1F,
                     0xC9,
-                    DIALOGUE_SOURCE_FD_PAGE,
+                    DIALOGUE_FD_SOURCE_PAGE,
                 ]
         }));
     }
@@ -289,5 +328,26 @@ mod tests {
         let rom = crate::test_support::release_rom();
 
         bind_selector_chain_site(&rom).unwrap();
+    }
+
+    /// 별도 selector 동굴은 경계 전체가 `FF`일 때만 이 모듈이 소유한다.
+    #[test]
+    fn the_selector_cave_is_still_reserved() {
+        let rom = crate::test_support::release_rom();
+
+        bind_selector_cave(&rom).unwrap();
+    }
+
+    #[test]
+    fn a_non_ff_byte_in_the_selector_cave_refuses_installation() {
+        let rom = crate::test_support::release_rom();
+        let mut bytes = rom.data().to_vec();
+        let fixed_base = 16 + rom.prg().len() - 16 * 1024;
+        bytes[fixed_base + usize::from(SELECTOR_CAVE_ORIGIN) - 0xC000] = 0xEA;
+        let mutated = Rom::parse(bytes).unwrap();
+
+        let error = bind_selector_cave(&mutated).unwrap_err();
+
+        assert!(error.to_string().contains("is not exact FF"));
     }
 }

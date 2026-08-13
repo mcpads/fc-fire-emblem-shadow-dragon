@@ -31,9 +31,9 @@ use super::{RuntimeRoutine, next_address};
 use crate::rp2a03::{Instruction, assemble_at};
 
 /// 원본이 디렉터리 선택자를 담아 두는 자리다.
-const SOURCE_DIRECTORY_SELECTOR: u16 = 0x77F4;
+pub(super) const SOURCE_DIRECTORY_SELECTOR: u16 = 0x77F4;
 /// 원본이 엔트리 색인을 담아 두는 자리다.
-const SOURCE_ENTRY_INDEX: u16 = 0x77F1;
+pub(super) const SOURCE_ENTRY_INDEX: u16 = 0x77F1;
 /// 식별표에서 «없는 선택자»를 뜻하는 값이다.
 const MISSING_TABLE: u8 = 0xFF;
 
@@ -284,8 +284,8 @@ fn finish_resolver(
     restore_scratch(&mut instructions);
     instructions.push(Instruction::Rts);
 
-    let bytes = assemble_at(origin, &instructions)
-        .with_context(|| format!("cannot assemble {role}"))?;
+    let bytes =
+        assemble_at(origin, &instructions).with_context(|| format!("cannot assemble {role}"))?;
     Ok(RuntimeRoutine {
         role,
         address: origin,
@@ -456,13 +456,22 @@ mod tests {
             build_resolve_next_page_request(0xA700, layout()).unwrap(),
         ] {
             assert!(
-                routine.bytes.windows(2).any(|window| window == [0xA0, 0x02]),
+                routine
+                    .bytes
+                    .windows(2)
+                    .any(|window| window == [0xA0, 0x02]),
                 "{} never reads the next record-directory entry",
                 routine.role
             );
             assert!(
-                routine.bytes.windows(2).any(|window| window == [0xC5, 0x03])
-                    && routine.bytes.windows(2).any(|window| window == [0xC5, 0x02]),
+                routine
+                    .bytes
+                    .windows(2)
+                    .any(|window| window == [0xC5, 0x03])
+                    && routine
+                        .bytes
+                        .windows(2)
+                        .any(|window| window == [0xC5, 0x02]),
                 "{} never compares the selected page offset with the 16-bit end",
                 routine.role
             );
@@ -482,7 +491,10 @@ mod tests {
         }
         expected.push(0x60);
 
-        assert_eq!(&routine.bytes[routine.bytes.len() - expected.len()..], &expected[..]);
+        assert_eq!(
+            &routine.bytes[routine.bytes.len() - expected.len()..],
+            &expected[..]
+        );
     }
 
     /// 성공은 캐리를 세우고 돌아간다. 생산자는 그 캐리만 보고 요청을 발행한다.
@@ -510,7 +522,10 @@ mod tests {
                 .windows(3)
                 .position(|window| window == store)
                 .unwrap_or_else(|| panic!("cursor {cursor:04X} is never written"));
-            assert!(at < success_end, "cursor {cursor:04X} is written after success");
+            assert!(
+                at < success_end,
+                "cursor {cursor:04X} is written after success"
+            );
         }
     }
 

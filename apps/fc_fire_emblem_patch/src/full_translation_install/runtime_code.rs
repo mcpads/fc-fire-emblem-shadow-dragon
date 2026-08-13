@@ -124,6 +124,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     dispatcher_gate::bind_dispatcher_entry(source, candidate)?;
     lifecycle::bind_lifecycle_sites(source, candidate)?;
     chr_selector::bind_selector_chain_site(candidate)?;
+    chr_selector::bind_selector_cave(candidate)?;
     let chr_source_state = chr_source_state::bind_chr_source_state(candidate)?;
 
     let chr_restore_callee_cycles = chr_source_state.restore_callee_cycles();
@@ -138,8 +139,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     let next_page_resolver_address = next_page_resolver.address;
     let trampoline_routine = trampoline::build_trampoline(bank_restore, transport.address)?;
 
-    let gate =
-        dispatcher_gate::build_dispatcher_gate(dispatcher_gate::RECLAIMED_GATE_CAVE_ORIGIN)?;
+    let gate = dispatcher_gate::build_dispatcher_gate(dispatcher_gate::RECLAIMED_GATE_CAVE_ORIGIN)?;
     let gate_address = gate.address;
     let mut fixed_support_bytes = gate.bytes;
     let fixed_support_capacity = usize::from(
@@ -156,22 +156,22 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         bytes: fixed_support_bytes,
     };
 
-    let initializer_origin = trampoline_routine.address
+    let publisher_origin = trampoline_routine.address
         + u16::try_from(trampoline_routine.bytes.len())
             .context("dialogue trampoline length overflow")?;
-    let initializer =
-        dispatcher_gate::build_cold_initializer(initializer_origin, resolver.address, code_page)?;
+    let publisher = dispatcher_gate::build_source_identity_request_publisher(
+        publisher_origin,
+        resolver.address,
+        code_page,
+    )?;
 
     // 예산은 시험만이 아니라 빌드가 지킨다. vblank를 넘기는 코드는 ROM에 들어가면
     // 안 되므로, 여기서 막지 않으면 그 판정이 시험을 돌리는 사람에게 넘어간다.
     // 의사결정 62번을 따른다.
     let reserve = trampoline::worst_case_reserve_cycles(bank_restore)?;
     let budget = budgeted_transport_cycles(reserve);
-    let frame_cycles = transport::worst_case_frame_cycles(
-        runtime_code_cpu_start,
-        atlas_page,
-        chr_source_state,
-    )?;
+    let frame_cycles =
+        transport::worst_case_frame_cycles(runtime_code_cpu_start, atlas_page, chr_source_state)?;
     ensure!(
         frame_cycles <= budget,
         "one transport frame costs {frame_cycles} cycles but only {budget} of the measured \
@@ -179,22 +179,21 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
          {SAFETY_MARGIN_PERCENT}% margin and the {reserve}-cycle trampoline reserve"
     );
 
-    let selector_origin = initializer.address
-        + u16::try_from(initializer.bytes.len()).context("cold initializer length overflow")?;
     let selector = chr_selector::build_chr_selector(
-        selector_origin,
+        chr_selector::SELECTOR_CAVE_ORIGIN,
         CHR_BANK_SELECT_REGISTER,
         CHR_BANK_VALUE_REGISTER,
     )?;
 
-    let initializer_address = initializer.address;
+    let publisher_address = publisher.address;
     let selector_address = selector.address;
-    let fixed_routines = vec![trampoline_routine, initializer, selector];
-    let code_routines = vec![transport, resolver, next_page_resolver];
     ensure_disjoint(
-        &fixed_routines.iter().collect::<Vec<_>>(),
+        &[&trampoline_routine, &publisher],
         trampoline::TRAMPOLINE_CAVE_END,
     )?;
+    ensure_disjoint(&[&selector], chr_selector::SELECTOR_CAVE_END)?;
+    let fixed_routines = vec![trampoline_routine, publisher, selector];
+    let code_routines = vec![transport, resolver, next_page_resolver];
     let lifecycle = lifecycle::build_lifecycle_suite(next_page_resolver_address, code_page)?;
     let completed_page_entry = lifecycle.completed_page_entry;
     let handoff_invalidation_entry = lifecycle.handoff_invalidation_entry;
@@ -240,7 +239,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
                 bank: 0x0A,
                 address: dispatcher_gate::COLD_ENTRY,
             },
-            bytes: dispatcher_gate::cold_hook_bytes(initializer_address).to_vec(),
+            bytes: dispatcher_gate::request_hook_bytes(publisher_address).to_vec(),
         },
     ];
     for (role, write_role, address) in [
@@ -267,7 +266,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
                 bank: 0x0A,
                 address,
             },
-            bytes: dispatcher_gate::cold_hook_bytes(initializer_address).to_vec(),
+            bytes: dispatcher_gate::request_hook_bytes(publisher_address).to_vec(),
         });
     }
     hooks.extend([

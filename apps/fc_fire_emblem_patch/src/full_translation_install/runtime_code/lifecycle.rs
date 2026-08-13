@@ -34,7 +34,7 @@ pub(super) const E7_RESUME_SITE: u16 = 0x871C;
 
 const MAIN_DIALOGUE_BANK: u8 = 0x0A;
 const DIALOGUE_STATE: u16 = 0x77F7;
-const TERMINAL_STATE: u8 = 0x0F;
+pub(super) const TERMINAL_STATE: u8 = 0x0F;
 const IDLE_STATE: u8 = 0x10;
 const CONTINUE_STATE: u8 = 0x09;
 const FIRST_COMPLETION_FLAG: u16 = 0x7802;

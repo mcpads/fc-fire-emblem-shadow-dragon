@@ -377,6 +377,10 @@ fn record_page_worksets<'a>(
                     *dynamic_string_selector_counts.entry(selector).or_default() += count;
                 }
                 dynamic_string_control_count += line_control_count;
+                preserve_runtime_generated_active_codes(
+                    &logical_line,
+                    &mut preserved_target_active_codes,
+                );
                 for byte in logical_line {
                     match byte {
                         LogicalDialogueByte::TargetGlyph(glyph) => {
@@ -412,7 +416,21 @@ fn record_page_worksets<'a>(
                 source_reclaimable_active_codes,
                 preserved_target_active_codes,
             })
-        })
+    })
+}
+
+/// 대사 바이트 자체가 아니라 제어 코드의 실행 결과로 화면에 생기는 글리프 코드를
+/// 현재 페이지에서 보호한다. `{EA}`는 원본 표식 두 타일을 `9E AB`로 출력한다.
+fn preserve_runtime_generated_active_codes(
+    bytes: &[LogicalDialogueByte],
+    preserved_codes: &mut BTreeSet<u8>,
+) {
+    if bytes
+        .iter()
+        .any(|byte| *byte == LogicalDialogueByte::Encoded(DIALOGUE_PREFIX_CONTROL_CODE))
+    {
+        preserved_codes.extend(DIALOGUE_PREFIX_OUTPUT_CODES);
+    }
 }
 
 pub(super) fn dynamic_string_controls(
@@ -462,5 +480,15 @@ mod tests {
         let selectors = dynamic_string_controls(&logical).unwrap();
 
         assert_eq!(selectors, BTreeMap::from([(0, 2), (2, 1)]));
+    }
+
+    #[test]
+    fn ea_control_preserves_the_two_codes_it_writes_at_runtime() {
+        let logical = encode_korean_markup("{E9:03}{EA}마르스{EF}").unwrap();
+        let mut preserved = BTreeSet::new();
+
+        preserve_runtime_generated_active_codes(&logical, &mut preserved);
+
+        assert_eq!(preserved, BTreeSet::from(DIALOGUE_PREFIX_OUTPUT_CODES));
     }
 }

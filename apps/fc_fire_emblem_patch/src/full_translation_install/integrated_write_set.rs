@@ -1,7 +1,9 @@
 use anyhow::{Result, ensure};
 use serde::Serialize;
 
-use crate::{rom::Rom, tracked::TrackedImage};
+use crate::{
+    dialogue_assets::EncodedMainDialogueBundle, rom::Rom, tracked::TrackedImage,
+};
 
 use super::{
     installation_layout::main_dialogue_runtime_material_file_offset,
@@ -13,10 +15,10 @@ const FIXED_BANK_SIZE: usize = 16 * 1024;
 
 pub(super) struct IntegratedWriteSetInputs<'a> {
     pub(super) candidate: &'a Rom,
+    pub(super) encoded_dialogue: &'a EncodedMainDialogueBundle,
     pub(super) dialogue_runtime_material: &'a [u8],
     pub(super) dialogue_runtime_code: &'a DialogueRuntimeCodePlan,
     pub(super) required_domains: &'a [&'static str],
-    pub(super) expected_dialogue_storage_write_count: usize,
 }
 
 #[derive(Serialize)]
@@ -30,7 +32,10 @@ pub(super) struct IntegratedWriteSetPlan {
     dialogue_runtime_hook_roles: Vec<DialogueRuntimeHookRole>,
     dialogue_runtime_fixed_routine_count: usize,
     dialogue_runtime_code_routine_count: usize,
+    dialogue_storage_region_count: usize,
+    dialogue_pointer_write_count: usize,
     changed_byte_count: usize,
+    installed_dialogue_matches_current_encoding: bool,
     every_change_tracked: bool,
     one_shared_image: bool,
     all_domains_contribute_expected_writes: bool,
@@ -55,8 +60,15 @@ pub(super) fn plan_integrated_write_set(
     inputs: IntegratedWriteSetInputs<'_>,
 ) -> Result<(Vec<u8>, IntegratedWriteSetPlan)> {
     let mut image = TrackedImage::new(inputs.candidate.data().to_vec());
+    let dialogue_storage_write_count = inputs.encoded_dialogue.regions.len()
+        + inputs.encoded_dialogue.pointer_writes.len();
+    install_encoded_dialogue(
+        &mut image,
+        inputs.candidate,
+        inputs.encoded_dialogue,
+    )?;
     ensure!(
-        image.writes().len() == inputs.expected_dialogue_storage_write_count,
+        image.writes().len() == dialogue_storage_write_count,
         "integrated write set and complete dialogue write set disagree"
     );
     let runtime_material_offset = main_dialogue_runtime_material_file_offset()?;
@@ -155,6 +167,7 @@ pub(super) fn plan_integrated_write_set(
     image.verify_all_changes_tracked(inputs.candidate.data())?;
     let expected_write_count = image.writes().len();
     let output = image.into_data();
+    verify_installed_dialogue(&output, inputs.encoded_dialogue)?;
     let installed_image = output.clone();
     let changed_byte_count = inputs
         .candidate
@@ -166,7 +179,7 @@ pub(super) fn plan_integrated_write_set(
 
     let domains = domain_contributions(
         inputs.required_domains,
-        inputs.expected_dialogue_storage_write_count + 1,
+        dialogue_storage_write_count + 1,
     )?;
     let contributing_domain_count = domains
         .iter()
@@ -194,7 +207,10 @@ pub(super) fn plan_integrated_write_set(
             dialogue_runtime_fixed_routine_count: inputs.dialogue_runtime_code.fixed_routines.len()
                 + inputs.dialogue_runtime_code.reclaimed_fixed_routines.len(),
             dialogue_runtime_code_routine_count: inputs.dialogue_runtime_code.code_routines.len(),
+            dialogue_storage_region_count: inputs.encoded_dialogue.regions.len(),
+            dialogue_pointer_write_count: inputs.encoded_dialogue.pointer_writes.len(),
             changed_byte_count,
+            installed_dialogue_matches_current_encoding: true,
             every_change_tracked: true,
             one_shared_image: true,
             all_domains_contribute_expected_writes: false,
@@ -202,6 +218,83 @@ pub(super) fn plan_integrated_write_set(
             rom_emitted: false,
         },
     ))
+}
+
+/// 최종 바이트를 다시 읽어 현재 인코딩 결과가 실제 설치됐는지 확인한다.
+///
+/// 계획 개수나 `TrackedImage` 등록만 확인하면 런타임 재료는 새 코드북인데 본문은 이전
+/// 단계 코드북인 산출물도 만들 수 있다. 최종 산출물의 소유 구간과 포인터 바이트가
+/// 현재 번들의 결과와 하나라도 다르면 빌드를 실패시킨다.
+fn verify_installed_dialogue(
+    installed: &[u8],
+    encoded: &EncodedMainDialogueBundle,
+) -> Result<()> {
+    for (region_index, region) in encoded.regions.iter().enumerate() {
+        let end = region
+            .file_offset
+            .checked_add(region.encoded_storage.len())
+            .ok_or_else(|| anyhow::anyhow!("installed dialogue region range overflow"))?;
+        ensure!(
+            installed.get(region.file_offset..end) == Some(region.encoded_storage.as_slice()),
+            "installed dialogue region {region_index} does not match the current encoding"
+        );
+    }
+    for pointer in &encoded.pointer_writes {
+        ensure!(
+            installed.get(pointer.file_offset..pointer.file_offset + 2)
+                == Some(pointer.planned_pointer.to_le_bytes().as_slice()),
+            "installed dialogue pointer {} does not match the current encoding",
+            pointer.record_id
+        );
+    }
+    Ok(())
+}
+
+/// 현재 단계 후보에 정규 대사 저장소와 포인터를 함께 설치한다.
+///
+/// 후보 전체의 SHA-1은 호출자가 이미 빌드 보고서와 결속했다. 여기서는 그 정확한
+/// 후보 바이트를 Expected Write의 선행조건으로 삼고, 현재 코드북으로 다시 만든
+/// 저장소와 포인터를 한 이미지에 등록한다. 런타임 재료만 새로 쓰고 이전 단계의
+/// 코드북 바이트를 남겨 두는 산출물은 이 경계를 통과할 수 없다.
+fn install_encoded_dialogue(
+    image: &mut TrackedImage,
+    candidate: &Rom,
+    encoded: &EncodedMainDialogueBundle,
+) -> Result<()> {
+    for (region_index, region) in encoded.regions.iter().enumerate() {
+        ensure!(
+            region.encoded_storage.len() == region.source_storage.len(),
+            "encoded dialogue region {region_index} changed its owned extent"
+        );
+        let end = region
+            .file_offset
+            .checked_add(region.encoded_storage.len())
+            .ok_or_else(|| anyhow::anyhow!("encoded dialogue region range overflow"))?;
+        let expected = candidate
+            .data()
+            .get(region.file_offset..end)
+            .ok_or_else(|| anyhow::anyhow!("encoded dialogue region is outside candidate"))?;
+        image.write_expected(
+            format!("main dialogue storage region {region_index}"),
+            region.file_offset,
+            expected,
+            &region.encoded_storage,
+        )?;
+    }
+
+    for pointer in &encoded.pointer_writes {
+        let expected = candidate
+            .data()
+            .get(pointer.file_offset..pointer.file_offset + 2)
+            .ok_or_else(|| anyhow::anyhow!("main dialogue pointer is outside candidate"))?;
+        image.write_expected(
+            format!("main dialogue pointer {}", pointer.record_id),
+            pointer.file_offset,
+            expected,
+            &pointer.planned_pointer.to_le_bytes(),
+        )?;
+    }
+    Ok(())
 }
 
 fn fixed_file_offset(rom: &Rom, address: u16) -> Result<usize> {
@@ -255,6 +348,44 @@ fn domain_contributions(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dialogue_assets::{
+        EncodedMainDialogueRegion, MainDialoguePointerWrite,
+    };
+
+    fn synthetic_rom() -> Rom {
+        let mut bytes = vec![0; crate::rom::HEADER_SIZE + 16 * 1024];
+        bytes[..4].copy_from_slice(b"NES\x1A");
+        bytes[4] = 1;
+        Rom::parse(bytes).unwrap()
+    }
+
+    #[test]
+    fn installs_encoded_storage_and_pointers_in_one_tracked_image() {
+        let candidate = synthetic_rom();
+        let encoded = EncodedMainDialogueBundle {
+            regions: vec![EncodedMainDialogueRegion {
+                file_offset: 0x20,
+                source_storage: vec![0, 0, 0],
+                encoded_storage: vec![0x40, 0x41, 0xEF],
+                used_storage_byte_count: 3,
+            }],
+            pointer_writes: vec![MainDialoguePointerWrite {
+                record_id: "record".to_owned(),
+                file_offset: 0x30,
+                source_pointer: 0x8000,
+                planned_pointer: 0x8123,
+            }],
+        };
+        let mut image = TrackedImage::new(candidate.data().to_vec());
+
+        install_encoded_dialogue(&mut image, &candidate, &encoded).unwrap();
+
+        assert_eq!(image.writes().len(), 2);
+        let output = image.into_data();
+        verify_installed_dialogue(&output, &encoded).unwrap();
+        assert_eq!(&output[0x20..0x23], [0x40, 0x41, 0xEF]);
+        assert_eq!(&output[0x30..0x32], 0x8123_u16.to_le_bytes());
+    }
 
     #[test]
     fn storage_only_dialogue_contribution_does_not_count_as_a_complete_domain() {

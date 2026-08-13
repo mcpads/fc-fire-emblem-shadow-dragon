@@ -1,4 +1,4 @@
-//! 대사 상태 머신을 붙잡는 게이트와, 진입에서 요청을 발행하는 콜드 초기화다.
+//! 대사 상태 머신을 붙잡는 게이트와, 원문 정체성별 요청 발행기다.
 //!
 //! 게이트가 처리기를 붙잡고 있는 동안 원본은 PPU 큐에 아무것도 넣지 않는다.
 //! 그래서 그 프레임들이 조용해지고 전송이 굶지 않는다. «올라가기 전에 출력하지
@@ -31,13 +31,18 @@ pub(in crate::full_translation_install) const DISPATCHER_ENTRY: u16 = 0x8000;
 pub(in crate::full_translation_install) const DISPATCHER_STATE: u16 = 0x77F7;
 /// 표 분기 호출이다. 게이트는 통과할 때 이 자리로 되돌린다.
 pub(in crate::full_translation_install) const DISPATCHER_TABLE_CALL: u16 = 0x8003;
-/// 대사 초기 진입이다. 콜드 초기화가 이 세 바이트를 가져간다.
+/// 대사 초기 진입이다. 요청 발행기가 이 세 바이트를 가져간다.
 pub(in crate::full_translation_install) const COLD_ENTRY: u16 = 0x809B;
 /// 초기 진입이 부르는 원본 포인터 resolver다.
 pub(in crate::full_translation_install) const SOURCE_POINTER_RESOLVER: u16 = 0xE6B2;
 
 use super::super::runtime_bank_contract::{PRG_A000_REGISTER, PRG_BANK_SHADOW};
+use super::super::runtime_cursor_storage::{
+    PUBLISHED_SOURCE_DIRECTORY_SELECTOR, PUBLISHED_SOURCE_ENTRY_INDEX,
+};
 use super::super::runtime_nmi_contract::PPU_CONTROL_SHADOW;
+use super::super::runtime_state_storage::VISIBLE_PAGE_INDEX;
+use super::resolve_request::{SOURCE_DIRECTORY_SELECTOR, SOURCE_ENTRY_INDEX};
 use super::transport::{REQUEST_STATE, STATE_READY};
 
 /// 폐기된 표본 그룹 selector가 차지한 동굴이다. 전역 런타임에서는 그 selector를
@@ -93,8 +98,8 @@ pub(super) fn dispatcher_hook_bytes(gate: u16) -> [u8; 3] {
 }
 
 /// `0A:$809B`에 쓸 세 바이트다.
-pub(super) fn cold_hook_bytes(initializer: u16) -> [u8; 3] {
-    [0x20, initializer as u8, (initializer >> 8) as u8]
+pub(super) fn request_hook_bytes(publisher: u16) -> [u8; 3] {
+    [0x20, publisher as u8, (publisher >> 8) as u8]
 }
 
 /// 요청이 걸려 있으면 처리기를 돌리지 않고 그대로 돌아간다.
@@ -125,19 +130,57 @@ pub(super) fn build_dispatcher_gate(origin: u16) -> Result<RuntimeRoutine> {
     })
 }
 
-/// 해석기를 불러 커서를 세우고, 성공했을 때만 요청을 발행한다.
+/// 같은 원문의 준비된 0페이지는 재사용하고, 그 밖에는 해석기로 새 요청을 발행한다.
 ///
 /// 해석기는 실행 코드 페이지에 있으므로 그 페이지를 `$A000`에 걸어야 부를 수 있다.
 /// 걸면 원본이 기대하던 뱅크가 사라지므로 돌아오기 전에 되돌린다. 되돌리는 값은
 /// `$29` 그림자와 원본 도우미 `$FA20`이 준다 — `$C1FB`가 매 프레임 쓰는 방식이다.
 ///
+/// E4 전환 생산자는 같은 호출 자리를 여러 프레임 다시 지난다. 이미 준비된 같은
+/// 원문 0페이지를 매번 무효화하면 소비자가 완성 직후부터 영원히 다시 시작한다.
+/// `ready + page zero + published source identity`가 모두 같을 때만 기존 페이지를
+/// 재사용한다. 다음 페이지, 다른 원문, 수명 이탈 뒤 요청은 모두 냉합성한다.
+///
 /// 실패하면 커서도 요청도 남기지 않는다. 그 경우 원본 일본어 경로가 그대로 돈다.
-pub(super) fn build_cold_initializer(
+pub(super) fn build_source_identity_request_publisher(
     origin: u16,
     resolver: u16,
     code_page: u8,
 ) -> Result<RuntimeRoutine> {
     let mut instructions = vec![
+        Instruction::LdaAbsolute(REQUEST_STATE),
+        Instruction::CmpImmediate(STATE_READY),
+    ];
+    let rebuild_for_state = instructions.len();
+    instructions.push(Instruction::BneAbsolute(origin));
+    instructions.push(Instruction::LdaAbsolute(VISIBLE_PAGE_INDEX));
+    let rebuild_for_page = instructions.len();
+    instructions.push(Instruction::BneAbsolute(origin));
+    instructions.extend([
+        Instruction::LdaAbsolute(SOURCE_DIRECTORY_SELECTOR),
+        Instruction::CmpAbsolute(PUBLISHED_SOURCE_DIRECTORY_SELECTOR),
+    ]);
+    let rebuild_for_selector = instructions.len();
+    instructions.push(Instruction::BneAbsolute(origin));
+    instructions.extend([
+        Instruction::LdaAbsolute(SOURCE_ENTRY_INDEX),
+        Instruction::CmpAbsolute(PUBLISHED_SOURCE_ENTRY_INDEX),
+    ]);
+    let rebuild_for_entry = instructions.len();
+    instructions.push(Instruction::BneAbsolute(origin));
+    // 밀어낸 원본 호출로 바로 넘겨 반복 생산자의 원본 부작용을 진행시킨다.
+    instructions.push(Instruction::JmpAbsolute(SOURCE_POINTER_RESOLVER));
+
+    let rebuild = next_address(origin, &instructions)?;
+    for index in [
+        rebuild_for_state,
+        rebuild_for_page,
+        rebuild_for_selector,
+        rebuild_for_entry,
+    ] {
+        instructions[index] = Instruction::BneAbsolute(rebuild);
+    }
+    instructions.extend([
         // NMI를 끄기 직전 한 프레임이 끼어도 이전 수명의 `ready`를 고르지 않는다.
         Instruction::LdaImmediate(0),
         Instruction::StaAbsolute(REQUEST_STATE),
@@ -165,7 +208,7 @@ pub(super) fn build_cold_initializer(
         Instruction::Pla,
         Instruction::StaZeroPage(PPU_CONTROL_SHADOW),
         Instruction::StaAbsolute(PPU_CONTROL),
-    ];
+    ]);
     let failed_placeholder = instructions.len();
     instructions.push(Instruction::BccAbsolute(origin));
     instructions.extend([
@@ -179,7 +222,7 @@ pub(super) fn build_cold_initializer(
     instructions.push(Instruction::JmpAbsolute(SOURCE_POINTER_RESOLVER));
 
     Ok(RuntimeRoutine {
-        role: "dialogue cold initializer",
+        role: "dialogue source-identity request publisher",
         address: origin,
         bytes: assemble_at(origin, &instructions)?,
     })
@@ -272,7 +315,7 @@ mod tests {
     /// 않은 커서를 읽고 남의 자료를 CHR RAM에 올린다.
     #[test]
     fn a_failed_resolve_publishes_no_request() {
-        let routine = build_cold_initializer(0xF558, 0xA400, 0x30).unwrap();
+        let routine = build_source_identity_request_publisher(0xF446, 0xA400, 0x30).unwrap();
         let publish = publish_position(&routine.bytes, REQUEST_STATE)
             .expect("the initializer publishes a request");
         let branch = routine
@@ -291,7 +334,7 @@ mod tests {
     /// 읽기 전에 끝나야 하므로 그 사이에 `PHP`/`PLP`가 있어야 한다.
     #[test]
     fn the_borrowed_banks_are_handed_back_before_the_carry_decides() {
-        let routine = build_cold_initializer(0xF558, 0xA400, 0x30).unwrap();
+        let routine = build_source_identity_request_publisher(0xF446, 0xA400, 0x30).unwrap();
         let restore = routine
             .bytes
             .windows(3)
@@ -322,7 +365,7 @@ mod tests {
     /// 코드가 바뀐다. NMI는 매핑 전에 꺼지고 뱅크 복원 뒤에만 돌아와야 한다.
     #[test]
     fn the_banked_resolver_cannot_be_interrupted_by_bank_restoring_nmi() {
-        let routine = build_cold_initializer(0xF558, 0xA400, 0x30).unwrap();
+        let routine = build_source_identity_request_publisher(0xF446, 0xA400, 0x30).unwrap();
         let disable = routine
             .bytes
             .windows(2)
@@ -356,8 +399,8 @@ mod tests {
     }
 
     #[test]
-    fn cold_entry_invalidates_the_previous_page_before_disabling_nmi() {
-        let routine = build_cold_initializer(0xF558, 0xA400, 0x30).unwrap();
+    fn a_rebuild_invalidates_the_previous_page_before_disabling_nmi() {
+        let routine = build_source_identity_request_publisher(0xF446, 0xA400, 0x30).unwrap();
         let invalidate = [
             0xA9,
             0x00,
@@ -367,20 +410,24 @@ mod tests {
         ];
         let disable = [0x29, !NMI_ENABLE_MASK];
 
-        assert_eq!(&routine.bytes[..invalidate.len()], invalidate);
-        assert!(
-            routine
-                .bytes
-                .windows(disable.len())
-                .position(|window| window == disable)
-                .is_some_and(|position| position >= invalidate.len())
-        );
+        let invalidate_at = routine
+            .bytes
+            .windows(invalidate.len())
+            .position(|window| window == invalidate)
+            .expect("the rebuild path invalidates the old page");
+        let disable_at = routine
+            .bytes
+            .windows(disable.len())
+            .position(|window| window == disable)
+            .expect("the rebuild path disables NMI");
+
+        assert!(invalidate_at + invalidate.len() <= disable_at);
     }
 
     /// 초기화도 밀어낸 원본 호출로 끝나야 대사가 이어진다.
     #[test]
     fn the_initializer_reaches_the_displaced_source_resolver() {
-        let routine = build_cold_initializer(0xF558, 0xA400, 0x30).unwrap();
+        let routine = build_source_identity_request_publisher(0xF446, 0xA400, 0x30).unwrap();
 
         assert_eq!(
             &routine.bytes[routine.bytes.len() - 3..],
@@ -390,6 +437,77 @@ mod tests {
                 (SOURCE_POINTER_RESOLVER >> 8) as u8
             ]
         );
+    }
+
+    /// E4 전환 생산자는 같은 원문을 여러 프레임 다시 요청한다. 준비된 0페이지의
+    /// 정체성이 같으면 무효화보다 먼저 원본 resolver로 넘겨야 전환이 진행된다.
+    #[test]
+    fn a_repeated_ready_page_zero_request_reuses_the_published_source_identity() {
+        let routine = build_source_identity_request_publisher(0xF446, 0xA400, 0x30).unwrap();
+        let reuse = [
+            0x4C,
+            SOURCE_POINTER_RESOLVER as u8,
+            (SOURCE_POINTER_RESOLVER >> 8) as u8,
+        ];
+        let reuse_at = routine
+            .bytes
+            .windows(reuse.len())
+            .position(|window| window == reuse)
+            .expect("same ready identity can reuse the completed page");
+        let invalidate = [
+            0xA9,
+            0x00,
+            0x8D,
+            REQUEST_STATE as u8,
+            (REQUEST_STATE >> 8) as u8,
+        ];
+        let invalidate_at = routine
+            .bytes
+            .windows(invalidate.len())
+            .position(|window| window == invalidate)
+            .expect("different requests still rebuild");
+
+        assert!(routine.bytes.windows(5).any(|window| {
+            window
+                == [
+                    0xAD,
+                    REQUEST_STATE as u8,
+                    (REQUEST_STATE >> 8) as u8,
+                    0xC9,
+                    STATE_READY,
+                ]
+        }));
+        assert!(routine.bytes.windows(3).any(|window| {
+            window
+                == [
+                    0xAD,
+                    VISIBLE_PAGE_INDEX as u8,
+                    (VISIBLE_PAGE_INDEX >> 8) as u8,
+                ]
+        }));
+        assert!(routine.bytes.windows(6).any(|window| {
+            window
+                == [
+                    0xAD,
+                    SOURCE_DIRECTORY_SELECTOR as u8,
+                    (SOURCE_DIRECTORY_SELECTOR >> 8) as u8,
+                    0xCD,
+                    PUBLISHED_SOURCE_DIRECTORY_SELECTOR as u8,
+                    (PUBLISHED_SOURCE_DIRECTORY_SELECTOR >> 8) as u8,
+                ]
+        }));
+        assert!(routine.bytes.windows(6).any(|window| {
+            window
+                == [
+                    0xAD,
+                    SOURCE_ENTRY_INDEX as u8,
+                    (SOURCE_ENTRY_INDEX >> 8) as u8,
+                    0xCD,
+                    PUBLISHED_SOURCE_ENTRY_INDEX as u8,
+                    (PUBLISHED_SOURCE_ENTRY_INDEX >> 8) as u8,
+                ]
+        }));
+        assert!(reuse_at < invalidate_at);
     }
 
     fn publish_position(bytes: &[u8], address: u16) -> Option<usize> {

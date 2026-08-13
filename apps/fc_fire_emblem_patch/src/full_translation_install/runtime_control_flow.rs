@@ -146,7 +146,12 @@ struct SelectorConsumer {
     current_fallback_cpu_address_hex: &'static str,
     replacement_role: &'static str,
     selects_chr_ram_only_when_ready: bool,
+    ready_fd_published_by_transport: bool,
+    central_fd_resupply_reselects_ready_ram: bool,
+    original_dialogue_active_state_range_hex: &'static str,
+    prg_bank_shadow_used_as_dialogue_lifetime: bool,
     source_fd_page_guard_hex: &'static str,
+    source_fd_mismatch_invalidates_request: bool,
     selects_chr_ram_for_fd_latch_only: bool,
     native_fe_latch_remains_source_rom: bool,
     inactive_falls_through_to_existing_consumers: bool,
@@ -233,25 +238,25 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         (
             "initial_direct_entry",
             0x809B,
-            "cold_rebuild_page_zero",
+            "reuse_same_ready_page_zero_otherwise_cold_rebuild",
             "new dialogue lifetime",
         ),
         (
             "E4_transition_entry",
             0x85F8,
-            "cold_rebuild_page_zero",
+            "reuse_same_ready_page_zero_otherwise_cold_rebuild",
             "same visible dialogue lifetime",
         ),
         (
             "E6_transition_entry",
             0x865F,
-            "cold_rebuild_page_zero",
+            "reuse_same_ready_page_zero_otherwise_cold_rebuild",
             "same visible dialogue lifetime",
         ),
         (
             "E7_caller_resume",
             0x871C,
-            "cold_rebuild_page_zero",
+            "reuse_same_ready_page_zero_otherwise_cold_rebuild",
             "external caller may have changed the font lifetime",
         ),
     ];
@@ -442,7 +447,7 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         .collect();
 
     Ok(DialogueRuntimeControlFlowPlan {
-        strategy: "derive every request from the original main-dialogue state machine, cold-compose the dialogue FD page in the quiet-frame NMI consumer, and replace only the FD latch after that exact request is ready",
+        strategy: "derive every request from the original main-dialogue state machine, reuse an already-ready page only for the same source identity at page zero, otherwise cold-compose the dialogue FD page in the quiet-frame NMI consumer, and replace only the FD latch after that exact request is ready",
         states: vec![
             RuntimeState {
                 id: "inactive",
@@ -488,7 +493,7 @@ pub(super) fn plan_dialogue_runtime_control_flow(
             runtime_code_cpu_end_exclusive_hex: "0xC000",
             runtime_code_capacity_byte_count: inputs.runtime_code_byte_count,
             cold_request_action: "copy all 4096 original font bytes then overlay every assigned target glyph in the selected page group",
-            continuous_request_action: "not emitted; every successful request currently uses a cold rebuild",
+            continuous_request_action: "a repeated producer reuses the completed page only when ready, page zero, and both raw source-identity bytes still match; every other request cold-rebuilds",
             dynamic_values_covered_by_page_group: true,
         },
         selector_consumer: SelectorConsumer {
@@ -496,7 +501,12 @@ pub(super) fn plan_dialogue_runtime_control_flow(
             current_fallback_cpu_address_hex: "0xFF40",
             replacement_role: "global_main_dialogue_ready_fd_selector_then_existing_roster_chain",
             selects_chr_ram_only_when_ready: true,
+            ready_fd_published_by_transport: true,
+            central_fd_resupply_reselects_ready_ram: true,
+            original_dialogue_active_state_range_hex: "0x00..0x0E",
+            prg_bank_shadow_used_as_dialogue_lifetime: false,
             source_fd_page_guard_hex: "0x00",
+            source_fd_mismatch_invalidates_request: true,
             selects_chr_ram_for_fd_latch_only: true,
             native_fe_latch_remains_source_rom: true,
             inactive_falls_through_to_existing_consumers: true,

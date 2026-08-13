@@ -43,9 +43,13 @@ use anyhow::{Context, Result, ensure};
 
 use super::super::runtime_cursor_storage::{
     CURSOR_ENTRY_HIGH, CURSOR_ENTRY_LOW, CURSOR_GROUP_PAGE, CURSOR_OVERLAY_TILES, CURSOR_PHASE,
-    CURSOR_REMAINING_TILES,
+    CURSOR_REMAINING_TILES, PUBLISHED_SOURCE_DIRECTORY_SELECTOR, PUBLISHED_SOURCE_ENTRY_INDEX,
 };
-use super::{RuntimeRoutine, next_address, worst_case_cycles, worst_case_cycles_with_calls};
+use super::{
+    RuntimeRoutine, next_address,
+    resolve_request::{SOURCE_DIRECTORY_SELECTOR, SOURCE_ENTRY_INDEX},
+    worst_case_cycles, worst_case_cycles_with_calls,
+};
 use crate::rp2a03::{Instruction, assemble_at};
 
 /// 한 프레임에 올리는 타일 수다. 사이클 예산에서 유도한 값이므로 늘리려면
@@ -86,7 +90,7 @@ const PRG_8000_REGISTER: u8 = 6;
 /// 매퍼 165가 4 KiB CHR 창 둘에 쓰는 MMC3 레지스터다.
 const CHR_BANK_REGISTERS: [u8; 2] = [2, 4];
 /// CHR RAM을 고르는 뱅크 값이다. CHR ROM의 물리 페이지 0은 다른 값으로 인코딩된다.
-const CHR_RAM_BANK_VALUE: u8 = 0;
+const CHR_RAM_BANK_VALUE: u8 = super::chr_source_state::CHR_RAM_BANK_VALUE;
 /// 되돌릴 중앙 원천 상태와 stateless 설정기의 짝이다. FD와 FE는 같은 값이라고
 /// 가정하지 않는다.
 const CHR_RESTORE_PATHS: [(u8, u16); 2] = [
@@ -358,8 +362,39 @@ fn frame_epilogue(origin: u16) -> Result<(Vec<Instruction>, Vec<usize>)> {
 
     let publish = next_address(origin, &instructions)?;
     instructions[publish_placeholder] = Instruction::BneAbsolute(publish);
+    // 원천 FD가 이 RAM의 기반인 페이지 0일 때만 표시한다. 다른 원천이면 잘못된
+    // 페이지를 보여 주지 않고 요청을 무효화해 원본 경로로 실패 닫힘한다.
     instructions.extend([
+        Instruction::LdaZeroPage(super::chr_source_state::RIGHT_FD_SOURCE_SHADOW),
+        Instruction::OraZeroPage(super::chr_source_state::CHR_SOURCE_HIGH_BITS),
+        Instruction::AndImmediate(0x1F),
+        Instruction::CmpImmediate(super::chr_source_state::DIALOGUE_FD_SOURCE_PAGE),
+    ]);
+    let wrong_fd_source_placeholder = instructions.len();
+    instructions.push(Instruction::BneAbsolute(origin));
+    // FE는 위에서 원본으로 복원한 채 두고, FD만 완성된 RAM으로 게시한다. 같은 NMI
+    // 안에서 하드웨어 선택이 끝난 뒤에만 `ready`를 공개한다.
+    instructions.extend([
+        // 전송 커서는 이제 필요 없다. `ready`를 게시하기 전에 같은 두 칸을 이
+        // 완성 페이지의 원문 정체성으로 바꿔 반복 생산자가 재사용할 수 있게 한다.
+        Instruction::LdaAbsolute(SOURCE_DIRECTORY_SELECTOR),
+        Instruction::StaAbsolute(PUBLISHED_SOURCE_DIRECTORY_SELECTOR),
+        Instruction::LdaAbsolute(SOURCE_ENTRY_INDEX),
+        Instruction::StaAbsolute(PUBLISHED_SOURCE_ENTRY_INDEX),
+        Instruction::LdaImmediate(super::chr_source_state::RIGHT_FD_CHR_REGISTER),
+        Instruction::StaAbsolute(BANK_SELECT_REGISTER),
+        Instruction::LdaImmediate(CHR_RAM_BANK_VALUE),
+        Instruction::StaAbsolute(BANK_VALUE_REGISTER),
         Instruction::LdaImmediate(STATE_READY),
+        Instruction::StaAbsolute(REQUEST_STATE),
+    ]);
+    needs_done.push(instructions.len());
+    instructions.push(Instruction::JmpAbsolute(origin));
+
+    let wrong_fd_source = next_address(origin, &instructions)?;
+    instructions[wrong_fd_source_placeholder] = Instruction::BneAbsolute(wrong_fd_source);
+    instructions.extend([
+        Instruction::LdaImmediate(0),
         Instruction::StaAbsolute(REQUEST_STATE),
     ]);
     Ok((instructions, needs_done))
@@ -601,6 +636,99 @@ mod tests {
             .expect("the epilogue publishes readiness");
 
         assert!(fe_restore_at + fe_restore.len() <= ready_at);
+    }
+
+    /// 마지막 전송 프레임은 중앙 selector가 나중에 다시 불리기를 기다리지 않는다.
+    /// FE 원본 복원 뒤 FD만 RAM으로 게시하고, 그 하드웨어 선택이 끝난 뒤에야
+    /// 준비 완료를 알려야 첫 완성 프레임부터 올바른 두 래치가 보인다.
+    #[test]
+    fn the_completed_page_publishes_fd_ram_before_readiness() {
+        let epilogue = frame_epilogue(0xA000).unwrap().0;
+        let fe_restore = Instruction::JsrAbsolute(super::super::chr_source_state::RIGHT_FE_HELPER);
+        let select_fd = [
+            Instruction::LdaImmediate(super::super::chr_source_state::RIGHT_FD_CHR_REGISTER),
+            Instruction::StaAbsolute(BANK_SELECT_REGISTER),
+            Instruction::LdaImmediate(CHR_RAM_BANK_VALUE),
+            Instruction::StaAbsolute(BANK_VALUE_REGISTER),
+        ];
+        let fe_restore_at = epilogue
+            .iter()
+            .position(|instruction| *instruction == fe_restore)
+            .expect("the epilogue restores native FE");
+        let select_fd_at = epilogue
+            .windows(select_fd.len())
+            .position(|window| window == select_fd)
+            .expect("the epilogue publishes FD RAM");
+        let ready_at = epilogue
+            .iter()
+            .position(|instruction| *instruction == Instruction::StaAbsolute(REQUEST_STATE))
+            .expect("the epilogue publishes readiness");
+
+        assert!(fe_restore_at < select_fd_at && select_fd_at + select_fd.len() <= ready_at);
+        assert!(
+            !epilogue
+                .iter()
+                .any(|instruction| { *instruction == Instruction::LdaImmediate(4) })
+        );
+    }
+
+    /// 반복 생산자는 `ready`에서만 커서 두 칸을 게시 원문 정체성으로 읽는다. 두 값을
+    /// 모두 저장한 뒤에 준비 완료를 알려야 중간 상태를 같은 요청으로 오인하지 않는다.
+    #[test]
+    fn published_source_identity_is_complete_before_readiness() {
+        let epilogue = frame_epilogue(0xA000).unwrap().0;
+        let directory = [
+            Instruction::LdaAbsolute(SOURCE_DIRECTORY_SELECTOR),
+            Instruction::StaAbsolute(PUBLISHED_SOURCE_DIRECTORY_SELECTOR),
+        ];
+        let entry = [
+            Instruction::LdaAbsolute(SOURCE_ENTRY_INDEX),
+            Instruction::StaAbsolute(PUBLISHED_SOURCE_ENTRY_INDEX),
+        ];
+        let directory_at = epilogue
+            .windows(directory.len())
+            .position(|window| window == directory)
+            .expect("the epilogue publishes the source selector");
+        let entry_at = epilogue
+            .windows(entry.len())
+            .position(|window| window == entry)
+            .expect("the epilogue publishes the source entry");
+        let ready_at = epilogue
+            .iter()
+            .position(|instruction| *instruction == Instruction::StaAbsolute(REQUEST_STATE))
+            .expect("the epilogue publishes readiness");
+
+        assert!(directory_at + directory.len() <= entry_at);
+        assert!(entry_at + entry.len() <= ready_at);
+    }
+
+    /// RAM의 기반과 다른 FD 원천에서는 준비 완료를 게시하지 않는다. 원본 FD를 복원한
+    /// 상태로 요청을 0으로 내려 원본 표시 경로가 계속되게 한다.
+    #[test]
+    fn a_non_dialogue_fd_source_invalidates_instead_of_publishing_ram() {
+        let epilogue = frame_epilogue(0xA000).unwrap().0;
+        let guard_prefix = [
+            Instruction::LdaZeroPage(super::super::chr_source_state::RIGHT_FD_SOURCE_SHADOW),
+            Instruction::OraZeroPage(super::super::chr_source_state::CHR_SOURCE_HIGH_BITS),
+            Instruction::AndImmediate(0x1F),
+            Instruction::CmpImmediate(super::super::chr_source_state::DIALOGUE_FD_SOURCE_PAGE),
+        ];
+        let guard_at = epilogue
+            .windows(guard_prefix.len())
+            .position(|window| window == guard_prefix)
+            .expect("the epilogue guards the FD source page");
+
+        assert!(matches!(
+            epilogue[guard_at + guard_prefix.len()],
+            Instruction::BneAbsolute(_)
+        ));
+        assert!(epilogue.windows(2).any(|window| {
+            window
+                == [
+                    Instruction::LdaImmediate(0),
+                    Instruction::StaAbsolute(REQUEST_STATE),
+                ]
+        }));
     }
 
     /// 항목은 그룹 덩이 페이지에서, 타일 자료는 atlas 페이지에서 읽어야 한다.

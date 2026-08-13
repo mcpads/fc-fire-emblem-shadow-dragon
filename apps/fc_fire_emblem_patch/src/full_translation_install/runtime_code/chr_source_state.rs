@@ -24,6 +24,12 @@ pub(in crate::full_translation_install) const RIGHT_FD_SOURCE_SHADOW: u8 = 0x5B;
 pub(in crate::full_translation_install) const RIGHT_FE_SOURCE_SHADOW: u8 = 0x5C;
 /// 중앙 기록기가 설정기 호출 직전에 합치는 상위 원천 비트다.
 pub(in crate::full_translation_install) const CHR_SOURCE_HIGH_BITS: u8 = 0x52;
+/// 주 대사 글꼴을 공급하는 오른쪽 FD 원천 페이지다.
+pub(in crate::full_translation_install) const DIALOGUE_FD_SOURCE_PAGE: u8 = 0;
+/// mapper165의 오른쪽 FD MMC3 레지스터다.
+pub(in crate::full_translation_install) const RIGHT_FD_CHR_REGISTER: u8 = 2;
+/// mapper165에서 CHR RAM을 고르는 뱅크 값이다.
+pub(in crate::full_translation_install) const CHR_RAM_BANK_VALUE: u8 = 0;
 
 /// stateless 오른쪽 FD 설정기다.
 pub(in crate::full_translation_install) const RIGHT_FD_HELPER: u16 = 0xFA80;
