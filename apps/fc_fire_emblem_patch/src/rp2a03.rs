@@ -33,6 +33,7 @@ pub enum Instruction {
     AdcAbsolute(u16),
     AdcAbsoluteX(u16),
     SbcImmediate(u8),
+    SbcAbsolute(u16),
     SbcZeroPage(u8),
     CmpImmediate(u8),
     CmpAbsolute(u16),
@@ -127,6 +128,7 @@ impl Instruction {
             | Self::AdcAbsoluteX(_)
             | Self::LdxAbsolute(_)
             | Self::CmpAbsolute(_)
+            | Self::SbcAbsolute(_)
             | Self::LdyAbsoluteX(_)
             | Self::StaAbsolute(_)
             | Self::StaAbsoluteX(_)
@@ -184,7 +186,8 @@ impl Instruction {
             | Self::StaAbsolute(_)
             | Self::AdcAbsolute(_)
             | Self::LdxAbsolute(_)
-            | Self::CmpAbsolute(_) => 4,
+            | Self::CmpAbsolute(_)
+            | Self::SbcAbsolute(_) => 4,
             // 색인 적재는 페이지 경계를 넘으면 한 사이클 더 쓴다.
             Self::LdaAbsoluteX(_)
             | Self::LdaAbsoluteY(_)
@@ -244,6 +247,7 @@ impl Instruction {
             Self::AdcAbsolute(address) => absolute(Mnemonic::Adc, address),
             Self::AdcAbsoluteX(address) => absolute_x(Mnemonic::Adc, address),
             Self::SbcImmediate(value) => immediate(Mnemonic::Sbc, value),
+            Self::SbcAbsolute(address) => absolute(Mnemonic::Sbc, address),
             Self::SbcZeroPage(address) => zero_page(Mnemonic::Sbc, address),
             Self::CmpImmediate(value) => immediate(Mnemonic::Cmp, value),
             Self::CmpAbsolute(address) => absolute(Mnemonic::Cmp, address),

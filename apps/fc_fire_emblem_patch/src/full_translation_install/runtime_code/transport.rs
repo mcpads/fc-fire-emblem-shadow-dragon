@@ -15,6 +15,24 @@
 //! 올라가지 않은 CHR RAM이 화면에 나와 안전 성질이 깨진다. 둘 다 vblank 안이라
 //! 렌더링은 그 사이를 보지 못한다.
 //!
+//! 합성은 두 단계다. 먼저 원본 배경 페이지 4 KiB를 CHR RAM으로 복원하고, 그 위에
+//! 그 그룹의 한글 타일을 덮는다. 복원이 필요한 이유는 맵 타일과 대사 글꼴이 같은
+//! 4 KiB 페이지 안에 함께 있기 때문이다 — 덮기만 하면 맵이 사라진다. 실행으로
+//! 확인했다.
+//!
+//! 복원의 원본은 PRG 페이지 `21`이다. CHR ROM은 CPU가 읽을 수 없으므로 빌드가 원본
+//! 페이지를 PRG에 복제해 두었고, 그것이 원본 글꼴과 바이트가 같다는 것은 설치가
+//! 매번 확인한다.
+//!
+//! **다만 그 페이지가 맞는 페이지가 아니다.** 실행해 보니 대사 글자는 제대로 나오는데
+//! 맵 타일이 여전히 사라진다. 원인은 페이지 번호다. 게임이 `LDA #$00; JSR $FA80`으로
+//! 고르는 «0번»은 `$FEEE`가 `(A & 0x1F) × 4 + 8`로 바꾸므로 물리 CHR 페이지 **2번**이다.
+//! PRG `21`에 복제해 둔 것은 물리 0번, 즉 원본 글꼴 페이지다.
+//!
+//! 그러므로 복원이 되살리는 것은 맵이 쓰던 페이지가 아니라 글꼴 페이지다. 다음 과제는
+//! 덮어쓸 수 있는 물리 CHR 페이지들을 PRG에도 복제해 두고, 관측해 둔 페이지 번호로
+//! 그중 맞는 것을 고르는 것이다. PRG는 아직 100 KB 넘게 비어 있다.
+//!
 //! 되돌릴 페이지는 `chr_page_shadow`가 관측해 둔 값이다. 원본에는 «지금 걸려 있는
 //! 페이지»를 담아 두는 변수가 없어서 만들어 두었다. 되돌리는 일 자체는 원본 설정기
 //! `$FA80`·`$FAA0`이 하고, 그 비용은 아래에 세어 두었다.
@@ -25,14 +43,27 @@
 use anyhow::{Context, Result, ensure};
 
 use super::super::runtime_cursor_storage::{
-    CURSOR_ENTRY_HIGH, CURSOR_ENTRY_LOW, CURSOR_GROUP_PAGE, CURSOR_REMAINING_TILES,
+    CURSOR_ENTRY_HIGH, CURSOR_ENTRY_LOW, CURSOR_GROUP_PAGE, CURSOR_OVERLAY_TILES, CURSOR_PHASE,
+    CURSOR_REMAINING_TILES,
 };
 use super::{RuntimeRoutine, next_address, worst_case_cycles, worst_case_cycles_with_calls};
 use crate::rp2a03::{Instruction, assemble_at};
 
 /// 한 프레임에 올리는 타일 수다. 사이클 예산에서 유도한 값이므로 늘리려면
 /// 아래 예산 시험이 먼저 통과해야 한다.
-pub(in crate::full_translation_install) const TILES_PER_FRAME: u8 = 3;
+pub(in crate::full_translation_install) const TILES_PER_FRAME: u8 = 2;
+/// 복원 단계가 한 번에 옮기는 덩어리의 크기다.
+const RESTORE_CHUNK_BYTE_COUNT: u8 = 32;
+/// 4 KiB 페이지를 그 크기로 나눈 덩어리 수다.
+pub(in crate::full_translation_install) const RESTORE_CHUNK_COUNT: u8 = 128;
+/// 한 프레임에 옮기는 덩어리 수다. 타일 수와 같은 예산에서 따로 유도한다.
+const RESTORE_CHUNKS_PER_FRAME: u8 = 1;
+/// 원본 배경 페이지를 복제해 둔 PRG 페이지다.
+pub(in crate::full_translation_install) const SOURCE_PAGE_MMC3_PAGE: u8 = 0x21;
+/// 복원 단계를 뜻하는 값이다.
+pub(in crate::full_translation_install) const PHASE_RESTORE: u8 = 0;
+/// 덮기 단계를 뜻하는 값이다.
+pub(in crate::full_translation_install) const PHASE_OVERLAY: u8 = 1;
 /// 그룹 덩이 항목 하나의 크기다. 코드 하나와 atlas CPU 주소 둘이다.
 const GROUP_BLOCK_ENTRY_BYTE_COUNT: u8 = 3;
 /// atlas가 타일 하나에 쓰는 바이트다. 1bpp 8×8.
@@ -108,26 +139,35 @@ fn frame_prologue(origin: u16) -> Result<(Vec<Instruction>, usize)> {
         instructions.extend([Instruction::LdaZeroPage(address), Instruction::Pha]);
     }
 
-    // 이번 프레임 몫은 남은 것과 예산 중 작은 쪽이다.
+    // 이번 프레임 몫은 남은 것과 단계별 예산 중 작은 쪽이다.
     instructions.extend([
+        Instruction::LdaAbsolute(CURSOR_PHASE),
+        Instruction::BneAbsolute(origin),
+    ]);
+    let overlay_budget_placeholder = instructions.len() - 1;
+    instructions.push(Instruction::LdaImmediate(RESTORE_CHUNKS_PER_FRAME));
+    let budget_chosen_placeholder = instructions.len();
+    instructions.push(Instruction::JmpAbsolute(origin));
+    let overlay_budget = next_address(origin, &instructions)?;
+    instructions[overlay_budget_placeholder] = Instruction::BneAbsolute(overlay_budget);
+    instructions.push(Instruction::LdaImmediate(TILES_PER_FRAME));
+    let budget_chosen = next_address(origin, &instructions)?;
+    instructions[budget_chosen_placeholder] = Instruction::JmpAbsolute(budget_chosen);
+    instructions.extend([
+        Instruction::StaZeroPage(BATCH_SIZE),
         Instruction::LdaAbsolute(CURSOR_REMAINING_TILES),
-        Instruction::CmpImmediate(TILES_PER_FRAME),
+        Instruction::CmpZeroPage(BATCH_SIZE),
     ]);
     let use_remaining_placeholder = instructions.len();
     instructions.push(Instruction::BccAbsolute(origin));
-    instructions.push(Instruction::LdaImmediate(TILES_PER_FRAME));
+    instructions.push(Instruction::LdaZeroPage(BATCH_SIZE));
     let batch_selected = next_address(origin, &instructions)?;
     instructions[use_remaining_placeholder] = Instruction::BccAbsolute(batch_selected);
     instructions.extend([
         Instruction::Tax,
         Instruction::StxZeroPage(BATCH_SIZE),
-        // 남은 수는 지금 줄여 둔다. 루프는 이 값을 읽지 않으므로 나중에 다시 셀
-        // 이유가 없고, 여기서 줄여 두면 커서 저장이 한 곳으로 모인다.
-        Instruction::LdaAbsolute(CURSOR_REMAINING_TILES),
-        Instruction::Sec,
-        Instruction::SbcZeroPage(BATCH_SIZE),
-        Instruction::StaAbsolute(CURSOR_REMAINING_TILES),
-        // 항목 포인터를 제로 페이지에 세운다.
+        // 항목 포인터를 제로 페이지에 세운다. 복원 단계는 쓰지 않지만 세워 두어도
+        // 해가 없고, 두 단계가 같은 프롤로그를 쓰면 진입이 하나로 남는다.
         Instruction::LdaAbsolute(CURSOR_ENTRY_LOW),
         Instruction::StaZeroPage(ENTRY_POINTER_LOW),
         Instruction::LdaAbsolute(CURSOR_ENTRY_HIGH),
@@ -202,7 +242,7 @@ fn tile_body(loop_start: u16, atlas_page: u8) -> Result<Vec<Instruction>> {
     }
     // 몸통이 상대 분기 사거리보다 길다. 뒤로 돌아가는 분기를 쓸 수 없으므로 조건을
     // 뒤집어 `JMP` 하나를 건너뛴다. 탈출 자리는 그 `JMP` 바로 뒤다.
-    instructions.push(Instruction::Dex);
+    instructions.extend([Instruction::DecAbsolute(CURSOR_REMAINING_TILES), Instruction::Dex]);
     let branch = next_address(loop_start, &instructions)?;
     let exit = branch
         .checked_add(2 + 3)
@@ -214,8 +254,68 @@ fn tile_body(loop_start: u16, atlas_page: u8) -> Result<Vec<Instruction>> {
     Ok(instructions)
 }
 
-/// 커서를 저장하고, 빌린 제로 페이지를 되돌리고, 다 올렸으면 준비 완료를 알린다.
-fn frame_epilogue(pending_placeholder: u16) -> Vec<Instruction> {
+/// 원본 페이지에서 한 덩어리를 옮긴다.
+///
+/// 원본 주소도 목적지 주소도 «몇 덩어리 남았나»에서 나오므로 커서에 포인터를 담지
+/// 않는다. 덮기 단계의 커서를 건드리지 않아야 복원이 끝난 뒤 그대로 이어받는다.
+fn restore_body(loop_start: u16) -> Result<Vec<Instruction>> {
+    let mut instructions = vec![
+        // 이미 옮긴 덩어리 수를 만든다.
+        Instruction::LdaImmediate(RESTORE_CHUNK_COUNT),
+        Instruction::Sec,
+        Instruction::SbcAbsolute(CURSOR_REMAINING_TILES),
+        Instruction::StaZeroPage(CURRENT_CODE),
+        // 원본 주소는 `$8000 + done × 32`다.
+        Instruction::AslAccumulator,
+        Instruction::AslAccumulator,
+        Instruction::AslAccumulator,
+        Instruction::AslAccumulator,
+        Instruction::AslAccumulator,
+        Instruction::StaZeroPage(ATLAS_POINTER_LOW),
+        Instruction::LdaZeroPage(CURRENT_CODE),
+        Instruction::LsrAccumulator,
+        Instruction::LsrAccumulator,
+        Instruction::LsrAccumulator,
+        Instruction::Clc,
+        Instruction::AdcImmediate(0x80),
+        Instruction::StaZeroPage(ATLAS_POINTER_HIGH),
+        // 목적지는 `$1000 + done × 32`다. 상위 바이트만 다르다.
+        Instruction::LdaAbsolute(PPU_STATUS),
+        Instruction::LdaZeroPage(ATLAS_POINTER_HIGH),
+        Instruction::Sec,
+        Instruction::SbcImmediate(0x80 - (CHR_RAM_BASE >> 8) as u8),
+        Instruction::StaAbsolute(PPU_ADDRESS),
+        Instruction::LdaZeroPage(ATLAS_POINTER_LOW),
+        Instruction::StaAbsolute(PPU_ADDRESS),
+        Instruction::LdyImmediate(0),
+    ];
+    for _ in 0..RESTORE_CHUNK_BYTE_COUNT {
+        instructions.extend([
+            Instruction::LdaIndirectY(ATLAS_POINTER_LOW),
+            Instruction::StaAbsolute(PPU_DATA),
+            Instruction::Iny,
+        ]);
+    }
+    instructions.extend([
+        Instruction::DecAbsolute(CURSOR_REMAINING_TILES),
+        Instruction::Dex,
+    ]);
+    let branch = next_address(loop_start, &instructions)?;
+    let exit = branch
+        .checked_add(2 + 3)
+        .context("transport restore body exit address overflow")?;
+    instructions.extend([
+        Instruction::BeqAbsolute(exit),
+        Instruction::JmpAbsolute(loop_start),
+    ]);
+    Ok(instructions)
+}
+
+/// 커서를 저장하고, 빌린 제로 페이지를 되돌리고, 단계를 넘기거나 준비 완료를 알린다.
+///
+/// 돌려주는 색인들은 «루틴 끝»을 가리켜야 하는 분기들이다. 끝 주소는 이 조각의 길이가
+/// 정해진 뒤에야 나오므로 부르는 쪽이 되메운다.
+fn frame_epilogue(origin: u16) -> Result<(Vec<Instruction>, Vec<usize>)> {
     let mut instructions = vec![
         Instruction::LdaZeroPage(ENTRY_POINTER_LOW),
         Instruction::StaAbsolute(CURSOR_ENTRY_LOW),
@@ -234,29 +334,72 @@ fn frame_epilogue(pending_placeholder: u16) -> Vec<Instruction> {
     for address in BORROWED_SCRATCH.iter().rev() {
         instructions.extend([Instruction::Pla, Instruction::StaZeroPage(*address)]);
     }
+
+    let mut needs_done = Vec::new();
+    instructions.push(Instruction::LdaAbsolute(CURSOR_REMAINING_TILES));
+    needs_done.push(instructions.len());
+    instructions.push(Instruction::BneAbsolute(origin));
+
+    // 이번 단계가 끝났다. 복원이었으면 덮기로 넘어가고, 덮기였으면 준비 완료다.
+    instructions.push(Instruction::LdaAbsolute(CURSOR_PHASE));
+    let publish_placeholder = instructions.len();
+    instructions.push(Instruction::BneAbsolute(origin));
     instructions.extend([
-        Instruction::LdaAbsolute(CURSOR_REMAINING_TILES),
-        Instruction::BneAbsolute(pending_placeholder),
+        Instruction::LdaImmediate(PHASE_OVERLAY),
+        Instruction::StaAbsolute(CURSOR_PHASE),
+        Instruction::LdaAbsolute(CURSOR_OVERLAY_TILES),
+        Instruction::StaAbsolute(CURSOR_REMAINING_TILES),
+    ]);
+    needs_done.push(instructions.len());
+    instructions.push(Instruction::JmpAbsolute(origin));
+
+    let publish = next_address(origin, &instructions)?;
+    instructions[publish_placeholder] = Instruction::BneAbsolute(publish);
+    instructions.extend([
         Instruction::LdaImmediate(STATE_READY),
         Instruction::StaAbsolute(REQUEST_STATE),
     ]);
-    instructions
+    Ok((instructions, needs_done))
 }
 
 pub(super) fn build_transport_routine(origin: u16, atlas_page: u8) -> Result<RuntimeRoutine> {
     let (mut instructions, finished_jump) = frame_prologue(origin)?;
-    let loop_start = next_address(origin, &instructions)?;
-    instructions.extend(tile_body(loop_start, atlas_page)?);
+    // 단계에 따라 다른 루프로 간다. 복원 몸통이 상대 분기 사거리보다 길어 조건을
+    // 뒤집어 `JMP` 하나를 건너뛴다.
+    instructions.push(Instruction::LdaAbsolute(CURSOR_PHASE));
+    let restore_branch = next_address(origin, &instructions)?;
+    let restore_here = restore_branch
+        .checked_add(2 + 3)
+        .context("transport phase branch address overflow")?;
+    instructions.push(Instruction::BeqAbsolute(restore_here));
+    let overlay_placeholder = instructions.len();
+    instructions.push(Instruction::JmpAbsolute(origin));
+
+    instructions.extend(map_data_page(Instruction::LdaImmediate(
+        SOURCE_PAGE_MMC3_PAGE,
+    )));
+    let restore_start = next_address(origin, &instructions)?;
+    instructions.extend(restore_body(restore_start)?);
+    let after_restore_placeholder = instructions.len();
+    instructions.push(Instruction::JmpAbsolute(origin));
+
+    let overlay_start = next_address(origin, &instructions)?;
+    instructions[overlay_placeholder] = Instruction::JmpAbsolute(overlay_start);
+    instructions.extend(tile_body(overlay_start, atlas_page)?);
 
     let epilogue_start_index = instructions.len();
     let epilogue_address = next_address(origin, &instructions)?;
-    instructions.extend(frame_epilogue(epilogue_address));
+    instructions[after_restore_placeholder] = Instruction::JmpAbsolute(epilogue_address);
+    let (epilogue, needs_done) = frame_epilogue(epilogue_address)?;
+    instructions.extend(epilogue);
     let done = next_address(origin, &instructions)?;
-    let pending_branch = instructions[epilogue_start_index..]
-        .iter()
-        .position(|instruction| matches!(instruction, Instruction::BneAbsolute(_)))
-        .context("the transport epilogue lost its pending branch")?;
-    instructions[epilogue_start_index + pending_branch] = Instruction::BneAbsolute(done);
+    for index in needs_done {
+        let slot = epilogue_start_index + index;
+        instructions[slot] = match instructions[slot] {
+            Instruction::BneAbsolute(_) => Instruction::BneAbsolute(done),
+            _ => Instruction::JmpAbsolute(done),
+        };
+    }
     instructions[finished_jump] = Instruction::JmpAbsolute(done);
     instructions.push(Instruction::Rts);
 
@@ -273,16 +416,21 @@ pub(super) fn build_transport_routine(origin: u16, atlas_page: u8) -> Result<Run
 }
 
 /// 한 프레임이 최악의 경우 쓰는 사이클이다. 실제로 방출하는 명령에서 센다.
+/// 두 단계 중 비싼 쪽을 센다. 예산은 어느 단계가 돌든 지켜져야 한다.
 pub(super) fn worst_case_frame_cycles(origin: u16, atlas_page: u8) -> Result<u32> {
     let (prologue, _) = frame_prologue(origin)?;
     let loop_start = next_address(origin, &prologue)?;
-    Ok(worst_case_cycles(&prologue)?
-        + worst_case_cycles(&tile_body(loop_start, atlas_page)?)? * u32::from(TILES_PER_FRAME)
+    let fixed = worst_case_cycles(&prologue)?
         + worst_case_cycles_with_calls(
-            &frame_epilogue(origin),
+            &frame_epilogue(origin)?.0,
             &CHR_RESTORE_HELPERS.map(|helper| (helper, CHR_HELPER_WORST_CASE_CYCLES)),
         )?
-        + u32::from(Instruction::Rts.worst_case_cycles()))
+        + u32::from(Instruction::Rts.worst_case_cycles());
+    let overlay =
+        worst_case_cycles(&tile_body(loop_start, atlas_page)?)? * u32::from(TILES_PER_FRAME);
+    let restore =
+        worst_case_cycles(&restore_body(loop_start)?)? * u32::from(RESTORE_CHUNKS_PER_FRAME);
+    Ok(fixed + overlay.max(restore))
 }
 
 #[cfg(test)]
@@ -350,16 +498,22 @@ mod tests {
     #[test]
     fn borrowed_zero_page_is_restored_in_reverse_order() {
         let (prologue, _) = frame_prologue(0xA000).unwrap();
+        // 밀기는 «제로 페이지 적재 뒤에 곧바로 `PHA`»인 짝만 센다. 배치 계산이 같은
+        // 바이트를 읽는 것과 섞이지 않게 한다.
         let pushed: Vec<u8> = prologue
-            .iter()
-            .filter_map(|instruction| match instruction {
-                Instruction::LdaZeroPage(address) if BORROWED_SCRATCH.contains(address) => {
+            .windows(2)
+            .filter_map(|window| match window {
+                [Instruction::LdaZeroPage(address), Instruction::Pha]
+                    if BORROWED_SCRATCH.contains(address) =>
+                {
                     Some(*address)
                 }
                 _ => None,
             })
             .collect();
         let restored: Vec<u8> = frame_epilogue(0xA000)
+            .unwrap()
+            .0
             .iter()
             .filter_map(|instruction| match instruction {
                 Instruction::StaZeroPage(address) if BORROWED_SCRATCH.contains(address) => {

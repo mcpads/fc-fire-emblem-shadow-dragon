@@ -12,9 +12,9 @@
 //! 하드 상한이 `$07DF`다. 공유 계약 아래에 네 바이트를 이어 잡으면 `$07EF`에
 //! 걸리는데 그 자리는 원본이 쓴다.
 //!
-//! 커서가 네 바이트인 것은 목적지 PPU 주소도 원본 주소도 담지 않기 때문이다.
-//! 목적지는 항목이 담은 코드에서 `$1000 + code × 16`으로 나오고, 원본 주소는 항목이
-//! 그대로 담고 있다.
+//! 커서가 목적지 PPU 주소도 원본 주소도 담지 않는 것은 둘 다 유도되기 때문이다.
+//! 덮기 단계의 목적지는 항목이 담은 코드에서 `$1000 + code × 16`으로 나오고 원본
+//! 주소는 항목이 그대로 담고 있다. 복원 단계는 양쪽 다 «몇 덩어리 남았나»에서 나온다.
 
 use super::runtime_state_storage::CANDIDATE_START;
 
@@ -27,8 +27,14 @@ pub(super) const CURSOR_ENTRY_LOW: u16 = CANDIDATE_START + SHARED_CONTRACT_BYTE_
 pub(super) const CURSOR_ENTRY_HIGH: u16 = CURSOR_ENTRY_LOW + 1;
 /// 그룹 덩이가 들어 있는 MMC3 페이지다. 소비자가 타일마다 이 페이지를 건다.
 pub(super) const CURSOR_GROUP_PAGE: u16 = CURSOR_ENTRY_LOW + 2;
-/// 아직 올리지 못한 타일 수다. 0이 되면 전송이 끝난다.
+/// 이번 단계에서 아직 처리하지 못한 몫이다. 복원 단계에서는 덩어리 수, 덮기 단계에서는
+/// 타일 수다.
 pub(super) const CURSOR_REMAINING_TILES: u16 = CURSOR_ENTRY_LOW + 3;
+/// 지금 어느 단계인지다. 0이면 원본 페이지 복원, 1이면 한글 타일 덮기다.
+pub(super) const CURSOR_PHASE: u16 = CURSOR_ENTRY_LOW + 4;
+/// 복원 단계 동안 보관해 두는 덮기 타일 수다. 두 단계가 같은 «남은 몫» 바이트를
+/// 쓰기 때문에 따로 담아 둔다.
+pub(super) const CURSOR_OVERLAY_TILES: u16 = CURSOR_ENTRY_LOW + 5;
 
 #[cfg(test)]
 mod tests {
@@ -40,7 +46,7 @@ mod tests {
     fn the_cursor_lives_inside_the_proven_reservation() {
         assert_eq!(CURSOR_ENTRY_LOW, CANDIDATE_START + SHARED_CONTRACT_BYTE_COUNT);
         assert_eq!(
-            CURSOR_REMAINING_TILES,
+            CURSOR_OVERLAY_TILES,
             super::super::runtime_state_storage::CANDIDATE_END
         );
     }
@@ -54,9 +60,11 @@ mod tests {
             CURSOR_ENTRY_HIGH,
             CURSOR_GROUP_PAGE,
             CURSOR_REMAINING_TILES,
+            CURSOR_PHASE,
+            CURSOR_OVERLAY_TILES,
         ];
 
-        assert_eq!(slots.len(), 4);
+        assert_eq!(slots.len(), 6);
         for pair in slots.windows(2) {
             assert_eq!(pair[1], pair[0] + 1, "cursor slots must be contiguous");
         }

@@ -19,8 +19,10 @@
 use anyhow::{Context, Result};
 
 use super::super::runtime_cursor_storage::{
-    CURSOR_ENTRY_HIGH, CURSOR_ENTRY_LOW, CURSOR_GROUP_PAGE, CURSOR_REMAINING_TILES,
+    CURSOR_ENTRY_HIGH, CURSOR_ENTRY_LOW, CURSOR_GROUP_PAGE, CURSOR_OVERLAY_TILES, CURSOR_PHASE,
+    CURSOR_REMAINING_TILES,
 };
+use super::transport::{PHASE_RESTORE, RESTORE_CHUNK_COUNT};
 use super::{RuntimeRoutine, next_address};
 use crate::rp2a03::{Instruction, assemble_at};
 
@@ -244,7 +246,8 @@ pub(in crate::full_translation_install) fn build_resolve_request(
         Instruction::StaZeroPage(0x01),
         Instruction::LdyImmediate(0),
         Instruction::LdaIndirectY(0x00),
-        Instruction::StaAbsolute(CURSOR_REMAINING_TILES),
+        // 덮기 몫은 보관해 둔다. 먼저 도는 것은 복원 단계다.
+        Instruction::StaAbsolute(CURSOR_OVERLAY_TILES),
     ]);
     // 항목 수가 0인 그룹은 올릴 것이 없다. 요청을 세우지 않는다.
     failure_branches.push(branch_to_failure(
@@ -260,6 +263,11 @@ pub(in crate::full_translation_install) fn build_resolve_request(
         Instruction::LdaZeroPage(0x03),
         Instruction::AdcImmediate(0),
         Instruction::StaAbsolute(CURSOR_ENTRY_HIGH),
+        // 합성은 원본 배경 페이지를 되살리는 것부터다. 덮기만 하면 맵 타일이 사라진다.
+        Instruction::LdaImmediate(PHASE_RESTORE),
+        Instruction::StaAbsolute(CURSOR_PHASE),
+        Instruction::LdaImmediate(RESTORE_CHUNK_COUNT),
+        Instruction::StaAbsolute(CURSOR_REMAINING_TILES),
         Instruction::Sec,
     ]);
     restore_scratch(&mut instructions);
@@ -332,6 +340,8 @@ mod tests {
             CURSOR_ENTRY_HIGH,
             CURSOR_GROUP_PAGE,
             CURSOR_REMAINING_TILES,
+            CURSOR_PHASE,
+            CURSOR_OVERLAY_TILES,
         ] {
             let store = [0x8D, cursor as u8, (cursor >> 8) as u8];
             let at = routine

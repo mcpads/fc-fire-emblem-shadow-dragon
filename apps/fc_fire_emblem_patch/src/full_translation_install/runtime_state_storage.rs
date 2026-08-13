@@ -17,10 +17,10 @@ use concurrent_access::{ConcurrentRuntimeAccessContract, bind_concurrent_runtime
 use source_contract::{RuntimeStateSourceAccessContract, bind_runtime_state_source_accesses};
 
 pub(super) const CANDIDATE_START: u16 = 0x07F0;
-/// 다섯 바이트는 생산자와 소비자의 공유 계약이고, 뒤의 네 바이트는 소비자만
+/// 다섯 바이트는 생산자와 소비자의 공유 계약이고, 뒤의 여섯 바이트는 소비자만
 /// 쓰는 전송 커서다. 소유자는 다르지만 «주 대사가 활성인 동안만 산다»는 수명이
 /// 같으므로 같은 증명 아래 둔다. 증명을 둘로 나누면 약한 쪽이 생긴다.
-pub(super) const CANDIDATE_END: u16 = 0x07F8;
+pub(super) const CANDIDATE_END: u16 = 0x07FA;
 
 #[derive(Serialize)]
 pub(super) struct DialogueRuntimeStateStoragePlan {
@@ -102,7 +102,7 @@ pub(super) fn plan_dialogue_runtime_state_storage(
 
     Ok(DialogueRuntimeStateStoragePlan {
         strategy: "own one nine-byte scratch range only from a cold-initialized main-dialogue entry through its terminal or external-caller invalidation; the first five bytes are the producer-consumer contract, the last four are the consumer-only transport cursor; inactive screens may clobber it",
-        candidate_cpu_range_hex: "0x07F0..0x07F8",
+        candidate_cpu_range_hex: "0x07F0..0x07FA",
         required_byte_count: usize::from(CANDIDATE_END - CANDIDATE_START + 1),
         ownership_lifetime: "main dialogue active, including page transitions; battle and every inactive or external-caller lifetime are excluded",
         main_dialogue_handler_root_count: roots.len(),
@@ -132,7 +132,7 @@ pub(super) fn plan_dialogue_runtime_state_storage(
         },
         every_entry_cold_initializes_all_bytes: false,
         runtime_initializer_emitted: false,
-        selected_cpu_range_hex: selection_complete.then_some("0x07F0..0x07F8"),
+        selected_cpu_range_hex: selection_complete.then_some("0x07F0..0x07FA"),
         selection_complete,
         complete: false,
     })
@@ -179,7 +179,7 @@ mod tests {
     #[test]
     fn the_reservation_starts_after_the_battle_reservation_and_covers_both_owners() {
         const SHARED_CONTRACT_BYTES: u16 = 5;
-        const TRANSPORT_CURSOR_BYTES: u16 = 4;
+        const TRANSPORT_CURSOR_BYTES: u16 = 6;
 
         assert_eq!(CANDIDATE_START, BATTLE_RUNTIME_STORAGE_END + 1);
         assert_eq!(
