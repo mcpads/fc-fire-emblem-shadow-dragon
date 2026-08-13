@@ -192,19 +192,11 @@ pub(super) fn worst_case_frame_cycles(origin: u16) -> Result<u32> {
 mod tests {
     use super::*;
 
-    /// `$C179` 진입 시점의 vblank 잔여를 실측한 값이다.
-    const MEASURED_VBLANK_REMAINDER: u32 = 1_704;
-    /// 실기 여유다. 이 비율은 의사결정 64번이 정했다.
-    const SAFETY_MARGIN_PERCENT: u32 = 20;
-    /// 트램폴린이 게이트와 뱅크 전환에 쓰는 몫이다. 트램폴린 쪽 테스트가 지킨다.
-    const TRAMPOLINE_RESERVE_CYCLES: u32 = 120;
-
     /// 한 프레임이 vblank를 넘지 않아야 한다. 넘으면 렌더링 중에 `$2007`을 쓰게 되고
     /// 그것은 에뮬레이터에서는 대체로 보이지 않는 실기 손상이다.
     #[test]
     fn one_frame_of_transport_fits_the_measured_vblank_remainder() {
-        let allowed = MEASURED_VBLANK_REMAINDER * (100 - SAFETY_MARGIN_PERCENT) / 100
-            - TRAMPOLINE_RESERVE_CYCLES;
+        let allowed = super::super::budgeted_transport_cycles();
 
         let worst_case = worst_case_frame_cycles(0xB000).unwrap();
 
@@ -218,8 +210,7 @@ mod tests {
     /// 이 단언이 깨지면 예산을 늘릴 여지가 생긴 것이므로 다시 유도한다.
     #[test]
     fn the_budget_is_the_largest_batch_that_still_fits() {
-        let allowed = MEASURED_VBLANK_REMAINDER * (100 - SAFETY_MARGIN_PERCENT) / 100
-            - TRAMPOLINE_RESERVE_CYCLES;
+        let allowed = super::super::budgeted_transport_cycles();
         let prologue = frame_prologue(0xB000).unwrap().0;
         let loop_start = next_address(0xB000, &prologue).unwrap();
         let per_tile = worst_case_cycles(&tile_body(loop_start));

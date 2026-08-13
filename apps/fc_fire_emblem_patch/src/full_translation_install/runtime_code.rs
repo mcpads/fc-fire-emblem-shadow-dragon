@@ -7,7 +7,25 @@ use anyhow::{Context, Result, ensure};
 
 use crate::rp2a03::{Instruction, assemble_at};
 
+pub(super) mod trampoline;
 pub(super) mod transport;
+
+/// `$C179` 진입 시점에 남아 있는 vblank다. 앞에 NMI 진입 오버헤드와 OAM DMA밖에
+/// 없고 둘 다 고정 비용이라 이 값은 표본이 아니라 상수다. 에뮬레이터 실측으로
+/// 확인했고 계산값 `2,273 − 566`과 3사이클 차이다. 의사결정 64번을 따른다.
+const MEASURED_VBLANK_REMAINDER: u32 = 1_704;
+/// 실기 여유다. 남은 vblank를 전부 쓰지 않는다.
+const SAFETY_MARGIN_PERCENT: u32 = 20;
+/// `$C179`의 `JSR`가 쓰는 몫이다.
+const CONSUMER_HOOK_CALL_CYCLES: u32 = 6;
+/// 트램폴린이 게이트·뱅크 전환·복원에 쓰는 몫이다. 트램폴린 쪽 시험이 이 값을
+/// 실제로 지키는지 확인한다.
+const TRAMPOLINE_RESERVE_CYCLES: u32 = 120;
+
+/// 전송 루틴이 한 프레임에 쓸 수 있는 사이클이다.
+const fn budgeted_transport_cycles() -> u32 {
+    MEASURED_VBLANK_REMAINDER * (100 - SAFETY_MARGIN_PERCENT) / 100 - TRAMPOLINE_RESERVE_CYCLES
+}
 
 /// ROM의 한 자리에 놓이는 실행 코드 조각이다.
 pub(super) struct RuntimeRoutine {
