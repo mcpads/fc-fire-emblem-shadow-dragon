@@ -28,8 +28,7 @@ use crate::{
 const MAIN_DIALOGUE_BANK: u8 = 0x0A;
 const FIXED_BANK_SIZE: usize = 16 * 1024;
 const MMC3_PAGE_BYTE_COUNT: usize = 8 * 1024;
-/// 재료 용기가 시작하는 페이지다. atlas는 이 페이지 안에 있다.
-const MATERIAL_FIRST_PAGE: u8 = 0x2C;
+use super::runtime_material::{RUNTIME_CODE_MMC3_PAGE, RUNTIME_MATERIAL_FIRST_PAGE as MATERIAL_FIRST_PAGE};
 /// 재료 용기 헤더와 구역 표를 지난 자리다. 실제 설치에서 atlas가 시작하는 곳과 같다.
 const ATLAS_CONTAINER_OFFSET: u16 = 46;
 /// 실행 코드가 놓이는 CPU 주소다. 전체 설치가 계산하는 값과 같다.
@@ -170,7 +169,7 @@ fn runtime_code_file_offset(rom: &Rom, address: u16) -> Result<usize> {
         (0xA000..0xC000).contains(&address),
         "runtime code address is outside the A000 window"
     );
-    let page = usize::from(MATERIAL_FIRST_PAGE) + 2;
+    let page = usize::from(RUNTIME_CODE_MMC3_PAGE);
     ensure!(
         (page + 1) * MMC3_PAGE_BYTE_COUNT <= rom.prg().len(),
         "the runtime code page is outside PRG"

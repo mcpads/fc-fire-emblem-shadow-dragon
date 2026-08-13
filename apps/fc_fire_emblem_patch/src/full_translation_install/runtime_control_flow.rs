@@ -31,7 +31,7 @@ const SAMPLE_INITIAL_SELECTOR_END: u16 = 0xFA00;
 const CENTRAL_SELECTOR_FALLBACK: u16 = 0xFF40;
 /// 생산자 다섯 곳, NMI 소비자 하나, 디스패처 게이트 하나다.
 const PLANNED_HOOK_COUNT: usize = 7;
-const RUNTIME_CODE_MMC3_PAGE: u8 = 0x2E;
+use super::runtime_material::{RUNTIME_CODE_MMC3_PAGE, RUNTIME_MATERIAL_FIRST_PAGE, RUNTIME_MATERIAL_PAGE_COUNT};
 const RUNTIME_CODE_WINDOW_START: u16 = 0xA000;
 const BATTLE_SOURCE_PAGE_MMC3_PAGE: u8 = 0x21;
 const EXPECTED_COMPLETED_PAGE_SOURCE_SHA1: &str = "8c2a9f5a6e028a59409f9cc254add2b81f318b21";
@@ -275,10 +275,12 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         "dialogue runtime fixed trampoline cave is no longer exact FF"
     );
 
-    let runtime_code_page_offset = usize::from(RUNTIME_CODE_MMC3_PAGE - 0x2C) * 8 * 1024;
+    let runtime_code_page_offset =
+        usize::from(RUNTIME_CODE_MMC3_PAGE - RUNTIME_MATERIAL_FIRST_PAGE) * 8 * 1024;
     ensure!(
         inputs.runtime_code_offset >= runtime_code_page_offset
-            && inputs.runtime_code_offset + inputs.runtime_code_byte_count == 3 * 8 * 1024,
+            && inputs.runtime_code_offset + inputs.runtime_code_byte_count
+                == RUNTIME_MATERIAL_PAGE_COUNT * 8 * 1024,
         "dialogue runtime code is not the tail of MMC3 page 2E"
     );
     let runtime_code_cpu_start = RUNTIME_CODE_WINDOW_START
@@ -518,12 +520,15 @@ mod tests {
     /// 자료가 줄면 코드 자리는 넓어지고, 늘면 좁아진다.
     #[test]
     fn runtime_code_occupies_the_window_tail_whatever_the_material_size() {
-        let page_offset = usize::from(RUNTIME_CODE_MMC3_PAGE - 0x2C) * 8 * 1024;
-        for offset in [22_688usize, 21_642, 16_384] {
+        let capacity = RUNTIME_MATERIAL_PAGE_COUNT * 8 * 1024;
+        let page_offset =
+            usize::from(RUNTIME_CODE_MMC3_PAGE - RUNTIME_MATERIAL_FIRST_PAGE) * 8 * 1024;
+        // 마지막 장 안의 어느 자리에서 자료가 끝나든 같은 관계가 성립해야 한다.
+        for offset in [page_offset, page_offset + 2_945, capacity - 1_888] {
             let cpu = RUNTIME_CODE_WINDOW_START + u16::try_from(offset - page_offset).unwrap();
 
             assert!(cpu >= RUNTIME_CODE_WINDOW_START && cpu < 0xC000);
-            assert_eq!(usize::from(0xC000 - cpu), 3 * 8 * 1024 - offset);
+            assert_eq!(usize::from(0xC000 - cpu), capacity - offset);
         }
     }
 

@@ -32,8 +32,7 @@ use crate::rp2a03::{Instruction, assemble_at};
 pub(super) const TRAMPOLINE_ORIGIN: u16 = 0xF400;
 /// 그 동굴의 끝이다. 넘으면 원본 자료를 덮는다.
 pub(super) const TRAMPOLINE_CAVE_END: u16 = 0xF4B0;
-/// 실행 코드가 들어 있는 MMC3 8 KiB 페이지다.
-pub(super) const RUNTIME_CODE_MMC3_PAGE: u8 = 0x2E;
+pub(super) use super::super::runtime_material::RUNTIME_CODE_MMC3_PAGE;
 
 const BANK_SELECT_REGISTER: u16 = 0x8000;
 const BANK_VALUE_REGISTER: u16 = 0x8001;

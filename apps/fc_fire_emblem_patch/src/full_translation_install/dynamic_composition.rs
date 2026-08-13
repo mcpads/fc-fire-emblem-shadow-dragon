@@ -40,6 +40,12 @@ pub(super) struct DialogueRuntimeCompositionPlan {
     pub(super) direct_delta_recipe_byte_count: usize,
     pub(super) bitpacked_delta_recipe_byte_count: usize,
     pub(super) dense_group_lookup_byte_count: usize,
+    /// 그룹마다 «이 그룹이 실제로 쓰는 코드» 목록의 시작 오프셋 표다.
+    pub(super) group_tile_list_directory_byte_count: usize,
+    /// 그 목록들의 총 길이다. 코드 한 바이트씩이다.
+    pub(super) group_tile_list_byte_count: usize,
+    /// 스캔 재료 안에서 목록 오프셋 표가 시작하는 자리다.
+    pub(super) group_tile_list_directory_offset: usize,
     pub(super) record_page_group_selector_byte_count: usize,
     pub(super) record_selector_directory_byte_count: usize,
     pub(super) scan_material_byte_count: usize,
@@ -248,9 +254,18 @@ pub(super) fn plan_dialogue_runtime_composition(
     let dense_group_lookup_byte_count = codebook.page_assignments.len() * (256 + 64);
     let record_page_group_selector_byte_count = dialogue.page_worksets.len();
     let record_selector_directory_byte_count = (record_worksets.len() + 1) * 2;
-    let scan_material_byte_count = dense_group_lookup_byte_count
+    let group_tile_list_directory_byte_count = (codebook.page_assignments.len() + 1) * 2;
+    let group_tile_list_byte_count = codebook
+        .page_assignments
+        .iter()
+        .map(|assignments| assignments.len())
+        .sum::<usize>();
+    let group_tile_list_directory_offset = dense_group_lookup_byte_count
         + record_page_group_selector_byte_count
         + record_selector_directory_byte_count;
+    let scan_material_byte_count = group_tile_list_directory_offset
+        + group_tile_list_directory_byte_count
+        + group_tile_list_byte_count;
     let scan_material = encode_scan_material(
         dialogue,
         codebook,
@@ -308,6 +323,9 @@ pub(super) fn plan_dialogue_runtime_composition(
         direct_delta_recipe_byte_count,
         bitpacked_delta_recipe_byte_count,
         dense_group_lookup_byte_count,
+        group_tile_list_directory_byte_count,
+        group_tile_list_byte_count,
+        group_tile_list_directory_offset,
         record_page_group_selector_byte_count,
         record_selector_directory_byte_count,
         scan_material_byte_count,
@@ -471,7 +489,33 @@ fn encode_scan_material(
     );
     encoded.extend_from_slice(&selectors);
     encoded.extend_from_slice(&directory);
+    let (group_directory, group_lists) = encode_group_tile_lists(&codebook.page_assignments);
+    encoded.extend_from_slice(&group_directory);
+    encoded.extend_from_slice(&group_lists);
     Ok(encoded)
+}
+
+/// 그룹마다 실제로 쓰는 코드 목록을 만든다.
+///
+/// 런타임이 조밀 조회표의 클래스 비트를 훑어 존재 여부를 가리면 프레임마다 코드
+/// 256개를 가변 시프트로 풀어야 한다. 그 비용은 타일 수에 비례하지 않아 예산에
+/// 들어가지 않는다. 그래서 빌드가 미리 세운다.
+///
+/// atlas 색인은 담지 않는다. 기존 조밀 조회표가 코드로 곧바로 주기 때문이고,
+/// 색인을 함께 담으면 세 배가 되어 용기에 들어가지 않는다.
+fn encode_group_tile_lists(page_assignments: &[BTreeMap<char, u8>]) -> (Vec<u8>, Vec<u8>) {
+    let mut directory = Vec::with_capacity((page_assignments.len() + 1) * 2);
+    let mut lists = Vec::new();
+    for assignments in page_assignments {
+        directory.extend_from_slice(&(lists.len() as u16).to_le_bytes());
+        // 코드 오름차순으로 담는다. 순서가 정해져 있어야 목록을 다시 만들었을 때
+        // 같은 바이트가 나오고, 런타임 커서가 중간에서 이어받을 수 있다.
+        let mut codes: Vec<u8> = assignments.values().copied().collect();
+        codes.sort_unstable();
+        lists.extend_from_slice(&codes);
+    }
+    directory.extend_from_slice(&(lists.len() as u16).to_le_bytes());
+    (directory, lists)
 }
 
 fn encode_dense_group_lookups(
@@ -610,5 +654,44 @@ mod tests {
         assert_eq!((classes >> ((0x42 % 4) * 2)) & 0b11, 0);
         assert_eq!((classes >> ((0x43 % 4) * 2)) & 0b11, 1);
         assert_eq!(encoded[256] & 0b11, 0b11);
+    }
+
+    /// 목록은 그 그룹이 쓰는 코드를 하나도 빠뜨리지 않고, 쓰지 않는 코드를 담지
+    /// 않아야 한다. 빠지면 그 글자가 CHR RAM에 안 올라가고, 남으면 원본 글꼴 타일을
+    /// 덮는다. 둘 다 화면에 잘못된 글자를 낸다.
+    #[test]
+    fn every_group_list_holds_exactly_the_codes_that_group_assigns() {
+        let assignments = vec![
+            BTreeMap::from([('가', 0x42u8), ('나', 0x10)]),
+            BTreeMap::from([('다', 0x80u8)]),
+        ];
+
+        let (directory, lists) = encode_group_tile_lists(&assignments);
+
+        assert_eq!(directory.len(), (assignments.len() + 1) * 2);
+        for (group, expected) in assignments.iter().enumerate() {
+            let start = usize::from(u16::from_le_bytes([
+                directory[group * 2],
+                directory[group * 2 + 1],
+            ]));
+            let end = usize::from(u16::from_le_bytes([
+                directory[group * 2 + 2],
+                directory[group * 2 + 3],
+            ]));
+            let mut wanted: Vec<u8> = expected.values().copied().collect();
+            wanted.sort_unstable();
+            assert_eq!(&lists[start..end], wanted.as_slice());
+        }
+    }
+
+    /// 오프셋 표의 마지막 항목이 전체 길이여야 마지막 그룹의 끝을 알 수 있다.
+    #[test]
+    fn the_group_directory_brackets_the_last_list() {
+        let assignments = vec![BTreeMap::from([('가', 1u8), ('나', 2u8)])];
+
+        let (directory, lists) = encode_group_tile_lists(&assignments);
+
+        let end = usize::from(u16::from_le_bytes([directory[2], directory[3]]));
+        assert_eq!(end, lists.len());
     }
 }

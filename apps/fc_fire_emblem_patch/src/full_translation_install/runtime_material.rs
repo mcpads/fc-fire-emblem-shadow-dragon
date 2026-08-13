@@ -7,7 +7,17 @@ const MATERIAL_MAGIC: &[u8; 4] = b"FDRM";
 const MATERIAL_SCHEMA: u8 = 1;
 const MATERIAL_HEADER_BYTE_COUNT: usize = 16;
 const SECTION_DESCRIPTOR_BYTE_COUNT: usize = 6;
-const RUNTIME_MATERIAL_PAGE_COUNT: usize = 3;
+/// 용기가 차지하는 MMC3 8 KiB 페이지 수다.
+///
+/// 셋이었다가 넷이 됐다. 그룹별 타일 목록이 스캔 재료에 들어오면서 세 페이지로는
+/// 실행 코드 자리가 남지 않았다. 페이지 `2F`부터 `3D`까지가 전부 비어 있어 늘려도
+/// 밀려나는 도메인이 없다.
+pub(super) const RUNTIME_MATERIAL_PAGE_COUNT: usize = 4;
+/// 용기가 시작하는 MMC3 페이지다.
+pub(super) const RUNTIME_MATERIAL_FIRST_PAGE: u8 = 0x2C;
+/// 실행 코드가 놓이는 페이지다. 용기의 마지막 장이고 `$A000` 창에 걸린다.
+pub(super) const RUNTIME_CODE_MMC3_PAGE: u8 =
+    RUNTIME_MATERIAL_FIRST_PAGE + RUNTIME_MATERIAL_PAGE_COUNT as u8 - 1;
 const MMC3_PAGE_BYTE_COUNT: usize = 8 * 1024;
 const RUNTIME_MATERIAL_CAPACITY: usize = RUNTIME_MATERIAL_PAGE_COUNT * MMC3_PAGE_BYTE_COUNT;
 const CONTENT_EMITTED_FLAG: u8 = 1;
