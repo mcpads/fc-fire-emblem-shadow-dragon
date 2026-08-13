@@ -14,8 +14,8 @@ use crate::{
     rp2a03::{Instruction, assemble_at},
 };
 
-pub(in crate::full_translation_install) mod chr_page_shadow;
 pub(in crate::full_translation_install) mod chr_selector;
+pub(in crate::full_translation_install) mod chr_source_state;
 pub(in crate::full_translation_install) mod dispatcher_gate;
 pub(in crate::full_translation_install) mod lifecycle;
 pub(in crate::full_translation_install) mod resolve_request;
@@ -38,8 +38,6 @@ pub(in crate::full_translation_install) enum DialogueRuntimeHookRole {
     NmiPageComposer,
     DispatcherGate,
     ChrRamSelector,
-    ChrFdPageObservation,
-    ChrFePageObservation,
 }
 
 /// 훅이 가져가는 원본 자리다.
@@ -123,7 +121,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     dispatcher_gate::bind_dispatcher_entry(source, candidate)?;
     lifecycle::bind_lifecycle_sites(source, candidate)?;
     chr_selector::bind_selector_chain_site(candidate)?;
-    chr_page_shadow::bind_chr_helper_site(candidate)?;
+    chr_source_state::bind_chr_source_state(candidate)?;
 
     let transport = transport::build_transport_routine(runtime_code_cpu_start, atlas_page)?;
     let resolver_origin = transport.address
@@ -136,24 +134,21 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     let next_page_resolver_address = next_page_resolver.address;
     let trampoline_routine = trampoline::build_trampoline(bank_restore, transport.address)?;
 
-    let gate = dispatcher_gate::build_dispatcher_gate(chr_page_shadow::OBSERVER_CAVE_ORIGIN)?;
-    let observer_origin = gate.address
-        + u16::try_from(gate.bytes.len()).context("dispatcher gate length overflow")?;
-    let observer = chr_page_shadow::build_chr_page_observer(observer_origin)?;
-    let observer_address = observer.address;
+    let gate =
+        dispatcher_gate::build_dispatcher_gate(dispatcher_gate::RECLAIMED_GATE_CAVE_ORIGIN)?;
     let gate_address = gate.address;
     let mut fixed_support_bytes = gate.bytes;
-    fixed_support_bytes.extend_from_slice(&observer.bytes);
-    let fixed_support_capacity =
-        usize::from(chr_page_shadow::OBSERVER_CAVE_END - chr_page_shadow::OBSERVER_CAVE_ORIGIN);
+    let fixed_support_capacity = usize::from(
+        dispatcher_gate::RECLAIMED_GATE_CAVE_END - dispatcher_gate::RECLAIMED_GATE_CAVE_ORIGIN,
+    );
     ensure!(
         fixed_support_bytes.len() <= fixed_support_capacity,
         "dialogue dispatcher and observer suite exceeds its reclaimed cave"
     );
     fixed_support_bytes.resize(fixed_support_capacity, 0xFF);
     let fixed_support = RuntimeRoutine {
-        role: "dialogue dispatcher gate and CHR page observer suite",
-        address: chr_page_shadow::OBSERVER_CAVE_ORIGIN,
+        role: "dialogue dispatcher gate",
+        address: dispatcher_gate::RECLAIMED_GATE_CAVE_ORIGIN,
         bytes: fixed_support_bytes,
     };
 
@@ -198,8 +193,8 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     let reclaimed_fixed_routines = vec![
         ReclaimedFixedRuntimeRoutine {
             routine: fixed_support,
-            source_end_exclusive: chr_page_shadow::OBSERVER_CAVE_END,
-            expected_source_sha1: chr_page_shadow::EXPECTED_SAMPLE_OBSERVER_CAVE_SHA1,
+            source_end_exclusive: dispatcher_gate::RECLAIMED_GATE_CAVE_END,
+            expected_source_sha1: dispatcher_gate::EXPECTED_RECLAIMED_GATE_CAVE_SHA1,
         },
         ReclaimedFixedRuntimeRoutine {
             routine: lifecycle.routine,
@@ -209,12 +204,6 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     ];
 
     let mut hooks = vec![
-        DialogueRuntimeHook {
-            role: DialogueRuntimeHookRole::ChrFdPageObservation,
-            write_role: "dialogue CHR FD page observer hook",
-            site: DialogueRuntimeHookSite::Fixed(chr_page_shadow::CHR_HELPER_SITE),
-            bytes: chr_page_shadow::helper_hook_bytes(observer_address).to_vec(),
-        },
         DialogueRuntimeHook {
             role: DialogueRuntimeHookRole::ChrRamSelector,
             write_role: "dialogue CHR RAM selector hook",

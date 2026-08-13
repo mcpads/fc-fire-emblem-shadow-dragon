@@ -35,7 +35,7 @@ const CENTRAL_SELECTOR_FALLBACK: u16 = 0xFF40;
 /// 완성된 대사 수명이 원본 제어 흐름에 끼어들어야 하는 모든 역할이다.
 ///
 /// 주소의 개수가 아니다. 완료 판정은 이 역할 집합에서 빠진 것이 없는지를 본다.
-const PLANNED_HOOK_ROLES: [DialogueRuntimeHookRole; 11] = [
+const PLANNED_HOOK_ROLES: [DialogueRuntimeHookRole; 9] = [
     DialogueRuntimeHookRole::InitialDirectEntryRequest,
     DialogueRuntimeHookRole::E4TransitionEntryRequest,
     DialogueRuntimeHookRole::E6TransitionEntryRequest,
@@ -45,8 +45,6 @@ const PLANNED_HOOK_ROLES: [DialogueRuntimeHookRole; 11] = [
     DialogueRuntimeHookRole::NmiPageComposer,
     DialogueRuntimeHookRole::DispatcherGate,
     DialogueRuntimeHookRole::ChrRamSelector,
-    DialogueRuntimeHookRole::ChrFdPageObservation,
-    DialogueRuntimeHookRole::ChrFePageObservation,
 ];
 use super::runtime_material::{
     RUNTIME_CODE_MMC3_PAGE, RUNTIME_MATERIAL_FIRST_PAGE, RUNTIME_MATERIAL_PAGE_COUNT,
@@ -127,6 +125,7 @@ struct FontPageBuilder {
     source_page_mmc3_page_hex: &'static str,
     source_page_sha1: String,
     source_page_matches_original_font: bool,
+    source_page_matches_active_fd_fe_backdrop: bool,
     runtime_code_mmc3_page_hex: String,
     runtime_code_cpu_start_hex: String,
     runtime_code_cpu_end_exclusive_hex: &'static str,
@@ -223,13 +222,13 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         (
             "E4_transition_entry",
             0x85F8,
-            "continuous_page_zero",
+            "cold_rebuild_page_zero",
             "same visible dialogue lifetime",
         ),
         (
             "E6_transition_entry",
             0x865F,
-            "continuous_page_zero",
+            "cold_rebuild_page_zero",
             "same visible dialogue lifetime",
         ),
         (
@@ -403,7 +402,7 @@ pub(super) fn plan_dialogue_runtime_control_flow(
                 prg_bank_hex: "0x0A",
                 cpu_address_hex: "0x85C9",
                 source_span_byte_count: 29,
-                request: "continuous_next_page_if_present_otherwise_leave_page_ready_until_boundary",
+                request: "cold_rebuild_next_page_if_present_otherwise_leave_page_ready_until_boundary",
                 continuity: "same display path",
             },
             RuntimeProducer {
@@ -426,7 +425,7 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         .collect();
 
     Ok(DialogueRuntimeControlFlowPlan {
-        strategy: "derive every request from the original main-dialogue state machine, compose one complete page group in the existing render-disabled NMI owner, and select CHR RAM only after that exact request is ready",
+        strategy: "derive every request from the original main-dialogue state machine, cold-compose one complete page group in the quiet-frame NMI consumer, and select CHR RAM only after that exact request is ready",
         states: vec![
             RuntimeState {
                 id: "inactive",
@@ -435,10 +434,6 @@ pub(super) fn plan_dialogue_runtime_control_flow(
             RuntimeState {
                 id: "cold_requested",
                 meaning: "build the source font page and the requested group before selection",
-            },
-            RuntimeState {
-                id: "continuous_requested",
-                meaning: "apply the exact group transition from the currently ready dialogue page",
             },
             RuntimeState {
                 id: "ready",
@@ -461,16 +456,17 @@ pub(super) fn plan_dialogue_runtime_control_flow(
             registers_and_status_preserved: true,
         },
         font_page_builder: FontPageBuilder {
-            strategy: "cold source-page rebuild plus dense page-group atlas overlay; continuous changes may use the already measured exact group delta",
+            strategy: "cold source-page rebuild plus dense page-group atlas overlay for every current request",
             source_page_mmc3_page_hex: "0x21",
             source_page_sha1: sha1_hex(source_page),
             source_page_matches_original_font: true,
+            source_page_matches_active_fd_fe_backdrop: false,
             runtime_code_mmc3_page_hex: format!("0x{RUNTIME_CODE_MMC3_PAGE:02X}"),
             runtime_code_cpu_start_hex: format!("0x{runtime_code_cpu_start:04X}"),
             runtime_code_cpu_end_exclusive_hex: "0xC000",
             runtime_code_capacity_byte_count: inputs.runtime_code_byte_count,
             cold_request_action: "copy all 4096 original font bytes then overlay every assigned target glyph in the selected page group",
-            continuous_request_action: "apply a verified delta only while the prior ready identity is still owned; otherwise use a cold rebuild",
+            continuous_request_action: "not emitted; every successful request currently uses a cold rebuild",
             dynamic_values_covered_by_page_group: true,
         },
         selector_consumer: SelectorConsumer {
@@ -494,7 +490,7 @@ pub(super) fn plan_dialogue_runtime_control_flow(
                 "display_path_index_high",
                 "visible_page_index",
                 "page_group_selector",
-                "inactive_cold_continuous_or_ready_state",
+                "inactive_cold_or_ready_state",
             ],
             ownership_rule: "select no address until every direct and indirect source access, save lifetime, PPU queue lifetime, and existing battle runtime reservation excludes it",
             selected_cpu_range_hex: Some(inputs.selected_runtime_state_cpu_range.to_owned()),
@@ -558,7 +554,7 @@ mod tests {
     use super::*;
 
     /// 설치된 훅 수가 어떤 목표 수와 같아도 역할이 빠졌다면 완료가 아니다. 현재 방출
-    /// 집합은 전이·수명 종료·FE 관측이 빠졌음을 그대로 드러내야 한다.
+    /// 집합은 전이·수명 종료가 빠졌음을 그대로 드러내야 한다.
     #[test]
     fn partial_hook_roles_report_what_is_missing() {
         let emitted = [
@@ -566,7 +562,6 @@ mod tests {
             DialogueRuntimeHookRole::NmiPageComposer,
             DialogueRuntimeHookRole::DispatcherGate,
             DialogueRuntimeHookRole::ChrRamSelector,
-            DialogueRuntimeHookRole::ChrFdPageObservation,
         ];
 
         let (classified, missing) = classify_emitted_hook_roles(&emitted).unwrap();
@@ -574,8 +569,6 @@ mod tests {
         assert_eq!(classified.len(), emitted.len());
         assert!(missing.contains(&DialogueRuntimeHookRole::E4TransitionEntryRequest));
         assert!(missing.contains(&DialogueRuntimeHookRole::E7CallerHandoffInvalidation));
-        assert!(missing.contains(&DialogueRuntimeHookRole::ChrFePageObservation));
-        assert!(!missing.contains(&DialogueRuntimeHookRole::ChrFdPageObservation));
     }
 
     /// 같은 역할을 두 번 세어 빠진 역할을 메운 척할 수 없어야 한다.

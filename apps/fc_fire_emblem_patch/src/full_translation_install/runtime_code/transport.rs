@@ -24,18 +24,21 @@
 //! 페이지를 PRG에 복제해 두었고, 그것이 원본 글꼴과 바이트가 같다는 것은 설치가
 //! 매번 확인한다.
 //!
-//! **다만 그 페이지가 맞는 페이지가 아니다.** 실행해 보니 대사 글자는 제대로 나오는데
-//! 맵 타일이 여전히 사라진다. 원인은 페이지 번호다. 게임이 `LDA #$00; JSR $FA80`으로
-//! 고르는 «0번»은 `$FEEE`가 `(A & 0x1F) × 4 + 8`로 바꾸므로 물리 CHR 페이지 **2번**이다.
-//! PRG `21`에 복제해 둔 것은 물리 0번, 즉 원본 글꼴 페이지다.
+//! **다만 그 페이지가 맞는 배경이 아니다.** 실행해 보니 대사 글자는 제대로 나오는데
+//! 맵 타일이 여전히 사라진다. 오른쪽 패턴 표는 mapper165의 FD/FE 원천 쌍에서 나오고,
+//! 게임이 `LDA #$00; JSR $FA80`으로 고르는 «0번»도 `$FEEE`가
+//! `(A & 0x1F) × 4 + 8`로 바꾸므로 물리 CHR 페이지 **2번**이다. PRG `21`에 복제해
+//! 둔 것은 물리 0번, 즉 원본 글꼴 페이지 하나뿐이다.
 //!
-//! 그러므로 복원이 되살리는 것은 맵이 쓰던 페이지가 아니라 글꼴 페이지다. 다음 과제는
-//! 덮어쓸 수 있는 물리 CHR 페이지들을 PRG에도 복제해 두고, 관측해 둔 페이지 번호로
-//! 그중 맞는 것을 고르는 것이다. PRG는 아직 100 KB 넘게 비어 있다.
+//! 그러므로 복원이 되살리는 것은 맵이 쓰던 FD/FE 배경이 아니라 글꼴 페이지다. 다음
+//! 과제는 중앙 상태 `$5B/$5C | $52`와 화면 수명의 가시 타일을 입력으로 두 원천의
+//! 필요한 패턴을 한 CHR-RAM 페이지에 합성하고, 같은 코드가 양쪽에서 다른 패턴을
+//! 동시에 요구하면 실패 닫힘으로 막는 것이다. PRG는 아직 100 KB 넘게 비어 있다.
 //!
-//! 되돌릴 페이지는 `chr_page_shadow`가 관측해 둔 값이다. 원본에는 «지금 걸려 있는
-//! 페이지»를 담아 두는 변수가 없어서 만들어 두었다. 되돌리는 일 자체는 원본 설정기
-//! `$FA80`·`$FAA0`이 하고, 그 비용은 아래에 세어 두었다.
+//! 되돌릴 원천 페이지는 mapper165 중앙 기록기가 이미 `$5B`(FD)와 `$5C`(FE)에 따로
+//! 보존한다. 직접 기록기는 의도적으로 그 상태를 바꾸지 않으므로 설정기 훅으로
+//! 관측하지 않는다. 소비자는 두 값을 읽기만 하고 `$52`의 상위 비트를 합친 뒤 원본
+//! stateless 설정기 `$FA80`·`$FAA0`으로 각 창을 되돌린다.
 //!
 //! atlas는 타일당 8바이트 1bpp다. CHR에는 16바이트 2bpp로 펼치고 상위 bitplane은
 //! 0으로 채운다. 상위 bitplane이 전부 0이라는 것은 직렬화 시점에 검사돼 있다.
@@ -88,9 +91,18 @@ const PRG_8000_REGISTER: u8 = 6;
 const CHR_BANK_REGISTERS: [u8; 2] = [2, 4];
 /// CHR RAM을 고르는 뱅크 값이다. CHR ROM의 물리 페이지 0은 다른 값으로 인코딩된다.
 const CHR_RAM_BANK_VALUE: u8 = 0;
-/// 되돌릴 때 부르는 원본 CHR 설정기들이다. 값은 관측해 둔 페이지 하나를 함께 쓴다.
-/// 열세 곳의 호출부 중 열한 곳이 두 설정기에 같은 값을 넘기므로 그렇게 맞춘다.
-const CHR_RESTORE_HELPERS: [u16; 2] = [0xFA80, 0xFAA0];
+/// 되돌릴 중앙 원천 상태와 stateless 설정기의 짝이다. FD와 FE는 같은 값이라고
+/// 가정하지 않는다.
+const CHR_RESTORE_PATHS: [(u8, u16); 2] = [
+    (
+        super::chr_source_state::RIGHT_FD_SOURCE_SHADOW,
+        super::chr_source_state::RIGHT_FD_HELPER,
+    ),
+    (
+        super::chr_source_state::RIGHT_FE_SOURCE_SHADOW,
+        super::chr_source_state::RIGHT_FE_HELPER,
+    ),
+];
 /// 도우미 하나가 최악의 경우 쓰는 사이클이다.
 ///
 /// 방출된 바이트를 전수로 세어 얻었다. `$FA80`은 `JMP $FEEE`(3)이고, `$FEEE`는
@@ -242,7 +254,10 @@ fn tile_body(loop_start: u16, atlas_page: u8) -> Result<Vec<Instruction>> {
     }
     // 몸통이 상대 분기 사거리보다 길다. 뒤로 돌아가는 분기를 쓸 수 없으므로 조건을
     // 뒤집어 `JMP` 하나를 건너뛴다. 탈출 자리는 그 `JMP` 바로 뒤다.
-    instructions.extend([Instruction::DecAbsolute(CURSOR_REMAINING_TILES), Instruction::Dex]);
+    instructions.extend([
+        Instruction::DecAbsolute(CURSOR_REMAINING_TILES),
+        Instruction::Dex,
+    ]);
     let branch = next_address(loop_start, &instructions)?;
     let exit = branch
         .checked_add(2 + 3)
@@ -324,9 +339,10 @@ fn frame_epilogue(origin: u16) -> Result<(Vec<Instruction>, Vec<usize>)> {
     ];
     // CHR 뱅크를 원본이 기대하는 값으로 되돌린다. 되돌리지 않으면 아직 다 올라가지
     // 않은 CHR RAM이 다음 프레임 렌더링에 그대로 나온다.
-    for helper in CHR_RESTORE_HELPERS {
+    for (source_shadow, helper) in CHR_RESTORE_PATHS {
         instructions.extend([
-            Instruction::LdaAbsolute(super::chr_page_shadow::CHR_PAGE_SHADOW),
+            Instruction::LdaZeroPage(source_shadow),
+            Instruction::OraZeroPage(super::chr_source_state::CHR_SOURCE_HIGH_BITS),
             Instruction::JsrAbsolute(helper),
         ]);
     }
@@ -423,7 +439,7 @@ pub(super) fn worst_case_frame_cycles(origin: u16, atlas_page: u8) -> Result<u32
     let fixed = worst_case_cycles(&prologue)?
         + worst_case_cycles_with_calls(
             &frame_epilogue(origin)?.0,
-            &CHR_RESTORE_HELPERS.map(|helper| (helper, CHR_HELPER_WORST_CASE_CYCLES)),
+            &CHR_RESTORE_PATHS.map(|(_, helper)| (helper, CHR_HELPER_WORST_CASE_CYCLES)),
         )?
         + u32::from(Instruction::Rts.worst_case_cycles());
     let overlay =
@@ -530,6 +546,43 @@ mod tests {
         );
     }
 
+    /// 중앙 selector가 소유하는 FD와 FE 원천은 서로 다를 수 있다. 전송 이탈이 한
+    /// 그림자를 두 helper에 재사용하거나 두 값을 갱신하면 원래 래치 쌍을 잃는다.
+    #[test]
+    fn fd_and_fe_are_restored_from_distinct_read_only_source_state() {
+        let epilogue = frame_epilogue(0xA000).unwrap().0;
+        let fd_restore = [
+            Instruction::LdaZeroPage(super::super::chr_source_state::RIGHT_FD_SOURCE_SHADOW),
+            Instruction::OraZeroPage(super::super::chr_source_state::CHR_SOURCE_HIGH_BITS),
+            Instruction::JsrAbsolute(super::super::chr_source_state::RIGHT_FD_HELPER),
+        ];
+        let fe_restore = [
+            Instruction::LdaZeroPage(super::super::chr_source_state::RIGHT_FE_SOURCE_SHADOW),
+            Instruction::OraZeroPage(super::super::chr_source_state::CHR_SOURCE_HIGH_BITS),
+            Instruction::JsrAbsolute(super::super::chr_source_state::RIGHT_FE_HELPER),
+        ];
+
+        assert!(
+            epilogue
+                .windows(fd_restore.len())
+                .any(|window| window == fd_restore)
+        );
+        assert!(
+            epilogue
+                .windows(fe_restore.len())
+                .any(|window| window == fe_restore)
+        );
+        assert!(!epilogue.iter().any(|instruction| matches!(
+            instruction,
+            Instruction::StaZeroPage(address)
+                if [
+                    super::super::chr_source_state::RIGHT_FD_SOURCE_SHADOW,
+                    super::super::chr_source_state::RIGHT_FE_SOURCE_SHADOW,
+                ]
+                .contains(address)
+        )));
+    }
+
     /// 항목은 그룹 덩이 페이지에서, 타일 자료는 atlas 페이지에서 읽어야 한다.
     /// 한쪽만 걸면 다른 쪽이 남의 자료를 읽는다.
     #[test]
@@ -586,8 +639,8 @@ mod tests {
     /// 6사이클이라고 세지 않는다»는 규칙이고, vblank에서 과소평가는 실기 손상이다.
     #[test]
     fn a_call_with_an_unmeasured_callee_is_refused_by_the_cycle_budget() {
-        let error = super::super::worst_case_cycles(&[Instruction::JsrAbsolute(0xFA80)])
-            .unwrap_err();
+        let error =
+            super::super::worst_case_cycles(&[Instruction::JsrAbsolute(0xFA80)]).unwrap_err();
 
         assert!(error.to_string().contains("must be measured"));
     }

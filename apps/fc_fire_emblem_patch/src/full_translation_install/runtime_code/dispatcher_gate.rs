@@ -40,6 +40,13 @@ use super::super::runtime_bank_contract::{PRG_A000_REGISTER, PRG_BANK_SHADOW};
 use super::super::runtime_nmi_contract::PPU_CONTROL_SHADOW;
 use super::transport::{REQUEST_STATE, STATE_READY};
 
+/// 폐기된 표본 그룹 selector가 차지한 동굴이다. 전역 런타임에서는 그 selector를
+/// 호출하지 않으므로 디스패처 게이트가 구간 전체를 digest에 묶어 되찾아 쓴다.
+pub(super) const RECLAIMED_GATE_CAVE_ORIGIN: u16 = 0xF341;
+pub(super) const RECLAIMED_GATE_CAVE_END: u16 = 0xF378;
+pub(super) const EXPECTED_RECLAIMED_GATE_CAVE_SHA1: &str =
+    "cea25e67f4399e422e8747046c13a959f5669ac1";
+
 const BANK_SELECT_REGISTER: u16 = 0x8000;
 const BANK_VALUE_REGISTER: u16 = 0x8001;
 const PPU_CONTROL: u16 = 0x2000;
@@ -393,6 +400,8 @@ mod tests {
             address as u8,
             (address >> 8) as u8,
         ];
-        bytes.windows(publish.len()).position(|window| window == publish)
+        bytes
+            .windows(publish.len())
+            .position(|window| window == publish)
     }
 }
