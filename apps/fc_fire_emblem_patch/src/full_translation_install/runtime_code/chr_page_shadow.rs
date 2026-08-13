@@ -31,6 +31,12 @@ const CHR_HELPER_TARGET: u16 = 0xFEEE;
 /// 피연산자로 쓰는 명령이 없다. 대사 예약 `$07F0..$07F8`과 달리 이 값은 대사가
 /// 활성이 아닐 때도 살아 있어야 하므로 그 범위 밖에 둔다.
 pub(in crate::full_translation_install) const CHR_PAGE_SHADOW: u16 = 0x07EB;
+/// 표본 전용 그룹 selector가 차지한 동굴이다. 전역 런타임에서는 더 이상 호출하지
+/// 않으므로 CHR 페이지 관측기를 이곳으로 옮긴다.
+pub(super) const OBSERVER_CAVE_ORIGIN: u16 = 0xF341;
+pub(super) const OBSERVER_CAVE_END: u16 = 0xF378;
+pub(super) const EXPECTED_SAMPLE_OBSERVER_CAVE_SHA1: &str =
+    "cea25e67f4399e422e8747046c13a959f5669ac1";
 /// 페이지 번호가 쓰는 비트다. `$FEEE`가 `AND #$1F`로 자르는 것과 같다.
 const CHR_PAGE_MASK: u8 = 0x1F;
 

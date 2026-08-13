@@ -4,8 +4,8 @@
 //! 탐침에서 `$2007` 쓰기가 버려진 것이 그 증거였다.
 //!
 //! 자리는 원본 CHR selector 사슬의 `$FF40`이다. 지금 값은 폐기된 표본 selector로
-//! 넘기는 `JMP $F990`이고, 그 뒤로 기존 소비자들이 이어진다. selector는 그 앞에
-//! 끼어들어 «준비됐으면 CHR RAM, 아니면 하던 대로»만 고른다.
+//! 넘기는 `JMP $F990`이다. 전역 selector는 그 표본을 대체하므로 준비되지 않았을
+//! 때는 표본 뒤의 실제 기존 소비자 `$FB80`으로 직접 넘긴다.
 //!
 //! 준비되지 않았을 때 CHR RAM을 고르면 아직 올라가지 않은 타일이 화면에 나온다.
 //! 그것이 설계의 안전 성질 위반이므로 `ready`가 아닌 모든 값은 기존 사슬로 넘긴다.
@@ -30,7 +30,11 @@
 
 use anyhow::{Context, Result, ensure};
 
-use super::{RuntimeRoutine, next_address, transport::{REQUEST_STATE, STATE_READY}};
+use super::super::runtime_bank_contract::{BANK_INDEX_MASK, PRG_BANK_SHADOW};
+use super::{
+    RuntimeRoutine, next_address,
+    transport::{REQUEST_STATE, STATE_READY},
+};
 use crate::{
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
@@ -39,8 +43,11 @@ use crate::{
 
 /// selector 사슬에서 이 런타임이 가져가는 자리다.
 pub(in crate::full_translation_install) const SELECTOR_CHAIN_SITE: u16 = 0xFF40;
-/// 그 자리가 지금 넘기는 곳이다. selector는 통과할 때 여기로 그대로 넘긴다.
-pub(in crate::full_translation_install) const SELECTOR_CHAIN_FALLBACK: u16 = 0xF990;
+/// 후보의 사슬 자리가 지금 넘기는 표본 selector다. 설치 선행 조건으로만 쓴다.
+const SELECTOR_CHAIN_SOURCE_TARGET: u16 = 0xF990;
+/// 표본 selector 뒤의 기존 소비자다. 전역 selector의 비활성 경로는 여기로 간다.
+pub(in crate::full_translation_install) const SELECTOR_CHAIN_FALLBACK: u16 = 0xFB80;
+const MAIN_DIALOGUE_BANK: u8 = 0x0A;
 /// CHR RAM을 고르는 뱅크 값이다. 매퍼 165는 값 0이 보드의 CHR RAM이고, CHR ROM의
 /// 물리 페이지 0은 `encode_chr_page_register`가 1로 인코딩해 이 값과 구분한다.
 /// 그러므로 여기서는 그 함수를 쓰지 않는다.
@@ -52,8 +59,8 @@ const CHR_BANK_REGISTERS: [u8; 2] = [2, 4];
 /// `$FF40`: `JMP $F990`.
 const SELECTOR_CHAIN_CODE: [u8; 3] = [
     0x4C,
-    SELECTOR_CHAIN_FALLBACK as u8,
-    (SELECTOR_CHAIN_FALLBACK >> 8) as u8,
+    SELECTOR_CHAIN_SOURCE_TARGET as u8,
+    (SELECTOR_CHAIN_SOURCE_TARGET >> 8) as u8,
 ];
 
 /// selector가 그 자리를 가져가기 전에 아직 그대로인지 확인한다.
@@ -98,9 +105,19 @@ pub(super) fn build_chr_selector(
         // 사슬이 나르는 누산기와 상태를 밀어 둔다.
         Instruction::Php,
         Instruction::Pha,
+        // 예약 RAM은 주 대사 수명 밖에서 덮여도 된다. 현재 16 KiB 뱅크가 주 대사일
+        // 때만 그 안의 요청 바이트를 읽어, 비활성 화면에서는 다섯 바이트를 전부
+        // 무시한다.
+        Instruction::LdaZeroPage(PRG_BANK_SHADOW),
+        Instruction::AndImmediate(BANK_INDEX_MASK),
+        Instruction::CmpImmediate(MAIN_DIALOGUE_BANK),
+    ];
+    let inactive_lifetime_placeholder = instructions.len();
+    instructions.push(Instruction::BneAbsolute(origin));
+    instructions.extend([
         Instruction::LdaAbsolute(REQUEST_STATE),
         Instruction::CmpImmediate(STATE_READY),
-    ];
+    ]);
     let not_ready_placeholder = instructions.len();
     instructions.push(Instruction::BneAbsolute(origin));
     instructions.extend([Instruction::Pla, Instruction::Plp]);
@@ -114,6 +131,7 @@ pub(super) fn build_chr_selector(
     }
     instructions.push(Instruction::Rts);
     let not_ready = next_address(origin, &instructions)?;
+    instructions[inactive_lifetime_placeholder] = Instruction::BneAbsolute(not_ready);
     instructions[not_ready_placeholder] = Instruction::BneAbsolute(not_ready);
     instructions.extend([
         Instruction::Pla,
@@ -145,6 +163,31 @@ mod tests {
                 SELECTOR_CHAIN_FALLBACK as u8,
                 (SELECTOR_CHAIN_FALLBACK >> 8) as u8
             ]
+        );
+    }
+
+    /// 비활성 화면은 예약 RAM이 덮였을 수 있으므로 요청 바이트 자체를 읽으면 안 된다.
+    /// 주 대사 뱅크 판정이 먼저 실패 경로로 나가야 우연한 `ready`를 신뢰하지 않는다.
+    #[test]
+    fn an_inactive_lifetime_never_reaches_the_request_read() {
+        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001).unwrap();
+        let bank_read = [0xA5, PRG_BANK_SHADOW];
+        let request_read = [0xAD, REQUEST_STATE as u8, (REQUEST_STATE >> 8) as u8];
+        let bank_position = routine
+            .bytes
+            .windows(bank_read.len())
+            .position(|window| window == bank_read)
+            .expect("the selector reads the active bank");
+        let request_position = routine
+            .bytes
+            .windows(request_read.len())
+            .position(|window| window == request_read)
+            .expect("the selector reads the request");
+
+        assert!(bank_position < request_position);
+        assert!(
+            routine.bytes[bank_position..request_position].contains(&0xD0),
+            "the inactive bank has no branch around the request read"
         );
     }
 
@@ -208,7 +251,11 @@ mod tests {
 
         let error = bind_selector_chain_site(&mutated).unwrap_err();
 
-        assert!(error.to_string().contains("hands the existing chain control"));
+        assert!(
+            error
+                .to_string()
+                .contains("hands the existing chain control")
+        );
     }
 
     /// 원본 사슬 자리는 아직 표본 selector로 넘긴다. 그 사실이 바뀌면 이 계층이

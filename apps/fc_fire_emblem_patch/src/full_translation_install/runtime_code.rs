@@ -17,6 +17,7 @@ use crate::{
 pub(in crate::full_translation_install) mod chr_page_shadow;
 pub(in crate::full_translation_install) mod chr_selector;
 pub(in crate::full_translation_install) mod dispatcher_gate;
+pub(in crate::full_translation_install) mod lifecycle;
 pub(in crate::full_translation_install) mod resolve_request;
 pub(super) mod trampoline;
 pub(in crate::full_translation_install) mod transport;
@@ -52,7 +53,17 @@ pub(in crate::full_translation_install) struct DialogueRuntimeHook {
     pub(in crate::full_translation_install) role: DialogueRuntimeHookRole,
     pub(in crate::full_translation_install) write_role: &'static str,
     pub(in crate::full_translation_install) site: DialogueRuntimeHookSite,
-    pub(in crate::full_translation_install) bytes: [u8; 3],
+    pub(in crate::full_translation_install) bytes: Vec<u8>,
+}
+
+/// 먼저 설치했던 표본 전용 실행 코드를 전역 런타임이 되찾아 쓰는 고정 뱅크 조각이다.
+///
+/// 일반 고정 동굴은 `FF`라는 선행 조건만 필요하지만, 여기는 이미 실행 코드가 있다.
+/// 전체 원천 구간의 digest를 별도로 고정해야 그중 일부만 우연히 같아도 덮지 않는다.
+pub(in crate::full_translation_install) struct ReclaimedFixedRuntimeRoutine {
+    pub(in crate::full_translation_install) routine: RuntimeRoutine,
+    pub(in crate::full_translation_install) source_end_exclusive: u16,
+    pub(in crate::full_translation_install) expected_source_sha1: &'static str,
 }
 
 /// `$C179` 진입 시점에 남아 있는 vblank다. 앞에 NMI 진입 오버헤드와 OAM DMA밖에
@@ -82,6 +93,9 @@ pub(in crate::full_translation_install) struct DialogueRuntimeCodePlan {
     pub(in crate::full_translation_install) code_routines: Vec<RuntimeRoutine>,
     /// 고정 뱅크 동굴에 놓이는 조각들이다.
     pub(in crate::full_translation_install) fixed_routines: Vec<RuntimeRoutine>,
+    /// 정확한 기존 실행 코드 전체를 확인한 뒤 되찾아 쓰는 고정 뱅크 조각들이다.
+    pub(in crate::full_translation_install) reclaimed_fixed_routines:
+        Vec<ReclaimedFixedRuntimeRoutine>,
     /// 원본에 실제로 설치할 훅이다. 역할과 주소와 바이트가 한 단위라 따로 세지 않는다.
     pub(in crate::full_translation_install) hooks: Vec<DialogueRuntimeHook>,
 }
@@ -107,6 +121,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     let bank_restore = bind_bank_restore_contract(candidate)?;
     bind_quiet_frame_gate(source, candidate)?;
     dispatcher_gate::bind_dispatcher_entry(source, candidate)?;
+    lifecycle::bind_lifecycle_sites(source, candidate)?;
     chr_selector::bind_selector_chain_site(candidate)?;
     chr_page_shadow::bind_chr_helper_site(candidate)?;
 
@@ -118,15 +133,33 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         + u16::try_from(resolver.bytes.len()).context("initial resolver length overflow")?;
     let next_page_resolver =
         resolve_request::build_resolve_next_page_request(next_page_resolver_origin, layout)?;
+    let next_page_resolver_address = next_page_resolver.address;
     let trampoline_routine = trampoline::build_trampoline(bank_restore, transport.address)?;
 
-    let gate_origin = trampoline_routine.address
+    let gate = dispatcher_gate::build_dispatcher_gate(chr_page_shadow::OBSERVER_CAVE_ORIGIN)?;
+    let observer_origin = gate.address
+        + u16::try_from(gate.bytes.len()).context("dispatcher gate length overflow")?;
+    let observer = chr_page_shadow::build_chr_page_observer(observer_origin)?;
+    let observer_address = observer.address;
+    let gate_address = gate.address;
+    let mut fixed_support_bytes = gate.bytes;
+    fixed_support_bytes.extend_from_slice(&observer.bytes);
+    let fixed_support_capacity =
+        usize::from(chr_page_shadow::OBSERVER_CAVE_END - chr_page_shadow::OBSERVER_CAVE_ORIGIN);
+    ensure!(
+        fixed_support_bytes.len() <= fixed_support_capacity,
+        "dialogue dispatcher and observer suite exceeds its reclaimed cave"
+    );
+    fixed_support_bytes.resize(fixed_support_capacity, 0xFF);
+    let fixed_support = RuntimeRoutine {
+        role: "dialogue dispatcher gate and CHR page observer suite",
+        address: chr_page_shadow::OBSERVER_CAVE_ORIGIN,
+        bytes: fixed_support_bytes,
+    };
+
+    let initializer_origin = trampoline_routine.address
         + u16::try_from(trampoline_routine.bytes.len())
             .context("dialogue trampoline length overflow")?;
-    let gate = dispatcher_gate::build_dispatcher_gate(gate_origin)?;
-
-    let initializer_origin = gate.address
-        + u16::try_from(gate.bytes.len()).context("dispatcher gate length overflow")?;
     let initializer =
         dispatcher_gate::build_cold_initializer(initializer_origin, resolver.address, code_page)?;
 
@@ -151,35 +184,48 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         CHR_BANK_VALUE_REGISTER,
     )?;
 
-    let observer_origin = selector.address
-        + u16::try_from(selector.bytes.len()).context("CHR selector length overflow")?;
-    let observer = chr_page_shadow::build_chr_page_observer(observer_origin)?;
-
-    let fixed_routines = vec![trampoline_routine, gate, initializer, selector, observer];
+    let initializer_address = initializer.address;
+    let selector_address = selector.address;
+    let fixed_routines = vec![trampoline_routine, initializer, selector];
     let code_routines = vec![transport, resolver, next_page_resolver];
     ensure_disjoint(
         &fixed_routines.iter().collect::<Vec<_>>(),
         trampoline::TRAMPOLINE_CAVE_END,
     )?;
+    let lifecycle = lifecycle::build_lifecycle_suite(next_page_resolver_address, code_page)?;
+    let completed_page_entry = lifecycle.completed_page_entry;
+    let handoff_invalidation_entry = lifecycle.handoff_invalidation_entry;
+    let reclaimed_fixed_routines = vec![
+        ReclaimedFixedRuntimeRoutine {
+            routine: fixed_support,
+            source_end_exclusive: chr_page_shadow::OBSERVER_CAVE_END,
+            expected_source_sha1: chr_page_shadow::EXPECTED_SAMPLE_OBSERVER_CAVE_SHA1,
+        },
+        ReclaimedFixedRuntimeRoutine {
+            routine: lifecycle.routine,
+            source_end_exclusive: lifecycle::LIFECYCLE_CAVE_END,
+            expected_source_sha1: lifecycle::EXPECTED_SAMPLE_LIFECYCLE_SHA1,
+        },
+    ];
 
-    let hooks = vec![
+    let mut hooks = vec![
         DialogueRuntimeHook {
             role: DialogueRuntimeHookRole::ChrFdPageObservation,
             write_role: "dialogue CHR FD page observer hook",
             site: DialogueRuntimeHookSite::Fixed(chr_page_shadow::CHR_HELPER_SITE),
-            bytes: chr_page_shadow::helper_hook_bytes(fixed_routines[4].address),
+            bytes: chr_page_shadow::helper_hook_bytes(observer_address).to_vec(),
         },
         DialogueRuntimeHook {
             role: DialogueRuntimeHookRole::ChrRamSelector,
             write_role: "dialogue CHR RAM selector hook",
             site: DialogueRuntimeHookSite::Fixed(chr_selector::SELECTOR_CHAIN_SITE),
-            bytes: chr_selector::selector_hook_bytes(fixed_routines[3].address),
+            bytes: chr_selector::selector_hook_bytes(selector_address).to_vec(),
         },
         DialogueRuntimeHook {
             role: DialogueRuntimeHookRole::NmiPageComposer,
             write_role: "dialogue NMI page composer hook",
             site: DialogueRuntimeHookSite::Fixed(super::runtime_nmi_contract::CONSUMER_HOOK),
-            bytes: trampoline::hook_bytes(),
+            bytes: trampoline::hook_bytes().to_vec(),
         },
         DialogueRuntimeHook {
             role: DialogueRuntimeHookRole::DispatcherGate,
@@ -188,7 +234,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
                 bank: 0x0A,
                 address: dispatcher_gate::DISPATCHER_ENTRY,
             },
-            bytes: dispatcher_gate::dispatcher_hook_bytes(fixed_routines[1].address),
+            bytes: dispatcher_gate::dispatcher_hook_bytes(gate_address).to_vec(),
         },
         DialogueRuntimeHook {
             role: DialogueRuntimeHookRole::InitialDirectEntryRequest,
@@ -197,13 +243,61 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
                 bank: 0x0A,
                 address: dispatcher_gate::COLD_ENTRY,
             },
-            bytes: dispatcher_gate::cold_hook_bytes(fixed_routines[2].address),
+            bytes: dispatcher_gate::cold_hook_bytes(initializer_address).to_vec(),
         },
     ];
+    for (role, write_role, address) in [
+        (
+            DialogueRuntimeHookRole::E4TransitionEntryRequest,
+            "dialogue E4 transition-entry request hook",
+            lifecycle::E4_TRANSITION_SITE,
+        ),
+        (
+            DialogueRuntimeHookRole::E6TransitionEntryRequest,
+            "dialogue E6 transition-entry request hook",
+            lifecycle::E6_TRANSITION_SITE,
+        ),
+        (
+            DialogueRuntimeHookRole::E7CallerResumeRequest,
+            "dialogue E7 caller-resume request hook",
+            lifecycle::E7_RESUME_SITE,
+        ),
+    ] {
+        hooks.push(DialogueRuntimeHook {
+            role,
+            write_role,
+            site: DialogueRuntimeHookSite::Switchable {
+                bank: 0x0A,
+                address,
+            },
+            bytes: dispatcher_gate::cold_hook_bytes(initializer_address).to_vec(),
+        });
+    }
+    hooks.extend([
+        DialogueRuntimeHook {
+            role: DialogueRuntimeHookRole::CompletedPageAdvanceOrLifetimeEnd,
+            write_role: "dialogue completed-page lifecycle hook",
+            site: DialogueRuntimeHookSite::Switchable {
+                bank: 0x0A,
+                address: lifecycle::COMPLETED_PAGE_SITE,
+            },
+            bytes: lifecycle::completed_page_hook_bytes(completed_page_entry)?,
+        },
+        DialogueRuntimeHook {
+            role: DialogueRuntimeHookRole::E7CallerHandoffInvalidation,
+            write_role: "dialogue E7 caller-handoff invalidation hook",
+            site: DialogueRuntimeHookSite::Switchable {
+                bank: 0x0A,
+                address: lifecycle::E7_HANDOFF_SITE,
+            },
+            bytes: lifecycle::handoff_invalidation_hook_bytes(handoff_invalidation_entry).to_vec(),
+        },
+    ]);
 
     Ok(DialogueRuntimeCodePlan {
         code_routines,
         fixed_routines,
+        reclaimed_fixed_routines,
         hooks,
     })
 }

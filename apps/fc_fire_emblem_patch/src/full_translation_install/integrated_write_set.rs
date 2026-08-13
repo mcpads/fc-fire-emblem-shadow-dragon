@@ -93,6 +93,34 @@ pub(super) fn plan_integrated_write_set(
         );
         image.write_expected(routine.role, offset, existing, &routine.bytes)?;
     }
+    // 표본 전용 코드가 차지한 구간은 `FF` 동굴로 가장하지 않는다. 계획이 고정한
+    // 전체 digest가 맞는 경우에만 전역 런타임으로 대체한다.
+    for reclaimed in &inputs.dialogue_runtime_code.reclaimed_fixed_routines {
+        let routine = &reclaimed.routine;
+        let capacity = usize::from(
+            reclaimed
+                .source_end_exclusive
+                .checked_sub(routine.address)
+                .ok_or_else(|| anyhow::anyhow!("{} reclaimed range is reversed", routine.role))?,
+        );
+        ensure!(
+            routine.bytes.len() == capacity,
+            "{} must replace its whole reclaimed source range",
+            routine.role
+        );
+        let offset = fixed_file_offset(inputs.candidate, routine.address)?;
+        let existing = inputs
+            .candidate
+            .data()
+            .get(offset..offset + capacity)
+            .ok_or_else(|| anyhow::anyhow!("{} is outside the candidate", routine.role))?;
+        ensure!(
+            crate::sha1_hex(existing) == reclaimed.expected_source_sha1,
+            "{} source digest changed",
+            routine.role
+        );
+        image.write_expected(routine.role, offset, existing, &routine.bytes)?;
+    }
 
     // 훅 역할과 원본 자리와 쓸 바이트는 코드 계획이 한 단위로 제공한다. 설치자가
     // 별도 배열로 다시 세면 새 훅을 추가할 때 보고서와 실제 쓰기가 갈라진다.
@@ -163,7 +191,8 @@ pub(super) fn plan_integrated_write_set(
             expected_write_count,
             dialogue_runtime_hook_count: hook_roles.len(),
             dialogue_runtime_hook_roles: hook_roles.into_iter().collect(),
-            dialogue_runtime_fixed_routine_count: inputs.dialogue_runtime_code.fixed_routines.len(),
+            dialogue_runtime_fixed_routine_count: inputs.dialogue_runtime_code.fixed_routines.len()
+                + inputs.dialogue_runtime_code.reclaimed_fixed_routines.len(),
             dialogue_runtime_code_routine_count: inputs.dialogue_runtime_code.code_routines.len(),
             changed_byte_count,
             every_change_tracked: true,

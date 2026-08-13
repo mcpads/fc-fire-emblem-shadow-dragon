@@ -37,10 +37,13 @@ pub(in crate::full_translation_install) const COLD_ENTRY: u16 = 0x809B;
 pub(in crate::full_translation_install) const SOURCE_POINTER_RESOLVER: u16 = 0xE6B2;
 
 use super::super::runtime_bank_contract::{PRG_A000_REGISTER, PRG_BANK_SHADOW};
+use super::super::runtime_nmi_contract::PPU_CONTROL_SHADOW;
 use super::transport::{REQUEST_STATE, STATE_READY};
 
 const BANK_SELECT_REGISTER: u16 = 0x8000;
 const BANK_VALUE_REGISTER: u16 = 0x8001;
+const PPU_CONTROL: u16 = 0x2000;
+const NMI_ENABLE_MASK: u8 = 0x80;
 /// 16 KiB 뱅크 짝을 되돌리는 원본 도우미다.
 const PAIRED_BANK_HELPER: u16 = 0xFA20;
 
@@ -128,6 +131,16 @@ pub(super) fn build_cold_initializer(
     code_page: u8,
 ) -> Result<RuntimeRoutine> {
     let mut instructions = vec![
+        // NMI를 끄기 직전 한 프레임이 끼어도 이전 수명의 `ready`를 고르지 않는다.
+        Instruction::LdaImmediate(0),
+        Instruction::StaAbsolute(REQUEST_STATE),
+        // `$A000`에서 해석기를 실행하는 동안 NMI가 원본 뱅크를 복원하면 복귀할
+        // 코드가 사라진다. 현재 PPU 제어값을 보존하고 NMI만 잠깐 막는다.
+        Instruction::LdaZeroPage(PPU_CONTROL_SHADOW),
+        Instruction::Pha,
+        Instruction::AndImmediate(!NMI_ENABLE_MASK),
+        Instruction::StaZeroPage(PPU_CONTROL_SHADOW),
+        Instruction::StaAbsolute(PPU_CONTROL),
         // 실행 코드 페이지를 `$A000`에 건다.
         Instruction::LdaImmediate(PRG_A000_REGISTER),
         Instruction::StaAbsolute(BANK_SELECT_REGISTER),
@@ -140,6 +153,11 @@ pub(super) fn build_cold_initializer(
         Instruction::LdaZeroPage(PRG_BANK_SHADOW),
         Instruction::JsrAbsolute(PAIRED_BANK_HELPER),
         Instruction::Plp,
+        // 뱅크가 원래대로 돌아온 뒤에만 NMI를 원래 상태로 되돌린다. `PLA`와
+        // `STA`는 resolver의 캐리를 바꾸지 않는다.
+        Instruction::Pla,
+        Instruction::StaZeroPage(PPU_CONTROL_SHADOW),
+        Instruction::StaAbsolute(PPU_CONTROL),
     ];
     let failed_placeholder = instructions.len();
     instructions.push(Instruction::BccAbsolute(origin));
@@ -194,17 +212,10 @@ mod tests {
     #[test]
     fn the_pass_path_reproduces_the_source_entry_and_returns_to_the_table_call() {
         let routine = build_dispatcher_gate(0xF460).unwrap();
-        let load_state = [
-            0xAD,
-            DISPATCHER_STATE as u8,
-            (DISPATCHER_STATE >> 8) as u8,
-        ];
+        let load_state = [0xAD, DISPATCHER_STATE as u8, (DISPATCHER_STATE >> 8) as u8];
 
         assert!(
-            routine
-                .bytes
-                .windows(3)
-                .any(|window| window == load_state),
+            routine.bytes.windows(3).any(|window| window == load_state),
             "the gate never loads the dispatcher state the source entry loaded"
         );
         assert_eq!(
@@ -243,7 +254,11 @@ mod tests {
 
         let error = bind_dispatcher_entry(&rom, &mutated).unwrap_err();
 
-        assert!(error.to_string().contains("dispatcher entry at 0A:8000 changed"));
+        assert!(
+            error
+                .to_string()
+                .contains("dispatcher entry at 0A:8000 changed")
+        );
     }
 
     /// 해석기가 실패하면 요청을 발행하지 않아야 한다. 발행하면 소비자가 세워지지
@@ -251,7 +266,7 @@ mod tests {
     #[test]
     fn a_failed_resolve_publishes_no_request() {
         let routine = build_cold_initializer(0xF558, 0xA400, 0x30).unwrap();
-        let publish = store_position(&routine.bytes, REQUEST_STATE)
+        let publish = publish_position(&routine.bytes, REQUEST_STATE)
             .expect("the initializer publishes a request");
         let branch = routine
             .bytes
@@ -259,7 +274,10 @@ mod tests {
             .position(|byte| *byte == 0x90)
             .expect("the initializer branches on the resolver's carry");
 
-        assert!(branch < publish, "the request is published before the carry is read");
+        assert!(
+            branch < publish,
+            "the request is published before the carry is read"
+        );
     }
 
     /// 빌린 뱅크를 되돌리지 않으면 원본이 남의 코드를 실행한다. 되돌리기는 캐리를
@@ -271,7 +289,12 @@ mod tests {
             .bytes
             .windows(3)
             .position(|window| {
-                window == [0x20, PAIRED_BANK_HELPER as u8, (PAIRED_BANK_HELPER >> 8) as u8]
+                window
+                    == [
+                        0x20,
+                        PAIRED_BANK_HELPER as u8,
+                        (PAIRED_BANK_HELPER >> 8) as u8,
+                    ]
             })
             .expect("the initializer restores the bank pair");
         let branch = routine
@@ -281,8 +304,70 @@ mod tests {
             .expect("the initializer branches on the resolver's carry");
 
         assert!(restore < branch);
-        assert!(routine.bytes.contains(&0x08), "the carry is never saved across the restore");
+        assert!(
+            routine.bytes.contains(&0x08),
+            "the carry is never saved across the restore"
+        );
         assert!(routine.bytes.contains(&0x28), "the carry is never restored");
+    }
+
+    /// 주 흐름이 `$A000`의 임시 코드를 실행할 때 NMI가 뱅크를 되돌리면 복귀 주소의
+    /// 코드가 바뀐다. NMI는 매핑 전에 꺼지고 뱅크 복원 뒤에만 돌아와야 한다.
+    #[test]
+    fn the_banked_resolver_cannot_be_interrupted_by_bank_restoring_nmi() {
+        let routine = build_cold_initializer(0xF558, 0xA400, 0x30).unwrap();
+        let disable = routine
+            .bytes
+            .windows(2)
+            .position(|window| window == [0x29, !NMI_ENABLE_MASK])
+            .expect("the initializer disables NMI");
+        let map_code_page = routine
+            .bytes
+            .windows(2)
+            .position(|window| window == [0xA9, PRG_A000_REGISTER])
+            .expect("the initializer maps the code page");
+        let restore_bank = routine
+            .bytes
+            .windows(3)
+            .position(|window| {
+                window
+                    == [
+                        0x20,
+                        PAIRED_BANK_HELPER as u8,
+                        (PAIRED_BANK_HELPER >> 8) as u8,
+                    ]
+            })
+            .expect("the initializer restores the bank pair");
+        let restore_ppu = routine
+            .bytes
+            .windows(3)
+            .rposition(|window| window == [0x8D, 0x00, 0x20])
+            .expect("the initializer restores PPU control");
+
+        assert!(disable < map_code_page);
+        assert!(restore_bank < restore_ppu);
+    }
+
+    #[test]
+    fn cold_entry_invalidates_the_previous_page_before_disabling_nmi() {
+        let routine = build_cold_initializer(0xF558, 0xA400, 0x30).unwrap();
+        let invalidate = [
+            0xA9,
+            0x00,
+            0x8D,
+            REQUEST_STATE as u8,
+            (REQUEST_STATE >> 8) as u8,
+        ];
+        let disable = [0x29, !NMI_ENABLE_MASK];
+
+        assert_eq!(&routine.bytes[..invalidate.len()], invalidate);
+        assert!(
+            routine
+                .bytes
+                .windows(disable.len())
+                .position(|window| window == disable)
+                .is_some_and(|position| position >= invalidate.len())
+        );
     }
 
     /// 초기화도 밀어낸 원본 호출로 끝나야 대사가 이어진다.
@@ -300,8 +385,14 @@ mod tests {
         );
     }
 
-    fn store_position(bytes: &[u8], address: u16) -> Option<usize> {
-        let store = [0x8D, address as u8, (address >> 8) as u8];
-        bytes.windows(3).position(|window| window == store)
+    fn publish_position(bytes: &[u8], address: u16) -> Option<usize> {
+        let publish = [
+            0xA9,
+            STATE_COLD_REQUESTED,
+            0x8D,
+            address as u8,
+            (address >> 8) as u8,
+        ];
+        bytes.windows(publish.len()).position(|window| window == publish)
     }
 }
