@@ -35,6 +35,7 @@ mod runtime_identity;
 mod runtime_material;
 mod runtime_nmi_contract;
 mod runtime_state_storage;
+mod transport_probe;
 
 use current_candidate::{CurrentCandidateInputs, inspect_dialogue_page_pool_capacity};
 use dynamic_composition::plan_dialogue_runtime_composition;
@@ -53,6 +54,7 @@ use runtime_material::{
     DialogueRuntimeMaterialPlan, RuntimeMaterialInputs, plan_dialogue_runtime_material,
 };
 use runtime_state_storage::{DialogueRuntimeStateStoragePlan, plan_dialogue_runtime_state_storage};
+pub(crate) use transport_probe::{DialogueTransportProbePlan, build_dialogue_transport_probe};
 
 /// 대사 런타임 재료 용기가 시작하는 MMC3 8 KiB 페이지다.
 const MAIN_DIALOGUE_MATERIAL_FIRST_PAGE: u8 = 0x2C;

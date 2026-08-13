@@ -13,9 +13,9 @@ use crate::{
     rp2a03::{Instruction, assemble_at},
 };
 
-pub(super) mod dispatcher_gate;
+pub(in crate::full_translation_install) mod dispatcher_gate;
 pub(super) mod trampoline;
-pub(super) mod transport;
+pub(in crate::full_translation_install) mod transport;
 
 /// `$C179` 진입 시점에 남아 있는 vblank다. 앞에 NMI 진입 오버헤드와 OAM DMA밖에
 /// 없고 둘 다 고정 비용이라 이 값은 표본이 아니라 상수다. 에뮬레이터 실측으로
@@ -35,24 +35,24 @@ fn budgeted_transport_cycles(trampoline_reserve: u32) -> u32 {
 }
 
 /// 대사 런타임이 ROM에 넣는 실행 코드와 훅 전체다.
-pub(super) struct DialogueRuntimeCodePlan {
+pub(in crate::full_translation_install) struct DialogueRuntimeCodePlan {
     /// 페이지 `2E` 꼬리에 놓이는 전송 루틴이다.
-    pub(super) transport: RuntimeRoutine,
+    pub(in crate::full_translation_install) transport: RuntimeRoutine,
     /// 고정 뱅크 동굴에 놓이는 조각들이다.
-    pub(super) fixed_routines: Vec<RuntimeRoutine>,
+    pub(in crate::full_translation_install) fixed_routines: Vec<RuntimeRoutine>,
     /// `$C179`에 쓸 소비자 훅이다.
-    pub(super) consumer_hook: [u8; 3],
+    pub(in crate::full_translation_install) consumer_hook: [u8; 3],
     /// `0A:$8000`에 쓸 디스패처 훅이다.
-    pub(super) dispatcher_hook: [u8; 3],
+    pub(in crate::full_translation_install) dispatcher_hook: [u8; 3],
     /// `0A:$809B`에 쓸 콜드 초기화 훅이다.
-    pub(super) cold_hook: [u8; 3],
+    pub(in crate::full_translation_install) cold_hook: [u8; 3],
 }
 
 /// 실행 코드를 전부 조립한다.
 ///
 /// 고정 뱅크 동굴의 배치는 여기서 한 번에 정한다. 조각마다 시작 주소를 따로 두면
 /// 하나가 커졌을 때 다음 조각을 덮는다.
-pub(super) fn plan_dialogue_runtime_code(
+pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     source: &Rom,
     candidate: &Rom,
     runtime_code_cpu_start: u16,
@@ -108,10 +108,10 @@ pub(super) fn plan_dialogue_runtime_code(
 
 /// ROM의 한 자리에 놓이는 실행 코드 조각이다.
 #[derive(Debug)]
-pub(super) struct RuntimeRoutine {
-    pub(super) role: &'static str,
-    pub(super) address: u16,
-    pub(super) bytes: Vec<u8>,
+pub(in crate::full_translation_install) struct RuntimeRoutine {
+    pub(in crate::full_translation_install) role: &'static str,
+    pub(in crate::full_translation_install) address: u16,
+    pub(in crate::full_translation_install) bytes: Vec<u8>,
 }
 
 /// 같은 동굴에 놓이는 조각들이 서로 겹치거나 동굴을 넘지 않아야 한다.

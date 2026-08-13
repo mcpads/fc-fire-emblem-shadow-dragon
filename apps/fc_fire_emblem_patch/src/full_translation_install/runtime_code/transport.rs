@@ -17,7 +17,7 @@ use crate::rp2a03::{Instruction, assemble_at};
 
 /// 한 프레임에 올리는 타일 수다. 사이클 예산에서 유도한 값이므로 늘리려면
 /// 아래 `budget` 테스트가 먼저 통과해야 한다.
-pub(super) const TILES_PER_FRAME: u8 = 8;
+pub(in crate::full_translation_install) const TILES_PER_FRAME: u8 = 8;
 /// 타일 하나가 CHR에서 차지하는 바이트다. 2bpp 8×8.
 pub(super) const CHR_TILE_BYTE_COUNT: u8 = 16;
 /// atlas가 타일 하나에 쓰는 바이트다. 1bpp 8×8.

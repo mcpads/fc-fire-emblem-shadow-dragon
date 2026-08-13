@@ -75,6 +75,15 @@ enum Command {
         #[arg(long, default_value = "out/release-image.json")]
         report: PathBuf,
     },
+    /// Install only the dialogue transport layer so its vblank cost can be measured.
+    BuildDialogueTransportProbe {
+        source: PathBuf,
+        candidate: PathBuf,
+        #[arg(long, default_value = "out/dialogue-transport-probe.nes")]
+        output: PathBuf,
+        #[arg(long, default_value = "out/dialogue-transport-probe.json")]
+        report: PathBuf,
+    },
     /// Analyze the supported source font page without declaring free slots.
     AnalyzeFontSupply {
         source: PathBuf,
@@ -794,6 +803,34 @@ fn main() -> Result<()> {
                 plan.appended_zero_chr_page_count,
                 plan.chr_ram_byte_count,
                 plan.battery_work_ram_byte_count
+            );
+        }
+        Command::BuildDialogueTransportProbe {
+            source,
+            candidate,
+            output,
+            report,
+        } => {
+            let source_rom = rom::Rom::from_path(&source)?;
+            let candidate_rom = rom::Rom::from_path(&candidate)?;
+            let (image, plan) =
+                full_translation_install::build_dialogue_transport_probe(&source_rom, &candidate_rom)?;
+            if let Some(parent) = output.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&output, &image)?;
+            let json = serde_json::to_string_pretty(&plan)?;
+            std::fs::write(&report, format!("{json}\n"))?;
+            println!("wrote {}", output.display());
+            println!("output SHA-1: {}", plan.output_sha1);
+            println!(
+                "dialogue transport probe: runtime code at {} ({} bytes), {} fixed routines, {} hooks, one {}-tile cold request takes {} frames",
+                plan.runtime_code_cpu_start_hex,
+                plan.transport_byte_count,
+                plan.fixed_routines.len(),
+                plan.hook_count,
+                plan.cold_request_tile_count,
+                plan.frames_to_complete_one_cold_request
             );
         }
         Command::AnalyzeFontSupply {
