@@ -26,6 +26,7 @@ mod mmc5_prg;
 mod mmc5_queue_runtime;
 mod mmc5_queue_shadow;
 mod options;
+mod release_image;
 mod rom;
 mod roster_localization;
 mod rp2a03;
@@ -64,6 +65,14 @@ struct Cli {
 enum Command {
     /// Verify that a ROM is the exact supported Japanese source revision.
     VerifySource { source: PathBuf },
+    /// Repack a cumulative image with an NES 2.0 header and mapper-maximum CHR alignment.
+    BuildReleaseImage {
+        cumulative: PathBuf,
+        #[arg(long, default_value = "out/fire-emblem-fe1-korean-release.nes")]
+        output: PathBuf,
+        #[arg(long, default_value = "out/release-image.json")]
+        report: PathBuf,
+    },
     /// Analyze the supported source font page without declaring free slots.
     AnalyzeFontSupply {
         source: PathBuf,
@@ -756,6 +765,33 @@ fn main() -> Result<()> {
                 source_rom.mapper(),
                 source_rom.prg().len(),
                 source_rom.chr().len()
+            );
+        }
+        Command::BuildReleaseImage {
+            cumulative,
+            output,
+            report,
+        } => {
+            let cumulative_rom = rom::Rom::from_path(&cumulative)?;
+            let (image, plan) = release_image::build_release_image(&cumulative_rom)?;
+            if let Some(parent) = output.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&output, &image)?;
+            let json = serde_json::to_string_pretty(&plan)?;
+            std::fs::write(&report, format!("{json}\n"))?;
+            println!("wrote {}", output.display());
+            println!("output SHA-1: {}", plan.output_sha1);
+            println!(
+                "release image: {} header, mapper {}, PRG {} bytes, CHR {} -> {} bytes ({} zero pages appended), declares {} bytes CHR RAM and {} bytes battery work RAM",
+                plan.header_format,
+                plan.mapper,
+                plan.prg_byte_count,
+                plan.input_chr_byte_count,
+                plan.output_chr_byte_count,
+                plan.appended_zero_chr_page_count,
+                plan.chr_ram_byte_count,
+                plan.battery_work_ram_byte_count
             );
         }
         Command::AnalyzeFontSupply {

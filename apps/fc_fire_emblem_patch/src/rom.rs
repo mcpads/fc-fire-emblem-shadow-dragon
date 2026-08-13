@@ -37,14 +37,30 @@ impl Rom {
             "not an iNES image"
         );
         let header: [u8; HEADER_SIZE] = data[..HEADER_SIZE].try_into().unwrap();
-        ensure!(header[7] & 0x0C == 0, "NES 2.0 images are unsupported");
         ensure!(
             header[6] & 0x04 == 0,
             "trainer-bearing images are unsupported"
         );
+        // 배포 이미지는 NES 2.0이다. iNES 1.0에는 CHR ROM과 별개인 CHR RAM을 적을
+        // 자리가 없기 때문이다. 의사결정 62번을 따른다. 크기 상위 니블은 바이트 9에
+        // 있고, 니블이 `F`면 지수 표기인데 이 프로젝트의 크기는 모두 선형 표기 안에
+        // 들어가므로 지수 표기는 받지 않는다.
+        let nes20 = header[7] & 0x0C == 0x08;
+        let (prg_banks, chr_banks) = if nes20 {
+            ensure!(
+                header[9] & 0x0F != 0x0F && header[9] >> 4 != 0x0F,
+                "NES 2.0 exponent size form is unsupported"
+            );
+            (
+                usize::from(header[4]) | (usize::from(header[9] & 0x0F) << 8),
+                usize::from(header[5]) | (usize::from(header[9] >> 4) << 8),
+            )
+        } else {
+            (usize::from(header[4]), usize::from(header[5]))
+        };
 
-        let prg_size = header[4] as usize * 16 * 1024;
-        let chr_size = header[5] as usize * 8 * 1024;
+        let prg_size = prg_banks * 16 * 1024;
+        let chr_size = chr_banks * 8 * 1024;
         let payload_end = HEADER_SIZE + prg_size + chr_size;
         ensure!(
             data.len() == payload_end,
