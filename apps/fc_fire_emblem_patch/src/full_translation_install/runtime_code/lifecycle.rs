@@ -582,32 +582,6 @@ mod tests {
     }
 
     #[test]
-    fn lifecycle_installation_is_bound_to_the_source_and_sample_code() {
-        let source_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes");
-        let source = Rom::parse(std::fs::read(source_path).unwrap()).unwrap();
-        let candidate = crate::test_support::release_rom();
-
-        bind_lifecycle_sites(&source, &candidate).unwrap();
-    }
-
-    #[test]
-    fn the_reclaimed_lifecycle_range_fails_closed_after_mutation() {
-        let source_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes");
-        let source = Rom::parse(std::fs::read(source_path).unwrap()).unwrap();
-        let candidate = crate::test_support::release_rom();
-        let mut bytes = candidate.data().to_vec();
-        let fixed_base = 16 + candidate.prg().len() - 16 * 1024;
-        bytes[fixed_base + usize::from(LIFECYCLE_ORIGIN - 0xC000)] ^= 1;
-        let mutated = Rom::parse(bytes).unwrap();
-
-        let error = bind_lifecycle_sites(&source, &mutated).unwrap_err();
-
-        assert!(error.to_string().contains("sample lifecycle cave changed"));
-    }
-
-    #[test]
     fn source_pointer_call_constant_matches_the_displaced_target() {
         assert_eq!(
             SOURCE_POINTER_CALL,

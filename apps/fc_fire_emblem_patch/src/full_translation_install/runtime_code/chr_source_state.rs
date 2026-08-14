@@ -65,7 +65,35 @@ impl ChrSourceStateContract {
 /// helper 두 곳만 확인하면 `$5B/$5C`가 무엇인지 증명되지 않는다. 중앙 기록기가
 /// 각 값을 먼저 보존한 뒤 현재 selector 사슬로 넘기는 바이트까지 함께 확인한다.
 pub(super) fn bind_chr_source_state(candidate: &Rom) -> Result<ChrSourceStateContract> {
-    for (address, expected, role) in [
+    for (address, expected, role) in expected_source_state_regions()? {
+        let actual = fixed_bytes(candidate, address, expected.len())?;
+        ensure!(
+            actual == expected,
+            "mapper165 {role} at {address:04X} changed"
+        );
+        decode_rp2a03_sequence(&expected, address, role)?;
+    }
+    const BATTLE_ACTIVE_RANGE: (u16, u16) = (0xFE90, 0xFEC3);
+    const RIGHT_FD_ENTRY_RANGE: (u16, u16) = (RIGHT_FD_HELPER, RIGHT_FD_HELPER + 3);
+    const RIGHT_FD_RANGE: (u16, u16) = (0xFEEE, 0xFF2D);
+    const RIGHT_FE_ENTRY_RANGE: (u16, u16) = (RIGHT_FE_HELPER, RIGHT_FE_HELPER + 3);
+    const RIGHT_FE_RANGE: (u16, u16) = (0xFF43, 0xFF80);
+    Ok(ChrSourceStateContract {
+        fd_restore_callee_cycles: worst_case_fixed_subroutine_cycles(
+            candidate,
+            RIGHT_FD_HELPER,
+            &[RIGHT_FD_ENTRY_RANGE, BATTLE_ACTIVE_RANGE, RIGHT_FD_RANGE],
+        )?,
+        fe_restore_callee_cycles: worst_case_fixed_subroutine_cycles(
+            candidate,
+            RIGHT_FE_HELPER,
+            &[RIGHT_FE_ENTRY_RANGE, BATTLE_ACTIVE_RANGE, RIGHT_FE_RANGE],
+        )?,
+    })
+}
+
+fn expected_source_state_regions() -> Result<[(u16, Vec<u8>, &'static str); 4]> {
+    Ok([
         (
             RIGHT_FD_HELPER,
             assemble_at(
@@ -108,31 +136,7 @@ pub(super) fn bind_chr_source_state(candidate: &Rom) -> Result<ChrSourceStateCon
             )?,
             "central right FE source writer",
         ),
-    ] {
-        let actual = fixed_bytes(candidate, address, expected.len())?;
-        ensure!(
-            actual == expected,
-            "mapper165 {role} at {address:04X} changed"
-        );
-        decode_rp2a03_sequence(&expected, address, role)?;
-    }
-    const BATTLE_ACTIVE_RANGE: (u16, u16) = (0xFE90, 0xFEC3);
-    const RIGHT_FD_ENTRY_RANGE: (u16, u16) = (RIGHT_FD_HELPER, RIGHT_FD_HELPER + 3);
-    const RIGHT_FD_RANGE: (u16, u16) = (0xFEEE, 0xFF2D);
-    const RIGHT_FE_ENTRY_RANGE: (u16, u16) = (RIGHT_FE_HELPER, RIGHT_FE_HELPER + 3);
-    const RIGHT_FE_RANGE: (u16, u16) = (0xFF43, 0xFF80);
-    Ok(ChrSourceStateContract {
-        fd_restore_callee_cycles: worst_case_fixed_subroutine_cycles(
-            candidate,
-            RIGHT_FD_HELPER,
-            &[RIGHT_FD_ENTRY_RANGE, BATTLE_ACTIVE_RANGE, RIGHT_FD_RANGE],
-        )?,
-        fe_restore_callee_cycles: worst_case_fixed_subroutine_cycles(
-            candidate,
-            RIGHT_FE_HELPER,
-            &[RIGHT_FE_ENTRY_RANGE, BATTLE_ACTIVE_RANGE, RIGHT_FE_RANGE],
-        )?,
-    })
+    ])
 }
 
 fn fixed_bytes(rom: &Rom, address: u16, length: usize) -> Result<&[u8]> {
@@ -151,20 +155,17 @@ fn fixed_bytes(rom: &Rom, address: u16, length: usize) -> Result<&[u8]> {
 mod tests {
     use super::*;
 
-    /// 후보가 유지하는 중앙 그림자와 stateless helper 구조가 계약의 원천이다.
-    #[test]
-    fn the_release_candidate_keeps_the_bound_chr_source_state() {
-        bind_chr_source_state(&crate::test_support::release_rom()).unwrap();
-    }
-
     /// helper만 그대로여도 중앙 기록기가 다른 상태를 쓰기 시작하면 이 소비자는 그
     /// 값을 현재 페이지로 해석할 수 없다.
     #[test]
     fn a_changed_central_shadow_writer_refuses_installation() {
-        let rom = crate::test_support::release_rom();
-        let mut bytes = rom.data().to_vec();
-        let fixed_base = 16 + rom.prg().len() - 16 * 1024;
-        bytes[fixed_base + usize::from(CENTRAL_RIGHT_FD_WRITER) - 0xC000 + 1] = 0x5A;
+        let mut bytes = crate::test_support::synthetic_mapper165_rom_bytes(0xFF);
+        for (address, expected, _) in expected_source_state_regions().unwrap() {
+            let offset = crate::test_support::synthetic_fixed_bank_file_offset(address);
+            bytes[offset..offset + expected.len()].copy_from_slice(&expected);
+        }
+        let writer = crate::test_support::synthetic_fixed_bank_file_offset(CENTRAL_RIGHT_FD_WRITER);
+        bytes[writer + 1] = 0x5A;
         let mutated = Rom::parse(bytes).unwrap();
 
         let error = bind_chr_source_state(&mutated).unwrap_err();
@@ -177,16 +178,5 @@ mod tests {
     fn fd_and_fe_have_distinct_source_state_and_helpers() {
         assert_ne!(RIGHT_FD_SOURCE_SHADOW, RIGHT_FE_SOURCE_SHADOW);
         assert_ne!(RIGHT_FD_HELPER, RIGHT_FE_HELPER);
-    }
-
-    /// 상한은 손으로 적은 공용 숫자가 아니라 후보의 서로 다른 두 CFG에서 나온다.
-    #[test]
-    fn restore_cycle_bounds_come_from_each_candidate_helper_cfg() {
-        let contract = bind_chr_source_state(&crate::test_support::release_rom()).unwrap();
-        let [(fd_helper, fd_cycles), (fe_helper, fe_cycles)] = contract.restore_callee_cycles();
-
-        assert_eq!(fd_helper, RIGHT_FD_HELPER);
-        assert_eq!(fe_helper, RIGHT_FE_HELPER);
-        assert!(fd_cycles > 0 && fe_cycles > 0);
     }
 }

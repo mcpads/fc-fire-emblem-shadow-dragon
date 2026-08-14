@@ -6,6 +6,15 @@ const LINE_START_CONTROL_CODE: u8 = 0xE9;
 const SYNTHETIC_BANK: u8 = 0x02;
 const SYNTHETIC_TABLE_OFFSET: usize = HEADER_SIZE + 2 * PRG_BANK_SIZE + 0x0100;
 const SYNTHETIC_DATA_START: usize = HEADER_SIZE + 2 * PRG_BANK_SIZE + 0x0200;
+const SYNTHETIC_TRANSITION_BANK: u8 = 0x03;
+const SYNTHETIC_TRANSITION_TARGET_ENTRY_INDEX: usize = 1;
+const SYNTHETIC_TRANSITION_POINTER_COUNT: usize = SYNTHETIC_TRANSITION_TARGET_ENTRY_INDEX + 1;
+const SYNTHETIC_TRANSITION_TABLE_OFFSET: usize =
+    HEADER_SIZE + SYNTHETIC_TRANSITION_BANK as usize * PRG_BANK_SIZE + 0x0100;
+const SYNTHETIC_TRANSITION_DATA_START: usize =
+    SYNTHETIC_TRANSITION_TABLE_OFFSET + SYNTHETIC_TRANSITION_POINTER_COUNT * 2;
+const SYNTHETIC_TRANSITION_LEADING_TEXT: [u8; FIXED_RECORD_HEADER_BYTE_COUNT] =
+    [0x00, 0x01, 0x02, 0x03];
 const TEST_FIXED_HANDLER: HandlerTargetSpec = HandlerTargetSpec {
     cpu_address: 0xC73D,
     role: "empty_dialogue_handler",
@@ -29,6 +38,70 @@ fn synthetic_spec(pointer_count: usize) -> DialogueTableSpec {
         separate_consumer: None,
         allowed_handler_targets: NO_HANDLER_TARGETS,
     }
+}
+
+fn synthetic_transition_only_spec() -> DialogueTableSpec {
+    DialogueTableSpec {
+        id: "epilogue-dialogue",
+        role: "synthetic_transition_dialogue",
+        source_prg_bank: SYNTHETIC_TRANSITION_BANK,
+        pointer_table_file_offset: SYNTHETIC_TRANSITION_TABLE_OFFSET,
+        pointer_count: SYNTHETIC_TRANSITION_POINTER_COUNT,
+        data_file_start: SYNTHETIC_TRANSITION_DATA_START,
+        directory_group: Some(0),
+        directory_selector_use: None,
+        separate_consumer: None,
+        allowed_handler_targets: NO_HANDLER_TARGETS,
+    }
+}
+
+fn synthetic_transition_only_source() -> Vec<u8> {
+    let mut source = synthetic_source();
+    let pointer_table_cpu_address =
+        switchable_file_to_cpu(SYNTHETIC_TRANSITION_BANK, SYNTHETIC_TRANSITION_TABLE_OFFSET)
+            .unwrap();
+    let directory_entry_file_offset =
+        switchable_cpu_to_file_offset(SYNTHETIC_TRANSITION_BANK, DIALOGUE_DIRECTORY_CPU_ADDRESS)
+            .unwrap();
+    source[directory_entry_file_offset..directory_entry_file_offset + 2]
+        .copy_from_slice(&pointer_table_cpu_address.to_le_bytes());
+
+    let transition_source_cpu_address =
+        switchable_file_to_cpu(SYNTHETIC_TRANSITION_BANK, SYNTHETIC_TRANSITION_DATA_START).unwrap();
+    let transition_target_file_offset = SYNTHETIC_TRANSITION_DATA_START + 3;
+    let transition_target_cpu_address =
+        switchable_file_to_cpu(SYNTHETIC_TRANSITION_BANK, transition_target_file_offset).unwrap();
+    for index in 0..SYNTHETIC_TRANSITION_TARGET_ENTRY_INDEX {
+        let pointer_file_offset = SYNTHETIC_TRANSITION_TABLE_OFFSET + index * 2;
+        source[pointer_file_offset..pointer_file_offset + 2]
+            .copy_from_slice(&transition_source_cpu_address.to_le_bytes());
+    }
+    let target_pointer_file_offset =
+        SYNTHETIC_TRANSITION_TABLE_OFFSET + SYNTHETIC_TRANSITION_TARGET_ENTRY_INDEX * 2;
+    source[target_pointer_file_offset..target_pointer_file_offset + 2]
+        .copy_from_slice(&transition_target_cpu_address.to_le_bytes());
+
+    source[SYNTHETIC_TRANSITION_DATA_START..SYNTHETIC_TRANSITION_DATA_START + 3]
+        .copy_from_slice(&[0xE4, 0x40, SYNTHETIC_TRANSITION_TARGET_ENTRY_INDEX as u8]);
+    source[transition_target_file_offset
+        ..transition_target_file_offset + SYNTHETIC_TRANSITION_LEADING_TEXT.len()]
+        .copy_from_slice(&SYNTHETIC_TRANSITION_LEADING_TEXT);
+    source[transition_target_file_offset + SYNTHETIC_TRANSITION_LEADING_TEXT.len()] = 0xEF;
+    source
+}
+
+fn inspect_synthetic_transition_only_records(
+    source: &[u8],
+    transition_only_entries: &BTreeSet<(&'static str, usize)>,
+) -> Result<Vec<MainDialogueStorageRecord>> {
+    let table = extract_dialogue_table(source, &synthetic_transition_only_spec())?;
+    let graph = build_main_dialogue_graph(std::slice::from_ref(&table))?;
+    main_dialogue_translation_view::build_main_dialogue_storage_records_with_transition_only_entries(
+        source,
+        &[table],
+        &graph,
+        transition_only_entries,
+    )
 }
 
 fn write_pointer(source: &mut [u8], index: usize, pointer: u16) {
@@ -310,48 +383,41 @@ fn locates_transition_targets_without_a_direct_record_header() {
     );
 }
 
-/// 직접 엔트리로 해석하면 선두 네 글자를 헤더로 오인하지만, 원본 선택기가 직접
-/// 고를 수 없는 엔딩 확장 레코드는 전이 진입 해석을 써야 한다.
+/// 직접 엔트리로 해석하면 선두 네 글자를 헤더로 오인하지만, 전이 전용으로 분류된
+/// 레코드는 전이 진입 해석을 써야 한다.
 #[test]
-fn a_source_bound_transition_only_entry_keeps_its_leading_text() {
-    let source_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes");
-    let rom = Rom::from_path(&source_path).unwrap();
-    let record = inspect_main_dialogue_storage(rom.data())
+fn transition_only_policy_keeps_the_leading_text() {
+    let source = synthetic_transition_only_source();
+    let transition_only_entries =
+        BTreeSet::from([("epilogue-dialogue", SYNTHETIC_TRANSITION_TARGET_ENTRY_INDEX)]);
+    let record = inspect_synthetic_transition_only_records(&source, &transition_only_entries)
         .unwrap()
-        .records
         .into_iter()
         .find(|record| {
-            record.table_id == "epilogue-dialogue" && record.canonical_entry_index == 0x36
+            record.table_id == "epilogue-dialogue"
+                && record.canonical_entry_index == SYNTHETIC_TRANSITION_TARGET_ENTRY_INDEX
         })
-        .expect("epilogue transition-only entry 0x36");
+        .expect("synthetic transition-only entry");
 
     assert_eq!(record.prefix_byte_count, 0);
-    assert!(record.literal_file_offsets.contains(&record.file_offset));
-    assert_eq!(
-        &rom.data()[record.file_offset..record.file_offset + 4],
-        [0x0E, 0x19, 0x09, 0x0F],
-        "the leading Japanese text must stay in the translatable literal set"
+    assert!(
+        (record.file_offset..record.file_offset + SYNTHETIC_TRANSITION_LEADING_TEXT.len())
+            .all(|offset| record.literal_file_offsets.contains(&offset)),
+        "the leading text must stay in the translatable literal set"
     );
 }
 
-/// 프리픽스 차이를 단순 예외 목록으로 허용하면 선택기 변경 뒤에도 잘못된 해석을
-/// 계속 승인한다. 직접 도달 범위를 만드는 원본 바이트가 바뀌면 닫혀야 한다.
+/// 직접 도달 가능한 레코드까지 전이 해석으로 허용하면 실제 기술자 네 바이트를
+/// 글자로 오인한다. 전이 전용 정책이 그 레코드를 승인하지 않으면 닫혀야 한다.
 #[test]
-fn a_changed_ending_selector_revokes_transition_only_prefix_handling() {
-    let source_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes");
-    let rom = Rom::from_path(&source_path).unwrap();
-    let mut source = rom.data().to_vec();
-    let cursor_initializer = switchable_cpu_to_file_offset(0x04, 0xA12C).unwrap();
-    source[cursor_initializer + 1] = 0x36;
-
-    let error = inspect_main_dialogue_storage(&source)
+fn a_directly_reachable_entry_cannot_use_transition_only_prefix_handling() {
+    let source = synthetic_transition_only_source();
+    let error = inspect_synthetic_transition_only_records(&source, &BTreeSet::new())
         .unwrap_err()
         .to_string();
 
     assert!(
-        error.contains("transition-only ending entry reachability is no longer proven"),
+        error.contains("is not admitted by the transition-only entry policy"),
         "{error}"
     );
 }

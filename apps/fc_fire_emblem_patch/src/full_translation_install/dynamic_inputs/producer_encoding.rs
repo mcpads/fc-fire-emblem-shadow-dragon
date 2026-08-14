@@ -266,7 +266,7 @@ mod tests {
 
     #[test]
     fn source_fixed_offsets_follow_the_expanded_active_fixed_bank() {
-        let candidate = crate::test_support::release_rom();
+        let candidate = crate::test_support::synthetic_mapper165_rom(0);
         let source_fixed_start = HEADER_SIZE + PRG_SIZE - FIXED_BANK_BYTE_COUNT;
 
         let mapped = runtime_candidate_file_offset(&candidate, source_fixed_start + 0x123).unwrap();
@@ -279,7 +279,7 @@ mod tests {
 
     #[test]
     fn switchable_source_offsets_do_not_move_after_prg_expansion() {
-        let candidate = crate::test_support::release_rom();
+        let candidate = crate::test_support::synthetic_mapper165_rom(0);
         let source_offset = HEADER_SIZE + 0x1234;
 
         assert_eq!(

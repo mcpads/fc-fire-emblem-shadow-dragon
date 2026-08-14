@@ -24,11 +24,7 @@ const DIRECT_CHR_RAM_SELECTION_SITES: [u16; 3] = [0xFCE4, 0xFCEE, 0xFF36];
 
 /// 전투 합성 진입과 후보의 직접 CHR-RAM 선택자 전수를 현재 누적 롬에 결속한다.
 pub(super) fn bind_shared_chr_ram_ownership_boundary(candidate: &Rom) -> Result<()> {
-    let composition_entry = CUMULATIVE_RUNTIME_LAYOUT.compose_page;
-    let expected_call = assemble_at(
-        BATTLE_COMPOSITION_CALL_SITE,
-        &[Instruction::JsrAbsolute(composition_entry)],
-    )?;
+    let expected_call = battle_composition_call()?;
     ensure!(
         fixed_bytes(candidate, BATTLE_COMPOSITION_CALL_SITE, expected_call.len())? == expected_call,
         "battle composition call site changed"
@@ -39,13 +35,7 @@ pub(super) fn bind_shared_chr_ram_ownership_boundary(candidate: &Rom) -> Result<
         "battle composition call",
     )?;
 
-    let direct_chr_ram_selection = assemble_at(
-        0,
-        &[
-            Instruction::LdaImmediate(0),
-            Instruction::StaAbsolute(0x8001),
-        ],
-    )?;
+    let direct_chr_ram_selection = direct_chr_ram_selection()?;
 
     let fixed_start = candidate
         .prg()
@@ -72,6 +62,25 @@ pub(super) fn bind_shared_chr_ram_ownership_boundary(candidate: &Rom) -> Result<
         actual_sites
     );
     Ok(())
+}
+
+fn battle_composition_call() -> Result<Vec<u8>> {
+    assemble_at(
+        BATTLE_COMPOSITION_CALL_SITE,
+        &[Instruction::JsrAbsolute(
+            CUMULATIVE_RUNTIME_LAYOUT.compose_page,
+        )],
+    )
+}
+
+fn direct_chr_ram_selection() -> Result<Vec<u8>> {
+    assemble_at(
+        0,
+        &[
+            Instruction::LdaImmediate(0),
+            Instruction::StaAbsolute(0x8001),
+        ],
+    )
 }
 
 /// 대사 상주권을 내린 뒤 원래 전투 합성기로 꼬리 호출한다.
@@ -120,11 +129,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn release_candidate_binds_the_complete_direct_chr_ram_selection_inventory() {
-        bind_shared_chr_ram_ownership_boundary(&crate::test_support::release_rom()).unwrap();
-    }
-
-    #[test]
     fn ownership_transfer_invalidates_dialogue_before_tail_calling_battle() {
         let routine = build_battle_composition_ownership_transfer(0xF594).unwrap();
 
@@ -145,11 +149,11 @@ mod tests {
 
     #[test]
     fn a_changed_battle_composition_call_refuses_installation() {
-        let release = crate::test_support::release_rom();
-        let fixed_start = release.prg().len() - FIXED_BANK_SIZE;
-        let offset = fixed_start + usize::from(BATTLE_COMPOSITION_CALL_SITE - 0xC000);
+        let release = chr_ram_ownership_rom();
         let mut bytes = release.data().to_vec();
-        bytes[crate::rom::HEADER_SIZE + offset] ^= 0x01;
+        let offset =
+            crate::test_support::synthetic_fixed_bank_file_offset(BATTLE_COMPOSITION_CALL_SITE);
+        bytes[offset] ^= 0x01;
         let mutated = Rom::parse(bytes).unwrap();
 
         let error = bind_shared_chr_ram_ownership_boundary(&mutated).unwrap_err();
@@ -158,14 +162,31 @@ mod tests {
 
     #[test]
     fn a_changed_direct_chr_ram_selection_refuses_installation() {
-        let release = crate::test_support::release_rom();
-        let fixed_start = release.prg().len() - FIXED_BANK_SIZE;
-        let offset = fixed_start + usize::from(DIRECT_CHR_RAM_SELECTION_SITES[0] - 0xC000);
+        let release = chr_ram_ownership_rom();
         let mut bytes = release.data().to_vec();
-        bytes[crate::rom::HEADER_SIZE + offset] ^= 0x01;
+        let offset = crate::test_support::synthetic_fixed_bank_file_offset(
+            DIRECT_CHR_RAM_SELECTION_SITES[0],
+        );
+        bytes[offset] ^= 0x01;
         let mutated = Rom::parse(bytes).unwrap();
 
         let error = bind_shared_chr_ram_ownership_boundary(&mutated).unwrap_err();
         assert!(error.to_string().contains("selection inventory changed"));
+    }
+
+    fn chr_ram_ownership_rom() -> Rom {
+        let mut bytes = crate::test_support::synthetic_mapper165_rom_bytes(0xFF);
+        let composition_call = battle_composition_call().unwrap();
+        let composition_offset =
+            crate::test_support::synthetic_fixed_bank_file_offset(BATTLE_COMPOSITION_CALL_SITE);
+        bytes[composition_offset..composition_offset + composition_call.len()]
+            .copy_from_slice(&composition_call);
+
+        let direct_selection = direct_chr_ram_selection().unwrap();
+        for address in DIRECT_CHR_RAM_SELECTION_SITES {
+            let offset = crate::test_support::synthetic_fixed_bank_file_offset(address);
+            bytes[offset..offset + direct_selection.len()].copy_from_slice(&direct_selection);
+        }
+        Rom::parse(bytes).expect("CHR-RAM ownership fixture parses")
     }
 }

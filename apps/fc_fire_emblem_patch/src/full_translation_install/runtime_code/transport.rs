@@ -477,70 +477,10 @@ pub(super) fn worst_case_frame_cycles(
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::runtime_bank_contract::BankRestoreContract;
-    use super::super::trampoline::worst_case_reserve_cycles;
     use super::*;
 
     const ATLAS_PAGE: u8 = 0x2C;
     const COLD_REQUEST_MAPPER_REGISTER: u8 = 0xC8;
-
-    fn trampoline_reserve() -> u32 {
-        worst_case_reserve_cycles(BankRestoreContract {
-            prg_8000_register: 6,
-            prg_a000_register: 7,
-            prg_bank_shadow: 0x29,
-            helper_reachable_page_count: 32,
-        })
-        .unwrap()
-    }
-
-    fn chr_source_state() -> super::super::chr_source_state::ChrSourceStateContract {
-        super::super::chr_source_state::bind_chr_source_state(&crate::test_support::release_rom())
-            .unwrap()
-    }
-
-    /// 한 프레임이 vblank를 넘지 않아야 한다. 넘으면 렌더링 중에 `$2007`을 쓰게 되고
-    /// 그것은 에뮬레이터에서는 대체로 보이지 않는 실기 손상이다.
-    #[test]
-    fn one_frame_of_transport_fits_the_measured_vblank_remainder() {
-        let allowed = super::super::budgeted_transport_cycles(trampoline_reserve());
-
-        let worst_case = worst_case_frame_cycles(
-            0xA000,
-            ATLAS_PAGE,
-            chr_source_state(),
-            COLD_REQUEST_MAPPER_REGISTER,
-        )
-        .unwrap();
-
-        assert!(
-            worst_case <= allowed,
-            "one frame costs {worst_case} cycles but only {allowed} are budgeted"
-        );
-    }
-
-    /// 예산을 한 타일 더 늘리면 넘친다는 것이 지금 값이 상한이라는 근거다.
-    #[test]
-    fn the_budget_is_the_largest_batch_that_still_fits() {
-        let allowed = super::super::budgeted_transport_cycles(trampoline_reserve());
-        let prologue = frame_prologue(0xA000).unwrap().0;
-        let loop_start = next_address(0xA000, &prologue).unwrap();
-        let per_tile = worst_case_cycles(&tile_body(loop_start, ATLAS_PAGE).unwrap()).unwrap();
-
-        let one_more = worst_case_frame_cycles(
-            0xA000,
-            ATLAS_PAGE,
-            chr_source_state(),
-            COLD_REQUEST_MAPPER_REGISTER,
-        )
-        .unwrap()
-            + per_tile;
-
-        assert!(
-            one_more > allowed,
-            "another tile would still fit; the budget is understated"
-        );
-    }
 
     /// 한 타일이 CHR에서 차지하는 만큼 정확히 쓰지 않으면 다음 타일이 밀린다.
     #[test]

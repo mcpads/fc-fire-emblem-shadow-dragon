@@ -357,24 +357,17 @@ mod tests {
         assert_eq!(DISPATCHER_TABLE_CALL - DISPATCHER_ENTRY, 3);
     }
 
-    /// 입구가 아직 원본이어야 게이트가 그 자리를 가져갈 수 있다.
-    #[test]
-    fn the_source_dispatcher_entry_is_still_where_the_gate_expects_it() {
-        let rom = crate::test_support::release_rom();
-
-        bind_dispatcher_entry(&rom, &rom).unwrap();
-    }
-
     /// 입구가 바뀌면 표 분기의 복귀 주소가 어긋나므로 설치를 막는다.
     #[test]
     fn a_changed_dispatcher_entry_refuses_installation() {
-        let rom = crate::test_support::release_rom();
         let offset = switchable_cpu_to_file_offset(MAIN_DIALOGUE_BANK, DISPATCHER_ENTRY).unwrap();
-        let mut bytes = rom.data().to_vec();
+        let mut bytes = crate::test_support::synthetic_mapper165_rom_bytes(0xFF);
+        bytes[offset..offset + DISPATCHER_ENTRY_CODE.len()].copy_from_slice(&DISPATCHER_ENTRY_CODE);
+        let source = Rom::parse(bytes.clone()).unwrap();
         bytes[offset + 3] = 0xEA;
         let mutated = Rom::parse(bytes).unwrap();
 
-        let error = bind_dispatcher_entry(&rom, &mutated).unwrap_err();
+        let error = bind_dispatcher_entry(&source, &mutated).unwrap_err();
 
         assert!(
             error

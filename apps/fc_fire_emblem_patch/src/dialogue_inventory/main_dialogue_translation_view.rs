@@ -78,6 +78,21 @@ pub(super) fn build_main_dialogue_storage_records(
     tables: &[DialogueTableReport],
     graph: &MainDialogueGraphReport,
 ) -> Result<Vec<MainDialogueStorageRecord>> {
+    let transition_only_entries = bind_source_transition_only_entries(source)?;
+    build_main_dialogue_storage_records_with_transition_only_entries(
+        source,
+        tables,
+        graph,
+        &transition_only_entries,
+    )
+}
+
+pub(super) fn build_main_dialogue_storage_records_with_transition_only_entries(
+    source: &[u8],
+    tables: &[DialogueTableReport],
+    graph: &MainDialogueGraphReport,
+    transition_only_entries: &BTreeSet<(&'static str, usize)>,
+) -> Result<Vec<MainDialogueStorageRecord>> {
     let transition_targets = graph
         .transition_edges
         .iter()
@@ -120,11 +135,13 @@ pub(super) fn build_main_dialogue_storage_records(
                     entry.index,
                 )?;
                 if prefix_byte_count != direct_storage.prefix_byte_count {
-                    bind_transition_only_entry(
-                        source,
+                    let canonical_entry_index = canonical_dialogue_entry_index(entry);
+                    ensure!(
+                        transition_only_entries.contains(&(table.id, canonical_entry_index)),
+                        "{} canonical entry {} has different direct and transition prefixes but is not admitted by the transition-only entry policy",
                         table.id,
-                        canonical_dialogue_entry_index(entry),
-                    )?;
+                        canonical_entry_index,
+                    );
                 }
                 let first_line_file_offset = entry
                     .file_offset
@@ -205,18 +222,14 @@ pub(super) fn build_main_dialogue_storage_records(
         .collect()
 }
 
-/// 직접 진입 해석과 전이 진입 해석의 프리픽스 길이가 다를 때, 전이 해석을 택해도
-/// 안전하다는 원본 제어 흐름을 묶는다.
+/// 직접 진입 해석과 전이 진입 해석의 프리픽스 길이가 다른 엔트리 중 전이 해석을
+/// 택해도 안전한 집합을 원본 제어 흐름에 묶는다.
 ///
 /// 현재 해당하는 것은 엔딩 확장 레코드뿐이다. 바깥 선택기는 커서를 `0x35`로
 /// 초기화하고, 매 차례 먼저 감소시키며, 음수가 되면 끝낸다. 실제 엔트리 번호는
 /// 감소한 커서에 1을 더해 쓰므로 직접 선택 범위는 `0x01..=0x35`다. 따라서
 /// `0x36..=0x41`은 대사 제어 코드의 전이로만 진입한다.
-fn bind_transition_only_entry(
-    source: &[u8],
-    table_id: &str,
-    canonical_entry_index: usize,
-) -> Result<()> {
+fn bind_source_transition_only_entries(source: &[u8]) -> Result<BTreeSet<(&'static str, usize)>> {
     const ENDING_BANK: u8 = 0x04;
     const DIRECT_TABLE_ID: &str = "epilogue-dialogue";
     const FIRST_TRANSITION_ONLY_ENTRY: usize = 0x36;
@@ -241,12 +254,6 @@ fn bind_transition_only_entry(
         ),
     ];
 
-    ensure!(
-        table_id == DIRECT_TABLE_ID
-            && (FIRST_TRANSITION_ONLY_ENTRY..=LAST_TRANSITION_ONLY_ENTRY)
-                .contains(&canonical_entry_index),
-        "{table_id} canonical entry {canonical_entry_index} has different direct and transition prefixes but no source-bound transition-only reachability"
-    );
     for (address, expected, role) in SOURCE_SNIPPETS {
         let offset = switchable_cpu_to_file_offset(ENDING_BANK, *address)?;
         let actual = source
@@ -258,7 +265,9 @@ fn bind_transition_only_entry(
         );
         decode_rp2a03_sequence(expected, *address, role)?;
     }
-    Ok(())
+    Ok((FIRST_TRANSITION_ONLY_ENTRY..=LAST_TRANSITION_ONLY_ENTRY)
+        .map(|entry_index| (DIRECT_TABLE_ID, entry_index))
+        .collect())
 }
 
 fn transition_targets_match(

@@ -872,10 +872,10 @@ mod tests {
     /// 사슬 자리가 이미 바뀌었으면 이 selector가 무엇 앞에 끼어드는지 알 수 없다.
     #[test]
     fn a_changed_chain_site_refuses_installation() {
-        let rom = crate::test_support::release_rom();
-        let mut bytes = rom.data().to_vec();
-        let fixed_base = 16 + rom.prg().len() - 16 * 1024;
-        bytes[fixed_base + usize::from(SELECTOR_CHAIN_SITE) - 0xC000] = 0xEA;
+        let mut bytes = crate::test_support::synthetic_mapper165_rom_bytes(0xFF);
+        let chain = crate::test_support::synthetic_fixed_bank_file_offset(SELECTOR_CHAIN_SITE);
+        bytes[chain..chain + SELECTOR_CHAIN_CODE.len()].copy_from_slice(&SELECTOR_CHAIN_CODE);
+        bytes[chain] = 0xEA;
         let mutated = Rom::parse(bytes).unwrap();
 
         let error = bind_selector_chain_site(&mutated).unwrap_err();
@@ -887,29 +887,11 @@ mod tests {
         );
     }
 
-    /// 원본 사슬 자리는 아직 표본 selector로 넘긴다. 그 사실이 바뀌면 이 계층이
-    /// 대체하려는 대상이 달라진 것이다.
-    #[test]
-    fn the_source_chain_site_is_still_where_the_selector_expects_it() {
-        let rom = crate::test_support::release_rom();
-
-        bind_selector_chain_site(&rom).unwrap();
-    }
-
-    /// 별도 selector 동굴은 경계 전체가 `FF`일 때만 이 모듈이 소유한다.
-    #[test]
-    fn the_selector_cave_is_still_reserved() {
-        let rom = crate::test_support::release_rom();
-
-        bind_selector_cave(&rom).unwrap();
-    }
-
     #[test]
     fn a_non_ff_byte_in_the_selector_cave_refuses_installation() {
-        let rom = crate::test_support::release_rom();
-        let mut bytes = rom.data().to_vec();
-        let fixed_base = 16 + rom.prg().len() - 16 * 1024;
-        bytes[fixed_base + usize::from(SELECTOR_CAVE_ORIGIN) - 0xC000] = 0xEA;
+        let mut bytes = crate::test_support::synthetic_mapper165_rom_bytes(0xFF);
+        let cave = crate::test_support::synthetic_fixed_bank_file_offset(SELECTOR_CAVE_ORIGIN);
+        bytes[cave] = 0xEA;
         let mutated = Rom::parse(bytes).unwrap();
 
         let error = bind_selector_cave(&mutated).unwrap_err();

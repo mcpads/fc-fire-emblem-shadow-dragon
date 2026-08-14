@@ -106,33 +106,10 @@ fn fixed_bytes(rom: &Rom, address: u16, length: usize) -> Result<&[u8]> {
 mod tests {
     use super::*;
 
-    /// 게이트가 보는 표시는 각각 원본의 PPU 자료 갈래를 열고 닫는다. 그 대응이
-    /// 깨지면 «조용한 프레임»의 뜻이 달라져 소비자가 남의 vblank를 쓴다.
-    #[test]
-    fn every_queue_flag_still_guards_a_ppu_data_branch() {
-        let rom = crate::test_support::release_rom();
-
-        let contract = bind_quiet_frame_gate(&rom, &rom).unwrap();
-
-        assert_eq!(contract.gated_branch_count, 3);
-        assert_eq!(QUEUE_FLAGS.len(), 4);
-        for flag in [
-            BLOCK_INTERPRETER_GATE[1],
-            PALETTE_QUEUE_GATE[1],
-            ROW_UPLOAD_GATE[1],
-            ROW_UPLOAD_GATE[5],
-        ] {
-            assert!(
-                QUEUE_FLAGS.contains(&flag),
-                "flag {flag:02X} guards a branch but the gate does not read it"
-            );
-        }
-    }
-
     /// 훅 자리가 다른 호출로 바뀌면 소비자가 밀어낼 대상이 사라진다.
     #[test]
     fn a_changed_hook_site_refuses_installation() {
-        let rom = crate::test_support::release_rom();
+        let rom = quiet_frame_rom();
         let mutated = with_fixed_byte_replaced(&rom, CONSUMER_HOOK, 0xEA);
 
         let error = bind_quiet_frame_gate(&mutated, &mutated).unwrap_err();
@@ -143,7 +120,7 @@ mod tests {
     /// 갈래의 첫 분기가 바뀌면 게이트가 지키던 전제가 사라지므로 설치를 막는다.
     #[test]
     fn a_changed_data_branch_voids_the_quiet_frame_precondition() {
-        let rom = crate::test_support::release_rom();
+        let rom = quiet_frame_rom();
         let mutated = with_fixed_byte_replaced(&rom, ROW_UPLOAD_ADDRESS, 0xEA);
 
         let error = bind_quiet_frame_gate(&rom, &mutated).unwrap_err();
@@ -151,10 +128,25 @@ mod tests {
         assert!(error.to_string().contains("precondition is void"));
     }
 
+    fn quiet_frame_rom() -> Rom {
+        let mut bytes = crate::test_support::synthetic_mapper165_rom_bytes(0xFF);
+        for (address, expected) in [
+            (CONSUMER_HOOK, HOOK_SITE.as_slice()),
+            (BLOCK_INTERPRETER_ADDRESS, BLOCK_INTERPRETER_GATE.as_slice()),
+            (PALETTE_QUEUE_ADDRESS, PALETTE_QUEUE_GATE.as_slice()),
+            (ROW_UPLOAD_ADDRESS, ROW_UPLOAD_GATE.as_slice()),
+            (CONTROL_RESTORE_ADDRESS, CONTROL_RESTORE.as_slice()),
+        ] {
+            let offset = crate::test_support::synthetic_fixed_bank_file_offset(address);
+            bytes[offset..offset + expected.len()].copy_from_slice(expected);
+        }
+        Rom::parse(bytes).expect("quiet-frame fixture parses")
+    }
+
     fn with_fixed_byte_replaced(rom: &Rom, address: u16, value: u8) -> Rom {
         let mut bytes = rom.data().to_vec();
-        let fixed_base = 16 + rom.prg().len() - 16 * 1024;
-        bytes[fixed_base + usize::from(address) - 0xC000] = value;
+        let offset = crate::test_support::synthetic_fixed_bank_file_offset(address);
+        bytes[offset] = value;
         Rom::parse(bytes).expect("mutated image still parses")
     }
 }

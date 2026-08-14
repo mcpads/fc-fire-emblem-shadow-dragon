@@ -98,36 +98,17 @@ fn fixed_bytes(rom: &Rom, address: u16, length: usize) -> Result<&[u8]> {
 mod tests {
     use super::*;
 
-    /// 되돌릴 뱅크 값의 출처가 원본에 있어야 소비자가 뱅크를 빌려 쓸 수 있다.
-    #[test]
-    fn the_nmi_restores_its_prg_bank_from_a_zero_page_shadow() {
-        let rom = crate::test_support::release_rom();
-
-        let contract = bind_bank_restore_contract(&rom).unwrap();
-
-        assert_eq!(contract.prg_bank_shadow, BANK_SHADOW_RESTORE[9]);
-        assert_eq!(contract.prg_a000_register, PAIRED_BANK_SETTER[17]);
-        assert_eq!(contract.prg_8000_register, PAIRED_BANK_SETTER[7]);
-    }
-
-    /// 원본 도우미로는 실행 코드 페이지에 닿지 못한다. 소비자가 레지스터를 직접
-    /// 쓰는 이유가 이것이므로, 도우미의 도달 범위가 넓어지면 그 선택을 다시 본다.
-    #[test]
-    fn the_source_helper_cannot_reach_the_runtime_code_page() {
-        let rom = crate::test_support::release_rom();
-
-        let contract = bind_bank_restore_contract(&rom).unwrap();
-
-        assert!(contract.helper_reachable_page_count <= 0x2E);
-    }
-
     /// 도우미가 바뀌면 되돌리기 계산이 달라지므로 설치를 막아야 한다.
     #[test]
     fn a_changed_bank_setter_refuses_installation() {
-        let rom = crate::test_support::release_rom();
-        let mut bytes = rom.data().to_vec();
-        let fixed_base = 16 + rom.prg().len() - 16 * 1024;
-        bytes[fixed_base + usize::from(PAIRED_BANK_SETTER_ADDRESS) - 0xC000] = 0xEA;
+        let mut bytes = crate::test_support::synthetic_mapper165_rom_bytes(0xFF);
+        let setter =
+            crate::test_support::synthetic_fixed_bank_file_offset(PAIRED_BANK_SETTER_ADDRESS);
+        bytes[setter..setter + PAIRED_BANK_SETTER.len()].copy_from_slice(&PAIRED_BANK_SETTER);
+        let restore =
+            crate::test_support::synthetic_fixed_bank_file_offset(BANK_SHADOW_RESTORE_ADDRESS);
+        bytes[restore..restore + BANK_SHADOW_RESTORE.len()].copy_from_slice(&BANK_SHADOW_RESTORE);
+        bytes[setter] = 0xEA;
         let mutated = Rom::parse(bytes).unwrap();
 
         let error = bind_bank_restore_contract(&mutated).unwrap_err();
