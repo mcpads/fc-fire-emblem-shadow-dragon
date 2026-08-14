@@ -40,11 +40,11 @@ fn global_dialogue_plan_advances_only_proven_cross_domain_consumers() {
     let current = BTreeMap::from([
         (
             "chapter_titles",
-            installation(2, &["chapter_intro_title_dialogue_composite"]),
+            installation_with_complete_screens(2, &["chapter_intro_title_dialogue_composite"], &[]),
         ),
         (
             "unit_names",
-            installation(
+            installation_with_complete_screens(
                 52,
                 &[
                     "battle_animation",
@@ -52,7 +52,12 @@ fn global_dialogue_plan_advances_only_proven_cross_domain_consumers() {
                     "unit_status",
                     "unit_summary",
                 ],
+                &[],
             ),
+        ),
+        (
+            "item_names",
+            installation_with_complete_screens(64, &["battle_animation"], &["battle_animation"]),
         ),
     ]);
 
@@ -79,6 +84,18 @@ fn global_dialogue_plan_advances_only_proven_cross_domain_consumers() {
         [ENDING_CHARACTER_EPILOGUE]
     );
     assert!(by_id["item_names"].globally_planned_screen_roles.is_empty());
+    assert!(
+        !by_id["item_names"]
+            .remaining_screen_roles
+            .iter()
+            .any(|role| role == "battle_animation")
+    );
+    assert!(
+        by_id["item_names"]
+            .remaining_screen_roles
+            .iter()
+            .any(|role| role == "item_inventory_list")
+    );
     assert_eq!(
         domains
             .iter()
@@ -88,10 +105,21 @@ fn global_dialogue_plan_advances_only_proven_cross_domain_consumers() {
     );
 }
 
-fn installation(installed_target_unit_count: usize, screen_roles: &[&str]) -> DomainInstallation {
+fn installation_with_complete_screens(
+    installed_target_unit_count: usize,
+    installed_screen_roles: &[&str],
+    consumer_complete_screen_roles: &[&str],
+) -> DomainInstallation {
     DomainInstallation {
         installed_target_unit_count,
-        installed_screen_roles: screen_roles.iter().map(|role| (*role).to_owned()).collect(),
+        installed_screen_roles: installed_screen_roles
+            .iter()
+            .map(|role| (*role).to_owned())
+            .collect(),
+        consumer_complete_screen_roles: consumer_complete_screen_roles
+            .iter()
+            .map(|role| (*role).to_owned())
+            .collect(),
         runtime_bound_screen_roles: Vec::new(),
     }
 }

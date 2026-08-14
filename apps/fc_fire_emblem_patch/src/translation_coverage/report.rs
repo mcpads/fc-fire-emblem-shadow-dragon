@@ -35,6 +35,8 @@ pub(crate) struct DomainPopulation {
 pub(crate) struct DomainInstallation {
     pub(crate) installed_target_unit_count: usize,
     pub(crate) installed_screen_roles: Vec<String>,
+    /// 전역 도메인 개수와 달라도 원천 소비자 부분집합 전체가 설치된 화면이다.
+    pub(crate) consumer_complete_screen_roles: Vec<String>,
     pub(crate) runtime_bound_screen_roles: Vec<String>,
 }
 

@@ -199,7 +199,7 @@ fn assemble_domain_consumers(
                 "current candidate installs more {id} units than the current translation input"
             );
             let current_candidate_carried_screen_roles = installation
-                .installed_screen_roles
+                .consumer_complete_screen_roles
                 .into_iter()
                 .collect::<BTreeSet<_>>();
             ensure!(
@@ -244,13 +244,7 @@ fn assemble_domain_consumers(
                 .difference(&current_candidate_carried_screen_roles)
                 .cloned()
                 .collect::<BTreeSet<_>>();
-            let fully_carried_screen_roles =
-                if installation.installed_target_unit_count == target_unit_count {
-                    current_candidate_carried_screen_roles.clone()
-                } else {
-                    BTreeSet::new()
-                };
-            let statically_accounted_screen_roles = fully_carried_screen_roles
+            let statically_accounted_screen_roles = current_candidate_carried_screen_roles
                 .union(&globally_planned_screen_roles)
                 .cloned()
                 .collect::<BTreeSet<_>>();

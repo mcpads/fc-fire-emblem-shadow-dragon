@@ -656,12 +656,18 @@ fn collect_domain_installations(
     } else {
         Vec::new()
     };
+    let unit_name_complete_screens = if report.playable_unit_names.workspace_entry_count == 53 {
+        unit_name_screens.clone()
+    } else {
+        Vec::new()
+    };
     put(
         &mut domains,
         "unit_names",
-        installation(
+        installation_with_complete_screens(
             report.playable_unit_names.workspace_entry_count,
             &unit_name_screens,
+            &unit_name_complete_screens,
             &unit_name_runtime,
         ),
     )?;
@@ -706,12 +712,18 @@ fn collect_domain_installations(
                 .then_some("ending_chapter_record_scroll"),
         )
         .collect::<Vec<_>>();
+    let complete_title_screens = if report.chapter_titles.installed_entry_count == 25 {
+        title_screens.clone()
+    } else {
+        Vec::new()
+    };
     put(
         &mut domains,
         "chapter_titles",
-        installation(
+        installation_with_complete_screens(
             report.chapter_titles.installed_entry_count,
             &title_screens,
+            &complete_title_screens,
             &[],
         ),
     )?;
@@ -865,12 +877,32 @@ fn installation(
     installed_screen_roles: &[&str],
     runtime_bound_screen_roles: &[&str],
 ) -> DomainInstallation {
+    installation_with_complete_screens(
+        installed_target_unit_count,
+        installed_screen_roles,
+        installed_screen_roles,
+        runtime_bound_screen_roles,
+    )
+}
+
+fn installation_with_complete_screens(
+    installed_target_unit_count: usize,
+    installed_screen_roles: &[&str],
+    consumer_complete_screen_roles: &[&str],
+    runtime_bound_screen_roles: &[&str],
+) -> DomainInstallation {
     let mut installed_screen_roles = installed_screen_roles
         .iter()
         .map(|role| (*role).to_owned())
         .collect::<Vec<_>>();
     installed_screen_roles.sort();
     installed_screen_roles.dedup();
+    let mut consumer_complete_screen_roles = consumer_complete_screen_roles
+        .iter()
+        .map(|role| (*role).to_owned())
+        .collect::<Vec<_>>();
+    consumer_complete_screen_roles.sort();
+    consumer_complete_screen_roles.dedup();
     let mut runtime_bound_screen_roles = runtime_bound_screen_roles
         .iter()
         .map(|role| (*role).to_owned())
@@ -880,6 +912,7 @@ fn installation(
     DomainInstallation {
         installed_target_unit_count,
         installed_screen_roles,
+        consumer_complete_screen_roles,
         runtime_bound_screen_roles,
     }
 }
