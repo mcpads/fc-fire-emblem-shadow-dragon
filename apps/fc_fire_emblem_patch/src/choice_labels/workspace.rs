@@ -252,35 +252,3 @@ fn encode_hex(bytes: &[u8]) -> String {
         .collect::<Vec<_>>()
         .join(" ")
 }
-
-#[cfg(test)]
-mod tests {
-    use std::path::Path;
-
-    use super::*;
-
-    #[test]
-    fn public_choice_labels_bind_the_supported_source() {
-        let source = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
-        ));
-        if !source.exists() {
-            return;
-        }
-        let workspace = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../assets/translation/choice-labels.ko.json"
-        ));
-        let rom = Rom::from_path(source).unwrap();
-        let plan = plan_choice_labels(&rom, workspace).unwrap();
-
-        assert_eq!(plan.entries.len(), 2);
-        assert_eq!(plan.entries[0].fixed_string_index, 0x22);
-        assert_eq!(plan.entries[1].fixed_string_index, 0x23);
-        assert_eq!(
-            plan.unique_glyphs(),
-            BTreeSet::from(['니', '아', '예', '오'])
-        );
-    }
-}

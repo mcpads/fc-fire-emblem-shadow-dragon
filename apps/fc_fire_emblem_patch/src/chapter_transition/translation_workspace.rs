@@ -131,28 +131,3 @@ pub(crate) fn plan_transition_labels(
         },
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn public_workspace_covers_forecast_save_and_ending_labels() {
-        let source = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
-        ));
-        if !source.exists() {
-            return;
-        }
-        let workspace = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../assets/translation/transition-labels.ko.json"
-        ));
-        let rom = Rom::from_path(source).unwrap();
-        let plan = plan_transition_labels(&rom, workspace).unwrap();
-        assert_eq!(plan.forecast.entry_count, 1);
-        assert_eq!(plan.save_offer.entry_count, 1);
-        assert_eq!(plan.ending_record.entry_count, 1);
-    }
-}

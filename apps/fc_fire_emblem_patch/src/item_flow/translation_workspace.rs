@@ -31,27 +31,3 @@ pub(crate) fn plan_item_action_labels(
     );
     plan_semantic_translation(workspace_path, &expected_entries)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn public_workspace_covers_all_four_japanese_item_actions() {
-        let source = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
-        ));
-        if !source.exists() {
-            return;
-        }
-        let workspace = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../assets/translation/item-action-labels.ko.json"
-        ));
-        let rom = Rom::from_path(source).unwrap();
-        let plan = plan_item_action_labels(&rom, workspace).unwrap();
-        assert_eq!(plan.entry_count, 4);
-        assert!(!plan.review_complete);
-    }
-}

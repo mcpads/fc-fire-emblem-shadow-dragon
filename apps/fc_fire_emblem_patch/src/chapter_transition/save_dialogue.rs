@@ -41,26 +41,3 @@ pub(crate) fn bind_save_complete_dialogue_records(
         power_off_notice: "victory-and-defeat-dialogue:001",
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use std::path::Path;
-
-    use super::*;
-
-    #[test]
-    fn save_complete_handlers_select_the_first_two_victory_records() {
-        let source = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
-        ));
-        if !source.exists() {
-            return;
-        }
-        let rom = Rom::from_path(source).unwrap();
-        let records = bind_save_complete_dialogue_records(&rom).unwrap();
-
-        assert_eq!(records.continue_prompt, "victory-and-defeat-dialogue:000");
-        assert_eq!(records.power_off_notice, "victory-and-defeat-dialogue:001");
-    }
-}

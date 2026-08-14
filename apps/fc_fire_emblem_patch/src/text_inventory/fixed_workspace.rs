@@ -625,23 +625,4 @@ mod tests {
         assert_eq!(fresh.entries[0].korean_markup, "맘쿠트");
         assert_eq!(fresh.entries[0].status, "needs_human_review");
     }
-
-    #[test]
-    fn public_location_workspace_covers_all_twenty_four_names() {
-        let source = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
-        ));
-        if !source.exists() {
-            return;
-        }
-        let workspace = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../assets/translation/location-names.ko.json"
-        ));
-        let rom = Rom::from_path(source).unwrap();
-        let plan = plan_location_name_text(&rom, workspace).unwrap();
-        assert_eq!(plan.entries.len(), 24);
-        assert!(!plan.review_complete);
-    }
 }

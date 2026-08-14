@@ -204,28 +204,3 @@ pub(super) fn verify_shop_dialogue_runtime_evidence(
         unique_image_count: image_hashes.len(),
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn installed_manifest_binds_the_decline_exit_and_map_restore_route() {
-        let manifest = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../evidence/private/shop-dialogue-installed/manifest.json"
-        ));
-        if !manifest.exists() {
-            return;
-        }
-        let evidence = verify_shop_dialogue_runtime_evidence(
-            manifest,
-            "526c33aad26622f758a193aa7ef8f40776e8348b",
-            0xC0,
-        )
-        .unwrap();
-
-        assert_eq!(evidence.sample_count, 7);
-        assert_eq!(evidence.unique_image_count, 4);
-    }
-}

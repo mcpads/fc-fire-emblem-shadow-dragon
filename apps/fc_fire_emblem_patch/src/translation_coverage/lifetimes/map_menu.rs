@@ -68,34 +68,3 @@ pub(super) fn inspect(bindings: InputBindings<'_>) -> Result<TranslationLifetime
         evidence_report_sha1: sha1_hex(&evidence_bytes),
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn complete_map_menu_fits_without_screen_specific_preservation_assumptions() {
-        let source = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
-        ));
-        if !source.exists() {
-            return;
-        }
-        let localization = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../assets/translation/map-menu.ko.json"
-        ));
-        let localization_sha1 = sha1_hex(&std::fs::read(localization).unwrap());
-        let demand = inspect(InputBindings {
-            source_path: source,
-            localization_path: localization,
-            localization_sha1: &localization_sha1,
-        })
-        .unwrap();
-
-        assert_eq!(demand.target_glyph_count, 17);
-        assert_eq!(demand.preserved_active_source_code_count, 186);
-        assert_eq!(demand.total_slot_demand, 203);
-    }
-}

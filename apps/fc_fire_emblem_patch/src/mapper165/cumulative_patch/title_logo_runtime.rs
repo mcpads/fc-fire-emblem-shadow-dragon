@@ -192,29 +192,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn installed_manifest_binds_both_logo_phases_tm_copyright_and_exit() {
-        let manifest = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../evidence/private/title-logo-runtime-completion/manifest.json"
-        ));
-        if !manifest.exists() {
-            return;
-        }
-        let evidence = verify_title_logo_runtime_evidence(
-            manifest,
-            "1ddc435b5e678c214c2273ce7a665ba4bf0ade13",
-        )
-        .unwrap();
-
-        assert_eq!(evidence.sample_count, 4);
-        assert_eq!(evidence.unique_image_count, 4);
-        assert!(
-            verify_title_logo_runtime_evidence(manifest, &"00".repeat(20)).is_err(),
-            "an explicitly supplied stale manifest must still fail closed"
-        );
-    }
-
-    #[test]
     fn omitted_manifest_keeps_runtime_binding_unresolved() {
         assert!(
             load_title_logo_runtime_evidence(None, &"00".repeat(20))

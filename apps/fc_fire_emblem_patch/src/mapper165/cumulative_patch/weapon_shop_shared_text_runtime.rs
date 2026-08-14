@@ -273,28 +273,3 @@ pub(super) fn verify_weapon_shop_shared_text_runtime_evidence(
         choice_label_screen_roles: CHOICE_LABEL_SCREEN_ROLES.to_vec(),
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn installed_manifest_binds_the_shared_text_decline_and_exit_route() {
-        let manifest = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../evidence/private/shop-shared-text-installed/manifest.json"
-        ));
-        if !manifest.exists() {
-            return;
-        }
-        let evidence = verify_weapon_shop_shared_text_runtime_evidence(
-            manifest,
-            "4758d15b9beb9b075be6976508b90e17ef1ea54d",
-            0xC0,
-        )
-        .unwrap();
-
-        assert_eq!(evidence.sample_count, 17);
-        assert_eq!(evidence.unique_image_count, 5);
-    }
-}

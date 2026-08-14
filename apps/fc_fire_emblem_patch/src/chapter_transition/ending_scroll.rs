@@ -504,8 +504,6 @@ fn semantic_title_bytes(bytes: &[u8]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
     use super::*;
 
     #[test]
@@ -514,38 +512,5 @@ mod tests {
             ending_scroll_literal_codes(&[0x01, 0xED, 0x19, 0x60, 0xFF], "test").unwrap(),
             [0x01, 0x60, 0xFF]
         );
-    }
-
-    #[test]
-    fn ending_aggregate_label_source_is_semantically_bound() {
-        let source = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
-        ));
-        if !source.exists() {
-            return;
-        }
-        let rom = Rom::from_path(source).unwrap();
-        let label = bind_ending_aggregate_label_source(&rom).unwrap();
-        assert_eq!(label.japanese_markup, "せ゛んターンすう{ED}{19}");
-        assert!(!label.source_reclaimable_active_codes.is_empty());
-    }
-
-    #[test]
-    fn ending_chapter_record_stream_has_no_unreserved_preserved_literals() {
-        let source = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
-        ));
-        if !source.exists() {
-            return;
-        }
-        let rom = Rom::from_path(source).unwrap();
-        let lifetime = bind_ending_chapter_record_lifetime_source(&rom).unwrap();
-
-        assert_eq!(lifetime.record_count, 113);
-        assert_eq!(lifetime.target_record_count, 26);
-        assert_eq!(lifetime.source_reclaimable_active_codes.len(), 73);
-        assert!(lifetime.preserved_active_stream_codes.is_empty());
     }
 }

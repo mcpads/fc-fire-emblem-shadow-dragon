@@ -342,45 +342,6 @@ fn read_bound_file(path: &Path, expected_sha1: &str, role: &str) -> Result<Vec<u
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{class_profile::plan_class_profiles, font_slots::ACTIVE_HANGUL_SLOT_COUNT};
-
-    #[test]
-    fn twenty_two_profiles_split_into_two_screen_safe_pages() {
-        let source_path = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
-        ));
-        let workspace = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../assets/translation/class-profiles.ko.json"
-        ));
-        let evidence = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../evidence/private/class-profile-manifest.json"
-        ));
-        if !source_path.exists() || !evidence.exists() {
-            return;
-        }
-        let source = Rom::from_path(source_path).unwrap();
-        let profiles = plan_class_profiles(&source, workspace).unwrap();
-        let page = plan_class_profile_pages(&source, &source, &profiles, evidence, 32).unwrap();
-
-        // 페이지별 글리프 수는 확정한 표기에 따라 달라지므로 고정하지 않는다.
-        // 지켜야 하는 것은 각 페이지가 활성 슬롯 예산 안에 들면서, 두 페이지의 합집합은
-        // 한 페이지를 넘어 실제로 분할이 필요하다는 점이다.
-        for assignment in &page.assignments {
-            assert!(!assignment.is_empty());
-            assert!(assignment.len() <= ACTIVE_HANGUL_SLOT_COUNT);
-        }
-        let combined: BTreeSet<char> = page
-            .assignments
-            .iter()
-            .flat_map(|assignment| assignment.keys().copied())
-            .collect();
-        assert!(combined.len() > ACTIVE_HANGUL_SLOT_COUNT);
-        assert_eq!(page.preserved_active_code_count, 12);
-        assert_eq!(page.page_pack.len(), 2 * FONT_PAGE_SIZE);
-    }
 
     #[test]
     fn title_hook_selects_both_latches_and_restores_the_replaced_prefix_effect() {

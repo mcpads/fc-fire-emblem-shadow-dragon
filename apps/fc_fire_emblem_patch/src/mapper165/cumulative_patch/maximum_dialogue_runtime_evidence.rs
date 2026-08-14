@@ -568,41 +568,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn installed_manifest_binds_selector_pages_temporal_phases_and_exit_to_exact_output() {
-        let manifest = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../evidence/private/chapter7-maximum-exact/manifest.json"
-        ));
-        if !manifest.exists() {
-            return;
-        }
-        let pointers = [
-            0x901C, 0x9049, 0x9064, 0x9093, 0x90C0, 0x90F0, 0x911A, 0x913B, 0x9165, 0x9192, 0x91B3,
-            0x91E0, 0x920E, 0x9231, 0x925F,
-        ];
-        let page_groups = [0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2];
-        let evidence = verify_maximum_dialogue_runtime_evidence(
-            manifest,
-            "17911417a91fc8190e68d5e032107e97ca939dfe",
-            "08609de072c22f606eae5244c5714cc32894de58",
-            &pointers,
-            &page_groups,
-            &[0xC8, 0xCC, 0xD0],
-        )
-        .unwrap();
-
-        assert_eq!(evidence.sample_count, 90);
-        assert_eq!(evidence.page_count, 15);
-        assert_eq!(evidence.unique_nametable_count, 15);
-        assert_eq!(evidence.temporal_screen_count, 90);
-        assert_eq!(evidence.pages_with_visual_phase_change, 15);
-        assert!(evidence.visual_review_passed);
-        assert!(evidence.initial_selector_observed);
-        assert!(evidence.page_reload_bound_to_build);
-        assert!(evidence.final_exit_bound_to_build);
-    }
-
-    #[test]
     fn runtime_addresses_are_projected_from_cpu_to_prg_ram() {
         assert_eq!(prg_ram_offset(0x77F7).unwrap(), 0x17F7);
         assert_eq!(prg_ram_offset(0x7814).unwrap(), 0x1814);

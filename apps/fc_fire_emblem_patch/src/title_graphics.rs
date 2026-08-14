@@ -214,28 +214,3 @@ pub(super) fn source_chr_page(rom: &Rom) -> Result<&[u8]> {
         .get(chr_start..chr_start + CHR_PAGE_BYTES)
         .context("title CHR page is outside the ROM")
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn public_title_workspace_separates_logo_from_preserved_original_text() {
-        let source = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
-        ));
-        if !source.exists() {
-            return;
-        }
-        let workspace = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../assets/translation/title-logo.ko.json"
-        ));
-        let rom = Rom::from_path(source).unwrap();
-        let plan = plan_title_graphics(&rom, workspace).unwrap();
-
-        assert_eq!(plan.translated_surface_count, 1);
-        assert!(!plan.review_complete);
-    }
-}

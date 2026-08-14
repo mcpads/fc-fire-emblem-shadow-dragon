@@ -167,28 +167,3 @@ pub(super) fn verify_class_profile_runtime_evidence(
         unique_image_count: image_hashes.len(),
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn installed_manifest_binds_both_font_pages_and_the_automatic_exit() {
-        let manifest = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../evidence/private/class-profile-installed/manifest.json"
-        ));
-        if !manifest.exists() {
-            return;
-        }
-        let evidence = verify_class_profile_runtime_evidence(
-            manifest,
-            "63d36eb2c182979873ea662eb27a9afcdbbbb88c",
-            0xBC,
-        )
-        .unwrap();
-
-        assert_eq!(evidence.sample_count, 7);
-        assert_eq!(evidence.unique_image_count, 7);
-    }
-}

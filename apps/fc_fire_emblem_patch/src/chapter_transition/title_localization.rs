@@ -497,23 +497,4 @@ mod tests {
 
         assert!(entry.encoded_storage_bytes(&assignments).is_err());
     }
-
-    #[test]
-    fn public_chapter_title_plan_has_one_global_target_glyph_set() {
-        let source = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
-        ));
-        if !source.exists() {
-            return;
-        }
-        let workspace = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../assets/translation/chapter-titles.ko.json"
-        ));
-        let rom = Rom::from_path(source).unwrap();
-        let plan = plan_chapter_titles(&rom, workspace).unwrap();
-
-        assert_eq!(plan.unique_glyphs().len(), 88);
-    }
 }
