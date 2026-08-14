@@ -32,6 +32,8 @@ pub(super) const EXPECTED_SAMPLE_LIFECYCLE_SHA1: &str = "67856cd2b7a26ef43649181
 
 pub(super) const COMPLETED_PAGE_SITE: u16 = 0x85C9;
 const COMPLETED_PAGE_SPAN: usize = 29;
+const COMPLETED_PAGE_PREDECESSOR_SITE: u16 = 0x85C5;
+const COMPLETED_PAGE_SHARED_EXIT: u16 = 0x85E5;
 pub(super) const E7_HANDOFF_SITE: u16 = 0x8556;
 pub(super) const E4_TRANSITION_SITE: u16 = 0x85F8;
 pub(super) const E6_TRANSITION_SITE: u16 = 0x865F;
@@ -63,6 +65,9 @@ const COMPLETED_PAGE_SOURCE: [u8; COMPLETED_PAGE_SPAN] = [
     0xAD, 0x02, 0x78, 0xF0, 0x04, 0xA9, 0x0F, 0xD0, 0x10, 0xA9, 0x00, 0x8D, 0x04, 0x78, 0xAD, 0x0A,
     0x78, 0xF0, 0x04, 0xA9, 0x10, 0xD0, 0x02, 0xA9, 0x09, 0x8D, 0xF7, 0x77, 0x60,
 ];
+// 교체 구간 바로 앞의 분기가 마지막 RTS로 들어온다. 따라서 그 바이트는 훅만
+// 소유하는 죽은 패딩이 아니라 원본 처리기와 공유하는 종료점이다.
+const COMPLETED_PAGE_PREDECESSOR_SOURCE: [u8; 4] = [0xA5, 0x18, 0xF0, 0x1C];
 const EXPECTED_SAMPLE_COMPLETED_PAGE_SHA1: &str = "965de5bfca83263ac587e5c7c316ed6324d95ca8";
 const E7_HANDOFF_SOURCE: [u8; 17] = [
     0xAD, 0x08, 0x78, 0xF0, 0x0C, 0xA9, 0x01, 0x8D, 0x31, 0x78, 0xEE, 0x09, 0x78, 0xA9, 0x11, 0xD0,
@@ -77,6 +82,22 @@ pub(super) struct LifecycleSuite {
 
 /// 설치가 전제로 삼는 원본 상태 전이와 표본 코드를 한 번에 결속한다.
 pub(super) fn bind_lifecycle_sites(source: &Rom, candidate: &Rom) -> Result<()> {
+    for rom in [source, candidate] {
+        ensure!(
+            switchable_bytes(
+                rom,
+                COMPLETED_PAGE_PREDECESSOR_SITE,
+                COMPLETED_PAGE_PREDECESSOR_SOURCE.len()
+            )? == COMPLETED_PAGE_PREDECESSOR_SOURCE,
+            "main-dialogue completed-page predecessor changed"
+        );
+    }
+    decode_rp2a03_sequence(
+        &COMPLETED_PAGE_PREDECESSOR_SOURCE,
+        COMPLETED_PAGE_PREDECESSOR_SITE,
+        "main-dialogue completed-page predecessor",
+    )?;
+
     for address in [E4_TRANSITION_SITE, E6_TRANSITION_SITE, E7_RESUME_SITE] {
         for rom in [source, candidate] {
             ensure!(
@@ -210,6 +231,13 @@ pub(super) fn build_lifecycle_suite(
     instructions.push(Instruction::BneAbsolute(origin));
     instructions.extend([
         // 원본 완료 상태가 다음 표시 페이지를 요구할 때만 가시 페이지를 올린다.
+        // 밀어낸 원본 29바이트는 X/Y를 바꾸지 않는다. 아래 resolver는 둘 다
+        // 작업 레지스터로 쓰므로, 원본 상태기가 다음 줄 포인터와 화면 버퍼를 고를
+        // 때 같은 값을 보도록 호출 전체에서 보존한다.
+        Instruction::Txa,
+        Instruction::Pha,
+        Instruction::Tya,
+        Instruction::Pha,
         Instruction::LdaAbsolute(CURRENT_PAGE_GROUP),
         Instruction::Pha,
     ]);
@@ -219,6 +247,12 @@ pub(super) fn build_lifecycle_suite(
         code_page,
         resolved_page_publication,
     );
+    instructions.extend([
+        Instruction::Pla,
+        Instruction::Tay,
+        Instruction::Pla,
+        Instruction::Tax,
+    ]);
     let store_continue = next_address(origin, &instructions)?;
     instructions[unowned_page] = Instruction::BneAbsolute(store_continue);
     instructions.extend([
@@ -274,14 +308,25 @@ pub(super) fn build_lifecycle_suite(
 }
 
 /// 표본이 바꾼 29바이트 전체를 가져간다. 첫 `JMP` 뒤는 실행되지 않는 `NOP`으로
-/// 채워 표본 전용 분기가 새 전역 훅 뒤에 남지 않게 한다.
+/// 채워 표본 전용 분기가 새 전역 훅 뒤에 남지 않게 한다. 다만 바로 앞 `$85C7`의
+/// 원본 분기가 마지막 바이트 `$85E5`를 공용 `RTS`로 사용하므로 그 종료 명령은
+/// 반드시 보존한다.
 pub(super) fn completed_page_hook_bytes(entry: u16) -> Result<Vec<u8>> {
     let mut instructions = vec![Instruction::JmpAbsolute(entry)];
     instructions.resize(COMPLETED_PAGE_SPAN - 2, Instruction::Nop);
+    *instructions
+        .last_mut()
+        .context("completed-page hook has no shared exit slot")? = Instruction::Rts;
     let bytes = assemble_at(COMPLETED_PAGE_SITE, &instructions)?;
     ensure!(
         bytes.len() == COMPLETED_PAGE_SPAN,
         "completed-page hook changed its source span"
+    );
+    ensure!(
+        COMPLETED_PAGE_SITE
+            + u16::try_from(bytes.len() - 1).context("completed-page span overflow")?
+            == COMPLETED_PAGE_SHARED_EXIT,
+        "completed-page hook no longer ends at the source shared exit"
     );
     Ok(bytes)
 }
@@ -414,6 +459,42 @@ mod tests {
         }));
     }
 
+    /// 밀어낸 완료 처리기는 X/Y를 바꾸지 않는다. 다음 페이지 resolver의 임시
+    /// 색인값이 새 화면의 줄 포인터 선택으로 새면 같은 레코드의 첫 페이지가 다시
+    /// 그려진다.
+    #[test]
+    fn next_page_resolution_preserves_the_source_handlers_index_registers() {
+        let suite = lifecycle_suite();
+        let bytes = &suite.routine.bytes;
+        let resolver = bytes
+            .windows(3)
+            .position(|window| window == [0x20, 0x00, 0xB4])
+            .expect("the lifecycle calls the next-page resolver");
+        let publication = bytes
+            .windows(3)
+            .position(|window| {
+                window
+                    == [
+                        0x20,
+                        RESOLVED_PAGE_PUBLICATION as u8,
+                        (RESOLVED_PAGE_PUBLICATION >> 8) as u8,
+                    ]
+            })
+            .expect("the lifecycle publishes the resolved page");
+
+        assert!(
+            bytes[..resolver]
+                .windows(4)
+                .any(|window| window == [0x8A, 0x48, 0x98, 0x48]),
+            "the source X/Y registers are not saved before the resolver"
+        );
+        assert_eq!(
+            &bytes[publication + 3..publication + 7],
+            [0x68, 0xA8, 0x68, 0xAA],
+            "the source Y/X registers are not restored after publication"
+        );
+    }
+
     #[test]
     fn next_page_resolution_is_nmi_guarded_until_the_bank_is_restored() {
         let suite = lifecycle_suite();
@@ -468,10 +549,22 @@ mod tests {
     #[test]
     fn the_completed_page_hook_replaces_the_whole_sample_span() {
         let hook = completed_page_hook_bytes(LIFECYCLE_ORIGIN).unwrap();
+        let shared_exit = assemble_at(COMPLETED_PAGE_SHARED_EXIT, &[Instruction::Rts]).unwrap();
+        let branch_after = COMPLETED_PAGE_PREDECESSOR_SITE
+            + u16::try_from(COMPLETED_PAGE_PREDECESSOR_SOURCE.len()).unwrap();
+        let predecessor_target = (i32::from(branch_after)
+            + i32::from(COMPLETED_PAGE_PREDECESSOR_SOURCE[3] as i8))
+            as u16;
 
         assert_eq!(hook.len(), COMPLETED_PAGE_SPAN);
         assert_eq!(&hook[..3], &[0x4C, 0x90, 0xF9]);
-        assert!(hook[3..].iter().all(|byte| *byte == 0xEA));
+        assert!(hook[3..hook.len() - 1].iter().all(|byte| *byte == 0xEA));
+        assert_eq!(predecessor_target, COMPLETED_PAGE_SHARED_EXIT);
+        assert_eq!(
+            COMPLETED_PAGE_SITE + u16::try_from(hook.len() - 1).unwrap(),
+            COMPLETED_PAGE_SHARED_EXIT
+        );
+        assert_eq!(&hook[hook.len() - 1..], shared_exit);
     }
 
     #[test]

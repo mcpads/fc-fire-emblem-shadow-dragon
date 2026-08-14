@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 use crate::sha1_hex;
 
 const MINIMUM_IRREGULAR_SAMPLE_COUNT: usize = 3;
+const MULTI_PAGE_MAIN_DIALOGUE_ROLE: &str = "chapter_intro_title_dialogue_composite";
 
 #[derive(Serialize)]
 pub(super) struct FinalArtifactRuntimeEvidence {
@@ -53,7 +54,17 @@ struct ScreenObservation {
     japanese_target_text_absent: bool,
     protected_original_text: ProtectedOriginalText,
     visual_glitch_absent_across_samples: bool,
+    #[serde(default)]
+    main_dialogue_progression: Option<MainDialogueProgression>,
     samples: Vec<RuntimeSample>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MainDialogueProgression {
+    distinct_visible_page_sample_offsets: Vec<u64>,
+    following_record_sample_offset: u64,
+    role_exit_sample_offset: u64,
 }
 
 #[derive(Clone, Copy, Deserialize, Eq, PartialEq)]
@@ -239,6 +250,49 @@ fn verify_observation(
         "runtime screen {} has a visual glitch in its temporal samples",
         observation.screen_role
     );
+    if observation.screen_role == MULTI_PAGE_MAIN_DIALOGUE_ROLE {
+        let progression = observation
+            .main_dialogue_progression
+            .as_ref()
+            .context("multi-page main-dialogue runtime evidence has no progression result")?;
+        let sample_offsets = observation
+            .samples
+            .iter()
+            .map(|sample| sample.frame_offset)
+            .collect::<BTreeSet<_>>();
+        ensure!(
+            progression.distinct_visible_page_sample_offsets.len() >= 2,
+            "multi-page main-dialogue runtime evidence observed fewer than two distinct pages"
+        );
+        ensure!(
+            progression
+                .distinct_visible_page_sample_offsets
+                .windows(2)
+                .all(|pair| pair[0] < pair[1]),
+            "multi-page main-dialogue page samples are not strictly increasing"
+        );
+        ensure!(
+            progression
+                .distinct_visible_page_sample_offsets
+                .iter()
+                .all(|offset| sample_offsets.contains(offset)),
+            "multi-page main-dialogue page evidence names an unbound sample"
+        );
+        let last_visible_page = *progression
+            .distinct_visible_page_sample_offsets
+            .last()
+            .context("multi-page main-dialogue evidence has no page sample")?;
+        ensure!(
+            last_visible_page < progression.following_record_sample_offset
+                && sample_offsets.contains(&progression.following_record_sample_offset),
+            "multi-page main-dialogue evidence did not bind a later following-record sample"
+        );
+        ensure!(
+            progression.following_record_sample_offset < progression.role_exit_sample_offset
+                && sample_offsets.contains(&progression.role_exit_sample_offset),
+            "multi-page main-dialogue evidence did not bind a later role-exit sample"
+        );
+    }
     ensure!(
         observation.samples.len() >= MINIMUM_IRREGULAR_SAMPLE_COUNT,
         "runtime screen {} has fewer than {} temporal samples",

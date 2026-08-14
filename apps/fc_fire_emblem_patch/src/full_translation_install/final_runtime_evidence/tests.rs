@@ -97,6 +97,72 @@ fn regular_frame_sampling_is_rejected() {
     assert!(format!("{error:#}").contains("irregular offsets"));
 }
 
+#[test]
+fn a_single_page_cannot_bind_the_multi_page_main_dialogue_role() {
+    let fixture = RuntimeFixture::new();
+    let artifact_sha1 = "11".repeat(20);
+    fixture.write_manifest(json!({
+        "artifact_sha1": artifact_sha1,
+        "runs": [{
+            "run_id": "single-dialogue-page",
+            "started_from_cold_boot": true,
+            "savestate_used": false,
+            "observations": [{
+                "screen_role": MULTI_PAGE_MAIN_DIALOGUE_ROLE,
+                "kind": "representative",
+                "hangul_readable": true,
+                "japanese_target_text_absent": true,
+                "protected_original_text": "preserved",
+                "visual_glitch_absent_across_samples": true,
+                "samples": fixture.samples([0, 47, 130])
+            }]
+        }]
+    }));
+
+    let error = load_final_artifact_runtime_evidence(Some(&fixture.manifest_path), &artifact_sha1)
+        .err()
+        .unwrap();
+
+    assert!(format!("{error:#}").contains("has no progression result"));
+}
+
+#[test]
+fn distinct_pages_following_record_and_exit_bind_main_dialogue_progression() {
+    let fixture = RuntimeFixture::new();
+    let artifact_sha1 = "11".repeat(20);
+    fixture.write_manifest(json!({
+        "artifact_sha1": artifact_sha1,
+        "runs": [{
+            "run_id": "complete-dialogue-progression",
+            "started_from_cold_boot": true,
+            "savestate_used": false,
+            "observations": [{
+                "screen_role": MULTI_PAGE_MAIN_DIALOGUE_ROLE,
+                "kind": "representative",
+                "hangul_readable": true,
+                "japanese_target_text_absent": true,
+                "protected_original_text": "preserved",
+                "visual_glitch_absent_across_samples": true,
+                "main_dialogue_progression": {
+                    "distinct_visible_page_sample_offsets": [0, 840],
+                    "following_record_sample_offset": 1650,
+                    "role_exit_sample_offset": 3274
+                },
+                "samples": fixture.samples_at(&[0, 840, 1650, 3274])
+            }]
+        }]
+    }));
+
+    let evidence =
+        load_final_artifact_runtime_evidence(Some(&fixture.manifest_path), &artifact_sha1).unwrap();
+
+    assert!(
+        evidence
+            .bound_screen_roles()
+            .contains(MULTI_PAGE_MAIN_DIALOGUE_ROLE)
+    );
+}
+
 struct RuntimeFixture {
     directory: PathBuf,
     manifest_path: PathBuf,
@@ -125,8 +191,13 @@ impl RuntimeFixture {
     }
 
     fn samples(&self, offsets: [u64; 3]) -> Vec<serde_json::Value> {
+        self.samples_at(&offsets)
+    }
+
+    fn samples_at(&self, offsets: &[u64]) -> Vec<serde_json::Value> {
         offsets
-            .into_iter()
+            .iter()
+            .copied()
             .map(|frame_offset| {
                 json!({
                     "frame_offset": frame_offset,
