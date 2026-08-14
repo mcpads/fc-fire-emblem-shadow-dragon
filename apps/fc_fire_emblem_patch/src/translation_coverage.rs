@@ -266,6 +266,8 @@ pub(crate) fn analyze_translation_coverage(
                 .front_end_preserved_active_code_count,
             front_end_no_save_source_lifetime_bound: installation
                 .front_end_no_save_source_lifetime_bound,
+            front_end_save_slot_selection_source_lifetime_bound: installation
+                .front_end_save_slot_selection_source_lifetime_bound,
             options_target_glyph_count: installation.options_target_glyph_count,
             options_preserved_active_code_count: installation.options_preserved_active_code_count,
             options_total_slot_demand: installation.options_total_slot_demand,

@@ -1052,6 +1052,7 @@ pub(crate) fn build_cumulative_patch(
             font_page_pack_sha1: sha1_hex(&front_end_stage.page.page_pack),
             central_fe_companion_refresh_routed: true,
             no_save_source_lifetime_bound: true,
+            save_slot_selection_source_lifetime_bound: true,
             runtime_variants_bound_to_build: false,
             review_complete: front_end_menu_plan.review_complete,
         },

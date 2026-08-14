@@ -45,6 +45,8 @@ pub(crate) const OBSERVED_CHR_PAIRS: &[ObservedChrPair] = &[
     pair("title", PatternWindow::Right, 0x00, 0x14),
     pair("new_game_choice", PatternWindow::Left, 0x1A, 0x1A),
     pair("new_game_choice", PatternWindow::Right, 0x00, 0x00),
+    pair("save_slot_selection", PatternWindow::Left, 0x1A, 0x1A),
+    pair("save_slot_selection", PatternWindow::Right, 0x00, 0x00),
     pair("intro_terrain", PatternWindow::Left, 0x1A, 0x1A),
     pair("intro_terrain", PatternWindow::Right, 0x15, 0x15),
     pair("class_profile", PatternWindow::Left, 0x14, 0x14),

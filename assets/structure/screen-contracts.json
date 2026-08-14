@@ -55,6 +55,22 @@
       "contract_state": "observed_partial"
     },
     {
+      "screen_role": "save_slot_selection",
+      "surface_family": "front_end",
+      "runtime_observed": true,
+      "input_behavior": "input_wait",
+      "translation_scope": "japanese_with_preserved_original_latin",
+      "temporal_behavior": "selection cursor and left prompt may flash, so the visible union needs irregular samples",
+      "known_focus": [
+        "source bank 02:A6CA sends composite state 21 through fixed writer E690 to internal RAM 05E8",
+        "left 1A/1A and right 00/00 CHR pairs",
+        "the seven-entry front-end codebook supplies Korean record labels while original MAP, digits, and dashes stay protected"
+      ],
+      "unresolved_focus": ["valid-save and suspend-data variants beyond the empty-slot route"],
+      "next_gate": "retain state 21 in the front-end page selector and bind the remaining save-data variants to exact integrated artifacts",
+      "contract_state": "observed_partial"
+    },
+    {
       "screen_role": "intro_terrain",
       "surface_family": "chapter_intro",
       "runtime_observed": true,

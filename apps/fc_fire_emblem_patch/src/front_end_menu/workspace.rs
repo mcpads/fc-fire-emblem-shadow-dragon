@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     japanese_encoding::japanese_text_glyph,
     mmc5_chr::switchable_bank_file_offset,
+    mmc5_prg::fixed_bank_file_offset,
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
     text_inventory::{
@@ -19,9 +20,11 @@ use crate::{
 };
 
 use super::source_spec::{
-    COMPOSITE_DISPATCH_BINDING, FIXED_STRING_POINTER_TABLE_ADDRESS, MENU_LABEL_SPECS,
-    RECORD_MENU_LABEL_BINDING, RECORD_MENU_LABEL_BINDING_ADDRESS, SOURCE_PRG_BANK,
-    START_MENU_LABEL_BINDING, START_MENU_LABEL_BINDING_ADDRESS,
+    COMPOSITE_DISPATCH_BINDING, COMPOSITE_STATE_WRITER_ADDRESS, COMPOSITE_STATE_WRITER_BINDING,
+    FIXED_STRING_POINTER_TABLE_ADDRESS, MENU_LABEL_SPECS, RECORD_MENU_LABEL_BINDING,
+    RECORD_MENU_LABEL_BINDING_ADDRESS, SAVE_SLOT_ROUTE_BINDING, SAVE_SLOT_ROUTE_BINDING_ADDRESS,
+    SAVE_SLOT_ROUTE_SOURCE_PRG_BANK, SOURCE_PRG_BANK, START_MENU_LABEL_BINDING,
+    START_MENU_LABEL_BINDING_ADDRESS,
 };
 
 #[derive(Debug)]
@@ -307,6 +310,22 @@ fn validate_consumers(rom: &Rom) -> Result<()> {
             "front-end {role} consumer binding changed"
         );
     }
+    let save_slot_route_offset = switchable_bank_file_offset(
+        SAVE_SLOT_ROUTE_SOURCE_PRG_BANK,
+        SAVE_SLOT_ROUTE_BINDING_ADDRESS,
+    )?;
+    ensure!(
+        rom.data()[save_slot_route_offset..save_slot_route_offset + SAVE_SLOT_ROUTE_BINDING.len()]
+            == *SAVE_SLOT_ROUTE_BINDING,
+        "front-end save-slot selection route binding changed"
+    );
+    let composite_state_writer_offset = fixed_bank_file_offset(COMPOSITE_STATE_WRITER_ADDRESS)?;
+    ensure!(
+        rom.data()[composite_state_writer_offset
+            ..composite_state_writer_offset + COMPOSITE_STATE_WRITER_BINDING.len()]
+            == *COMPOSITE_STATE_WRITER_BINDING,
+        "front-end composite-state writer binding changed"
+    );
     Ok(())
 }
 

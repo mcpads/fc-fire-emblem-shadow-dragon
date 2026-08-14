@@ -48,6 +48,7 @@ pub(super) struct LifetimeInputBindings<'a> {
     pub(super) front_end_target_glyph_count: usize,
     pub(super) front_end_preserved_active_code_count: usize,
     pub(super) front_end_no_save_source_lifetime_bound: bool,
+    pub(super) front_end_save_slot_selection_source_lifetime_bound: bool,
     pub(super) options_target_glyph_count: usize,
     pub(super) options_preserved_active_code_count: usize,
     pub(super) options_total_slot_demand: usize,
@@ -92,7 +93,7 @@ struct ConsumerLifetimeDemands {
     unit_roster: TranslationLifetimeDemandReport,
     weapon_shop: Vec<TranslationLifetimeDemandReport>,
     item_flow: Vec<TranslationLifetimeDemandReport>,
-    front_end_menu: TranslationLifetimeDemandReport,
+    front_end_menu: Vec<TranslationLifetimeDemandReport>,
     options_menu: TranslationLifetimeDemandReport,
     title_graphics: TranslationLifetimeDemandReport,
     map_menu: TranslationLifetimeDemandReport,
@@ -236,10 +237,12 @@ pub(super) fn inspect_translation_lifetimes(
         unit_name_workspace_sha1: bindings.unit_name_workspace_sha1,
         item_action_label_workspace_sha1: bindings.item_action_label_workspace_sha1,
     })?;
-    let front_end_menu_demand = front_end_menu::inspect(front_end_menu::InputBindings {
+    let front_end_menu_demands = front_end_menu::inspect(front_end_menu::InputBindings {
         target_glyph_count: bindings.front_end_target_glyph_count,
         preserved_active_code_count: bindings.front_end_preserved_active_code_count,
         no_save_source_lifetime_bound: bindings.front_end_no_save_source_lifetime_bound,
+        save_slot_selection_source_lifetime_bound: bindings
+            .front_end_save_slot_selection_source_lifetime_bound,
         evidence_report_sha1: bindings.current_build_report_sha1,
     })?;
     let options_menu_demand = options_menu::inspect(options_menu::InputBindings {
@@ -309,7 +312,7 @@ pub(super) fn inspect_translation_lifetimes(
             unit_roster: unit_roster_demand,
             weapon_shop: weapon_shop_demands,
             item_flow: item_flow_demands,
-            front_end_menu: front_end_menu_demand,
+            front_end_menu: front_end_menu_demands,
             options_menu: options_menu_demand,
             title_graphics: title_graphics_demand,
             map_menu: map_menu_demand,
@@ -375,7 +378,7 @@ fn build_translation_lifetime_inventory(
     demands.push(consumer_demands.unit_roster);
     demands.extend(consumer_demands.weapon_shop);
     demands.extend(consumer_demands.item_flow);
-    demands.push(consumer_demands.front_end_menu);
+    demands.extend(consumer_demands.front_end_menu);
     demands.push(consumer_demands.options_menu);
     demands.push(consumer_demands.title_graphics);
     demands.push(consumer_demands.map_menu);
@@ -537,10 +540,11 @@ mod tests {
         })
         .unwrap();
         let item_flow_demands = item_flow_demands();
-        let front_end_menu_demand = front_end_menu::inspect(front_end_menu::InputBindings {
+        let front_end_menu_demands = front_end_menu::inspect(front_end_menu::InputBindings {
             target_glyph_count: 15,
             preserved_active_code_count: 12,
             no_save_source_lifetime_bound: true,
+            save_slot_selection_source_lifetime_bound: true,
             evidence_report_sha1: "build-report",
         })
         .unwrap();
@@ -573,6 +577,7 @@ mod tests {
             "game_over",
             "map_menu",
             "new_game_choice",
+            "save_slot_selection",
             "options",
             "unit_command_menu",
             "unit_roster",
@@ -619,6 +624,7 @@ mod tests {
                 front_end_target_glyph_count: 15,
                 front_end_preserved_active_code_count: 12,
                 front_end_no_save_source_lifetime_bound: true,
+                front_end_save_slot_selection_source_lifetime_bound: true,
                 options_target_glyph_count: 12,
                 options_preserved_active_code_count: 78,
                 options_total_slot_demand: 90,
@@ -649,7 +655,7 @@ mod tests {
                 unit_roster: unit_roster_demand,
                 weapon_shop: weapon_shop_demands,
                 item_flow: item_flow_demands,
-                front_end_menu: front_end_menu_demand,
+                front_end_menu: front_end_menu_demands,
                 options_menu: options_menu_demand,
                 title_graphics: title_graphics::inspect(title_graphics::InputBindings {
                     installed_unique_tile_count: 117,
@@ -691,7 +697,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(inventory.demands.len(), 30);
+        assert_eq!(inventory.demands.len(), 31);
         assert_eq!(inventory.strongest.state, "complete");
         assert_eq!(inventory.strongest.selected_screen_role, Some("map_menu"));
         assert_eq!(inventory.strongest.selected_slot_demand, Some(203));

@@ -1,5 +1,14 @@
 pub(super) const SOURCE_PRG_BANK: u8 = 0x0B;
 pub(super) const FIXED_STRING_POINTER_TABLE_ADDRESS: u16 = 0x8FC2;
+pub(super) const SAVE_SLOT_ROUTE_SOURCE_PRG_BANK: u8 = 0x02;
+pub(super) const SAVE_SLOT_ROUTE_BINDING_ADDRESS: u16 = 0xA6C6;
+pub(super) const SAVE_SLOT_ROUTE_BINDING: &[u8] =
+    &[0xA9, 0x02, 0x85, 0x84, 0xA9, 0x21, 0x4C, 0x90, 0xE6];
+pub(super) const COMPOSITE_STATE_WRITER_ADDRESS: u16 = 0xE690;
+pub(super) const COMPOSITE_STATE_WRITER_BINDING: &[u8] = &[
+    0x8D, 0xE8, 0x05, 0xA9, 0x01, 0x85, 0x44, 0xA9, 0x0B, 0x4C, 0xFA, 0xC9,
+];
+pub(crate) const SAVE_SLOT_SELECTION_COMPOSITE_STATE: u8 = 0x21;
 
 pub(super) struct MenuLabelSpec {
     pub(super) id: &'static str,

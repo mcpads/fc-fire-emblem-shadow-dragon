@@ -9,6 +9,7 @@ use serde::Deserialize;
 
 use crate::{
     font_slots::{FONT_PAGE_SIZE, active_hangul_codes},
+    front_end_menu::SAVE_SLOT_SELECTION_COMPOSITE_STATE,
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     rp2a03::{Instruction, assemble_at},
     sha1_hex,
@@ -21,7 +22,7 @@ use super::{
 
 pub(super) const PAGE_ROUTINE_ADDRESS: u16 = 0xFC60;
 pub(super) const PAGE_ROUTINE_END: u16 = 0xFC99;
-const CHECK_COMPOSITE_PAIR_ADDRESS: u16 = 0xFC6D;
+const CHECK_COMPOSITE_PAIR_ADDRESS: u16 = 0xFC70;
 const FALLBACK_ADDRESS: u16 = 0xFC94;
 const SOURCE_FONT_PHYSICAL_PAGE: usize = 2;
 const EXTENSION_PAGE_COUNT: usize = 2;
@@ -131,9 +132,11 @@ pub(super) fn build_page_selector(mapper_register: u8, fallback_target: u16) -> 
             Instruction::Php,
             Instruction::Pha,
             Instruction::LdaAbsolute(0x05E8),
-            Instruction::CmpImmediate(0x0D),
-            Instruction::BeqAbsolute(CHECK_COMPOSITE_PAIR_ADDRESS),
-            Instruction::CmpImmediate(0x0E),
+            Instruction::Sec,
+            Instruction::SbcImmediate(0x0D),
+            Instruction::CmpImmediate(0x02),
+            Instruction::BccAbsolute(CHECK_COMPOSITE_PAIR_ADDRESS),
+            Instruction::CmpImmediate(SAVE_SLOT_SELECTION_COMPOSITE_STATE - 0x0D),
             Instruction::BneAbsolute(FALLBACK_ADDRESS),
             Instruction::LdaZeroPage(0x59),
             Instruction::CmpImmediate(0x1A),
@@ -142,20 +145,20 @@ pub(super) fn build_page_selector(mapper_register: u8, fallback_target: u16) -> 
             Instruction::CmpImmediate(0x1A),
             Instruction::BneAbsolute(FALLBACK_ADDRESS),
             Instruction::LdaZeroPage(0x5B),
-            Instruction::CmpImmediate(0x00),
+            Instruction::OraZeroPage(0x5C),
             Instruction::BneAbsolute(FALLBACK_ADDRESS),
-            Instruction::LdaZeroPage(0x5C),
-            Instruction::CmpImmediate(0x00),
-            Instruction::BneAbsolute(FALLBACK_ADDRESS),
-            Instruction::LdaImmediate(mapper_register),
-            Instruction::Pha,
             Instruction::LdaImmediate(2),
             Instruction::StaAbsolute(0x8000),
-            Instruction::Pla,
+            Instruction::LdaImmediate(mapper_register),
             Instruction::StaAbsolute(0x8001),
             Instruction::Pla,
             Instruction::Plp,
             Instruction::Rts,
+            Instruction::Nop,
+            Instruction::Nop,
+            Instruction::Nop,
+            Instruction::Nop,
+            Instruction::Nop,
             Instruction::Pla,
             Instruction::Plp,
             Instruction::JmpAbsolute(fallback_target),
@@ -302,7 +305,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn selector_matches_only_front_end_composition_and_original_page_request() {
+    fn selector_admits_both_front_end_menu_lifetimes_and_original_page_request() {
         let routine = build_page_selector(
             0xA8,
             super::super::SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
@@ -313,10 +316,27 @@ mod tests {
             routine.len(),
             usize::from(PAGE_ROUTINE_END - PAGE_ROUTINE_ADDRESS)
         );
+        assert!(routine.windows(12).any(|bytes| {
+            bytes
+                == [
+                    0xAD,
+                    0xE8,
+                    0x05,
+                    0x38,
+                    0xE9,
+                    0x0D,
+                    0xC9,
+                    0x02,
+                    0x90,
+                    0x04,
+                    0xC9,
+                    SAVE_SLOT_SELECTION_COMPOSITE_STATE - 0x0D,
+                ]
+        }));
         assert!(
             routine
-                .windows(7)
-                .any(|bytes| bytes == [0xAD, 0xE8, 0x05, 0xC9, 0x0D, 0xF0, 0x04])
+                .windows(6)
+                .any(|bytes| bytes == [0xA5, 0x5B, 0x05, 0x5C, 0xD0, 0x12])
         );
         assert!(routine.windows(2).any(|bytes| bytes == [0xA9, 0xA8]));
         assert_eq!(&routine[routine.len() - 3..], &[0x4C, 0xC0, 0xFA]);

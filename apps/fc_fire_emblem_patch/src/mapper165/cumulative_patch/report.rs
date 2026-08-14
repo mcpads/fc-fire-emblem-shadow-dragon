@@ -214,6 +214,7 @@ pub(super) struct CumulativeFrontEndMenuReport {
     pub(super) font_page_pack_sha1: String,
     pub(super) central_fe_companion_refresh_routed: bool,
     pub(super) no_save_source_lifetime_bound: bool,
+    pub(super) save_slot_selection_source_lifetime_bound: bool,
     pub(super) runtime_variants_bound_to_build: bool,
     pub(super) review_complete: bool,
 }

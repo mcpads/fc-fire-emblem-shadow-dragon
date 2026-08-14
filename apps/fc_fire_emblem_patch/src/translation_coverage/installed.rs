@@ -101,6 +101,8 @@ struct CurrentFrontEndMenu {
     unique_glyph_count: usize,
     preserved_active_code_count: usize,
     no_save_source_lifetime_bound: bool,
+    #[serde(default)]
+    save_slot_selection_source_lifetime_bound: bool,
     runtime_variants_bound_to_build: bool,
 }
 
@@ -216,6 +218,7 @@ pub(crate) struct CurrentInstallation {
     pub(crate) front_end_target_glyph_count: usize,
     pub(crate) front_end_preserved_active_code_count: usize,
     pub(crate) front_end_no_save_source_lifetime_bound: bool,
+    pub(crate) front_end_save_slot_selection_source_lifetime_bound: bool,
     pub(crate) options_target_glyph_count: usize,
     pub(crate) options_preserved_active_code_count: usize,
     pub(crate) options_total_slot_demand: usize,
@@ -294,6 +297,9 @@ pub(crate) fn inspect_current_installation(
         front_end_no_save_source_lifetime_bound: report
             .front_end_menu
             .no_save_source_lifetime_bound,
+        front_end_save_slot_selection_source_lifetime_bound: report
+            .front_end_menu
+            .save_slot_selection_source_lifetime_bound,
         options_target_glyph_count: report.options_menu.target_glyph_count,
         options_preserved_active_code_count: report.options_menu.preserved_active_code_count,
         options_total_slot_demand: report.options_menu.total_slot_demand,
@@ -381,7 +387,8 @@ fn validate_front_end_lifetime(report: &CurrentBuildReport) -> Result<()> {
         front_end.installed_entry_count == 7
             && front_end.unique_glyph_count > 0
             && front_end.preserved_active_code_count > 0
-            && front_end.no_save_source_lifetime_bound,
+            && front_end.no_save_source_lifetime_bound
+            && front_end.save_slot_selection_source_lifetime_bound,
         "current front-end menu lifetime changed"
     );
     Ok(())
@@ -615,18 +622,21 @@ fn collect_domain_installations(
         )?;
     }
 
+    let front_end_screens = ["new_game_choice", "save_slot_selection"];
     let front_end_runtime = report
         .front_end_menu
         .runtime_variants_bound_to_build
-        .then_some("new_game_choice")
+        .then_some(front_end_screens.as_slice())
         .into_iter()
+        .flatten()
+        .copied()
         .collect::<Vec<_>>();
     put(
         &mut domains,
         "front_end_menu_labels",
         installation(
             report.front_end_menu.installed_entry_count,
-            &["new_game_choice"],
+            &front_end_screens,
             &front_end_runtime,
         ),
     )?;

@@ -43,6 +43,7 @@ pub(crate) const DOMAIN_SEEDS: &[TranslationDomainSeed] = &[
 const SCREEN_TARGETS: &[ScreenTargetSeed] = &[
     screen("title", &["title_graphics"]),
     screen("new_game_choice", &["front_end_menu_labels"]),
+    screen("save_slot_selection", &["front_end_menu_labels"]),
     screen("class_profile", &["class_profiles"]),
     screen("intro_dialogue", &["main_dialogue"]),
     screen("later_intro_dialogue", &["main_dialogue"]),
@@ -246,8 +247,8 @@ mod tests {
         let partition = inspect_screen_translation_partition().unwrap();
         let domains = bind_domain_screen_targets(&partition).unwrap();
 
-        assert_eq!(partition.screen_count, 45);
-        assert_eq!(partition.japanese_bearing_screens.len(), 36);
+        assert_eq!(partition.screen_count, 46);
+        assert_eq!(partition.japanese_bearing_screens.len(), 37);
         assert_eq!(partition.preserved_original_only_screen_count, 5);
         assert_eq!(partition.no_text_screen_count, 4);
         assert_eq!(domains.len(), DOMAIN_SEEDS.len());
