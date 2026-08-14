@@ -46,6 +46,15 @@ pub(super) struct DynamicDialogueInputPlan {
     pub(super) every_augmented_workset_fits: bool,
 }
 
+impl DynamicDialogueInputPlan {
+    /// 대사 안에서 동적으로 들어오는 아이템·유닛·지명은 저장 바이트와 글꼴 코드가
+    /// 이미 한 계약이다. 고정 UI 코드북도 이 값을 씨앗으로 써야 같은 원천 표를
+    /// 소비자마다 다시 인코딩하지 않는다.
+    pub(super) fn canonical_dynamic_codes(&self) -> &BTreeMap<char, u8> {
+        &self.canonical_dynamic_codes
+    }
+}
+
 pub(super) fn plan_dynamic_dialogue_inputs(
     dialogue: &MainDialogueDisplayPlan,
     fixed_text: &[FixedTextPlannedEntry],

@@ -23,6 +23,7 @@ use crate::{
 
 mod chapter_intro_residency;
 mod cold_request_presentation;
+mod consumer_codebook;
 mod consumer_installation;
 mod cross_domain_material;
 mod current_candidate;
@@ -44,6 +45,7 @@ mod transition_residency;
 
 use chapter_intro_residency::plan_chapter_intro_residency;
 use cold_request_presentation::plan_cold_request_presentation_page;
+use consumer_codebook::{ConsumerCodebookInputs, ConsumerCodebookPlan, plan_consumer_codebook};
 use consumer_installation::{
     ConsumerInstallationInputs, ConsumerInstallationPlan, plan_consumer_installation,
 };
@@ -139,6 +141,7 @@ struct FullTranslationInstallReport {
     chapter_intro_residency: ChapterIntroResidency,
     dialogue_page_pool: DialoguePagePool,
     cross_domain_material: cross_domain_material::CrossDomainMaterialPlan,
+    consumer_codebook: ConsumerCodebookPlan,
     installation_layout: InstallationLayoutPlan,
     integrated_write_set: IntegratedWriteSetPlan,
     dialogue_runtime_control_flow: DialogueRuntimeControlFlowPlan,
@@ -466,6 +469,24 @@ pub(crate) fn plan_full_translation_installation(
         .available_page_count
         .checked_sub(1)
         .context("cold-request presentation exhausted the reclaimable CHR page pool")?;
+    let consumer_codebook = plan_consumer_codebook(ConsumerCodebookInputs {
+        source_font_page,
+        first_physical_page: cold_request_presentation
+            .physical_page
+            .checked_add(1)
+            .context("consumer font page range overflow")?,
+        available_page_count: remaining_available_page_count,
+        dynamic_inputs: &dynamic_inputs,
+        chapter_intro: &chapter_intro_residency,
+        fixed: &fixed,
+        unit_names: &unit_names,
+        chapter_titles: &chapter_titles,
+        choices: &choices,
+        map_menu: &map_menu,
+        unit_ui: &unit_ui,
+        item_actions: &item_actions,
+        transitions: &transitions,
+    })?;
     let font_page_pack = build_glyph_workset_font_page_pack(source_font_page, &codebook)?;
     ensure!(
         font_page_pack.len() == codebook.page_assignments.len() * FONT_PAGE_SIZE,
@@ -713,6 +734,7 @@ pub(crate) fn plan_full_translation_installation(
             dialogue_runtime_code: &dialogue_runtime_code,
             encoded_chapter_titles: &chapter_intro_residency.encoded_titles,
             cold_request_presentation: &cold_request_presentation,
+            consumer_codebook: &consumer_codebook,
             cross_domain_material: &cross_domain_material,
             consumer_installation: &consumer_installation,
             required_domains: &REQUIRED_DOMAINS,
@@ -741,7 +763,7 @@ pub(crate) fn plan_full_translation_installation(
     };
 
     let report = FullTranslationInstallReport {
-        schema: 13,
+        schema: 14,
         source_sha1: EXPECTED_SOURCE_SHA1,
         strategy: "install all remaining translation domains in one cumulative candidate, run complete static gates, then run consumer-path dynamic regression on that same ROM",
         required_domain_count: REQUIRED_DOMAIN_COUNT,
@@ -822,6 +844,7 @@ pub(crate) fn plan_full_translation_installation(
             current_candidate_bound: true,
         },
         cross_domain_material,
+        consumer_codebook,
         installation_layout,
         integrated_write_set,
         dialogue_runtime_control_flow: runtime_control_flow,

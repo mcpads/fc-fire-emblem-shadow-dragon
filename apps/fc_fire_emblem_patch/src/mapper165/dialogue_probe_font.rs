@@ -61,9 +61,25 @@ pub(super) fn install_font_glyphs(
     Ok(())
 }
 
-pub(super) fn build_font_page(
+pub(crate) fn build_font_page(
     source_page: &[u8],
     assignments: &BTreeMap<char, u8>,
+) -> Result<Vec<u8>> {
+    let glyphs_by_code = assignments
+        .iter()
+        .map(|(glyph, code)| (*code, *glyph))
+        .collect::<BTreeMap<_, _>>();
+    ensure!(
+        glyphs_by_code.len() == assignments.len(),
+        "font page assigns one code to multiple glyphs"
+    );
+    build_font_page_by_code(source_page, &glyphs_by_code)
+}
+
+/// 한 글자 모양이 서로 다른 생산자 코드에 중복될 수 있는 페이지를 만든다.
+pub(crate) fn build_font_page_by_code(
+    source_page: &[u8],
+    glyphs_by_code: &BTreeMap<u8, char>,
 ) -> Result<Vec<u8>> {
     ensure!(
         source_page.len() == FONT_PAGE_SIZE,
@@ -71,7 +87,7 @@ pub(super) fn build_font_page(
     );
     let font = load_dalmoori()?;
     let mut page = source_page.to_vec();
-    for (character, code) in assignments {
+    for (code, character) in glyphs_by_code {
         let offset = usize::from(*code) * FONT_TILE_SIZE;
         page[offset..offset + FONT_TILE_SIZE].copy_from_slice(&rasterize_glyph(&font, *character)?);
     }

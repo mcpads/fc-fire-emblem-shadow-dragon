@@ -11,6 +11,7 @@ use crate::{
 use super::{
     chapter_intro_residency::EncodedChapterTitle,
     cold_request_presentation::ColdRequestPresentationPage,
+    consumer_codebook::ConsumerCodebookPlan,
     consumer_installation::ConsumerInstallationPlan,
     cross_domain_material::CrossDomainMaterialPlan,
     installation_layout::main_dialogue_runtime_material_file_offset,
@@ -27,6 +28,7 @@ pub(super) struct IntegratedWriteSetInputs<'a> {
     pub(super) dialogue_runtime_code: &'a DialogueRuntimeCodePlan,
     pub(super) encoded_chapter_titles: &'a [EncodedChapterTitle],
     pub(super) cold_request_presentation: &'a ColdRequestPresentationPage,
+    pub(super) consumer_codebook: &'a ConsumerCodebookPlan,
     pub(super) cross_domain_material: &'a CrossDomainMaterialPlan,
     pub(super) consumer_installation: &'a ConsumerInstallationPlan,
     pub(super) required_domains: &'a [&'static str],
@@ -47,8 +49,10 @@ pub(super) struct IntegratedWriteSetPlan {
     dialogue_pointer_write_count: usize,
     chapter_title_storage_write_count: usize,
     cold_request_presentation_write_count: usize,
+    static_consumer_font_page_write_count: usize,
     cross_domain_material_write_count: usize,
     installed_cold_request_presentation_matches_plan: bool,
+    installed_static_consumer_font_pages_match_plan: bool,
     installed_cross_domain_material_matches_plan: bool,
     changed_byte_count: usize,
     installed_dialogue_matches_current_encoding: bool,
@@ -92,6 +96,7 @@ pub(super) fn plan_integrated_write_set(
         inputs.candidate,
         inputs.cold_request_presentation,
     )?;
+    install_static_consumer_font_pages(&mut image, inputs.candidate, inputs.consumer_codebook)?;
     let runtime_material_offset = main_dialogue_runtime_material_file_offset()?;
     let runtime_material_end = runtime_material_offset
         .checked_add(inputs.dialogue_runtime_material.len())
@@ -198,6 +203,11 @@ pub(super) fn plan_integrated_write_set(
         inputs.candidate,
         inputs.cold_request_presentation,
     )?;
+    verify_installed_static_consumer_font_pages(
+        &output,
+        inputs.candidate,
+        inputs.consumer_codebook,
+    )?;
     verify_installed_cross_domain_material(&output, inputs.cross_domain_material)?;
     let installed_image = output.clone();
     let changed_byte_count = inputs
@@ -247,8 +257,10 @@ pub(super) fn plan_integrated_write_set(
             dialogue_pointer_write_count: inputs.encoded_dialogue.pointer_writes.len(),
             chapter_title_storage_write_count: inputs.encoded_chapter_titles.len(),
             cold_request_presentation_write_count: 1,
+            static_consumer_font_page_write_count: inputs.consumer_codebook.pages().len(),
             cross_domain_material_write_count: inputs.cross_domain_material.sections().len(),
             installed_cold_request_presentation_matches_plan: true,
+            installed_static_consumer_font_pages_match_plan: true,
             installed_cross_domain_material_matches_plan: true,
             changed_byte_count,
             installed_dialogue_matches_current_encoding: true,
@@ -308,6 +320,64 @@ fn verify_installed_cold_request_presentation(
         "installed cold-request presentation page does not match its plan"
     );
     Ok(())
+}
+
+fn install_static_consumer_font_pages(
+    image: &mut TrackedImage,
+    candidate: &Rom,
+    plan: &ConsumerCodebookPlan,
+) -> Result<()> {
+    ensure!(
+        plan.pages().len() == 3,
+        "integrated consumer codebook must install the three fixed-content pages"
+    );
+    let mut physical_pages = std::collections::BTreeSet::new();
+    for page in plan.pages() {
+        ensure!(
+            physical_pages.insert(page.physical_page())
+                && page.bytes.len() == FONT_PAGE_SIZE
+                && page.assignment_count() != 0,
+            "static consumer page {} is empty, duplicated, or not 4 KiB",
+            page.id
+        );
+        let offset = static_consumer_page_file_offset(candidate, page.physical_page())?;
+        let expected = candidate
+            .data()
+            .get(offset..offset + FONT_PAGE_SIZE)
+            .ok_or_else(|| {
+                anyhow::anyhow!("static consumer page {} is outside candidate", page.id)
+            })?;
+        image.write_expected(
+            format!("static consumer font page {}", page.id),
+            offset,
+            expected,
+            &page.bytes,
+        )?;
+    }
+    Ok(())
+}
+
+fn verify_installed_static_consumer_font_pages(
+    installed: &[u8],
+    candidate: &Rom,
+    plan: &ConsumerCodebookPlan,
+) -> Result<()> {
+    for page in plan.pages() {
+        let offset = static_consumer_page_file_offset(candidate, page.physical_page())?;
+        ensure!(
+            installed.get(offset..offset + FONT_PAGE_SIZE) == Some(page.bytes.as_slice()),
+            "installed static consumer page {} does not match its codebook",
+            page.id
+        );
+    }
+    Ok(())
+}
+
+fn static_consumer_page_file_offset(candidate: &Rom, physical_page: u8) -> Result<usize> {
+    HEADER_SIZE
+        .checked_add(candidate.prg().len())
+        .and_then(|offset| offset.checked_add(usize::from(physical_page) * FONT_PAGE_SIZE))
+        .ok_or_else(|| anyhow::anyhow!("static consumer CHR offset overflow"))
 }
 
 fn install_cross_domain_material(

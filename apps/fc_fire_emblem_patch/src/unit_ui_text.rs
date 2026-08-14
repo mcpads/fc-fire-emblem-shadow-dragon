@@ -228,6 +228,25 @@ pub(crate) fn preserved_codes_for_unit_name_projection(source: &[u8]) -> Result<
     Ok(preserved)
 }
 
+/// 요약·상태 화면이 고정 문자열 표에서 읽는 번역 대상 ID다. 소비자 코드북이 ID를
+/// 다시 적어 두면 원본 표의 인덱스가 바뀌었을 때 조용히 다른 문구를 묶게 된다.
+pub(crate) fn summary_and_status_label_ids() -> Vec<String> {
+    SUMMARY_AND_STATUS_LABEL_SPECS
+        .iter()
+        .filter(|spec| spec.translation_scope == "japanese_only")
+        .map(|spec| format!("unit-ui-label:{:02X}", spec.index))
+        .collect()
+}
+
+/// 명령 메뉴가 고정 문자열 표에서 읽는 번역 대상 ID다.
+pub(crate) fn command_menu_label_ids() -> Vec<String> {
+    command_menu::COMMAND_LABEL_SPECS
+        .iter()
+        .filter(|spec| spec.translation_scope == "japanese_only")
+        .map(|spec| format!("unit-ui-label:{:02X}", spec.index))
+        .collect()
+}
+
 fn build_report(
     prg: &[u8],
     glyph_budget: glyph_budget::GlyphBudgetReport,

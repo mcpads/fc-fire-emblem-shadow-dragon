@@ -29,6 +29,10 @@ pub(super) struct ChapterIntroResidencyPlan {
     pub(super) fixed_code_count: usize,
     pub(super) maximum_augmented_workset_slot_demand: usize,
     pub(super) fixed_assignment_sha1: String,
+    /// 장 제목 저장소는 장 도입 대사와 엔딩 기록 화면이 함께 읽는다. 엔딩용 글꼴
+    /// 페이지가 도입부와 다른 코드를 쓰면 저장소를 두 벌로 복제해야 하므로 실제
+    /// 고정 코드를 다음 소비자 계획에도 넘긴다.
+    pub(super) title_glyph_codes: BTreeMap<char, u8>,
 }
 
 pub(super) fn plan_chapter_intro_residency(
@@ -166,6 +170,7 @@ pub(super) fn plan_chapter_intro_residency(
         fixed_code_count: title_glyph_codes.len(),
         maximum_augmented_workset_slot_demand,
         fixed_assignment_sha1: fixed_assignment_sha1(&title_glyph_codes),
+        title_glyph_codes,
     })
 }
 

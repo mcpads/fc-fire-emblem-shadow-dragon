@@ -22,7 +22,7 @@ pub(crate) mod battle_text_runtime_base;
 mod class_profile_page;
 pub(crate) mod cumulative_patch;
 mod dialogue_lifetime_page;
-mod dialogue_probe_font;
+pub(crate) mod dialogue_probe_font;
 pub(crate) mod dialogue_slice_probe;
 pub(crate) mod direct_chr_pairs;
 mod front_end_page;
