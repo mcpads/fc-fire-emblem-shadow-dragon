@@ -99,6 +99,20 @@ impl ConsumerCatalogPlan {
             .get(identity.page_index)
             .context("catalog identity page index is outside the page list")
     }
+
+    pub(super) fn encode_base_logical(&self, logical: &[FixedTextLogicalByte]) -> Result<Vec<u8>> {
+        logical
+            .iter()
+            .map(|byte| match byte {
+                FixedTextLogicalByte::Encoded(value) => Ok(*value),
+                FixedTextLogicalByte::TargetGlyph(glyph) => self
+                    .base_assignments
+                    .get(glyph)
+                    .copied()
+                    .with_context(|| format!("consumer catalog has no base code for {glyph:?}")),
+            })
+            .collect()
+    }
 }
 
 #[derive(Serialize)]

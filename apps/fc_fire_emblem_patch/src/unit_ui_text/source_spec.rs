@@ -138,15 +138,15 @@ pub(super) const CODE_REGION_SPECS: &[CodeRegionSpec] = &[
     },
 ];
 
-pub(super) struct FixedLabelSpec {
-    pub(super) index: u8,
-    pub(super) source_text: &'static str,
-    pub(super) translation_scope: &'static str,
-    pub(super) pointer: u16,
-    pub(super) expected: &'static [u8],
+pub(crate) struct FixedLabelSpec {
+    pub(crate) index: u8,
+    pub(crate) source_text: &'static str,
+    pub(crate) translation_scope: &'static str,
+    pub(crate) pointer: u16,
+    pub(crate) expected: &'static [u8],
 }
 
-pub(super) const SUMMARY_AND_STATUS_LABEL_SPECS: &[FixedLabelSpec] = &[
+pub(crate) const SUMMARY_AND_STATUS_LABEL_SPECS: &[FixedLabelSpec] = &[
     fixed_label(
         0x00,
         "ちから",

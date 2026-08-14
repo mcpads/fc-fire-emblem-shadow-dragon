@@ -17,7 +17,9 @@ mod target_glyphs;
 mod tests;
 mod workspace;
 
+pub(crate) use command_menu::COMMAND_LABEL_SPECS;
 use source_spec::*;
+pub(crate) use source_spec::{FixedLabelSpec, SUMMARY_AND_STATUS_LABEL_SPECS};
 pub(crate) use workspace::plan_unit_ui_labels;
 
 const PRG_BANK_SIZE: usize = 16 * 1024;

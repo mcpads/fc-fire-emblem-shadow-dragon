@@ -35,7 +35,7 @@ const CHAPTER_ONE_FACILITY_POINTER: [u8; 2] = [0x31, 0xA5];
 const CHAPTER_ONE_FACILITY_RECORD_ADDRESS: u16 = 0xA531;
 const CHAPTER_ONE_WEAPON_SHOP_RECORD: [u8; 5] = [0x03, 0x1A, 0x01, 0x00, 0xF0];
 
-pub(super) const COMMAND_LABEL_SPECS: &[FixedLabelSpec] = &[
+pub(crate) const COMMAND_LABEL_SPECS: &[FixedLabelSpec] = &[
     fixed_label(
         0x0E,
         "こうげき",

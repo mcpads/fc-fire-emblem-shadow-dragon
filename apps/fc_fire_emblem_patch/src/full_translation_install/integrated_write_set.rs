@@ -15,6 +15,7 @@ use super::{
     consumer_codebook::ConsumerCodebookPlan,
     consumer_installation::ConsumerInstallationPlan,
     cross_domain_material::CrossDomainMaterialPlan,
+    fixed_ui_projection::FixedUiProjectionPlan,
     installation_layout::main_dialogue_runtime_material_file_offset,
     runtime_code::{DialogueRuntimeCodePlan, DialogueRuntimeHookRole, DialogueRuntimeHookSite},
 };
@@ -32,6 +33,7 @@ pub(super) struct IntegratedWriteSetInputs<'a> {
     pub(super) consumer_codebook: &'a ConsumerCodebookPlan,
     pub(super) consumer_catalog: &'a ConsumerCatalogPlan,
     pub(super) cross_domain_material: &'a CrossDomainMaterialPlan,
+    pub(super) fixed_ui_projection: &'a FixedUiProjectionPlan,
     pub(super) consumer_installation: &'a ConsumerInstallationPlan,
     pub(super) required_domains: &'a [&'static str],
 }
@@ -56,6 +58,7 @@ pub(super) struct IntegratedWriteSetPlan {
     static_consumer_font_page_write_count: usize,
     catalog_consumer_font_page_write_count: usize,
     cross_domain_material_write_count: usize,
+    fixed_ui_projection_write_count: usize,
     installed_cold_request_presentation_matches_plan: bool,
     installed_static_consumer_font_pages_match_plan: bool,
     installed_catalog_consumer_font_pages_match_plan: bool,
@@ -225,6 +228,8 @@ pub(super) fn plan_integrated_write_set(
         image.write_expected(hook.write_role, offset, existing, &hook.bytes)?;
     }
 
+    install_fixed_ui_projection(&mut image, inputs.fixed_ui_projection)?;
+
     let expected_write_count_before_cross_domain = image.writes().len();
     install_cross_domain_material(&mut image, inputs.candidate, inputs.cross_domain_material)?;
 
@@ -249,6 +254,7 @@ pub(super) fn plan_integrated_write_set(
         inputs.consumer_catalog,
     )?;
     verify_installed_cross_domain_material(&output, inputs.cross_domain_material)?;
+    verify_installed_fixed_ui_projection(&output, inputs.fixed_ui_projection)?;
     let installed_image = output.clone();
     let changed_byte_count = expanded_base
         .iter()
@@ -261,6 +267,7 @@ pub(super) fn plan_integrated_write_set(
         expected_write_count_before_cross_domain - inputs.encoded_chapter_titles.len(),
         inputs.encoded_chapter_titles.len(),
         inputs.cross_domain_material,
+        inputs.fixed_ui_projection,
         inputs.consumer_installation,
     )?;
     let contributing_domain_count = domains
@@ -300,6 +307,7 @@ pub(super) fn plan_integrated_write_set(
             static_consumer_font_page_write_count: inputs.consumer_codebook.pages().len(),
             catalog_consumer_font_page_write_count: inputs.consumer_catalog.pages().len(),
             cross_domain_material_write_count: inputs.cross_domain_material.sections().len() + 1,
+            fixed_ui_projection_write_count: inputs.fixed_ui_projection.write_count(),
             installed_cold_request_presentation_matches_plan: true,
             installed_static_consumer_font_pages_match_plan: true,
             installed_catalog_consumer_font_pages_match_plan: true,
@@ -715,11 +723,46 @@ fn fixed_file_offset(rom: &Rom, address: u16) -> Result<usize> {
     Ok(crate::rom::HEADER_SIZE + base + usize::from(address) - 0xC000)
 }
 
+fn install_fixed_ui_projection(
+    image: &mut TrackedImage,
+    plan: &FixedUiProjectionPlan,
+) -> Result<()> {
+    ensure!(
+        plan.write_count() == 64,
+        "fixed UI projection must install twenty-nine slots, twenty-nine pointers, and six map labels"
+    );
+    for write in plan.writes() {
+        image.write_expected(
+            &write.role,
+            write.file_offset,
+            &write.expected,
+            &write.replacement,
+        )?;
+    }
+    Ok(())
+}
+
+fn verify_installed_fixed_ui_projection(
+    installed: &[u8],
+    plan: &FixedUiProjectionPlan,
+) -> Result<()> {
+    for write in plan.writes() {
+        ensure!(
+            installed.get(write.file_offset..write.file_offset + write.replacement.len())
+                == Some(write.replacement.as_slice()),
+            "installed fixed UI projection does not match {}",
+            write.role
+        );
+    }
+    Ok(())
+}
+
 fn domain_contributions(
     required_domains: &[&'static str],
     expected_dialogue_write_count: usize,
     expected_chapter_title_write_count: usize,
     cross_domain_material: &CrossDomainMaterialPlan,
+    fixed_ui_projection: &FixedUiProjectionPlan,
     consumer_installation: &ConsumerInstallationPlan,
 ) -> Result<Vec<DomainWriteContribution>> {
     ensure!(
@@ -752,6 +795,7 @@ fn domain_contributions(
             let dialogue = *id == "main_dialogue";
             let chapter_titles = *id == "chapter_titles";
             let material = material_sections.contains(id);
+            let fixed_ui_write_count = fixed_ui_projection.write_count_for_domain(id);
             let all_consumers_statically_accounted =
                 consumer_installation.domain_all_consumers_statically_accounted(id);
             DomainWriteContribution {
@@ -760,6 +804,7 @@ fn domain_contributions(
                 glyph_lifetime_bound: true,
                 storage_and_address_writes_contributed: dialogue
                     || chapter_titles
+                    || fixed_ui_write_count != 0
                     || all_consumers_statically_accounted,
                 runtime_material_writes_contributed: dialogue || material,
                 font_supply_writes_contributed: true,
@@ -769,6 +814,7 @@ fn domain_contributions(
                     .domain_has_newly_planned_consumers(id),
                 all_consumer_writes_contributed: all_consumers_statically_accounted,
                 expected_write_count: usize::from(material)
+                    + fixed_ui_write_count
                     + if dialogue {
                         expected_dialogue_write_count
                     } else if chapter_titles {

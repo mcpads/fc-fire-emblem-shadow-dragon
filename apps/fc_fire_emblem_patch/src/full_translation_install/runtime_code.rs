@@ -3,6 +3,8 @@
 //! 갈래를 나눈 기준은 «무엇이 바뀌면 이 파일이 바뀌는가»다. 전송 루프는 프레임
 //! 예산이 바뀌면 바뀌고, 트램폴린은 원본 NMI 계약이 바뀌면 바뀐다.
 
+use std::collections::BTreeSet;
+
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
@@ -118,6 +120,21 @@ pub(in crate::full_translation_install) struct DialogueRuntimeCodePlan {
 impl DialogueRuntimeCodePlan {
     pub(in crate::full_translation_install) fn hook_roles(&self) -> Vec<DialogueRuntimeHookRole> {
         self.hooks.iter().map(|hook| hook.role).collect()
+    }
+
+    pub(in crate::full_translation_install) fn consumer_catalog_paths_planned(&self) -> bool {
+        let roles = self.hook_roles().into_iter().collect::<BTreeSet<_>>();
+        [
+            DialogueRuntimeHookRole::ConsumerCatalogItemAppender,
+            DialogueRuntimeHookRole::ConsumerCatalogUnitAppender,
+            DialogueRuntimeHookRole::ConsumerCatalogClassAppender,
+        ]
+        .iter()
+        .all(|role| roles.contains(role))
+            && self
+                .fixed_routines
+                .iter()
+                .any(|routine| routine.role == "fixed and catalog consumer CHR page selector")
     }
 }
 

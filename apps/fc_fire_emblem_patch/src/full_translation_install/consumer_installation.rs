@@ -21,6 +21,7 @@ pub(super) struct ConsumerInstallationInputs<'a> {
     pub(super) all_dialogue_records_encoded: bool,
     pub(super) all_dialogue_runtime_hooks_emitted: bool,
     pub(super) dynamic_dialogue_producers_bound: bool,
+    pub(super) globally_planned_consumer_roles: &'a BTreeMap<&'static str, BTreeSet<String>>,
 }
 
 #[derive(Serialize)]
@@ -113,6 +114,7 @@ pub(super) fn plan_consumer_installation(
         inputs.all_chapter_titles_encoded,
         inputs.all_dialogue_records_encoded && inputs.all_dialogue_runtime_hooks_emitted,
         inputs.dynamic_dialogue_producers_bound,
+        inputs.globally_planned_consumer_roles,
     )?;
 
     let carried_consumer_domain_count = domains
@@ -140,7 +142,7 @@ pub(super) fn plan_consumer_installation(
         .sum();
 
     Ok(ConsumerInstallationPlan {
-        strategy: "bind the exact cumulative candidate first, add only consumers supplied by the global dialogue runtime, and leave every other screen unresolved",
+        strategy: "bind the exact cumulative candidate first, union only source-bound global runtime and storage-projection consumers, and leave every other screen unresolved",
         current_candidate_sha1: current.build_output_sha1,
         current_build_report_sha1: current.build_report_sha1,
         required_domain_count: inputs.required_domains.len(),
@@ -165,6 +167,7 @@ fn assemble_domain_consumers(
     all_chapter_titles_encoded: bool,
     global_dialogue_runtime_planned: bool,
     dynamic_dialogue_producers_bound: bool,
+    additional_globally_planned_roles: &BTreeMap<&'static str, BTreeSet<String>>,
 ) -> Result<Vec<DomainConsumerInstallation>> {
     ensure!(
         required_domains
@@ -235,6 +238,13 @@ fn assemble_domain_consumers(
                     _ => {}
                 }
             }
+            globally_planned_screen_roles.extend(
+                additional_globally_planned_roles
+                    .get(id)
+                    .into_iter()
+                    .flatten()
+                    .cloned(),
+            );
             ensure!(
                 globally_planned_screen_roles.is_subset(&target_screen_roles),
                 "global dialogue runtime plans {id} outside its canonical consumer set"

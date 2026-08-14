@@ -363,16 +363,16 @@ const fn region(
     }
 }
 
-pub(super) struct ItemActionLabelSpec {
-    pub(super) action_code: Option<u8>,
-    pub(super) index: u8,
-    pub(super) source_text: &'static str,
-    pub(super) translation_scope: &'static str,
-    pub(super) pointer: u16,
-    pub(super) expected: &'static [u8],
+pub(crate) struct ItemActionLabelSpec {
+    pub(crate) action_code: Option<u8>,
+    pub(crate) index: u8,
+    pub(crate) source_text: &'static str,
+    pub(crate) translation_scope: &'static str,
+    pub(crate) pointer: u16,
+    pub(crate) expected: &'static [u8],
 }
 
-pub(super) const ITEM_ACTION_LABELS: &[ItemActionLabelSpec] = &[
+pub(crate) const ITEM_ACTION_LABELS: &[ItemActionLabelSpec] = &[
     action_label(
         Some(0),
         0x13,

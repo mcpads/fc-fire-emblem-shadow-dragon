@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::Path,
+};
 
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
@@ -32,6 +36,7 @@ mod dialogue_bank_layout;
 mod dynamic_composition;
 mod dynamic_input_producers;
 mod dynamic_inputs;
+mod fixed_ui_projection;
 mod installation_layout;
 mod integrated_write_set;
 mod runtime_bank_contract;
@@ -58,6 +63,9 @@ use dynamic_input_producers::{DynamicInputProducerPlan, inspect_dynamic_input_pr
 use dynamic_inputs::{
     DynamicProducerEncodingPlan, bind_dynamic_producer_encoding, bind_dynamic_string_page_codes,
     plan_dynamic_dialogue_inputs,
+};
+use fixed_ui_projection::{
+    FixedUiProjectionInputs, FixedUiProjectionPlan, plan_fixed_ui_projection,
 };
 use installation_layout::{InstallationLayoutPlan, plan_installation_layout};
 use integrated_write_set::{
@@ -145,6 +153,7 @@ struct FullTranslationInstallReport {
     cross_domain_material: cross_domain_material::CrossDomainMaterialPlan,
     consumer_codebook: ConsumerCodebookPlan,
     consumer_catalog: ConsumerCatalogPlan,
+    fixed_ui_projection: FixedUiProjectionPlan,
     installation_layout: InstallationLayoutPlan,
     integrated_write_set: IntegratedWriteSetPlan,
     dialogue_runtime_control_flow: DialogueRuntimeControlFlowPlan,
@@ -499,6 +508,14 @@ pub(crate) fn plan_full_translation_installation(
         unit_ui: &unit_ui,
         item_actions: &item_actions,
     })?;
+    let fixed_ui_projection = plan_fixed_ui_projection(FixedUiProjectionInputs {
+        candidate: &current_candidate,
+        unit_ui: &unit_ui,
+        item_actions: &item_actions,
+        map_menu: &map_menu,
+        consumer_codebook: &consumer_codebook,
+        consumer_catalog: &consumer_catalog,
+    })?;
     let font_page_pack = build_glyph_workset_font_page_pack(source_font_page, &codebook)?;
     ensure!(
         font_page_pack.len() == codebook.page_assignments.len() * FONT_PAGE_SIZE,
@@ -727,6 +744,30 @@ pub(crate) fn plan_full_translation_installation(
         required_target_unit_counts.len() == REQUIRED_DOMAIN_COUNT,
         "full translation consumer target populations do not cover every required domain"
     );
+    let mut globally_planned_consumer_roles = BTreeMap::<&'static str, BTreeSet<String>>::new();
+    if dialogue_runtime_code.consumer_catalog_paths_planned() {
+        let mut add_roles = |domain: &'static str, roles: &[&'static str]| {
+            globally_planned_consumer_roles
+                .entry(domain)
+                .or_default()
+                .extend(roles.iter().map(|role| (*role).to_owned()));
+        };
+        for domain in ["unit_ui_labels", "item_action_labels", "map_menu_labels"] {
+            add_roles(domain, fixed_ui_projection.projected_screen_roles(domain));
+        }
+        for domain in ["unit_names", "enemy_names", "class_names"] {
+            add_roles(domain, &["unit_summary", "unit_status"]);
+        }
+        add_roles(
+            "item_names",
+            &[
+                "unit_summary",
+                "unit_status",
+                "item_inventory_list",
+                "item_action_menu",
+            ],
+        );
+    }
     let consumer_installation = plan_consumer_installation(ConsumerInstallationInputs {
         current_candidate_path: inputs.current_candidate_path,
         current_build_report_path: inputs.current_build_report_path,
@@ -738,6 +779,7 @@ pub(crate) fn plan_full_translation_installation(
             && encoded_display.pointer_writes.len() == 517,
         all_dialogue_runtime_hooks_emitted: runtime_control_flow.all_planned_hooks_emitted(),
         dynamic_dialogue_producers_bound: dynamic_string_producers_bound,
+        globally_planned_consumer_roles: &globally_planned_consumer_roles,
     })?;
     let installation_layout = plan_installation_layout(
         &current_candidate,
@@ -757,6 +799,7 @@ pub(crate) fn plan_full_translation_installation(
             consumer_codebook: &consumer_codebook,
             consumer_catalog: &consumer_catalog,
             cross_domain_material: &cross_domain_material,
+            fixed_ui_projection: &fixed_ui_projection,
             consumer_installation: &consumer_installation,
             required_domains: &REQUIRED_DOMAINS,
         })?;
@@ -776,7 +819,7 @@ pub(crate) fn plan_full_translation_installation(
     let all_required_consumers_statically_accounted =
         consumer_installation.all_required_consumers_statically_accounted();
     let next_gate = if translation_input_complete && runtime_state_storage.selection_complete() {
-        "generate every source projection, pointer selection, and lifetime font request from the twelve exact cross-domain material sections; keep the integrated candidate closed until all thirteen domains contribute every consumer write"
+        "project the chapter-save offer and two choice labels into their chapter-transition consumers, then rewrite the ending chapter-title copies and aggregate label against the ending page; keep the integrated candidate closed until the remaining four domains contribute every consumer write"
     } else if translation_input_complete {
         "close the exact volatile runtime-state storage selection against source access, queue, save/load, and battle lifetimes; do not emit or run a partial ROM"
     } else {
@@ -867,6 +910,7 @@ pub(crate) fn plan_full_translation_installation(
         cross_domain_material,
         consumer_codebook,
         consumer_catalog,
+        fixed_ui_projection,
         installation_layout,
         integrated_write_set,
         dialogue_runtime_control_flow: runtime_control_flow,

@@ -17,6 +17,7 @@ mod translation_workspace;
 
 use runtime_evidence::{RuntimeObservation, runtime_observations};
 use screen_roles::{ItemActionChoice, ItemScreen, action_choices, item_screens};
+pub(crate) use source_contract::ITEM_ACTION_LABELS;
 use source_contract::{
     COMPOSITE_STATE_ADDRESS, ELIGIBLE_RECIPIENT_COUNT_ADDRESS, ITEM_FLOW_STATES,
     MAIN_STATE_ADDRESS, MENU_CHOICE_MASK_BASE_ADDRESS, MENU_CONTROLLER_INDEX_ADDRESS,

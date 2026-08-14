@@ -24,7 +24,7 @@ use crate::{
     },
     semantic_translation::SemanticTranslationPlan,
     sha1_hex,
-    text_inventory::FixedTextPlan,
+    text_inventory::{FixedTextLogicalByte, FixedTextPlan},
     unit_names::UnitNamePlan,
 };
 
@@ -106,6 +106,34 @@ impl ConsumerCodebookPlan {
             .find(|page| page.id == page_id)
             .map(StaticConsumerPage::mapper_register)
             .with_context(|| format!("consumer codebook has no {page_id} page"))
+    }
+
+    pub(super) fn encode_fixed_ui_for(
+        &self,
+        page_id: &str,
+        logical: &[FixedTextLogicalByte],
+    ) -> Result<Vec<u8>> {
+        let page = self
+            .pages
+            .iter()
+            .find(|page| page.id == page_id)
+            .with_context(|| format!("consumer codebook has no {page_id} page"))?;
+        logical
+            .iter()
+            .map(|byte| match byte {
+                FixedTextLogicalByte::Encoded(value) => Ok(*value),
+                FixedTextLogicalByte::TargetGlyph(glyph) => page
+                    .assignments
+                    .get(&GlyphKey {
+                        owner: CodeOwner::FixedUi,
+                        glyph: *glyph,
+                    })
+                    .copied()
+                    .with_context(|| {
+                        format!("consumer page {page_id} has no fixed-UI code for {glyph:?}")
+                    }),
+            })
+            .collect()
     }
 }
 

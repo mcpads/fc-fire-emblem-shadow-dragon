@@ -50,12 +50,24 @@ const SCREEN_TARGETS: &[ScreenTargetSeed] = &[
     screen("options", &["options_labels"]),
     screen(
         "unit_summary",
-        &["unit_names", "class_names", "item_names", "unit_ui_labels"],
+        &[
+            "unit_names",
+            "enemy_names",
+            "class_names",
+            "item_names",
+            "unit_ui_labels",
+        ],
     ),
     screen("unit_command_menu", &["unit_ui_labels"]),
     screen(
         "unit_status",
-        &["unit_names", "class_names", "item_names", "unit_ui_labels"],
+        &[
+            "unit_names",
+            "enemy_names",
+            "class_names",
+            "item_names",
+            "unit_ui_labels",
+        ],
     ),
     screen("unit_roster", &["roster_header", "unit_names"]),
     screen(
