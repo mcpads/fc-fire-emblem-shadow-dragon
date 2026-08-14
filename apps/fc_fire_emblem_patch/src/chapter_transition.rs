@@ -30,7 +30,10 @@ use crate::{
     typed_source::{TypedInstructionBinding, decode_rp2a03_sequence},
 };
 
-pub(crate) use ending_scroll::bind_ending_chapter_record_lifetime_source;
+pub(crate) use ending_scroll::{
+    EndingChapterRecordStorageSource, EndingChapterRowStorageSource,
+    bind_ending_chapter_record_lifetime_source, bind_ending_chapter_record_storage_source,
+};
 use report::*;
 use runtime_routes::*;
 pub(crate) use save_dialogue::bind_save_complete_dialogue_records;

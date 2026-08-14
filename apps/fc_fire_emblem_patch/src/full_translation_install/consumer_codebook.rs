@@ -114,6 +114,23 @@ impl ConsumerCodebookPlan {
         page_id: &str,
         logical: &[FixedTextLogicalByte],
     ) -> Result<Vec<u8>> {
+        self.encode_for(page_id, CodeOwner::FixedUi, logical)
+    }
+
+    pub(super) fn encode_chapter_title_for(
+        &self,
+        page_id: &str,
+        logical: &[FixedTextLogicalByte],
+    ) -> Result<Vec<u8>> {
+        self.encode_for(page_id, CodeOwner::ChapterTitle, logical)
+    }
+
+    fn encode_for(
+        &self,
+        page_id: &str,
+        owner: CodeOwner,
+        logical: &[FixedTextLogicalByte],
+    ) -> Result<Vec<u8>> {
         let page = self
             .pages
             .iter()
@@ -126,12 +143,12 @@ impl ConsumerCodebookPlan {
                 FixedTextLogicalByte::TargetGlyph(glyph) => page
                     .assignments
                     .get(&GlyphKey {
-                        owner: CodeOwner::FixedUi,
+                        owner,
                         glyph: *glyph,
                     })
                     .copied()
                     .with_context(|| {
-                        format!("consumer page {page_id} has no fixed-UI code for {glyph:?}")
+                        format!("consumer page {page_id} has no {owner:?} code for {glyph:?}")
                     }),
             })
             .collect()

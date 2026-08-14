@@ -38,6 +38,7 @@ mod dialogue_bank_layout;
 mod dynamic_composition;
 mod dynamic_input_producers;
 mod dynamic_inputs;
+mod ending_record_projection;
 mod fixed_ui_projection;
 mod installation_layout;
 mod integrated_write_set;
@@ -70,6 +71,9 @@ use dynamic_input_producers::{DynamicInputProducerPlan, inspect_dynamic_input_pr
 use dynamic_inputs::{
     DynamicProducerEncodingPlan, bind_dynamic_producer_encoding, bind_dynamic_string_page_codes,
     plan_dynamic_dialogue_inputs,
+};
+use ending_record_projection::{
+    EndingRecordProjectionInputs, EndingRecordProjectionPlan, plan_ending_record_projection,
 };
 use fixed_ui_projection::{
     FixedUiProjectionInputs, FixedUiProjectionPlan, plan_fixed_ui_projection,
@@ -158,6 +162,7 @@ struct FullTranslationInstallReport {
     chapter_intro_residency: ChapterIntroResidency,
     choice_residency: ChoiceResidencyPlan,
     chapter_save_projection: ChapterSaveProjectionPlan,
+    ending_record_projection: EndingRecordProjectionPlan,
     dialogue_page_pool: DialoguePagePool,
     cross_domain_material: cross_domain_material::CrossDomainMaterialPlan,
     consumer_codebook: ConsumerCodebookPlan,
@@ -522,6 +527,13 @@ pub(crate) fn plan_full_translation_installation(
         transitions: &transitions,
         consumer_codebook: &consumer_codebook,
     })?;
+    let ending_record_projection = plan_ending_record_projection(EndingRecordProjectionInputs {
+        source: &rom,
+        candidate: &current_candidate,
+        chapter_titles: &chapter_titles,
+        transitions: &transitions,
+        consumer_codebook: &consumer_codebook,
+    })?;
     let consumer_catalog = plan_consumer_catalog(ConsumerCatalogInputs {
         source_font_page,
         first_physical_page: consumer_codebook.next_physical_page()?,
@@ -797,6 +809,12 @@ pub(crate) fn plan_full_translation_installation(
                 chapter_save_projection.projected_screen_roles(domain),
             );
         }
+        for domain in ["chapter_titles", "ending_record_labels"] {
+            add_roles(
+                domain,
+                ending_record_projection.projected_screen_roles(domain),
+            );
+        }
     }
     let consumer_installation = plan_consumer_installation(ConsumerInstallationInputs {
         current_candidate_path: inputs.current_candidate_path,
@@ -831,6 +849,7 @@ pub(crate) fn plan_full_translation_installation(
             cross_domain_material: &cross_domain_material,
             fixed_ui_projection: &fixed_ui_projection,
             chapter_save_projection: &chapter_save_projection,
+            ending_record_projection: &ending_record_projection,
             consumer_installation: &consumer_installation,
             required_domains: &REQUIRED_DOMAINS,
         })?;
@@ -849,8 +868,13 @@ pub(crate) fn plan_full_translation_installation(
         && translation_input_complete;
     let all_required_consumers_statically_accounted =
         consumer_installation.all_required_consumers_statically_accounted();
-    let next_gate = if translation_input_complete && runtime_state_storage.selection_complete() {
-        "project the chapter-save offer and two choice labels into their chapter-transition consumers, then rewrite the ending chapter-title copies and aggregate label against the ending page; keep the integrated candidate closed until the remaining four domains contribute every consumer write"
+    let next_gate = if translation_input_complete
+        && runtime_state_storage.selection_complete()
+        && all_required_consumers_statically_accounted
+    {
+        "materialize the exact integrated ROM, then bind representative and worst-case consumer paths to that artifact before any release claim"
+    } else if translation_input_complete && runtime_state_storage.selection_complete() {
+        "finish every remaining consumer storage projection against its already-planned font page; do not emit or run a partial ROM"
     } else if translation_input_complete {
         "close the exact volatile runtime-state storage selection against source access, queue, save/load, and battle lifetimes; do not emit or run a partial ROM"
     } else {
@@ -923,6 +947,7 @@ pub(crate) fn plan_full_translation_installation(
         },
         choice_residency,
         chapter_save_projection,
+        ending_record_projection,
         dialogue_page_pool: DialoguePagePool {
             current_candidate_sha1: page_capacity.current_candidate_sha1,
             current_chr_page_count: page_capacity.current_chr_page_count,
@@ -1090,7 +1115,7 @@ pub(crate) fn plan_full_translation_installation(
                 <= remaining_available_page_count,
             dialogue_runtime_composition_planned: true,
             cross_domain_consumer_writes_planned: all_required_consumers_statically_accounted,
-            integrated_candidate_ready: false,
+            integrated_candidate_ready: all_required_consumers_statically_accounted,
         },
         rom_emitted: false,
         dynamic_verification_started: false,

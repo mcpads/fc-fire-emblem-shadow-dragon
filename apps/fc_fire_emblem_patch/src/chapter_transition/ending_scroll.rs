@@ -30,6 +30,7 @@ const ENDING_SCROLL_PRESERVED_RECORD_COUNT: usize = 43;
 const ENDING_SCROLL_CHAPTER_RECORD_COUNT: usize = 25;
 const ENDING_SCROLL_AGGREGATE_RECORD_INDEX: usize = 93;
 const ENDING_SCROLL_TRAILING_BLANK_RECORD_COUNT: usize = 19;
+const ENDING_SCROLL_TURN_SUFFIX: [u8; 3] = [0x40, 0x3F, 0x5F];
 
 #[derive(Debug, Serialize)]
 pub(super) struct EndingChapterRecordTranslationSurface {
@@ -91,6 +92,102 @@ pub(crate) struct EndingChapterRecordLifetimeSource {
     pub(crate) target_record_count: usize,
     pub(crate) source_reclaimable_active_codes: BTreeSet<u8>,
     pub(crate) preserved_active_stream_codes: BTreeSet<u8>,
+}
+
+pub(crate) struct EndingChapterRecordStorageSource {
+    pub(crate) stream_sha1: String,
+    pub(crate) chapter_rows: Vec<EndingChapterRowStorageSource>,
+    pub(crate) aggregate: EndingAggregateRecordStorageSource,
+}
+
+pub(crate) struct EndingChapterRowStorageSource {
+    pub(crate) chapter_index: u8,
+    pub(crate) title_file_offset: usize,
+    pub(crate) title_source_storage: Vec<u8>,
+    pub(crate) turn_control_file_offset: usize,
+    pub(crate) turn_control_source: [u8; 2],
+    pub(crate) turn_suffix_file_offset: usize,
+    pub(crate) turn_suffix_source_storage: Vec<u8>,
+}
+
+pub(crate) struct EndingAggregateRecordStorageSource {
+    pub(crate) payload_file_offset: usize,
+    pub(crate) source_storage: Vec<u8>,
+    pub(crate) interpolation_offset: usize,
+}
+
+pub(crate) fn bind_ending_chapter_record_storage_source(
+    rom: &Rom,
+) -> Result<EndingChapterRecordStorageSource> {
+    bind_ending_chapter_record_translation_surface(rom)?;
+    let stream_file_offset = source_file_offset(0x04, ENDING_SCROLL_STREAM_ADDRESS)?;
+    let stream_end_file_offset =
+        source_file_offset(0x04, ENDING_SCROLL_STREAM_END_EXCLUSIVE_ADDRESS)?;
+    let stream = &rom.data()[stream_file_offset..stream_end_file_offset];
+    let records = parse_records(stream)?;
+
+    let chapter_rows = (0..ENDING_SCROLL_CHAPTER_RECORD_COUNT)
+        .map(|chapter_index| {
+            let record_index = ENDING_SCROLL_PRESERVED_RECORD_COUNT + chapter_index * 2;
+            let record = records[record_index];
+            let payload = &stream[record.payload_start..record.payload_end_exclusive];
+            let interpolation_offset = payload
+                .iter()
+                .position(|byte| *byte == ENDING_SCROLL_TURN_INTERPOLATION)
+                .with_context(|| {
+                    format!("ending chapter record {chapter_index} has no turn interpolation")
+                })?;
+            let turn_control_source = [ENDING_SCROLL_TURN_INTERPOLATION, chapter_index as u8];
+            ensure!(
+                payload.get(interpolation_offset..interpolation_offset + 2)
+                    == Some(turn_control_source.as_slice()),
+                "ending chapter record {chapter_index} turn control changed"
+            );
+            let turn_suffix_source_storage = payload[interpolation_offset + 2..].to_vec();
+            ensure!(
+                turn_suffix_source_storage == ENDING_SCROLL_TURN_SUFFIX,
+                "ending chapter record {chapter_index} turn suffix changed"
+            );
+            let payload_file_offset = stream_file_offset + record.payload_start;
+            Ok(EndingChapterRowStorageSource {
+                chapter_index: chapter_index as u8,
+                title_file_offset: payload_file_offset,
+                title_source_storage: payload[..interpolation_offset].to_vec(),
+                turn_control_file_offset: payload_file_offset + interpolation_offset,
+                turn_control_source,
+                turn_suffix_file_offset: payload_file_offset + interpolation_offset + 2,
+                turn_suffix_source_storage,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    ensure!(
+        chapter_rows.len() == ENDING_SCROLL_CHAPTER_RECORD_COUNT,
+        "ending chapter-row storage population changed"
+    );
+
+    let aggregate_record = records[ENDING_SCROLL_AGGREGATE_RECORD_INDEX];
+    let aggregate_source_storage =
+        stream[aggregate_record.payload_start..aggregate_record.payload_end_exclusive].to_vec();
+    let aggregate_interpolation_offset = aggregate_source_storage
+        .iter()
+        .position(|byte| *byte == ENDING_SCROLL_TURN_INTERPOLATION)
+        .context("ending aggregate record has no turn interpolation")?;
+    ensure!(
+        aggregate_source_storage
+            .get(aggregate_interpolation_offset..aggregate_interpolation_offset + 2)
+            == Some([ENDING_SCROLL_TURN_INTERPOLATION, 0x19].as_slice()),
+        "ending aggregate turn control changed"
+    );
+
+    Ok(EndingChapterRecordStorageSource {
+        stream_sha1: sha1_hex(stream),
+        chapter_rows,
+        aggregate: EndingAggregateRecordStorageSource {
+            payload_file_offset: stream_file_offset + aggregate_record.payload_start,
+            source_storage: aggregate_source_storage,
+            interpolation_offset: aggregate_interpolation_offset,
+        },
+    })
 }
 
 pub(crate) fn bind_ending_chapter_record_lifetime_source(
