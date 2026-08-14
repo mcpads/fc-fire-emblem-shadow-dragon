@@ -78,7 +78,7 @@ use report::{
 };
 use shop_dialogue_runtime::verify_shop_dialogue_runtime_evidence;
 use shop_dialogue_stage::install_shop_dialogue_stage;
-use title_logo_runtime::verify_title_logo_runtime_evidence;
+use title_logo_runtime::load_title_logo_runtime_evidence;
 use unit_name_stage::install_unit_name_stage;
 use verify::{install_chapter_title, install_dialogue_record, verify_cumulative_output};
 use weapon_shop_shared_text_runtime::verify_weapon_shop_shared_text_runtime_evidence;
@@ -149,16 +149,16 @@ pub(crate) struct CumulativePatchInputs<'a> {
     pub(crate) front_end_menu_evidence_path: &'a Path,
     pub(crate) unit_name_evidence_path: &'a Path,
     pub(crate) class_profile_evidence_path: &'a Path,
-    pub(crate) class_profile_runtime_evidence_path: &'a Path,
+    pub(crate) class_profile_runtime_evidence_path: Option<&'a Path>,
     pub(crate) shop_dialogue_evidence_path: &'a Path,
-    pub(crate) shop_dialogue_runtime_evidence_path: &'a Path,
-    pub(crate) weapon_shop_shared_text_runtime_evidence_path: &'a Path,
+    pub(crate) shop_dialogue_runtime_evidence_path: Option<&'a Path>,
+    pub(crate) weapon_shop_shared_text_runtime_evidence_path: Option<&'a Path>,
     pub(crate) maximum_dialogue_evidence_path: &'a Path,
     pub(crate) maximum_dialogue_page_boundary_path: &'a Path,
     pub(crate) maximum_dialogue_runtime_evidence_path: Option<&'a Path>,
     pub(crate) title_graphics_localization_path: &'a Path,
     pub(crate) title_logo_asset_path: &'a Path,
-    pub(crate) title_logo_runtime_evidence_path: &'a Path,
+    pub(crate) title_logo_runtime_evidence_path: Option<&'a Path>,
     pub(crate) stage_directory: &'a Path,
     pub(crate) output_path: &'a Path,
     pub(crate) report_path: &'a Path,
@@ -695,25 +695,40 @@ pub(crate) fn build_cumulative_patch(
         + class_profile_stage.page.assignments[1].len()
         + battle_stage.stable_color_count;
     let output_sha1 = sha1_hex(&output);
-    let title_logo_runtime = verify_title_logo_runtime_evidence(
+    let title_logo_runtime = load_title_logo_runtime_evidence(
         inputs.title_logo_runtime_evidence_path,
         &title_logo_stage.output_sha1,
     )?;
-    let shop_dialogue_runtime = verify_shop_dialogue_runtime_evidence(
-        inputs.shop_dialogue_runtime_evidence_path,
-        &shop_dialogue_stage.output_sha1,
-        shop_dialogue_stage.page.mapper_register,
-    )?;
-    let class_profile_runtime = verify_class_profile_runtime_evidence(
-        inputs.class_profile_runtime_evidence_path,
-        &class_profile_stage.output_sha1,
-        class_profile_stage.page.mapper_registers[1],
-    )?;
-    let weapon_shop_shared_text_runtime = verify_weapon_shop_shared_text_runtime_evidence(
-        inputs.weapon_shop_shared_text_runtime_evidence_path,
-        &weapon_shop_shared_text_stage.output_sha1,
-        weapon_shop_shared_text_stage.plan.page.mapper_register,
-    )?;
+    let shop_dialogue_runtime = inputs
+        .shop_dialogue_runtime_evidence_path
+        .map(|path| {
+            verify_shop_dialogue_runtime_evidence(
+                path,
+                &shop_dialogue_stage.output_sha1,
+                shop_dialogue_stage.page.mapper_register,
+            )
+        })
+        .transpose()?;
+    let class_profile_runtime = inputs
+        .class_profile_runtime_evidence_path
+        .map(|path| {
+            verify_class_profile_runtime_evidence(
+                path,
+                &class_profile_stage.output_sha1,
+                class_profile_stage.page.mapper_registers[1],
+            )
+        })
+        .transpose()?;
+    let weapon_shop_shared_text_runtime = inputs
+        .weapon_shop_shared_text_runtime_evidence_path
+        .map(|path| {
+            verify_weapon_shop_shared_text_runtime_evidence(
+                path,
+                &weapon_shop_shared_text_stage.output_sha1,
+                weapon_shop_shared_text_stage.plan.page.mapper_register,
+            )
+        })
+        .transpose()?;
     let weapon_shop_shared_page_total_slot_demand = weapon_shop_shared_text_stage
         .plan
         .page
@@ -743,15 +758,17 @@ pub(crate) fn build_cumulative_patch(
     let weapon_shop_capacity_roles = WEAPON_SHOP_CAPACITY_BOUND_SCREEN_ROLES
         .into_iter()
         .collect::<BTreeSet<_>>();
-    ensure!(
-        weapon_shop_shared_text_runtime
-            .dialogue_screen_roles
-            .iter()
-            .chain(&weapon_shop_shared_text_runtime.item_name_screen_roles)
-            .chain(&weapon_shop_shared_text_runtime.choice_label_screen_roles)
-            .all(|role| weapon_shop_capacity_roles.contains(role)),
-        "weapon-shop runtime evidence names a screen outside the shared-page capacity contract"
-    );
+    if let Some(runtime) = &weapon_shop_shared_text_runtime {
+        ensure!(
+            runtime
+                .dialogue_screen_roles
+                .iter()
+                .chain(&runtime.item_name_screen_roles)
+                .chain(&runtime.choice_label_screen_roles)
+                .all(|role| weapon_shop_capacity_roles.contains(role)),
+            "weapon-shop runtime evidence names a screen outside the shared-page capacity contract"
+        );
+    }
     ensure!(
         sha1_hex(&unit_name_stage.output) == unit_name_stage.output_sha1,
         "unit-name stage output hash changed before class-profile installation"
@@ -875,7 +892,7 @@ pub(crate) fn build_cumulative_patch(
                 shop_dialogue_lifetime_report(
                     &shop_dialogue_plan,
                     &shop_dialogue_stage.page,
-                    &shop_dialogue_runtime,
+                    shop_dialogue_runtime.as_ref(),
                 ),
             ],
             maximum_page_reloaded_lifetime: CumulativeMaximumDialogueReport {
@@ -1104,14 +1121,20 @@ pub(crate) fn build_cumulative_patch(
             screen_evidence_manifest_sha1: class_profile_stage.page.evidence_manifest_sha1.clone(),
             temporal_sample_count: class_profile_stage.page.temporal_sample_count,
             unique_image_count: class_profile_stage.page.unique_image_count,
-            runtime_evidence_manifest_sha1: class_profile_runtime.manifest_sha1.clone(),
-            runtime_sample_count: class_profile_runtime.sample_count,
-            runtime_unique_image_count: class_profile_runtime.unique_image_count,
+            runtime_evidence_manifest_sha1: class_profile_runtime
+                .as_ref()
+                .map_or_else(String::new, |runtime| runtime.manifest_sha1.clone()),
+            runtime_sample_count: class_profile_runtime
+                .as_ref()
+                .map_or(0, |runtime| runtime.sample_count),
+            runtime_unique_image_count: class_profile_runtime
+                .as_ref()
+                .map_or(0, |runtime| runtime.unique_image_count),
             visible_code_count: class_profile_stage.page.visible_code_count,
             preserved_active_code_count: class_profile_stage.page.preserved_active_code_count,
             original_english_digits_and_ui_preserved: true,
             profile_index_page_selector_installed: true,
-            runtime_bound_to_build: true,
+            runtime_bound_to_build: class_profile_runtime.is_some(),
             review_complete: class_profile_plan.review_complete,
         },
         title_logo: CumulativeTitleLogoReport {
@@ -1137,10 +1160,16 @@ pub(crate) fn build_cumulative_patch(
             unassigned_title_chr_patterns_unchanged: title_logo_stage
                 .unassigned_title_chr_patterns_unchanged,
             source_sword_sprite_tm_and_copyright_assets_unchanged: true,
-            runtime_evidence_manifest_sha1: title_logo_runtime.manifest_sha1.clone(),
-            runtime_sample_count: title_logo_runtime.sample_count,
-            runtime_unique_image_count: title_logo_runtime.unique_image_count,
-            runtime_bound_to_build: true,
+            runtime_evidence_manifest_sha1: title_logo_runtime
+                .as_ref()
+                .map_or_else(String::new, |runtime| runtime.manifest_sha1.clone()),
+            runtime_sample_count: title_logo_runtime
+                .as_ref()
+                .map_or(0, |runtime| runtime.sample_count),
+            runtime_unique_image_count: title_logo_runtime
+                .as_ref()
+                .map_or(0, |runtime| runtime.unique_image_count),
+            runtime_bound_to_build: title_logo_runtime.is_some(),
             review_complete: title_graphics_plan.review_complete,
         },
         weapon_shop_shared_text: CumulativeWeaponShopSharedTextReport {
@@ -1196,18 +1225,31 @@ pub(crate) fn build_cumulative_patch(
             choice_pointer_selector_installed: true,
             unconverted_consumers_fallback_to_source_tables: true,
             capacity_bound_screen_roles: WEAPON_SHOP_CAPACITY_BOUND_SCREEN_ROLES.to_vec(),
-            runtime_evidence_manifest_sha1: weapon_shop_shared_text_runtime.manifest_sha1,
-            runtime_evidence_output_sha1: weapon_shop_shared_text_runtime.output_sha1,
-            runtime_sample_count: weapon_shop_shared_text_runtime.sample_count,
-            runtime_unique_image_count: weapon_shop_shared_text_runtime.unique_image_count,
+            runtime_evidence_manifest_sha1: weapon_shop_shared_text_runtime
+                .as_ref()
+                .map_or_else(String::new, |runtime| runtime.manifest_sha1.clone()),
+            runtime_evidence_output_sha1: weapon_shop_shared_text_runtime
+                .as_ref()
+                .map_or_else(String::new, |runtime| runtime.output_sha1.clone()),
+            runtime_sample_count: weapon_shop_shared_text_runtime
+                .as_ref()
+                .map_or(0, |runtime| runtime.sample_count),
+            runtime_unique_image_count: weapon_shop_shared_text_runtime
+                .as_ref()
+                .map_or(0, |runtime| runtime.unique_image_count),
             runtime_bound_dialogue_screen_roles: weapon_shop_shared_text_runtime
-                .dialogue_screen_roles,
+                .as_ref()
+                .map_or_else(Vec::new, |runtime| runtime.dialogue_screen_roles.clone()),
             runtime_bound_item_name_screen_roles: weapon_shop_shared_text_runtime
-                .item_name_screen_roles,
+                .as_ref()
+                .map_or_else(Vec::new, |runtime| runtime.item_name_screen_roles.clone()),
             runtime_bound_choice_label_screen_roles: weapon_shop_shared_text_runtime
-                .choice_label_screen_roles,
-            runtime_bound_to_stage_output: true,
-            runtime_carried_forward_by_verified_writes: true,
+                .as_ref()
+                .map_or_else(Vec::new, |runtime| {
+                    runtime.choice_label_screen_roles.clone()
+                }),
+            runtime_bound_to_stage_output: weapon_shop_shared_text_runtime.is_some(),
+            runtime_carried_forward_by_verified_writes: weapon_shop_shared_text_runtime.is_some(),
             review_complete: weapon_shop_shared_text_stage.plan.review_complete,
         },
         battle_text: CumulativeBattleTextReport {
@@ -1317,10 +1359,22 @@ pub(crate) fn build_cumulative_patch(
             "Private observations passed the installed no-save and valid-save front-end variants, but installed runtime evidence is not yet build-bound and the suspend-data variant is unverified.",
             "Playable-unit names are installed for roster, map unit-summary/status, and battle consumers; ending consumers remain Japanese backlog until their own font lifetimes are installed.",
             "The translated playable-unit name pages still need build-bound cold runtime evidence across roster, unit summary, unit status, and their exit paths.",
-            "The installed weapon-shop shared page is capacity-bound to all nine screen roles at 150/210 slots. The decline route is runtime-bound to the eighth-stage output through item selection, choices, continue prompt, item-list return, exit message, and map restoration; the final cumulative output, purchase, and every preflight branch still need exact-output runtime evidence.",
+            if weapon_shop_shared_text_runtime.is_some() {
+                "The installed weapon-shop shared page is capacity-bound to all nine screen roles at 150/210 slots. The decline route is runtime-bound to the eighth-stage output through item selection, choices, continue prompt, item-list return, exit message, and map restoration; the final cumulative output, purchase, and every preflight branch still need exact-output runtime evidence."
+            } else {
+                "The installed weapon-shop shared page is capacity-bound to all nine screen roles, but exact-output runtime evidence was explicitly deferred for this development build. Every shop route remains dynamically unbound to this artifact."
+            },
             "Battle text and the dynamic composition loader are installed in this cumulative lineage, but the new cumulative output still needs cold-route battle and prior-screen regression evidence.",
-            "The source-bound fifteen-page maximum dialogue has exact-output evidence for its state-bridged Chapter 7 seize entry, initial selector, all page font reloads, irregular temporal samples, and the final NEXT STORY exit; cold-route prior-screen continuity remains open.",
-            "The source-bound Korean title logo is exact-output-bound through its initial and completed blink phases, preserved sword, two-cell TM, copyright line, and automatic profile exit. The later defeat-route title return and human visual approval remain open.",
+            if maximum_dialogue_runtime.is_some() {
+                "The source-bound fifteen-page maximum dialogue has exact-output evidence for its state-bridged Chapter 7 seize entry, initial selector, all page font reloads, irregular temporal samples, and the final NEXT STORY exit; cold-route prior-screen continuity remains open."
+            } else {
+                "The source-bound fifteen-page maximum dialogue is installed, but exact-output runtime evidence was not supplied for this development build. Initial selection, page reloads, final exit, and cold-route prior-screen continuity remain dynamically unbound."
+            },
+            if title_logo_runtime.is_some() {
+                "The source-bound Korean title logo is exact-output-bound through its initial and completed blink phases, preserved sword, two-cell TM, copyright line, and automatic profile exit. The later defeat-route title return and human visual approval remain open."
+            } else {
+                "The source-bound Korean title logo is installed, but exact-output runtime evidence was explicitly deferred for this development build. Initial and completed blink phases, the later defeat-route title return, and human visual approval remain open."
+            },
             "The remaining main-dialogue screen lifetimes and translated non-dialogue surfaces are not yet installed in this cumulative lineage.",
             "The ending scroll owns a separate physical copy of all chapter titles; that duplicate consumer is not installed by this intro-title stage.",
             "Human translation review is incomplete, so this output is a development build rather than a release candidate.",
@@ -1395,7 +1449,7 @@ fn dialogue_lifetime_report(
 fn shop_dialogue_lifetime_report(
     plan: &MainDialogueBundlePlan,
     page: &super::shop_dialogue_page::ShopDialoguePagePlan,
-    runtime: &shop_dialogue_runtime::ShopDialogueRuntimeEvidence,
+    runtime: Option<&shop_dialogue_runtime::ShopDialogueRuntimeEvidence>,
 ) -> CumulativeDialogueLifetimeReport {
     CumulativeDialogueLifetimeReport {
         screen_role: SHOP_DIALOGUE_SCREEN_ROLE,
@@ -1418,10 +1472,10 @@ fn shop_dialogue_lifetime_report(
         font_mapper_register: page.mapper_register,
         font_page_sha1: page.page_sha1.clone(),
         font_page_pack_sha1: sha1_hex(&page.page_pack),
-        runtime_evidence_manifest_sha1: Some(runtime.manifest_sha1.clone()),
-        runtime_sample_count: runtime.sample_count,
-        runtime_unique_image_count: runtime.unique_image_count,
-        runtime_bound_to_dialogue_stage_output: true,
+        runtime_evidence_manifest_sha1: runtime.map(|runtime| runtime.manifest_sha1.clone()),
+        runtime_sample_count: runtime.map_or(0, |runtime| runtime.sample_count),
+        runtime_unique_image_count: runtime.map_or(0, |runtime| runtime.unique_image_count),
+        runtime_bound_to_dialogue_stage_output: runtime.is_some(),
     }
 }
 

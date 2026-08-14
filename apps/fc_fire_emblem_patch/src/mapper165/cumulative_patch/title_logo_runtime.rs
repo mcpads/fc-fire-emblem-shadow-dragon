@@ -15,6 +15,17 @@ pub(super) struct TitleLogoRuntimeEvidence {
     pub(super) unique_image_count: usize,
 }
 
+/// 증거 경로를 준 기본 빌드는 정확한 산출물 결속을 요구한다. 경로를 생략한 개발
+/// 빌드만 명시적으로 미결 상태를 돌려주며, 오래된 증거를 현재 산출물에 승계하지 않는다.
+pub(super) fn load_title_logo_runtime_evidence(
+    manifest_path: Option<&Path>,
+    output_sha1: &str,
+) -> Result<Option<TitleLogoRuntimeEvidence>> {
+    manifest_path
+        .map(|path| verify_title_logo_runtime_evidence(path, output_sha1))
+        .transpose()
+}
+
 #[derive(Debug, Deserialize)]
 struct RuntimeManifest {
     format_version: u8,
@@ -197,5 +208,18 @@ mod tests {
 
         assert_eq!(evidence.sample_count, 4);
         assert_eq!(evidence.unique_image_count, 4);
+        assert!(
+            verify_title_logo_runtime_evidence(manifest, &"00".repeat(20)).is_err(),
+            "an explicitly supplied stale manifest must still fail closed"
+        );
+    }
+
+    #[test]
+    fn omitted_manifest_keeps_runtime_binding_unresolved() {
+        assert!(
+            load_title_logo_runtime_evidence(None, &"00".repeat(20))
+                .unwrap()
+                .is_none()
+        );
     }
 }

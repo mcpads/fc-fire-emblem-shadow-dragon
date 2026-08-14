@@ -651,6 +651,9 @@ enum Command {
             default_value = "evidence/private/title-logo-runtime-completion/manifest.json"
         )]
         title_logo_runtime_evidence: PathBuf,
+        /// Emit a development build while leaving exact-output runtime bindings unresolved.
+        #[arg(long, default_value_t = false)]
+        defer_runtime_evidence: bool,
         #[arg(long, default_value = "out/cumulative-stages")]
         stage_directory: PathBuf,
         #[arg(long, default_value = "out/fire-emblem-fe1-korean-patch.nes")]
@@ -1730,6 +1733,7 @@ fn main() -> Result<()> {
             title_graphics_localization,
             title_logo_asset,
             title_logo_runtime_evidence,
+            defer_runtime_evidence,
             stage_directory,
             output,
             report,
@@ -1754,18 +1758,22 @@ fn main() -> Result<()> {
                     front_end_menu_evidence_path: &front_end_menu_evidence,
                     unit_name_evidence_path: &unit_name_evidence,
                     class_profile_evidence_path: &class_profile_evidence,
-                    class_profile_runtime_evidence_path: &class_profile_runtime_evidence,
+                    class_profile_runtime_evidence_path: (!defer_runtime_evidence)
+                        .then_some(class_profile_runtime_evidence.as_path()),
                     shop_dialogue_evidence_path: &shop_dialogue_evidence,
-                    shop_dialogue_runtime_evidence_path: &shop_dialogue_runtime_evidence,
-                    weapon_shop_shared_text_runtime_evidence_path:
-                        &weapon_shop_shared_text_runtime_evidence,
+                    shop_dialogue_runtime_evidence_path: (!defer_runtime_evidence)
+                        .then_some(shop_dialogue_runtime_evidence.as_path()),
+                    weapon_shop_shared_text_runtime_evidence_path: (!defer_runtime_evidence)
+                        .then_some(weapon_shop_shared_text_runtime_evidence.as_path()),
                     maximum_dialogue_evidence_path: &maximum_dialogue_evidence,
                     maximum_dialogue_page_boundary_path: &maximum_dialogue_page_boundaries,
-                    maximum_dialogue_runtime_evidence_path: maximum_dialogue_runtime_evidence
-                        .as_deref(),
+                    maximum_dialogue_runtime_evidence_path: (!defer_runtime_evidence)
+                        .then_some(maximum_dialogue_runtime_evidence.as_deref())
+                        .flatten(),
                     title_graphics_localization_path: &title_graphics_localization,
                     title_logo_asset_path: &title_logo_asset,
-                    title_logo_runtime_evidence_path: &title_logo_runtime_evidence,
+                    title_logo_runtime_evidence_path: (!defer_runtime_evidence)
+                        .then_some(title_logo_runtime_evidence.as_path()),
                     stage_directory: &stage_directory,
                     output_path: &output,
                     report_path: &report,

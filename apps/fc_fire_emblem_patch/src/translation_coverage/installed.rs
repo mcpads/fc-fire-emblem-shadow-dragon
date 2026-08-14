@@ -69,6 +69,12 @@ struct CurrentDialogueLifetime {
     unique_nametable_count: usize,
     font_physical_page: u8,
     font_mapper_register: u8,
+    #[serde(default)]
+    runtime_evidence_manifest_sha1: Option<String>,
+    #[serde(default)]
+    runtime_sample_count: usize,
+    #[serde(default)]
+    runtime_unique_image_count: usize,
     runtime_bound_to_dialogue_stage_output: bool,
 }
 
@@ -166,7 +172,13 @@ struct CurrentWeaponShopSharedText {
     choice_pointer_selector_installed: bool,
     unconverted_consumers_fallback_to_source_tables: bool,
     capacity_bound_screen_roles: Vec<String>,
+    #[serde(default)]
+    runtime_evidence_manifest_sha1: String,
     runtime_evidence_output_sha1: String,
+    #[serde(default)]
+    runtime_sample_count: usize,
+    #[serde(default)]
+    runtime_unique_image_count: usize,
     runtime_bound_dialogue_screen_roles: Vec<String>,
     runtime_bound_item_name_screen_roles: Vec<String>,
     runtime_bound_choice_label_screen_roles: Vec<String>,
@@ -410,13 +422,24 @@ fn validate_title_logo_lifetime(report: &CurrentBuildReport) -> Result<()> {
             && title.preserved_title_stream_bytes_unchanged
             && title.preserved_runtime_completion_control_bytes_unchanged
             && title.unassigned_title_chr_patterns_unchanged
-            && title.source_sword_sprite_tm_and_copyright_assets_unchanged
-            && !title.runtime_evidence_manifest_sha1.is_empty()
-            && title.runtime_sample_count == 4
-            && title.runtime_unique_image_count == 4
-            && title.runtime_bound_to_build,
+            && title.source_sword_sprite_tm_and_copyright_assets_unchanged,
         "current title-logo lifetime changed"
     );
+    if title.runtime_bound_to_build {
+        ensure!(
+            !title.runtime_evidence_manifest_sha1.is_empty()
+                && title.runtime_sample_count == 4
+                && title.runtime_unique_image_count == 4,
+            "bound title-logo runtime evidence is incomplete"
+        );
+    } else {
+        ensure!(
+            title.runtime_evidence_manifest_sha1.is_empty()
+                && title.runtime_sample_count == 0
+                && title.runtime_unique_image_count == 0,
+            "unbound title-logo runtime evidence retains stale claims"
+        );
+    }
     Ok(())
 }
 
@@ -491,34 +514,65 @@ fn validate_weapon_shop_lifetime(report: &CurrentBuildReport) -> Result<()> {
         .iter()
         .map(String::as_str)
         .collect::<BTreeSet<_>>();
-    ensure!(
-        shared.runtime_evidence_output_sha1
-            == report
-                .stages
-                .iter()
-                .find(|stage| stage.role == "weapon_shop_shared_item_names_and_choice_labels")
-                .and_then(|stage| stage.output_sha1.as_deref())
-                .context("current build lost the weapon-shop shared-text stage")?
-            && shared.runtime_bound_to_stage_output
-            && shared.runtime_carried_forward_by_verified_writes
-            && dialogue.runtime_bound_to_dialogue_stage_output
-            && dialogue_runtime_roles
-                == DECLINE_ROUTE_DIALOGUE_RUNTIME_SCREEN_ROLES
-                    .into_iter()
-                    .collect::<BTreeSet<_>>()
-            && item_name_runtime_roles
-                == DECLINE_ROUTE_ITEM_NAME_RUNTIME_SCREEN_ROLES
-                    .into_iter()
-                    .collect::<BTreeSet<_>>()
-            && choice_label_runtime_roles
-                == DECLINE_ROUTE_CHOICE_LABEL_RUNTIME_SCREEN_ROLES
-                    .into_iter()
-                    .collect::<BTreeSet<_>>()
-            && dialogue_runtime_roles.is_subset(&capacity_roles)
-            && item_name_runtime_roles.is_subset(&capacity_roles)
-            && choice_label_runtime_roles.is_subset(&capacity_roles),
-        "current weapon-shop runtime evidence scope changed"
-    );
+    let every_runtime_binding_published = shared.runtime_bound_to_stage_output
+        && shared.runtime_carried_forward_by_verified_writes
+        && dialogue.runtime_bound_to_dialogue_stage_output;
+    let every_runtime_binding_unpublished = !shared.runtime_bound_to_stage_output
+        && !shared.runtime_carried_forward_by_verified_writes
+        && !dialogue.runtime_bound_to_dialogue_stage_output;
+    if every_runtime_binding_published {
+        ensure!(
+            !shared.runtime_evidence_manifest_sha1.is_empty()
+                && shared.runtime_sample_count > 0
+                && shared.runtime_unique_image_count > 0
+                && dialogue
+                    .runtime_evidence_manifest_sha1
+                    .as_deref()
+                    .is_some_and(|sha1| !sha1.is_empty())
+                && dialogue.runtime_sample_count > 0
+                && dialogue.runtime_unique_image_count > 0
+                && shared.runtime_evidence_output_sha1
+                    == report
+                        .stages
+                        .iter()
+                        .find(|stage| {
+                            stage.role == "weapon_shop_shared_item_names_and_choice_labels"
+                        })
+                        .and_then(|stage| stage.output_sha1.as_deref())
+                        .context("current build lost the weapon-shop shared-text stage")?
+                && dialogue_runtime_roles
+                    == DECLINE_ROUTE_DIALOGUE_RUNTIME_SCREEN_ROLES
+                        .into_iter()
+                        .collect::<BTreeSet<_>>()
+                && item_name_runtime_roles
+                    == DECLINE_ROUTE_ITEM_NAME_RUNTIME_SCREEN_ROLES
+                        .into_iter()
+                        .collect::<BTreeSet<_>>()
+                && choice_label_runtime_roles
+                    == DECLINE_ROUTE_CHOICE_LABEL_RUNTIME_SCREEN_ROLES
+                        .into_iter()
+                        .collect::<BTreeSet<_>>()
+                && dialogue_runtime_roles.is_subset(&capacity_roles)
+                && item_name_runtime_roles.is_subset(&capacity_roles)
+                && choice_label_runtime_roles.is_subset(&capacity_roles),
+            "bound weapon-shop runtime evidence scope changed"
+        );
+    } else {
+        ensure!(
+            every_runtime_binding_unpublished
+                && shared.runtime_evidence_manifest_sha1.is_empty()
+                && shared.runtime_evidence_output_sha1.is_empty()
+                && shared.runtime_sample_count == 0
+                && shared.runtime_unique_image_count == 0
+                && dialogue.runtime_evidence_manifest_sha1.is_none()
+                && dialogue.runtime_sample_count == 0
+                && dialogue.runtime_unique_image_count == 0
+                && dialogue_runtime_roles.is_empty()
+                && item_name_runtime_roles.is_empty()
+                && choice_label_runtime_roles.is_empty(),
+            "unbound weapon-shop runtime evidence retains stale claims"
+        );
+    }
     Ok(())
 }
 
@@ -848,7 +902,7 @@ mod tests {
 
     #[test]
     fn cumulative_battle_stage_projects_each_domain_without_claiming_ending_or_runtime() {
-        let report: CurrentBuildReport = serde_json::from_value(serde_json::json!({
+        let mut report: CurrentBuildReport = serde_json::from_value(serde_json::json!({
             "schema": 1,
             "source_sha1": EXPECTED_SOURCE_SHA1,
             "output_sha1": "output-sha1",
@@ -872,6 +926,9 @@ mod tests {
                     "preserved_active_code_count": 90,
                     "font_physical_page": 48,
                     "font_mapper_register": 192,
+                    "runtime_evidence_manifest_sha1": "shop-dialogue-runtime",
+                    "runtime_sample_count": 7,
+                    "runtime_unique_image_count": 4,
                     "runtime_bound_to_dialogue_stage_output": true
                 }],
                 "maximum_page_reloaded_lifetime": {
@@ -957,6 +1014,9 @@ mod tests {
                     "weapon_shop_declined_continue_prompt",
                     "weapon_shop_purchase_inventory_full_exit"
                 ],
+                "runtime_evidence_manifest_sha1": "shop-shared-runtime",
+                "runtime_sample_count": 17,
+                "runtime_unique_image_count": 5,
                 "runtime_bound_dialogue_screen_roles": [
                     "weapon_shop_item_list",
                     "weapon_shop_purchase_confirmation",
@@ -1098,5 +1158,38 @@ mod tests {
                 "weapon_shop_purchase_confirmation"
             ]
         );
+
+        let shop_dialogue = report
+            .main_dialogue
+            .lifetimes
+            .iter_mut()
+            .find(|lifetime| lifetime.screen_role == "weapon_shop_dialogue_lifetime")
+            .unwrap();
+        shop_dialogue.runtime_evidence_manifest_sha1 = None;
+        shop_dialogue.runtime_sample_count = 0;
+        shop_dialogue.runtime_unique_image_count = 0;
+        shop_dialogue.runtime_bound_to_dialogue_stage_output = false;
+        let shared = &mut report.weapon_shop_shared_text;
+        shared.runtime_evidence_manifest_sha1.clear();
+        shared.runtime_evidence_output_sha1.clear();
+        shared.runtime_sample_count = 0;
+        shared.runtime_unique_image_count = 0;
+        shared.runtime_bound_dialogue_screen_roles.clear();
+        shared.runtime_bound_item_name_screen_roles.clear();
+        shared.runtime_bound_choice_label_screen_roles.clear();
+        shared.runtime_bound_to_stage_output = false;
+        shared.runtime_carried_forward_by_verified_writes = false;
+        validate_weapon_shop_lifetime(&report).unwrap();
+        assert!(
+            collect_domain_installations(&report).unwrap()["item_names"]
+                .runtime_bound_screen_roles
+                .is_empty()
+        );
+
+        report.title_logo.runtime_evidence_manifest_sha1.clear();
+        report.title_logo.runtime_sample_count = 0;
+        report.title_logo.runtime_unique_image_count = 0;
+        report.title_logo.runtime_bound_to_build = false;
+        validate_title_logo_lifetime(&report).unwrap();
     }
 }
