@@ -9,6 +9,8 @@ use serde::Deserialize;
 
 use crate::{font_slots::active_hangul_codes, rom::EXPECTED_SOURCE_SHA1, sha1_hex};
 
+use super::options_page::{OPTIONS_COMPOSITE_STATE, OPTIONS_COMPOSITE_STATE_ADDRESS};
+
 const INTERNAL_RAM_SIZE: usize = 2 * 1024;
 const NAMETABLE_MEMORY_SIZE: usize = 2 * 1024;
 const PHYSICAL_NAMETABLE_SIZE: usize = 1024;
@@ -98,6 +100,7 @@ pub(super) fn inspect_options_lifetime(
             iram.len() == INTERNAL_RAM_SIZE
                 && iram[ROW_STATE_ADDRESS] == sample.expected_row_state
                 && iram[SCREEN_KIND_ADDRESS] == 0
+                && iram[usize::from(OPTIONS_COMPOSITE_STATE_ADDRESS)] == OPTIONS_COMPOSITE_STATE
                 && iram[CHR_PAIR_ADDRESS..CHR_PAIR_ADDRESS + EXPECTED_CHR_PAIR.len()]
                     == EXPECTED_CHR_PAIR,
             "options IRAM sample no longer matches its exact screen lifetime"

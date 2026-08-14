@@ -23,11 +23,15 @@ use super::{
     assemble_mapper165_parity_bytes, encode_chr_page_register,
     options_lifetime::inspect_options_lifetime,
     options_page::{
+        OPTIONS_COMPOSITE_STATE, OPTIONS_COMPOSITE_STATE_ADDRESS,
         PAGE_A_REGISTER as OPTIONS_PAGE_A_REGISTER, PAGE_B_REGISTER as OPTIONS_PAGE_B_REGISTER,
         PAGE_ROUTINE_ADDRESS as OPTIONS_PAGE_ROUTINE_ADDRESS,
         PAGE_ROUTINE_END as OPTIONS_PAGE_ROUTINE_END, ROW_HOOK_ADDRESS as OPTIONS_ROW_HOOK_ADDRESS,
-        ROW_HOOK_LEN as OPTIONS_ROW_HOOK_LEN, ROW_PRG_BANK as OPTIONS_ROW_PRG_BANK,
+        ROW_HOOK_LEN as OPTIONS_ROW_HOOK_LEN,
+        ROW_OWNER_GATE_ADDRESS as OPTIONS_ROW_OWNER_GATE_ADDRESS,
+        ROW_OWNER_GATE_END as OPTIONS_ROW_OWNER_GATE_END, ROW_PRG_BANK as OPTIONS_ROW_PRG_BANK,
         build_page_routine_with_fallback as build_options_page_routine_with_fallback,
+        build_row_owner_gate as build_options_row_owner_gate,
         row_calculation as options_row_calculation, row_hook as options_row_hook,
     },
     roster_page::{
@@ -140,6 +144,11 @@ struct HookReport {
     source_prg_bank: u8,
     source_cpu_address: String,
     source_len: usize,
+    owner_state_address: String,
+    owner_state_value: u8,
+    owner_gate_cpu_start: String,
+    owner_gate_cpu_end_exclusive: String,
+    owner_gate_len: usize,
     routine_cpu_start: String,
     routine_cpu_end_exclusive: String,
     routine_len: usize,
@@ -287,6 +296,30 @@ pub(crate) fn build_mapper165_hangul_page_probe(
         "options page routine cave has {options_direct_transfer_count} pre-existing direct transfers"
     );
 
+    let options_row_owner_gate = build_options_row_owner_gate()?;
+    ensure!(
+        OPTIONS_ROW_OWNER_GATE_ADDRESS as usize + options_row_owner_gate.len()
+            <= OPTIONS_ROW_OWNER_GATE_END as usize,
+        "options row owner gate exceeds its fixed-bank cave"
+    );
+    let options_row_owner_gate_start = fixed_bank_file_offset(OPTIONS_ROW_OWNER_GATE_ADDRESS)?;
+    let options_row_owner_gate_end = options_row_owner_gate_start + options_row_owner_gate.len();
+    ensure!(
+        parity_base[options_row_owner_gate_start..options_row_owner_gate_end]
+            .iter()
+            .all(|byte| *byte == 0xFF),
+        "options row owner gate cave is no longer all FF"
+    );
+    let options_row_owner_gate_direct_transfer_count = count_direct_transfers_to_range(
+        source_rom.prg(),
+        OPTIONS_ROW_OWNER_GATE_ADDRESS,
+        OPTIONS_ROW_OWNER_GATE_END,
+    )?;
+    ensure!(
+        options_row_owner_gate_direct_transfer_count == 0,
+        "options row owner gate cave has {options_row_owner_gate_direct_transfer_count} pre-existing direct transfers"
+    );
+
     let roster_routine =
         build_roster_page_routine(roster_page_registers[0], roster_page_registers[1])?;
     ensure!(
@@ -311,8 +344,9 @@ pub(crate) fn build_mapper165_hangul_page_probe(
         roster_direct_transfer_count == 0,
         "roster page routine cave has {roster_direct_transfer_count} pre-existing direct transfers"
     );
-    let direct_code_cave_transfer_count =
-        options_direct_transfer_count + roster_direct_transfer_count;
+    let direct_code_cave_transfer_count = options_direct_transfer_count
+        + options_row_owner_gate_direct_transfer_count
+        + roster_direct_transfer_count;
 
     let mut expanded_base = parity_base.clone();
     expanded_base.extend_from_slice(&page_pack);
@@ -339,6 +373,12 @@ pub(crate) fn build_mapper165_hangul_page_probe(
         options_cave_start,
         &vec![0xFF; options_routine.len()],
         &options_routine,
+    )?;
+    image.write_expected(
+        "options row owner gate",
+        options_row_owner_gate_start,
+        &vec![0xFF; options_row_owner_gate.len()],
+        &options_row_owner_gate,
     )?;
     image.write_expected(
         "Korean roster name header",
@@ -505,6 +545,11 @@ pub(crate) fn build_mapper165_hangul_page_probe(
             source_prg_bank: OPTIONS_ROW_PRG_BANK,
             source_cpu_address: format!("0x{OPTIONS_ROW_HOOK_ADDRESS:04X}"),
             source_len: OPTIONS_ROW_HOOK_LEN,
+            owner_state_address: format!("0x{OPTIONS_COMPOSITE_STATE_ADDRESS:04X}"),
+            owner_state_value: OPTIONS_COMPOSITE_STATE,
+            owner_gate_cpu_start: format!("0x{OPTIONS_ROW_OWNER_GATE_ADDRESS:04X}"),
+            owner_gate_cpu_end_exclusive: format!("0x{OPTIONS_ROW_OWNER_GATE_END:04X}"),
+            owner_gate_len: options_row_owner_gate.len(),
             routine_cpu_start: format!("0x{OPTIONS_PAGE_ROUTINE_ADDRESS:04X}"),
             routine_cpu_end_exclusive: format!("0x{OPTIONS_PAGE_ROUTINE_END:04X}"),
             routine_len: options_routine.len(),
@@ -529,7 +574,7 @@ pub(crate) fn build_mapper165_hangul_page_probe(
         runtime_verified: false,
         unresolved_boundaries: vec![
             "Cold visible roster A-B-A evidence stays external to this static build report, so runtime_verified remains false by construction.",
-            "The options A-B-A selector and natural-page restoration need a regression check on this expanded output.",
+            "The options A-B-A selector, natural-page restoration, and non-options owner-gate fallthrough need a regression check on this expanded output.",
             "The mixed roster contract covers the three observed 00/15, 00/18, and 00/19 backing-page variants; other pairs still fall back to the natural page.",
             "The pages prove screen-bound selection, not final corpus packing or whole-game coverage.",
         ],

@@ -7,8 +7,12 @@ pub(super) const ROW_HOOK_ADDRESS: u16 = 0x93B7;
 pub(super) const ROW_HOOK_LEN: usize = 11;
 pub(super) const PAGE_ROUTINE_ADDRESS: u16 = 0xFB20;
 pub(super) const PAGE_ROUTINE_END: u16 = 0xFB68;
+pub(super) const ROW_OWNER_GATE_ADDRESS: u16 = PAGE_ROUTINE_END;
+pub(super) const ROW_OWNER_GATE_END: u16 = 0xFB80;
 pub(super) const PAGE_A_REGISTER: u8 = 0x88;
 pub(super) const PAGE_B_REGISTER: u8 = 0x8C;
+pub(super) const OPTIONS_COMPOSITE_STATE_ADDRESS: u16 = 0x05E8;
+pub(super) const OPTIONS_COMPOSITE_STATE: u8 = 0x1B;
 
 pub(super) fn row_calculation() -> Result<Vec<u8>> {
     assemble_at(
@@ -25,9 +29,31 @@ pub(super) fn row_calculation() -> Result<Vec<u8>> {
 }
 
 pub(super) fn row_hook() -> Result<Vec<u8>> {
-    let mut instructions = vec![Instruction::JsrAbsolute(PAGE_ROUTINE_ADDRESS)];
+    let mut instructions = vec![Instruction::JsrAbsolute(ROW_OWNER_GATE_ADDRESS)];
     instructions.extend(std::iter::repeat_n(Instruction::Nop, ROW_HOOK_LEN - 3));
     assemble_at(ROW_HOOK_ADDRESS, &instructions)
+}
+
+/// 공유 문자열 행 계산기가 설정 화면 밖에서도 호출되므로, 그림자 CHR 쌍만 보고
+/// 설정 페이지를 고르면 맵 메뉴와 유닛 UI의 더 구체적인 소비자 페이지를 덮는다.
+/// 설정 합성 상태일 때만 기존 페이지 선택기로 들어가고, 그 밖에는 훅이 밀어낸 원래
+/// 행 계산만 실행한다.
+pub(super) fn build_row_owner_gate() -> Result<Vec<u8>> {
+    let mut instructions = vec![
+        Instruction::LdaAbsolute(OPTIONS_COMPOSITE_STATE_ADDRESS),
+        Instruction::CmpImmediate(OPTIONS_COMPOSITE_STATE),
+        Instruction::BeqAbsolute(PAGE_ROUTINE_ADDRESS),
+    ];
+    instructions.extend([
+        Instruction::LdyImmediate(4),
+        Instruction::LdaIndirectY(0x6E),
+        Instruction::Clc,
+        Instruction::AdcAbsoluteX(0x93D8),
+        Instruction::StaZeroPage(0x34),
+        Instruction::Iny,
+        Instruction::Rts,
+    ]);
+    assemble_at(ROW_OWNER_GATE_ADDRESS, &instructions)
 }
 
 pub(super) fn build_page_routine_with_fallback(
@@ -100,8 +126,30 @@ mod tests {
             ]
         );
         assert_eq!(hook.len(), original.len());
-        assert_eq!(&hook[..3], &[0x20, 0x20, 0xFB]);
+        assert_eq!(&hook[..3], &[0x20, 0x68, 0xFB]);
         assert!(hook[3..].iter().all(|byte| *byte == 0xEA));
+    }
+
+    #[test]
+    fn row_owner_gate_admits_only_the_evidenced_options_composite_state() {
+        let gate = build_row_owner_gate().unwrap();
+
+        assert!(ROW_OWNER_GATE_ADDRESS as usize + gate.len() <= ROW_OWNER_GATE_END as usize);
+        assert_eq!(
+            &gate[..7],
+            &[
+                0xAD,
+                OPTIONS_COMPOSITE_STATE_ADDRESS as u8,
+                (OPTIONS_COMPOSITE_STATE_ADDRESS >> 8) as u8,
+                0xC9,
+                OPTIONS_COMPOSITE_STATE,
+                0xF0,
+                0xB1,
+            ]
+        );
+        let mut displaced_row = row_calculation().unwrap();
+        displaced_row.push(0x60);
+        assert_eq!(&gate[7..], displaced_row);
     }
 
     #[test]
