@@ -23,6 +23,7 @@ use crate::{
 
 mod chapter_intro_residency;
 mod cold_request_presentation;
+mod cross_domain_material;
 mod current_candidate;
 mod dialogue_bank_layout;
 mod dynamic_composition;
@@ -42,6 +43,7 @@ mod transition_residency;
 
 use chapter_intro_residency::plan_chapter_intro_residency;
 use cold_request_presentation::plan_cold_request_presentation_page;
+use cross_domain_material::{CrossDomainMaterialInputs, plan_cross_domain_material};
 use current_candidate::{CurrentCandidateInputs, inspect_dialogue_page_pool_capacity};
 use dynamic_composition::plan_dialogue_runtime_composition;
 use dynamic_input_producers::{DynamicInputProducerPlan, inspect_dynamic_input_producers};
@@ -132,6 +134,7 @@ struct FullTranslationInstallReport {
     dialogue_codebook: DialogueCodebook,
     chapter_intro_residency: ChapterIntroResidency,
     dialogue_page_pool: DialoguePagePool,
+    cross_domain_material: cross_domain_material::CrossDomainMaterialPlan,
     installation_layout: InstallationLayoutPlan,
     integrated_write_set: IntegratedWriteSetPlan,
     dialogue_runtime_control_flow: DialogueRuntimeControlFlowPlan,
@@ -223,6 +226,9 @@ struct DialoguePagePool {
 struct DialogueRuntimeComposition {
     strategy_selected: bool,
     glyph_atlas_tile_count: usize,
+    dialogue_codebook_glyph_count: usize,
+    additional_cross_domain_glyph_count: usize,
+    glyph_atlas_covers_every_required_domain_glyph: bool,
     stored_bytes_per_glyph: usize,
     composed_bytes_per_glyph: usize,
     glyph_atlas_byte_count: usize,
@@ -464,6 +470,16 @@ pub(crate) fn plan_full_translation_installation(
     // 원천 소유 구간과 포인터만 낸다. 의사결정 59번을 따른다.
     let encoded_display = dialogue
         .encoded_by_page_groups(&codebook.workset_page_indices, &codebook.page_assignments)?;
+    let mut cross_domain_target_glyphs = fixed.unique_glyphs();
+    cross_domain_target_glyphs.extend(unit_names.unique_glyphs());
+    cross_domain_target_glyphs.extend(chapter_titles.unique_glyphs());
+    cross_domain_target_glyphs.extend(choices.unique_glyphs());
+    cross_domain_target_glyphs.extend(map_menu.target_glyphs.iter().copied());
+    cross_domain_target_glyphs.extend(unit_ui.unique_target_glyphs());
+    cross_domain_target_glyphs.extend(item_actions.unique_target_glyphs());
+    cross_domain_target_glyphs.extend(transitions.save_offer.target_glyphs.iter().copied());
+    cross_domain_target_glyphs.extend(transitions.ending_record.target_glyphs.iter().copied());
+    cross_domain_target_glyphs.extend(locations.unique_glyphs());
     let composition = plan_dialogue_runtime_composition(
         &display,
         &dialogue_graph,
@@ -471,7 +487,15 @@ pub(crate) fn plan_full_translation_installation(
         &dynamic_page_codes,
         source_font_page,
         &font_page_pack,
+        &cross_domain_target_glyphs,
     )?;
+    ensure!(
+        cross_domain_target_glyphs.iter().all(|glyph| composition
+            .glyph_atlas_characters
+            .binary_search(glyph)
+            .is_ok()),
+        "shared glyph atlas lost a required cross-domain glyph"
+    );
     ensure!(
         composition.resident_group_change_count == 0
             && composition.resident_group_reuse_count
@@ -598,10 +622,24 @@ pub(crate) fn plan_full_translation_installation(
         canonical_dynamic_codes_are_page_physical_codes: dynamic_page_codes
             .canonical_codes_are_page_physical_codes,
     })?;
+    let cross_domain_material = plan_cross_domain_material(CrossDomainMaterialInputs {
+        main_dialogue_runtime_material_byte_count: runtime_material.material.len(),
+        shared_atlas_characters: &composition.glyph_atlas_characters,
+        fixed: &fixed,
+        unit_names: &unit_names,
+        chapter_titles: &chapter_titles,
+        choices: &choices,
+        map_menu: &map_menu,
+        unit_ui: &unit_ui,
+        item_actions: &item_actions,
+        transitions: &transitions,
+        locations: &locations,
+    })?;
     let installation_layout = plan_installation_layout(
         &current_candidate,
         &page_capacity,
         runtime_material.material.len(),
+        cross_domain_material.material_span_byte_count(),
         &cold_request_presentation,
     )?;
     let (installed_image, integrated_write_set) =
@@ -612,6 +650,7 @@ pub(crate) fn plan_full_translation_installation(
             dialogue_runtime_code: &dialogue_runtime_code,
             encoded_chapter_titles: &chapter_intro_residency.encoded_titles,
             cold_request_presentation: &cold_request_presentation,
+            cross_domain_material: &cross_domain_material,
             required_domains: &REQUIRED_DOMAINS,
         })?;
     let translation_input_complete = dialogue_validation.translation_input_complete;
@@ -628,7 +667,7 @@ pub(crate) fn plan_full_translation_installation(
         && locations.review_complete
         && translation_input_complete;
     let next_gate = if translation_input_complete && runtime_state_storage.selection_complete() {
-        "cold-boot the exact emitted probe and verify that every mandatory cold interval shows the protected English and UI over blank target slots, never Japanese or partial Hangul, before the completed Korean page is presented"
+        "generate every source projection, pointer selection, and lifetime font request from the twelve exact cross-domain material sections; keep the integrated candidate closed until all thirteen domains contribute every consumer write"
     } else if translation_input_complete {
         "close the exact volatile runtime-state storage selection against source access, queue, save/load, and battle lifetimes; do not emit or run a partial ROM"
     } else {
@@ -636,7 +675,7 @@ pub(crate) fn plan_full_translation_installation(
     };
 
     let report = FullTranslationInstallReport {
-        schema: 11,
+        schema: 12,
         source_sha1: EXPECTED_SOURCE_SHA1,
         strategy: "install all remaining translation domains in one cumulative candidate, run complete static gates, then run consumer-path dynamic regression on that same ROM",
         required_domain_count: REQUIRED_DOMAIN_COUNT,
@@ -716,6 +755,7 @@ pub(crate) fn plan_full_translation_installation(
             mapper_capacity_bound: true,
             current_candidate_bound: true,
         },
+        cross_domain_material,
         installation_layout,
         integrated_write_set,
         dialogue_runtime_control_flow: runtime_control_flow,
@@ -723,6 +763,9 @@ pub(crate) fn plan_full_translation_installation(
         dialogue_runtime_composition: DialogueRuntimeComposition {
             strategy_selected: true,
             glyph_atlas_tile_count: composition.glyph_atlas_tile_count,
+            dialogue_codebook_glyph_count: composition.dialogue_codebook_glyph_count,
+            additional_cross_domain_glyph_count: composition.additional_cross_domain_glyph_count,
+            glyph_atlas_covers_every_required_domain_glyph: true,
             stored_bytes_per_glyph: 8,
             composed_bytes_per_glyph: FONT_TILE_SIZE,
             glyph_atlas_byte_count: composition.glyph_atlas.len(),

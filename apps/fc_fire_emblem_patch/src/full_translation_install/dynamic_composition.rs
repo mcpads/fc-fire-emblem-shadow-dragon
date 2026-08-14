@@ -24,9 +24,12 @@ const GLYPH_ATLAS_TILE_BYTE_COUNT: usize = 8;
 
 pub(super) struct DialogueRuntimeCompositionPlan {
     pub(super) glyph_atlas: Vec<u8>,
+    pub(super) glyph_atlas_characters: Vec<char>,
     pub(super) scan_material: Vec<u8>,
     pub(super) scan_material_sha1: String,
     pub(super) glyph_atlas_tile_count: usize,
+    pub(super) dialogue_codebook_glyph_count: usize,
+    pub(super) additional_cross_domain_glyph_count: usize,
     pub(super) four_by_four_block_count: usize,
     pub(super) four_by_four_block_index_bit_count: usize,
     pub(super) four_by_four_block_atlas_byte_count: usize,
@@ -86,6 +89,7 @@ pub(super) fn plan_dialogue_runtime_composition(
     dynamic_page_codes: &DynamicStringPageCodePlan,
     source_font_page: &[u8],
     static_page_pack: &[u8],
+    additional_target_glyphs: &BTreeSet<char>,
 ) -> Result<DialogueRuntimeCompositionPlan> {
     ensure!(
         source_font_page.len() == FONT_PAGE_SIZE,
@@ -95,17 +99,22 @@ pub(super) fn plan_dialogue_runtime_composition(
         static_page_pack.len() == codebook.page_assignments.len() * FONT_PAGE_SIZE,
         "dialogue runtime composition static page pack length changed"
     );
-    let dialogue_glyphs = codebook
+    let dialogue_codebook_glyphs = codebook
         .page_assignments
         .iter()
         .flat_map(|assignments| assignments.keys().copied())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
+        .collect::<BTreeSet<_>>();
     ensure!(
-        dialogue_glyphs.len() == codebook.glyph_count,
+        dialogue_codebook_glyphs.len() == codebook.glyph_count,
         "dialogue runtime composition lost glyph-atlas entries"
     );
+    let additional_cross_domain_glyph_count = additional_target_glyphs
+        .difference(&dialogue_codebook_glyphs)
+        .count();
+    let dialogue_glyphs = dialogue_codebook_glyphs
+        .union(additional_target_glyphs)
+        .copied()
+        .collect::<Vec<_>>();
     ensure!(
         dialogue_glyphs.len() <= 3 * 256,
         "dialogue glyph atlas needs more than three dense lookup classes"
@@ -355,9 +364,12 @@ pub(super) fn plan_dialogue_runtime_composition(
 
     Ok(DialogueRuntimeCompositionPlan {
         glyph_atlas,
+        glyph_atlas_characters: dialogue_glyphs.clone(),
         scan_material_sha1: crate::sha1_hex(&scan_material),
         scan_material,
         glyph_atlas_tile_count: dialogue_glyphs.len(),
+        dialogue_codebook_glyph_count: codebook.glyph_count,
+        additional_cross_domain_glyph_count,
         four_by_four_block_count: quadrant_compression.block_count,
         four_by_four_block_index_bit_count: quadrant_compression.index_bit_count,
         four_by_four_block_atlas_byte_count: quadrant_compression.byte_count,

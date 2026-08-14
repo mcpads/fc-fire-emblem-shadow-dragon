@@ -35,6 +35,12 @@ pub(super) struct InstallationLayoutPlan {
     cross_domain_material_capacity_bound: bool,
 }
 
+pub(super) struct CrossDomainMaterialPool {
+    pub(super) first_mmc3_page: u8,
+    pub(super) file_offset: usize,
+    pub(super) capacity_byte_count: usize,
+}
+
 #[derive(Serialize)]
 struct MaterialPageReservation {
     role: &'static str,
@@ -74,6 +80,7 @@ pub(super) fn plan_installation_layout(
     candidate: &Rom,
     page_pool: &DialoguePagePoolCapacity,
     main_dialogue_runtime_material_byte_count: usize,
+    cross_domain_material_byte_count: usize,
     cold_request_presentation: &ColdRequestPresentationPage,
 ) -> Result<InstallationLayoutPlan> {
     ensure!(
@@ -91,18 +98,15 @@ pub(super) fn plan_installation_layout(
         main_dialogue_page_count > 0,
         "main-dialogue runtime material reservation is empty"
     );
-    let first_cross_domain_page = MAIN_DIALOGUE_RUNTIME_FIRST_PAGE
-        .checked_add(
-            u8::try_from(main_dialogue_page_count)
-                .context("main-dialogue runtime page count does not fit u8")?,
-        )
-        .context("main-dialogue runtime page range overflow")?;
+    let cross_domain_pool = cross_domain_material_pool(main_dialogue_runtime_material_byte_count)?;
     ensure!(
-        first_cross_domain_page <= LAST_SWITCHABLE_MATERIAL_PAGE,
-        "main-dialogue runtime material consumes the entire expanded PRG pool"
+        cross_domain_material_byte_count <= cross_domain_pool.capacity_byte_count,
+        "cross-domain material needs {} bytes but only {} remain",
+        cross_domain_material_byte_count,
+        cross_domain_pool.capacity_byte_count
     );
-    let cross_domain_page_count =
-        usize::from(LAST_SWITCHABLE_MATERIAL_PAGE + 1 - first_cross_domain_page);
+    let first_cross_domain_page = cross_domain_pool.first_mmc3_page;
+    let cross_domain_page_count = cross_domain_pool.capacity_byte_count / PRG_PAGE_SIZE;
 
     let main_dialogue_range =
         mmc3_page_file_range(MAIN_DIALOGUE_RUNTIME_FIRST_PAGE, main_dialogue_page_count)?;
@@ -181,7 +185,7 @@ pub(super) fn plan_installation_layout(
             role: "remaining_cross_domain_material_pool",
             first_mmc3_page: first_cross_domain_page,
             page_count: cross_domain_page_count,
-            byte_count: 0,
+            byte_count: cross_domain_material_byte_count,
             capacity_byte_count: cross_domain_page_count * PRG_PAGE_SIZE,
         },
         fixed_code_reservations,
@@ -198,7 +202,34 @@ pub(super) fn plan_installation_layout(
         remaining_reclaimable_chr_page_count,
         all_reserved_material_bytes_are_exact_ff: true,
         reservations_are_disjoint: true,
-        cross_domain_material_capacity_bound: false,
+        cross_domain_material_capacity_bound: true,
+    })
+}
+
+pub(super) fn cross_domain_material_pool(
+    main_dialogue_runtime_material_byte_count: usize,
+) -> Result<CrossDomainMaterialPool> {
+    let main_dialogue_page_count =
+        main_dialogue_runtime_material_byte_count.div_ceil(PRG_PAGE_SIZE);
+    ensure!(
+        main_dialogue_page_count > 0,
+        "main-dialogue runtime material reservation is empty"
+    );
+    let first_mmc3_page = MAIN_DIALOGUE_RUNTIME_FIRST_PAGE
+        .checked_add(
+            u8::try_from(main_dialogue_page_count)
+                .context("main-dialogue runtime page count does not fit u8")?,
+        )
+        .context("main-dialogue runtime page range overflow")?;
+    ensure!(
+        first_mmc3_page <= LAST_SWITCHABLE_MATERIAL_PAGE,
+        "main-dialogue runtime material consumes the entire expanded PRG pool"
+    );
+    let page_count = usize::from(LAST_SWITCHABLE_MATERIAL_PAGE + 1 - first_mmc3_page);
+    Ok(CrossDomainMaterialPool {
+        first_mmc3_page,
+        file_offset: mmc3_page_file_range(first_mmc3_page, 1)?.start,
+        capacity_byte_count: page_count * PRG_PAGE_SIZE,
     })
 }
 

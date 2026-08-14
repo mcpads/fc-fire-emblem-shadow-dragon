@@ -69,6 +69,10 @@ pub(crate) struct ChapterTitlePlannedEntry {
 }
 
 impl ChapterTitlePlannedEntry {
+    pub(crate) fn logical_bytes(&self) -> &[FixedTextLogicalByte] {
+        &self.logical_bytes
+    }
+
     pub(crate) fn unique_glyphs(&self) -> BTreeSet<char> {
         self.logical_bytes
             .iter()

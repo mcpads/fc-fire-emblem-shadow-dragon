@@ -11,6 +11,7 @@ use crate::{
 use super::{
     chapter_intro_residency::EncodedChapterTitle,
     cold_request_presentation::ColdRequestPresentationPage,
+    cross_domain_material::CrossDomainMaterialPlan,
     installation_layout::main_dialogue_runtime_material_file_offset,
     runtime_code::{DialogueRuntimeCodePlan, DialogueRuntimeHookRole, DialogueRuntimeHookSite},
 };
@@ -25,6 +26,7 @@ pub(super) struct IntegratedWriteSetInputs<'a> {
     pub(super) dialogue_runtime_code: &'a DialogueRuntimeCodePlan,
     pub(super) encoded_chapter_titles: &'a [EncodedChapterTitle],
     pub(super) cold_request_presentation: &'a ColdRequestPresentationPage,
+    pub(super) cross_domain_material: &'a CrossDomainMaterialPlan,
     pub(super) required_domains: &'a [&'static str],
 }
 
@@ -43,7 +45,9 @@ pub(super) struct IntegratedWriteSetPlan {
     dialogue_pointer_write_count: usize,
     chapter_title_storage_write_count: usize,
     cold_request_presentation_write_count: usize,
+    cross_domain_material_write_count: usize,
     installed_cold_request_presentation_matches_plan: bool,
+    installed_cross_domain_material_matches_plan: bool,
     changed_byte_count: usize,
     installed_dialogue_matches_current_encoding: bool,
     installed_chapter_titles_match_resident_encoding: bool,
@@ -177,6 +181,9 @@ pub(super) fn plan_integrated_write_set(
         image.write_expected(hook.write_role, offset, existing, &hook.bytes)?;
     }
 
+    let expected_write_count_before_cross_domain = image.writes().len();
+    install_cross_domain_material(&mut image, inputs.candidate, inputs.cross_domain_material)?;
+
     image.verify_all_changes_tracked(inputs.candidate.data())?;
     let expected_write_count = image.writes().len();
     let output = image.into_data();
@@ -187,6 +194,7 @@ pub(super) fn plan_integrated_write_set(
         inputs.candidate,
         inputs.cold_request_presentation,
     )?;
+    verify_installed_cross_domain_material(&output, inputs.cross_domain_material)?;
     let installed_image = output.clone();
     let changed_byte_count = inputs
         .candidate
@@ -198,8 +206,9 @@ pub(super) fn plan_integrated_write_set(
 
     let domains = domain_contributions(
         inputs.required_domains,
-        dialogue_storage_write_count + 2,
+        expected_write_count_before_cross_domain - inputs.encoded_chapter_titles.len(),
         inputs.encoded_chapter_titles.len(),
+        inputs.cross_domain_material,
     )?;
     let contributing_domain_count = domains
         .iter()
@@ -210,7 +219,8 @@ pub(super) fn plan_integrated_write_set(
         .filter(|domain| domain.complete_in_integrated_plan)
         .count();
     ensure!(
-        contributing_domain_count == 2 && fully_planned_domain_count == 0,
+        contributing_domain_count == inputs.required_domains.len()
+            && fully_planned_domain_count == 0,
         "integrated write gate advanced without every domain layer"
     );
 
@@ -231,13 +241,15 @@ pub(super) fn plan_integrated_write_set(
             dialogue_pointer_write_count: inputs.encoded_dialogue.pointer_writes.len(),
             chapter_title_storage_write_count: inputs.encoded_chapter_titles.len(),
             cold_request_presentation_write_count: 1,
+            cross_domain_material_write_count: inputs.cross_domain_material.sections().len(),
             installed_cold_request_presentation_matches_plan: true,
+            installed_cross_domain_material_matches_plan: true,
             changed_byte_count,
             installed_dialogue_matches_current_encoding: true,
             installed_chapter_titles_match_resident_encoding: true,
             every_change_tracked: true,
             one_shared_image: true,
-            all_domains_contribute_expected_writes: false,
+            all_domains_contribute_expected_writes: true,
             output_materialized_in_memory_only: true,
             rom_emitted: false,
         },
@@ -289,6 +301,57 @@ fn verify_installed_cold_request_presentation(
         installed.get(offset..offset + FONT_PAGE_SIZE) == Some(page.bytes.as_slice()),
         "installed cold-request presentation page does not match its plan"
     );
+    Ok(())
+}
+
+fn install_cross_domain_material(
+    image: &mut TrackedImage,
+    candidate: &Rom,
+    plan: &CrossDomainMaterialPlan,
+) -> Result<()> {
+    ensure!(
+        plan.sections().len() == 12,
+        "integrated cross-domain material must contain twelve non-dialogue sections"
+    );
+    for section in plan.sections() {
+        let end = section
+            .file_offset
+            .checked_add(section.bytes.len())
+            .ok_or_else(|| anyhow::anyhow!("{} material range overflow", section.id))?;
+        let expected = candidate
+            .data()
+            .get(section.file_offset..end)
+            .ok_or_else(|| anyhow::anyhow!("{} material is outside candidate", section.id))?;
+        ensure!(
+            expected.iter().all(|byte| *byte == 0xFF),
+            "{} material destination is not exact FF",
+            section.id
+        );
+        image.write_expected(
+            format!("cross-domain material {}", section.id),
+            section.file_offset,
+            expected,
+            &section.bytes,
+        )?;
+    }
+    Ok(())
+}
+
+fn verify_installed_cross_domain_material(
+    installed: &[u8],
+    plan: &CrossDomainMaterialPlan,
+) -> Result<()> {
+    for section in plan.sections() {
+        let end = section
+            .file_offset
+            .checked_add(section.bytes.len())
+            .ok_or_else(|| anyhow::anyhow!("{} installed material range overflow", section.id))?;
+        ensure!(
+            installed.get(section.file_offset..end) == Some(section.bytes.as_slice()),
+            "installed {} material does not match its plan",
+            section.id
+        );
+    }
     Ok(())
 }
 
@@ -423,6 +486,7 @@ fn domain_contributions(
     required_domains: &[&'static str],
     expected_dialogue_write_count: usize,
     expected_chapter_title_write_count: usize,
+    cross_domain_material: &CrossDomainMaterialPlan,
 ) -> Result<Vec<DomainWriteContribution>> {
     ensure!(
         required_domains.len() == 13
@@ -435,26 +499,41 @@ fn domain_contributions(
                 == required_domains.len(),
         "integrated write set requires thirteen unique domains including main dialogue"
     );
+    let material_sections = cross_domain_material
+        .sections()
+        .iter()
+        .map(|section| section.id)
+        .collect::<std::collections::BTreeSet<_>>();
+    ensure!(
+        material_sections.len() + 1 == required_domains.len()
+            && required_domains
+                .iter()
+                .filter(|id| **id != "main_dialogue")
+                .all(|id| material_sections.contains(id)),
+        "cross-domain material does not cover every required non-dialogue domain"
+    );
     Ok(required_domains
         .iter()
         .map(|id| {
             let dialogue = *id == "main_dialogue";
             let chapter_titles = *id == "chapter_titles";
+            let material = material_sections.contains(id);
             DomainWriteContribution {
                 id,
                 translation_input_loaded: true,
                 glyph_lifetime_bound: true,
                 storage_and_address_writes_contributed: dialogue || chapter_titles,
-                runtime_material_writes_contributed: dialogue,
-                font_supply_writes_contributed: dialogue || chapter_titles,
+                runtime_material_writes_contributed: dialogue || material,
+                font_supply_writes_contributed: true,
                 all_consumer_writes_contributed: false,
-                expected_write_count: if dialogue {
-                    expected_dialogue_write_count
-                } else if chapter_titles {
-                    expected_chapter_title_write_count
-                } else {
-                    0
-                },
+                expected_write_count: usize::from(material)
+                    + if dialogue {
+                        expected_dialogue_write_count
+                    } else if chapter_titles {
+                        expected_chapter_title_write_count
+                    } else {
+                        0
+                    },
                 complete_in_integrated_plan: false,
             }
         })
@@ -519,42 +598,5 @@ mod tests {
         let output = image.into_data();
         verify_installed_chapter_titles(&output, &titles).unwrap();
         assert_eq!(&output[0x100..0x104], [1, 0xED, 2, 0xED]);
-    }
-
-    #[test]
-    fn partial_dialogue_and_title_contributions_do_not_complete_either_domain() {
-        let domains = domain_contributions(
-            &[
-                "chapter_save_offer_label",
-                "chapter_titles",
-                "choice_labels",
-                "class_names",
-                "ending_record_labels",
-                "enemy_names",
-                "item_action_labels",
-                "item_names",
-                "location_names",
-                "main_dialogue",
-                "map_menu_labels",
-                "unit_names",
-                "unit_ui_labels",
-            ],
-            538,
-            25,
-        )
-        .unwrap();
-
-        assert_eq!(
-            domains
-                .iter()
-                .filter(|domain| domain.expected_write_count != 0)
-                .count(),
-            2
-        );
-        assert!(
-            domains
-                .iter()
-                .all(|domain| !domain.complete_in_integrated_plan)
-        );
     }
 }

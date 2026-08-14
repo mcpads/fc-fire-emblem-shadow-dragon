@@ -7,7 +7,11 @@ use std::{
 use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 
-use crate::{rom::EXPECTED_SOURCE_SHA1, sha1_hex, text_inventory::is_japanese_character};
+use crate::{
+    rom::EXPECTED_SOURCE_SHA1,
+    sha1_hex,
+    text_inventory::{FixedTextLogicalByte, encode_target_markup, is_japanese_character},
+};
 
 pub(crate) struct ExpectedSemanticEntry {
     pub(crate) id: String,
@@ -21,6 +25,8 @@ pub(crate) struct SemanticTranslationPlan {
     pub(crate) entry_count: usize,
     pub(crate) review_complete: bool,
     reviewed_entry_ids: BTreeSet<String>,
+    ordered_entry_ids: Vec<String>,
+    logical_bytes_by_entry_id: BTreeMap<String, Vec<FixedTextLogicalByte>>,
     target_glyphs_by_entry_id: BTreeMap<String, BTreeSet<char>>,
 }
 
@@ -31,6 +37,14 @@ impl SemanticTranslationPlan {
 
     pub(crate) fn entry_target_glyphs(&self, id: &str) -> Option<&BTreeSet<char>> {
         self.target_glyphs_by_entry_id.get(id)
+    }
+
+    pub(crate) fn entry_logical_bytes(&self, id: &str) -> Option<&[FixedTextLogicalByte]> {
+        self.logical_bytes_by_entry_id.get(id).map(Vec::as_slice)
+    }
+
+    pub(crate) fn entry_ids(&self) -> impl Iterator<Item = &str> {
+        self.ordered_entry_ids.iter().map(String::as_str)
     }
 
     pub(crate) fn unique_target_glyphs(&self) -> BTreeSet<char> {
@@ -85,6 +99,8 @@ pub(crate) fn plan_semantic_translation(
     );
 
     let mut reviewed_entry_ids = BTreeSet::new();
+    let mut ordered_entry_ids = Vec::with_capacity(workspace.entries.len());
+    let mut logical_bytes_by_entry_id = BTreeMap::new();
     let mut target_glyphs_by_entry_id = BTreeMap::new();
     for (entry, expected) in workspace.entries.iter().zip(expected_entries) {
         ensure!(
@@ -122,11 +138,23 @@ pub(crate) fn plan_semantic_translation(
         if entry.status == "complete" {
             reviewed_entry_ids.insert(entry.id.clone());
         }
-        let target_glyphs = entry
-            .korean_markup
-            .chars()
-            .filter(|character| is_target_hangul(*character))
+        ordered_entry_ids.push(entry.id.clone());
+        let logical_bytes = encode_target_markup(&entry.korean_markup)
+            .with_context(|| format!("encode semantic translation {}", entry.id))?;
+        let target_glyphs = logical_bytes
+            .iter()
+            .filter_map(|byte| match byte {
+                FixedTextLogicalByte::TargetGlyph(glyph) => Some(*glyph),
+                FixedTextLogicalByte::Encoded(_) => None,
+            })
             .collect();
+        ensure!(
+            logical_bytes_by_entry_id
+                .insert(entry.id.clone(), logical_bytes)
+                .is_none(),
+            "semantic translation repeats logical entry {}",
+            entry.id
+        );
         ensure!(
             target_glyphs_by_entry_id
                 .insert(entry.id.clone(), target_glyphs)
@@ -141,6 +169,8 @@ pub(crate) fn plan_semantic_translation(
         entry_count: workspace.entries.len(),
         review_complete: reviewed_entry_ids.len() == workspace.entries.len(),
         reviewed_entry_ids,
+        ordered_entry_ids,
+        logical_bytes_by_entry_id,
         target_glyphs_by_entry_id,
     })
 }
@@ -186,6 +216,39 @@ mod tests {
         assert_eq!(
             protected_source_sequence("저장할까요?", is_target_hangul),
             "?"
+        );
+    }
+
+    #[test]
+    fn planned_semantic_text_retains_ordered_logical_cells_without_reloading() {
+        let plan = SemanticTranslationPlan {
+            workspace_sha1: "workspace".to_owned(),
+            entry_count: 1,
+            review_complete: false,
+            reviewed_entry_ids: BTreeSet::new(),
+            ordered_entry_ids: vec!["label".to_owned()],
+            logical_bytes_by_entry_id: BTreeMap::from([(
+                "label".to_owned(),
+                vec![
+                    FixedTextLogicalByte::TargetGlyph('가'),
+                    FixedTextLogicalByte::Encoded(0xFF),
+                    FixedTextLogicalByte::TargetGlyph('나'),
+                ],
+            )]),
+            target_glyphs_by_entry_id: BTreeMap::from([(
+                "label".to_owned(),
+                BTreeSet::from(['가', '나']),
+            )]),
+        };
+
+        assert_eq!(plan.entry_ids().collect::<Vec<_>>(), ["label"]);
+        assert_eq!(
+            plan.entry_logical_bytes("label").unwrap(),
+            [
+                FixedTextLogicalByte::TargetGlyph('가'),
+                FixedTextLogicalByte::Encoded(0xFF),
+                FixedTextLogicalByte::TargetGlyph('나'),
+            ]
         );
     }
 }

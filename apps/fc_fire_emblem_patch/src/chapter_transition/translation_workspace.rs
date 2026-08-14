@@ -8,7 +8,7 @@ use crate::{
     japanese_encoding::is_japanese_text_code,
     rom::Rom,
     semantic_translation::{ExpectedSemanticEntry, plan_semantic_translation},
-    text_inventory::decode_source_markup,
+    text_inventory::{FixedTextLogicalByte, decode_source_markup},
 };
 
 use super::{
@@ -22,6 +22,7 @@ pub(crate) struct TransitionTranslationInput {
     pub(crate) review_complete: bool,
     pub(crate) target_glyphs: BTreeSet<char>,
     pub(crate) source_reclaimable_active_codes: BTreeSet<u8>,
+    pub(crate) logical_bytes: Vec<FixedTextLogicalByte>,
 }
 
 pub(crate) struct TransitionTranslationPlans {
@@ -92,6 +93,15 @@ pub(crate) fn plan_transition_labels(
         .entry_target_glyphs("ending-total-turn-label")
         .context("transition plan lost ending-record target glyphs")?
         .clone();
+    let logical_bytes = |id: &str| -> Result<Vec<FixedTextLogicalByte>> {
+        Ok(plan
+            .entry_logical_bytes(id)
+            .with_context(|| format!("transition plan lost {id} logical bytes"))?
+            .to_vec())
+    };
+    let forecast_logical_bytes = logical_bytes("battle-forecast-label")?;
+    let save_offer_logical_bytes = logical_bytes("chapter-save-offer-label")?;
+    let ending_record_logical_bytes = logical_bytes("ending-total-turn-label")?;
     Ok(TransitionTranslationPlans {
         forecast: TransitionTranslationInput {
             workspace_sha1: plan.workspace_sha1.clone(),
@@ -99,6 +109,7 @@ pub(crate) fn plan_transition_labels(
             review_complete: forecast_review_complete,
             target_glyphs: forecast_target_glyphs,
             source_reclaimable_active_codes: reclaimable(&FORECAST_LABEL_SOURCE[3..9]),
+            logical_bytes: forecast_logical_bytes,
         },
         save_offer: TransitionTranslationInput {
             workspace_sha1: plan.workspace_sha1.clone(),
@@ -108,6 +119,7 @@ pub(crate) fn plan_transition_labels(
             source_reclaimable_active_codes: reclaimable(
                 &SAVE_OFFER_LABEL_BYTES[..SAVE_OFFER_LABEL_BYTES.len() - 1],
             ),
+            logical_bytes: save_offer_logical_bytes,
         },
         ending_record: TransitionTranslationInput {
             workspace_sha1: plan.workspace_sha1,
@@ -115,6 +127,7 @@ pub(crate) fn plan_transition_labels(
             review_complete: ending_record_review_complete,
             target_glyphs: ending_record_target_glyphs,
             source_reclaimable_active_codes: ending.source_reclaimable_active_codes,
+            logical_bytes: ending_record_logical_bytes,
         },
     })
 }

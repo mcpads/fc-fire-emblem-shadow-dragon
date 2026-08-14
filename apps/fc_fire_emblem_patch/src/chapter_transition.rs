@@ -44,7 +44,7 @@ pub(crate) use title_localization::{
     plan_chapter_titles,
 };
 use translation_surfaces::{TranslationSurfaceContracts, bind_translation_surfaces};
-pub(crate) use translation_workspace::plan_transition_labels;
+pub(crate) use translation_workspace::{TransitionTranslationPlans, plan_transition_labels};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ChapterIntroLifetimeContext {

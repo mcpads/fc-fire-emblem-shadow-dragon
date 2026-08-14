@@ -8,7 +8,7 @@ use crate::{
     japanese_encoding::{is_japanese_text_code, japanese_text_glyph},
     rom::{EXPECTED_SOURCE_SHA1, HEADER_SIZE, Rom},
     sha1_hex,
-    text_inventory::{encode_target_markup, is_japanese_character},
+    text_inventory::{FixedTextLogicalByte, encode_target_markup, is_japanese_character},
     typed_source::decode_rp2a03_sequence,
 };
 
@@ -93,6 +93,22 @@ pub(crate) struct MapMenuPlan {
     pub(crate) workspace_sha1: String,
     pub(crate) target_glyphs: BTreeSet<char>,
     pub(crate) source_reclaimable_active_codes: BTreeSet<u8>,
+    pub(crate) entries: Vec<MapMenuPlannedEntry>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct MapMenuPlannedEntry {
+    pub(crate) id: String,
+    pub(crate) source_cpu_address: u16,
+    pub(crate) source_file_offset: usize,
+    pub(crate) source_storage: Vec<u8>,
+    logical_bytes: Vec<FixedTextLogicalByte>,
+}
+
+impl MapMenuPlannedEntry {
+    pub(crate) fn logical_bytes(&self) -> &[FixedTextLogicalByte] {
+        &self.logical_bytes
+    }
 }
 
 pub(crate) fn plan_map_menu(rom: &Rom, workspace_path: &Path) -> Result<MapMenuPlan> {
@@ -116,6 +132,7 @@ pub(crate) fn plan_map_menu(rom: &Rom, workspace_path: &Path) -> Result<MapMenuP
 
     let mut translated_entry_count = 0;
     let mut target_glyphs = BTreeSet::new();
+    let mut entries = Vec::with_capacity(LABELS.len());
     for (entry, spec) in workspace.entries.iter().zip(LABELS) {
         let source_markup = decode_source_markup(&spec.expected[..spec.expected.len() - 1]);
         ensure!(
@@ -154,13 +171,21 @@ pub(crate) fn plan_map_menu(rom: &Rom, workspace_path: &Path) -> Result<MapMenuP
                 "map menu translation introduced non-Hangul text for {}",
                 spec.id
             );
+            let logical_bytes = encode_target_markup(&entry.korean_markup)?;
             ensure!(
-                encode_target_markup(&entry.korean_markup)?.len() <= 6,
+                logical_bytes.len() <= 6,
                 "map menu translation exceeds six visible cells for {}",
                 spec.id
             );
             translated_entry_count += 1;
             target_glyphs.extend(entry.korean_markup.chars());
+            entries.push(MapMenuPlannedEntry {
+                id: entry.id.clone(),
+                source_cpu_address: spec.pointer,
+                source_file_offset: source_file_offset(spec.pointer)?,
+                source_storage: spec.expected.to_vec(),
+                logical_bytes,
+            });
         }
     }
     let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
@@ -184,6 +209,7 @@ pub(crate) fn plan_map_menu(rom: &Rom, workspace_path: &Path) -> Result<MapMenuP
         workspace_sha1: sha1_hex(&bytes),
         target_glyphs,
         source_reclaimable_active_codes,
+        entries,
     })
 }
 
@@ -234,15 +260,23 @@ fn source_slice(rom: &Rom, cpu_address: u16, len: usize) -> Result<&[u8]> {
         (CPU_WINDOW_START..0xC000).contains(&cpu_address),
         "map menu source address {cpu_address:04X} is outside bank 0B"
     );
-    let offset = HEADER_SIZE
-        + usize::from(PRG_BANK) * PRG_BANK_SIZE
-        + usize::from(cpu_address - CPU_WINDOW_START);
+    let offset = source_file_offset(cpu_address)?;
     let end = offset
         .checked_add(len)
         .context("map menu source overflow")?;
     rom.data()
         .get(offset..end)
         .with_context(|| format!("map menu source exceeds ROM at {offset:05X}"))
+}
+
+fn source_file_offset(cpu_address: u16) -> Result<usize> {
+    ensure!(
+        (CPU_WINDOW_START..0xC000).contains(&cpu_address),
+        "map menu source address {cpu_address:04X} is outside bank 0B"
+    );
+    Ok(HEADER_SIZE
+        + usize::from(PRG_BANK) * PRG_BANK_SIZE
+        + usize::from(cpu_address - CPU_WINDOW_START))
 }
 
 fn decode_source_markup(raw: &[u8]) -> String {
@@ -287,6 +321,14 @@ mod tests {
         assert_eq!(plan.translated_entry_count, 6);
         assert_eq!(plan.target_glyphs.len(), 17);
         assert_eq!(plan.source_reclaimable_active_codes.len(), 24);
+        assert_eq!(plan.entries.len(), 6);
+        let roster = plan
+            .entries
+            .iter()
+            .find(|entry| entry.id == "map-menu:roster")
+            .unwrap();
+        assert_eq!(roster.source_cpu_address, 0x81B2);
+        assert_eq!(roster.source_storage, [0x01, 0x11, 0x28, 0x2F, 0xED]);
         assert!(!plan.review_complete);
     }
 }
