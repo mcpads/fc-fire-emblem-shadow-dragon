@@ -145,7 +145,8 @@ pub(super) fn build_page_selector(mapper_register: u8, fallback_target: u16) -> 
             Instruction::CmpImmediate(0x1A),
             Instruction::BneAbsolute(FALLBACK_ADDRESS),
             Instruction::LdaZeroPage(0x5B),
-            Instruction::OraZeroPage(0x5C),
+            Instruction::OraZeroPage(0x52),
+            Instruction::AndImmediate(0x1F),
             Instruction::BneAbsolute(FALLBACK_ADDRESS),
             Instruction::LdaImmediate(2),
             Instruction::StaAbsolute(0x8000),
@@ -154,8 +155,6 @@ pub(super) fn build_page_selector(mapper_register: u8, fallback_target: u16) -> 
             Instruction::Pla,
             Instruction::Plp,
             Instruction::Rts,
-            Instruction::Nop,
-            Instruction::Nop,
             Instruction::Nop,
             Instruction::Nop,
             Instruction::Nop,
@@ -335,8 +334,12 @@ mod tests {
         }));
         assert!(
             routine
-                .windows(6)
-                .any(|bytes| bytes == [0xA5, 0x5B, 0x05, 0x5C, 0xD0, 0x12])
+                .windows(8)
+                .any(|bytes| { bytes == [0xA5, 0x5B, 0x05, 0x52, 0x29, 0x1F, 0xD0, 0x10] })
+        );
+        assert!(
+            !routine.windows(2).any(|bytes| bytes == [0xA5, 0x5C]),
+            "front-end FD codebook selection must not depend on the unrelated FE backdrop"
         );
         assert!(routine.windows(2).any(|bytes| bytes == [0xA9, 0xA8]));
         assert_eq!(&routine[routine.len() - 3..], &[0x4C, 0xC0, 0xFA]);
