@@ -23,6 +23,7 @@ use crate::{
 
 mod chapter_intro_residency;
 mod cold_request_presentation;
+mod consumer_catalog;
 mod consumer_codebook;
 mod consumer_installation;
 mod cross_domain_material;
@@ -45,6 +46,7 @@ mod transition_residency;
 
 use chapter_intro_residency::plan_chapter_intro_residency;
 use cold_request_presentation::plan_cold_request_presentation_page;
+use consumer_catalog::{ConsumerCatalogInputs, ConsumerCatalogPlan, plan_consumer_catalog};
 use consumer_codebook::{ConsumerCodebookInputs, ConsumerCodebookPlan, plan_consumer_codebook};
 use consumer_installation::{
     ConsumerInstallationInputs, ConsumerInstallationPlan, plan_consumer_installation,
@@ -142,6 +144,7 @@ struct FullTranslationInstallReport {
     dialogue_page_pool: DialoguePagePool,
     cross_domain_material: cross_domain_material::CrossDomainMaterialPlan,
     consumer_codebook: ConsumerCodebookPlan,
+    consumer_catalog: ConsumerCatalogPlan,
     installation_layout: InstallationLayoutPlan,
     integrated_write_set: IntegratedWriteSetPlan,
     dialogue_runtime_control_flow: DialogueRuntimeControlFlowPlan,
@@ -486,6 +489,15 @@ pub(crate) fn plan_full_translation_installation(
         unit_ui: &unit_ui,
         item_actions: &item_actions,
         transitions: &transitions,
+    })?;
+    let consumer_catalog = plan_consumer_catalog(ConsumerCatalogInputs {
+        source_font_page,
+        first_physical_page: consumer_codebook.next_physical_page()?,
+        available_page_count: consumer_codebook.remaining_page_count()?,
+        fixed: &fixed,
+        unit_names: &unit_names,
+        unit_ui: &unit_ui,
+        item_actions: &item_actions,
     })?;
     let font_page_pack = build_glyph_workset_font_page_pack(source_font_page, &codebook)?;
     ensure!(
@@ -845,6 +857,7 @@ pub(crate) fn plan_full_translation_installation(
         },
         cross_domain_material,
         consumer_codebook,
+        consumer_catalog,
         installation_layout,
         integrated_write_set,
         dialogue_runtime_control_flow: runtime_control_flow,

@@ -87,6 +87,18 @@ impl ConsumerCodebookPlan {
     pub(super) fn pages(&self) -> &[StaticConsumerPage] {
         &self.pages
     }
+
+    pub(super) fn next_physical_page(&self) -> Result<u8> {
+        self.first_physical_page
+            .checked_add(u8::try_from(self.pages.len()).context("consumer page count exceeds u8")?)
+            .context("consumer physical page range overflow")
+    }
+
+    pub(super) fn remaining_page_count(&self) -> Result<usize> {
+        self.available_page_count
+            .checked_sub(self.pages.len())
+            .context("consumer codebook exhausted the available page range")
+    }
 }
 
 #[derive(Serialize)]
