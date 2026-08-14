@@ -36,7 +36,8 @@ pub(super) const NEXT_STORY_LABEL_BYTES: &[u8] = &[
     0x77, 0x6E, 0x81, 0x7D, 0xFF, 0x7C, 0x7D, 0x78, 0x7B, 0x82, 0xED,
 ];
 pub(super) const SAVE_OFFER_POINTER_BYTES: &[u8] = &[0xAA, 0x91];
-pub(super) const SAVE_OFFER_LABEL_BYTES: &[u8] = &[
+pub(crate) const SAVE_OFFER_LABEL_ADDRESS: u16 = 0x91AA;
+pub(crate) const SAVE_OFFER_LABEL_BYTES: &[u8] = &[
     0x3D, 0x3F, 0x4C, 0x0F, 0x0B, 0x20, 0x0C, 0x05, 0xFF, 0x9C, 0xED,
 ];
 pub(super) const REGULAR_SAVE_CHECKSUM_BYTES: &[u8] = &[
@@ -160,7 +161,7 @@ pub(super) const SOURCE_REGIONS: &[SourceRegionSpec] = &[
     SourceRegionSpec::data(
         "chapter_save_offer_label",
         0x0B,
-        0x91AA,
+        SAVE_OFFER_LABEL_ADDRESS,
         SAVE_OFFER_LABEL_BYTES,
     ),
     SourceRegionSpec::code(

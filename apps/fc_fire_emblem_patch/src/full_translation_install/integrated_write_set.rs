@@ -10,6 +10,7 @@ use crate::{
 
 use super::{
     chapter_intro_residency::EncodedChapterTitle,
+    chapter_save_projection::ChapterSaveProjectionPlan,
     cold_request_presentation::ColdRequestPresentationPage,
     consumer_catalog::ConsumerCatalogPlan,
     consumer_codebook::ConsumerCodebookPlan,
@@ -34,6 +35,7 @@ pub(super) struct IntegratedWriteSetInputs<'a> {
     pub(super) consumer_catalog: &'a ConsumerCatalogPlan,
     pub(super) cross_domain_material: &'a CrossDomainMaterialPlan,
     pub(super) fixed_ui_projection: &'a FixedUiProjectionPlan,
+    pub(super) chapter_save_projection: &'a ChapterSaveProjectionPlan,
     pub(super) consumer_installation: &'a ConsumerInstallationPlan,
     pub(super) required_domains: &'a [&'static str],
 }
@@ -59,6 +61,7 @@ pub(super) struct IntegratedWriteSetPlan {
     catalog_consumer_font_page_write_count: usize,
     cross_domain_material_write_count: usize,
     fixed_ui_projection_write_count: usize,
+    chapter_save_projection_write_count: usize,
     installed_cold_request_presentation_matches_plan: bool,
     installed_static_consumer_font_pages_match_plan: bool,
     installed_catalog_consumer_font_pages_match_plan: bool,
@@ -229,6 +232,7 @@ pub(super) fn plan_integrated_write_set(
     }
 
     install_fixed_ui_projection(&mut image, inputs.fixed_ui_projection)?;
+    install_chapter_save_projection(&mut image, inputs.chapter_save_projection)?;
 
     let expected_write_count_before_cross_domain = image.writes().len();
     install_cross_domain_material(&mut image, inputs.candidate, inputs.cross_domain_material)?;
@@ -255,6 +259,7 @@ pub(super) fn plan_integrated_write_set(
     )?;
     verify_installed_cross_domain_material(&output, inputs.cross_domain_material)?;
     verify_installed_fixed_ui_projection(&output, inputs.fixed_ui_projection)?;
+    verify_installed_chapter_save_projection(&output, inputs.chapter_save_projection)?;
     let installed_image = output.clone();
     let changed_byte_count = expanded_base
         .iter()
@@ -268,6 +273,7 @@ pub(super) fn plan_integrated_write_set(
         inputs.encoded_chapter_titles.len(),
         inputs.cross_domain_material,
         inputs.fixed_ui_projection,
+        inputs.chapter_save_projection,
         inputs.consumer_installation,
     )?;
     let contributing_domain_count = domains
@@ -308,6 +314,7 @@ pub(super) fn plan_integrated_write_set(
             catalog_consumer_font_page_write_count: inputs.consumer_catalog.pages().len(),
             cross_domain_material_write_count: inputs.cross_domain_material.sections().len() + 1,
             fixed_ui_projection_write_count: inputs.fixed_ui_projection.write_count(),
+            chapter_save_projection_write_count: inputs.chapter_save_projection.write_count(),
             installed_cold_request_presentation_matches_plan: true,
             installed_static_consumer_font_pages_match_plan: true,
             installed_catalog_consumer_font_pages_match_plan: true,
@@ -379,8 +386,8 @@ fn install_static_consumer_font_pages(
     plan: &ConsumerCodebookPlan,
 ) -> Result<()> {
     ensure!(
-        plan.pages().len() == 3,
-        "integrated consumer codebook must install the three fixed-content pages"
+        plan.pages().len() == 4,
+        "integrated consumer codebook must install the four fixed-content pages"
     );
     let mut physical_pages = std::collections::BTreeSet::new();
     for page in plan.pages() {
@@ -757,12 +764,47 @@ fn verify_installed_fixed_ui_projection(
     Ok(())
 }
 
+fn install_chapter_save_projection(
+    image: &mut TrackedImage,
+    plan: &ChapterSaveProjectionPlan,
+) -> Result<()> {
+    ensure!(
+        plan.write_count() == 3,
+        "chapter-save projection must install the save question and both choices"
+    );
+    for write in plan.writes() {
+        image.write_expected(
+            &write.role,
+            write.file_offset,
+            &write.expected,
+            &write.replacement,
+        )?;
+    }
+    Ok(())
+}
+
+fn verify_installed_chapter_save_projection(
+    installed: &[u8],
+    plan: &ChapterSaveProjectionPlan,
+) -> Result<()> {
+    for write in plan.writes() {
+        ensure!(
+            installed.get(write.file_offset..write.file_offset + write.replacement.len())
+                == Some(write.replacement.as_slice()),
+            "installed chapter-save projection does not match {}",
+            write.role
+        );
+    }
+    Ok(())
+}
+
 fn domain_contributions(
     required_domains: &[&'static str],
     expected_dialogue_write_count: usize,
     expected_chapter_title_write_count: usize,
     cross_domain_material: &CrossDomainMaterialPlan,
     fixed_ui_projection: &FixedUiProjectionPlan,
+    chapter_save_projection: &ChapterSaveProjectionPlan,
     consumer_installation: &ConsumerInstallationPlan,
 ) -> Result<Vec<DomainWriteContribution>> {
     ensure!(
@@ -796,6 +838,7 @@ fn domain_contributions(
             let chapter_titles = *id == "chapter_titles";
             let material = material_sections.contains(id);
             let fixed_ui_write_count = fixed_ui_projection.write_count_for_domain(id);
+            let chapter_save_write_count = chapter_save_projection.write_count_for_domain(id);
             let all_consumers_statically_accounted =
                 consumer_installation.domain_all_consumers_statically_accounted(id);
             DomainWriteContribution {
@@ -805,6 +848,7 @@ fn domain_contributions(
                 storage_and_address_writes_contributed: dialogue
                     || chapter_titles
                     || fixed_ui_write_count != 0
+                    || chapter_save_write_count != 0
                     || all_consumers_statically_accounted,
                 runtime_material_writes_contributed: dialogue || material,
                 font_supply_writes_contributed: true,
@@ -815,6 +859,7 @@ fn domain_contributions(
                 all_consumer_writes_contributed: all_consumers_statically_accounted,
                 expected_write_count: usize::from(material)
                     + fixed_ui_write_count
+                    + chapter_save_write_count
                     + if dialogue {
                         expected_dialogue_write_count
                     } else if chapter_titles {

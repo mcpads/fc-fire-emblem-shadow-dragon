@@ -51,6 +51,9 @@ struct ChoiceLabelEntry {
 pub(crate) struct ChoiceLabelPlannedEntry {
     pub(crate) id: String,
     pub(crate) fixed_string_index: u8,
+    pub(crate) source_pointer: u16,
+    pub(crate) source_file_offset: usize,
+    pub(crate) source_storage: Vec<u8>,
     logical_bytes: Vec<FixedTextLogicalByte>,
     terminator: u8,
 }
@@ -182,6 +185,9 @@ pub(crate) fn plan_choice_labels(rom: &Rom, workspace_path: &Path) -> Result<Cho
         entries.push(ChoiceLabelPlannedEntry {
             id: entry.id.clone(),
             fixed_string_index: entry.fixed_string_index,
+            source_pointer: pointer,
+            source_file_offset,
+            source_storage: source.to_vec(),
             logical_bytes,
             terminator: *spec.expected.last().unwrap(),
         });

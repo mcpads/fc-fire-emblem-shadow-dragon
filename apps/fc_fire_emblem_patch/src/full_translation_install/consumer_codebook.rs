@@ -48,6 +48,7 @@ pub(super) struct ConsumerCodebookInputs<'a> {
     pub(super) unit_names: &'a UnitNamePlan,
     pub(super) chapter_titles: &'a ChapterTitlePlan,
     pub(super) choices: &'a ChoiceLabelPlan,
+    pub(super) choice_glyph_codes: &'a BTreeMap<char, u8>,
     pub(super) map_menu: &'a MapMenuPlan,
     pub(super) unit_ui: &'a SemanticTranslationPlan,
     pub(super) item_actions: &'a SemanticTranslationPlan,
@@ -230,6 +231,12 @@ pub(super) fn plan_consumer_codebook(
         &inputs.chapter_intro.title_glyph_codes,
         "chapter titles",
     )?;
+    merge_preassignments(
+        &mut preassigned,
+        CodeOwner::FixedUi,
+        inputs.choice_glyph_codes,
+        "resident choice labels",
+    )?;
     ensure!(
         preassigned.values().all(|code| active_codes.contains(code)),
         "consumer codebook preassigns a reserved font code"
@@ -311,7 +318,7 @@ pub(super) fn plan_consumer_codebook(
 
     Ok(ConsumerCodebookPlan {
         schema: 1,
-        strategy: "prebuild only fixed-content command, map-menu, and ending pages; keep dialogue-dynamic and chapter-title producer codes fixed, and require KTX1 runtime projection for variable unit, item, shop, choice, and save consumers",
+        strategy: "prebuild fixed-content command, map-menu, chapter-save, and ending pages; keep dialogue-dynamic, chapter-title, and save-choice producer codes fixed, and require KTX1 runtime projection only for variable unit, item, and shop consumers",
         glyph_count: graph.glyph_count(),
         conflict_edge_count: graph.edge_count(),
         preassigned_glyph_count: preassigned.len(),

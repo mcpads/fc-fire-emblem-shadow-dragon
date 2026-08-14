@@ -97,11 +97,34 @@ pub(super) fn build_lifetimes(inputs: &ConsumerCodebookInputs<'_>) -> Result<Vec
         .copied()
         .collect();
     lifetimes.push(map_lifetime);
-    let _runtime_projected_save_and_choices = (
-        &inputs.transitions.save_offer.logical_bytes,
-        &choices,
-        &inputs.choices.preserved_active_codes,
+    let save_offer = vec![inputs.transitions.save_offer.logical_bytes.clone()];
+    let mut save_offer_lifetime = lifetime(
+        "chapter_save_offer",
+        "save_question_and_both_choices",
+        vec!["chapter_save_offer"],
+        vec!["chapter_save_offer_label", "choice_labels"],
+        &[
+            (CodeOwner::FixedUi, save_offer.as_slice()),
+            (CodeOwner::FixedUi, choices.as_slice()),
+        ],
+        true,
     );
+    save_offer_lifetime
+        .preserved_active_codes
+        .extend(inputs.choices.preserved_active_codes.iter().copied());
+    let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
+    save_offer_lifetime.preserved_active_codes.extend(
+        inputs
+            .transitions
+            .save_offer
+            .logical_bytes
+            .iter()
+            .filter_map(|byte| match byte {
+                FixedTextLogicalByte::Encoded(code) if active_codes.contains(code) => Some(*code),
+                FixedTextLogicalByte::Encoded(_) | FixedTextLogicalByte::TargetGlyph(_) => None,
+            }),
+    );
+    lifetimes.push(save_offer_lifetime);
     let ending_label = vec![inputs.transitions.ending_record.logical_bytes.clone()];
     lifetimes.push(lifetime(
         "ending_chapter_record",

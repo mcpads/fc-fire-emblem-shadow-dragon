@@ -1,5 +1,5 @@
 pub(crate) const SOURCE_PRG_BANK: u8 = 0x0B;
-pub(super) const POINTER_TABLE_ADDRESS: u16 = 0x8FC2;
+pub(crate) const POINTER_TABLE_ADDRESS: u16 = 0x8FC2;
 pub(crate) const POINTER_LOAD_ADDRESS: u16 = 0x8EF0;
 pub(crate) const POINTER_LOAD_BYTES: [u8; 10] =
     [0xB9, 0xC2, 0x8F, 0x85, 0x00, 0xB9, 0xC3, 0x8F, 0x85, 0x01];

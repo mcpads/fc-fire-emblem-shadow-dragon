@@ -26,6 +26,8 @@ use crate::{
 };
 
 mod chapter_intro_residency;
+mod chapter_save_projection;
+mod choice_residency;
 mod cold_request_presentation;
 mod consumer_catalog;
 mod consumer_codebook;
@@ -39,6 +41,7 @@ mod dynamic_inputs;
 mod fixed_ui_projection;
 mod installation_layout;
 mod integrated_write_set;
+mod resident_glyph_assignment;
 mod runtime_bank_contract;
 mod runtime_code;
 mod runtime_control_flow;
@@ -50,6 +53,10 @@ mod runtime_state_storage;
 mod transition_residency;
 
 use chapter_intro_residency::plan_chapter_intro_residency;
+use chapter_save_projection::{
+    ChapterSaveProjectionInputs, ChapterSaveProjectionPlan, plan_chapter_save_projection,
+};
+use choice_residency::{ChoiceResidencyPlan, plan_choice_residency};
 use cold_request_presentation::plan_cold_request_presentation_page;
 use consumer_catalog::{ConsumerCatalogInputs, ConsumerCatalogPlan, plan_consumer_catalog};
 use consumer_codebook::{ConsumerCodebookInputs, ConsumerCodebookPlan, plan_consumer_codebook};
@@ -149,6 +156,8 @@ struct FullTranslationInstallReport {
     translation_inputs: TranslationInputs,
     dialogue_codebook: DialogueCodebook,
     chapter_intro_residency: ChapterIntroResidency,
+    choice_residency: ChoiceResidencyPlan,
+    chapter_save_projection: ChapterSaveProjectionPlan,
     dialogue_page_pool: DialoguePagePool,
     cross_domain_material: cross_domain_material::CrossDomainMaterialPlan,
     consumer_codebook: ConsumerCodebookPlan,
@@ -456,11 +465,17 @@ pub(crate) fn plan_full_translation_installation(
         &chapter_titles,
         &dynamic_inputs.augmented_worksets,
     )?;
+    let choice_residency = plan_choice_residency(
+        &rom,
+        &display,
+        &choices,
+        &chapter_intro_residency.augmented_worksets,
+    )?;
     let dialogue_graph = inspect_main_dialogue_graph(rom.data())?;
     let transition_residency = plan_transition_residency(
         &display,
         &dialogue_graph,
-        &chapter_intro_residency.augmented_worksets,
+        &choice_residency.augmented_worksets,
     )?;
     let codebook = plan_glyph_workset_page_upper_bound(&transition_residency.augmented_worksets)?;
     let dynamic_page_codes = bind_dynamic_string_page_codes(&dynamic_inputs, &codebook)?;
@@ -494,10 +509,18 @@ pub(crate) fn plan_full_translation_installation(
         unit_names: &unit_names,
         chapter_titles: &chapter_titles,
         choices: &choices,
+        choice_glyph_codes: &choice_residency.choice_glyph_codes,
         map_menu: &map_menu,
         unit_ui: &unit_ui,
         item_actions: &item_actions,
         transitions: &transitions,
+    })?;
+    let chapter_save_projection = plan_chapter_save_projection(ChapterSaveProjectionInputs {
+        candidate: &current_candidate,
+        choices: &choices,
+        choice_glyph_codes: &choice_residency.choice_glyph_codes,
+        transitions: &transitions,
+        consumer_codebook: &consumer_codebook,
     })?;
     let consumer_catalog = plan_consumer_catalog(ConsumerCatalogInputs {
         source_font_page,
@@ -665,6 +688,7 @@ pub(crate) fn plan_full_translation_installation(
             unit_command: consumer_codebook.mapper_register_for("unit_command_menu")?,
             map_menu: consumer_codebook.mapper_register_for("map_menu")?,
             ending_record: consumer_codebook.mapper_register_for("ending_chapter_record")?,
+            chapter_save_offer: consumer_codebook.mapper_register_for("chapter_save_offer")?,
             catalog: consumer_catalog.mapper_registers()?,
         },
     )?;
@@ -767,6 +791,12 @@ pub(crate) fn plan_full_translation_installation(
                 "item_action_menu",
             ],
         );
+        for domain in ["chapter_save_offer_label", "choice_labels"] {
+            add_roles(
+                domain,
+                chapter_save_projection.projected_screen_roles(domain),
+            );
+        }
     }
     let consumer_installation = plan_consumer_installation(ConsumerInstallationInputs {
         current_candidate_path: inputs.current_candidate_path,
@@ -800,6 +830,7 @@ pub(crate) fn plan_full_translation_installation(
             consumer_catalog: &consumer_catalog,
             cross_domain_material: &cross_domain_material,
             fixed_ui_projection: &fixed_ui_projection,
+            chapter_save_projection: &chapter_save_projection,
             consumer_installation: &consumer_installation,
             required_domains: &REQUIRED_DOMAINS,
         })?;
@@ -890,6 +921,8 @@ pub(crate) fn plan_full_translation_installation(
             every_title_glyph_has_one_stable_code: true,
             title_storage_connected: true,
         },
+        choice_residency,
+        chapter_save_projection,
         dialogue_page_pool: DialoguePagePool {
             current_candidate_sha1: page_capacity.current_candidate_sha1,
             current_chr_page_count: page_capacity.current_chr_page_count,

@@ -229,6 +229,7 @@ const UNIT_COMMAND_COMPOSITE_STATE: u8 = 0x05;
 const UNIT_ITEM_LIST_COMPOSITE_STATE: u8 = 0x07;
 const ITEM_ACTION_COMPOSITE_STATE: u8 = 0x09;
 const UNIT_STATUS_COMPOSITE_STATE: u8 = 0x0F;
+const CHAPTER_SAVE_OFFER_COMPOSITE_STATE: u8 = 0x1C;
 const ITEM_INVENTORY_MAIN_STATE: u8 = 0x1B;
 const ENDING_RECORD_ACTIVE_PHASE: u8 = 1;
 
@@ -237,6 +238,7 @@ pub(in crate::full_translation_install) struct ConsumerFontPageRegisters {
     pub(in crate::full_translation_install) unit_command: u8,
     pub(in crate::full_translation_install) map_menu: u8,
     pub(in crate::full_translation_install) ending_record: u8,
+    pub(in crate::full_translation_install) chapter_save_offer: u8,
     pub(in crate::full_translation_install) catalog: [u8; 2],
 }
 
@@ -276,6 +278,10 @@ pub(super) fn build_consumer_font_selector(
     let catalog_dynamic_from_status = append_long_jump_if_equal(origin, &mut instructions)?;
     instructions.push(Instruction::CmpImmediate(UNIT_ITEM_LIST_COMPOSITE_STATE));
     let shared_item_list = append_long_jump_if_equal(origin, &mut instructions)?;
+    instructions.push(Instruction::CmpImmediate(
+        CHAPTER_SAVE_OFFER_COMPOSITE_STATE,
+    ));
+    let chapter_save_offer = append_long_jump_if_equal(origin, &mut instructions)?;
     let unsupported_from_state = push_long_jump(&mut instructions, origin);
 
     let shared_item_list_target = next_address(origin, &instructions)?;
@@ -350,6 +356,19 @@ pub(super) fn build_consumer_font_selector(
         bank_select_register,
         bank_value_register,
         pages.ending_record,
+    );
+
+    let chapter_save_offer_target = next_address(origin, &instructions)?;
+    patch_long_jump(
+        &mut instructions,
+        chapter_save_offer,
+        chapter_save_offer_target,
+    );
+    append_immediate_page_selection(
+        &mut instructions,
+        bank_select_register,
+        bank_value_register,
+        pages.chapter_save_offer,
     );
 
     let unsupported = next_address(origin, &instructions)?;
@@ -450,6 +469,7 @@ mod tests {
             unit_command: 0xC9,
             map_menu: 0xCA,
             ending_record: 0xCB,
+            chapter_save_offer: 0xCE,
             catalog: [0xCC, 0xCD],
         }
     }
@@ -689,6 +709,7 @@ mod tests {
             UNIT_ITEM_LIST_COMPOSITE_STATE,
             ITEM_ACTION_COMPOSITE_STATE,
             UNIT_STATUS_COMPOSITE_STATE,
+            CHAPTER_SAVE_OFFER_COMPOSITE_STATE,
         ] {
             assert!(
                 routine
@@ -763,6 +784,7 @@ mod tests {
             pages.unit_command,
             pages.map_menu,
             pages.ending_record,
+            pages.chapter_save_offer,
         ] {
             assert!(routine.bytes.windows(10).any(|window| {
                 window
