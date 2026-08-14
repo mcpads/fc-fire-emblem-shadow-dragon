@@ -747,6 +747,7 @@ pub(crate) fn plan_full_translation_installation(
             encoded_chapter_titles: &chapter_intro_residency.encoded_titles,
             cold_request_presentation: &cold_request_presentation,
             consumer_codebook: &consumer_codebook,
+            consumer_catalog: &consumer_catalog,
             cross_domain_material: &cross_domain_material,
             consumer_installation: &consumer_installation,
             required_domains: &REQUIRED_DOMAINS,

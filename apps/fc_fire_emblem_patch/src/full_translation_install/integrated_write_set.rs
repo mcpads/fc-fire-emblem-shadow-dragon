@@ -11,6 +11,7 @@ use crate::{
 use super::{
     chapter_intro_residency::EncodedChapterTitle,
     cold_request_presentation::ColdRequestPresentationPage,
+    consumer_catalog::ConsumerCatalogPlan,
     consumer_codebook::ConsumerCodebookPlan,
     consumer_installation::ConsumerInstallationPlan,
     cross_domain_material::CrossDomainMaterialPlan,
@@ -29,6 +30,7 @@ pub(super) struct IntegratedWriteSetInputs<'a> {
     pub(super) encoded_chapter_titles: &'a [EncodedChapterTitle],
     pub(super) cold_request_presentation: &'a ColdRequestPresentationPage,
     pub(super) consumer_codebook: &'a ConsumerCodebookPlan,
+    pub(super) consumer_catalog: &'a ConsumerCatalogPlan,
     pub(super) cross_domain_material: &'a CrossDomainMaterialPlan,
     pub(super) consumer_installation: &'a ConsumerInstallationPlan,
     pub(super) required_domains: &'a [&'static str],
@@ -49,10 +51,14 @@ pub(super) struct IntegratedWriteSetPlan {
     dialogue_pointer_write_count: usize,
     chapter_title_storage_write_count: usize,
     cold_request_presentation_write_count: usize,
+    chr_expansion_header_write_count: usize,
+    appended_chr_page_count: usize,
     static_consumer_font_page_write_count: usize,
+    catalog_consumer_font_page_write_count: usize,
     cross_domain_material_write_count: usize,
     installed_cold_request_presentation_matches_plan: bool,
     installed_static_consumer_font_pages_match_plan: bool,
+    installed_catalog_consumer_font_pages_match_plan: bool,
     installed_cross_domain_material_matches_plan: bool,
     changed_byte_count: usize,
     installed_dialogue_matches_current_encoding: bool,
@@ -82,21 +88,50 @@ struct DomainWriteContribution {
 pub(super) fn plan_integrated_write_set(
     inputs: IntegratedWriteSetInputs<'_>,
 ) -> Result<(Vec<u8>, IntegratedWriteSetPlan)> {
-    let mut image = TrackedImage::new(inputs.candidate.data().to_vec());
+    let (expanded_base, appended_chr_page_count) = expand_candidate_for_consumer_pages(&inputs)?;
+    let mut image = TrackedImage::new(expanded_base.clone());
+    let chr_expansion_header_write_count = usize::from(appended_chr_page_count != 0);
+    if appended_chr_page_count != 0 {
+        let expanded_chr_bank_count = u8::try_from(
+            (inputs.candidate.chr().len() / FONT_PAGE_SIZE + appended_chr_page_count) / 2,
+        )
+        .map_err(|_| anyhow::anyhow!("expanded CHR bank count exceeds iNES byte 5"))?;
+        image.write_expected(
+            "expand integrated candidate CHR",
+            5,
+            &[inputs.candidate.data()[5]],
+            &[expanded_chr_bank_count],
+        )?;
+    }
     let dialogue_storage_write_count =
         inputs.encoded_dialogue.regions.len() + inputs.encoded_dialogue.pointer_writes.len();
     install_encoded_dialogue(&mut image, inputs.candidate, inputs.encoded_dialogue)?;
     install_encoded_chapter_titles(&mut image, inputs.candidate, inputs.encoded_chapter_titles)?;
     ensure!(
-        image.writes().len() == dialogue_storage_write_count + inputs.encoded_chapter_titles.len(),
+        image.writes().len()
+            == chr_expansion_header_write_count
+                + dialogue_storage_write_count
+                + inputs.encoded_chapter_titles.len(),
         "integrated write set and dialogue/title storage write sets disagree"
     );
     install_cold_request_presentation(
         &mut image,
         inputs.candidate,
+        &expanded_base,
         inputs.cold_request_presentation,
     )?;
-    install_static_consumer_font_pages(&mut image, inputs.candidate, inputs.consumer_codebook)?;
+    install_static_consumer_font_pages(
+        &mut image,
+        inputs.candidate,
+        &expanded_base,
+        inputs.consumer_codebook,
+    )?;
+    install_catalog_consumer_font_pages(
+        &mut image,
+        inputs.candidate,
+        &expanded_base,
+        inputs.consumer_catalog,
+    )?;
     let runtime_material_offset = main_dialogue_runtime_material_file_offset()?;
     let runtime_material_end = runtime_material_offset
         .checked_add(inputs.dialogue_runtime_material.len())
@@ -193,7 +228,7 @@ pub(super) fn plan_integrated_write_set(
     let expected_write_count_before_cross_domain = image.writes().len();
     install_cross_domain_material(&mut image, inputs.candidate, inputs.cross_domain_material)?;
 
-    image.verify_all_changes_tracked(inputs.candidate.data())?;
+    image.verify_all_changes_tracked(&expanded_base)?;
     let expected_write_count = image.writes().len();
     let output = image.into_data();
     verify_installed_dialogue(&output, inputs.encoded_dialogue)?;
@@ -208,11 +243,14 @@ pub(super) fn plan_integrated_write_set(
         inputs.candidate,
         inputs.consumer_codebook,
     )?;
+    verify_installed_catalog_consumer_font_pages(
+        &output,
+        inputs.candidate,
+        inputs.consumer_catalog,
+    )?;
     verify_installed_cross_domain_material(&output, inputs.cross_domain_material)?;
     let installed_image = output.clone();
-    let changed_byte_count = inputs
-        .candidate
-        .data()
+    let changed_byte_count = expanded_base
         .iter()
         .zip(&output)
         .filter(|(before, after)| before != after)
@@ -257,10 +295,14 @@ pub(super) fn plan_integrated_write_set(
             dialogue_pointer_write_count: inputs.encoded_dialogue.pointer_writes.len(),
             chapter_title_storage_write_count: inputs.encoded_chapter_titles.len(),
             cold_request_presentation_write_count: 1,
+            chr_expansion_header_write_count,
+            appended_chr_page_count,
             static_consumer_font_page_write_count: inputs.consumer_codebook.pages().len(),
+            catalog_consumer_font_page_write_count: inputs.consumer_catalog.pages().len(),
             cross_domain_material_write_count: inputs.cross_domain_material.sections().len(),
             installed_cold_request_presentation_matches_plan: true,
             installed_static_consumer_font_pages_match_plan: true,
+            installed_catalog_consumer_font_pages_match_plan: true,
             installed_cross_domain_material_matches_plan: true,
             changed_byte_count,
             installed_dialogue_matches_current_encoding: true,
@@ -289,6 +331,7 @@ fn cold_request_presentation_file_offset(
 fn install_cold_request_presentation(
     image: &mut TrackedImage,
     candidate: &Rom,
+    baseline: &[u8],
     page: &ColdRequestPresentationPage,
 ) -> Result<()> {
     ensure!(
@@ -296,8 +339,7 @@ fn install_cold_request_presentation(
         "cold-request presentation is not one 4 KiB CHR page"
     );
     let offset = cold_request_presentation_file_offset(candidate, page)?;
-    let expected = candidate
-        .data()
+    let expected = baseline
         .get(offset..offset + FONT_PAGE_SIZE)
         .ok_or_else(|| anyhow::anyhow!("cold-request presentation page is outside candidate"))?;
     image.write_expected(
@@ -325,6 +367,7 @@ fn verify_installed_cold_request_presentation(
 fn install_static_consumer_font_pages(
     image: &mut TrackedImage,
     candidate: &Rom,
+    baseline: &[u8],
     plan: &ConsumerCodebookPlan,
 ) -> Result<()> {
     ensure!(
@@ -341,8 +384,7 @@ fn install_static_consumer_font_pages(
             page.id
         );
         let offset = static_consumer_page_file_offset(candidate, page.physical_page())?;
-        let expected = candidate
-            .data()
+        let expected = baseline
             .get(offset..offset + FONT_PAGE_SIZE)
             .ok_or_else(|| {
                 anyhow::anyhow!("static consumer page {} is outside candidate", page.id)
@@ -368,6 +410,93 @@ fn verify_installed_static_consumer_font_pages(
             installed.get(offset..offset + FONT_PAGE_SIZE) == Some(page.bytes.as_slice()),
             "installed static consumer page {} does not match its codebook",
             page.id
+        );
+    }
+    Ok(())
+}
+
+fn install_catalog_consumer_font_pages(
+    image: &mut TrackedImage,
+    candidate: &Rom,
+    baseline: &[u8],
+    plan: &ConsumerCatalogPlan,
+) -> Result<()> {
+    ensure!(
+        !plan.pages().is_empty(),
+        "integrated consumer catalog has no font pages"
+    );
+    let mut physical_pages = std::collections::BTreeSet::new();
+    for page in plan.pages() {
+        ensure!(
+            physical_pages.insert(page.physical_page()) && page.bytes.len() == FONT_PAGE_SIZE,
+            "catalog consumer page is duplicated or not 4 KiB"
+        );
+        let offset = static_consumer_page_file_offset(candidate, page.physical_page())?;
+        let expected = baseline
+            .get(offset..offset + FONT_PAGE_SIZE)
+            .ok_or_else(|| anyhow::anyhow!("catalog consumer page is outside candidate"))?;
+        image.write_expected("catalog consumer font page", offset, expected, &page.bytes)?;
+    }
+    Ok(())
+}
+
+fn expand_candidate_for_consumer_pages(
+    inputs: &IntegratedWriteSetInputs<'_>,
+) -> Result<(Vec<u8>, usize)> {
+    ensure!(
+        inputs.candidate.chr().len().is_multiple_of(FONT_PAGE_SIZE),
+        "integrated candidate CHR is not a whole number of 4 KiB pages"
+    );
+    let highest_required_page = std::iter::once(inputs.cold_request_presentation.physical_page)
+        .chain(
+            inputs
+                .consumer_codebook
+                .pages()
+                .iter()
+                .map(|page| page.physical_page()),
+        )
+        .chain(
+            inputs
+                .consumer_catalog
+                .pages()
+                .iter()
+                .map(|page| page.physical_page()),
+        )
+        .max()
+        .ok_or_else(|| anyhow::anyhow!("integrated consumer page set is empty"))?;
+    let required_page_count = usize::from(highest_required_page) + 1;
+    let required_bank_aligned_page_count = required_page_count.div_ceil(2) * 2;
+    ensure!(
+        required_bank_aligned_page_count <= 64,
+        "integrated consumer pages exceed mapper 165 CHR capacity"
+    );
+    let current_page_count = inputs.candidate.chr().len() / FONT_PAGE_SIZE;
+    ensure!(
+        current_page_count <= required_bank_aligned_page_count,
+        "integrated page plan would shrink the current candidate CHR"
+    );
+    let appended_page_count = required_bank_aligned_page_count - current_page_count;
+    let mut expanded = inputs.candidate.data().to_vec();
+    expanded.resize(
+        expanded
+            .len()
+            .checked_add(appended_page_count * FONT_PAGE_SIZE)
+            .ok_or_else(|| anyhow::anyhow!("integrated CHR expansion overflow"))?,
+        0xFF,
+    );
+    Ok((expanded, appended_page_count))
+}
+
+fn verify_installed_catalog_consumer_font_pages(
+    installed: &[u8],
+    candidate: &Rom,
+    plan: &ConsumerCatalogPlan,
+) -> Result<()> {
+    for page in plan.pages() {
+        let offset = static_consumer_page_file_offset(candidate, page.physical_page())?;
+        ensure!(
+            installed.get(offset..offset + FONT_PAGE_SIZE) == Some(page.bytes.as_slice()),
+            "installed catalog consumer page does not match its plan"
         );
     }
     Ok(())
