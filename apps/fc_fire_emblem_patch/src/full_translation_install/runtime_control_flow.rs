@@ -4,7 +4,8 @@ use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use super::{
-    runtime_bank_contract::bind_bank_restore_contract, runtime_code::DialogueRuntimeHookRole,
+    runtime_bank_contract::bind_bank_restore_contract,
+    runtime_code::{DialogueRuntimeHookRole, dispatcher_gate::EXPECTED_RECLAIMED_GATE_CAVE_SHA1},
     runtime_nmi_contract::bind_quiet_frame_gate,
 };
 use crate::{
@@ -61,7 +62,6 @@ const BATTLE_SOURCE_PAGE_MMC3_PAGE: u8 = 0x21;
 const EXPECTED_COMPLETED_PAGE_SOURCE_SHA1: &str = "8c2a9f5a6e028a59409f9cc254add2b81f318b21";
 const EXPECTED_COMPLETED_PAGE_CANDIDATE_SHA1: &str = "965de5bfca83263ac587e5c7c316ed6324d95ca8";
 const EXPECTED_SHARED_NMI_DISPATCH_SHA1: &str = "9f0090bd11866f7a4786db24a30e6660588b7758";
-const EXPECTED_SAMPLE_GROUP_SELECTOR_SHA1: &str = "cea25e67f4399e422e8747046c13a959f5669ac1";
 const EXPECTED_SAMPLE_INITIAL_SELECTOR_SHA1: &str = "67856cd2b7a26ef43649181f5e86ffe2741eb8b3";
 
 #[derive(Serialize)]
@@ -407,7 +407,7 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         usize::from(SAMPLE_INITIAL_SELECTOR_END - SAMPLE_INITIAL_SELECTOR_START),
     )?;
     ensure!(
-        sha1_hex(sample_group) == EXPECTED_SAMPLE_GROUP_SELECTOR_SHA1
+        sha1_hex(sample_group) == EXPECTED_RECLAIMED_GATE_CAVE_SHA1
             && sha1_hex(sample_initial) == EXPECTED_SAMPLE_INITIAL_SELECTOR_SHA1
             && fixed_bytes(inputs.candidate, CENTRAL_SELECTOR_FALLBACK, 3)?
                 == [

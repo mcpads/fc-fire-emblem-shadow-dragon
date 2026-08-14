@@ -51,8 +51,8 @@ use super::transport::{REQUEST_STATE, STATE_READY};
 /// 호출하지 않으므로 디스패처 게이트가 구간 전체를 digest에 묶어 되찾아 쓴다.
 pub(super) const RECLAIMED_GATE_CAVE_ORIGIN: u16 = 0xF341;
 pub(super) const RECLAIMED_GATE_CAVE_END: u16 = 0xF378;
-pub(super) const EXPECTED_RECLAIMED_GATE_CAVE_SHA1: &str =
-    "cea25e67f4399e422e8747046c13a959f5669ac1";
+pub(in crate::full_translation_install) const EXPECTED_RECLAIMED_GATE_CAVE_SHA1: &str =
+    "7ad92984b55ad0cdfc465743a52002420d3ae394";
 
 const BANK_VALUE_REGISTER: u16 = 0x8001;
 const PPU_CONTROL: u16 = 0x2000;
