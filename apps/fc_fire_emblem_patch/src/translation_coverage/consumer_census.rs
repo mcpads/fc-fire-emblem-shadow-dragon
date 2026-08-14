@@ -6,6 +6,7 @@ use serde::Serialize;
 use crate::{
     item_flow::inspect_item_action_translation_consumers,
     map_menu::inspect_map_menu_translation_consumers,
+    mapper165::battle_codebook_plan::inspect_known_terrain_name_translation_routes,
     rom::Rom,
     screen_contracts::ScreenTranslationPartition,
     translation_consumer::{ScreenConsumerSourceBinding, TranslationConsumerSourceEvidence},
@@ -14,14 +15,21 @@ use crate::{
 
 use super::screen_targets::{DOMAIN_SEEDS, DomainScreenTargets};
 
-const KNOWN_ROUTE_DOMAIN_IDS: [&str; 3] =
-    ["item_action_labels", "map_menu_labels", "unit_ui_labels"];
+const KNOWN_ROUTE_DOMAIN_IDS: [&str; 4] = [
+    "item_action_labels",
+    "map_menu_labels",
+    "terrain_names",
+    "unit_ui_labels",
+];
+const COMPLETE_CENSUS_DOMAIN_IDS: [&str; 0] = [];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ConsumerEvidenceState {
     /// 아래에 열거한 경로가 원천에 결속됐다는 뜻일 뿐, 참조 분모가 완전하다는 뜻은 아니다.
     KnownRoutesBound,
+    /// 원천 population, 생산자, 참조 후보, 소비자와 화면 소유권의 분모가 모두 닫혔다.
+    CompleteCensusBound,
     Unresolved,
 }
 
@@ -29,45 +37,61 @@ pub(crate) enum ConsumerEvidenceState {
 pub(crate) struct DomainConsumerEvidence {
     pub(crate) id: &'static str,
     pub(crate) state: ConsumerEvidenceState,
-    /// 완전한 원천 참조 분모가 아직 없으므로 첫 수직 단위에서는 모든 도메인이 false다.
-    pub(crate) consumer_census_complete: bool,
     pub(crate) population_ids: Vec<String>,
     pub(crate) source_bindings: Vec<ScreenConsumerSourceBinding>,
+    pub(crate) census_boundary_source_binding_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
 struct DomainSourceEvidence {
     domain_id: &'static str,
+    intended_state: ConsumerEvidenceState,
     source: TranslationConsumerSourceEvidence,
+    census_boundary_source_binding_ids: Vec<String>,
 }
 
-pub(crate) fn inspect_known_route_consumer_evidence(
+impl DomainSourceEvidence {
+    fn known_routes(domain_id: &'static str, source: TranslationConsumerSourceEvidence) -> Self {
+        Self {
+            domain_id,
+            intended_state: ConsumerEvidenceState::KnownRoutesBound,
+            source,
+            census_boundary_source_binding_ids: Vec::new(),
+        }
+    }
+}
+
+pub(crate) fn inspect_translation_consumer_evidence(
     rom: &Rom,
     partition: &ScreenTranslationPartition,
     targets: &[DomainScreenTargets],
 ) -> Result<Vec<DomainConsumerEvidence>> {
     rom.verify_supported_japanese()?;
-    bind_known_route_consumer_evidence(
+    bind_translation_consumer_evidence(
         partition,
         targets,
         vec![
-            DomainSourceEvidence {
-                domain_id: "unit_ui_labels",
-                source: inspect_unit_ui_translation_consumers(rom.data())?,
-            },
-            DomainSourceEvidence {
-                domain_id: "item_action_labels",
-                source: inspect_item_action_translation_consumers(rom)?,
-            },
-            DomainSourceEvidence {
-                domain_id: "map_menu_labels",
-                source: inspect_map_menu_translation_consumers(rom)?,
-            },
+            DomainSourceEvidence::known_routes(
+                "unit_ui_labels",
+                inspect_unit_ui_translation_consumers(rom.data())?,
+            ),
+            DomainSourceEvidence::known_routes(
+                "item_action_labels",
+                inspect_item_action_translation_consumers(rom)?,
+            ),
+            DomainSourceEvidence::known_routes(
+                "map_menu_labels",
+                inspect_map_menu_translation_consumers(rom)?,
+            ),
+            DomainSourceEvidence::known_routes(
+                "terrain_names",
+                inspect_known_terrain_name_translation_routes(rom)?,
+            ),
         ],
     )
 }
 
-fn bind_known_route_consumer_evidence(
+fn bind_translation_consumer_evidence(
     partition: &ScreenTranslationPartition,
     targets: &[DomainScreenTargets],
     evidence: Vec<DomainSourceEvidence>,
@@ -90,6 +114,17 @@ fn bind_known_route_consumer_evidence(
     );
 
     let known_route_domain_ids = KNOWN_ROUTE_DOMAIN_IDS.into_iter().collect::<BTreeSet<_>>();
+    let complete_census_domain_ids = COMPLETE_CENSUS_DOMAIN_IDS
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        known_route_domain_ids.is_disjoint(&complete_census_domain_ids),
+        "consumer evidence registries overlap"
+    );
+    let implemented_domain_ids = known_route_domain_ids
+        .union(&complete_census_domain_ids)
+        .copied()
+        .collect::<BTreeSet<_>>();
     let mut evidence_by_domain = BTreeMap::new();
     for domain in evidence {
         ensure!(
@@ -97,21 +132,30 @@ fn bind_known_route_consumer_evidence(
             "consumer census evidence uses unknown domain {}",
             domain.domain_id
         );
+        let expected_state = if known_route_domain_ids.contains(domain.domain_id) {
+            ConsumerEvidenceState::KnownRoutesBound
+        } else if complete_census_domain_ids.contains(domain.domain_id) {
+            ConsumerEvidenceState::CompleteCensusBound
+        } else {
+            anyhow::bail!(
+                "consumer census evidence for {} has no owning source implementation",
+                domain.domain_id
+            );
+        };
         ensure!(
-            known_route_domain_ids.contains(domain.domain_id),
-            "consumer census evidence for {} has no owning source implementation",
+            domain.intended_state == expected_state,
+            "consumer census evidence state changed for {}",
             domain.domain_id
         );
+        let domain_id = domain.domain_id;
         ensure!(
-            evidence_by_domain
-                .insert(domain.domain_id, domain.source)
-                .is_none(),
+            evidence_by_domain.insert(domain_id, domain).is_none(),
             "consumer census repeats source evidence for {}",
-            domain.domain_id
+            domain_id
         );
     }
     ensure!(
-        evidence_by_domain.keys().copied().collect::<BTreeSet<_>>() == known_route_domain_ids,
+        evidence_by_domain.keys().copied().collect::<BTreeSet<_>>() == implemented_domain_ids,
         "consumer census is missing an implemented source domain"
     );
 
@@ -122,16 +166,50 @@ fn bind_known_route_consumer_evidence(
         .collect::<BTreeSet<_>>();
     let mut census = Vec::with_capacity(targets.len());
     for target in targets {
-        let Some(mut source) = evidence_by_domain.remove(target.id) else {
+        let Some(mut evidence) = evidence_by_domain.remove(target.id) else {
             census.push(DomainConsumerEvidence {
                 id: target.id,
                 state: ConsumerEvidenceState::Unresolved,
-                consumer_census_complete: false,
                 population_ids: Vec::new(),
                 source_bindings: Vec::new(),
+                census_boundary_source_binding_ids: Vec::new(),
             });
             continue;
         };
+        let mut source = evidence.source;
+
+        match evidence.intended_state {
+            ConsumerEvidenceState::KnownRoutesBound => ensure!(
+                evidence.census_boundary_source_binding_ids.is_empty(),
+                "known-route evidence for {} claims a complete census boundary",
+                target.id
+            ),
+            ConsumerEvidenceState::CompleteCensusBound => {
+                ensure!(
+                    !evidence.census_boundary_source_binding_ids.is_empty(),
+                    "complete consumer census domain {} has no source boundary",
+                    target.id
+                );
+                let mut boundary_ids = BTreeSet::new();
+                for binding_id in &evidence.census_boundary_source_binding_ids {
+                    ensure!(
+                        !binding_id.trim().is_empty(),
+                        "complete consumer census domain {} contains an empty source boundary",
+                        target.id
+                    );
+                    ensure!(
+                        boundary_ids.insert(binding_id.as_str()),
+                        "complete consumer census domain {} repeats source boundary {}",
+                        target.id,
+                        binding_id
+                    );
+                }
+            }
+            ConsumerEvidenceState::Unresolved => anyhow::bail!(
+                "consumer census source evidence cannot declare {} unresolved",
+                target.id
+            ),
+        }
 
         ensure!(
             !source.population_ids.is_empty(),
@@ -250,10 +328,12 @@ fn bind_known_route_consumer_evidence(
             .sort_by_key(|binding| binding.screen_role);
         census.push(DomainConsumerEvidence {
             id: target.id,
-            state: ConsumerEvidenceState::KnownRoutesBound,
-            consumer_census_complete: false,
+            state: evidence.intended_state,
             population_ids: source.population_ids,
             source_bindings: source.screen_bindings,
+            census_boundary_source_binding_ids: std::mem::take(
+                &mut evidence.census_boundary_source_binding_ids,
+            ),
         });
     }
     ensure!(
@@ -296,39 +376,42 @@ mod tests {
 
     fn evidence() -> Vec<DomainSourceEvidence> {
         vec![
-            DomainSourceEvidence {
-                domain_id: "unit_ui_labels",
-                source: source(
+            DomainSourceEvidence::known_routes(
+                "unit_ui_labels",
+                source(
                     &["unit-ui-label:00"],
                     &["unit_summary", "unit_command_menu", "unit_status"],
                 ),
-            },
-            DomainSourceEvidence {
-                domain_id: "item_action_labels",
-                source: source(&["item-action-label:13"], &["item_action_menu"]),
-            },
-            DomainSourceEvidence {
-                domain_id: "map_menu_labels",
-                source: source(&["map-menu:roster"], &["map_menu"]),
-            },
+            ),
+            DomainSourceEvidence::known_routes(
+                "item_action_labels",
+                source(&["item-action-label:13"], &["item_action_menu"]),
+            ),
+            DomainSourceEvidence::known_routes(
+                "map_menu_labels",
+                source(&["map-menu:roster"], &["map_menu"]),
+            ),
+            DomainSourceEvidence::known_routes(
+                "terrain_names",
+                source(&["terrain-names:000"], &["battle_animation"]),
+            ),
         ]
     }
 
     #[test]
-    fn keeps_all_censuses_incomplete_while_binding_three_known_route_sets() {
+    fn keeps_all_censuses_incomplete_while_binding_four_known_route_sets() {
         let (partition, targets) = metadata();
-        let census = bind_known_route_consumer_evidence(&partition, &targets, evidence()).unwrap();
+        let census = bind_translation_consumer_evidence(&partition, &targets, evidence()).unwrap();
 
         assert_eq!(census.len(), 22);
         assert_eq!(DOMAIN_SEEDS.len(), 22);
         assert_eq!(
             census
                 .iter()
-                .filter(|domain| domain.consumer_census_complete)
+                .filter(|domain| domain.state == ConsumerEvidenceState::CompleteCensusBound)
                 .count(),
             0
         );
-        assert!(census.iter().all(|domain| !domain.consumer_census_complete));
         assert_eq!(
             census
                 .iter()
@@ -337,12 +420,25 @@ mod tests {
                 .collect::<BTreeSet<_>>(),
             KNOWN_ROUTE_DOMAIN_IDS.into_iter().collect()
         );
+        let terrain = census
+            .iter()
+            .find(|domain| domain.id == "terrain_names")
+            .unwrap();
+        assert_eq!(terrain.state, ConsumerEvidenceState::KnownRoutesBound);
+        assert!(terrain.census_boundary_source_binding_ids.is_empty());
         assert_eq!(
             census
                 .iter()
                 .filter(|domain| domain.state == ConsumerEvidenceState::Unresolved)
                 .count(),
-            19
+            18
+        );
+        assert_eq!(
+            census
+                .iter()
+                .filter(|domain| domain.state != ConsumerEvidenceState::CompleteCensusBound)
+                .count(),
+            22
         );
     }
 
@@ -353,7 +449,7 @@ mod tests {
         let mut empty = evidence();
         empty[0].source.screen_bindings[0].population_ids.clear();
         assert!(
-            bind_known_route_consumer_evidence(&partition, &targets, empty)
+            bind_translation_consumer_evidence(&partition, &targets, empty)
                 .unwrap_err()
                 .to_string()
                 .contains("has no edge population")
@@ -364,7 +460,7 @@ mod tests {
             .population_ids
             .push("unit-ui-label:00".to_owned());
         assert!(
-            bind_known_route_consumer_evidence(&partition, &targets, duplicate)
+            bind_translation_consumer_evidence(&partition, &targets, duplicate)
                 .unwrap_err()
                 .to_string()
                 .contains("repeats edge population")
@@ -373,7 +469,7 @@ mod tests {
         let mut unknown = evidence();
         unknown[0].source.screen_bindings[0].population_ids = vec!["unit-ui-label:FF".to_owned()];
         assert!(
-            bind_known_route_consumer_evidence(&partition, &targets, unknown)
+            bind_translation_consumer_evidence(&partition, &targets, unknown)
                 .unwrap_err()
                 .to_string()
                 .contains("assigns unknown population")
@@ -385,7 +481,7 @@ mod tests {
             .population_ids
             .push("unit-ui-label:01".to_owned());
         assert!(
-            bind_known_route_consumer_evidence(&partition, &targets, unassigned)
+            bind_translation_consumer_evidence(&partition, &targets, unassigned)
                 .unwrap_err()
                 .to_string()
                 .contains("leaves source population unassigned")
@@ -399,31 +495,31 @@ mod tests {
         let mut missing = evidence();
         missing.pop();
         assert!(
-            bind_known_route_consumer_evidence(&partition, &targets, missing)
+            bind_translation_consumer_evidence(&partition, &targets, missing)
                 .unwrap_err()
                 .to_string()
                 .contains("missing an implemented source domain")
         );
 
         let mut extra = evidence();
-        extra.push(DomainSourceEvidence {
-            domain_id: "main_dialogue",
-            source: source(&["dialogue:00"], &["intro_dialogue"]),
-        });
+        extra.push(DomainSourceEvidence::known_routes(
+            "main_dialogue",
+            source(&["dialogue:00"], &["intro_dialogue"]),
+        ));
         assert!(
-            bind_known_route_consumer_evidence(&partition, &targets, extra)
+            bind_translation_consumer_evidence(&partition, &targets, extra)
                 .unwrap_err()
                 .to_string()
                 .contains("has no owning source implementation")
         );
 
         let mut unknown = evidence();
-        unknown.push(DomainSourceEvidence {
-            domain_id: "unknown_domain",
-            source: source(&["unknown:00"], &["map_menu"]),
-        });
+        unknown.push(DomainSourceEvidence::known_routes(
+            "unknown_domain",
+            source(&["unknown:00"], &["map_menu"]),
+        ));
         assert!(
-            bind_known_route_consumer_evidence(&partition, &targets, unknown)
+            bind_translation_consumer_evidence(&partition, &targets, unknown)
                 .unwrap_err()
                 .to_string()
                 .contains("uses unknown domain")
@@ -437,7 +533,7 @@ mod tests {
         let mut missing = evidence();
         missing[0].source.screen_bindings.pop();
         assert!(
-            bind_known_route_consumer_evidence(&partition, &targets, missing)
+            bind_translation_consumer_evidence(&partition, &targets, missing)
                 .unwrap_err()
                 .to_string()
                 .contains("do not exactly match")
@@ -453,7 +549,7 @@ mod tests {
                 source_binding_ids: vec!["source:map_menu".to_owned()],
             });
         assert!(
-            bind_known_route_consumer_evidence(&partition, &targets, extra)
+            bind_translation_consumer_evidence(&partition, &targets, extra)
                 .unwrap_err()
                 .to_string()
                 .contains("do not exactly match")
@@ -469,7 +565,7 @@ mod tests {
                 source_binding_ids: vec!["source:unknown".to_owned()],
             });
         assert!(
-            bind_known_route_consumer_evidence(&partition, &targets, unknown)
+            bind_translation_consumer_evidence(&partition, &targets, unknown)
                 .unwrap_err()
                 .to_string()
                 .contains("unknown or non-Japanese screen")
@@ -483,7 +579,7 @@ mod tests {
         for population_ids in [Vec::new(), vec!["".to_owned()]] {
             let mut candidate = evidence();
             candidate[0].source.population_ids = population_ids;
-            assert!(bind_known_route_consumer_evidence(&partition, &targets, candidate).is_err());
+            assert!(bind_translation_consumer_evidence(&partition, &targets, candidate).is_err());
         }
 
         let mut duplicate = evidence();
@@ -492,7 +588,7 @@ mod tests {
             .population_ids
             .push("unit-ui-label:00".to_owned());
         assert!(
-            bind_known_route_consumer_evidence(&partition, &targets, duplicate)
+            bind_translation_consumer_evidence(&partition, &targets, duplicate)
                 .unwrap_err()
                 .to_string()
                 .contains("repeats population")
@@ -506,7 +602,7 @@ mod tests {
         let mut no_screen_binding = evidence();
         no_screen_binding[0].source.screen_bindings.clear();
         assert!(
-            bind_known_route_consumer_evidence(&partition, &targets, no_screen_binding)
+            bind_translation_consumer_evidence(&partition, &targets, no_screen_binding)
                 .unwrap_err()
                 .to_string()
                 .contains("has no screen binding")
@@ -515,7 +611,7 @@ mod tests {
         let mut empty_screen_role = evidence();
         empty_screen_role[0].source.screen_bindings[0].screen_role = "";
         assert!(
-            bind_known_route_consumer_evidence(&partition, &targets, empty_screen_role)
+            bind_translation_consumer_evidence(&partition, &targets, empty_screen_role)
                 .unwrap_err()
                 .to_string()
                 .contains("empty screen role")
@@ -524,7 +620,7 @@ mod tests {
         for source_binding_ids in [Vec::new(), vec!["".to_owned()]] {
             let mut candidate = evidence();
             candidate[0].source.screen_bindings[0].source_binding_ids = source_binding_ids;
-            assert!(bind_known_route_consumer_evidence(&partition, &targets, candidate).is_err());
+            assert!(bind_translation_consumer_evidence(&partition, &targets, candidate).is_err());
         }
 
         let mut duplicate = evidence();
@@ -533,7 +629,7 @@ mod tests {
             .source_binding_ids
             .push(repeated);
         assert!(
-            bind_known_route_consumer_evidence(&partition, &targets, duplicate)
+            bind_translation_consumer_evidence(&partition, &targets, duplicate)
                 .unwrap_err()
                 .to_string()
                 .contains("repeats source binding")
@@ -543,7 +639,7 @@ mod tests {
         let repeated = duplicate_screen[0].source.screen_bindings[0].clone();
         duplicate_screen[0].source.screen_bindings.push(repeated);
         assert!(
-            bind_known_route_consumer_evidence(&partition, &targets, duplicate_screen)
+            bind_translation_consumer_evidence(&partition, &targets, duplicate_screen)
                 .unwrap_err()
                 .to_string()
                 .contains("repeats screen binding")
@@ -552,10 +648,35 @@ mod tests {
         let mut duplicate_domain = evidence();
         duplicate_domain.push(duplicate_domain[0].clone());
         assert!(
-            bind_known_route_consumer_evidence(&partition, &targets, duplicate_domain)
+            bind_translation_consumer_evidence(&partition, &targets, duplicate_domain)
                 .unwrap_err()
                 .to_string()
                 .contains("repeats source evidence")
+        );
+    }
+
+    #[test]
+    fn rejects_census_boundary_or_complete_state_for_known_routes() {
+        let (partition, targets) = metadata();
+
+        let mut false_boundary = evidence();
+        false_boundary[3]
+            .census_boundary_source_binding_ids
+            .push("source:terrain-reference-census".to_owned());
+        assert!(
+            bind_translation_consumer_evidence(&partition, &targets, false_boundary)
+                .unwrap_err()
+                .to_string()
+                .contains("claims a complete census boundary")
+        );
+
+        let mut misclassified = evidence();
+        misclassified[3].intended_state = ConsumerEvidenceState::CompleteCensusBound;
+        assert!(
+            bind_translation_consumer_evidence(&partition, &targets, misclassified)
+                .unwrap_err()
+                .to_string()
+                .contains("evidence state changed")
         );
     }
 }

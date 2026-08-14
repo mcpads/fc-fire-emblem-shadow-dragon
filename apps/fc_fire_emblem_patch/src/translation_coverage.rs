@@ -20,7 +20,7 @@ mod report;
 mod screen_targets;
 mod weapon_shop;
 
-use consumer_census::inspect_known_route_consumer_evidence;
+use consumer_census::inspect_translation_consumer_evidence;
 pub(crate) use installed::inspect_current_installation;
 use lifetimes::{LifetimeInputBindings, inspect_translation_lifetimes};
 use population::{TranslationPopulationInputs, inspect_translation_populations};
@@ -70,7 +70,7 @@ pub(crate) fn analyze_translation_coverage(
     let screen_targets = bind_domain_screen_targets(&partition)?;
     let source_rom = Rom::from_path(inputs.source_path)?;
     let mut consumer_evidence =
-        inspect_known_route_consumer_evidence(&source_rom, &partition, &screen_targets)?
+        inspect_translation_consumer_evidence(&source_rom, &partition, &screen_targets)?
             .into_iter()
             .map(|domain| (domain.id, domain))
             .collect::<BTreeMap<_, _>>();
@@ -197,9 +197,10 @@ pub(crate) fn analyze_translation_coverage(
             id: targets.id,
             target_unit: targets.target_unit,
             consumer_evidence_state: consumer.state,
-            consumer_census_complete: consumer.consumer_census_complete,
             consumer_population_ids: consumer.population_ids,
             consumer_source_bindings: consumer.source_bindings,
+            consumer_census_boundary_source_binding_ids: consumer
+                .census_boundary_source_binding_ids,
             source_binding: population.source_binding,
             target_unit_count: population.target_unit_count,
             translated_target_unit_count: population.translated_target_unit_count,
@@ -249,7 +250,13 @@ pub(crate) fn analyze_translation_coverage(
             .filter(|domain| domain.source_binding == SourceBindingState::Unresolved)
             .map(|domain| domain.id)
             .collect(),
-        known_routes_bound_domain_count: domains
+        source_bound_consumer_evidence_domain_count: domains
+            .iter()
+            .filter(|domain| {
+                domain.consumer_evidence_state != consumer_census::ConsumerEvidenceState::Unresolved
+            })
+            .count(),
+        known_routes_only_domain_count: domains
             .iter()
             .filter(|domain| {
                 domain.consumer_evidence_state
@@ -258,11 +265,17 @@ pub(crate) fn analyze_translation_coverage(
             .count(),
         complete_consumer_census_domain_count: domains
             .iter()
-            .filter(|domain| domain.consumer_census_complete)
+            .filter(|domain| {
+                domain.consumer_evidence_state
+                    == consumer_census::ConsumerEvidenceState::CompleteCensusBound
+            })
             .count(),
         incomplete_consumer_census_domain_ids: domains
             .iter()
-            .filter(|domain| !domain.consumer_census_complete)
+            .filter(|domain| {
+                domain.consumer_evidence_state
+                    != consumer_census::ConsumerEvidenceState::CompleteCensusBound
+            })
             .map(|domain| domain.id)
             .collect(),
         incomplete_translation_input_domain_ids: domains
@@ -362,7 +375,7 @@ pub(crate) fn analyze_translation_coverage(
         &japanese_bearing_screen_roles,
     )?;
     let report = GlobalTranslationCoverageReport {
-        schema: 3,
+        schema: 4,
         source_sha1: EXPECTED_SOURCE_SHA1,
         build_output_sha1: installation.build_output_sha1,
         screen_population: ScreenPopulationReport {
@@ -395,7 +408,10 @@ pub(crate) fn analyze_translation_coverage(
         japanese_bearing_screen_count: report.screen_population.japanese_bearing_screen_count,
         domain_count: report.summary.domain_count,
         unresolved_source_domain_count: report.summary.unresolved_source_domain_ids.len(),
-        known_routes_bound_domain_count: report.summary.known_routes_bound_domain_count,
+        source_bound_consumer_evidence_domain_count: report
+            .summary
+            .source_bound_consumer_evidence_domain_count,
+        known_routes_only_domain_count: report.summary.known_routes_only_domain_count,
         complete_consumer_census_domain_count: report.summary.complete_consumer_census_domain_count,
         incomplete_consumer_census_domain_count: report
             .summary
