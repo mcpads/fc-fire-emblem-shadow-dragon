@@ -18,7 +18,10 @@ use crate::{
     rom::Rom,
     semantic_translation::SemanticTranslationPlan,
     sha1_hex,
-    unit_ui_text::{COMMAND_LABEL_SPECS, SUMMARY_AND_STATUS_LABEL_SPECS},
+    unit_ui_text::{
+        COMMAND_LABEL_SPECS, FixedLabelSpec, SUMMARY_AND_STATUS_LABEL_SPECS,
+        composite_payload_display_cell_count, terminated_composite_display_cell_count,
+    },
 };
 
 use super::{consumer_catalog::ConsumerCatalogPlan, consumer_codebook::ConsumerCodebookPlan};
@@ -46,6 +49,7 @@ pub(super) struct FixedUiProjectionPlan {
     source_slot_count: usize,
     projected_pointer_entry_count: usize,
     projected_map_menu_entry_count: usize,
+    projected_summary_status_label_count: usize,
     source_slot_capacity_byte_count: usize,
     projected_string_byte_count: usize,
     longest_source_slot_byte_count: usize,
@@ -56,6 +60,7 @@ pub(super) struct FixedUiProjectionPlan {
     assignment_sha1: String,
     every_source_slot_bound_to_candidate: bool,
     every_projected_string_fits_one_source_slot: bool,
+    every_summary_status_label_preserves_source_display_cell_count: bool,
     every_pointer_source_bound: bool,
     every_map_menu_entry_fits_owned_storage: bool,
     #[serde(skip)]
@@ -125,13 +130,7 @@ pub(super) fn plan_fixed_ui_projection(
             .entry_logical_bytes(&id)
             .with_context(|| format!("unit UI plan lost {id}"))?;
         let encoded = inputs.consumer_catalog.encode_base_logical(logical)?;
-        ensure!(
-            encoded.len() + 2 <= spec.expected.len(),
-            "unit summary projection exceeds its original display width for {id}"
-        );
-        let mut bytes = vec![0xFF; spec.expected.len() - encoded.len() - 2];
-        bytes.extend(encoded);
-        bytes.extend([SUMMARY_TRAILING_CELL, STRING_END]);
+        let bytes = project_summary_status_label(spec, &encoded, &id)?;
         targets.push(TargetString {
             id,
             domain: "unit_ui_labels",
@@ -278,11 +277,15 @@ pub(super) fn plan_fixed_ui_projection(
     let source_slot_capacity_byte_count = slots.iter().map(|slot| slot.expected.len()).sum();
     let projected_string_byte_count = targets.iter().map(|target| target.bytes.len()).sum();
     Ok(FixedUiProjectionPlan {
-        strategy: "match every encoded Japanese fixed-label target to one source-owned pointer-table slot by descending length, then project the map-menu block in place",
+        strategy: "preserve each summary/status label's source display-cell span, match every encoded Japanese fixed-label target to one source-owned pointer-table slot by descending storage length, then project the map-menu block in place",
         pointer_table_cpu_address_hex: "0x8FC2",
         source_slot_count: slots.len(),
         projected_pointer_entry_count: targets.len(),
         projected_map_menu_entry_count: inputs.map_menu.entries.len(),
+        projected_summary_status_label_count: SUMMARY_AND_STATUS_LABEL_SPECS
+            .iter()
+            .filter(|spec| spec.translation_scope == JAPANESE_ONLY)
+            .count(),
         source_slot_capacity_byte_count,
         projected_string_byte_count,
         longest_source_slot_byte_count: slots.first().map_or(0, |slot| slot.expected.len()),
@@ -293,10 +296,44 @@ pub(super) fn plan_fixed_ui_projection(
         assignment_sha1: sha1_hex(&assignment_identity),
         every_source_slot_bound_to_candidate: true,
         every_projected_string_fits_one_source_slot: true,
+        every_summary_status_label_preserves_source_display_cell_count: true,
         every_pointer_source_bound: true,
         every_map_menu_entry_fits_owned_storage: true,
         writes,
     })
+}
+
+fn project_summary_status_label(
+    spec: &FixedLabelSpec,
+    encoded: &[u8],
+    id: &str,
+) -> Result<Vec<u8>> {
+    ensure!(
+        spec.expected.get(spec.expected.len().saturating_sub(2)) == Some(&SUMMARY_TRAILING_CELL),
+        "source summary/status label lost its trailing colon for {id}"
+    );
+    ensure!(
+        !encoded.contains(&STRING_END) && !encoded.contains(&SEGMENT_END),
+        "translated summary/status label contains a structural terminator for {id}"
+    );
+    let source_display_cell_count =
+        terminated_composite_display_cell_count(spec.expected, STRING_END)?;
+    let target_display_cell_count = composite_payload_display_cell_count(encoded)
+        .checked_add(1)
+        .context("translated summary/status label display span overflow")?;
+    ensure!(
+        target_display_cell_count <= source_display_cell_count,
+        "translated summary/status label exceeds its source display-cell span for {id}"
+    );
+
+    let mut bytes = vec![0xFF; source_display_cell_count - target_display_cell_count];
+    bytes.extend_from_slice(encoded);
+    bytes.extend([SUMMARY_TRAILING_CELL, STRING_END]);
+    ensure!(
+        terminated_composite_display_cell_count(&bytes, STRING_END)? == source_display_cell_count,
+        "translated summary/status label changed its source display-cell span for {id}"
+    );
+    Ok(bytes)
 }
 
 fn bind_candidate(candidate: &Rom, offset: usize, expected: &[u8], role: &str) -> Result<()> {
@@ -392,5 +429,60 @@ mod tests {
         let error = match_targets_to_slots(&mut targets, &mut slots).unwrap_err();
 
         assert!(error.to_string().contains("cannot be matched one-to-one"));
+    }
+
+    #[test]
+    fn source_status_labels_share_one_eight_cell_span() {
+        let status_indices = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x27, 0x28];
+
+        for index in status_indices {
+            let spec = SUMMARY_AND_STATUS_LABEL_SPECS
+                .iter()
+                .find(|spec| spec.index == index)
+                .unwrap();
+            assert_eq!(
+                terminated_composite_display_cell_count(spec.expected, STRING_END).unwrap(),
+                8,
+                "status label {index:02X} lost its shared display span"
+            );
+        }
+    }
+
+    #[test]
+    fn voiced_source_bytes_do_not_shift_translated_status_values() {
+        for index in [0x02, 0x27] {
+            let spec = SUMMARY_AND_STATUS_LABEL_SPECS
+                .iter()
+                .find(|spec| spec.index == index)
+                .unwrap();
+
+            let projected =
+                project_summary_status_label(spec, &[0x40, 0x41, 0x42, 0x43], "fixture").unwrap();
+
+            assert_eq!(
+                projected,
+                [0xFF, 0xFF, 0xFF, 0x40, 0x41, 0x42, 0x43, 0x8D, 0xEF]
+            );
+            assert_eq!(
+                terminated_composite_display_cell_count(&projected, STRING_END).unwrap(),
+                8
+            );
+        }
+    }
+
+    #[test]
+    fn summary_level_keeps_its_original_four_cell_span() {
+        let spec = SUMMARY_AND_STATUS_LABEL_SPECS
+            .iter()
+            .find(|spec| spec.index == 0x08)
+            .unwrap();
+
+        let projected = project_summary_status_label(spec, &[0x40, 0x41], "fixture").unwrap();
+
+        assert_eq!(projected, [0xFF, 0x40, 0x41, 0x8D, 0xEF]);
+        assert_eq!(
+            terminated_composite_display_cell_count(&projected, STRING_END).unwrap(),
+            4
+        );
     }
 }

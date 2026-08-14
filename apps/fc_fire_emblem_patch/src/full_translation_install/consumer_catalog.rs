@@ -33,6 +33,7 @@ pub(super) struct ConsumerCatalogInputs<'a> {
     pub(super) source_font_page: &'a [u8],
     pub(super) first_physical_page: u8,
     pub(super) available_page_count: usize,
+    pub(super) preserved_unit_ui_display_codes: &'a BTreeSet<u8>,
     pub(super) fixed: &'a FixedTextPlan,
     pub(super) unit_names: &'a UnitNamePlan,
     pub(super) unit_ui: &'a SemanticTranslationPlan,
@@ -207,18 +208,13 @@ pub(super) fn plan_consumer_catalog(
             .flat_map(|entry| entry.logical_bytes.iter())
             .cloned(),
     );
+    let mut preserved_active_codes = inputs.preserved_unit_ui_display_codes.clone();
     let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
-    let preserved_active_codes = all_logical
-        .iter()
-        .filter_map(|byte| match byte {
-            FixedTextLogicalByte::Encoded(code) if active_codes.contains(code) => Some(*code),
-            FixedTextLogicalByte::Encoded(_) | FixedTextLogicalByte::TargetGlyph(_) => None,
-        })
-        .collect::<BTreeSet<_>>();
-    let available_codes = active_codes
-        .difference(&preserved_active_codes)
-        .copied()
-        .collect::<Vec<_>>();
+    preserved_active_codes.extend(all_logical.iter().filter_map(|byte| match byte {
+        FixedTextLogicalByte::Encoded(code) if active_codes.contains(code) => Some(*code),
+        FixedTextLogicalByte::Encoded(_) | FixedTextLogicalByte::TargetGlyph(_) => None,
+    }));
+    let available_codes = assignable_catalog_codes(&preserved_active_codes)?;
     ensure!(
         base_glyphs.len() < available_codes.len(),
         "consumer catalog base needs {} glyphs but only {} active codes remain",
@@ -272,6 +268,14 @@ pub(super) fn plan_consumer_catalog(
             "catalog page {page_index} assigns one code to multiple glyphs"
         );
         let bytes = build_font_page_by_code(inputs.source_font_page, &glyphs_by_code)?;
+        for code in &preserved_active_codes {
+            let tile_start = usize::from(*code) * crate::font_slots::FONT_TILE_SIZE;
+            let tile_end = tile_start + crate::font_slots::FONT_TILE_SIZE;
+            ensure!(
+                bytes[tile_start..tile_end] == inputs.source_font_page[tile_start..tile_end],
+                "catalog page {page_index} changed preserved source tile 0x{code:02X}"
+            );
+        }
         let identity_count = |domain| {
             packing
                 .identity_page_indices
@@ -326,7 +330,7 @@ pub(super) fn plan_consumer_catalog(
 
     Ok(ConsumerCatalogPlan {
         schema: 1,
-        strategy: "keep item, class, summary/status, and item-action glyphs at stable codes on every page; partition mutually exclusive unit and enemy name identities across deterministic best-fit pages",
+        strategy: "preserve source-bound direct unit-UI glyphs; keep item, class, summary/status, and item-action glyphs at stable codes on every page; partition mutually exclusive unit and enemy name identities across deterministic best-fit pages",
         base_glyph_count: base_glyphs.len(),
         preserved_active_code_count: preserved_active_codes.len(),
         per_page_name_slot_count: extra_codes.len(),
@@ -345,6 +349,18 @@ pub(super) fn plan_consumer_catalog(
         pages_fit_reclaimable_tail: true,
         base_assignments,
     })
+}
+
+fn assignable_catalog_codes(preserved_active_codes: &BTreeSet<u8>) -> Result<Vec<u8>> {
+    let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
+    ensure!(
+        preserved_active_codes.is_subset(&active_codes),
+        "consumer catalog display preservation includes a non-active font code"
+    );
+    Ok(active_codes
+        .difference(preserved_active_codes)
+        .copied()
+        .collect())
 }
 
 fn table_entries<'a>(plan: &'a FixedTextPlan, table_id: &str) -> Vec<&'a FixedTextPlannedEntry> {
@@ -387,4 +403,19 @@ fn assignment_sha1(assignments: &BTreeMap<char, u8>) -> String {
         bytes.push(*code);
     }
     sha1_hex(&bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_bound_unit_ui_codes_are_never_catalog_assignment_slots() {
+        let preserved = BTreeSet::from([0xAD, 0xAF, 0xBF]);
+
+        let assignable = assignable_catalog_codes(&preserved).unwrap();
+
+        assert!(preserved.iter().all(|code| !assignable.contains(code)));
+        assert_eq!(assignable.len() + preserved.len(), ACTIVE_HANGUL_SLOT_COUNT);
+    }
 }

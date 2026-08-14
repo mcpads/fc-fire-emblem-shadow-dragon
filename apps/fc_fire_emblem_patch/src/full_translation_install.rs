@@ -22,7 +22,7 @@ use crate::{
     sha1_hex,
     text_inventory::{plan_fixed_text, plan_location_name_text},
     unit_names::plan_unit_names,
-    unit_ui_text::plan_unit_ui_labels,
+    unit_ui_text::{plan_unit_ui_labels, preserved_unit_ui_display_codes},
 };
 
 mod chapter_intro_residency;
@@ -543,6 +543,7 @@ pub(crate) fn plan_full_translation_installation(
         source_font_page,
         first_physical_page: consumer_codebook.next_physical_page()?,
         available_page_count: consumer_codebook.remaining_page_count()?,
+        preserved_unit_ui_display_codes: &preserved_unit_ui_display_codes(rom.data())?,
         fixed: &fixed,
         unit_names: &unit_names,
         unit_ui: &unit_ui,

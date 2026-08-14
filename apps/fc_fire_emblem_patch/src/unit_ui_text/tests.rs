@@ -20,6 +20,12 @@ fn contract_fixture() -> Vec<u8> {
     prg
 }
 
+fn contract_source_fixture() -> Vec<u8> {
+    let mut source = vec![0; HEADER_SIZE + PRG_SIZE];
+    source[HEADER_SIZE..].copy_from_slice(&contract_fixture());
+    source
+}
+
 fn build_fixture_report(prg: &[u8]) -> Result<UnitUiTextReport> {
     build_report(prg, glyph_budget::fixture_report(25))
 }
@@ -78,6 +84,45 @@ fn preserves_original_hp_label_while_targeting_japanese_labels() {
             .count(),
         25
     );
+}
+
+#[test]
+fn binds_active_display_codes_emitted_directly_by_unit_ui_composers() {
+    let preserved = preserved_unit_ui_display_codes(&contract_source_fixture()).unwrap();
+
+    assert_eq!(preserved, BTreeSet::from([0xAD, 0xAF, 0xBF]));
+}
+
+#[test]
+fn rejects_changed_direct_unit_ui_display_code_contracts() {
+    for (role, code, store) in [
+        ("compose_unit_summary_header", 0xAD, [0x9D, 0x51, 0x04]),
+        ("compose_unit_summary_header", 0xBF, [0x9D, 0x51, 0x04]),
+        (
+            "compose_unit_summary_item_eligibility_markers",
+            0xAF,
+            [0x99, 0xC8, 0x04],
+        ),
+    ] {
+        let mut source = contract_source_fixture();
+        let spec = CODE_REGION_SPECS
+            .iter()
+            .find(|spec| spec.role == role)
+            .unwrap();
+        let immediate = spec
+            .expected
+            .windows(5)
+            .position(|window| window[0] == 0xA9 && window[1] == code && window[2..] == store)
+            .unwrap();
+        let source_offset =
+            HEADER_SIZE + banked_prg_offset(UNIT_UI_BANK, spec.cpu_address).unwrap();
+        source[source_offset + immediate + 1] ^= 0x01;
+
+        let error = preserved_unit_ui_display_codes(&source)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(role));
+    }
 }
 
 #[test]

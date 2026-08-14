@@ -1,3 +1,30 @@
+use anyhow::{Result, ensure};
+
+const VOICING_OVERLAY_CODES: [u8; 2] = [0x0F, 0x1F];
+
+pub(crate) fn composite_payload_display_cell_count(codes: &[u8]) -> usize {
+    codes
+        .iter()
+        .filter(|code| !VOICING_OVERLAY_CODES.contains(code))
+        .count()
+}
+
+pub(crate) fn terminated_composite_display_cell_count(
+    codes: &[u8],
+    terminator: u8,
+) -> Result<usize> {
+    let (payload, end) = codes
+        .split_last()
+        .map(|(end, payload)| (payload, *end))
+        .ok_or_else(|| anyhow::anyhow!("composite string is empty"))?;
+    ensure!(end == terminator, "composite string terminator changed");
+    ensure!(
+        !payload.contains(&terminator),
+        "composite string contains an early terminator"
+    );
+    Ok(composite_payload_display_cell_count(payload))
+}
+
 pub(super) struct CodeRegionSpec {
     pub(super) role: &'static str,
     pub(super) cpu_address: u16,
@@ -54,6 +81,14 @@ pub(super) const CODE_REGION_SPECS: &[CodeRegionSpec] = &[
             0x0E, 0x8F, 0xA9, 0xED, 0x9D, 0x51, 0x04, 0xE8, 0xA9, 0x28, 0x20, 0xEE, 0x8E, 0xA0,
             0x05, 0xB1, 0x74, 0x85, 0x00, 0x20, 0x0E, 0x8F, 0xA9, 0xED, 0x9D, 0x51, 0x04, 0xE8,
             0xA9, 0xEF, 0x9D, 0x51, 0x04, 0x4C, 0x39, 0x8F,
+        ],
+    },
+    CodeRegionSpec {
+        role: "compose_unit_summary_item_eligibility_markers",
+        cpu_address: 0x8749,
+        expected: &[
+            0xA4, 0x12, 0xA9, 0xAF, 0x99, 0xC8, 0x04, 0xE6, 0x12, 0xA4, 0x13, 0xC8, 0xC0, 0x17,
+            0x90, 0xD4, 0xA9, 0x00, 0x8D, 0xE2, 0x05, 0x60,
         ],
     },
     CodeRegionSpec {

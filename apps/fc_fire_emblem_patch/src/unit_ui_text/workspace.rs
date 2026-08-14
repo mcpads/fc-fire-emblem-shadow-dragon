@@ -9,23 +9,44 @@ use crate::{
     },
 };
 
-use super::{SUMMARY_AND_STATUS_LABEL_SPECS, command_menu, inspect_unit_ui_japanese_label_count};
+use super::{
+    SUMMARY_AND_STATUS_LABEL_SPECS, command_menu, inspect_unit_ui_japanese_label_count,
+    terminated_composite_display_cell_count,
+};
+
+const SUMMARY_LABEL_TERMINATOR: u8 = 0xEF;
 
 pub(crate) fn plan_unit_ui_labels(
     rom: &Rom,
     workspace_path: &Path,
 ) -> Result<SemanticTranslationPlan> {
     let expected_count = inspect_unit_ui_japanese_label_count(rom.data())?;
-    let expected_entries = SUMMARY_AND_STATUS_LABEL_SPECS
+    let mut expected_entries = Vec::new();
+    for spec in SUMMARY_AND_STATUS_LABEL_SPECS
         .iter()
-        .chain(command_menu::COMMAND_LABEL_SPECS)
         .filter(|spec| spec.translation_scope == "japanese_only")
-        .map(|spec| ExpectedSemanticEntry {
+    {
+        let display_cell_count =
+            terminated_composite_display_cell_count(spec.expected, SUMMARY_LABEL_TERMINATOR)?;
+        let max_visible_cells = display_cell_count
+            .checked_sub(1)
+            .expect("summary/status label display span includes its colon");
+        expected_entries.push(ExpectedSemanticEntry {
             id: format!("unit-ui-label:{:02X}", spec.index),
             japanese_markup: spec.source_text.to_owned(),
-            max_visible_cells: (spec.expected.len() - 1).max(6),
-        })
-        .collect::<Vec<_>>();
+            max_visible_cells,
+        });
+    }
+    expected_entries.extend(
+        command_menu::COMMAND_LABEL_SPECS
+            .iter()
+            .filter(|spec| spec.translation_scope == "japanese_only")
+            .map(|spec| ExpectedSemanticEntry {
+                id: format!("unit-ui-label:{:02X}", spec.index),
+                japanese_markup: spec.source_text.to_owned(),
+                max_visible_cells: (spec.expected.len() - 1).max(6),
+            }),
+    );
     ensure!(
         expected_entries.len() == expected_count,
         "unit UI semantic population changed"

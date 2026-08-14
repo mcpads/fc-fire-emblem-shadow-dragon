@@ -5,6 +5,7 @@ use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
+    font_slots::active_hangul_codes,
     rom::{EXPECTED_SOURCE_SHA1, HEADER_SIZE, PRG_SIZE, Rom},
     sha1_hex,
 };
@@ -19,7 +20,10 @@ mod workspace;
 
 pub(crate) use command_menu::COMMAND_LABEL_SPECS;
 use source_spec::*;
-pub(crate) use source_spec::{FixedLabelSpec, SUMMARY_AND_STATUS_LABEL_SPECS};
+pub(crate) use source_spec::{
+    FixedLabelSpec, SUMMARY_AND_STATUS_LABEL_SPECS, composite_payload_display_cell_count,
+    terminated_composite_display_cell_count,
+};
 pub(crate) use workspace::plan_unit_ui_labels;
 
 const PRG_BANK_SIZE: usize = 16 * 1024;
@@ -90,6 +94,8 @@ struct FixedLabelReport {
     pointer_table_address_hex: String,
     source_address: u16,
     source_address_hex: String,
+    source_storage_byte_count: usize,
+    source_display_cell_count: usize,
     source_codes: Vec<u8>,
     source_codes_hex: Vec<String>,
 }
@@ -206,10 +212,41 @@ pub(crate) fn inspect_unit_ui_japanese_label_count(source: &[u8]) -> Result<usiz
         .count())
 }
 
+/// 유닛 UI 생산자가 문자열 표를 거치지 않고 화면용 버퍼에 직접 쓰는 원본 글리프
+/// 코드다. 합성 문자열뿐 아니라 아이템 슬롯 표식도 번역 논리 바이트에 나타나지
+/// 않으므로 소비자 글꼴 페이지가 별도로 보존해야 한다.
+pub(crate) fn preserved_unit_ui_display_codes(source: &[u8]) -> Result<BTreeSet<u8>> {
+    let prg = source
+        .get(HEADER_SIZE..HEADER_SIZE + PRG_SIZE)
+        .context("supported source does not contain the complete PRG region")?;
+    validate_code_regions(prg)?;
+
+    let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
+    let preserved = CODE_REGION_SPECS
+        .iter()
+        .flat_map(|spec| spec.expected.windows(5))
+        .filter_map(|window| {
+            let writes_composite_buffer = window[2..] == [0x9D, 0x51, 0x04];
+            let writes_item_marker_buffer = window[2..] == [0x99, 0xC8, 0x04];
+            (window[0] == 0xA9 && (writes_composite_buffer || writes_item_marker_buffer))
+                .then_some(window[1])
+        })
+        .filter(|code| active_codes.contains(code))
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        preserved == BTreeSet::from([0xAD, 0xAF, 0xBF]),
+        "unit-UI direct display-code contract changed"
+    );
+    Ok(preserved)
+}
+
 pub(crate) fn preserved_codes_for_unit_name_projection(source: &[u8]) -> Result<BTreeSet<u8>> {
-    validate_code_regions(&source[HEADER_SIZE..HEADER_SIZE + PRG_SIZE])?;
+    let prg = source
+        .get(HEADER_SIZE..HEADER_SIZE + PRG_SIZE)
+        .context("supported source does not contain the complete PRG region")?;
+    validate_code_regions(prg)?;
     validate_fixed_labels(
-        &source[HEADER_SIZE..HEADER_SIZE + PRG_SIZE],
+        prg,
         SUMMARY_AND_STATUS_LABEL_SPECS
             .iter()
             .chain(command_menu::COMMAND_LABEL_SPECS),
@@ -227,6 +264,7 @@ pub(crate) fn preserved_codes_for_unit_name_projection(source: &[u8]) -> Result<
             .chain(command_menu::COMMAND_LABEL_SPECS)
             .flat_map(|label| label.expected.iter().copied()),
     );
+    preserved.extend(preserved_unit_ui_display_codes(source)?);
     Ok(preserved)
 }
 
@@ -401,6 +439,12 @@ fn validate_fixed_labels<'a>(
                 spec.index,
                 spec.pointer
             );
+            let terminator = *spec
+                .expected
+                .last()
+                .context("fixed-label source bytes are empty")?;
+            let source_display_cell_count =
+                terminated_composite_display_cell_count(spec.expected, terminator)?;
 
             Ok(FixedLabelReport {
                 index: spec.index,
@@ -411,6 +455,8 @@ fn validate_fixed_labels<'a>(
                 pointer_table_address_hex: format!("0x{pointer_address:04X}"),
                 source_address: spec.pointer,
                 source_address_hex: format!("0x{:04X}", spec.pointer),
+                source_storage_byte_count: spec.expected.len(),
+                source_display_cell_count,
                 source_codes: spec.expected.to_vec(),
                 source_codes_hex: spec
                     .expected
