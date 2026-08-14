@@ -134,8 +134,8 @@ pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) current_candidate_path: &'a Path,
     pub(crate) current_build_report_path: &'a Path,
     pub(crate) report_path: &'a Path,
-    /// 대사 런타임만 실은 확인용 이미지를 쓸 자리다. 배포본이 아니라 탐침이다.
-    pub(crate) transport_probe_path: Option<&'a Path>,
+    /// 모든 정적 게이트를 통과한 통합 이미지를 명시적으로 쓸 자리다.
+    pub(crate) output_path: Option<&'a Path>,
 }
 
 pub(crate) struct FullTranslationInstallSummary {
@@ -148,6 +148,7 @@ pub(crate) struct FullTranslationInstallSummary {
     pub(crate) dialogue_static_page_upper_bound_count: usize,
     pub(crate) dialogue_pointer_write_count: usize,
     pub(crate) dialogue_planned_storage_byte_count: usize,
+    pub(crate) integrated_image_sha1: String,
 }
 
 #[derive(Serialize)]
@@ -852,6 +853,7 @@ pub(crate) fn plan_full_translation_installation(
             ending_record_projection: &ending_record_projection,
             consumer_installation: &consumer_installation,
             required_domains: &REQUIRED_DOMAINS,
+            output_will_be_emitted: inputs.output_path.is_some(),
         })?;
     let translation_input_complete = dialogue_validation.translation_input_complete;
     let review_complete = dialogue_validation.review_complete
@@ -871,6 +873,12 @@ pub(crate) fn plan_full_translation_installation(
     let next_gate = if translation_input_complete
         && runtime_state_storage.selection_complete()
         && all_required_consumers_statically_accounted
+        && inputs.output_path.is_some()
+    {
+        "bind representative and worst-case consumer paths to the exact emitted artifact before any release claim"
+    } else if translation_input_complete
+        && runtime_state_storage.selection_complete()
+        && all_required_consumers_statically_accounted
     {
         "materialize the exact integrated ROM, then bind representative and worst-case consumer paths to that artifact before any release claim"
     } else if translation_input_complete && runtime_state_storage.selection_complete() {
@@ -879,6 +887,19 @@ pub(crate) fn plan_full_translation_installation(
         "close the exact volatile runtime-state storage selection against source access, queue, save/load, and battle lifetimes; do not emit or run a partial ROM"
     } else {
         "author Korean for every untranslated Japanese line before recalculating glyph lifetimes; do not emit or run a partial ROM"
+    };
+    let integrated_image_sha1 = sha1_hex(&installed_image);
+    let rom_emitted = if let Some(path) = inputs.output_path {
+        write_integrated_output(
+            path,
+            inputs.source_path,
+            inputs.current_candidate_path,
+            inputs.report_path,
+            &installed_image,
+        )?;
+        true
+    } else {
+        false
     };
 
     let report = FullTranslationInstallReport {
@@ -1117,7 +1138,7 @@ pub(crate) fn plan_full_translation_installation(
             cross_domain_consumer_writes_planned: all_required_consumers_statically_accounted,
             integrated_candidate_ready: all_required_consumers_statically_accounted,
         },
-        rom_emitted: false,
+        rom_emitted,
         dynamic_verification_started: false,
         next_gate,
     };
@@ -1130,16 +1151,6 @@ pub(crate) fn plan_full_translation_installation(
     fs::write(inputs.report_path, &report_bytes)
         .with_context(|| format!("write {}", inputs.report_path.display()))?;
 
-    // 대사 런타임과 그 재료만 실은 확인용 이미지다. 나머지 도메인이 아직 없으므로
-    // 배포본이 아니고, 이름과 별도 요청으로 그 구분을 남긴다. vblank 불변 조건과
-    // 합성 결과는 실행해 봐야만 확인되고, 그 확인이 나머지 도메인을 기다릴 이유가 없다.
-    if let Some(path) = inputs.transport_probe_path {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
-        }
-        fs::write(path, &installed_image).with_context(|| format!("write {}", path.display()))?;
-    }
-
     Ok(FullTranslationInstallSummary {
         report_sha1: sha1_hex(&report_bytes),
         required_domain_count: REQUIRED_DOMAIN_COUNT,
@@ -1150,5 +1161,50 @@ pub(crate) fn plan_full_translation_installation(
         dialogue_static_page_upper_bound_count: codebook.page_assignments.len(),
         dialogue_pointer_write_count: encoded_display.pointer_writes.len(),
         dialogue_planned_storage_byte_count: planned_storage_byte_count,
+        integrated_image_sha1,
     })
+}
+
+fn write_integrated_output(
+    output_path: &Path,
+    source_path: &Path,
+    current_candidate_path: &Path,
+    report_path: &Path,
+    installed_image: &[u8],
+) -> Result<()> {
+    let resolved_output = resolve_output_identity(output_path)?;
+    for protected_path in [source_path, current_candidate_path, report_path] {
+        let resolved_protected = resolve_output_identity(protected_path)?;
+        ensure!(
+            resolved_output != resolved_protected,
+            "integrated output must not overwrite protected input {}",
+            protected_path.display()
+        );
+    }
+
+    fs::write(output_path, installed_image)
+        .with_context(|| format!("write integrated output {}", output_path.display()))?;
+    let read_back = fs::read(output_path)
+        .with_context(|| format!("read integrated output {}", output_path.display()))?;
+    ensure!(
+        read_back == installed_image,
+        "integrated output read-back differs from the planned image"
+    );
+    Ok(())
+}
+
+fn resolve_output_identity(path: &Path) -> Result<std::path::PathBuf> {
+    if path.exists() {
+        return fs::canonicalize(path)
+            .with_context(|| format!("resolve existing path {}", path.display()));
+    }
+    let name = path
+        .file_name()
+        .context("output or report path has no file name")?;
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)
+        .with_context(|| format!("create output directory {}", parent.display()))?;
+    Ok(fs::canonicalize(parent)
+        .with_context(|| format!("resolve output directory {}", parent.display()))?
+        .join(name))
 }

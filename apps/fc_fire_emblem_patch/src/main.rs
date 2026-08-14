@@ -302,11 +302,11 @@ enum Command {
         #[arg(long, default_value = "out/translation-coverage.json")]
         report: PathBuf,
     },
-    /// Plan every unfinished translation domain together before emitting one integrated ROM.
+    /// Plan every translation domain together and optionally emit the gated integrated ROM.
     PlanFullTranslationInstallation {
         source: PathBuf,
-        #[arg(long)]
-        transport_probe: Option<PathBuf>,
+        #[arg(long, alias = "transport-probe")]
+        output: Option<PathBuf>,
         #[arg(long, default_value = "private/dialogue/main-workspace.json")]
         main_dialogue_workspace: PathBuf,
         #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
@@ -1198,7 +1198,7 @@ fn main() -> Result<()> {
         }
         Command::PlanFullTranslationInstallation {
             source,
-            transport_probe,
+            output,
             main_dialogue_workspace,
             fixed_text_workspace,
             unit_name_localization,
@@ -1229,7 +1229,7 @@ fn main() -> Result<()> {
                     current_candidate_path: &current_candidate,
                     current_build_report_path: &current_build_report,
                     report_path: &report,
-                    transport_probe_path: transport_probe.as_deref(),
+                    output_path: output.as_deref(),
                 },
             )?;
             println!("wrote {}", report.display());
@@ -1245,6 +1245,7 @@ fn main() -> Result<()> {
                 summary.dialogue_pointer_write_count,
                 summary.dialogue_planned_storage_byte_count,
             );
+            println!("integrated image SHA-1: {}", summary.integrated_image_sha1);
         }
         Command::AnalyzeChapterTransitions { source, report } => {
             let summary = chapter_transition::analyze_chapter_transitions(&source, &report)?;

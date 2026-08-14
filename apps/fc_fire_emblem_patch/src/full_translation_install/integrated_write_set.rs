@@ -40,6 +40,7 @@ pub(super) struct IntegratedWriteSetInputs<'a> {
     pub(super) ending_record_projection: &'a EndingRecordProjectionPlan,
     pub(super) consumer_installation: &'a ConsumerInstallationPlan,
     pub(super) required_domains: &'a [&'static str],
+    pub(super) output_will_be_emitted: bool,
 }
 
 #[derive(Serialize)]
@@ -76,6 +77,7 @@ pub(super) struct IntegratedWriteSetPlan {
     every_change_tracked: bool,
     one_shared_image: bool,
     all_domains_contribute_expected_writes: bool,
+    integrated_image_sha1: String,
     output_materialized_in_memory_only: bool,
     rom_emitted: bool,
 }
@@ -297,6 +299,7 @@ pub(super) fn plan_integrated_write_set(
                 == inputs.consumer_installation.fully_planned_domain_count(),
         "integrated write gate advanced without every domain layer"
     );
+    let integrated_image_sha1 = crate::sha1_hex(&installed_image);
 
     Ok((
         installed_image,
@@ -334,8 +337,9 @@ pub(super) fn plan_integrated_write_set(
             every_change_tracked: true,
             one_shared_image: true,
             all_domains_contribute_expected_writes: true,
-            output_materialized_in_memory_only: true,
-            rom_emitted: false,
+            integrated_image_sha1,
+            output_materialized_in_memory_only: !inputs.output_will_be_emitted,
+            rom_emitted: inputs.output_will_be_emitted,
         },
     ))
 }
