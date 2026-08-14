@@ -13,15 +13,20 @@ mod report;
 mod screen_targets;
 mod weapon_shop;
 
-use installed::inspect_current_installation;
+pub(crate) use installed::inspect_current_installation;
 use lifetimes::{LifetimeInputBindings, inspect_translation_lifetimes};
 use population::{TranslationPopulationInputs, inspect_translation_populations};
-pub(crate) use report::TranslationCoverageSummary;
 use report::{
     CapacityState, CoverageSummary, GlobalTranslationCoverageReport, ScreenPopulationReport,
     SourceBindingState, TranslationDomainReport, TranslationInputState,
 };
+pub(crate) use report::{DomainInstallation, TranslationCoverageSummary};
+pub(crate) use screen_targets::DomainScreenTargets;
 use screen_targets::{DOMAIN_SEEDS, bind_domain_screen_targets};
+
+pub(crate) fn inspect_domain_screen_targets() -> Result<Vec<DomainScreenTargets>> {
+    bind_domain_screen_targets(&inspect_screen_translation_partition()?)
+}
 
 pub(crate) struct TranslationCoverageInputs<'a> {
     pub(crate) source_path: &'a Path,

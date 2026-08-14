@@ -40,8 +40,12 @@ impl StableColoringPlan {
     pub(super) fn expand_to_color_count(&mut self, target_color_count: usize) -> Result<()> {
         ensure!(
             target_color_count >= self.color_count,
-            "battle coloring cannot contract from {} to {target_color_count} colors",
-            self.color_count
+            "battle coloring cannot contract from {} to {target_color_count} colors (constructed clique: {}, active-ceiling assignment found: {}, search nodes: {}, limit reached: {})",
+            self.color_count,
+            self.constructed_clique_glyph_count,
+            self.active_ceiling_assignment_found,
+            self.active_ceiling_search_node_count,
+            self.active_ceiling_search_limit_reached,
         );
         ensure!(
             target_color_count <= self.glyph_count,
@@ -84,6 +88,11 @@ pub(super) fn plan_stable_coloring(
     graph.verify_coloring(&greedy_colors)?;
     let constructed_clique = graph.extend_clique(&constructed_clique(families));
     graph.verify_clique(&constructed_clique)?;
+    ensure!(
+        constructed_clique.len() <= active_color_ceiling,
+        "battle conflict graph proves a {}-color lower bound above the {active_color_ceiling}-code ceiling",
+        constructed_clique.len(),
+    );
     let ceiling_search = search_coloring(
         &graph,
         &constructed_clique,

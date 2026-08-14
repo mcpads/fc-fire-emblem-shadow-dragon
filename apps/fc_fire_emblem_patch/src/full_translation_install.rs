@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{collections::BTreeMap, fs, path::Path};
 
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
@@ -23,6 +23,7 @@ use crate::{
 
 mod chapter_intro_residency;
 mod cold_request_presentation;
+mod consumer_installation;
 mod cross_domain_material;
 mod current_candidate;
 mod dialogue_bank_layout;
@@ -43,6 +44,9 @@ mod transition_residency;
 
 use chapter_intro_residency::plan_chapter_intro_residency;
 use cold_request_presentation::plan_cold_request_presentation_page;
+use consumer_installation::{
+    ConsumerInstallationInputs, ConsumerInstallationPlan, plan_consumer_installation,
+};
 use cross_domain_material::{CrossDomainMaterialInputs, plan_cross_domain_material};
 use current_candidate::{CurrentCandidateInputs, inspect_dialogue_page_pool_capacity};
 use dynamic_composition::plan_dialogue_runtime_composition;
@@ -140,6 +144,7 @@ struct FullTranslationInstallReport {
     dialogue_runtime_control_flow: DialogueRuntimeControlFlowPlan,
     dialogue_runtime_state_storage: DialogueRuntimeStateStoragePlan,
     dialogue_runtime_composition: DialogueRuntimeComposition,
+    consumer_installation: ConsumerInstallationPlan,
     dialogue_storage: DialogueStorage,
     installation_gates: InstallationGates,
     rom_emitted: bool,
@@ -622,6 +627,64 @@ pub(crate) fn plan_full_translation_installation(
         canonical_dynamic_codes_are_page_physical_codes: dynamic_page_codes
             .canonical_codes_are_page_physical_codes,
     })?;
+    let required_target_unit_counts = BTreeMap::from([
+        (
+            "chapter_save_offer_label",
+            transitions.save_offer.entry_count,
+        ),
+        ("chapter_titles", chapter_titles.entry_count),
+        ("choice_labels", choices.entries.len()),
+        (
+            "class_names",
+            fixed
+                .entries
+                .iter()
+                .filter(|entry| entry.table_id == "class-names")
+                .count(),
+        ),
+        (
+            "ending_record_labels",
+            transitions.ending_record.entry_count,
+        ),
+        (
+            "enemy_names",
+            fixed
+                .entries
+                .iter()
+                .filter(|entry| entry.table_id == "enemy-names")
+                .count(),
+        ),
+        ("item_action_labels", item_actions.entry_count),
+        (
+            "item_names",
+            fixed
+                .entries
+                .iter()
+                .filter(|entry| entry.table_id == "item-names")
+                .count(),
+        ),
+        ("location_names", locations.entries.len()),
+        ("main_dialogue", dialogue.translated_line_count),
+        ("map_menu_labels", map_menu.entry_count),
+        ("unit_names", unit_names.entries.len()),
+        ("unit_ui_labels", unit_ui.entry_count),
+    ]);
+    ensure!(
+        required_target_unit_counts.len() == REQUIRED_DOMAIN_COUNT,
+        "full translation consumer target populations do not cover every required domain"
+    );
+    let consumer_installation = plan_consumer_installation(ConsumerInstallationInputs {
+        current_candidate_path: inputs.current_candidate_path,
+        current_build_report_path: inputs.current_build_report_path,
+        required_domains: &REQUIRED_DOMAINS,
+        target_unit_counts: &required_target_unit_counts,
+        all_chapter_titles_encoded: chapter_intro_residency.encoded_titles.len()
+            == chapter_titles.entry_count,
+        all_dialogue_records_encoded: dialogue.record_ids.len() == 504
+            && encoded_display.pointer_writes.len() == 517,
+        all_dialogue_runtime_hooks_emitted: runtime_control_flow.all_planned_hooks_emitted(),
+        dynamic_dialogue_producers_bound: dynamic_string_producers_bound,
+    })?;
     let cross_domain_material = plan_cross_domain_material(CrossDomainMaterialInputs {
         main_dialogue_runtime_material_byte_count: runtime_material.material.len(),
         shared_atlas_characters: &composition.glyph_atlas_characters,
@@ -651,6 +714,7 @@ pub(crate) fn plan_full_translation_installation(
             encoded_chapter_titles: &chapter_intro_residency.encoded_titles,
             cold_request_presentation: &cold_request_presentation,
             cross_domain_material: &cross_domain_material,
+            consumer_installation: &consumer_installation,
             required_domains: &REQUIRED_DOMAINS,
         })?;
     let translation_input_complete = dialogue_validation.translation_input_complete;
@@ -666,6 +730,8 @@ pub(crate) fn plan_full_translation_installation(
         && transitions.ending_record.review_complete
         && locations.review_complete
         && translation_input_complete;
+    let all_required_consumers_statically_accounted =
+        consumer_installation.all_required_consumers_statically_accounted();
     let next_gate = if translation_input_complete && runtime_state_storage.selection_complete() {
         "generate every source projection, pointer selection, and lifetime font request from the twelve exact cross-domain material sections; keep the integrated candidate closed until all thirteen domains contribute every consumer write"
     } else if translation_input_complete {
@@ -675,7 +741,7 @@ pub(crate) fn plan_full_translation_installation(
     };
 
     let report = FullTranslationInstallReport {
-        schema: 12,
+        schema: 13,
         source_sha1: EXPECTED_SOURCE_SHA1,
         strategy: "install all remaining translation domains in one cumulative candidate, run complete static gates, then run consumer-path dynamic regression on that same ROM",
         required_domain_count: REQUIRED_DOMAIN_COUNT,
@@ -875,6 +941,7 @@ pub(crate) fn plan_full_translation_installation(
             main_dialogue_page_identity_bound: false,
             main_dialogue_transition_hook_planned: true,
         },
+        consumer_installation,
         dialogue_storage: DialogueStorage {
             region_count: encoded_display.regions.len(),
             record_count: dialogue.record_ids.len(),
@@ -900,7 +967,7 @@ pub(crate) fn plan_full_translation_installation(
             static_prebuilt_dialogue_page_pool_fits: codebook.page_assignments.len()
                 <= remaining_available_page_count,
             dialogue_runtime_composition_planned: true,
-            cross_domain_consumer_writes_planned: false,
+            cross_domain_consumer_writes_planned: all_required_consumers_statically_accounted,
             integrated_candidate_ready: false,
         },
         rom_emitted: false,

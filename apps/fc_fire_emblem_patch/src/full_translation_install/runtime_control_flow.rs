@@ -93,6 +93,12 @@ pub(super) struct DialogueRuntimeControlFlowPlan {
     complete: bool,
 }
 
+impl DialogueRuntimeControlFlowPlan {
+    pub(super) fn all_planned_hooks_emitted(&self) -> bool {
+        self.runtime_hooks_contributed && self.missing_hook_roles.is_empty()
+    }
+}
+
 #[derive(Serialize)]
 struct RuntimeState {
     id: &'static str,

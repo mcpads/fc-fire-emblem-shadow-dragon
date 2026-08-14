@@ -11,6 +11,7 @@ use crate::{
 use super::{
     chapter_intro_residency::EncodedChapterTitle,
     cold_request_presentation::ColdRequestPresentationPage,
+    consumer_installation::ConsumerInstallationPlan,
     cross_domain_material::CrossDomainMaterialPlan,
     installation_layout::main_dialogue_runtime_material_file_offset,
     runtime_code::{DialogueRuntimeCodePlan, DialogueRuntimeHookRole, DialogueRuntimeHookSite},
@@ -27,6 +28,7 @@ pub(super) struct IntegratedWriteSetInputs<'a> {
     pub(super) encoded_chapter_titles: &'a [EncodedChapterTitle],
     pub(super) cold_request_presentation: &'a ColdRequestPresentationPage,
     pub(super) cross_domain_material: &'a CrossDomainMaterialPlan,
+    pub(super) consumer_installation: &'a ConsumerInstallationPlan,
     pub(super) required_domains: &'a [&'static str],
 }
 
@@ -66,6 +68,8 @@ struct DomainWriteContribution {
     storage_and_address_writes_contributed: bool,
     runtime_material_writes_contributed: bool,
     font_supply_writes_contributed: bool,
+    carried_consumer_writes_bound_to_exact_candidate: bool,
+    new_global_consumer_writes_contributed: bool,
     all_consumer_writes_contributed: bool,
     expected_write_count: usize,
     complete_in_integrated_plan: bool,
@@ -209,6 +213,7 @@ pub(super) fn plan_integrated_write_set(
         expected_write_count_before_cross_domain - inputs.encoded_chapter_titles.len(),
         inputs.encoded_chapter_titles.len(),
         inputs.cross_domain_material,
+        inputs.consumer_installation,
     )?;
     let contributing_domain_count = domains
         .iter()
@@ -220,7 +225,8 @@ pub(super) fn plan_integrated_write_set(
         .count();
     ensure!(
         contributing_domain_count == inputs.required_domains.len()
-            && fully_planned_domain_count == 0,
+            && fully_planned_domain_count
+                == inputs.consumer_installation.fully_planned_domain_count(),
         "integrated write gate advanced without every domain layer"
     );
 
@@ -487,6 +493,7 @@ fn domain_contributions(
     expected_dialogue_write_count: usize,
     expected_chapter_title_write_count: usize,
     cross_domain_material: &CrossDomainMaterialPlan,
+    consumer_installation: &ConsumerInstallationPlan,
 ) -> Result<Vec<DomainWriteContribution>> {
     ensure!(
         required_domains.len() == 13
@@ -518,14 +525,22 @@ fn domain_contributions(
             let dialogue = *id == "main_dialogue";
             let chapter_titles = *id == "chapter_titles";
             let material = material_sections.contains(id);
+            let all_consumers_statically_accounted =
+                consumer_installation.domain_all_consumers_statically_accounted(id);
             DomainWriteContribution {
                 id,
                 translation_input_loaded: true,
                 glyph_lifetime_bound: true,
-                storage_and_address_writes_contributed: dialogue || chapter_titles,
+                storage_and_address_writes_contributed: dialogue
+                    || chapter_titles
+                    || all_consumers_statically_accounted,
                 runtime_material_writes_contributed: dialogue || material,
                 font_supply_writes_contributed: true,
-                all_consumer_writes_contributed: false,
+                carried_consumer_writes_bound_to_exact_candidate: consumer_installation
+                    .domain_has_carried_consumers(id),
+                new_global_consumer_writes_contributed: consumer_installation
+                    .domain_has_newly_planned_consumers(id),
+                all_consumer_writes_contributed: all_consumers_statically_accounted,
                 expected_write_count: usize::from(material)
                     + if dialogue {
                         expected_dialogue_write_count
@@ -534,7 +549,7 @@ fn domain_contributions(
                     } else {
                         0
                     },
-                complete_in_integrated_plan: false,
+                complete_in_integrated_plan: all_consumers_statically_accounted,
             }
         })
         .collect())

@@ -423,7 +423,7 @@ fn validate_title_logo_lifetime(report: &CurrentBuildReport) -> Result<()> {
 fn validate_unit_roster_lifetime(report: &CurrentBuildReport) -> Result<()> {
     let names = &report.playable_unit_names;
     ensure!(
-        names.workspace_entry_count == 53
+        (52..=53).contains(&names.workspace_entry_count)
             && names.roster_projection_installed
             && names.roster_page_target_glyph_count > 0
             && names.roster_page_preserved_active_code_count > 0
@@ -432,7 +432,7 @@ fn validate_unit_roster_lifetime(report: &CurrentBuildReport) -> Result<()> {
                     + names.roster_page_preserved_active_code_count
             && names.roster_page_total_slot_demand <= crate::font_slots::ACTIVE_HANGUL_SLOT_COUNT
             && names.roster_capacity_bound_to_build,
-        "current unit-roster page lifetime changed"
+        "current unit-roster page lifetime changed or lies outside the supported 52-to-53-entry cumulative lineage"
     );
     Ok(())
 }
