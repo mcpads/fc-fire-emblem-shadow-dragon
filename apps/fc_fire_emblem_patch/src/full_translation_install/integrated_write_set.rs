@@ -4,7 +4,7 @@ use serde::Serialize;
 use crate::{
     dialogue_assets::EncodedMainDialogueBundle,
     font_slots::FONT_PAGE_SIZE,
-    rom::{HEADER_SIZE, Rom},
+    rom::{HEADER_SIZE, PRG_SIZE, Rom},
     tracked::TrackedImage,
 };
 
@@ -117,13 +117,14 @@ pub(super) fn plan_integrated_write_set(
     }
     let dialogue_storage_write_count =
         inputs.encoded_dialogue.regions.len() + inputs.encoded_dialogue.pointer_writes.len();
+    let chapter_title_storage_write_count = inputs.encoded_chapter_titles.len() * 2;
     install_encoded_dialogue(&mut image, inputs.candidate, inputs.encoded_dialogue)?;
     install_encoded_chapter_titles(&mut image, inputs.candidate, inputs.encoded_chapter_titles)?;
     ensure!(
         image.writes().len()
             == chr_expansion_header_write_count
                 + dialogue_storage_write_count
-                + inputs.encoded_chapter_titles.len(),
+                + chapter_title_storage_write_count,
         "integrated write set and dialogue/title storage write sets disagree"
     );
     install_cold_request_presentation(
@@ -248,7 +249,7 @@ pub(super) fn plan_integrated_write_set(
     let expected_write_count = image.writes().len();
     let output = image.into_data();
     verify_installed_dialogue(&output, inputs.encoded_dialogue)?;
-    verify_installed_chapter_titles(&output, inputs.encoded_chapter_titles)?;
+    verify_installed_chapter_titles(&output, inputs.candidate, inputs.encoded_chapter_titles)?;
     verify_installed_cold_request_presentation(
         &output,
         inputs.candidate,
@@ -277,8 +278,8 @@ pub(super) fn plan_integrated_write_set(
 
     let domains = domain_contributions(
         inputs.required_domains,
-        expected_write_count_before_cross_domain - inputs.encoded_chapter_titles.len(),
-        inputs.encoded_chapter_titles.len(),
+        expected_write_count_before_cross_domain - chapter_title_storage_write_count,
+        chapter_title_storage_write_count,
         inputs.cross_domain_material,
         inputs.fixed_ui_projection,
         inputs.chapter_save_projection,
@@ -316,7 +317,7 @@ pub(super) fn plan_integrated_write_set(
             dialogue_runtime_code_routine_count: inputs.dialogue_runtime_code.code_routines.len(),
             dialogue_storage_region_count: inputs.encoded_dialogue.regions.len(),
             dialogue_pointer_write_count: inputs.encoded_dialogue.pointer_writes.len(),
-            chapter_title_storage_write_count: inputs.encoded_chapter_titles.len(),
+            chapter_title_storage_write_count,
             cold_request_presentation_write_count: 1,
             chr_expansion_header_write_count,
             appended_chr_page_count,
@@ -640,11 +641,29 @@ fn install_encoded_chapter_titles(
             expected,
             &title.encoded_storage,
         )?;
+        let active_mirror_offset = active_fixed_mirror_file_offset(candidate, title.file_offset)?;
+        let active_mirror_end = active_mirror_offset
+            .checked_add(title.encoded_storage.len())
+            .ok_or_else(|| anyhow::anyhow!("{} active mirror range overflow", title.id))?;
+        let active_mirror_expected = candidate
+            .data()
+            .get(active_mirror_offset..active_mirror_end)
+            .ok_or_else(|| anyhow::anyhow!("{} active mirror is outside candidate", title.id))?;
+        image.write_expected(
+            format!("active fixed-bank chapter title mirror {}", title.id),
+            active_mirror_offset,
+            active_mirror_expected,
+            &title.encoded_storage,
+        )?;
     }
     Ok(())
 }
 
-fn verify_installed_chapter_titles(installed: &[u8], titles: &[EncodedChapterTitle]) -> Result<()> {
+fn verify_installed_chapter_titles(
+    installed: &[u8],
+    candidate: &Rom,
+    titles: &[EncodedChapterTitle],
+) -> Result<()> {
     for title in titles {
         let end = title
             .file_offset
@@ -655,8 +674,40 @@ fn verify_installed_chapter_titles(installed: &[u8], titles: &[EncodedChapterTit
             "installed {} does not match its resident codebook encoding",
             title.id
         );
+        let active_mirror_offset = active_fixed_mirror_file_offset(candidate, title.file_offset)?;
+        let active_mirror_end = active_mirror_offset
+            .checked_add(title.encoded_storage.len())
+            .ok_or_else(|| {
+                anyhow::anyhow!("{} installed active mirror range overflow", title.id)
+            })?;
+        ensure!(
+            installed.get(active_mirror_offset..active_mirror_end)
+                == Some(title.encoded_storage.as_slice()),
+            "installed active fixed-bank mirror {} does not match its resident codebook encoding",
+            title.id
+        );
     }
     Ok(())
+}
+
+fn active_fixed_mirror_file_offset(candidate: &Rom, source_file_offset: usize) -> Result<usize> {
+    let source_fixed_start = HEADER_SIZE + PRG_SIZE - FIXED_BANK_SIZE;
+    let source_fixed_end = HEADER_SIZE + PRG_SIZE;
+    ensure!(
+        (source_fixed_start..source_fixed_end).contains(&source_file_offset),
+        "chapter-title storage is outside the supported source fixed bank"
+    );
+    ensure!(
+        candidate.prg().len() > PRG_SIZE,
+        "integrated chapter-title installation requires an expanded active fixed bank"
+    );
+    let active_fixed_start = HEADER_SIZE
+        + candidate
+            .prg()
+            .len()
+            .checked_sub(FIXED_BANK_SIZE)
+            .ok_or_else(|| anyhow::anyhow!("candidate PRG is smaller than one fixed bank"))?;
+    Ok(active_fixed_start + source_file_offset - source_fixed_start)
 }
 
 /// 최종 바이트를 다시 읽어 현재 인코딩 결과가 실제 설치됐는지 확인한다.
@@ -966,11 +1017,12 @@ mod tests {
 
     #[test]
     fn installs_all_chapter_titles_and_verifies_their_final_bytes() {
-        let candidate = synthetic_rom();
+        let candidate = synthetic_expanded_rom();
+        let source_fixed_start = crate::rom::HEADER_SIZE + PRG_SIZE - FIXED_BANK_SIZE;
         let titles = (0..25)
             .map(|index| EncodedChapterTitle {
                 id: format!("chapter-title:{:03}", index + 1),
-                file_offset: 0x100 + index * 2,
+                file_offset: source_fixed_start + 0x100 + index * 2,
                 encoded_storage: vec![index as u8 + 1, 0xED],
             })
             .collect::<Vec<_>>();
@@ -978,9 +1030,24 @@ mod tests {
 
         install_encoded_chapter_titles(&mut image, &candidate, &titles).unwrap();
 
-        assert_eq!(image.writes().len(), 25);
+        assert_eq!(image.writes().len(), 50);
         let output = image.into_data();
-        verify_installed_chapter_titles(&output, &titles).unwrap();
-        assert_eq!(&output[0x100..0x104], [1, 0xED, 2, 0xED]);
+        verify_installed_chapter_titles(&output, &candidate, &titles).unwrap();
+        assert_eq!(
+            &output[source_fixed_start + 0x100..source_fixed_start + 0x104],
+            [1, 0xED, 2, 0xED]
+        );
+        let active_fixed_start = crate::rom::HEADER_SIZE + 512 * 1024 - FIXED_BANK_SIZE;
+        assert_eq!(
+            &output[active_fixed_start + 0x100..active_fixed_start + 0x104],
+            [1, 0xED, 2, 0xED]
+        );
+    }
+
+    fn synthetic_expanded_rom() -> Rom {
+        let mut bytes = vec![0; crate::rom::HEADER_SIZE + 512 * 1024];
+        bytes[..4].copy_from_slice(b"NES\x1A");
+        bytes[4] = 32;
+        Rom::parse(bytes).unwrap()
     }
 }

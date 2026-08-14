@@ -150,3 +150,99 @@ fn exact_additional_consumer_roles_close_only_the_named_domain_screens() {
     assert_eq!(domains[0].globally_planned_screen_roles, ["map_menu"]);
     assert!(domains[0].all_consumers_statically_accounted);
 }
+
+#[test]
+fn final_artifact_runtime_roles_bind_to_every_domain_that_uses_the_screen() {
+    let mut plan = ConsumerInstallationPlan {
+        strategy: "test",
+        current_candidate_sha1: "candidate".to_owned(),
+        current_build_report_sha1: "report".to_owned(),
+        required_domain_count: 2,
+        domains: vec![
+            DomainConsumerInstallation {
+                id: "main_dialogue",
+                target_unit_count: 1,
+                current_candidate_installed_target_unit_count: 1,
+                globally_planned_target_unit_count: 1,
+                target_screen_roles: vec!["shared_screen".to_owned()],
+                current_candidate_carried_screen_roles: vec![],
+                globally_planned_screen_roles: vec!["shared_screen".to_owned()],
+                newly_planned_screen_roles: vec!["shared_screen".to_owned()],
+                statically_accounted_screen_roles: vec!["shared_screen".to_owned()],
+                remaining_screen_roles: vec![],
+                current_candidate_historical_runtime_roles: vec![],
+                final_artifact_runtime_bound_screen_roles: vec![],
+                all_consumers_statically_accounted: true,
+            },
+            DomainConsumerInstallation {
+                id: "choice_labels",
+                target_unit_count: 1,
+                current_candidate_installed_target_unit_count: 1,
+                globally_planned_target_unit_count: 1,
+                target_screen_roles: vec!["shared_screen".to_owned()],
+                current_candidate_carried_screen_roles: vec![],
+                globally_planned_screen_roles: vec!["shared_screen".to_owned()],
+                newly_planned_screen_roles: vec!["shared_screen".to_owned()],
+                statically_accounted_screen_roles: vec!["shared_screen".to_owned()],
+                remaining_screen_roles: vec![],
+                current_candidate_historical_runtime_roles: vec![],
+                final_artifact_runtime_bound_screen_roles: vec![],
+                all_consumers_statically_accounted: true,
+            },
+        ],
+        carried_consumer_domain_count: 0,
+        globally_advanced_domain_count: 2,
+        all_consumers_statically_accounted_domain_count: 2,
+        unresolved_consumer_domain_count: 0,
+        current_candidate_historical_runtime_role_count: 0,
+        final_artifact_runtime_bound_role_count: 0,
+        all_required_consumers_statically_accounted: true,
+        current_candidate_runtime_evidence_inherited: false,
+        final_artifact_runtime_replay_required: true,
+    };
+
+    let roles = BTreeSet::from(["shared_screen".to_owned()]);
+    plan.bind_final_artifact_runtime_roles(&roles, &roles)
+        .unwrap();
+
+    assert_eq!(plan.final_artifact_runtime_bound_role_count, 1);
+    assert!(!plan.final_artifact_runtime_replay_required);
+    assert!(
+        plan.domains.iter().all(|domain| {
+            domain.final_artifact_runtime_bound_screen_roles == ["shared_screen"]
+        })
+    );
+}
+
+#[test]
+fn unknown_final_artifact_runtime_role_is_rejected() {
+    let mut plan = ConsumerInstallationPlan {
+        strategy: "test",
+        current_candidate_sha1: "candidate".to_owned(),
+        current_build_report_sha1: "report".to_owned(),
+        required_domain_count: 0,
+        domains: vec![],
+        carried_consumer_domain_count: 0,
+        globally_advanced_domain_count: 0,
+        all_consumers_statically_accounted_domain_count: 0,
+        unresolved_consumer_domain_count: 0,
+        current_candidate_historical_runtime_role_count: 0,
+        final_artifact_runtime_bound_role_count: 0,
+        all_required_consumers_statically_accounted: true,
+        current_candidate_runtime_evidence_inherited: false,
+        final_artifact_runtime_replay_required: true,
+    };
+
+    let error = plan
+        .bind_final_artifact_runtime_roles(
+            &BTreeSet::from(["unknown".to_owned()]),
+            &BTreeSet::new(),
+        )
+        .err()
+        .unwrap();
+    assert!(
+        error
+            .to_string()
+            .contains("unknown translation screen roles")
+    );
+}

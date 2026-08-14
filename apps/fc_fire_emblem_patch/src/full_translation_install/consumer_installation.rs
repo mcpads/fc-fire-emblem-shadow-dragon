@@ -93,6 +93,47 @@ impl ConsumerInstallationPlan {
                             < domain.target_unit_count)
             })
     }
+
+    pub(super) fn bind_final_artifact_runtime_roles(
+        &mut self,
+        observed_roles: &BTreeSet<String>,
+        registered_roles: &BTreeSet<String>,
+    ) -> Result<()> {
+        let target_roles = self
+            .domains
+            .iter()
+            .flat_map(|domain| domain.target_screen_roles.iter().cloned())
+            .collect::<BTreeSet<_>>();
+        let unknown_roles = observed_roles
+            .difference(registered_roles)
+            .cloned()
+            .collect::<Vec<_>>();
+        ensure!(
+            unknown_roles.is_empty(),
+            "final-artifact runtime evidence names unknown translation screen roles: {}",
+            unknown_roles.join(", ")
+        );
+
+        for domain in &mut self.domains {
+            domain.final_artifact_runtime_bound_screen_roles = domain
+                .target_screen_roles
+                .iter()
+                .filter(|role| observed_roles.contains(*role))
+                .cloned()
+                .collect();
+        }
+        let required_observed_roles = observed_roles
+            .intersection(&target_roles)
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        self.final_artifact_runtime_bound_role_count = required_observed_roles.len();
+        self.final_artifact_runtime_replay_required = required_observed_roles != target_roles;
+        Ok(())
+    }
+
+    pub(super) fn final_artifact_runtime_replay_required(&self) -> bool {
+        self.final_artifact_runtime_replay_required
+    }
 }
 
 pub(super) fn plan_consumer_installation(

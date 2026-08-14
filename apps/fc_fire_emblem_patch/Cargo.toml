@@ -15,3 +15,4 @@ typed-isa-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha1.workspace = true
+sha2.workspace = true

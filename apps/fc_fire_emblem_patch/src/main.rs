@@ -331,6 +331,9 @@ enum Command {
         current_candidate: PathBuf,
         #[arg(long, default_value = "out/kr-patch-build.json")]
         current_build_report: PathBuf,
+        /// Bind private cold-route observations to the exact integrated image.
+        #[arg(long)]
+        final_runtime_evidence: Option<PathBuf>,
         #[arg(long, default_value = "out/full-translation-installation.json")]
         report: PathBuf,
     },
@@ -1211,6 +1214,7 @@ fn main() -> Result<()> {
             location_name_localization,
             current_candidate,
             current_build_report,
+            final_runtime_evidence,
             report,
         } => {
             let summary = full_translation_install::plan_full_translation_installation(
@@ -1228,6 +1232,7 @@ fn main() -> Result<()> {
                     location_name_localization_path: &location_name_localization,
                     current_candidate_path: &current_candidate,
                     current_build_report_path: &current_build_report,
+                    final_runtime_evidence_path: final_runtime_evidence.as_deref(),
                     report_path: &report,
                     output_path: output.as_deref(),
                 },

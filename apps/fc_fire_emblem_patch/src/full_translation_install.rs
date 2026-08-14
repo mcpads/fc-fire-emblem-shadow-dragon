@@ -39,6 +39,7 @@ mod dynamic_composition;
 mod dynamic_input_producers;
 mod dynamic_inputs;
 mod ending_record_projection;
+mod final_runtime_evidence;
 mod fixed_ui_projection;
 mod installation_layout;
 mod integrated_write_set;
@@ -75,6 +76,7 @@ use dynamic_inputs::{
 use ending_record_projection::{
     EndingRecordProjectionInputs, EndingRecordProjectionPlan, plan_ending_record_projection,
 };
+use final_runtime_evidence::{FinalArtifactRuntimeEvidence, load_final_artifact_runtime_evidence};
 use fixed_ui_projection::{
     FixedUiProjectionInputs, FixedUiProjectionPlan, plan_fixed_ui_projection,
 };
@@ -133,6 +135,7 @@ pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) location_name_localization_path: &'a Path,
     pub(crate) current_candidate_path: &'a Path,
     pub(crate) current_build_report_path: &'a Path,
+    pub(crate) final_runtime_evidence_path: Option<&'a Path>,
     pub(crate) report_path: &'a Path,
     /// 모든 정적 게이트를 통과한 통합 이미지를 명시적으로 쓸 자리다.
     pub(crate) output_path: Option<&'a Path>,
@@ -175,6 +178,7 @@ struct FullTranslationInstallReport {
     dialogue_runtime_state_storage: DialogueRuntimeStateStoragePlan,
     dialogue_runtime_composition: DialogueRuntimeComposition,
     consumer_installation: ConsumerInstallationPlan,
+    final_artifact_runtime_evidence: FinalArtifactRuntimeEvidence,
     dialogue_storage: DialogueStorage,
     installation_gates: InstallationGates,
     rom_emitted: bool,
@@ -817,7 +821,7 @@ pub(crate) fn plan_full_translation_installation(
             );
         }
     }
-    let consumer_installation = plan_consumer_installation(ConsumerInstallationInputs {
+    let mut consumer_installation = plan_consumer_installation(ConsumerInstallationInputs {
         current_candidate_path: inputs.current_candidate_path,
         current_build_report_path: inputs.current_build_report_path,
         required_domains: &REQUIRED_DOMAINS,
@@ -870,7 +874,34 @@ pub(crate) fn plan_full_translation_installation(
         && translation_input_complete;
     let all_required_consumers_statically_accounted =
         consumer_installation.all_required_consumers_statically_accounted();
+    let integrated_image_sha1 = sha1_hex(&installed_image);
+    let final_artifact_runtime_evidence = load_final_artifact_runtime_evidence(
+        inputs.final_runtime_evidence_path,
+        &integrated_image_sha1,
+    )?;
+    let registered_runtime_screen_roles =
+        crate::translation_coverage::inspect_domain_screen_targets()?
+            .into_iter()
+            .flat_map(|domain| domain.screen_roles)
+            .collect::<BTreeSet<_>>();
+    consumer_installation.bind_final_artifact_runtime_roles(
+        &final_artifact_runtime_evidence.bound_screen_roles(),
+        &registered_runtime_screen_roles,
+    )?;
+    let dynamic_verification_started = final_artifact_runtime_evidence.verification_started();
     let next_gate = if translation_input_complete
+        && runtime_state_storage.selection_complete()
+        && all_required_consumers_statically_accounted
+        && !consumer_installation.final_artifact_runtime_replay_required()
+    {
+        "rebind maximum-dialogue, title, defeat, save, ending, and release regressions to the exact integrated artifact"
+    } else if translation_input_complete
+        && runtime_state_storage.selection_complete()
+        && all_required_consumers_statically_accounted
+        && dynamic_verification_started
+    {
+        "continue representative and worst-case consumer-path replay on the exact integrated artifact"
+    } else if translation_input_complete
         && runtime_state_storage.selection_complete()
         && all_required_consumers_statically_accounted
         && inputs.output_path.is_some()
@@ -888,7 +919,6 @@ pub(crate) fn plan_full_translation_installation(
     } else {
         "author Korean for every untranslated Japanese line before recalculating glyph lifetimes; do not emit or run a partial ROM"
     };
-    let integrated_image_sha1 = sha1_hex(&installed_image);
     let rom_emitted = if let Some(path) = inputs.output_path {
         write_integrated_output(
             path,
@@ -1110,6 +1140,7 @@ pub(crate) fn plan_full_translation_installation(
             main_dialogue_transition_hook_planned: true,
         },
         consumer_installation,
+        final_artifact_runtime_evidence,
         dialogue_storage: DialogueStorage {
             region_count: encoded_display.regions.len(),
             record_count: dialogue.record_ids.len(),
@@ -1139,7 +1170,7 @@ pub(crate) fn plan_full_translation_installation(
             integrated_candidate_ready: all_required_consumers_statically_accounted,
         },
         rom_emitted,
-        dynamic_verification_started: false,
+        dynamic_verification_started,
         next_gate,
     };
     let mut report_bytes =
