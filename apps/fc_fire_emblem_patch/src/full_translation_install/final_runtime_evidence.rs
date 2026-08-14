@@ -12,6 +12,8 @@ use crate::sha1_hex;
 
 const MINIMUM_IRREGULAR_SAMPLE_COUNT: usize = 3;
 const MULTI_PAGE_MAIN_DIALOGUE_ROLE: &str = "chapter_intro_title_dialogue_composite";
+const CHAPTER_CLEAR_EPILOGUE_DIALOGUE_ROLE: &str = "chapter_clear_epilogue_dialogue";
+const MAXIMUM_DIALOGUE_COMPLETED_PAGE_COUNT: usize = 15;
 
 #[derive(Serialize)]
 pub(super) struct FinalArtifactRuntimeEvidence {
@@ -56,6 +58,8 @@ struct ScreenObservation {
     visual_glitch_absent_across_samples: bool,
     #[serde(default)]
     main_dialogue_progression: Option<MainDialogueProgression>,
+    #[serde(default)]
+    maximum_dialogue_progression: Option<MaximumDialogueProgression>,
     samples: Vec<RuntimeSample>,
 }
 
@@ -65,6 +69,13 @@ struct MainDialogueProgression {
     distinct_visible_page_sample_offsets: Vec<u64>,
     following_record_sample_offset: u64,
     role_exit_sample_offset: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MaximumDialogueProgression {
+    completed_page_sample_offsets: Vec<u64>,
+    exit_sample_offset: u64,
 }
 
 #[derive(Clone, Copy, Deserialize, Eq, PartialEq)]
@@ -291,6 +302,78 @@ fn verify_observation(
             progression.following_record_sample_offset < progression.role_exit_sample_offset
                 && sample_offsets.contains(&progression.role_exit_sample_offset),
             "multi-page main-dialogue evidence did not bind a later role-exit sample"
+        );
+    } else {
+        ensure!(
+            observation.main_dialogue_progression.is_none(),
+            "runtime screen {} declares main-dialogue progression for another role",
+            observation.screen_role
+        );
+    }
+    if observation.screen_role == CHAPTER_CLEAR_EPILOGUE_DIALOGUE_ROLE
+        && observation.kind == ObservationKind::WorstCase
+    {
+        let progression = observation
+            .maximum_dialogue_progression
+            .as_ref()
+            .context("maximum-dialogue runtime evidence has no progression result")?;
+        let sample_offsets = observation
+            .samples
+            .iter()
+            .map(|sample| sample.frame_offset)
+            .collect::<BTreeSet<_>>();
+        ensure!(
+            progression.completed_page_sample_offsets.len()
+                == MAXIMUM_DIALOGUE_COMPLETED_PAGE_COUNT,
+            "maximum-dialogue runtime evidence observed {} completed pages instead of {}",
+            progression.completed_page_sample_offsets.len(),
+            MAXIMUM_DIALOGUE_COMPLETED_PAGE_COUNT
+        );
+        ensure!(
+            progression
+                .completed_page_sample_offsets
+                .windows(2)
+                .all(|pair| pair[0] < pair[1]),
+            "maximum-dialogue completed-page samples are not strictly increasing"
+        );
+        ensure!(
+            progression
+                .completed_page_sample_offsets
+                .iter()
+                .all(|offset| sample_offsets.contains(offset)),
+            "maximum-dialogue progression names an unbound completed-page sample"
+        );
+        let completed_page_image_digests = progression
+            .completed_page_sample_offsets
+            .iter()
+            .filter_map(|offset| {
+                observation
+                    .samples
+                    .iter()
+                    .find(|sample| sample.frame_offset == *offset)
+                    .map(|sample| sample.image_sha256.as_str())
+            })
+            .collect::<BTreeSet<_>>();
+        ensure!(
+            completed_page_image_digests.len() == MAXIMUM_DIALOGUE_COMPLETED_PAGE_COUNT,
+            "maximum-dialogue runtime evidence has {} distinct completed-page images instead of {}",
+            completed_page_image_digests.len(),
+            MAXIMUM_DIALOGUE_COMPLETED_PAGE_COUNT
+        );
+        let last_completed_page = *progression
+            .completed_page_sample_offsets
+            .last()
+            .context("maximum-dialogue evidence has no completed-page sample")?;
+        ensure!(
+            last_completed_page < progression.exit_sample_offset
+                && sample_offsets.contains(&progression.exit_sample_offset),
+            "maximum-dialogue evidence did not bind an exit after page 15"
+        );
+    } else {
+        ensure!(
+            observation.maximum_dialogue_progression.is_none(),
+            "runtime screen {} declares maximum-dialogue progression for another role",
+            observation.screen_role
         );
     }
     ensure!(
