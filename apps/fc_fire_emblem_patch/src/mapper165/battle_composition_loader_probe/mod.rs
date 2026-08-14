@@ -176,6 +176,7 @@ struct BattleTextRuntimeBaseContract {
     observed_runtime_tuple_count: usize,
     maximum_observed_overlay_count: usize,
     stable_color_count: usize,
+    borrowed_logical_code_count: usize,
     canonical_code_table_byte_count: usize,
     canonical_code_table_cpu_address_hex: String,
     protected_abstract_color_count: usize,
@@ -622,7 +623,7 @@ fn validate_base_contract(
     actual_sha1: &str,
 ) -> Result<()> {
     ensure!(
-        contract.schema == 2
+        contract.schema == 3
             && contract.source_sha1 == EXPECTED_SOURCE_SHA1
             && contract.output_sha1 == actual_sha1
             && contract.output_mapper == OUTPUT_MAPPER
@@ -631,6 +632,10 @@ fn validate_base_contract(
     );
     ensure!(
         contract.stable_color_count == contract.canonical_code_table_byte_count
+            && contract.borrowed_logical_code_count
+                == contract
+                    .stable_color_count
+                    .saturating_sub(crate::font_slots::ACTIVE_HANGUL_SLOT_COUNT)
             && contract.canonical_code_table_cpu_address_hex
                 == format!("0x{PHYSICAL_CODE_TABLE_CPU_ADDRESS:04X}"),
         "battle composition loader canonical table contract changed"

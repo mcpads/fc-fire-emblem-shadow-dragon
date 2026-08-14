@@ -940,11 +940,12 @@ fn main() -> Result<()> {
             println!("wrote {}", report.display());
             println!("report SHA-1: {}", summary.report_sha1);
             println!(
-                "battle surface constraints: {} samples, {} runtime tuples, {:?} constrained colors, physical assignment {:?}",
+                "battle surface constraints: {} samples, {} runtime tuples, maximum {} selected colors, maximum {} remap pairs, assignment catalog {}",
                 summary.sample_count,
                 summary.runtime_tuple_count,
-                summary.constrained_color_count,
-                summary.physical_assignment_sha1
+                summary.maximum_selected_color_count,
+                summary.maximum_remap_pair_count,
+                summary.dynamic_assignment_catalog_sha1,
             );
         }
         Command::BuildBattleTextCacheBase {

@@ -8,7 +8,7 @@ use crate::{
         FORECAST_LABEL_FILE_OFFSET, FORECAST_LABEL_GLYPHS, FORECAST_LABEL_SOURCE,
     },
     dialogue_assets::plan_battle_dialogue_records,
-    font_slots::{ACTIVE_HANGUL_SLOT_COUNT, FONT_PAGE_SIZE},
+    font_slots::FONT_PAGE_SIZE,
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
     temporal_surface::load_observed_battle_temporal_evidence,
@@ -23,9 +23,9 @@ use super::{
         surface_constraints::select_observed_battle_surfaces,
     },
     battle_text_cache_probe::{
-        COLOR_BIT_MASKS, COLOR_BIT_MASKS_CPU_ADDRESS, COLOR_BIT_MASKS_PRG_OFFSET,
-        DynamicAssignmentMaterial, GLYPH_ATLAS_MMC3_PAGE, GLYPH_ATLAS_PRG_OFFSET,
-        PHYSICAL_CODE_TABLE_CPU_ADDRESS, PHYSICAL_CODE_TABLE_PRG_OFFSET,
+        CANONICAL_ABSTRACT_COLOR_COUNT, COLOR_BIT_MASKS, COLOR_BIT_MASKS_CPU_ADDRESS,
+        COLOR_BIT_MASKS_PRG_OFFSET, DynamicAssignmentMaterial, GLYPH_ATLAS_MMC3_PAGE,
+        GLYPH_ATLAS_PRG_OFFSET, PHYSICAL_CODE_TABLE_CPU_ADDRESS, PHYSICAL_CODE_TABLE_PRG_OFFSET,
         PROTECTED_ABSTRACT_COLORS_CPU_ADDRESS, PROTECTED_ABSTRACT_COLORS_PRG_OFFSET,
         RECIPE_BLOB_MMC3_PAGE, RECIPE_BLOB_PRG_OFFSET, SAFE_ABSTRACT_COLORS_CPU_ADDRESS,
         SAFE_ABSTRACT_COLORS_PRG_OFFSET, SOURCE_PAGE_MMC3_PAGE, SOURCE_PAGE_PRG_OFFSET,
@@ -33,6 +33,9 @@ use super::{
     },
     dialogue_probe_font::SOURCE_FONT_PHYSICAL_PAGE,
 };
+
+#[cfg(test)]
+use super::battle_text_cache_probe::{PROTECTED_ABSTRACT_COLOR_COUNT, SAFE_ABSTRACT_COLOR_COUNT};
 
 const EXPANDED_PRG_SIZE: usize = 512 * 1024;
 const FIXED_BANK_SIZE: usize = 16 * 1024;
@@ -68,6 +71,7 @@ struct BattleTextRuntimeBaseReport {
     observed_runtime_tuple_count: usize,
     maximum_observed_overlay_count: usize,
     stable_color_count: usize,
+    borrowed_logical_code_count: usize,
     abstract_assignment_sha1: String,
     canonical_assignment_sha1: String,
     canonical_code_table_byte_count: usize,
@@ -143,8 +147,8 @@ pub(crate) fn build_battle_text_runtime_base(
     let observed = select_observed_battle_surfaces(&source_rom, &material, &evidence)?;
     let codebook = plan_canonical_battle_codebook(&source_rom, &fixed, &dialogue)?;
     ensure!(
-        codebook.color_codes.len() == ACTIVE_HANGUL_SLOT_COUNT,
-        "battle runtime base canonical table does not fill the active codebook"
+        codebook.color_codes.len() == CANONICAL_ABSTRACT_COLOR_COUNT,
+        "battle runtime base canonical table does not fill the logical codebook"
     );
     ensure!(
         codebook
@@ -278,7 +282,7 @@ pub(crate) fn build_battle_text_runtime_base(
 
     let output_sha1 = sha1_hex(&output);
     let report = BattleTextRuntimeBaseReport {
-        schema: 2,
+        schema: 3,
         source_sha1: EXPECTED_SOURCE_SHA1,
         fixed_workspace_sha1: sha1_hex(&fs::read(fixed_workspace_path)?),
         dialogue_workspace_sha1: sha1_hex(&fs::read(dialogue_workspace_path)?),
@@ -306,6 +310,7 @@ pub(crate) fn build_battle_text_runtime_base(
         observed_runtime_tuple_count: observed.runtime_input_count,
         maximum_observed_overlay_count: observed.maximum_selected_overlay_count,
         stable_color_count: codebook.stable_color_count,
+        borrowed_logical_code_count: codebook.borrowed_logical_code_count,
         abstract_assignment_sha1: codebook.abstract_assignment_sha1,
         canonical_assignment_sha1: codebook.canonical_assignment_sha1,
         canonical_code_table_byte_count: codebook.color_codes.len(),
@@ -542,7 +547,7 @@ mod tests {
     #[test]
     fn report_omits_translation_content_and_private_paths() {
         let report = BattleTextRuntimeBaseReport {
-            schema: 2,
+            schema: 3,
             source_sha1: EXPECTED_SOURCE_SHA1,
             fixed_workspace_sha1: "fixed".to_owned(),
             dialogue_workspace_sha1: "dialogue".to_owned(),
@@ -569,22 +574,27 @@ mod tests {
             observed_battle_sample_count: 32,
             observed_runtime_tuple_count: 5,
             maximum_observed_overlay_count: 88,
-            stable_color_count: ACTIVE_HANGUL_SLOT_COUNT,
+            stable_color_count: CANONICAL_ABSTRACT_COLOR_COUNT,
+            borrowed_logical_code_count: 2,
             abstract_assignment_sha1: "abstract".to_owned(),
             canonical_assignment_sha1: "canonical".to_owned(),
-            canonical_code_table_byte_count: ACTIVE_HANGUL_SLOT_COUNT,
+            canonical_code_table_byte_count: CANONICAL_ABSTRACT_COLOR_COUNT,
             canonical_code_table_sha1: "table".to_owned(),
             canonical_code_table_cpu_address_hex: "0x9400".to_owned(),
             protected_physical_code_count: 39,
-            protected_abstract_color_count: 39,
+            protected_abstract_color_count: PROTECTED_ABSTRACT_COLOR_COUNT,
             protected_abstract_colors_sha1: "protected".to_owned(),
-            protected_abstract_colors_cpu_address_hex: "0x94D2".to_owned(),
-            safe_abstract_color_count: 171,
+            protected_abstract_colors_cpu_address_hex: format!(
+                "0x{PROTECTED_ABSTRACT_COLORS_CPU_ADDRESS:04X}"
+            ),
+            safe_abstract_color_count: SAFE_ABSTRACT_COLOR_COUNT,
             safe_abstract_colors_sha1: "safe".to_owned(),
-            safe_abstract_colors_cpu_address_hex: "0x94F9".to_owned(),
+            safe_abstract_colors_cpu_address_hex: format!(
+                "0x{SAFE_ABSTRACT_COLORS_CPU_ADDRESS:04X}"
+            ),
             color_bit_mask_byte_count: 8,
             color_bit_masks_sha1: "masks".to_owned(),
-            color_bit_masks_cpu_address_hex: "0x95A4".to_owned(),
+            color_bit_masks_cpu_address_hex: format!("0x{COLOR_BIT_MASKS_CPU_ADDRESS:04X}"),
             maximum_remap_pair_count: 8,
             glyph_atlas_tile_count: 296,
             glyph_atlas_byte_count: 4736,

@@ -20,10 +20,15 @@ use super::{
     ScreenCodeConstraint,
     background_ownership::bind_battle_background_code_ownership,
     composition::{BattleRuntimeRecipeInput, BattleRuntimeRecipeSelection},
-    physical_assignment::assign_physical_codes,
     plan_battle_codebook_model,
     protected_color_placement::plan_protected_color_placement,
     selected_physical_assignment::prove_selected_assignment_capacity,
+};
+
+mod dynamic_assignment_catalog;
+
+use dynamic_assignment_catalog::{
+    RouteDynamicAssignmentCoverage, catalog_observed_dynamic_assignments,
 };
 
 #[derive(Debug, Serialize)]
@@ -50,8 +55,7 @@ struct BattleSurfaceConstraintReport {
     remap_storage: super::remap_storage::BattleRemapStorageContract,
     protected_color_placement: super::protected_color_placement::ProtectedColorPlacementReport,
     physical_assignment_architecture: PhysicalAssignmentArchitecture,
-    route_assignment_feasibility: Vec<RouteAssignmentFeasibility>,
-    gameplay_routes_combined_assignment: RouteAssignmentFeasibility,
+    route_dynamic_assignment_coverage: Vec<RouteDynamicAssignmentCoverage>,
     minimum_observed_active_code_count: usize,
     maximum_observed_active_code_count: usize,
     minimum_observed_japanese_text_code_count: usize,
@@ -64,9 +68,10 @@ struct BattleSurfaceConstraintReport {
     nametable_constrained_sample_count: usize,
     visible_oam_constrained_sample_count: usize,
     abstract_assignment_sha1: String,
-    physical_assignment_sha1: Option<String>,
+    observed_dynamic_assignment_catalog_sha1: String,
     stable_color_count: usize,
-    constrained_color_count: Option<usize>,
+    observed_maximum_selected_color_count: usize,
+    observed_maximum_remap_pair_count: usize,
     conservative_text_overlay_count: usize,
     exact_modeled_text_overlay_count: usize,
     observed_maximum_combined_slot_demand: usize,
@@ -82,10 +87,10 @@ struct BattleSurfaceConstraintReport {
     observed_japanese_codes_reclaimed_for_translation: bool,
     every_observed_recipe_resolved: bool,
     runtime_selection_uses_source_bound_dialogue_projection: bool,
-    combined_physical_assignment_found: bool,
+    every_observed_sample_has_dynamic_assignment: bool,
     observed_route_catalog_complete: bool,
     global_background_capacity_bound_complete: bool,
-    physical_assignment_catalog_complete: bool,
+    observed_dynamic_assignment_catalog_complete: bool,
     glyph_characters_emitted: bool,
     translation_text_emitted: bool,
     runtime_verified: bool,
@@ -94,20 +99,13 @@ struct BattleSurfaceConstraintReport {
 }
 
 #[derive(Debug, Serialize)]
-struct RouteAssignmentFeasibility {
-    route_role: String,
-    sample_count: usize,
-    physical_assignment_found: bool,
-    physical_assignment_sha1: Option<String>,
-    constrained_color_count: Option<usize>,
-}
-
-#[derive(Debug, Serialize)]
 struct PhysicalAssignmentArchitecture {
     static_abstract_color_count: usize,
-    canonical_text_code_count: usize,
-    conservative_preserved_code_count: usize,
-    static_safe_code_count: usize,
+    active_physical_code_count: usize,
+    borrowed_logical_code_count: usize,
+    protected_abstract_color_count: usize,
+    protected_physical_code_count: usize,
+    safe_physical_code_count: usize,
     static_full_model_assignment_infeasible: bool,
     conservative_per_battle_text_code_count: usize,
     conservative_per_battle_combined_code_count: usize,
@@ -124,15 +122,16 @@ struct PhysicalAssignmentArchitecture {
     dynamic_per_battle_assignment_capacity_proven: bool,
     selected_assignment_algorithm_complete: bool,
     selected_strategy: &'static str,
-    observed_static_assignment_is_release_architecture: bool,
+    per_battle_dynamic_assignment_is_release_architecture: bool,
 }
 
 pub(crate) struct BattleSurfaceConstraintSummary {
     pub(crate) report_sha1: String,
     pub(crate) sample_count: usize,
     pub(crate) runtime_tuple_count: usize,
-    pub(crate) physical_assignment_sha1: Option<String>,
-    pub(crate) constrained_color_count: Option<usize>,
+    pub(crate) dynamic_assignment_catalog_sha1: String,
+    pub(crate) maximum_selected_color_count: usize,
+    pub(crate) maximum_remap_pair_count: usize,
 }
 
 pub(in crate::mapper165) struct ObservedBattleSurfaceSelection {
@@ -305,65 +304,6 @@ pub(crate) fn analyze_battle_surface_constraints(
             .collect(),
         "observed battle constraints do not cover both gameplay polarities and the shared sound-test route"
     );
-    let route_assignment_feasibility = route_sample_counts
-        .iter()
-        .map(|(route_role, sample_count)| {
-            let route_constraints = constraints
-                .iter()
-                .filter(|(candidate, _)| candidate == route_role)
-                .map(|(_, constraint)| ScreenCodeConstraint {
-                    glyphs: constraint.glyphs.clone(),
-                    preserved_active_codes: constraint.preserved_active_codes.clone(),
-                })
-                .collect::<Vec<_>>();
-            let physical = assign_physical_codes(&model.coloring, &route_constraints).ok();
-            RouteAssignmentFeasibility {
-                route_role: route_role.clone(),
-                sample_count: *sample_count,
-                physical_assignment_found: physical.is_some(),
-                physical_assignment_sha1: physical
-                    .as_ref()
-                    .map(|assignment| assignment.assignment_sha1.clone()),
-                constrained_color_count: physical
-                    .as_ref()
-                    .map(|assignment| assignment.constrained_color_count),
-            }
-        })
-        .collect::<Vec<_>>();
-    let gameplay_constraints = constraints
-        .iter()
-        .filter(|(route_role, _)| route_role.starts_with("gameplay_battle_"))
-        .map(|(_, constraint)| ScreenCodeConstraint {
-            glyphs: constraint.glyphs.clone(),
-            preserved_active_codes: constraint.preserved_active_codes.clone(),
-        })
-        .collect::<Vec<_>>();
-    let gameplay_physical = assign_physical_codes(&model.coloring, &gameplay_constraints).ok();
-    let gameplay_routes_combined_assignment = RouteAssignmentFeasibility {
-        route_role: "gameplay_battle_polarities_combined".to_owned(),
-        sample_count: gameplay_constraints.len(),
-        physical_assignment_found: gameplay_physical.is_some(),
-        physical_assignment_sha1: gameplay_physical
-            .as_ref()
-            .map(|assignment| assignment.assignment_sha1.clone()),
-        constrained_color_count: gameplay_physical
-            .as_ref()
-            .map(|assignment| assignment.constrained_color_count),
-    };
-    let all_constraints = constraints
-        .iter()
-        .map(|(_, constraint)| ScreenCodeConstraint {
-            glyphs: constraint.glyphs.clone(),
-            preserved_active_codes: constraint.preserved_active_codes.clone(),
-        })
-        .collect::<Vec<_>>();
-    let physical = assign_physical_codes(&model.coloring, &all_constraints).ok();
-    let physical_assignment_sha1 = physical
-        .as_ref()
-        .map(|assignment| assignment.assignment_sha1.clone());
-    let constrained_color_count = physical
-        .as_ref()
-        .map(|assignment| assignment.constrained_color_count);
     let conservative_text_overlay_count = model.runtime_demand.maximum_overlay_glyph_count();
     let exact_modeled_text_overlay_count = model.runtime_demand.exact_maximum_overlay_glyph_count();
     let observed_maximum_combined_slot_demand = conservative_text_overlay_count
@@ -403,6 +343,7 @@ pub(crate) fn analyze_battle_surface_constraints(
         &model.glyph_families,
         &model.coloring,
         &ownership.conservative_global_preserved_active_codes(),
+        &super::preserved_battle_literal_codes(&fixed, &dialogue),
     )?;
     ensure!(
         protected_color_placement.canonical_color_codes.len() == model.coloring.color_count,
@@ -418,8 +359,24 @@ pub(crate) fn analyze_battle_surface_constraints(
             == ACTIVE_HANGUL_SLOT_COUNT - conservative_global_combined_slot_demand,
         "selected battle assignment proof disagrees with the global capacity bound"
     );
+    let dynamic_assignments = catalog_observed_dynamic_assignments(
+        &constraints,
+        &model.coloring,
+        &protected_color_placement.canonical_color_codes,
+        &protected_color_placement.protected_abstract_colors,
+        remap_storage.maximum_remap_pair_count(),
+    )?;
+    ensure!(
+        dynamic_assignments.maximum_selected_color_count <= conservative_text_overlay_count,
+        "observed battle selected-color count exceeds the conservative runtime bound"
+    );
+    ensure!(
+        dynamic_assignments.maximum_remap_pair_count
+            <= protected_color_placement.conservative_collision_count,
+        "observed battle remap demand exceeds the modeled collision bound"
+    );
     let report = BattleSurfaceConstraintReport {
-        schema: 12,
+        schema: 13,
         source_sha1: EXPECTED_SOURCE_SHA1,
         fixed_workspace_sha1: sha1_hex(&fs::read(fixed_workspace_path)?),
         dialogue_workspace_sha1: sha1_hex(&fs::read(dialogue_workspace_path)?),
@@ -443,10 +400,13 @@ pub(crate) fn analyze_battle_surface_constraints(
         protected_color_placement: protected_color_placement.report,
         physical_assignment_architecture: PhysicalAssignmentArchitecture {
             static_abstract_color_count: model.coloring.color_count,
-            canonical_text_code_count: selected_assignment_capacity.safe_code_count
-                + selected_assignment_capacity.protected_code_count,
-            conservative_preserved_code_count: selected_assignment_capacity.protected_code_count,
-            static_safe_code_count: selected_assignment_capacity.safe_code_count,
+            active_physical_code_count: ACTIVE_HANGUL_SLOT_COUNT,
+            borrowed_logical_code_count: model.coloring.color_count - ACTIVE_HANGUL_SLOT_COUNT,
+            protected_abstract_color_count: selected_assignment_capacity.protected_code_count
+                + model.coloring.color_count
+                - ACTIVE_HANGUL_SLOT_COUNT,
+            protected_physical_code_count: selected_assignment_capacity.protected_code_count,
+            safe_physical_code_count: selected_assignment_capacity.safe_code_count,
             static_full_model_assignment_infeasible: model.coloring.color_count
                 > static_safe_code_count,
             conservative_per_battle_text_code_count: selected_assignment_capacity
@@ -473,10 +433,9 @@ pub(crate) fn analyze_battle_surface_constraints(
             dynamic_per_battle_assignment_capacity_proven: true,
             selected_assignment_algorithm_complete: true,
             selected_strategy: "place preserved physical codes on abstract colors outside the always-live common set, encode text with that canonical permutation, and keep a counted pair only for selected canonical codes that collide",
-            observed_static_assignment_is_release_architecture: false,
+            per_battle_dynamic_assignment_is_release_architecture: true,
         },
-        route_assignment_feasibility,
-        gameplay_routes_combined_assignment,
+        route_dynamic_assignment_coverage: dynamic_assignments.route_coverage,
         minimum_observed_active_code_count,
         maximum_observed_active_code_count,
         minimum_observed_japanese_text_code_count,
@@ -489,9 +448,10 @@ pub(crate) fn analyze_battle_surface_constraints(
         nametable_constrained_sample_count,
         visible_oam_constrained_sample_count,
         abstract_assignment_sha1: model.coloring.assignment_sha1,
-        physical_assignment_sha1: physical_assignment_sha1.clone(),
+        observed_dynamic_assignment_catalog_sha1: dynamic_assignments.catalog_sha1.clone(),
         stable_color_count: model.coloring.color_count,
-        constrained_color_count,
+        observed_maximum_selected_color_count: dynamic_assignments.maximum_selected_color_count,
+        observed_maximum_remap_pair_count: dynamic_assignments.maximum_remap_pair_count,
         conservative_text_overlay_count,
         exact_modeled_text_overlay_count,
         observed_maximum_combined_slot_demand,
@@ -510,19 +470,15 @@ pub(crate) fn analyze_battle_surface_constraints(
         observed_japanese_codes_reclaimed_for_translation: true,
         every_observed_recipe_resolved: true,
         runtime_selection_uses_source_bound_dialogue_projection: true,
-        combined_physical_assignment_found: physical.is_some(),
+        every_observed_sample_has_dynamic_assignment: true,
         observed_route_catalog_complete: true,
         global_background_capacity_bound_complete: true,
-        physical_assignment_catalog_complete: false,
+        observed_dynamic_assignment_catalog_complete: true,
         glyph_characters_emitted: false,
         translation_text_emitted: false,
         runtime_verified: false,
         release_eligible: false,
-        next_gate: if physical.is_some() {
-            "separate translated Korean code ownership from preserved literal English and numeric codes at the shared renderer, then prove visible battle legibility before installing the remaining translation domains"
-        } else {
-            "separate translated text producers from preserved graphics in the admitted temporal samples before extending the visual-variant catalog or installing the runtime loader"
-        },
+        next_gate: "replay every admitted battle route on the same cumulative artifact, then install the remaining translation-domain consumers",
     };
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize battle surface constraints")?;
@@ -536,8 +492,9 @@ pub(crate) fn analyze_battle_surface_constraints(
         report_sha1: sha1_hex(&report_bytes),
         sample_count: evidence.samples.len(),
         runtime_tuple_count: selection.runtime_input_count,
-        physical_assignment_sha1,
-        constrained_color_count,
+        dynamic_assignment_catalog_sha1: dynamic_assignments.catalog_sha1,
+        maximum_selected_color_count: dynamic_assignments.maximum_selected_color_count,
+        maximum_remap_pair_count: dynamic_assignments.maximum_remap_pair_count,
     })
 }
 
@@ -574,7 +531,7 @@ mod tests {
     #[test]
     fn serialized_report_omits_translation_content_and_private_paths() {
         let report = BattleSurfaceConstraintReport {
-            schema: 12,
+            schema: 13,
             source_sha1: EXPECTED_SOURCE_SHA1,
             fixed_workspace_sha1: "fixed".to_owned(),
             dialogue_workspace_sha1: "dialogue".to_owned(),
@@ -621,9 +578,11 @@ mod tests {
             protected_color_placement: super::super::protected_color_placement::test_report(),
             physical_assignment_architecture: PhysicalAssignmentArchitecture {
                 static_abstract_color_count: 210,
-                canonical_text_code_count: 210,
-                conservative_preserved_code_count: 39,
-                static_safe_code_count: 171,
+                active_physical_code_count: 210,
+                borrowed_logical_code_count: 0,
+                protected_abstract_color_count: 39,
+                protected_physical_code_count: 39,
+                safe_physical_code_count: 171,
                 static_full_model_assignment_infeasible: true,
                 conservative_per_battle_text_code_count: 134,
                 conservative_per_battle_combined_code_count: 173,
@@ -640,22 +599,16 @@ mod tests {
                 dynamic_per_battle_assignment_capacity_proven: true,
                 selected_assignment_algorithm_complete: true,
                 selected_strategy: "dynamic",
-                observed_static_assignment_is_release_architecture: false,
+                per_battle_dynamic_assignment_is_release_architecture: true,
             },
-            route_assignment_feasibility: vec![RouteAssignmentFeasibility {
+            route_dynamic_assignment_coverage: vec![RouteDynamicAssignmentCoverage {
                 route_role: "battle".to_owned(),
                 sample_count: 1,
-                physical_assignment_found: true,
-                physical_assignment_sha1: Some("physical".to_owned()),
-                constrained_color_count: Some(3),
+                every_sample_assignment_found: true,
+                assignment_catalog_sha1: "physical".to_owned(),
+                maximum_selected_color_count: 3,
+                maximum_remap_pair_count: 1,
             }],
-            gameplay_routes_combined_assignment: RouteAssignmentFeasibility {
-                route_role: "gameplay_battle_polarities_combined".to_owned(),
-                sample_count: 1,
-                physical_assignment_found: true,
-                physical_assignment_sha1: Some("physical".to_owned()),
-                constrained_color_count: Some(3),
-            },
             minimum_observed_active_code_count: 2,
             maximum_observed_active_code_count: 3,
             minimum_observed_japanese_text_code_count: 1,
@@ -668,9 +621,10 @@ mod tests {
             nametable_constrained_sample_count: 1,
             visible_oam_constrained_sample_count: 0,
             abstract_assignment_sha1: "abstract".to_owned(),
-            physical_assignment_sha1: Some("physical".to_owned()),
+            observed_dynamic_assignment_catalog_sha1: "physical".to_owned(),
             stable_color_count: 3,
-            constrained_color_count: Some(3),
+            observed_maximum_selected_color_count: 3,
+            observed_maximum_remap_pair_count: 1,
             conservative_text_overlay_count: 2,
             exact_modeled_text_overlay_count: 1,
             observed_maximum_combined_slot_demand: 4,
@@ -686,10 +640,10 @@ mod tests {
             observed_japanese_codes_reclaimed_for_translation: true,
             every_observed_recipe_resolved: true,
             runtime_selection_uses_source_bound_dialogue_projection: true,
-            combined_physical_assignment_found: true,
+            every_observed_sample_has_dynamic_assignment: true,
             observed_route_catalog_complete: true,
             global_background_capacity_bound_complete: true,
-            physical_assignment_catalog_complete: false,
+            observed_dynamic_assignment_catalog_complete: true,
             glyph_characters_emitted: false,
             translation_text_emitted: false,
             runtime_verified: false,

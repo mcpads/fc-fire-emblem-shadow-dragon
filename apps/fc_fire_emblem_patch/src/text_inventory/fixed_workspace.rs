@@ -131,6 +131,17 @@ impl FixedTextPlan {
             .collect()
     }
 
+    pub(crate) fn encoded_literal_codes(&self) -> BTreeSet<u8> {
+        self.entries
+            .iter()
+            .flat_map(|entry| &entry.logical_bytes)
+            .filter_map(|byte| match byte {
+                FixedTextLogicalByte::Encoded(value) => Some(*value),
+                FixedTextLogicalByte::TargetGlyph(_) => None,
+            })
+            .collect()
+    }
+
     pub(crate) fn table_max_entry_glyph_count(&self, table_id: &str) -> usize {
         self.entries
             .iter()

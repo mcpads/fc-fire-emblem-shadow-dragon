@@ -52,6 +52,12 @@ pub(super) struct BattleRemapStorageContract {
     runtime_verified: bool,
 }
 
+impl BattleRemapStorageContract {
+    pub(super) fn maximum_remap_pair_count(&self) -> usize {
+        self.maximum_remap_pair_count
+    }
+}
+
 pub(super) fn bind_battle_remap_storage(
     rom: &Rom,
     background: &BattleBackgroundPayloadModel,

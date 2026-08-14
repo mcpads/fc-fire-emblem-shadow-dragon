@@ -7,11 +7,17 @@ use crate::{font_slots::active_hangul_codes, sha1_hex};
 
 use super::conflict_graph::{BattleGlyphFamilies, StableColoringPlan};
 
+mod borrowed_logical_codes;
+
+use borrowed_logical_codes::select_source_safe_borrowed_codes;
+
 const COLOR_MASK_WORD_COUNT: usize = 4;
 
 #[derive(Debug)]
 pub(super) struct ProtectedColorPlacementPlan {
     pub(super) canonical_color_codes: Vec<u8>,
+    pub(super) protected_abstract_colors: Vec<u8>,
+    pub(super) borrowed_logical_code_count: usize,
     pub(super) conservative_collision_count: usize,
     pub(super) report: ProtectedColorPlacementReport,
 }
@@ -20,6 +26,10 @@ pub(super) struct ProtectedColorPlacementPlan {
 pub(super) struct ProtectedColorPlacementReport {
     strategy: &'static str,
     abstract_color_count: usize,
+    active_physical_code_count: usize,
+    borrowed_logical_code_count: usize,
+    borrowed_logical_codes_sha1: String,
+    preserved_literal_code_count: usize,
     protected_physical_code_count: usize,
     protected_abstract_color_count: usize,
     common_protected_color_count: usize,
@@ -40,6 +50,10 @@ pub(super) fn test_report() -> ProtectedColorPlacementReport {
     ProtectedColorPlacementReport {
         strategy: "test",
         abstract_color_count: 210,
+        active_physical_code_count: 210,
+        borrowed_logical_code_count: 0,
+        borrowed_logical_codes_sha1: sha1_hex(&[]),
+        preserved_literal_code_count: 0,
         protected_physical_code_count: 39,
         protected_abstract_color_count: 39,
         common_protected_color_count: 0,
@@ -77,17 +91,32 @@ pub(super) fn plan_protected_color_placement(
     families: &BattleGlyphFamilies,
     coloring: &StableColoringPlan,
     protected_physical_codes: &BTreeSet<u8>,
+    preserved_literal_codes: &BTreeSet<u8>,
 ) -> Result<ProtectedColorPlacementPlan> {
     let active_codes = active_hangul_codes();
     let active_set = active_codes.iter().copied().collect::<BTreeSet<_>>();
     ensure!(
-        coloring.color_count == active_codes.len(),
-        "protected battle color placement requires a complete active abstract codebook"
+        coloring.color_count >= active_codes.len() && coloring.color_count <= usize::from(u8::MAX),
+        "protected battle color placement needs {} logical colors outside its supported {}..={} range",
+        coloring.color_count,
+        active_codes.len(),
+        u8::MAX,
     );
     ensure!(
         protected_physical_codes.is_subset(&active_set),
         "protected battle color placement includes a reserved font code"
     );
+    let borrowed_logical_code_count = coloring.color_count - active_codes.len();
+    let borrowed_logical_codes =
+        select_source_safe_borrowed_codes(borrowed_logical_code_count, preserved_literal_codes)?;
+    ensure!(
+        borrowed_logical_codes.is_disjoint(&active_set),
+        "battle borrowed logical codes overlap the active physical code pool"
+    );
+    let protected_source_codes = protected_physical_codes
+        .union(&borrowed_logical_codes)
+        .copied()
+        .collect::<BTreeSet<_>>();
 
     let common = glyph_mask(&families.base, coloring)?;
     let choice_families = vec![
@@ -119,7 +148,7 @@ pub(super) fn plan_protected_color_placement(
     let (selected_colors, common_collision_count, family_collision_counts) =
         select_protected_colors(
             coloring.color_count,
-            protected_physical_codes.len(),
+            protected_source_codes.len(),
             common,
             &choice_families,
         )?;
@@ -142,6 +171,7 @@ pub(super) fn plan_protected_color_placement(
     let canonical_color_codes = assign_canonical_codes(
         coloring.color_count,
         &selected_colors,
+        &protected_source_codes,
         protected_physical_codes,
     )?;
     let selected_color_bytes = selected_colors
@@ -157,10 +187,18 @@ pub(super) fn plan_protected_color_placement(
     let runtime_pair_table_byte_count = 1 + conservative_collision_count * 2;
     Ok(ProtectedColorPlacementPlan {
         canonical_color_codes,
+        protected_abstract_colors: selected_color_bytes.clone(),
+        borrowed_logical_code_count,
         conservative_collision_count,
         report: ProtectedColorPlacementReport {
-            strategy: "exclude always-live common colors, then use deterministic greedy placement to minimize the source-family conservative collision bound and choice occurrence count; no cross-family overlap is credited",
+            strategy: "use source-safe preserved-display codes only for logical colors above the active physical width, then place every protected canonical source code outside always-live common colors and minimize the conservative selected-family remap bound",
             abstract_color_count: coloring.color_count,
+            active_physical_code_count: active_codes.len(),
+            borrowed_logical_code_count,
+            borrowed_logical_codes_sha1: sha1_hex(
+                &borrowed_logical_codes.iter().copied().collect::<Vec<_>>(),
+            ),
+            preserved_literal_code_count: preserved_literal_codes.len(),
             protected_physical_code_count: protected_physical_codes.len(),
             protected_abstract_color_count: selected_colors.len(),
             common_protected_color_count: common_collision_count,
@@ -323,16 +361,18 @@ fn glyph_mask(glyphs: &BTreeSet<char>, coloring: &StableColoringPlan) -> Result<
 fn assign_canonical_codes(
     color_count: usize,
     protected_abstract_colors: &BTreeSet<usize>,
+    protected_source_codes: &BTreeSet<u8>,
     protected_physical_codes: &BTreeSet<u8>,
 ) -> Result<Vec<u8>> {
     ensure!(
-        protected_abstract_colors.len() == protected_physical_codes.len(),
+        protected_abstract_colors.len() == protected_source_codes.len(),
         "protected battle canonical assignment cardinality changed"
     );
     let active_codes = active_hangul_codes();
     ensure!(
-        color_count == active_codes.len(),
-        "protected battle canonical assignment does not cover every active code"
+        color_count
+            == active_codes.len() + protected_source_codes.len() - protected_physical_codes.len(),
+        "protected battle canonical assignment logical and physical partitions disagree"
     );
     let safe_physical_codes = active_codes
         .iter()
@@ -350,7 +390,7 @@ fn assign_canonical_codes(
     for (color, code) in protected_abstract_colors
         .iter()
         .copied()
-        .zip(protected_physical_codes.iter().copied())
+        .zip(protected_source_codes.iter().copied())
     {
         assignments[color] = Some(code);
     }
@@ -403,8 +443,13 @@ mod tests {
         let active = active_hangul_codes();
         let protected_codes = BTreeSet::from([active[1], active[3]]);
         let protected_colors = BTreeSet::from([0, 2]);
-        let assignment =
-            assign_canonical_codes(active.len(), &protected_colors, &protected_codes).unwrap();
+        let assignment = assign_canonical_codes(
+            active.len(),
+            &protected_colors,
+            &protected_codes,
+            &protected_codes,
+        )
+        .unwrap();
 
         assert_eq!(
             protected_colors

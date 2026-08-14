@@ -42,14 +42,18 @@ pub(super) fn assign_selected_physical_codes(
 
 pub(super) fn assign_selected_physical_codes_with_canonical_map(
     selected_abstract_colors: &BTreeSet<u8>,
-    protected_physical_codes: &BTreeSet<u8>,
+    protected_canonical_codes: &BTreeSet<u8>,
     canonical_color_codes: &[u8],
 ) -> Result<SelectedPhysicalCodeAssignment> {
     let active_codes = active_hangul_codes();
     let active_set = active_codes.iter().copied().collect::<BTreeSet<_>>();
+    let canonical_set = canonical_color_codes
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
     ensure!(
-        protected_physical_codes.is_subset(&active_set),
-        "selected battle protection includes a reserved font code"
+        protected_canonical_codes.is_subset(&canonical_set),
+        "selected battle protection includes a code outside the canonical table"
     );
     ensure!(
         selected_abstract_colors
@@ -58,19 +62,18 @@ pub(super) fn assign_selected_physical_codes_with_canonical_map(
         "selected battle contains an abstract color outside the active codebook"
     );
     ensure!(
-        canonical_color_codes.len() == active_codes.len()
-            && canonical_color_codes
-                .iter()
-                .copied()
-                .collect::<BTreeSet<_>>()
-                == active_set,
-        "selected battle canonical code map is not a permutation of the active codes"
+        canonical_set.len() == canonical_color_codes.len() && active_set.is_subset(&canonical_set),
+        "selected battle canonical code map is not unique or does not cover every active code"
     );
+    let protected_active_codes = protected_canonical_codes
+        .intersection(&active_set)
+        .copied()
+        .collect::<BTreeSet<_>>();
     ensure!(
-        selected_abstract_colors.len() + protected_physical_codes.len() <= active_codes.len(),
+        selected_abstract_colors.len() + protected_active_codes.len() <= active_codes.len(),
         "selected battle needs {} text codes plus {} protected codes but only {} active codes exist",
         selected_abstract_colors.len(),
-        protected_physical_codes.len(),
+        protected_active_codes.len(),
         active_codes.len()
     );
 
@@ -89,13 +92,14 @@ pub(super) fn assign_selected_physical_codes_with_canonical_map(
         .iter()
         .copied()
         .filter(|color| {
-            protected_physical_codes.contains(&canonical_color_codes[usize::from(*color)])
+            let canonical = canonical_color_codes[usize::from(*color)];
+            protected_canonical_codes.contains(&canonical) || !active_set.contains(&canonical)
         })
         .collect::<Vec<_>>();
-    let available_safe_codes = canonical_color_codes
+    let available_safe_codes = active_codes
         .iter()
         .copied()
-        .filter(|code| !protected_physical_codes.contains(code))
+        .filter(|code| !protected_active_codes.contains(code))
         .filter(|code| {
             let owner = canonical_code_owners[code];
             !selected_abstract_colors.contains(&owner)
@@ -130,11 +134,12 @@ pub(super) fn assign_selected_physical_codes_with_canonical_map(
         "selected battle physical assignment reused a code"
     );
     ensure!(
-        assigned_codes.is_disjoint(protected_physical_codes),
+        assigned_codes.is_subset(&active_set)
+            && assigned_codes.is_disjoint(&protected_active_codes),
         "selected battle physical assignment overwrites a protected code"
     );
 
-    let protected_code_remap_targets = protected_physical_codes
+    let protected_code_remap_targets = protected_canonical_codes
         .iter()
         .map(|protected_code| {
             let owner = canonical_code_owners[protected_code];
@@ -170,10 +175,10 @@ pub(super) fn assign_selected_physical_codes_with_canonical_map(
         .filter(|(color, code)| canonical_color_codes[usize::from(**color)] == **code)
         .count();
     let remaining_safe_code_count =
-        active_codes.len() - protected_physical_codes.len() - selected_abstract_colors.len();
+        active_codes.len() - protected_active_codes.len() - selected_abstract_colors.len();
     let assignment_sha1 = assignment_sha1(
         &color_codes,
-        protected_physical_codes,
+        protected_canonical_codes,
         &protected_code_remap_targets,
     );
     Ok(SelectedPhysicalCodeAssignment {
@@ -393,5 +398,27 @@ mod tests {
         assert_eq!(assignment.color_codes[&0], canonical[0]);
         assert_eq!(assignment.color_codes[&1], canonical[1]);
         assert_ne!(assignment.color_codes[&10], canonical[10]);
+    }
+
+    #[test]
+    fn borrowed_logical_codes_are_projected_into_unused_active_codes() {
+        let active = active_hangul_codes();
+        let mut canonical = active.clone();
+        canonical.extend([0x60, 0x61]);
+        let selected = BTreeSet::from([0, 210, 211]);
+        let protected = BTreeSet::from([active[0], 0x60, 0x61]);
+
+        let assignment =
+            assign_selected_physical_codes_with_canonical_map(&selected, &protected, &canonical)
+                .unwrap();
+
+        assert_eq!(assignment.collision_count, 3);
+        assert_eq!(assignment.remap_pairs.len(), 3);
+        assert!(
+            assignment
+                .color_codes
+                .values()
+                .all(|code| active.contains(code) && !protected.contains(code))
+        );
     }
 }

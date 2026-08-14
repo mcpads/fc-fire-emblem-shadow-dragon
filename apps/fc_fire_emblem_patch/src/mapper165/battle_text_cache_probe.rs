@@ -6,7 +6,7 @@ use serde::Serialize;
 use crate::{
     dialogue_assets::plan_battle_dialogue_records,
     font::{load_dalmoori, rasterize_glyph},
-    font_slots::{ACTIVE_HANGUL_SLOT_COUNT, FONT_PAGE_SIZE},
+    font_slots::FONT_PAGE_SIZE,
     rom::{EXPECTED_SOURCE_SHA1, HEADER_SIZE, Rom},
     sha1_hex,
     text_inventory::plan_fixed_text,
@@ -26,11 +26,12 @@ pub(super) const GLYPH_ATLAS_MMC3_PAGE: u8 = 0x20;
 const MATERIAL_MMC3_PAGE_SIZE: usize = 8 * 1024;
 pub(super) const PHYSICAL_CODE_TABLE_PRG_OFFSET: usize = GLYPH_ATLAS_PRG_OFFSET + 0x1400;
 pub(super) const PHYSICAL_CODE_TABLE_CPU_ADDRESS: u16 = 0x9400;
+pub(super) const CANONICAL_ABSTRACT_COLOR_COUNT: usize = 212;
 pub(super) const PROTECTED_ABSTRACT_COLORS_PRG_OFFSET: usize =
-    PHYSICAL_CODE_TABLE_PRG_OFFSET + ACTIVE_HANGUL_SLOT_COUNT;
+    PHYSICAL_CODE_TABLE_PRG_OFFSET + CANONICAL_ABSTRACT_COLOR_COUNT;
 pub(super) const PROTECTED_ABSTRACT_COLORS_CPU_ADDRESS: u16 =
-    PHYSICAL_CODE_TABLE_CPU_ADDRESS + ACTIVE_HANGUL_SLOT_COUNT as u16;
-pub(super) const PROTECTED_ABSTRACT_COLOR_COUNT: usize = 39;
+    PHYSICAL_CODE_TABLE_CPU_ADDRESS + CANONICAL_ABSTRACT_COLOR_COUNT as u16;
+pub(super) const PROTECTED_ABSTRACT_COLOR_COUNT: usize = 41;
 pub(super) const SAFE_ABSTRACT_COLORS_PRG_OFFSET: usize =
     PROTECTED_ABSTRACT_COLORS_PRG_OFFSET + PROTECTED_ABSTRACT_COLOR_COUNT;
 pub(super) const SAFE_ABSTRACT_COLORS_CPU_ADDRESS: u16 =
@@ -233,7 +234,7 @@ pub(super) fn expand_prg_with_material(
     expanded_prg[GLYPH_ATLAS_PRG_OFFSET..atlas_end].copy_from_slice(atlas);
     if let Some(dynamic) = dynamic_assignment {
         ensure!(
-            dynamic.canonical_color_codes.len() == ACTIVE_HANGUL_SLOT_COUNT
+            dynamic.canonical_color_codes.len() == CANONICAL_ABSTRACT_COLOR_COUNT
                 && dynamic.protected_abstract_colors.len() == PROTECTED_ABSTRACT_COLOR_COUNT
                 && dynamic.safe_abstract_colors.len() == SAFE_ABSTRACT_COLOR_COUNT,
             "battle dynamic-assignment material dimensions changed"
@@ -246,7 +247,7 @@ pub(super) fn expand_prg_with_material(
                 .copied()
                 .collect::<std::collections::BTreeSet<_>>()
                 .len()
-                == ACTIVE_HANGUL_SLOT_COUNT,
+                == CANONICAL_ABSTRACT_COLOR_COUNT,
             "battle dynamic-assignment abstract color partitions overlap"
         );
         let physical_code_table_end = PHYSICAL_CODE_TABLE_PRG_OFFSET
@@ -314,9 +315,11 @@ mod tests {
         image[HEADER_SIZE + 256 * 1024 - FIXED_BANK_SIZE..].fill(0xA5);
         let rom = Rom::parse(image).unwrap();
         let source_page = vec![2; FONT_PAGE_SIZE];
-        let canonical = (0..ACTIVE_HANGUL_SLOT_COUNT as u8).collect::<Vec<_>>();
-        let protected = canonical[..39].to_vec();
-        let safe = canonical[39..].to_vec();
+        let canonical = (u8::MIN..=u8::MAX)
+            .take(CANONICAL_ABSTRACT_COLOR_COUNT)
+            .collect::<Vec<_>>();
+        let protected = canonical[..PROTECTED_ABSTRACT_COLOR_COUNT].to_vec();
+        let safe = canonical[PROTECTED_ABSTRACT_COLOR_COUNT..].to_vec();
         let output = expand_prg_with_material(
             &rom,
             &[1, 2, 3],

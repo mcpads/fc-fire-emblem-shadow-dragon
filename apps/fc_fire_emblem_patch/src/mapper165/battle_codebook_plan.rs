@@ -100,6 +100,7 @@ pub(super) struct CanonicalBattleCodebook {
     pub(super) abstract_assignment_sha1: String,
     pub(super) canonical_assignment_sha1: String,
     pub(super) stable_color_count: usize,
+    pub(super) borrowed_logical_code_count: usize,
     pub(super) protected_physical_code_count: usize,
     pub(super) maximum_remap_pair_count: usize,
 }
@@ -203,12 +204,6 @@ pub(crate) fn analyze_battle_codebook_plan(
         item_domain,
         enemy_domain,
     } = model;
-    ensure!(
-        coloring.color_count <= ACTIVE_HANGUL_SLOT_COUNT,
-        "renderer-complete battle codebook needs {} colors but only {} active slots exist",
-        coloring.color_count,
-        ACTIVE_HANGUL_SLOT_COUNT
-    );
     let protected = GAMEPLAY_BATTLE_PRESERVED_ACTIVE_CODES
         .into_iter()
         .collect::<BTreeSet<_>>();
@@ -274,7 +269,7 @@ pub(crate) fn analyze_battle_codebook_plan(
         glyph_characters_emitted: false,
         translation_text_emitted: false,
         release_eligible: false,
-        next_gate: "bind the abstract colors to physical codes under every cache page protection constraint; selector 62 natural reachability remains a runtime proof gate",
+        next_gate: "bind this logical codebook digest into the cumulative per-battle physical assignment and replay every supported battle consumer route on that exact artifact",
     };
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize battle codebook plan")?;
@@ -321,10 +316,12 @@ pub(super) fn plan_canonical_battle_codebook(
     let protected_physical_codes =
         background_ownership::bind_battle_background_code_ownership(rom)?
             .conservative_global_preserved_active_codes();
+    let preserved_literal_codes = preserved_battle_literal_codes(fixed, dialogue);
     let placement = protected_color_placement::plan_protected_color_placement(
         &model.glyph_families,
         &model.coloring,
         &protected_physical_codes,
+        &preserved_literal_codes,
     )?;
     let glyph_codes = model
         .coloring
@@ -340,26 +337,24 @@ pub(super) fn plan_canonical_battle_codebook(
             ))
         })
         .collect::<Result<BTreeMap<_, _>>>()?;
-    let protected_abstract_colors = placement
-        .canonical_color_codes
+    let protected_abstract_colors = placement.protected_abstract_colors.clone();
+    let protected_abstract_color_set = protected_abstract_colors
         .iter()
-        .enumerate()
-        .filter(|(_, code)| protected_physical_codes.contains(code))
-        .map(|(color, _)| {
-            u8::try_from(color).context("protected battle abstract color exceeds one byte")
-        })
-        .collect::<Result<Vec<_>>>()?;
+        .copied()
+        .map(usize::from)
+        .collect::<BTreeSet<_>>();
     let safe_abstract_colors = placement
         .canonical_color_codes
         .iter()
         .enumerate()
-        .filter(|(_, code)| !protected_physical_codes.contains(code))
+        .filter(|(color, _)| !protected_abstract_color_set.contains(color))
         .map(|(color, _)| {
             u8::try_from(color).context("safe battle abstract color exceeds one byte")
         })
         .collect::<Result<Vec<_>>>()?;
     ensure!(
-        protected_abstract_colors.len() == protected_physical_codes.len()
+        protected_abstract_colors.len()
+            == protected_physical_codes.len() + placement.borrowed_logical_code_count
             && safe_abstract_colors.len() + protected_abstract_colors.len()
                 == placement.canonical_color_codes.len(),
         "canonical battle color partitions changed"
@@ -377,9 +372,22 @@ pub(super) fn plan_canonical_battle_codebook(
         safe_abstract_colors,
         abstract_assignment_sha1: model.coloring.assignment_sha1,
         stable_color_count: model.coloring.color_count,
+        borrowed_logical_code_count: placement.borrowed_logical_code_count,
         protected_physical_code_count: protected_physical_codes.len(),
         maximum_remap_pair_count: placement.conservative_collision_count,
     })
+}
+
+fn preserved_battle_literal_codes(
+    fixed: &FixedTextPlan,
+    dialogue: &BattleDialogueReinsertionPlan,
+) -> BTreeSet<u8> {
+    fixed
+        .encoded_literal_codes()
+        .union(&dialogue.encoded_literal_codes())
+        .copied()
+        .chain([0x22, 0x4E, 0x04, 0x00])
+        .collect()
 }
 
 pub(super) fn plan_battle_cache_composition_material(
@@ -444,7 +452,7 @@ fn plan_battle_codebook_model(
         dialogue_records,
     };
     let mut coloring = plan_stable_coloring(&families, ACTIVE_HANGUL_SLOT_COUNT)?;
-    coloring.expand_to_color_count(ACTIVE_HANGUL_SLOT_COUNT)?;
+    coloring.expand_to_color_count(ACTIVE_HANGUL_SLOT_COUNT.max(coloring.color_count))?;
     let mut runtime_demand = plan_runtime_demand(&families, &coloring)?;
     let [
         player_index,

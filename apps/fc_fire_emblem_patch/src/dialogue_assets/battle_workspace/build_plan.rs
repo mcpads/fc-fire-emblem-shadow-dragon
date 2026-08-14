@@ -76,6 +76,17 @@ impl BattleDialogueReinsertionPlan {
             .collect()
     }
 
+    pub(crate) fn encoded_literal_codes(&self) -> BTreeSet<u8> {
+        self.records
+            .iter()
+            .flat_map(|record| &record.logical_bytes)
+            .filter_map(|byte| match byte {
+                LogicalDialogueByte::Encoded(value) => Some(*value),
+                LogicalDialogueByte::TargetGlyph(_) => None,
+            })
+            .collect()
+    }
+
     pub(crate) fn max_record_unique_glyph_count(&self) -> usize {
         self.records
             .iter()

@@ -11,7 +11,8 @@ mod exact_maximum;
 
 use exact_maximum::{ExactModeledMaximum, find_exact_modeled_maximum};
 
-const MASK_WORD_COUNT: usize = ACTIVE_HANGUL_SLOT_COUNT.div_ceil(u64::BITS as usize);
+const ABSTRACT_COLOR_CAPACITY: usize = 256;
+const MASK_WORD_COUNT: usize = ABSTRACT_COLOR_CAPACITY.div_ceil(u64::BITS as usize);
 
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 struct ColorMask([u64; MASK_WORD_COUNT]);
@@ -60,8 +61,8 @@ pub(super) fn plan_runtime_demand(
     coloring: &StableColoringPlan,
 ) -> Result<BattleRuntimeDemandPlan> {
     ensure!(
-        coloring.color_count <= ACTIVE_HANGUL_SLOT_COUNT,
-        "battle runtime demand exceeds the color-mask capacity"
+        coloring.color_count <= ABSTRACT_COLOR_CAPACITY,
+        "battle runtime demand exceeds the one-byte abstract-color capacity"
     );
     let base = mask_for(&families.base, coloring)?;
     let players = choice_masks(&families.player_participants, coloring, base)?;
@@ -211,8 +212,8 @@ fn mask_for(glyphs: &BTreeSet<char>, coloring: &StableColoringPlan) -> Result<Co
             .copied()
             .with_context(|| format!("battle runtime demand contains uncolored glyph {glyph:?}"))?;
         ensure!(
-            color < ACTIVE_HANGUL_SLOT_COUNT,
-            "battle runtime demand color {color} exceeds the active slots"
+            color < ABSTRACT_COLOR_CAPACITY,
+            "battle runtime demand color {color} exceeds the one-byte abstract-color space"
         );
         ensure!(
             !mask.contains(color),

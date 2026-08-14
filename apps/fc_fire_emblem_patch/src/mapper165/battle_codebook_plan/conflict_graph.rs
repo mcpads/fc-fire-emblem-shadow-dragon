@@ -88,11 +88,6 @@ pub(super) fn plan_stable_coloring(
     graph.verify_coloring(&greedy_colors)?;
     let constructed_clique = graph.extend_clique(&constructed_clique(families));
     graph.verify_clique(&constructed_clique)?;
-    ensure!(
-        constructed_clique.len() <= active_color_ceiling,
-        "battle conflict graph proves a {}-color lower bound above the {active_color_ceiling}-code ceiling",
-        constructed_clique.len(),
-    );
     let ceiling_search = search_coloring(
         &graph,
         &constructed_clique,
@@ -112,7 +107,9 @@ pub(super) fn plan_stable_coloring(
         .max()
         .map_or(0, |maximum| maximum + 1);
     let model_chromatic_number_proven = color_count == constructed_clique.len();
-    let coloring_strategy = if model_chromatic_number_proven {
+    let coloring_strategy = if model_chromatic_number_proven && color_count > active_color_ceiling {
+        "deterministic DSATUR matched the logical-color lower bound above the physical-code ceiling"
+    } else if model_chromatic_number_proven {
         "deterministic DSATUR matched constructed clique"
     } else {
         initial_strategy
