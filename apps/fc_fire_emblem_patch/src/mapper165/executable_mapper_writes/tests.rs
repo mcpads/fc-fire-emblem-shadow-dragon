@@ -4,6 +4,10 @@ use retro_rp2a03::{AddressingMode, Instruction, Mnemonic, Operand, encode_bytes}
 
 use super::*;
 
+mod all_byte_candidates;
+mod candidate_partition;
+mod support;
+
 fn typed_bytes(mnemonic: Mnemonic, mode: AddressingMode, operand: Operand) -> Vec<u8> {
     encode_bytes(&Instruction::new(mnemonic, mode, operand).unwrap()).unwrap()
 }

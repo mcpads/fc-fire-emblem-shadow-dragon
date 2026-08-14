@@ -13,7 +13,10 @@ use super::writer_sites::{CENTRAL_CHR_WRITERS, DIRECT_CHR_WRITERS, WriterLocatio
 
 mod audio_record;
 
-use audio_record::{AudioRecordCandidateBinding, bind_audio_record_candidate};
+use audio_record::{
+    AUDIO_BANK, AudioRecordCandidateBinding, RECORD_ADDRESS, RECORD_BYTES,
+    bind_audio_record_candidate,
+};
 
 const PRG_BANK_SIZE: usize = 16 * 1024;
 const FIXED_PRG_BANK: u8 = 0x0F;
@@ -31,6 +34,14 @@ struct ChrWriteCandidate {
     prg_bank: u8,
     cpu_address: u16,
     opcode: u8,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(super) struct LegacyCanonicalChrWriteCandidate {
+    pub(super) prg_bank: u8,
+    pub(super) cpu_address: u16,
+    pub(super) register: u16,
+    pub(super) opcode: u8,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -56,6 +67,24 @@ struct RegisterCandidateCount {
     documented_non_indexed_absolute_candidate_count: usize,
     converted_writer_count: usize,
     source_bound_audio_record_candidate_count: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct SourceBoundPrgDataRegion {
+    pub(super) role: &'static str,
+    pub(super) prg_bank: u8,
+    pub(super) cpu_address: u16,
+    pub(super) expected_bytes: &'static [u8],
+}
+
+pub(super) fn bind_audio_record_data_region(source: &Rom) -> Result<SourceBoundPrgDataRegion> {
+    bind_audio_record_candidate(source, RECORD_ADDRESS, RECORD_BYTES.len())?;
+    Ok(SourceBoundPrgDataRegion {
+        role: "source-bound C0/C1 audio record",
+        prg_bank: AUDIO_BANK,
+        cpu_address: RECORD_ADDRESS,
+        expected_bytes: &RECORD_BYTES,
+    })
 }
 
 pub(super) fn bind_absolute_chr_writer_census(source: &Rom) -> Result<AbsoluteChrWriterCensus> {
@@ -116,6 +145,22 @@ pub(super) fn bind_absolute_chr_writer_census(source: &Rom) -> Result<AbsoluteCh
         every_documented_non_indexed_absolute_candidate_classified: true,
         every_declared_writer_source_bound_and_converted: true,
     })
+}
+
+pub(super) fn legacy_canonical_chr_write_candidates(
+    source: &Rom,
+) -> Result<BTreeSet<LegacyCanonicalChrWriteCandidate>> {
+    Ok(
+        scan_documented_non_indexed_absolute_chr_write_candidates(source.prg())?
+            .into_iter()
+            .map(|candidate| LegacyCanonicalChrWriteCandidate {
+                prg_bank: candidate.prg_bank,
+                cpu_address: candidate.cpu_address,
+                register: candidate.register,
+                opcode: candidate.opcode,
+            })
+            .collect(),
+    )
 }
 
 fn bind_central_chr_writer_source_contracts(source: &Rom) -> Result<()> {

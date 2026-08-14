@@ -38,6 +38,7 @@ mod roster_page;
 mod runtime;
 pub(crate) mod selector_safety;
 mod shop_dialogue_page;
+mod source_mapper_write_audit;
 #[cfg(test)]
 mod tests;
 pub(crate) mod trigger_planes;
@@ -52,6 +53,7 @@ use runtime::{
     build_routines, replace_central_chr_writer, replace_central_prg_writer, replace_direct_writer,
     replace_mirroring_writer, validate_routine_placements,
 };
+use source_mapper_write_audit::{SourceMapperWriteAudit, audit_source_mapper_writes};
 
 use trigger_variants::{
     TriggerVariantPlan, install_observed_trigger_variants, verify_installed_trigger_variants,
@@ -114,6 +116,7 @@ struct Mapper165ParityReport {
     prg_writer_count: usize,
     central_chr_writer_count: usize,
     direct_chr_writer_count: usize,
+    source_mapper_write_audit: SourceMapperWriteAudit,
     absolute_chr_writer_census: AbsoluteChrWriterCensus,
     tracked_writes: Vec<TrackedWrite>,
     unresolved_boundaries: Vec<&'static str>,
@@ -190,6 +193,7 @@ struct AssembledParityImage {
     direct_code_cave_transfer_count: usize,
     routines: Vec<runtime::AssembledRoutine>,
     tracked_writes: Vec<TrackedWrite>,
+    source_mapper_write_audit: SourceMapperWriteAudit,
     absolute_chr_writer_census: AbsoluteChrWriterCensus,
 }
 
@@ -207,7 +211,7 @@ pub fn build_mapper165_parity_probe(
     let relocated_source_chr_sha1 = sha1_hex(&output_rom.chr()[OUTPUT_CHR_PADDING_SIZE..]);
     let output_chr_sha1 = sha1_hex(output_rom.chr());
     let report = Mapper165ParityReport {
-        schema: 3,
+        schema: 4,
         source_sha1: EXPECTED_SOURCE_SHA1,
         output_sha1: output_sha1.clone(),
         source_mapper: source_rom.mapper(),
@@ -276,11 +280,12 @@ pub fn build_mapper165_parity_probe(
         prg_writer_count: SOURCE_PRG_BANK_WRITERS.len() + 1,
         central_chr_writer_count: CENTRAL_CHR_WRITERS.len(),
         direct_chr_writer_count: DIRECT_CHR_WRITERS.len(),
+        source_mapper_write_audit: assembled.source_mapper_write_audit,
         absolute_chr_writer_census: assembled.absolute_chr_writer_census,
         tracked_writes: assembled.tracked_writes,
         unresolved_boundaries: vec![
             "Observed central PPU $1000 pairs use generated trigger-plane variants; unobserved pairs still require visible parity measurement.",
-            "Every documented non-indexed absolute STA/STX/STY opcode window targeting an MMC4 CHR register is classified as a converted writer or one source-bound audio-record byte occurrence; read-modify-write, indexed, indirect, computed, self-modified, and undocumented write forms remain separate negative-space work.",
+            "The legacy documented non-indexed absolute CHR census remains a verified subset of the root-independent source-MMC4 all-byte mapper-write denominator; executable ownership for the denominator's unresolved starts is not yet complete, and the final mapper165 image requires its own $8000-$FFFF denominator.",
             "Converted direct-writer values are source-bound, but their complete runtime FD/FE co-lifetime population still requires battle-phase validation.",
             "The probe preserves and relocates the source CHR but does not add Korean glyphs or translation assets.",
             "Runtime parity covers suspend persistence, one adverse game-over path, and the chapter-one completion/save/cold-load transition, not whole-game regression.",
@@ -303,6 +308,7 @@ pub fn build_mapper165_parity_probe(
 
 fn assemble_mapper165_parity_image(source_rom: &Rom) -> Result<AssembledParityImage> {
     verify_complete_prg_writer_inventory(source_rom)?;
+    let source_mapper_write_audit = audit_source_mapper_writes(source_rom)?;
     let absolute_chr_writer_census = bind_absolute_chr_writer_census(source_rom)?;
     selector_safety::bind_source_contract(source_rom)?;
 
@@ -401,6 +407,7 @@ fn assemble_mapper165_parity_image(source_rom: &Rom) -> Result<AssembledParityIm
         direct_code_cave_transfer_count,
         routines,
         tracked_writes,
+        source_mapper_write_audit,
         absolute_chr_writer_census,
     })
 }

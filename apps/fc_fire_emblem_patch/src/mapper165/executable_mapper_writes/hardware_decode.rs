@@ -1,5 +1,4 @@
 /// CPU-register classes decoded by the source MMC4.
-#[cfg(test)]
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) enum SourceMmc4Register {
     PrgBank,
@@ -11,7 +10,6 @@ pub(crate) enum SourceMmc4Register {
 }
 
 /// Decode every source-MMC4 write alias, not only the canonical page-start addresses.
-#[cfg(test)]
 pub(crate) const fn decode_source_mmc4_write(address: u16) -> Option<SourceMmc4Register> {
     match address >> 12 {
         0xA => Some(SourceMmc4Register::PrgBank),
