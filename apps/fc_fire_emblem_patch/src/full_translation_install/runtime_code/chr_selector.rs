@@ -36,6 +36,7 @@
 
 use anyhow::{Context, Result, ensure};
 
+use super::super::runtime_state_storage::CONSUMER_CATALOG_PAGE;
 use super::{
     RuntimeRoutine,
     chr_source_state::{
@@ -132,6 +133,7 @@ pub(super) fn build_chr_selector(
     bank_select_register: u16,
     bank_value_register: u16,
     cold_request_mapper_register: u8,
+    fallback: u16,
 ) -> Result<RuntimeRoutine> {
     let mut instructions = vec![
         // 사슬이 나르는 누산기와 상태를 밀어 둔다.
@@ -207,7 +209,7 @@ pub(super) fn build_chr_selector(
     instructions.extend([
         Instruction::Pla,
         Instruction::Plp,
-        Instruction::JmpAbsolute(SELECTOR_CHAIN_FALLBACK),
+        Instruction::JmpAbsolute(fallback),
     ]);
 
     Ok(RuntimeRoutine {
@@ -215,6 +217,207 @@ pub(super) fn build_chr_selector(
         address: origin,
         bytes: assemble_at(origin, &instructions)?,
     })
+}
+
+const COMPOSITE_STATE: u16 = 0x05E8;
+const MAIN_STATE: u8 = 0x84;
+const ENDING_RECORD_PHASE: u16 = 0x7731;
+
+const MAP_MENU_COMPOSITE_STATE: u8 = 0x03;
+const UNIT_SUMMARY_COMPOSITE_STATE: u8 = 0x04;
+const UNIT_COMMAND_COMPOSITE_STATE: u8 = 0x05;
+const UNIT_ITEM_LIST_COMPOSITE_STATE: u8 = 0x07;
+const ITEM_ACTION_COMPOSITE_STATE: u8 = 0x09;
+const UNIT_STATUS_COMPOSITE_STATE: u8 = 0x0F;
+const ITEM_INVENTORY_MAIN_STATE: u8 = 0x1B;
+const ENDING_RECORD_ACTIVE_PHASE: u8 = 1;
+
+#[derive(Clone, Copy)]
+pub(in crate::full_translation_install) struct ConsumerFontPageRegisters {
+    pub(in crate::full_translation_install) unit_command: u8,
+    pub(in crate::full_translation_install) map_menu: u8,
+    pub(in crate::full_translation_install) ending_record: u8,
+    pub(in crate::full_translation_install) catalog: [u8; 2],
+}
+
+/// 대사 선택기가 물러난 뒤 고정 화면과 카탈로그 화면의 오른쪽 FD 페이지를 고른다.
+/// `0x05E8 == 07`은 유닛 아이템 목록과 독립 아이템 인벤토리가 공유하므로 주 상태
+/// `0x84 == 1B`까지 함께 보며, 이름별 페이지 값은 두 계획된 register 중 하나일 때만
+/// 신뢰한다. 알 수 없는 값은 기존 roster/options 사슬로 그대로 넘긴다.
+pub(super) fn build_consumer_font_selector(
+    origin: u16,
+    bank_select_register: u16,
+    bank_value_register: u16,
+    pages: ConsumerFontPageRegisters,
+) -> Result<RuntimeRoutine> {
+    ensure!(
+        pages.catalog[0] != pages.catalog[1],
+        "consumer catalog pages use the same mapper register"
+    );
+    let mut instructions = vec![
+        Instruction::Php,
+        Instruction::Pha,
+        Instruction::LdaAbsolute(ENDING_RECORD_PHASE),
+        Instruction::CmpImmediate(ENDING_RECORD_ACTIVE_PHASE),
+    ];
+    let ending = append_long_jump_if_equal(origin, &mut instructions)?;
+    instructions.extend([
+        Instruction::LdaAbsolute(COMPOSITE_STATE),
+        Instruction::CmpImmediate(MAP_MENU_COMPOSITE_STATE),
+    ]);
+    let map_menu = append_long_jump_if_equal(origin, &mut instructions)?;
+    instructions.push(Instruction::CmpImmediate(UNIT_COMMAND_COMPOSITE_STATE));
+    let unit_command = append_long_jump_if_equal(origin, &mut instructions)?;
+    instructions.push(Instruction::CmpImmediate(ITEM_ACTION_COMPOSITE_STATE));
+    let catalog_default_from_action = append_long_jump_if_equal(origin, &mut instructions)?;
+    instructions.push(Instruction::CmpImmediate(UNIT_SUMMARY_COMPOSITE_STATE));
+    let catalog_dynamic_from_summary = append_long_jump_if_equal(origin, &mut instructions)?;
+    instructions.push(Instruction::CmpImmediate(UNIT_STATUS_COMPOSITE_STATE));
+    let catalog_dynamic_from_status = append_long_jump_if_equal(origin, &mut instructions)?;
+    instructions.push(Instruction::CmpImmediate(UNIT_ITEM_LIST_COMPOSITE_STATE));
+    let shared_item_list = append_long_jump_if_equal(origin, &mut instructions)?;
+    let unsupported_from_state = push_long_jump(&mut instructions, origin);
+
+    let shared_item_list_target = next_address(origin, &instructions)?;
+    patch_long_jump(&mut instructions, shared_item_list, shared_item_list_target);
+    instructions.extend([
+        Instruction::LdaZeroPage(MAIN_STATE),
+        Instruction::CmpImmediate(ITEM_INVENTORY_MAIN_STATE),
+    ]);
+    let catalog_default_from_inventory = append_long_jump_if_equal(origin, &mut instructions)?;
+    let catalog_dynamic_from_unit_items = push_long_jump(&mut instructions, origin);
+
+    let dynamic = next_address(origin, &instructions)?;
+    for jump in [
+        catalog_dynamic_from_summary,
+        catalog_dynamic_from_status,
+        catalog_dynamic_from_unit_items,
+    ] {
+        patch_long_jump(&mut instructions, jump, dynamic);
+    }
+    instructions.extend([
+        Instruction::LdaAbsolute(CONSUMER_CATALOG_PAGE),
+        Instruction::CmpImmediate(pages.catalog[0]),
+    ]);
+    let dynamic_valid_a = append_long_jump_if_equal(origin, &mut instructions)?;
+    instructions.push(Instruction::CmpImmediate(pages.catalog[1]));
+    let unsupported_dynamic = append_long_jump_if_not_equal(origin, &mut instructions)?;
+    let dynamic_valid = next_address(origin, &instructions)?;
+    patch_long_jump(&mut instructions, dynamic_valid_a, dynamic_valid);
+    instructions.extend([
+        Instruction::Pla,
+        Instruction::Plp,
+        Instruction::LdaImmediate(RIGHT_FD_CHR_REGISTER),
+        Instruction::StaAbsolute(bank_select_register),
+        Instruction::LdaAbsolute(CONSUMER_CATALOG_PAGE),
+        Instruction::StaAbsolute(bank_value_register),
+        Instruction::Rts,
+    ]);
+
+    let catalog_default = next_address(origin, &instructions)?;
+    for jump in [catalog_default_from_action, catalog_default_from_inventory] {
+        patch_long_jump(&mut instructions, jump, catalog_default);
+    }
+    append_immediate_page_selection(
+        &mut instructions,
+        bank_select_register,
+        bank_value_register,
+        pages.catalog[0],
+    );
+
+    let unit_command_target = next_address(origin, &instructions)?;
+    patch_long_jump(&mut instructions, unit_command, unit_command_target);
+    append_immediate_page_selection(
+        &mut instructions,
+        bank_select_register,
+        bank_value_register,
+        pages.unit_command,
+    );
+
+    let map_menu_target = next_address(origin, &instructions)?;
+    patch_long_jump(&mut instructions, map_menu, map_menu_target);
+    append_immediate_page_selection(
+        &mut instructions,
+        bank_select_register,
+        bank_value_register,
+        pages.map_menu,
+    );
+
+    let ending_target = next_address(origin, &instructions)?;
+    patch_long_jump(&mut instructions, ending, ending_target);
+    append_immediate_page_selection(
+        &mut instructions,
+        bank_select_register,
+        bank_value_register,
+        pages.ending_record,
+    );
+
+    let unsupported = next_address(origin, &instructions)?;
+    for jump in [unsupported_from_state, unsupported_dynamic] {
+        patch_long_jump(&mut instructions, jump, unsupported);
+    }
+    instructions.extend([
+        Instruction::Pla,
+        Instruction::Plp,
+        Instruction::JmpAbsolute(SELECTOR_CHAIN_FALLBACK),
+    ]);
+
+    Ok(RuntimeRoutine {
+        role: "fixed and catalog consumer CHR page selector",
+        address: origin,
+        bytes: assemble_at(origin, &instructions)?,
+    })
+}
+
+fn append_immediate_page_selection(
+    instructions: &mut Vec<Instruction>,
+    bank_select_register: u16,
+    bank_value_register: u16,
+    mapper_register: u8,
+) {
+    instructions.extend([
+        Instruction::Pla,
+        Instruction::Plp,
+        Instruction::LdaImmediate(RIGHT_FD_CHR_REGISTER),
+        Instruction::StaAbsolute(bank_select_register),
+        Instruction::LdaImmediate(mapper_register),
+        Instruction::StaAbsolute(bank_value_register),
+        Instruction::Rts,
+    ]);
+}
+
+fn push_long_jump(instructions: &mut Vec<Instruction>, placeholder: u16) -> usize {
+    let index = instructions.len();
+    instructions.push(Instruction::JmpAbsolute(placeholder));
+    index
+}
+
+fn patch_long_jump(instructions: &mut [Instruction], index: usize, target: u16) {
+    instructions[index] = Instruction::JmpAbsolute(target);
+}
+
+fn append_long_jump_if_equal(origin: u16, instructions: &mut Vec<Instruction>) -> Result<usize> {
+    append_long_conditional_jump(origin, instructions, Instruction::BneAbsolute)
+}
+
+fn append_long_jump_if_not_equal(
+    origin: u16,
+    instructions: &mut Vec<Instruction>,
+) -> Result<usize> {
+    append_long_conditional_jump(origin, instructions, Instruction::BeqAbsolute)
+}
+
+fn append_long_conditional_jump(
+    origin: u16,
+    instructions: &mut Vec<Instruction>,
+    inverse: fn(u16) -> Instruction,
+) -> Result<usize> {
+    let branch_address = next_address(origin, instructions)?;
+    let after = branch_address
+        .checked_add(5)
+        .context("consumer selector conditional jump address overflow")?;
+    instructions.push(inverse(after));
+    Ok(push_long_jump(instructions, origin))
 }
 
 /// 요청 발행기가 NMI를 다시 켜기 전에 냉간 표시 페이지를 원자적으로 고른다.
@@ -242,10 +445,20 @@ pub(super) fn build_cold_request_presentation_selector(
 mod tests {
     use super::*;
 
+    fn consumer_pages() -> ConsumerFontPageRegisters {
+        ConsumerFontPageRegisters {
+            unit_command: 0xC9,
+            map_menu: 0xCA,
+            ending_record: 0xCB,
+            catalog: [0xCC, 0xCD],
+        }
+    }
+
     /// 알 수 없는 상태에서 새 페이지를 고르면 원본의 다른 화면을 침범할 수 있다.
     #[test]
     fn an_unsupported_state_hands_the_existing_chain_control() {
-        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8).unwrap();
+        let routine =
+            build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
 
         assert_eq!(
             &routine.bytes[routine.bytes.len() - 3..],
@@ -261,7 +474,8 @@ mod tests {
     /// 다른 값이므로 selector가 그것을 읽으면 준비된 페이지를 영원히 고르지 못한다.
     #[test]
     fn prg_bank_shadow_is_not_used_as_the_dialogue_lifetime() {
-        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8).unwrap();
+        let routine =
+            build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
 
         assert!(!routine.bytes.windows(2).any(|window| window
             == [
@@ -284,7 +498,8 @@ mod tests {
     /// 안 된다. 수명 이탈 훅과 소비자 양쪽이 같은 경계를 지킨다.
     #[test]
     fn terminal_dialogue_state_falls_through_to_the_existing_chain() {
-        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8).unwrap();
+        let routine =
+            build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
 
         assert!(routine.bytes.windows(5).any(|window| {
             window
@@ -303,7 +518,8 @@ mod tests {
     /// MMC3는 «레지스터를 고른 뒤 값을 쓴다»는 순서도 함께 지킨다.
     #[test]
     fn the_ready_path_selects_only_fd_chr_ram_and_keeps_fe_on_source_rom() {
-        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8).unwrap();
+        let routine =
+            build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
 
         let mut selections = Vec::new();
         let mut index = 0;
@@ -334,7 +550,8 @@ mod tests {
     /// 페이지면 준비 표식만 믿지 않고 기존 selector 사슬로 넘겨야 한다.
     #[test]
     fn the_ready_path_is_guarded_by_the_dialogue_fd_source_page() {
-        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8).unwrap();
+        let routine =
+            build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
 
         assert!(routine.bytes.windows(8).any(|window| {
             window
@@ -355,7 +572,8 @@ mod tests {
     /// 소비자가 남의 값을 페이지로 읽어 화면이 깨진다.
     #[test]
     fn the_chain_accumulator_survives_both_paths() {
-        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8).unwrap();
+        let routine =
+            build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
 
         // 진입에서 `PHP PHA`, 두 갈래 모두 `PLA PLP`로 되돌린다.
         assert_eq!(&routine.bytes[..2], [0x08, 0x48]);
@@ -369,7 +587,8 @@ mod tests {
 
     #[test]
     fn cold_request_selection_uses_chr_rom_instead_of_partial_chr_ram() {
-        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8).unwrap();
+        let routine =
+            build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
 
         assert_eq!(
             &routine.bytes[2..7],
@@ -406,7 +625,8 @@ mod tests {
 
     #[test]
     fn resident_group_overlay_uses_the_same_safe_presentation() {
-        let routine = build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8).unwrap();
+        let routine =
+            build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
 
         assert!(
             routine
@@ -452,6 +672,124 @@ mod tests {
                 0x60
             ]
         );
+    }
+
+    /// 새 selector가 소유한다고 정적으로 묶은 화면만 가로채고, 나머지는 누산기와
+    /// 상태를 되돌린 뒤 기존 사슬에 넘겨야 한다.
+    #[test]
+    fn consumer_selector_admits_only_the_bound_screen_states() {
+        let routine =
+            build_consumer_font_selector(0xF600, 0x8000, 0x8001, consumer_pages()).unwrap();
+
+        assert_eq!(&routine.bytes[..2], [0x08, 0x48]);
+        for state in [
+            MAP_MENU_COMPOSITE_STATE,
+            UNIT_SUMMARY_COMPOSITE_STATE,
+            UNIT_COMMAND_COMPOSITE_STATE,
+            UNIT_ITEM_LIST_COMPOSITE_STATE,
+            ITEM_ACTION_COMPOSITE_STATE,
+            UNIT_STATUS_COMPOSITE_STATE,
+        ] {
+            assert!(
+                routine
+                    .bytes
+                    .windows(3)
+                    .any(|window| window == [0xC9, state, 0xD0]),
+                "composite state {state:02X} must be admitted through an explicit equality branch"
+            );
+        }
+        assert!(
+            routine.bytes.windows(5).any(|window| {
+                window == [0xA5, MAIN_STATE, 0xC9, ITEM_INVENTORY_MAIN_STATE, 0xD0]
+            })
+        );
+        assert_eq!(
+            &routine.bytes[routine.bytes.len() - 5..],
+            [
+                0x68,
+                0x28,
+                0x4C,
+                SELECTOR_CHAIN_FALLBACK as u8,
+                (SELECTOR_CHAIN_FALLBACK >> 8) as u8,
+            ]
+        );
+    }
+
+    /// 이름 문자열이 게시한 페이지는 계획된 두 카탈로그 레지스터 중 하나일 때만
+    /// 매퍼 값으로 사용한다. 초기값이나 오염된 값은 원본 사슬로 빠져야 한다.
+    #[test]
+    fn consumer_selector_validates_the_dynamic_catalog_page_before_mapping_it() {
+        let pages = consumer_pages();
+        let routine = build_consumer_font_selector(0xF600, 0x8000, 0x8001, pages).unwrap();
+
+        assert!(routine.bytes.windows(6).any(|window| {
+            window
+                == [
+                    0xAD,
+                    CONSUMER_CATALOG_PAGE as u8,
+                    (CONSUMER_CATALOG_PAGE >> 8) as u8,
+                    0xC9,
+                    pages.catalog[0],
+                    0xD0,
+                ]
+        }));
+        assert!(
+            routine
+                .bytes
+                .windows(3)
+                .any(|window| window == [0xC9, pages.catalog[1], 0xF0])
+        );
+        assert!(routine.bytes.windows(6).any(|window| {
+            window
+                == [
+                    0xAD,
+                    CONSUMER_CATALOG_PAGE as u8,
+                    (CONSUMER_CATALOG_PAGE >> 8) as u8,
+                    0x8D,
+                    0x01,
+                    0x80,
+                ]
+        }));
+    }
+
+    /// 고정 화면은 모두 오른쪽 FD 레지스터만 고르고 자기 계획 페이지를 즉시 쓴다.
+    #[test]
+    fn consumer_selector_maps_each_static_screen_to_its_planned_fd_page() {
+        let pages = consumer_pages();
+        let routine = build_consumer_font_selector(0xF600, 0x8000, 0x8001, pages).unwrap();
+
+        for page in [
+            pages.catalog[0],
+            pages.unit_command,
+            pages.map_menu,
+            pages.ending_record,
+        ] {
+            assert!(routine.bytes.windows(10).any(|window| {
+                window
+                    == [
+                        0xA9,
+                        RIGHT_FD_CHR_REGISTER,
+                        0x8D,
+                        0x00,
+                        0x80,
+                        0xA9,
+                        page,
+                        0x8D,
+                        0x01,
+                        0x80,
+                    ]
+            }));
+        }
+    }
+
+    #[test]
+    fn consumer_selector_rejects_an_ambiguous_catalog_page_plan() {
+        let mut pages = consumer_pages();
+        pages.catalog[1] = pages.catalog[0];
+
+        let error = build_consumer_font_selector(0xF600, 0x8000, 0x8001, pages).unwrap_err();
+
+        assert!(error.to_string().contains("same mapper register"));
     }
 
     /// 사슬 자리가 이미 바뀌었으면 이 selector가 무엇 앞에 끼어드는지 알 수 없다.

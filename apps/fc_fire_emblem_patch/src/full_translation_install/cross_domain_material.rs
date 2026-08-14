@@ -16,7 +16,7 @@ use crate::{
 
 use super::{
     consumer_catalog::{
-        ConsumerCatalogPlan, ConsumerCatalogRuntimeMaterialInputs,
+        ConsumerCatalogPlan, ConsumerCatalogRuntimeLayout, ConsumerCatalogRuntimeMaterialInputs,
         ConsumerCatalogRuntimeMaterialPlan, plan_consumer_catalog_runtime_material,
     },
     installation_layout::cross_domain_material_pool,
@@ -74,6 +74,10 @@ impl CrossDomainMaterialPlan {
 
     pub(super) fn consumer_catalog_runtime(&self) -> &ConsumerCatalogRuntimeMaterialPlan {
         &self.consumer_catalog_runtime
+    }
+
+    pub(super) fn consumer_catalog_runtime_layout(&self) -> Result<ConsumerCatalogRuntimeLayout> {
+        self.consumer_catalog_runtime.layout()
     }
 }
 

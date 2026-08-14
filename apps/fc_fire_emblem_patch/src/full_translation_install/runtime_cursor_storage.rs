@@ -55,21 +55,19 @@ pub(super) const REQUEST_SOURCE_ENTRY_INDEX: u16 = REQUEST_SOURCE_DIRECTORY_SELE
 
 #[cfg(test)]
 mod tests {
+    use super::super::runtime_state_storage::{CANDIDATE_END, CONSUMER_CATALOG_PAGE};
     use super::*;
 
-    /// 커서와 요청 정체성은 공유 계약 뒤에 붙고 예약 범위 안에서 끝나야 한다. 밖으로
-    /// 나가면 그 바이트는 아무 증명도 받지 못한 채 쓰이게 된다.
+    /// 커서와 요청 정체성은 공유 계약 뒤에 붙고 카탈로그 페이지 바로 앞에서 끝나야
+    /// 한다. 어느 쪽이든 예약 밖으로 나가면 증명받지 못한 바이트를 쓰게 된다.
     #[test]
     fn the_cursor_lives_inside_the_proven_reservation() {
         assert_eq!(
             CURSOR_ENTRY_LOW,
             CANDIDATE_START + SHARED_CONTRACT_BYTE_COUNT
         );
-        assert!(CURSOR_OVERLAY_TILES < super::super::runtime_state_storage::CANDIDATE_END);
-        assert_eq!(
-            REQUEST_SOURCE_ENTRY_INDEX,
-            super::super::runtime_state_storage::CANDIDATE_END
-        );
+        assert!(CURSOR_OVERLAY_TILES < CANDIDATE_END);
+        assert_eq!(REQUEST_SOURCE_ENTRY_INDEX + 1, CONSUMER_CATALOG_PAGE);
     }
 
     /// 네 바이트에 무엇이 들어가는지가 설계 결정이다. 주소는 항목이 담으므로
@@ -102,10 +100,8 @@ mod tests {
     }
 
     #[test]
-    fn request_source_identity_ends_the_proven_reservation() {
-        assert_eq!(
-            REQUEST_SOURCE_ENTRY_INDEX,
-            super::super::runtime_state_storage::CANDIDATE_END
-        );
+    fn catalog_page_ends_the_reservation_after_the_dialogue_identity() {
+        assert_eq!(REQUEST_SOURCE_ENTRY_INDEX + 1, CONSUMER_CATALOG_PAGE);
+        assert_eq!(CONSUMER_CATALOG_PAGE, CANDIDATE_END);
     }
 }

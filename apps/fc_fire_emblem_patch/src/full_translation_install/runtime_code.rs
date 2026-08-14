@@ -7,6 +7,7 @@ use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use super::{
+    consumer_catalog::ConsumerCatalogRuntimeLayout,
     runtime_bank_contract::bind_bank_restore_contract, runtime_nmi_contract::bind_quiet_frame_gate,
 };
 use crate::{
@@ -17,6 +18,7 @@ use crate::{
 mod chr_ram_ownership;
 pub(in crate::full_translation_install) mod chr_selector;
 pub(in crate::full_translation_install) mod chr_source_state;
+mod consumer_catalog;
 pub(in crate::full_translation_install) mod dispatcher_gate;
 mod dynamic_producer;
 mod fixed_cfg_cycles;
@@ -48,6 +50,9 @@ pub(in crate::full_translation_install) enum DialogueRuntimeHookRole {
     DynamicVillageItemProducer,
     DynamicEpilogueUnitProducer,
     DynamicEpilogueLocationProducer,
+    ConsumerCatalogItemAppender,
+    ConsumerCatalogUnitAppender,
+    ConsumerCatalogClassAppender,
 }
 
 /// 훅이 가져가는 원본 자리다.
@@ -127,7 +132,9 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     atlas_page: u8,
     code_page: u8,
     layout: resolve_request::MaterialLayout,
+    consumer_catalog_layout: ConsumerCatalogRuntimeLayout,
     cold_request_mapper_register: u8,
+    consumer_font_pages: chr_selector::ConsumerFontPageRegisters,
 ) -> Result<DialogueRuntimeCodePlan> {
     let bank_restore = bind_bank_restore_contract(candidate)?;
     bind_quiet_frame_gate(source, candidate)?;
@@ -137,13 +144,15 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     chr_selector::bind_selector_cave(candidate)?;
     chr_ram_ownership::bind_shared_chr_ram_ownership_boundary(candidate)?;
     dynamic_producer::bind_hook_sites(source, candidate)?;
+    consumer_catalog::bind_consumer_catalog_sites(source, candidate)?;
     let chr_source_state = chr_source_state::bind_chr_source_state(candidate)?;
 
-    let selector = chr_selector::build_chr_selector(
+    let mut selector = chr_selector::build_chr_selector(
         chr_selector::SELECTOR_CAVE_ORIGIN,
         CHR_BANK_SELECT_REGISTER,
         CHR_BANK_VALUE_REGISTER,
         cold_request_mapper_register,
+        chr_selector::SELECTOR_CHAIN_FALLBACK,
     )?;
     let cold_presentation_selector_origin = selector.address
         + u16::try_from(selector.bytes.len()).context("dialogue selector length overflow")?;
@@ -207,6 +216,22 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         resolved_page_publication_address,
     )?;
     let initial_request_publisher_address = initial_request_publisher.address;
+    let consumer_font_selector_origin = initial_request_publisher.address
+        + u16::try_from(initial_request_publisher.bytes.len())
+            .context("initial request publisher length overflow")?;
+    let consumer_font_selector = chr_selector::build_consumer_font_selector(
+        consumer_font_selector_origin,
+        CHR_BANK_SELECT_REGISTER,
+        CHR_BANK_VALUE_REGISTER,
+        consumer_font_pages,
+    )?;
+    selector = chr_selector::build_chr_selector(
+        chr_selector::SELECTOR_CAVE_ORIGIN,
+        CHR_BANK_SELECT_REGISTER,
+        CHR_BANK_VALUE_REGISTER,
+        cold_request_mapper_register,
+        consumer_font_selector.address,
+    )?;
     let lifecycle = lifecycle::build_lifecycle_suite(
         next_page_resolver.address,
         code_page,
@@ -219,6 +244,26 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         dynamic_producer_code_origin,
         code_page,
         layout,
+    )?;
+    let catalog_code_origin = dynamic_producers
+        .code_routines
+        .last()
+        .map(|routine| usize::from(routine.address) + routine.bytes.len())
+        .context("dynamic producer runtime emitted no code routine")?;
+    let catalog_code_origin = u16::try_from(catalog_code_origin)
+        .context("consumer catalog code origin exceeds the CPU address space")?;
+    let catalog_stub_origin = dynamic_producers
+        .fixed_routines
+        .last()
+        .map(|routine| usize::from(routine.address) + routine.bytes.len())
+        .context("dynamic producer runtime emitted no fixed bridge")?;
+    let catalog_stub_origin = u16::try_from(catalog_stub_origin)
+        .context("consumer catalog stub origin exceeds the CPU address space")?;
+    let consumer_catalog = consumer_catalog::build_consumer_catalog_runtime(
+        catalog_code_origin,
+        code_page,
+        catalog_stub_origin,
+        consumer_catalog_layout,
     )?;
     ensure_disjoint(&[&gate], dispatcher_gate::RECLAIMED_GATE_CAVE_END)?;
     let mut fixed_support_bytes = gate.bytes;
@@ -278,6 +323,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
             &ownership_transfer,
             &resolved_page_publication,
             &initial_request_publisher,
+            &consumer_font_selector,
         ],
         chr_selector::SELECTOR_CAVE_END,
     )?;
@@ -290,10 +336,13 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         ownership_transfer,
         resolved_page_publication,
         initial_request_publisher,
+        consumer_font_selector,
     ];
     fixed_routines.extend(dynamic_producers.fixed_routines);
+    fixed_routines.extend(consumer_catalog.fixed_routines);
     let mut code_routines = vec![transport, resolver, next_page_resolver];
     code_routines.extend(dynamic_producers.code_routines);
+    code_routines.push(consumer_catalog.code_routine);
     let completed_page_entry = lifecycle.completed_page_entry;
     let handoff_residency_suspension_entry = lifecycle.handoff_residency_suspension_entry;
     let reclaimed_fixed_routines = vec![
@@ -399,6 +448,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         },
     ]);
     hooks.extend(dynamic_producers.hooks);
+    hooks.extend(consumer_catalog.hooks);
 
     Ok(DialogueRuntimeCodePlan {
         code_routines,

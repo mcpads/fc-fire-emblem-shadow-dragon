@@ -15,6 +15,7 @@ pub enum Instruction {
     LdxAbsolute(u16),
     LdxZeroPage(u8),
     LdyImmediate(u8),
+    LdyZeroPage(u8),
     LdyAbsoluteX(u16),
     StaZeroPage(u8),
     StxZeroPage(u8),
@@ -97,6 +98,7 @@ impl Instruction {
             | Self::LdxImmediate(_)
             | Self::LdxZeroPage(_)
             | Self::LdyImmediate(_)
+            | Self::LdyZeroPage(_)
             | Self::StaZeroPage(_)
             | Self::StxZeroPage(_)
             | Self::StyZeroPage(_)
@@ -172,6 +174,7 @@ impl Instruction {
             Self::Pha | Self::Php => 3,
             Self::LdaZeroPage(_)
             | Self::LdxZeroPage(_)
+            | Self::LdyZeroPage(_)
             | Self::StaZeroPage(_)
             | Self::StxZeroPage(_)
             | Self::StyZeroPage(_)
@@ -225,6 +228,7 @@ impl Instruction {
             Self::LdxAbsolute(address) => absolute(Mnemonic::Ldx, address),
             Self::LdxZeroPage(address) => zero_page(Mnemonic::Ldx, address),
             Self::LdyImmediate(value) => immediate(Mnemonic::Ldy, value),
+            Self::LdyZeroPage(address) => zero_page(Mnemonic::Ldy, address),
             Self::LdyAbsoluteX(address) => absolute_x(Mnemonic::Ldy, address),
             Self::StaZeroPage(address) => zero_page(Mnemonic::Sta, address),
             Self::StxZeroPage(address) => zero_page(Mnemonic::Stx, address),

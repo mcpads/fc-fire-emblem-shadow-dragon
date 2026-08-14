@@ -99,6 +99,14 @@ impl ConsumerCodebookPlan {
             .checked_sub(self.pages.len())
             .context("consumer codebook exhausted the available page range")
     }
+
+    pub(super) fn mapper_register_for(&self, page_id: &str) -> Result<u8> {
+        self.pages
+            .iter()
+            .find(|page| page.id == page_id)
+            .map(StaticConsumerPage::mapper_register)
+            .with_context(|| format!("consumer codebook has no {page_id} page"))
+    }
 }
 
 #[derive(Serialize)]
@@ -127,6 +135,10 @@ impl StaticConsumerPage {
 
     pub(super) fn assignment_count(&self) -> usize {
         self.assignments.len()
+    }
+
+    pub(super) fn mapper_register(&self) -> u8 {
+        self.mapper_register
     }
 }
 

@@ -19,9 +19,13 @@ use source_contract::{RuntimeStateSourceAccessContract, bind_runtime_state_sourc
 pub(super) const CANDIDATE_START: u16 = 0x07F0;
 /// 다섯 바이트는 생산자와 소비자의 공유 계약이고, 뒤의 여섯 바이트는 소비자만
 /// 쓰는 전송 커서다. 마지막 두 바이트는 생산자 시점의 원문 선행 조회값을 전송
-/// 완료까지 붙잡는다. 소유자는 다르지만 «주 대사가 활성인 동안만 산다»는 수명이
-/// 같으므로 같은 증명 아래 둔다. 증명을 둘로 나누면 약한 쪽이 생긴다.
-pub(super) const CANDIDATE_END: u16 = 0x07FC;
+/// 완료까지 붙잡는다. 마지막 한 바이트는 비대사 카탈로그 화면이 고른 CHR 페이지다.
+/// 서로 동시에 활성화되지 않으며 같은 원본·NMI·전투 접근 배제 증명을 쓰므로 한
+/// 연속 범위로 묶는다. 증명을 둘로 나누면 약한 쪽이 생긴다.
+pub(super) const CANDIDATE_END: u16 = 0x07FD;
+
+/// 유닛·적 이름 원천 ID가 선택한 카탈로그 CHR mapper register다.
+pub(in crate::full_translation_install) const CONSUMER_CATALOG_PAGE: u16 = CANDIDATE_END;
 
 /// 생산자와 소비자가 공유하는 런타임 정체성이다. 앞의 네 바이트가 모두 세워진
 /// 뒤에만 `REQUEST_STATE`를 요청 또는 준비 상태로 올린다.
@@ -110,10 +114,10 @@ pub(super) fn plan_dialogue_runtime_state_storage(
         && battle_reservation_excludes_candidate;
 
     Ok(DialogueRuntimeStateStoragePlan {
-        strategy: "own one thirteen-byte scratch range from a main-dialogue request through terminal invalidation; E7 suspends selection without discarding a resident page, while the actual battle CHR-RAM composer invalidates it before overwrite; the first five bytes are the producer-consumer contract, the next six are the consumer cursor, and the last two freeze the request-time source lookahead identity; inactive screens may clobber it",
-        candidate_cpu_range_hex: "0x07F0..0x07FC",
+        strategy: "own one fourteen-byte scratch range proven free of source, NMI, queue, save, and battle writers; the first thirteen bytes belong to the main-dialogue lifetime and the final byte carries the mutually exclusive unit-catalog CHR page",
+        candidate_cpu_range_hex: "0x07F0..0x07FD",
         required_byte_count: usize::from(CANDIDATE_END - CANDIDATE_START + 1),
-        ownership_lifetime: "main dialogue active plus an E7-suspended resident page; battle composition invalidates before overwrite and every other inactive lifetime remains excluded",
+        ownership_lifetime: "main dialogue active plus an E7-suspended resident page, or one mutually exclusive unit/item catalog screen; battle composition invalidates dialogue residency and source/concurrent writers exclude the whole range",
         main_dialogue_handler_root_count: roots.len(),
         main_dialogue_reachable_instruction_count: trace.visited.len(),
         main_dialogue_reachable_instruction_catalog_sha1: sha1_hex(&catalog),
@@ -141,7 +145,7 @@ pub(super) fn plan_dialogue_runtime_state_storage(
         },
         every_entry_cold_initializes_all_bytes: false,
         runtime_initializer_emitted: false,
-        selected_cpu_range_hex: selection_complete.then_some("0x07F0..0x07FC"),
+        selected_cpu_range_hex: selection_complete.then_some("0x07F0..0x07FD"),
         selection_complete,
         complete: false,
     })
@@ -185,17 +189,21 @@ mod tests {
 
     /// 예약은 전투 예약 바로 뒤에서 시작해야 두 소유자가 겹치지 않는다.
     /// 길이는 공유 계약 다섯 바이트, 소비자 전용 커서 여섯 바이트, 요청 시점 원문
-    /// 정체성 두 바이트의 합이다.
+    /// 정체성 두 바이트, 상호 배타적인 카탈로그 페이지 한 바이트의 합이다.
     #[test]
     fn the_reservation_starts_after_the_battle_reservation_and_covers_both_owners() {
         const SHARED_CONTRACT_BYTES: u16 = 5;
         const TRANSPORT_CURSOR_BYTES: u16 = 6;
         const REQUEST_SOURCE_IDENTITY_BYTES: u16 = 2;
+        const CONSUMER_CATALOG_PAGE_BYTES: u16 = 1;
 
         assert_eq!(CANDIDATE_START, BATTLE_RUNTIME_STORAGE_END + 1);
         assert_eq!(
             CANDIDATE_END - CANDIDATE_START + 1,
-            SHARED_CONTRACT_BYTES + TRANSPORT_CURSOR_BYTES + REQUEST_SOURCE_IDENTITY_BYTES
+            SHARED_CONTRACT_BYTES
+                + TRANSPORT_CURSOR_BYTES
+                + REQUEST_SOURCE_IDENTITY_BYTES
+                + CONSUMER_CATALOG_PAGE_BYTES
         );
     }
 

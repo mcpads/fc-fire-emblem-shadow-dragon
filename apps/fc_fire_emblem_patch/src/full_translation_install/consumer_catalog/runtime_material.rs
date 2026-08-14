@@ -37,6 +37,16 @@ pub(in crate::full_translation_install) struct ConsumerCatalogRuntimeMaterialInp
     pub(in crate::full_translation_install) catalog: &'a ConsumerCatalogPlan,
 }
 
+#[derive(Clone, Copy)]
+pub(in crate::full_translation_install) struct ConsumerCatalogRuntimeLayout {
+    pub(in crate::full_translation_install) material_page: u8,
+    pub(in crate::full_translation_install) material_base: u16,
+    pub(in crate::full_translation_install) item_directory: u16,
+    pub(in crate::full_translation_install) class_directory: u16,
+    pub(in crate::full_translation_install) unit_directory: u16,
+    pub(in crate::full_translation_install) enemy_directory: u16,
+}
+
 #[derive(Serialize)]
 pub(in crate::full_translation_install) struct ConsumerCatalogRuntimeMaterialPlan {
     schema: u8,
@@ -60,6 +70,25 @@ pub(in crate::full_translation_install) struct ConsumerCatalogRuntimeMaterialPla
     one_mmc3_page_bound: bool,
     #[serde(skip)]
     pub(in crate::full_translation_install) bytes: Vec<u8>,
+}
+
+impl ConsumerCatalogRuntimeMaterialPlan {
+    pub(in crate::full_translation_install) fn layout(
+        &self,
+    ) -> Result<ConsumerCatalogRuntimeLayout> {
+        let address = |offset: usize| {
+            u16::try_from(0x8000 + offset)
+                .context("consumer catalog runtime address exceeds the 8000 window")
+        };
+        Ok(ConsumerCatalogRuntimeLayout {
+            material_page: self.mmc3_page,
+            material_base: 0x8000,
+            item_directory: address(self.item_directory_offset)?,
+            class_directory: address(self.class_directory_offset)?,
+            unit_directory: address(self.unit_directory_offset)?,
+            enemy_directory: address(self.enemy_directory_offset)?,
+        })
+    }
 }
 
 pub(in crate::full_translation_install) fn plan_consumer_catalog_runtime_material(

@@ -8,8 +8,8 @@ mod packing;
 mod runtime_material;
 
 pub(in crate::full_translation_install) use runtime_material::{
-    ConsumerCatalogRuntimeMaterialInputs, ConsumerCatalogRuntimeMaterialPlan,
-    plan_consumer_catalog_runtime_material,
+    ConsumerCatalogRuntimeLayout, ConsumerCatalogRuntimeMaterialInputs,
+    ConsumerCatalogRuntimeMaterialPlan, plan_consumer_catalog_runtime_material,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -70,6 +70,17 @@ impl ConsumerCatalogPlan {
 
     pub(super) fn base_assignments(&self) -> &BTreeMap<char, u8> {
         &self.base_assignments
+    }
+
+    pub(super) fn mapper_registers(&self) -> Result<[u8; 2]> {
+        ensure!(
+            self.pages.len() == 2,
+            "consumer catalog selector requires exactly two pages"
+        );
+        Ok([
+            self.pages[0].mapper_register(),
+            self.pages[1].mapper_register(),
+        ])
     }
 
     pub(super) fn page_for_name(

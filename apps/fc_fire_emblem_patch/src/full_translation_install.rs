@@ -642,7 +642,14 @@ pub(crate) fn plan_full_translation_installation(
         page(atlas_offset)?,
         runtime_material.runtime_code_mmc3_page(),
         layout,
+        cross_domain_material.consumer_catalog_runtime_layout()?,
         cold_request_presentation.mapper_register,
+        runtime_code::chr_selector::ConsumerFontPageRegisters {
+            unit_command: consumer_codebook.mapper_register_for("unit_command_menu")?,
+            map_menu: consumer_codebook.mapper_register_for("map_menu")?,
+            ending_record: consumer_codebook.mapper_register_for("ending_chapter_record")?,
+            catalog: consumer_catalog.mapper_registers()?,
+        },
     )?;
     let emitted_hook_roles = dialogue_runtime_code.hook_roles();
     dynamic_producer_encoding.bind_runtime_hooks(&emitted_hook_roles)?;
