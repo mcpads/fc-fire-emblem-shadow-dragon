@@ -13,6 +13,10 @@ use super::{
     SELECT_LEFT_FE_CHR_BANK_ADDRESS, SELECT_PRG_BANK_ADDRESS, SELECT_RIGHT_FD_CHR_BANK_ADDRESS,
     SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS, SELECT_RIGHT_FE_CHR_BANK_ADDRESS,
     SOURCE_RESET_ADDRESS, SOURCE_SELECT_PRG_BANK_AND_SAVE_ADDRESS,
+    selector_safety::{
+        NMI_ENTRY_CONTINUATION_ADDRESS, NMI_EXIT_TRAMPOLINE_ADDRESS,
+        SELECT_REGISTER_ROUTINE_ADDRESS, SELECTED_REGISTER_SHADOW, select_register_instruction,
+    },
     trigger_planes::PatternWindow,
     trigger_variants::PairSelectorEntry,
     writer_sites::{CentralChrWriter, DirectWriter, WriterLocation},
@@ -62,12 +66,12 @@ pub(super) fn build_routines(
                 Instruction::AslAccumulator,
                 Instruction::Pha,
                 Instruction::LdaImmediate(6),
-                Instruction::StaAbsolute(0x8000),
+                select_register_instruction(),
                 Instruction::Pla,
                 Instruction::StaAbsolute(0x8001),
                 Instruction::Pha,
                 Instruction::LdaImmediate(7),
-                Instruction::StaAbsolute(0x8000),
+                select_register_instruction(),
                 Instruction::Pla,
                 Instruction::OraImmediate(1),
                 Instruction::StaAbsolute(0x8001),
@@ -81,15 +85,47 @@ pub(super) fn build_routines(
             SELECT_LEFT_FD_CHR_BANK_ADDRESS,
             0,
         )?,
+        assemble_routine(
+            "selected MMC3 register writer",
+            SELECT_REGISTER_ROUTINE_ADDRESS,
+            &[
+                Instruction::StaZeroPage(SELECTED_REGISTER_SHADOW),
+                Instruction::StaAbsolute(0x8000),
+                Instruction::Rts,
+            ],
+        )?,
         build_chr_routine(
             "PPU $0000 FE CHR bank selection",
             SELECT_LEFT_FE_CHR_BANK_ADDRESS,
             1,
         )?,
+        assemble_routine(
+            "NMI zero-page save continuation",
+            NMI_ENTRY_CONTINUATION_ADDRESS,
+            &[
+                Instruction::LdaZeroPage(0x00),
+                Instruction::Pha,
+                Instruction::LdaZeroPage(0x01),
+                Instruction::Pha,
+                Instruction::JmpAbsolute(0xC179),
+            ],
+        )?,
         build_chr_routine(
             "PPU $1000 FD CHR bank selection",
             SELECT_RIGHT_FD_CHR_BANK_ADDRESS,
             2,
+        )?,
+        assemble_routine(
+            "NMI selected-register restore trampoline",
+            NMI_EXIT_TRAMPOLINE_ADDRESS,
+            &[
+                Instruction::Pla,
+                select_register_instruction(),
+                Instruction::Pla,
+                Instruction::Tay,
+                Instruction::Pla,
+                Instruction::JmpAbsolute(0xC1C0),
+            ],
         )?,
         build_chr_routine(
             "PPU $1000 FE CHR bank selection",
@@ -160,7 +196,7 @@ fn build_pair_aware_right_fd_routine(
         Instruction::AdcImmediate(8),
         Instruction::Pha,
         Instruction::LdaImmediate(2),
-        Instruction::StaAbsolute(0x8000),
+        select_register_instruction(),
         Instruction::Pla,
         Instruction::StaAbsolute(0x8001),
         Instruction::Pla,
@@ -192,7 +228,7 @@ fn build_chr_routine(
             Instruction::AdcImmediate(8),
             Instruction::Pha,
             Instruction::LdaImmediate(mapper_register),
-            Instruction::StaAbsolute(0x8000),
+            select_register_instruction(),
             Instruction::Pla,
             Instruction::StaAbsolute(0x8001),
             Instruction::Pla,
@@ -216,6 +252,7 @@ fn assemble_routine(
 
 pub(super) fn validate_routine_placements(routines: &[AssembledRoutine]) -> Result<()> {
     let cave_end = CODE_CAVE_START_ADDRESS as usize + CODE_CAVE_LEN;
+    const DOWNSTREAM_RUNTIME_START: usize = 0xFAF3;
     for (index, routine) in routines.iter().enumerate() {
         let routine_end = routine.cpu_address as usize + routine.bytes.len();
         ensure!(
@@ -232,6 +269,15 @@ pub(super) fn validate_routine_placements(routines: &[AssembledRoutine]) -> Resu
             );
         }
     }
+    let pair_selector = routines
+        .iter()
+        .find(|routine| routine.cpu_address == SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS)
+        .ok_or_else(|| anyhow::anyhow!("mapper 165 pair selector routine is missing"))?;
+    ensure!(
+        usize::from(pair_selector.cpu_address) + pair_selector.bytes.len()
+            <= DOWNSTREAM_RUNTIME_START,
+        "mapper 165 pair selector reaches the downstream runtime reservation at $FAF3"
+    );
     Ok(())
 }
 
@@ -244,7 +290,8 @@ pub(super) fn replace_central_prg_writer(image: &mut TrackedImage) -> Result<()>
     ];
     let replacement = [
         Instruction::StaZeroPage(0x29),
-        Instruction::StaZeroPage(0x51),
+        Instruction::Nop,
+        Instruction::Nop,
         Instruction::JsrAbsolute(SELECT_PRG_BANK_ADDRESS),
         Instruction::Rts,
     ];

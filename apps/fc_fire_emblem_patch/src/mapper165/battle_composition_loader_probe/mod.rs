@@ -131,7 +131,7 @@ pub(crate) const CUMULATIVE_RUNTIME_LAYOUT: BattleCompositionRuntimeLayout =
 
 const PPU_MASK_SHADOW: u8 = 0xCC;
 const PPU_CONTROL_SHADOW: u16 = 0x00CD;
-const PRG_BANK_SHADOW: u8 = 0x51;
+const PRG_BANK_SHADOW: u8 = 0x29;
 const RIGHT_FE_SHADOW: u8 = 0x5C;
 const CHR_HIGH_BITS_SHADOW: u8 = 0x52;
 const MAIN_STATE_ADDRESS: u16 = 0x0084;
@@ -753,7 +753,7 @@ fn natural_right_selector(address: u16, mapper_register: u8) -> Result<Vec<u8>> 
             Instruction::AdcImmediate(8),
             Instruction::Pha,
             Instruction::LdaImmediate(mapper_register),
-            Instruction::StaAbsolute(0x8000),
+            crate::mapper165::selector_safety::select_register_instruction(),
             Instruction::Pla,
             Instruction::StaAbsolute(0x8001),
             Instruction::Pla,

@@ -19,7 +19,7 @@ use anyhow::{Result, ensure};
 
 use super::super::{
     runtime_bank_contract::{BANK_INDEX_MASK, BankRestoreContract},
-    runtime_nmi_contract::{DISPLACED_CALL, PPU_CONTROL_SHADOW, QUEUE_FLAGS},
+    runtime_nmi_contract::{DISPLACED_CALL, PPU_CONTROL_SHADOW, VBLANK_BUSY_FLAGS},
 };
 use super::{
     CONSUMER_HOOK_CALL_CYCLES, RuntimeRoutine, next_address,
@@ -29,12 +29,11 @@ use super::{
 use crate::rp2a03::{Instruction, assemble_at};
 
 /// 고정 뱅크에 비워 둔 동굴의 시작이다.
-pub(super) const TRAMPOLINE_ORIGIN: u16 = 0xF400;
+pub(in crate::full_translation_install) const TRAMPOLINE_ORIGIN: u16 = 0xF400;
 /// 그 동굴의 끝이다. 넘으면 원본 자료를 덮는다.
 pub(super) const TRAMPOLINE_CAVE_END: u16 = 0xF4B0;
 pub(super) use super::super::runtime_material::RUNTIME_CODE_MMC3_PAGE;
 
-const BANK_SELECT_REGISTER: u16 = 0x8000;
 const BANK_VALUE_REGISTER: u16 = 0x8001;
 const PPU_CONTROL: u16 = 0x2000;
 /// `$2000`의 증가 비트를 끄는 마스크다. `$D4E7`이 쓰는 값과 같다.
@@ -53,10 +52,11 @@ fn instructions(contract: BankRestoreContract, transport_entry: u16) -> Result<V
     let origin = TRAMPOLINE_ORIGIN;
     let mut instructions = vec![
         // 원본이 이 프레임에 PPU 자료를 쓸 예정이면 비켜난다.
-        Instruction::LdaZeroPage(QUEUE_FLAGS[0]),
-        Instruction::OraZeroPage(QUEUE_FLAGS[1]),
-        Instruction::OraZeroPage(QUEUE_FLAGS[2]),
-        Instruction::OraZeroPage(QUEUE_FLAGS[3]),
+        Instruction::LdaZeroPage(VBLANK_BUSY_FLAGS[0]),
+        Instruction::OraZeroPage(VBLANK_BUSY_FLAGS[1]),
+        Instruction::OraZeroPage(VBLANK_BUSY_FLAGS[2]),
+        Instruction::OraZeroPage(VBLANK_BUSY_FLAGS[3]),
+        Instruction::OraZeroPage(VBLANK_BUSY_FLAGS[4]),
     ];
     let busy_placeholder = instructions.len();
     instructions.push(Instruction::BneAbsolute(origin));
@@ -81,7 +81,7 @@ fn instructions(contract: BankRestoreContract, transport_entry: u16) -> Result<V
         // 잘라 이 페이지에 닿지 못하므로 레지스터를 직접 쓴다. `$8000`은 전송 루틴이
         // 타일마다 스스로 바꾸므로 여기서 걸지 않는다.
         Instruction::LdaImmediate(contract.prg_a000_register),
-        Instruction::StaAbsolute(BANK_SELECT_REGISTER),
+        crate::mapper165::selector_safety::select_register_instruction(),
         Instruction::LdaImmediate(RUNTIME_CODE_MMC3_PAGE),
         Instruction::StaAbsolute(BANK_VALUE_REGISTER),
         Instruction::JsrAbsolute(transport_entry),
@@ -92,11 +92,11 @@ fn instructions(contract: BankRestoreContract, transport_entry: u16) -> Result<V
         Instruction::AslAccumulator,
         Instruction::Tax,
         Instruction::LdaImmediate(contract.prg_8000_register),
-        Instruction::StaAbsolute(BANK_SELECT_REGISTER),
+        crate::mapper165::selector_safety::select_register_instruction(),
         Instruction::Txa,
         Instruction::StaAbsolute(BANK_VALUE_REGISTER),
         Instruction::LdaImmediate(contract.prg_a000_register),
-        Instruction::StaAbsolute(BANK_SELECT_REGISTER),
+        crate::mapper165::selector_safety::select_register_instruction(),
         Instruction::Txa,
         Instruction::OraImmediate(1),
         Instruction::StaAbsolute(BANK_VALUE_REGISTER),
@@ -162,9 +162,11 @@ mod tests {
 
         let budget = super::super::budgeted_transport_cycles(reserve);
 
+        assert_eq!(reserve, 152);
+        assert_eq!(budget, 1_201);
         assert_eq!(
             reserve + budget,
-            super::super::MEASURED_VBLANK_REMAINDER * (100 - super::super::SAFETY_MARGIN_PERCENT)
+            super::super::MAPPER_VBLANK_REMAINDER * (100 - super::super::SAFETY_MARGIN_PERCENT)
                 / 100
         );
     }
@@ -199,6 +201,26 @@ mod tests {
         }
 
         assert_eq!(after_skip, vec![Instruction::JmpAbsolute(DISPLACED_CALL)]);
+    }
+
+    #[test]
+    fn the_chr_restore_flag_uses_the_same_busy_skip_path() {
+        let listing = instructions(contract(), 0xB000).unwrap();
+
+        assert_eq!(
+            &listing[..VBLANK_BUSY_FLAGS.len()],
+            &[
+                Instruction::LdaZeroPage(0x21),
+                Instruction::OraZeroPage(0x22),
+                Instruction::OraZeroPage(0x89),
+                Instruction::OraZeroPage(0x8A),
+                Instruction::OraZeroPage(0x5D),
+            ]
+        );
+        assert!(matches!(
+            listing[VBLANK_BUSY_FLAGS.len()],
+            Instruction::BneAbsolute(_)
+        ));
     }
 
     /// 모든 경로가 밀어낸 원본 호출로 끝나야 한다. 그러지 않으면 원본의 블록 큐가

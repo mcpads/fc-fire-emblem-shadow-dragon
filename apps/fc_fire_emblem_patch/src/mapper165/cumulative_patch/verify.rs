@@ -122,5 +122,8 @@ pub(super) fn verify_cumulative_output(
             == *dialogue_selector,
         "cumulative dialogue selector changed"
     );
+    crate::mapper165::selector_safety::verify_active_fixed_bank_nonindexed_absolute_mapper_select_store(
+        output_rom,
+    )?;
     Ok(())
 }

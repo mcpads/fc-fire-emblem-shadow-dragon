@@ -236,11 +236,11 @@ fn compose_page_for_layout(
         Instruction::StaAbsolute(PPU_CONTROL_SHADOW),
         Instruction::StaAbsolute(0x2000),
         Instruction::LdaImmediate(6),
-        Instruction::StaAbsolute(0x8000),
+        crate::mapper165::selector_safety::select_register_instruction(),
         Instruction::LdaImmediate(GLYPH_ATLAS_MMC3_PAGE),
         Instruction::StaAbsolute(0x8001),
         Instruction::LdaImmediate(7),
-        Instruction::StaAbsolute(0x8000),
+        crate::mapper165::selector_safety::select_register_instruction(),
         Instruction::LdaImmediate(SOURCE_PAGE_MMC3_PAGE),
         Instruction::StaAbsolute(0x8001),
         Instruction::JsrAbsolute(DYNAMIC_ASSIGNMENT_CODE_CPU_ADDRESS),
@@ -253,11 +253,11 @@ fn compose_page_for_layout(
     instructions[assignment_succeeded_placeholder] = Instruction::BeqAbsolute(assignment_succeeded);
     instructions.extend([
         Instruction::LdaImmediate(2),
-        Instruction::StaAbsolute(0x8000),
+        crate::mapper165::selector_safety::select_register_instruction(),
         Instruction::LdaImmediate(0),
         Instruction::StaAbsolute(0x8001),
         Instruction::LdaImmediate(4),
-        Instruction::StaAbsolute(0x8000),
+        crate::mapper165::selector_safety::select_register_instruction(),
         Instruction::LdaImmediate(0),
         Instruction::StaAbsolute(0x8001),
         Instruction::LdaAbsolute(0x2002),
@@ -736,7 +736,7 @@ fn battle_right_selector_for_layout(
     instructions.extend([
         Instruction::Pha,
         Instruction::LdaImmediate(mapper_register),
-        Instruction::StaAbsolute(0x8000),
+        crate::mapper165::selector_safety::select_register_instruction(),
         Instruction::Pla,
     ]);
     instructions.extend([
@@ -783,7 +783,7 @@ fn battle_central_right_fd_selector_for_layout(
     instructions.push(Instruction::BneAbsolute(address));
     instructions.extend([
         Instruction::LdaImmediate(2),
-        Instruction::StaAbsolute(0x8000),
+        crate::mapper165::selector_safety::select_register_instruction(),
         Instruction::LdaImmediate(0),
         Instruction::StaAbsolute(0x8001),
         Instruction::Pla,

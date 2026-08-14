@@ -13,6 +13,13 @@ use crate::{
 
 use super::writer_sites::{DIRECT_CHR_WRITERS, WriterLocation};
 
+mod immediate_left_fd;
+
+use immediate_left_fd::{
+    LOCATION as IMMEDIATE_LEFT_FD_LOCATION, REGISTER as IMMEDIATE_LEFT_FD_REGISTER,
+    WRITERS as IMMEDIATE_LEFT_FD_WRITERS,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum PairLocation {
     Fixed,
@@ -171,6 +178,7 @@ struct DirectChrPairReport {
     same_value_writer_count: usize,
     runtime_value_pair_writer_count: usize,
     singleton_writer_count: usize,
+    immediate_left_fd_writer_count: usize,
     groups: Vec<GroupEvidence>,
     unresolved_boundaries: Vec<&'static str>,
     release_eligible: bool,
@@ -184,6 +192,7 @@ struct GroupEvidence {
     mapper_registers: Vec<String>,
     value_contract: &'static str,
     source_value_addresses: Vec<String>,
+    immediate_source_pages: Vec<String>,
     runtime_observation_required: bool,
 }
 
@@ -191,6 +200,7 @@ pub struct DirectChrPairSummary {
     pub report_sha1: String,
     pub direct_writer_count: usize,
     pub same_value_writer_count: usize,
+    pub immediate_left_fd_writer_count: usize,
     pub runtime_observation_writer_count: usize,
 }
 
@@ -200,11 +210,10 @@ pub fn analyze_direct_chr_pairs(
 ) -> Result<DirectChrPairSummary> {
     let source_rom = Rom::from_path(source_path)?;
     source_rom.verify_supported_japanese()?;
-    verify_declared_writer_partition()?;
+    bind_direct_chr_writer_source_contracts(&source_rom)?;
 
     let mut groups = Vec::new();
     for group in SAME_ACCUMULATOR_GROUPS {
-        verify_same_accumulator_group(&source_rom, group)?;
         groups.push(GroupEvidence {
             role: group.role,
             location: group.location.label(),
@@ -216,11 +225,11 @@ pub fn analyze_direct_chr_pairs(
                 .collect(),
             value_contract: "consecutive STA instructions consume the same accumulator value",
             source_value_addresses: Vec::new(),
+            immediate_source_pages: Vec::new(),
             runtime_observation_required: false,
         });
     }
     for pair in SEPARATE_VALUE_PAIRS {
-        verify_separate_value_pair(&source_rom, pair)?;
         groups.push(GroupEvidence {
             role: pair.role,
             location: pair.location.label(),
@@ -237,10 +246,10 @@ pub fn analyze_direct_chr_pairs(
                 format!("0x{:02X}", pair.fd_value_address),
                 format!("0x{:02X}", pair.fe_value_address),
             ],
+            immediate_source_pages: Vec::new(),
             runtime_observation_required: true,
         });
     }
-    verify_singleton(&source_rom)?;
     groups.push(GroupEvidence {
         role: "unit data left FD singleton",
         location: SINGLETON_LOCATION.label(),
@@ -248,8 +257,21 @@ pub fn analyze_direct_chr_pairs(
         mapper_registers: vec![format!("0x{SINGLETON_REGISTER:04X}")],
         value_contract: "one indexed value updates only the left FD register",
         source_value_addresses: vec!["0x0484+X".to_owned()],
+        immediate_source_pages: Vec::new(),
         runtime_observation_required: true,
     });
+    for writer in IMMEDIATE_LEFT_FD_WRITERS {
+        groups.push(GroupEvidence {
+            role: writer.role,
+            location: IMMEDIATE_LEFT_FD_LOCATION.label(),
+            writer_addresses: vec![format!("0x{:04X}", writer.writer_address)],
+            mapper_registers: vec![format!("0x{IMMEDIATE_LEFT_FD_REGISTER:04X}")],
+            value_contract: "an immediate source page updates only the left FD register",
+            source_value_addresses: Vec::new(),
+            immediate_source_pages: vec![format!("0x{:02X}", writer.source_page)],
+            runtime_observation_required: true,
+        });
+    }
 
     let same_value_writer_count = SAME_ACCUMULATOR_GROUPS
         .iter()
@@ -257,19 +279,24 @@ pub fn analyze_direct_chr_pairs(
         .sum::<usize>();
     let runtime_value_pair_writer_count = SEPARATE_VALUE_PAIRS.len() * 2;
     let singleton_writer_count = 1;
-    let direct_writer_count =
-        same_value_writer_count + runtime_value_pair_writer_count + singleton_writer_count;
+    let immediate_left_fd_writer_count = IMMEDIATE_LEFT_FD_WRITERS.len();
+    let direct_writer_count = same_value_writer_count
+        + runtime_value_pair_writer_count
+        + singleton_writer_count
+        + immediate_left_fd_writer_count;
     let report = DirectChrPairReport {
-        schema: 1,
+        schema: 2,
         source_sha1: EXPECTED_SOURCE_SHA1,
         direct_writer_count,
         same_value_writer_count,
         runtime_value_pair_writer_count,
         singleton_writer_count,
+        immediate_left_fd_writer_count,
         groups,
         unresolved_boundaries: vec![
             "Separate $5E/$5F pairs require runtime values before trigger-plane compatibility can be classified.",
             "The unit-data left FD singleton requires the active left FE page at each execution site.",
+            "Immediate left FD writers bind their source page statically, but their active left FE page and execution co-lifetimes are not complete runtime claims.",
             "Static same-accumulator pairing proves equal FD/FE values, not execution coverage of battle, chapter transition, defeat, or ending paths.",
         ],
         release_eligible: false,
@@ -288,8 +315,30 @@ pub fn analyze_direct_chr_pairs(
         report_sha1,
         direct_writer_count,
         same_value_writer_count,
-        runtime_observation_writer_count: runtime_value_pair_writer_count + singleton_writer_count,
+        immediate_left_fd_writer_count,
+        runtime_observation_writer_count: runtime_value_pair_writer_count
+            + singleton_writer_count
+            + immediate_left_fd_writer_count,
     })
+}
+
+pub(super) fn bind_direct_chr_writer_source_contracts(source_rom: &Rom) -> Result<()> {
+    verify_declared_writer_partition()?;
+    for group in SAME_ACCUMULATOR_GROUPS {
+        verify_same_accumulator_group(source_rom, group)?;
+    }
+    for pair in SEPARATE_VALUE_PAIRS {
+        verify_separate_value_pair(source_rom, pair)?;
+    }
+    verify_singleton(source_rom)?;
+    immediate_left_fd::verify_source_sequences(source_rom)
+}
+
+pub(super) fn immediate_left_fd_writer_addresses() -> BTreeSet<u16> {
+    IMMEDIATE_LEFT_FD_WRITERS
+        .iter()
+        .map(|writer| writer.writer_address)
+        .collect()
 }
 
 fn verify_same_accumulator_group(source_rom: &Rom, group: &SameAccumulatorGroup) -> Result<()> {
@@ -361,6 +410,7 @@ fn verify_bytes(
 }
 
 fn verify_declared_writer_partition() -> Result<()> {
+    immediate_left_fd::verify_inventory_inclusion()?;
     let actual = DIRECT_CHR_WRITERS
         .iter()
         .map(|writer| {
@@ -390,6 +440,13 @@ fn verify_declared_writer_partition() -> Result<()> {
         SINGLETON_WRITER_ADDRESS,
         SINGLETON_REGISTER,
     ));
+    for writer in IMMEDIATE_LEFT_FD_WRITERS {
+        declared.insert((
+            IMMEDIATE_LEFT_FD_LOCATION,
+            writer.writer_address,
+            IMMEDIATE_LEFT_FD_REGISTER,
+        ));
+    }
     ensure!(
         actual == declared,
         "direct CHR writer pair partition no longer covers the writer inventory exactly"
@@ -417,9 +474,13 @@ mod tests {
 
         assert_eq!(same_value_writer_count, 26);
         assert_eq!(SEPARATE_VALUE_PAIRS.len() * 2, 4);
+        assert_eq!(IMMEDIATE_LEFT_FD_WRITERS.len(), 22);
         assert_eq!(
-            same_value_writer_count + SEPARATE_VALUE_PAIRS.len() * 2 + 1,
-            31
+            same_value_writer_count
+                + SEPARATE_VALUE_PAIRS.len() * 2
+                + 1
+                + IMMEDIATE_LEFT_FD_WRITERS.len(),
+            53
         );
     }
 

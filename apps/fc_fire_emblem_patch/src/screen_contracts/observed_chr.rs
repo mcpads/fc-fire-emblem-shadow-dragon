@@ -103,7 +103,9 @@ pub(crate) const OBSERVED_CHR_PAIRS: &[ObservedChrPair] = &[
     pair("unit_roster", PatternWindow::Right, 0x00, 0x19),
     pair("battle_animation", PatternWindow::Left, 0x02, 0x06),
     pair("battle_animation", PatternWindow::Left, 0x06, 0x06),
+    pair("battle_animation", PatternWindow::Left, 0x16, 0x01),
     pair("battle_animation", PatternWindow::Right, 0x02, 0x06),
+    pair("battle_animation", PatternWindow::Right, 0x02, 0x01),
     pair(
         "chapter_clear_epilogue_dialogue",
         PatternWindow::Left,

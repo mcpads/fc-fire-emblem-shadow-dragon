@@ -25,7 +25,6 @@ const FIXED_BRIDGE_END: u16 = 0xF807;
 const PPU_CONTROL: u16 = 0x2000;
 const PPU_CONTROL_SHADOW: u8 = 0xCD;
 const NMI_ENABLE_MASK: u8 = 0x80;
-const BANK_SELECT_REGISTER: u16 = 0x8000;
 const BANK_VALUE_REGISTER: u16 = 0x8001;
 const PRG_8000_REGISTER: u8 = 6;
 const PRG_A000_REGISTER: u8 = 7;
@@ -213,7 +212,7 @@ fn build_fixed_bridge(origin: u16, canonical_copy: u16, code_page: u8) -> Result
             Instruction::AndImmediate(!NMI_ENABLE_MASK),
             Instruction::StaAbsolute(PPU_CONTROL),
             Instruction::LdaImmediate(PRG_A000_REGISTER),
-            Instruction::StaAbsolute(BANK_SELECT_REGISTER),
+            crate::mapper165::selector_safety::select_register_instruction(),
             Instruction::LdaImmediate(code_page),
             Instruction::StaAbsolute(BANK_VALUE_REGISTER),
             Instruction::Txa,
@@ -421,7 +420,7 @@ fn build_canonical_copy_runtime(origin: u16, layout: MaterialLayout) -> Result<R
         Instruction::AdcImmediate(0),
         Instruction::StaZeroPage(0x01),
         Instruction::LdaImmediate(PRG_8000_REGISTER),
-        Instruction::StaAbsolute(BANK_SELECT_REGISTER),
+        crate::mapper165::selector_safety::select_register_instruction(),
         Instruction::LdaImmediate(layout.producer_encoding_page),
         Instruction::StaAbsolute(BANK_VALUE_REGISTER),
         Instruction::LdyImmediate(0),
@@ -449,7 +448,7 @@ fn build_canonical_copy_runtime(origin: u16, layout: MaterialLayout) -> Result<R
         // `$A000`에서 실행 중이므로 `$8000`만 먼저 되돌린다. 고정 브리지로
         // 돌아간 뒤 `$FA20`이 두 창을 함께 원복한다.
         Instruction::LdaImmediate(PRG_8000_REGISTER),
-        Instruction::StaAbsolute(BANK_SELECT_REGISTER),
+        crate::mapper165::selector_safety::select_register_instruction(),
         Instruction::LdaZeroPage(PRG_BANK_SHADOW),
         Instruction::AndImmediate(0x0F),
         Instruction::AslAccumulator,

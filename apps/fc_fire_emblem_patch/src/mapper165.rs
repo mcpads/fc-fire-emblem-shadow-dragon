@@ -35,6 +35,7 @@ mod options_lifetime;
 mod options_page;
 mod roster_page;
 mod runtime;
+pub(crate) mod selector_safety;
 mod shop_dialogue_page;
 #[cfg(test)]
 mod tests;
@@ -43,6 +44,7 @@ mod trigger_variants;
 mod unit_name_page;
 mod unit_name_table;
 mod weapon_shop_shared_text;
+mod writer_census;
 mod writer_sites;
 
 use runtime::{
@@ -54,6 +56,7 @@ use trigger_variants::{
     TriggerVariantPlan, install_observed_trigger_variants, verify_installed_trigger_variants,
 };
 
+use writer_census::{AbsoluteChrWriterCensus, bind_absolute_chr_writer_census};
 use writer_sites::{CENTRAL_CHR_WRITERS, DIRECT_CHR_WRITERS, SOURCE_PRG_BANK_WRITERS};
 
 const OUTPUT_MAPPER: u16 = 165;
@@ -110,6 +113,7 @@ struct Mapper165ParityReport {
     prg_writer_count: usize,
     central_chr_writer_count: usize,
     direct_chr_writer_count: usize,
+    absolute_chr_writer_census: AbsoluteChrWriterCensus,
     tracked_writes: Vec<TrackedWrite>,
     unresolved_boundaries: Vec<&'static str>,
     release_eligible: bool,
@@ -185,6 +189,7 @@ struct AssembledParityImage {
     direct_code_cave_transfer_count: usize,
     routines: Vec<runtime::AssembledRoutine>,
     tracked_writes: Vec<TrackedWrite>,
+    absolute_chr_writer_census: AbsoluteChrWriterCensus,
 }
 
 pub fn build_mapper165_parity_probe(
@@ -201,7 +206,7 @@ pub fn build_mapper165_parity_probe(
     let relocated_source_chr_sha1 = sha1_hex(&output_rom.chr()[OUTPUT_CHR_PADDING_SIZE..]);
     let output_chr_sha1 = sha1_hex(output_rom.chr());
     let report = Mapper165ParityReport {
-        schema: 2,
+        schema: 3,
         source_sha1: EXPECTED_SOURCE_SHA1,
         output_sha1: output_sha1.clone(),
         source_mapper: source_rom.mapper(),
@@ -270,11 +275,12 @@ pub fn build_mapper165_parity_probe(
         prg_writer_count: SOURCE_PRG_BANK_WRITERS.len() + 1,
         central_chr_writer_count: CENTRAL_CHR_WRITERS.len(),
         direct_chr_writer_count: DIRECT_CHR_WRITERS.len(),
+        absolute_chr_writer_census: assembled.absolute_chr_writer_census,
         tracked_writes: assembled.tracked_writes,
         unresolved_boundaries: vec![
             "Observed central PPU $1000 pairs use generated trigger-plane variants; unobserved pairs still require visible parity measurement.",
-            "Direct CHR writers are limited to instruction-boundary sites proven by fixed-bank disassembly, adjacent register groups, or prior runtime traces; isolated byte-pattern candidates remain unclassified.",
-            "The classified direct-writer pairs need no trigger-plane variants; late-game executions outside the current runtime sample remain part of full regression.",
+            "Every documented non-indexed absolute STA/STX/STY opcode window targeting an MMC4 CHR register is classified as a converted writer or one source-bound audio-record byte occurrence; read-modify-write, indexed, indirect, computed, self-modified, and undocumented write forms remain separate negative-space work.",
+            "Converted direct-writer values are source-bound, but their complete runtime FD/FE co-lifetime population still requires battle-phase validation.",
             "The probe preserves and relocates the source CHR but does not add Korean glyphs or translation assets.",
             "Runtime parity covers suspend persistence, one adverse game-over path, and the chapter-one completion/save/cold-load transition, not whole-game regression.",
         ],
@@ -296,6 +302,8 @@ pub fn build_mapper165_parity_probe(
 
 fn assemble_mapper165_parity_image(source_rom: &Rom) -> Result<AssembledParityImage> {
     verify_complete_prg_writer_inventory(source_rom)?;
+    let absolute_chr_writer_census = bind_absolute_chr_writer_census(source_rom)?;
+    selector_safety::bind_source_contract(source_rom)?;
 
     let (base, trigger_variant_plan) = create_chr_relocated_image(source_rom)?;
     let cave_file_start = fixed_bank_file_offset(CODE_CAVE_START_ADDRESS)?;
@@ -340,6 +348,7 @@ fn assemble_mapper165_parity_image(source_rom: &Rom) -> Result<AssembledParityIm
     }
 
     replace_central_prg_writer(&mut image)?;
+    selector_safety::install_source_hooks(&mut image)?;
     for writer in SOURCE_PRG_BANK_WRITERS {
         replace_direct_writer(&mut image, *writer)?;
     }
@@ -381,6 +390,8 @@ fn assemble_mapper165_parity_image(source_rom: &Rom) -> Result<AssembledParityIm
     let output = image.into_data();
     let output_rom = Rom::parse(output.clone()).context("parse mapper 165 parity image")?;
     verify_output(source_rom, &output_rom, &output, &trigger_variant_plan)?;
+    selector_safety::verify_installed_contract(&output_rom)?;
+    selector_safety::verify_parity_nonindexed_absolute_mapper_select_store(&output_rom)?;
 
     Ok(AssembledParityImage {
         output,
@@ -389,6 +400,7 @@ fn assemble_mapper165_parity_image(source_rom: &Rom) -> Result<AssembledParityIm
         direct_code_cave_transfer_count,
         routines,
         tracked_writes,
+        absolute_chr_writer_census,
     })
 }
 

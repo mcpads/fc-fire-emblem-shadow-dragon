@@ -54,7 +54,6 @@ pub(super) const RECLAIMED_GATE_CAVE_END: u16 = 0xF378;
 pub(super) const EXPECTED_RECLAIMED_GATE_CAVE_SHA1: &str =
     "cea25e67f4399e422e8747046c13a959f5669ac1";
 
-const BANK_SELECT_REGISTER: u16 = 0x8000;
 const BANK_VALUE_REGISTER: u16 = 0x8001;
 const PPU_CONTROL: u16 = 0x2000;
 const NMI_ENABLE_MASK: u8 = 0x80;
@@ -270,7 +269,7 @@ fn append_guarded_resolver_publication(
         Instruction::StaAbsolute(PPU_CONTROL),
         // 실행 코드 페이지를 `$A000`에 건다.
         Instruction::LdaImmediate(PRG_A000_REGISTER),
-        Instruction::StaAbsolute(BANK_SELECT_REGISTER),
+        crate::mapper165::selector_safety::select_register_instruction(),
         Instruction::LdaImmediate(code_page),
         Instruction::StaAbsolute(BANK_VALUE_REGISTER),
         Instruction::JsrAbsolute(resolver),

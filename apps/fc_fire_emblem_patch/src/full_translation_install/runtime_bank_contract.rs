@@ -16,7 +16,11 @@
 
 use anyhow::{Result, ensure};
 
-use crate::rom::Rom;
+use crate::{
+    mapper165::selector_safety::{self, select_register_instruction},
+    rom::Rom,
+    rp2a03::{Instruction, assemble_at},
+};
 
 /// PRG `$8000` 창을 고르는 MMC3 레지스터 번호다. 소비자는 여기에 읽을 자료를 건다.
 pub(super) const PRG_8000_REGISTER: u8 = 6;
@@ -27,13 +31,33 @@ pub(super) const PRG_BANK_SHADOW: u8 = 0x29;
 /// `$FA20`이 입력에 씌우는 마스크다. 되돌릴 때 같은 계산을 해야 한다.
 pub(super) const BANK_INDEX_MASK: u8 = 0x0F;
 
-/// `$FA20`: 16 KiB 뱅크 하나를 레지스터 6·7 짝으로 펼친다.
-/// `PHP PHA AND#$0F ASL PHA LDA#6 STA$8000 PLA STA$8001 PHA LDA#7 STA$8000
-///  PLA ORA#$01 STA$8001 PLA PLP RTS`
-const PAIRED_BANK_SETTER: [u8; 30] = [
-    0x08, 0x48, 0x29, 0x0F, 0x0A, 0x48, 0xA9, 0x06, 0x8D, 0x00, 0x80, 0x68, 0x8D, 0x01, 0x80, 0x48,
-    0xA9, 0x07, 0x8D, 0x00, 0x80, 0x68, 0x09, 0x01, 0x8D, 0x01, 0x80, 0x68, 0x28, 0x60,
-];
+/// `$FA20`: 16 KiB 뱅크 하나를 레지스터 6·7 짝으로 펼친다. 선택 포트는
+/// `$FA58` 공용 writer만 거치며 값 포트는 이어서 직접 쓴다.
+fn paired_bank_setter() -> Result<Vec<u8>> {
+    assemble_at(
+        PAIRED_BANK_SETTER_ADDRESS,
+        &[
+            Instruction::Php,
+            Instruction::Pha,
+            Instruction::AndImmediate(BANK_INDEX_MASK),
+            Instruction::AslAccumulator,
+            Instruction::Pha,
+            Instruction::LdaImmediate(PRG_8000_REGISTER),
+            select_register_instruction(),
+            Instruction::Pla,
+            Instruction::StaAbsolute(0x8001),
+            Instruction::Pha,
+            Instruction::LdaImmediate(PRG_A000_REGISTER),
+            select_register_instruction(),
+            Instruction::Pla,
+            Instruction::OraImmediate(1),
+            Instruction::StaAbsolute(0x8001),
+            Instruction::Pla,
+            Instruction::Plp,
+            Instruction::Rts,
+        ],
+    )
+}
 
 /// `$C1FB`: 뱅크를 바꿔 논리를 부르고 `$29`로 되돌린다. `$29`가 그림자라는 근거다.
 /// `LDA #$0E JSR $FA20 JSR $8000 LDA $29 JSR $FA20 RTS`
@@ -59,12 +83,13 @@ pub(super) struct BankRestoreContract {
 /// `candidate`는 매퍼 165로 변환한 누적 이미지다. 원본은 매퍼 10이라 `$8000`·`$8001`이
 /// 뱅크 레지스터가 아니므로 여기서 볼 대상이 아니다.
 pub(super) fn bind_bank_restore_contract(candidate: &Rom) -> Result<BankRestoreContract> {
+    let paired_bank_setter = paired_bank_setter()?;
     ensure!(
         fixed_bytes(
             candidate,
             PAIRED_BANK_SETTER_ADDRESS,
-            PAIRED_BANK_SETTER.len()
-        )? == PAIRED_BANK_SETTER,
+            paired_bank_setter.len()
+        )? == paired_bank_setter,
         "the paired PRG bank setter at $FA20 changed"
     );
     ensure!(
@@ -75,6 +100,7 @@ pub(super) fn bind_bank_restore_contract(candidate: &Rom) -> Result<BankRestoreC
         )? == BANK_SHADOW_RESTORE,
         "the NMI bank shadow restore at $C1FB changed"
     );
+    selector_safety::verify_installed_contract(candidate)?;
     Ok(BankRestoreContract {
         prg_8000_register: PRG_8000_REGISTER,
         prg_a000_register: PRG_A000_REGISTER,
@@ -104,7 +130,8 @@ mod tests {
         let mut bytes = crate::test_support::synthetic_mapper165_rom_bytes(0xFF);
         let setter =
             crate::test_support::synthetic_fixed_bank_file_offset(PAIRED_BANK_SETTER_ADDRESS);
-        bytes[setter..setter + PAIRED_BANK_SETTER.len()].copy_from_slice(&PAIRED_BANK_SETTER);
+        let paired_bank_setter = paired_bank_setter().unwrap();
+        bytes[setter..setter + paired_bank_setter.len()].copy_from_slice(&paired_bank_setter);
         let restore =
             crate::test_support::synthetic_fixed_bank_file_offset(BANK_SHADOW_RESTORE_ADDRESS);
         bytes[restore..restore + BANK_SHADOW_RESTORE.len()].copy_from_slice(&BANK_SHADOW_RESTORE);

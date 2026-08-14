@@ -30,7 +30,6 @@ const FIXED_BRIDGE_END: u16 = 0xFB20;
 const PPU_CONTROL: u16 = 0x2000;
 const PPU_CONTROL_SHADOW: u8 = 0xCD;
 const NMI_ENABLE_MASK: u8 = 0x80;
-const BANK_SELECT_REGISTER: u16 = 0x8000;
 const BANK_VALUE_REGISTER: u16 = 0x8001;
 const PRG_8000_REGISTER: u8 = 6;
 const PRG_A000_REGISTER: u8 = 7;
@@ -203,7 +202,7 @@ fn build_fixed_bridge(origin: u16, appender: u16, code_page: u8) -> Result<Vec<u
             Instruction::AndImmediate(!NMI_ENABLE_MASK),
             Instruction::StaAbsolute(PPU_CONTROL),
             Instruction::LdaImmediate(PRG_A000_REGISTER),
-            Instruction::StaAbsolute(BANK_SELECT_REGISTER),
+            crate::mapper165::selector_safety::select_register_instruction(),
             Instruction::LdaImmediate(code_page),
             Instruction::StaAbsolute(BANK_VALUE_REGISTER),
             Instruction::Tya,
@@ -360,7 +359,7 @@ fn build_catalog_append_runtime(
         Instruction::AdcImmediate(0),
         Instruction::StaZeroPage(0x01),
         Instruction::LdaImmediate(PRG_8000_REGISTER),
-        Instruction::StaAbsolute(BANK_SELECT_REGISTER),
+        crate::mapper165::selector_safety::select_register_instruction(),
         Instruction::LdaImmediate(layout.material_page),
         Instruction::StaAbsolute(BANK_VALUE_REGISTER),
         Instruction::LdyImmediate(0),
@@ -409,7 +408,7 @@ fn build_catalog_append_runtime(
         Instruction::StaAbsoluteX(COMPOSITE_BUFFER),
         Instruction::Inx,
         Instruction::LdaImmediate(PRG_8000_REGISTER),
-        Instruction::StaAbsolute(BANK_SELECT_REGISTER),
+        crate::mapper165::selector_safety::select_register_instruction(),
         Instruction::LdaZeroPage(PRG_BANK_SHADOW),
         Instruction::AndImmediate(0x0F),
         Instruction::AslAccumulator,

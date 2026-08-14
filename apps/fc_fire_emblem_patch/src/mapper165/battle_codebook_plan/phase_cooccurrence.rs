@@ -65,6 +65,26 @@ pub(super) fn battle_phase_roots() -> Vec<(u8, u16)> {
         .collect()
 }
 
+pub(in crate::mapper165) fn battle_phase_reachable_instruction_starts(
+    rom: &Rom,
+) -> Result<BTreeSet<(u8, u16)>> {
+    bind_nested_dispatchers(rom)?;
+    let mut reachable = BTreeSet::new();
+    for (bank_number, _, pointers) in phase_groups() {
+        let bank = prg_bank(rom, bank_number)?;
+        for handler in pointers {
+            let trace = trace_switchable_control_flow(bank, *handler, &BTreeSet::new())?;
+            reachable.extend(
+                trace
+                    .visited_instructions
+                    .into_iter()
+                    .map(|address| (bank_number, address)),
+            );
+        }
+    }
+    Ok(reachable)
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub(super) struct BattlePhasePublisherReachability {
     phase_group_count: usize,
@@ -102,38 +122,18 @@ pub(super) fn bind_phase_publisher_reachability(
     rom: &Rom,
 ) -> Result<BattlePhasePublisherReachability> {
     bind_nested_dispatchers(rom)?;
-    let groups = [
-        (0x05, "primary", PRIMARY_PHASE_POINTERS.as_slice()),
-        (0x05, "unit_panel", UNIT_PANEL_PHASE_POINTERS.as_slice()),
-        (0x05, "animation", ANIMATION_PHASE_POINTERS.as_slice()),
-        (
-            0x05,
-            "animation_command",
-            ANIMATION_COMMAND_PHASE_POINTERS.as_slice(),
-        ),
-        (
-            0x05,
-            "effect_object",
-            EFFECT_OBJECT_PHASE_POINTERS.as_slice(),
-        ),
-        (
-            0x05,
-            "animation_cleanup",
-            ANIMATION_CLEANUP_PHASE_POINTERS.as_slice(),
-        ),
-        (0x07, "dialogue_box", DIALOGUE_BOX_PHASE_POINTERS.as_slice()),
-    ]
-    .into_iter()
-    .map(|(bank_number, role, pointers)| {
-        trace_group(
-            prg_bank(rom, bank_number)?,
-            bank_number,
-            role,
-            pointers,
-            &publisher_addresses(bank_number),
-        )
-    })
-    .collect::<Result<Vec<_>>>()?;
+    let groups = phase_groups()
+        .into_iter()
+        .map(|(bank_number, role, pointers)| {
+            trace_group(
+                prg_bank(rom, bank_number)?,
+                bank_number,
+                role,
+                pointers,
+                &publisher_addresses(bank_number),
+            )
+        })
+        .collect::<Result<Vec<_>>>()?;
 
     let reached_publishers = groups
         .iter()
@@ -197,6 +197,30 @@ pub(super) fn bind_phase_publisher_reachability(
         conservative_full_lifetime_bound_complete: true,
         exact_phase_to_text_cooccurrence_required_for_capacity: false,
     })
+}
+
+fn phase_groups() -> [(u8, &'static str, &'static [u16]); 7] {
+    [
+        (0x05, "primary", PRIMARY_PHASE_POINTERS.as_slice()),
+        (0x05, "unit_panel", UNIT_PANEL_PHASE_POINTERS.as_slice()),
+        (0x05, "animation", ANIMATION_PHASE_POINTERS.as_slice()),
+        (
+            0x05,
+            "animation_command",
+            ANIMATION_COMMAND_PHASE_POINTERS.as_slice(),
+        ),
+        (
+            0x05,
+            "effect_object",
+            EFFECT_OBJECT_PHASE_POINTERS.as_slice(),
+        ),
+        (
+            0x05,
+            "animation_cleanup",
+            ANIMATION_CLEANUP_PHASE_POINTERS.as_slice(),
+        ),
+        (0x07, "dialogue_box", DIALOGUE_BOX_PHASE_POINTERS.as_slice()),
+    ]
 }
 
 impl BattlePhasePublisherReachability {

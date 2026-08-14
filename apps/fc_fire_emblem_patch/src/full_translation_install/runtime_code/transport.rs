@@ -51,7 +51,7 @@ use crate::rp2a03::{Instruction, assemble_at};
 
 /// 한 프레임에 올리는 타일 수다. 사이클 예산에서 유도한 값이므로 늘리려면
 /// 아래 예산 시험이 먼저 통과해야 한다.
-pub(in crate::full_translation_install) const TILES_PER_FRAME: u8 = 2;
+pub(in crate::full_translation_install) const TILES_PER_FRAME: u8 = 1;
 /// 복원 단계가 한 번에 옮기는 덩어리의 크기다.
 const RESTORE_CHUNK_BYTE_COUNT: u8 = 32;
 /// 4 KiB 페이지를 그 크기로 나눈 덩어리 수다.
@@ -81,7 +81,6 @@ const CHR_RAM_BASE: u16 = 0x1000;
 const PPU_STATUS: u16 = 0x2002;
 const PPU_ADDRESS: u16 = 0x2006;
 const PPU_DATA: u16 = 0x2007;
-const BANK_SELECT_REGISTER: u16 = 0x8000;
 const BANK_VALUE_REGISTER: u16 = 0x8001;
 const PRG_8000_REGISTER: u8 = 6;
 /// 매퍼 165가 4 KiB CHR 창 둘에 쓰는 MMC3 레지스터다.
@@ -115,7 +114,7 @@ const BATCH_SIZE: u8 = BORROWED_SCRATCH[3];
 fn map_data_page(page: Instruction) -> [Instruction; 4] {
     [
         Instruction::LdaImmediate(PRG_8000_REGISTER),
-        Instruction::StaAbsolute(BANK_SELECT_REGISTER),
+        crate::mapper165::selector_safety::select_register_instruction(),
         page,
         Instruction::StaAbsolute(BANK_VALUE_REGISTER),
     ]
@@ -177,7 +176,7 @@ fn frame_prologue(origin: u16) -> Result<(Vec<Instruction>, usize)> {
     for register in CHR_BANK_REGISTERS {
         instructions.extend([
             Instruction::LdaImmediate(register),
-            Instruction::StaAbsolute(BANK_SELECT_REGISTER),
+            crate::mapper165::selector_safety::select_register_instruction(),
             Instruction::LdaImmediate(CHR_RAM_BANK_VALUE),
             Instruction::StaAbsolute(BANK_VALUE_REGISTER),
         ]);
@@ -348,7 +347,7 @@ fn frame_epilogue(
     // 프레임 뒤쪽에서 다음 표시 원천을 갱신할 수 있기 때문이다.
     instructions.extend([
         Instruction::LdaImmediate(super::chr_source_state::RIGHT_FD_CHR_REGISTER),
-        Instruction::StaAbsolute(BANK_SELECT_REGISTER),
+        crate::mapper165::selector_safety::select_register_instruction(),
         Instruction::LdaImmediate(cold_request_mapper_register),
         Instruction::StaAbsolute(BANK_VALUE_REGISTER),
     ]);
@@ -383,7 +382,7 @@ fn frame_epilogue(
         Instruction::LdaAbsolute(REQUEST_SOURCE_ENTRY_INDEX),
         Instruction::StaAbsolute(PUBLISHED_SOURCE_ENTRY_INDEX),
         Instruction::LdaImmediate(super::chr_source_state::RIGHT_FD_CHR_REGISTER),
-        Instruction::StaAbsolute(BANK_SELECT_REGISTER),
+        crate::mapper165::selector_safety::select_register_instruction(),
         Instruction::LdaImmediate(CHR_RAM_BANK_VALUE),
         Instruction::StaAbsolute(BANK_VALUE_REGISTER),
         Instruction::LdaImmediate(STATE_READY),
@@ -452,14 +451,37 @@ pub(super) fn build_transport_routine(
     })
 }
 
-/// 한 프레임이 최악의 경우 쓰는 사이클이다. 실제로 방출하는 명령에서 센다.
-/// 두 단계 중 비싼 쪽을 센다. 예산은 어느 단계가 돌든 지켜져야 한다.
-pub(super) fn worst_case_frame_cycles(
+/// 방출된 프롤로그·분기·단계 몸통·에필로그에서 독립적으로 센 프레임 비용이다.
+///
+/// 최종 합계만 남기면 helper 비용이나 단계 라우팅 하나가 빠졌을 때 어느 경계에서
+/// 과소평가됐는지 알 수 없다. 이 조각들은 빌드 오류에도 그대로 노출한다.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct FrameCycleComponents {
+    pub(super) fixed: u32,
+    pub(super) phase_route: u32,
+    pub(super) overlay: u32,
+    pub(super) restore: u32,
+}
+
+impl FrameCycleComponents {
+    pub(super) const fn total(self) -> u32 {
+        self.fixed
+            + self.phase_route
+            + if self.overlay > self.restore {
+                self.overlay
+            } else {
+                self.restore
+            }
+    }
+}
+
+fn worst_case_frame_cycle_components_for_batch(
     origin: u16,
     atlas_page: u8,
     chr_source_state: super::chr_source_state::ChrSourceStateContract,
     cold_request_mapper_register: u8,
-) -> Result<u32> {
+    tiles_per_frame: u8,
+) -> Result<FrameCycleComponents> {
     let (prologue, _) = frame_prologue(origin)?;
     let loop_start = next_address(origin, &prologue)?;
     let fixed = worst_case_cycles(&prologue)?
@@ -468,11 +490,60 @@ pub(super) fn worst_case_frame_cycles(
             &chr_source_state.restore_callee_cycles(),
         )?
         + u32::from(Instruction::Rts.worst_case_cycles());
-    let overlay =
-        worst_case_cycles(&tile_body(loop_start, atlas_page)?)? * u32::from(TILES_PER_FRAME);
-    let restore =
-        worst_case_cycles(&restore_body(loop_start)?)? * u32::from(RESTORE_CHUNKS_PER_FRAME);
-    Ok(fixed + overlay.max(restore))
+    let phase_route = worst_case_cycles(&[
+        Instruction::LdaAbsolute(CURSOR_PHASE),
+        Instruction::BeqAbsolute(origin),
+    ])?;
+    let overlay = worst_case_cycles(&[Instruction::JmpAbsolute(origin)])?
+        + worst_case_cycles(&tile_body(loop_start, atlas_page)?)? * u32::from(tiles_per_frame);
+    let restore = worst_case_cycles(&map_data_page(Instruction::LdaImmediate(
+        SOURCE_PAGE_MMC3_PAGE,
+    )))? + worst_case_cycles(&restore_body(loop_start)?)?
+        * u32::from(RESTORE_CHUNKS_PER_FRAME)
+        + worst_case_cycles(&[Instruction::JmpAbsolute(origin)])?;
+    Ok(FrameCycleComponents {
+        fixed,
+        phase_route,
+        overlay,
+        restore,
+    })
+}
+
+/// 실제 후보 helper와 방출 코드로부터 예산 안에 들어가는 가장 큰 배치를 찾는다.
+///
+/// `TILES_PER_FRAME`를 먼저 정하고 그 값 하나만 검사하면, 더 큰 값이 안전해졌거나
+/// 현재 값조차 불안전해졌을 때 정책과 코드가 조용히 어긋난다. 모든 `u8` 후보를 같은
+/// 생산 계산기에 태워 가장 큰 값을 고른 뒤 상수와 일치시키는 쪽이 실패 폐쇄적이다.
+pub(super) fn largest_fitting_tile_batch(
+    origin: u16,
+    atlas_page: u8,
+    chr_source_state: super::chr_source_state::ChrSourceStateContract,
+    cold_request_mapper_register: u8,
+    budget: u32,
+) -> Result<(u8, FrameCycleComponents)> {
+    let mut largest = None;
+    let mut previous_total = 0;
+    for tiles_per_frame in 1..=u8::MAX {
+        let components = worst_case_frame_cycle_components_for_batch(
+            origin,
+            atlas_page,
+            chr_source_state,
+            cold_request_mapper_register,
+            tiles_per_frame,
+        )?;
+        let total = components.total();
+        ensure!(
+            total >= previous_total,
+            "transport cycle model is not monotonic at batch {tiles_per_frame}: {total} < {previous_total}"
+        );
+        previous_total = total;
+        if total <= budget {
+            largest = Some((tiles_per_frame, components));
+        } else {
+            break;
+        }
+    }
+    largest.context("not even one dialogue tile fits the production vblank transport budget")
 }
 
 #[cfg(test)]
@@ -581,7 +652,7 @@ mod tests {
         let fd_restore = Instruction::JsrAbsolute(super::super::chr_source_state::RIGHT_FD_HELPER);
         let cold_selection = [
             Instruction::LdaImmediate(super::super::chr_source_state::RIGHT_FD_CHR_REGISTER),
-            Instruction::StaAbsolute(BANK_SELECT_REGISTER),
+            crate::mapper165::selector_safety::select_register_instruction(),
             Instruction::LdaImmediate(COLD_REQUEST_MAPPER_REGISTER),
             Instruction::StaAbsolute(BANK_VALUE_REGISTER),
         ];
@@ -633,7 +704,7 @@ mod tests {
         let fe_restore = Instruction::JsrAbsolute(super::super::chr_source_state::RIGHT_FE_HELPER);
         let select_fd = [
             Instruction::LdaImmediate(super::super::chr_source_state::RIGHT_FD_CHR_REGISTER),
-            Instruction::StaAbsolute(BANK_SELECT_REGISTER),
+            crate::mapper165::selector_safety::select_register_instruction(),
             Instruction::LdaImmediate(CHR_RAM_BANK_VALUE),
             Instruction::StaAbsolute(BANK_VALUE_REGISTER),
         ];
@@ -655,7 +726,7 @@ mod tests {
             window
                 == [
                     Instruction::LdaImmediate(4),
-                    Instruction::StaAbsolute(BANK_SELECT_REGISTER),
+                    crate::mapper165::selector_safety::select_register_instruction(),
                     Instruction::LdaImmediate(CHR_RAM_BANK_VALUE),
                     Instruction::StaAbsolute(BANK_VALUE_REGISTER),
                 ]
@@ -757,6 +828,46 @@ mod tests {
             super::super::worst_case_cycles(&[Instruction::JsrAbsolute(0xFA80)]).unwrap_err();
 
         assert!(error.to_string().contains("must be measured"));
+    }
+
+    #[test]
+    fn largest_batch_selection_uses_the_emitted_cycle_boundary() {
+        let source_state =
+            super::super::chr_source_state::ChrSourceStateContract::with_restore_callee_cycles(
+                64, 64,
+            );
+        let one = worst_case_frame_cycle_components_for_batch(
+            0xA000,
+            ATLAS_PAGE,
+            source_state,
+            COLD_REQUEST_MAPPER_REGISTER,
+            1,
+        )
+        .unwrap()
+        .total();
+        let two = worst_case_frame_cycle_components_for_batch(
+            0xA000,
+            ATLAS_PAGE,
+            source_state,
+            COLD_REQUEST_MAPPER_REGISTER,
+            2,
+        )
+        .unwrap()
+        .total();
+        assert!(one < two);
+
+        let boundary_budget = two - 1;
+        let (largest, selected) = largest_fitting_tile_batch(
+            0xA000,
+            ATLAS_PAGE,
+            source_state,
+            COLD_REQUEST_MAPPER_REGISTER,
+            boundary_budget,
+        )
+        .unwrap();
+
+        assert_eq!(largest, 1);
+        assert_eq!(selected.total(), one);
     }
 
     /// 남은 타일이 0인 프레임은 PPU를 건드리지 않고 곧바로 돌아가야 한다.

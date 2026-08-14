@@ -1862,7 +1862,11 @@ fn main() -> Result<()> {
                 summary.same_value_writer_count
             );
             println!(
-                "runtime-value or singleton writers: {}",
+                "immediate left-FD writers: {}",
+                summary.immediate_left_fd_writer_count
+            );
+            println!(
+                "writers requiring runtime co-lifetime observation: {}",
                 summary.runtime_observation_writer_count
             );
         }

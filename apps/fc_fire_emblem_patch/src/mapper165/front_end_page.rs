@@ -149,7 +149,7 @@ pub(super) fn build_page_selector(mapper_register: u8, fallback_target: u16) -> 
             Instruction::AndImmediate(0x1F),
             Instruction::BneAbsolute(FALLBACK_ADDRESS),
             Instruction::LdaImmediate(2),
-            Instruction::StaAbsolute(0x8000),
+            crate::mapper165::selector_safety::select_register_instruction(),
             Instruction::LdaImmediate(mapper_register),
             Instruction::StaAbsolute(0x8001),
             Instruction::Pla,

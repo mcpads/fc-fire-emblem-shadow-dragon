@@ -72,7 +72,7 @@ pub(super) fn build_chapter_page_selector(
             Instruction::AdcImmediate(sequence.first_mapper_register),
             Instruction::Pha,
             Instruction::LdaImmediate(2),
-            Instruction::StaAbsolute(0x8000),
+            crate::mapper165::selector_safety::select_register_instruction(),
             Instruction::Pla,
             Instruction::StaAbsolute(0x8001),
             Instruction::Pla,

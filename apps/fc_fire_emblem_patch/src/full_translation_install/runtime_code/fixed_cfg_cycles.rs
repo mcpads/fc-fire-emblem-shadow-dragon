@@ -208,7 +208,7 @@ impl Analyzer<'_> {
 /// 현재 helper 경로에서 허용한 명령 형식의 안전한 최악값이다. 새 형식이 경로에
 /// 나타나면 추정하지 않고 이 표를 의식적으로 확장할 때까지 실패한다.
 fn documented_worst_case_cycles(instruction: &retro_rp2a03::Instruction) -> Result<u32> {
-    use AddressingMode::{Absolute, Accumulator, Immediate, Implied, Relative};
+    use AddressingMode::{Absolute, Accumulator, Immediate, Implied, Relative, ZeroPage};
     use Mnemonic::{
         Adc, And, Asl, Bcc, Bcs, Beq, Bmi, Bne, Bpl, Bvc, Bvs, Clc, Cmp, Jmp, Jsr, Lda, Pha, Php,
         Pla, Plp, Rts, Sta,
@@ -221,6 +221,7 @@ fn documented_worst_case_cycles(instruction: &retro_rp2a03::Instruction) -> Resu
         (Pha | Php, Implied) => 3,
         (Pla | Plp, Implied) => 4,
         (Lda | Sta, Absolute) => 4,
+        (Sta, ZeroPage) => 3,
         (Adc | And | Cmp | Lda, Immediate) => 2,
         (Asl, Accumulator) => 2,
         (Clc, Implied) => 2,

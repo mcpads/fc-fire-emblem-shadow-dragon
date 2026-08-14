@@ -98,7 +98,7 @@ pub(super) fn build_page_routine_with_fallback(
             Instruction::LdaImmediate(page_b_register),
             Instruction::Pha,
             Instruction::LdaImmediate(2),
-            Instruction::StaAbsolute(0x8000),
+            crate::mapper165::selector_safety::select_register_instruction(),
             Instruction::Pla,
             Instruction::StaAbsolute(0x8001),
             Instruction::Plp,

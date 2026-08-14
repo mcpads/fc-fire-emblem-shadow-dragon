@@ -22,6 +22,22 @@ fn registry_covers_every_observed_chr_pair() {
 }
 
 #[test]
+fn battle_animation_contract_includes_the_terrain_preview_sprite_supply() {
+    assert!(OBSERVED_CHR_PAIRS.iter().any(|pair| {
+        pair.screen_role == "battle_animation"
+            && pair.pattern_window == PatternWindow::Left
+            && pair.fd_source_page == 0x16
+            && pair.fe_source_page == 0x01
+    }));
+    assert!(OBSERVED_CHR_PAIRS.iter().any(|pair| {
+        pair.screen_role == "battle_animation"
+            && pair.pattern_window == PatternWindow::Right
+            && pair.fd_source_page == 0x02
+            && pair.fe_source_page == 0x01
+    }));
+}
+
+#[test]
 fn command_menu_keeps_remaining_labels_and_actions_as_open_work() {
     let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
     let command_menu = report

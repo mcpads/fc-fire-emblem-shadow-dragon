@@ -157,12 +157,12 @@ pub(super) fn build_profile_page_selector(mapper_registers: [u8; 2]) -> Result<V
             Instruction::LdaImmediate(mapper_registers[0]),
             Instruction::Pha,
             Instruction::LdaImmediate(2),
-            Instruction::StaAbsolute(0x8000),
+            crate::mapper165::selector_safety::select_register_instruction(),
             Instruction::Pla,
             Instruction::StaAbsolute(0x8001),
             Instruction::Pha,
             Instruction::LdaImmediate(4),
-            Instruction::StaAbsolute(0x8000),
+            crate::mapper165::selector_safety::select_register_instruction(),
             Instruction::Pla,
             Instruction::StaAbsolute(0x8001),
             Instruction::LdaImmediate(0xA8),
@@ -352,12 +352,12 @@ mod tests {
         assert!(
             selector
                 .windows(5)
-                .any(|bytes| bytes == [0xA9, 0x02, 0x8D, 0x00, 0x80])
+                .any(|bytes| bytes == [0xA9, 0x02, 0x20, 0x58, 0xFA])
         );
         assert!(
             selector
                 .windows(5)
-                .any(|bytes| bytes == [0xA9, 0x04, 0x8D, 0x00, 0x80])
+                .any(|bytes| bytes == [0xA9, 0x04, 0x20, 0x58, 0xFA])
         );
         assert_eq!(
             &selector[selector.len() - 5..],

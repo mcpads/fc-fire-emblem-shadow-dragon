@@ -49,7 +49,6 @@ const SECOND_COMPLETION_FLAG: u16 = 0x780A;
 const PAGE_ADVANCE_CLEAR: u16 = 0x7804;
 const E7_DECODER_FLAG: u16 = 0x7808;
 
-const BANK_SELECT_REGISTER: u16 = 0x8000;
 const BANK_VALUE_REGISTER: u16 = 0x8001;
 const PAIRED_BANK_HELPER: u16 = 0xFA20;
 const PPU_CONTROL: u16 = 0x2000;
@@ -76,6 +75,7 @@ const E7_HANDOFF_SOURCE: [u8; 17] = [
 
 pub(super) struct LifecycleSuite {
     pub(super) routine: RuntimeRoutine,
+    pub(super) executable_byte_count: usize,
     pub(super) completed_page_entry: u16,
     pub(super) handoff_residency_suspension_entry: u16,
 }
@@ -175,7 +175,7 @@ fn append_guarded_banked_resolver_call(
         Instruction::StaZeroPage(PPU_CONTROL_SHADOW),
         Instruction::StaAbsolute(PPU_CONTROL),
         Instruction::LdaImmediate(PRG_A000_REGISTER),
-        Instruction::StaAbsolute(BANK_SELECT_REGISTER),
+        crate::mapper165::selector_safety::select_register_instruction(),
         Instruction::LdaImmediate(code_page),
         Instruction::StaAbsolute(BANK_VALUE_REGISTER),
         Instruction::JsrAbsolute(resolver),
@@ -289,6 +289,7 @@ pub(super) fn build_lifecycle_suite(
 
     let mut bytes = assemble_at(origin, &instructions)
         .context("cannot assemble the dialogue lifecycle suite")?;
+    let executable_byte_count = bytes.len();
     let capacity = usize::from(LIFECYCLE_CAVE_END - LIFECYCLE_ORIGIN);
     ensure!(
         bytes.len() <= capacity,
@@ -302,6 +303,7 @@ pub(super) fn build_lifecycle_suite(
             address: origin,
             bytes,
         },
+        executable_byte_count,
         completed_page_entry: origin,
         handoff_residency_suspension_entry,
     })

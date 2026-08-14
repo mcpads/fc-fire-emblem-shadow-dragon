@@ -68,6 +68,7 @@ pub enum Instruction {
     BcsAbsolute(u16),
     BneAbsolute(u16),
     Rts,
+    Rti,
     Nop,
 }
 
@@ -91,6 +92,7 @@ impl Instruction {
             | Self::Clc
             | Self::Sec
             | Self::Rts
+            | Self::Rti
             | Self::Nop => 1,
             Self::LdaImmediate(_)
             | Self::LdaZeroPage(_)
@@ -203,7 +205,11 @@ impl Instruction {
             | Self::DecZeroPage(_) => 5,
             Self::LdaIndirectY(_) => 6,
             Self::StaIndirectY(_) => 6,
-            Self::IncAbsolute(_) | Self::DecAbsolute(_) | Self::JsrAbsolute(_) | Self::Rts => 6,
+            Self::IncAbsolute(_)
+            | Self::DecAbsolute(_)
+            | Self::JsrAbsolute(_)
+            | Self::Rts
+            | Self::Rti => 6,
             // 분기는 성립하고 페이지도 넘는 경우를 최악으로 본다.
             Self::BeqAbsolute(_)
             | Self::BccAbsolute(_)
@@ -285,6 +291,7 @@ impl Instruction {
             Self::BcsAbsolute(target) => relative(Mnemonic::Bcs, "BCS", pc, target)?,
             Self::BneAbsolute(target) => relative(Mnemonic::Bne, "BNE", pc, target)?,
             Self::Rts => implied(Mnemonic::Rts, AddressingMode::Implied),
+            Self::Rti => implied(Mnemonic::Rti, AddressingMode::Implied),
             Self::Nop => implied(Mnemonic::Nop, AddressingMode::Implied),
         };
         TypedInstruction::new(mnemonic, mode, operand)

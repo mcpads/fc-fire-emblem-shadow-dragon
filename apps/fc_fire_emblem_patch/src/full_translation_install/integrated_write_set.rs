@@ -294,6 +294,11 @@ pub(super) fn plan_integrated_write_set(
     let expected_write_count = image.writes().len();
     let actual_mutations = image.mutation_identities().to_vec();
     let output = image.into_data();
+    let output_rom = Rom::parse(output.clone()).context("parse integrated mapper output")?;
+    crate::mapper165::selector_safety::verify_final_installed_contract(
+        &output_rom,
+        super::runtime_code::trampoline::TRAMPOLINE_ORIGIN,
+    )?;
     verify_installed_dialogue(&output, inputs.encoded_dialogue)?;
     verify_installed_chapter_titles(&output, inputs.candidate, inputs.encoded_chapter_titles)?;
     verify_installed_cold_request_presentation(

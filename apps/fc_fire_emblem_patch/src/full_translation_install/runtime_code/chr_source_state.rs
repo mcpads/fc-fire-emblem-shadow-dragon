@@ -58,6 +58,14 @@ impl ChrSourceStateContract {
             (RIGHT_FE_HELPER, self.fe_restore_callee_cycles),
         ]
     }
+
+    #[cfg(test)]
+    pub(super) const fn with_restore_callee_cycles(fd: u32, fe: u32) -> Self {
+        Self {
+            fd_restore_callee_cycles: fd,
+            fe_restore_callee_cycles: fe,
+        }
+    }
 }
 
 /// 대사 소비자가 기대하는 mapper165 생산자 구조를 후보 ROM에 묶는다.
@@ -74,6 +82,7 @@ pub(super) fn bind_chr_source_state(candidate: &Rom) -> Result<ChrSourceStateCon
         decode_rp2a03_sequence(&expected, address, role)?;
     }
     const BATTLE_ACTIVE_RANGE: (u16, u16) = (0xFE90, 0xFEC3);
+    const SELECT_REGISTER_RANGE: (u16, u16) = (0xFA58, 0xFA5E);
     const RIGHT_FD_ENTRY_RANGE: (u16, u16) = (RIGHT_FD_HELPER, RIGHT_FD_HELPER + 3);
     const RIGHT_FD_RANGE: (u16, u16) = (0xFEEE, 0xFF2D);
     const RIGHT_FE_ENTRY_RANGE: (u16, u16) = (RIGHT_FE_HELPER, RIGHT_FE_HELPER + 3);
@@ -82,12 +91,22 @@ pub(super) fn bind_chr_source_state(candidate: &Rom) -> Result<ChrSourceStateCon
         fd_restore_callee_cycles: worst_case_fixed_subroutine_cycles(
             candidate,
             RIGHT_FD_HELPER,
-            &[RIGHT_FD_ENTRY_RANGE, BATTLE_ACTIVE_RANGE, RIGHT_FD_RANGE],
+            &[
+                RIGHT_FD_ENTRY_RANGE,
+                SELECT_REGISTER_RANGE,
+                BATTLE_ACTIVE_RANGE,
+                RIGHT_FD_RANGE,
+            ],
         )?,
         fe_restore_callee_cycles: worst_case_fixed_subroutine_cycles(
             candidate,
             RIGHT_FE_HELPER,
-            &[RIGHT_FE_ENTRY_RANGE, BATTLE_ACTIVE_RANGE, RIGHT_FE_RANGE],
+            &[
+                RIGHT_FE_ENTRY_RANGE,
+                SELECT_REGISTER_RANGE,
+                BATTLE_ACTIVE_RANGE,
+                RIGHT_FE_RANGE,
+            ],
         )?,
     })
 }

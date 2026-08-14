@@ -45,7 +45,6 @@ pub(super) const LOOKUP_LIVE_SOURCE_IDENTITY: u8 = 0;
 /// 연속 대사에서 직전에 게시한 선행 조회값을 현재 레코드로 승격한다.
 pub(super) const LOOKUP_PUBLISHED_SOURCE_IDENTITY: u8 = 1;
 
-const BANK_SELECT_REGISTER: u16 = 0x8000;
 const BANK_VALUE_REGISTER: u16 = 0x8001;
 const PRG_8000_REGISTER: u8 = 6;
 /// 자료 창의 시작이다. 재료 페이지가 여기 걸린다.
@@ -119,7 +118,7 @@ fn branch_to_failure(
 fn map_page(page: Instruction) -> [Instruction; 4] {
     [
         Instruction::LdaImmediate(PRG_8000_REGISTER),
-        Instruction::StaAbsolute(BANK_SELECT_REGISTER),
+        crate::mapper165::selector_safety::select_register_instruction(),
         page,
         Instruction::StaAbsolute(BANK_VALUE_REGISTER),
     ]
@@ -724,7 +723,7 @@ mod tests {
             (&initial, layout().scan_page),
             (&next, layout().scan_page),
         ] {
-            let select = [0xA9, PRG_8000_REGISTER, 0x8D, 0x00, 0x80, 0xA9, page];
+            let select = [0xA9, PRG_8000_REGISTER, 0x20, 0x58, 0xFA, 0xA9, page];
             assert!(
                 routine.bytes.windows(7).any(|window| window == select),
                 "the resolver never maps page {page:02X}"

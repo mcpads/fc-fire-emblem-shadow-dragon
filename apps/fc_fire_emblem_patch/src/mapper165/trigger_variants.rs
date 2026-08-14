@@ -167,7 +167,7 @@ mod tests {
             let start = page * CHR_PAGE_SIZE + FD_TILE_HIGH_PLANE_OFFSET;
             chr[start..start + 8].fill(0x20);
         }
-        for page in [0x02, 0x06, 0x14] {
+        for page in [0x01, 0x02, 0x06, 0x14, 0x16] {
             let start = page * CHR_PAGE_SIZE + FD_TILE_HIGH_PLANE_OFFSET;
             chr[start..start + 8].fill(0);
         }

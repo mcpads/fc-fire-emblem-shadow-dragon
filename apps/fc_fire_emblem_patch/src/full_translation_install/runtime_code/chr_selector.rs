@@ -51,6 +51,7 @@ use super::{
     transport::{REQUEST_STATE, STATE_READY},
 };
 use crate::{
+    mapper165::selector_safety::select_register_instruction,
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
     typed_source::decode_rp2a03_sequence,
@@ -130,7 +131,6 @@ pub(super) fn selector_hook_bytes(selector: u16) -> [u8; 3] {
 
 pub(super) fn build_chr_selector(
     origin: u16,
-    bank_select_register: u16,
     bank_value_register: u16,
     cold_request_mapper_register: u8,
     fallback: u16,
@@ -184,7 +184,7 @@ pub(super) fn build_chr_selector(
     instructions[complete_request_placeholder] = Instruction::BeqAbsolute(complete_request);
     instructions.extend([
         Instruction::LdaImmediate(RIGHT_FD_CHR_REGISTER),
-        Instruction::StaAbsolute(bank_select_register),
+        select_register_instruction(),
         Instruction::LdaImmediate(CHR_RAM_BANK_VALUE),
         Instruction::StaAbsolute(bank_value_register),
         Instruction::Pla,
@@ -195,7 +195,7 @@ pub(super) fn build_chr_selector(
     instructions[incomplete_request_placeholder] = Instruction::BneAbsolute(incomplete_request);
     instructions.extend([
         Instruction::LdaImmediate(RIGHT_FD_CHR_REGISTER),
-        Instruction::StaAbsolute(bank_select_register),
+        select_register_instruction(),
         Instruction::LdaImmediate(cold_request_mapper_register),
         Instruction::StaAbsolute(bank_value_register),
         Instruction::Pla,
@@ -248,7 +248,6 @@ pub(in crate::full_translation_install) struct ConsumerFontPageRegisters {
 /// 신뢰한다. 알 수 없는 값은 기존 roster/options 사슬로 그대로 넘긴다.
 pub(super) fn build_consumer_font_selector(
     origin: u16,
-    bank_select_register: u16,
     bank_value_register: u16,
     pages: ConsumerFontPageRegisters,
 ) -> Result<RuntimeRoutine> {
@@ -312,7 +311,7 @@ pub(super) fn build_consumer_font_selector(
     patch_long_jump(&mut instructions, dynamic_valid_a, dynamic_valid);
     instructions.extend([
         Instruction::LdaImmediate(RIGHT_FD_CHR_REGISTER),
-        Instruction::StaAbsolute(bank_select_register),
+        select_register_instruction(),
         Instruction::LdaAbsolute(CONSUMER_CATALOG_PAGE),
         Instruction::StaAbsolute(bank_value_register),
         Instruction::Pla,
@@ -324,39 +323,19 @@ pub(super) fn build_consumer_font_selector(
     for jump in [catalog_default_from_action, catalog_default_from_inventory] {
         patch_long_jump(&mut instructions, jump, catalog_default);
     }
-    append_immediate_page_selection(
-        &mut instructions,
-        bank_select_register,
-        bank_value_register,
-        pages.catalog[0],
-    );
+    append_immediate_page_selection(&mut instructions, bank_value_register, pages.catalog[0]);
 
     let unit_command_target = next_address(origin, &instructions)?;
     patch_long_jump(&mut instructions, unit_command, unit_command_target);
-    append_immediate_page_selection(
-        &mut instructions,
-        bank_select_register,
-        bank_value_register,
-        pages.unit_command,
-    );
+    append_immediate_page_selection(&mut instructions, bank_value_register, pages.unit_command);
 
     let map_menu_target = next_address(origin, &instructions)?;
     patch_long_jump(&mut instructions, map_menu, map_menu_target);
-    append_immediate_page_selection(
-        &mut instructions,
-        bank_select_register,
-        bank_value_register,
-        pages.map_menu,
-    );
+    append_immediate_page_selection(&mut instructions, bank_value_register, pages.map_menu);
 
     let ending_target = next_address(origin, &instructions)?;
     patch_long_jump(&mut instructions, ending, ending_target);
-    append_immediate_page_selection(
-        &mut instructions,
-        bank_select_register,
-        bank_value_register,
-        pages.ending_record,
-    );
+    append_immediate_page_selection(&mut instructions, bank_value_register, pages.ending_record);
 
     let chapter_save_offer_target = next_address(origin, &instructions)?;
     patch_long_jump(
@@ -366,7 +345,6 @@ pub(super) fn build_consumer_font_selector(
     );
     append_immediate_page_selection(
         &mut instructions,
-        bank_select_register,
         bank_value_register,
         pages.chapter_save_offer,
     );
@@ -390,13 +368,12 @@ pub(super) fn build_consumer_font_selector(
 
 fn append_immediate_page_selection(
     instructions: &mut Vec<Instruction>,
-    bank_select_register: u16,
     bank_value_register: u16,
     mapper_register: u8,
 ) {
     instructions.extend([
         Instruction::LdaImmediate(RIGHT_FD_CHR_REGISTER),
-        Instruction::StaAbsolute(bank_select_register),
+        select_register_instruction(),
         Instruction::LdaImmediate(mapper_register),
         Instruction::StaAbsolute(bank_value_register),
         Instruction::Pla,
@@ -442,13 +419,12 @@ fn append_long_conditional_jump(
 /// 요청 발행기가 NMI를 다시 켜기 전에 냉간 표시 페이지를 원자적으로 고른다.
 pub(super) fn build_cold_request_presentation_selector(
     origin: u16,
-    bank_select_register: u16,
     bank_value_register: u16,
     cold_request_mapper_register: u8,
 ) -> Result<RuntimeRoutine> {
     let instructions = [
         Instruction::LdaImmediate(RIGHT_FD_CHR_REGISTER),
-        Instruction::StaAbsolute(bank_select_register),
+        select_register_instruction(),
         Instruction::LdaImmediate(cold_request_mapper_register),
         Instruction::StaAbsolute(bank_value_register),
         Instruction::Rts,
@@ -477,8 +453,7 @@ mod tests {
     /// 알 수 없는 상태에서 새 페이지를 고르면 원본의 다른 화면을 침범할 수 있다.
     #[test]
     fn an_unsupported_state_hands_the_existing_chain_control() {
-        let routine =
-            build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
+        let routine = build_chr_selector(0xF4A0, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
 
         assert_eq!(
             &routine.bytes[routine.bytes.len() - 3..],
@@ -494,8 +469,7 @@ mod tests {
     /// 다른 값이므로 selector가 그것을 읽으면 준비된 페이지를 영원히 고르지 못한다.
     #[test]
     fn prg_bank_shadow_is_not_used_as_the_dialogue_lifetime() {
-        let routine =
-            build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
+        let routine = build_chr_selector(0xF4A0, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
 
         assert!(!routine.bytes.windows(2).any(|window| window
             == [
@@ -518,8 +492,7 @@ mod tests {
     /// 안 된다. 수명 이탈 훅과 소비자 양쪽이 같은 경계를 지킨다.
     #[test]
     fn terminal_dialogue_state_falls_through_to_the_existing_chain() {
-        let routine =
-            build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
+        let routine = build_chr_selector(0xF4A0, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
 
         assert!(routine.bytes.windows(5).any(|window| {
             window
@@ -538,14 +511,13 @@ mod tests {
     /// MMC3는 «레지스터를 고른 뒤 값을 쓴다»는 순서도 함께 지킨다.
     #[test]
     fn the_ready_path_selects_only_fd_chr_ram_and_keeps_fe_on_source_rom() {
-        let routine =
-            build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
+        let routine = build_chr_selector(0xF4A0, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
 
         let mut selections = Vec::new();
         let mut index = 0;
         while index + 9 < routine.bytes.len() {
             if routine.bytes[index] == 0xA9
-                && routine.bytes[index + 2..index + 5] == [0x8D, 0x00, 0x80]
+                && routine.bytes[index + 2..index + 5] == [0x20, 0x58, 0xFA]
                 && routine.bytes[index + 5] == 0xA9
                 && routine.bytes[index + 7..index + 10] == [0x8D, 0x01, 0x80]
             {
@@ -570,8 +542,7 @@ mod tests {
     /// 페이지면 준비 표식만 믿지 않고 기존 selector 사슬로 넘겨야 한다.
     #[test]
     fn the_ready_path_is_guarded_by_the_dialogue_fd_source_page() {
-        let routine =
-            build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
+        let routine = build_chr_selector(0xF4A0, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
 
         assert!(routine.bytes.windows(8).any(|window| {
             window
@@ -592,8 +563,7 @@ mod tests {
     /// 그 값을 A에 남기면 호출자가 그것을 자연 페이지 그림자에 저장해 화면이 깨진다.
     #[test]
     fn the_chain_accumulator_survives_both_paths() {
-        let routine =
-            build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
+        let routine = build_chr_selector(0xF4A0, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
 
         assert_eq!(&routine.bytes[..2], [0x08, 0x48]);
         let selected_returns = routine
@@ -625,8 +595,7 @@ mod tests {
 
     #[test]
     fn cold_request_selection_uses_chr_rom_instead_of_partial_chr_ram() {
-        let routine =
-            build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
+        let routine = build_chr_selector(0xF4A0, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
 
         assert_eq!(
             &routine.bytes[2..7],
@@ -649,9 +618,9 @@ mod tests {
                 == [
                     0xA9,
                     RIGHT_FD_CHR_REGISTER,
-                    0x8D,
-                    0x00,
-                    0x80,
+                    0x20,
+                    0x58,
+                    0xFA,
                     0xA9,
                     0xC8,
                     0x8D,
@@ -663,8 +632,7 @@ mod tests {
 
     #[test]
     fn resident_group_overlay_uses_the_same_safe_presentation() {
-        let routine =
-            build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
+        let routine = build_chr_selector(0xF4A0, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
 
         assert!(
             routine
@@ -677,9 +645,9 @@ mod tests {
                 == [
                     0xA9,
                     RIGHT_FD_CHR_REGISTER,
-                    0x8D,
-                    0x00,
-                    0x80,
+                    0x20,
+                    0x58,
+                    0xFA,
                     0xA9,
                     0xC8,
                     0x8D,
@@ -691,17 +659,16 @@ mod tests {
 
     #[test]
     fn atomic_cold_selector_maps_only_the_fd_window() {
-        let routine =
-            build_cold_request_presentation_selector(0xF5A0, 0x8000, 0x8001, 0xC8).unwrap();
+        let routine = build_cold_request_presentation_selector(0xF5A0, 0x8001, 0xC8).unwrap();
 
         assert_eq!(
             routine.bytes,
             [
                 0xA9,
                 RIGHT_FD_CHR_REGISTER,
-                0x8D,
-                0x00,
-                0x80,
+                0x20,
+                0x58,
+                0xFA,
                 0xA9,
                 0xC8,
                 0x8D,
@@ -716,8 +683,7 @@ mod tests {
     /// 상태를 되돌린 뒤 기존 사슬에 넘겨야 한다.
     #[test]
     fn consumer_selector_admits_only_the_bound_screen_states() {
-        let routine =
-            build_consumer_font_selector(0xF600, 0x8000, 0x8001, consumer_pages()).unwrap();
+        let routine = build_consumer_font_selector(0xF600, 0x8001, consumer_pages()).unwrap();
 
         assert_eq!(&routine.bytes[..2], [0x08, 0x48]);
         for state in [
@@ -759,7 +725,7 @@ mod tests {
     #[test]
     fn consumer_selector_validates_the_dynamic_catalog_page_before_mapping_it() {
         let pages = consumer_pages();
-        let routine = build_consumer_font_selector(0xF600, 0x8000, 0x8001, pages).unwrap();
+        let routine = build_consumer_font_selector(0xF600, 0x8001, pages).unwrap();
 
         assert!(routine.bytes.windows(6).any(|window| {
             window
@@ -795,7 +761,7 @@ mod tests {
     #[test]
     fn consumer_selector_maps_each_static_screen_to_its_planned_fd_page() {
         let pages = consumer_pages();
-        let routine = build_consumer_font_selector(0xF600, 0x8000, 0x8001, pages).unwrap();
+        let routine = build_consumer_font_selector(0xF600, 0x8001, pages).unwrap();
 
         for page in [
             pages.catalog[0],
@@ -809,9 +775,9 @@ mod tests {
                     == [
                         0xA9,
                         RIGHT_FD_CHR_REGISTER,
-                        0x8D,
-                        0x00,
-                        0x80,
+                        0x20,
+                        0x58,
+                        0xFA,
                         0xA9,
                         page,
                         0x8D,
@@ -825,7 +791,7 @@ mod tests {
     #[test]
     fn consumer_selector_restores_the_chain_accumulator_after_every_mapping() {
         let pages = consumer_pages();
-        let routine = build_consumer_font_selector(0xF600, 0x8000, 0x8001, pages).unwrap();
+        let routine = build_consumer_font_selector(0xF600, 0x8001, pages).unwrap();
 
         let immediate_selected_returns = routine
             .bytes
@@ -864,7 +830,7 @@ mod tests {
         let mut pages = consumer_pages();
         pages.catalog[1] = pages.catalog[0];
 
-        let error = build_consumer_font_selector(0xF600, 0x8000, 0x8001, pages).unwrap_err();
+        let error = build_consumer_font_selector(0xF600, 0x8001, pages).unwrap_err();
 
         assert!(error.to_string().contains("same mapper register"));
     }

@@ -192,7 +192,7 @@ fn dispatch_and_composer_restore_post_scan_registers_and_borrowed_scratch() {
         .unwrap();
     let chr_ram_selection = compose
         .windows(5)
-        .position(|window| window == [0xA9, 0x02, 0x8D, 0x00, 0x80])
+        .position(|window| window == [0xA9, 0x02, 0x20, 0x58, 0xFA])
         .unwrap();
     assert!(assignment_call < chr_ram_selection);
 }
@@ -350,9 +350,9 @@ fn zero_right_page_selects_its_mapper_register_before_writing_chr_ram() {
                 0x48,
                 0xA9,
                 mapper_register,
-                0x8D,
-                0x00,
-                0x80,
+                0x20,
+                0x58,
+                0xFA,
                 0x68,
                 0x8D,
                 0x01,

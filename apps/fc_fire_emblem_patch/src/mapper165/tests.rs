@@ -1,5 +1,9 @@
-use crate::rp2a03::{Instruction, assemble_at};
+use crate::{
+    mmc5_chr::switchable_bank_file_offset,
+    rp2a03::{Instruction, assemble_at},
+};
 
+use super::writer_sites::{DirectWriter, WriterLocation};
 use super::*;
 
 #[test]
@@ -7,13 +11,13 @@ fn routines_fit_disjoint_ranges_inside_the_proven_cave() {
     let routines = build_routines(&[]).unwrap();
     validate_routine_placements(&routines).unwrap();
 
-    assert_eq!(routines.len(), 8);
+    assert_eq!(routines.len(), 11);
 }
 
 #[test]
 fn prg_selector_maps_one_mmc4_bank_to_two_consecutive_mmc3_banks() {
     let bytes = &build_routines(&[]).unwrap()[1].bytes;
-    assert!(bytes.windows(3).any(|window| window == [0x8D, 0x00, 0x80]));
+    assert!(bytes.windows(3).any(|window| window == [0x20, 0x58, 0xFA]));
     assert!(bytes.windows(3).any(|window| window == [0x8D, 0x01, 0x80]));
     assert!(bytes.windows(2).any(|window| window == [0x29, 0x0F]));
     assert!(bytes.windows(2).any(|window| window == [0x09, 0x01]));
@@ -21,7 +25,17 @@ fn prg_selector_maps_one_mmc4_bank_to_two_consecutive_mmc3_banks() {
 
 #[test]
 fn chr_selectors_bias_source_pages_away_from_chr_ram() {
-    for routine in build_routines(&[]).unwrap().iter().skip(2).take(4) {
+    let routines = build_routines(&[]).unwrap();
+    for address in [
+        SELECT_LEFT_FD_CHR_BANK_ADDRESS,
+        SELECT_LEFT_FE_CHR_BANK_ADDRESS,
+        SELECT_RIGHT_FD_CHR_BANK_ADDRESS,
+        SELECT_RIGHT_FE_CHR_BANK_ADDRESS,
+    ] {
+        let routine = routines
+            .iter()
+            .find(|routine| routine.cpu_address == address)
+            .expect("the CHR selector routine is present");
         assert!(
             routine
                 .bytes
@@ -74,7 +88,8 @@ fn central_writer_redirects_preserve_source_lengths() {
         SOURCE_SELECT_PRG_BANK_AND_SAVE_ADDRESS,
         &[
             Instruction::StaZeroPage(0x29),
-            Instruction::StaZeroPage(0x51),
+            Instruction::Nop,
+            Instruction::Nop,
             Instruction::JsrAbsolute(SELECT_PRG_BANK_ADDRESS),
             Instruction::Rts,
         ],
@@ -126,6 +141,30 @@ fn direct_writer_redirects_keep_three_byte_instruction_size() {
 }
 
 #[test]
+fn direct_writer_redirect_preserves_the_preceding_immediate_page_value() {
+    let writer = DirectWriter {
+        role: "synthetic immediate left-FD selection",
+        location: WriterLocation::Switchable { prg_bank: 0x05 },
+        source_address: 0x9002,
+        source_register: 0xB000,
+        target_routine: SELECT_LEFT_FD_CHR_BANK_ADDRESS,
+    };
+    let sequence_start = switchable_bank_file_offset(0x05, 0x9000).unwrap();
+    let writer_start = switchable_bank_file_offset(0x05, writer.source_address).unwrap();
+    let mut source = vec![0_u8; writer_start + 3];
+    source[sequence_start..sequence_start + 5].copy_from_slice(&[0xA9, 0x16, 0x8D, 0x00, 0xB0]);
+    let mut image = TrackedImage::new(source);
+
+    replace_direct_writer(&mut image, writer).unwrap();
+    let output = image.into_data();
+
+    assert_eq!(
+        &output[sequence_start..sequence_start + 5],
+        &[0xA9, 0x16, 0x20, 0x40, 0xFA]
+    );
+}
+
+#[test]
 fn pair_aware_right_selector_preserves_a_and_flags_and_selects_the_variant() {
     let entry = trigger_variants::PairSelectorEntry {
         pattern_window: trigger_planes::PatternWindow::Right,
@@ -157,6 +196,20 @@ fn pair_aware_right_selector_preserves_a_and_flags_and_selects_the_variant() {
             .any(|bytes| bytes == [0xA5, 0x5C, 0x05, 0x52, 0x29, 0x1F, 0xC9, 0x14])
     );
     assert!(selector.bytes.windows(2).any(|bytes| bytes == [0xA9, 0x04]));
+}
+
+#[test]
+fn a_second_pair_selector_is_refused_before_the_downstream_runtime_bridge() {
+    let entry = trigger_variants::PairSelectorEntry {
+        pattern_window: trigger_planes::PatternWindow::Right,
+        fd_source_page: 0,
+        fe_source_page: 0x14,
+        mapper_register_value: 4,
+    };
+    let routines = build_routines(&[entry, entry]).unwrap();
+    let error = validate_routine_placements(&routines).unwrap_err();
+
+    assert!(error.to_string().contains("downstream runtime reservation"));
 }
 
 #[test]
