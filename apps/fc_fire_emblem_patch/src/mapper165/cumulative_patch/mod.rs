@@ -882,6 +882,10 @@ pub(crate) fn build_cumulative_patch(
                 screen_role: MAXIMUM_DIALOGUE_SCREEN_ROLE,
                 target_record_id: maximum_dialogue_plan.record_id.clone(),
                 workspace_sha1: maximum_dialogue_plan.workspace_sha1.clone(),
+                record_page_boundary_topology_sha1: maximum_dialogue_stage
+                    .page
+                    .record_page_boundary_topology_sha1
+                    .clone(),
                 screen_evidence_manifest_sha1: maximum_dialogue_stage
                     .page
                     .evidence_manifest_sha1

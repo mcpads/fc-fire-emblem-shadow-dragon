@@ -29,6 +29,7 @@ mod front_end_page;
 pub(crate) mod hangul_page_probe;
 mod maximum_dialogue_boundary;
 mod maximum_dialogue_page;
+pub(crate) mod maximum_dialogue_rebinding;
 mod maximum_dialogue_runtime;
 mod options_lifetime;
 mod options_page;

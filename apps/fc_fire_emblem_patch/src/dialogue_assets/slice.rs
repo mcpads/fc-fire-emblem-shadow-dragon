@@ -9,12 +9,31 @@ use anyhow::{Context, Result, ensure};
 
 #[cfg(test)]
 use crate::dialogue_inventory::MainDialogueTransitionEdgeReport;
-use crate::{dialogue_inventory::MainDialogueGraphReport, rom::Rom, sha1_hex};
+use crate::{
+    dialogue_inventory::MainDialogueGraphReport,
+    font::{load_dalmoori, rasterize_glyph},
+    font_slots::{FONT_PAGE_SIZE, FONT_TILE_SIZE, active_hangul_codes},
+    rom::Rom,
+    sha1_hex,
+};
 
 use super::*;
 
 const DIALOGUE_PREFIX_CONTROL_CODE: u8 = 0xEA;
 const DIALOGUE_PREFIX_OUTPUT_CODES: [u8; 2] = [0x9E, 0xAB];
+const PAGE_BOUNDARY_TOPOLOGY_DIGEST_VERSION: u8 = 1;
+const PAGE_BOUNDARY_TOPOLOGY_DIGEST_DOMAIN: &[u8] =
+    b"fc-fire-emblem/main-dialogue-page-boundary-topology";
+
+#[derive(Debug)]
+pub(crate) struct MainDialoguePageBoundaryTopologySummary {
+    pub(crate) workspace_sha1: String,
+    pub(crate) record_id: String,
+    pub(crate) topology_sha1: String,
+    pub(crate) source_pointer_cpu_address: u16,
+    pub(crate) logical_byte_count: usize,
+    pub(crate) line_count: usize,
+}
 
 pub(crate) struct MainDialogueSlicePlan {
     pub(crate) workspace_sha1: String,
@@ -30,6 +49,35 @@ pub(crate) struct MainDialogueSlicePlan {
 }
 
 impl MainDialogueSlicePlan {
+    pub(crate) fn page_boundary_topology_sha1(&self) -> String {
+        let mut canonical = Vec::new();
+        append_digest_field(&mut canonical, PAGE_BOUNDARY_TOPOLOGY_DIGEST_DOMAIN);
+        canonical.push(PAGE_BOUNDARY_TOPOLOGY_DIGEST_VERSION);
+        append_digest_field(&mut canonical, self.record_id.as_bytes());
+        canonical.extend_from_slice(&(self.source_file_offset as u64).to_le_bytes());
+        canonical.extend_from_slice(&(self.source_storage_byte_count as u64).to_le_bytes());
+        canonical.extend_from_slice(&self.source_pointer_cpu_address.to_le_bytes());
+        canonical.extend_from_slice(&(self.translated_line_count as u64).to_le_bytes());
+        canonical.extend_from_slice(&(self.logical_line_ranges.len() as u64).to_le_bytes());
+        for range in &self.logical_line_ranges {
+            canonical.extend_from_slice(&(range.start as u64).to_le_bytes());
+            canonical.extend_from_slice(&(range.end as u64).to_le_bytes());
+        }
+        canonical.extend_from_slice(&(self.logical_bytes.len() as u64).to_le_bytes());
+        for byte in &self.logical_bytes {
+            match byte {
+                LogicalDialogueByte::Encoded(value) => {
+                    canonical.push(0);
+                    canonical.push(*value);
+                }
+                LogicalDialogueByte::TargetGlyph(_) => {
+                    canonical.push(1);
+                }
+            }
+        }
+        sha1_hex(&canonical)
+    }
+
     pub(crate) fn unique_glyphs(&self) -> BTreeSet<char> {
         self.logical_bytes
             .iter()
@@ -99,6 +147,97 @@ impl MainDialogueSlicePlan {
         Ok(encoded)
     }
 
+    pub(crate) fn verify_encoded_page_rendering(
+        &self,
+        encoded_record: &[u8],
+        completed_page_pointers: &[u16],
+        page_groups: &[usize],
+        font_pages: &[&[u8]],
+    ) -> Result<usize> {
+        ensure!(
+            encoded_record.len() == self.logical_bytes.len(),
+            "dialogue encoded record length changed"
+        );
+        ensure!(
+            font_pages.iter().all(|page| page.len() == FONT_PAGE_SIZE),
+            "dialogue font page length changed"
+        );
+        let page_ranges = self.page_byte_ranges(completed_page_pointers)?;
+        ensure!(
+            page_groups.len() == page_ranges.len(),
+            "dialogue page-group coverage changed"
+        );
+        ensure!(
+            page_groups.iter().all(|group| *group < font_pages.len()),
+            "dialogue page selects a missing font page"
+        );
+
+        let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
+        let font = load_dalmoori()?;
+        let mut target_glyph_byte_count = 0;
+        for (page_index, range) in page_ranges.into_iter().enumerate() {
+            let font_page = font_pages[page_groups[page_index]];
+            for logical_index in range {
+                let encoded = encoded_record[logical_index];
+                match self.logical_bytes[logical_index] {
+                    LogicalDialogueByte::Encoded(expected) => ensure!(
+                        encoded == expected,
+                        "dialogue preserved byte changed at logical offset {logical_index}"
+                    ),
+                    LogicalDialogueByte::TargetGlyph(character) => {
+                        ensure!(
+                            active_codes.contains(&encoded),
+                            "dialogue target glyph uses an inactive code at logical offset {logical_index}"
+                        );
+                        let tile_start = usize::from(encoded) * FONT_TILE_SIZE;
+                        let tile_end = tile_start + FONT_TILE_SIZE;
+                        let actual = font_page
+                            .get(tile_start..tile_end)
+                            .context("dialogue target glyph tile is outside its font page")?;
+                        ensure!(
+                            actual == rasterize_glyph(&font, character)?,
+                            "dialogue target glyph raster changed at logical offset {logical_index}"
+                        );
+                        target_glyph_byte_count += 1;
+                    }
+                }
+            }
+        }
+        Ok(target_glyph_byte_count)
+    }
+
+    pub(crate) fn verify_encoded_page_topology(
+        &self,
+        encoded_record: &[u8],
+        completed_page_pointers: &[u16],
+    ) -> Result<usize> {
+        ensure!(
+            encoded_record.len() == self.logical_bytes.len(),
+            "dialogue encoded record length changed"
+        );
+        let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
+        let mut target_glyph_byte_count = 0;
+        for range in self.page_byte_ranges(completed_page_pointers)? {
+            for logical_index in range {
+                let encoded = encoded_record[logical_index];
+                match self.logical_bytes[logical_index] {
+                    LogicalDialogueByte::Encoded(expected) => ensure!(
+                        encoded == expected,
+                        "dialogue preserved byte changed at logical offset {logical_index}"
+                    ),
+                    LogicalDialogueByte::TargetGlyph(_) => {
+                        ensure!(
+                            active_codes.contains(&encoded),
+                            "dialogue target glyph uses an inactive code at logical offset {logical_index}"
+                        );
+                        target_glyph_byte_count += 1;
+                    }
+                }
+            }
+        }
+        Ok(target_glyph_byte_count)
+    }
+
     pub(crate) fn source_pointer_cpu_address(&self) -> u16 {
         self.source_pointer_cpu_address
     }
@@ -129,6 +268,11 @@ impl MainDialogueSlicePlan {
         );
         Ok(ranges)
     }
+}
+
+fn append_digest_field(output: &mut Vec<u8>, value: &[u8]) {
+    output.extend_from_slice(&(value.len() as u64).to_le_bytes());
+    output.extend_from_slice(value);
 }
 
 fn encode_logical_bytes(
@@ -257,6 +401,23 @@ pub(crate) fn plan_main_dialogue_slice(
         source_pointer_cpu_address: logical.source_pointer_cpu_address,
         logical_line_ranges,
         logical_bytes: logical.bytes,
+    })
+}
+
+pub(crate) fn summarize_main_dialogue_page_boundary_topology(
+    source_path: &Path,
+    workspace_path: &Path,
+    record_id: &str,
+) -> Result<MainDialoguePageBoundaryTopologySummary> {
+    let rom = Rom::from_path(source_path)?;
+    let plan = plan_main_dialogue_slice(&rom, workspace_path, record_id)?;
+    Ok(MainDialoguePageBoundaryTopologySummary {
+        workspace_sha1: plan.workspace_sha1.clone(),
+        record_id: plan.record_id.clone(),
+        topology_sha1: plan.page_boundary_topology_sha1(),
+        source_pointer_cpu_address: plan.source_pointer_cpu_address(),
+        logical_byte_count: plan.logical_bytes.len(),
+        line_count: plan.line_count(),
     })
 }
 
@@ -410,6 +571,80 @@ mod tests {
     }
 
     #[test]
+    fn page_boundary_topology_ignores_workspace_and_target_glyph_changes() {
+        let first = boundary_digest_plan(
+            "workspace-a",
+            vec![
+                LogicalDialogueByte::TargetGlyph('가'),
+                LogicalDialogueByte::Encoded(0xED),
+            ],
+            vec![0..2],
+        );
+        let second = boundary_digest_plan(
+            "workspace-b",
+            vec![
+                LogicalDialogueByte::TargetGlyph('가'),
+                LogicalDialogueByte::Encoded(0xED),
+            ],
+            vec![0..2],
+        );
+
+        assert_eq!(
+            first.page_boundary_topology_sha1(),
+            second.page_boundary_topology_sha1()
+        );
+        let changed_glyph = boundary_digest_plan(
+            "workspace-c",
+            vec![
+                LogicalDialogueByte::TargetGlyph('나'),
+                LogicalDialogueByte::Encoded(0xED),
+            ],
+            vec![0..2],
+        );
+        assert_eq!(
+            first.page_boundary_topology_sha1(),
+            changed_glyph.page_boundary_topology_sha1()
+        );
+    }
+
+    #[test]
+    fn page_boundary_topology_changes_with_control_bytes_or_line_boundaries() {
+        let baseline = boundary_digest_plan(
+            "workspace",
+            vec![
+                LogicalDialogueByte::TargetGlyph('가'),
+                LogicalDialogueByte::Encoded(0xED),
+            ],
+            vec![0..2],
+        );
+        let changed_kind = boundary_digest_plan(
+            "workspace",
+            vec![
+                LogicalDialogueByte::Encoded(0x00),
+                LogicalDialogueByte::Encoded(0xED),
+            ],
+            vec![0..2],
+        );
+        let changed_lines = boundary_digest_plan(
+            "workspace",
+            vec![
+                LogicalDialogueByte::TargetGlyph('가'),
+                LogicalDialogueByte::Encoded(0xED),
+            ],
+            vec![0..1, 1..2],
+        );
+
+        assert_ne!(
+            baseline.page_boundary_topology_sha1(),
+            changed_kind.page_boundary_topology_sha1()
+        );
+        assert_ne!(
+            baseline.page_boundary_topology_sha1(),
+            changed_lines.page_boundary_topology_sha1()
+        );
+    }
+
+    #[test]
     fn observed_page_boundaries_must_consume_the_whole_record_once() {
         let plan = MainDialogueSlicePlan {
             workspace_sha1: "workspace".to_owned(),
@@ -438,6 +673,40 @@ mod tests {
                 .map(|set| set.len())
                 .collect::<Vec<_>>(),
             [2, 0]
+        );
+    }
+
+    #[test]
+    fn page_topology_accepts_reassigned_target_codes_but_rejects_structural_drift() {
+        let plan = MainDialogueSlicePlan {
+            workspace_sha1: "workspace".to_owned(),
+            record_id: "record".to_owned(),
+            source_file_offset: 0,
+            source_storage_byte_count: 3,
+            translated_line_count: 1,
+            transition_chain_record_count: 1,
+            preserved_source_codes: BTreeSet::new(),
+            source_pointer_cpu_address: 0x8000,
+            logical_line_ranges: std::iter::once(0..3).collect(),
+            logical_bytes: vec![
+                LogicalDialogueByte::TargetGlyph('가'),
+                LogicalDialogueByte::Encoded(0xED),
+                LogicalDialogueByte::TargetGlyph('나'),
+            ],
+        };
+
+        assert_eq!(
+            plan.verify_encoded_page_topology(&[0x00, 0xED, 0x01], &[0x8003])
+                .unwrap(),
+            2
+        );
+        assert!(
+            plan.verify_encoded_page_topology(&[0x00, 0xEF, 0x01], &[0x8003])
+                .is_err()
+        );
+        assert!(
+            plan.verify_encoded_page_topology(&[0x00, 0xED, 0x60], &[0x8003])
+                .is_err()
         );
     }
 
@@ -522,6 +791,25 @@ mod tests {
             boundary_control: 0xEF,
             literal_file_offsets,
             lines: Vec::new(),
+        }
+    }
+
+    fn boundary_digest_plan(
+        workspace_sha1: &str,
+        logical_bytes: Vec<LogicalDialogueByte>,
+        logical_line_ranges: Vec<Range<usize>>,
+    ) -> MainDialogueSlicePlan {
+        MainDialogueSlicePlan {
+            workspace_sha1: workspace_sha1.to_owned(),
+            record_id: "record".to_owned(),
+            source_file_offset: 0x1234,
+            source_storage_byte_count: 8,
+            translated_line_count: logical_line_ranges.len(),
+            transition_chain_record_count: 1,
+            preserved_source_codes: BTreeSet::new(),
+            source_pointer_cpu_address: 0x8FF0,
+            logical_line_ranges,
+            logical_bytes,
         }
     }
 }

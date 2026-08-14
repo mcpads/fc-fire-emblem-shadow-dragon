@@ -260,6 +260,7 @@ pub(super) struct CumulativeMaximumDialogueReport {
     pub(super) screen_role: &'static str,
     pub(super) target_record_id: String,
     pub(super) workspace_sha1: String,
+    pub(super) record_page_boundary_topology_sha1: String,
     pub(super) screen_evidence_manifest_sha1: String,
     pub(super) page_boundary_manifest_sha1: String,
     pub(super) page_boundary_observation_output_sha1: String,

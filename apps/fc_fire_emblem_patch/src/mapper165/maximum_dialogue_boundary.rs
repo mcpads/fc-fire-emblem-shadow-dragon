@@ -18,6 +18,7 @@ struct PageBoundaryManifest {
     target_record_id: String,
     source_sha1: String,
     workspace_sha1: String,
+    record_page_boundary_topology_sha1: String,
     observation_output_sha1: String,
     source_pointer_cpu_address: String,
     runtime_binding: RuntimeBinding,
@@ -57,7 +58,7 @@ pub(super) fn load_observed_page_boundaries(
     let manifest: PageBoundaryManifest = serde_json::from_slice(&bytes)
         .with_context(|| format!("parse maximum dialogue page boundaries {}", path.display()))?;
     ensure!(
-        manifest.format_version == 1,
+        manifest.format_version == 2,
         "unsupported maximum dialogue page-boundary format"
     );
     ensure!(
@@ -66,7 +67,8 @@ pub(super) fn load_observed_page_boundaries(
     );
     ensure!(
         manifest.source_sha1 == EXPECTED_SOURCE_SHA1
-            && manifest.workspace_sha1 == record.workspace_sha1,
+            && is_lower_hex_sha1(&manifest.workspace_sha1)
+            && manifest.record_page_boundary_topology_sha1 == record.page_boundary_topology_sha1(),
         "maximum dialogue page boundaries are bound to different inputs"
     );
     ensure!(

@@ -470,6 +470,27 @@ enum Command {
         #[arg(long, default_value = "out/main-dialogue-layout.json")]
         report: PathBuf,
     },
+    /// Hash one dialogue record's page-boundary-relevant input without emitting its text.
+    SummarizeMainDialoguePageBoundaryTopology {
+        source: PathBuf,
+        #[arg(long, default_value = "private/dialogue/main-workspace.json")]
+        workspace: PathBuf,
+        #[arg(long, default_value = "village-and-outro-dialogue:024")]
+        record_id: String,
+    },
+    /// Prove reference topology and current rendering for one bound maximum-dialogue record.
+    VerifyMaximumDialogueBoundaryRebinding {
+        source: PathBuf,
+        reference_output: PathBuf,
+        candidate_output: PathBuf,
+        #[arg(long, default_value = "private/dialogue/main-workspace.json")]
+        workspace: PathBuf,
+        #[arg(
+            long,
+            default_value = "evidence/private/chapter7-maximum-installed/page-boundaries.json"
+        )]
+        page_boundaries: PathBuf,
+    },
     /// Verify that a private main-dialogue source asset rebuilds the source exactly.
     VerifyMainDialogueSourceRoundtrip {
         source: PathBuf,
@@ -1518,6 +1539,48 @@ fn main() -> Result<()> {
                 summary.translation_input_complete,
                 summary.review_complete,
                 summary.release_eligible
+            );
+        }
+        Command::SummarizeMainDialoguePageBoundaryTopology {
+            source,
+            workspace,
+            record_id,
+        } => {
+            let summary = dialogue_assets::summarize_main_dialogue_page_boundary_topology(
+                &source, &workspace, &record_id,
+            )?;
+            println!("workspace SHA-1: {}", summary.workspace_sha1);
+            println!("record: {}", summary.record_id);
+            println!("page-boundary topology SHA-1: {}", summary.topology_sha1);
+            println!(
+                "source pointer: 0x{:04X}; logical bytes: {}; lines: {}",
+                summary.source_pointer_cpu_address, summary.logical_byte_count, summary.line_count
+            );
+        }
+        Command::VerifyMaximumDialogueBoundaryRebinding {
+            source,
+            reference_output,
+            candidate_output,
+            workspace,
+            page_boundaries,
+        } => {
+            let summary =
+                mapper165::maximum_dialogue_rebinding::verify_maximum_dialogue_boundary_rebinding(
+                    &source,
+                    &workspace,
+                    &page_boundaries,
+                    &reference_output,
+                    &candidate_output,
+                )?;
+            println!("reference output SHA-1: {}", summary.reference_output_sha1);
+            println!("candidate output SHA-1: {}", summary.candidate_output_sha1);
+            println!(
+                "page-boundary topology SHA-1: {}",
+                summary.record_page_boundary_topology_sha1
+            );
+            println!(
+                "verified rendered maximum dialogue: {} pages, {} logical bytes, {} target-glyph bytes",
+                summary.page_count, summary.logical_byte_count, summary.target_glyph_byte_count
             );
         }
         Command::VerifyMainDialogueSourceRoundtrip {

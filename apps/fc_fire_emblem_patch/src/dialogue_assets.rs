@@ -54,7 +54,9 @@ pub use model::{
     DialogueLayoutPlanSummary, DialogueSourceAssetSummary, DialogueSourceRoundtripSummary,
     DialogueWorkspaceSummary, DialogueWorkspaceValidationSummary,
 };
-pub(crate) use slice::{MainDialogueSlicePlan, plan_main_dialogue_slice};
+pub(crate) use slice::{
+    MainDialogueSlicePlan, plan_main_dialogue_slice, summarize_main_dialogue_page_boundary_topology,
+};
 use source_asset::*;
 use workspace::*;
 
