@@ -44,7 +44,6 @@ pub(super) struct LifetimeInputBindings<'a> {
     pub(super) map_menu_localization_sha1: &'a str,
     pub(super) class_profile_page_target_glyph_counts: &'a [usize],
     pub(super) class_profile_preserved_active_code_count: usize,
-    pub(super) class_profile_runtime_bound_to_build: bool,
     pub(super) front_end_target_glyph_count: usize,
     pub(super) front_end_preserved_active_code_count: usize,
     pub(super) front_end_no_save_source_lifetime_bound: bool,
@@ -58,7 +57,6 @@ pub(super) struct LifetimeInputBindings<'a> {
     pub(super) title_logo_installed_tilemap_cell_count: usize,
     pub(super) title_logo_installed_runtime_cleared_top_strip_cell_count: usize,
     pub(super) title_logo_installed_runtime_reasserted_logo_cell_count: usize,
-    pub(super) title_logo_runtime_bound_to_build: bool,
     pub(super) current_build_report_sha1: &'a str,
     pub(super) roster_page_target_glyph_count: usize,
     pub(super) roster_page_preserved_active_code_count: usize,
@@ -260,7 +258,6 @@ pub(super) fn inspect_translation_lifetimes(
             .title_logo_installed_runtime_cleared_top_strip_cell_count,
         installed_runtime_reasserted_logo_cell_count: bindings
             .title_logo_installed_runtime_reasserted_logo_cell_count,
-        runtime_bound_to_build: bindings.title_logo_runtime_bound_to_build,
         evidence_report_sha1: bindings.current_build_report_sha1,
     })?;
     let map_menu_demand = map_menu::inspect(map_menu::InputBindings {
@@ -349,10 +346,6 @@ fn build_translation_lifetime_inventory(
             <= ACTIVE_HANGUL_SLOT_COUNT,
         evidence_report_sha1: battle_report_sha1,
     }];
-    ensure!(
-        bindings.class_profile_runtime_bound_to_build,
-        "class-profile lifetime is not runtime-bound to the current build"
-    );
     let class_profile_target_glyph_count = bindings
         .class_profile_page_target_glyph_counts
         .iter()
@@ -364,8 +357,7 @@ fn build_translation_lifetime_inventory(
         .context("class-profile lifetime slot demand overflow")?;
     demands.push(TranslationLifetimeDemandReport {
         screen_role: "class_profile",
-        measurement_basis:
-            "largest exact-output-bound installed profile-group working set plus preserved active codes",
+        measurement_basis: "largest installed profile-group working set plus preserved active codes",
         target_glyph_count: class_profile_target_glyph_count,
         preserved_active_source_code_count: bindings.class_profile_preserved_active_code_count,
         additional_target_glyph_reservation_count: 0,
@@ -620,7 +612,6 @@ mod tests {
                 map_menu_localization_sha1: "map-menu",
                 class_profile_page_target_glyph_counts: &[143, 161],
                 class_profile_preserved_active_code_count: 12,
-                class_profile_runtime_bound_to_build: true,
                 front_end_target_glyph_count: 15,
                 front_end_preserved_active_code_count: 12,
                 front_end_no_save_source_lifetime_bound: true,
@@ -634,7 +625,6 @@ mod tests {
                 title_logo_installed_tilemap_cell_count: 134,
                 title_logo_installed_runtime_cleared_top_strip_cell_count: 26,
                 title_logo_installed_runtime_reasserted_logo_cell_count: 11,
-                title_logo_runtime_bound_to_build: true,
                 current_build_report_sha1: "build-report",
                 roster_page_target_glyph_count: 72,
                 roster_page_preserved_active_code_count: 18,
@@ -663,7 +653,6 @@ mod tests {
                     installed_tilemap_cell_count: 134,
                     installed_runtime_cleared_top_strip_cell_count: 26,
                     installed_runtime_reasserted_logo_cell_count: 11,
-                    runtime_bound_to_build: true,
                     evidence_report_sha1: "build-report",
                 })
                 .unwrap(),

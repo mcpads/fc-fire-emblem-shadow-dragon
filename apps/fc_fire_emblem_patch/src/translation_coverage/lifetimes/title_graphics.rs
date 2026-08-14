@@ -8,7 +8,6 @@ pub(super) struct InputBindings<'a> {
     pub(super) installed_tilemap_cell_count: usize,
     pub(super) installed_runtime_cleared_top_strip_cell_count: usize,
     pub(super) installed_runtime_reasserted_logo_cell_count: usize,
-    pub(super) runtime_bound_to_build: bool,
     pub(super) evidence_report_sha1: &'a str,
 }
 
@@ -19,13 +18,12 @@ pub(super) fn inspect(bindings: InputBindings<'_>) -> Result<TranslationLifetime
             && bindings.installed_tilemap_cell_count >= bindings.installed_unique_tile_count
             && bindings.installed_runtime_cleared_top_strip_cell_count == 26
             && bindings.installed_runtime_reasserted_logo_cell_count == 11
-            && bindings.runtime_bound_to_build
             && !bindings.evidence_report_sha1.is_empty(),
-        "installed title-graphics lifetime is incomplete or exceeds its source-owned tile budget"
+        "installed title-graphics lifetime is statically incomplete or exceeds its source-owned tile budget"
     );
     Ok(TranslationLifetimeDemandReport {
         screen_role: "title",
-        measurement_basis: "installed unique logo patterns within the source-owned title-tile budget, including the completed-phase top-strip clearing and logo-cell reassertion",
+        measurement_basis: "installed unique logo patterns within the source-owned title-tile budget, including the statically installed completion-phase top-strip clearing and logo-cell reassertion writes",
         target_glyph_count: bindings.installed_unique_tile_count,
         preserved_active_source_code_count: 0,
         additional_target_glyph_reservation_count: 0,
@@ -48,7 +46,6 @@ mod tests {
             installed_tilemap_cell_count: 134,
             installed_runtime_cleared_top_strip_cell_count: 26,
             installed_runtime_reasserted_logo_cell_count: 11,
-            runtime_bound_to_build: true,
             evidence_report_sha1: "build-report",
         })
         .unwrap();
@@ -65,7 +62,6 @@ mod tests {
                 installed_tilemap_cell_count: 134,
                 installed_runtime_cleared_top_strip_cell_count: 26,
                 installed_runtime_reasserted_logo_cell_count: 11,
-                runtime_bound_to_build: true,
                 evidence_report_sha1: "build-report",
             })
             .is_err()

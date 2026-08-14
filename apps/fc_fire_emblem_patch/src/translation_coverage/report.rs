@@ -147,4 +147,5 @@ pub(crate) struct TranslationCoverageSummary {
     pub(crate) complete_consumer_census_domain_count: usize,
     pub(crate) incomplete_consumer_census_domain_count: usize,
     pub(crate) all_declared_consumers_installed_domain_count: usize,
+    pub(crate) all_declared_consumers_runtime_bound_domain_count: usize,
 }

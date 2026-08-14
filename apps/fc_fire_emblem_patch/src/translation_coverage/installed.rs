@@ -214,7 +214,6 @@ pub(crate) struct CurrentInstallation {
     pub(crate) domains: BTreeMap<&'static str, DomainInstallation>,
     pub(crate) class_profile_page_target_glyph_counts: Vec<usize>,
     pub(crate) class_profile_preserved_active_code_count: usize,
-    pub(crate) class_profile_runtime_bound_to_build: bool,
     pub(crate) front_end_target_glyph_count: usize,
     pub(crate) front_end_preserved_active_code_count: usize,
     pub(crate) front_end_no_save_source_lifetime_bound: bool,
@@ -228,7 +227,6 @@ pub(crate) struct CurrentInstallation {
     pub(crate) title_logo_installed_tilemap_cell_count: usize,
     pub(crate) title_logo_installed_runtime_cleared_top_strip_cell_count: usize,
     pub(crate) title_logo_installed_runtime_reasserted_logo_cell_count: usize,
-    pub(crate) title_logo_runtime_bound_to_build: bool,
     pub(crate) roster_page_target_glyph_count: usize,
     pub(crate) roster_page_preserved_active_code_count: usize,
     pub(crate) roster_page_total_slot_demand: usize,
@@ -289,9 +287,6 @@ pub(crate) fn inspect_current_installation(
         class_profile_preserved_active_code_count: report
             .automatic_class_profiles
             .preserved_active_code_count,
-        class_profile_runtime_bound_to_build: report
-            .automatic_class_profiles
-            .runtime_bound_to_build,
         front_end_target_glyph_count: report.front_end_menu.unique_glyph_count,
         front_end_preserved_active_code_count: report.front_end_menu.preserved_active_code_count,
         front_end_no_save_source_lifetime_bound: report
@@ -313,7 +308,6 @@ pub(crate) fn inspect_current_installation(
         title_logo_installed_runtime_reasserted_logo_cell_count: report
             .title_logo
             .installed_runtime_reasserted_logo_cell_count,
-        title_logo_runtime_bound_to_build: report.title_logo.runtime_bound_to_build,
         roster_page_target_glyph_count: report.playable_unit_names.roster_page_target_glyph_count,
         roster_page_preserved_active_code_count: report
             .playable_unit_names
@@ -1011,10 +1005,10 @@ mod tests {
                 "runtime_bound_to_build": false
             },
             "automatic_class_profiles": {
-                "workspace_entry_count": 0,
-                "installed_entry_count": 0,
-                "page_unique_glyph_counts": [],
-                "preserved_active_code_count": 0,
+                "workspace_entry_count": 2,
+                "installed_entry_count": 2,
+                "page_unique_glyph_counts": [3],
+                "preserved_active_code_count": 1,
                 "runtime_bound_to_build": false
             },
             "title_logo": {
@@ -1234,5 +1228,18 @@ mod tests {
         report.title_logo.runtime_unique_image_count = 0;
         report.title_logo.runtime_bound_to_build = false;
         validate_title_logo_lifetime(&report).unwrap();
+        let installations = collect_domain_installations(&report).unwrap();
+        let class_profiles = &installations["class_profiles"];
+        assert_eq!(class_profiles.installed_target_unit_count, 2);
+        assert_eq!(class_profiles.installed_screen_roles, ["class_profile"]);
+        assert_eq!(
+            class_profiles.consumer_complete_screen_roles,
+            ["class_profile"]
+        );
+        assert!(class_profiles.runtime_bound_screen_roles.is_empty());
+        let title = &installations["title_graphics"];
+        assert_eq!(title.installed_screen_roles, ["title"]);
+        assert_eq!(title.consumer_complete_screen_roles, ["title"]);
+        assert!(title.runtime_bound_screen_roles.is_empty());
     }
 }

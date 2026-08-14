@@ -319,7 +319,6 @@ pub(crate) fn analyze_translation_coverage(
                 .class_profile_page_target_glyph_counts,
             class_profile_preserved_active_code_count: installation
                 .class_profile_preserved_active_code_count,
-            class_profile_runtime_bound_to_build: installation.class_profile_runtime_bound_to_build,
             front_end_target_glyph_count: installation.front_end_target_glyph_count,
             front_end_preserved_active_code_count: installation
                 .front_end_preserved_active_code_count,
@@ -340,7 +339,6 @@ pub(crate) fn analyze_translation_coverage(
                 .title_logo_installed_runtime_cleared_top_strip_cell_count,
             title_logo_installed_runtime_reasserted_logo_cell_count: installation
                 .title_logo_installed_runtime_reasserted_logo_cell_count,
-            title_logo_runtime_bound_to_build: installation.title_logo_runtime_bound_to_build,
             current_build_report_sha1: &installation.build_report_sha1,
             roster_page_target_glyph_count: installation.roster_page_target_glyph_count,
             roster_page_preserved_active_code_count: installation
@@ -406,5 +404,8 @@ pub(crate) fn analyze_translation_coverage(
         all_declared_consumers_installed_domain_count: report
             .summary
             .all_declared_consumers_installed_domain_count,
+        all_declared_consumers_runtime_bound_domain_count: report
+            .summary
+            .all_declared_consumers_runtime_bound_domain_count,
     })
 }
