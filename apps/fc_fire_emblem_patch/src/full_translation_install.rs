@@ -565,6 +565,20 @@ pub(crate) fn plan_full_translation_installation(
         runtime_identity: &runtime_identity.material,
         dynamic_producer_encoding: &dynamic_producer_encoding.material,
     })?;
+    let cross_domain_material = plan_cross_domain_material(CrossDomainMaterialInputs {
+        main_dialogue_runtime_material_byte_count: runtime_material.material.len(),
+        shared_atlas_characters: &composition.glyph_atlas_characters,
+        fixed: &fixed,
+        unit_names: &unit_names,
+        chapter_titles: &chapter_titles,
+        choices: &choices,
+        map_menu: &map_menu,
+        unit_ui: &unit_ui,
+        item_actions: &item_actions,
+        transitions: &transitions,
+        locations: &locations,
+        consumer_catalog: &consumer_catalog,
+    })?;
     // 실행 코드는 자료 배치가 끝난 뒤에 조립한다. 놓일 주소가 자료 길이에서 나오기
     // 때문이다. 코드 길이는 그 주소에 영향을 주지 않으므로 한 번에 정해진다.
     // 실행 코드는 자료 배치가 끝난 뒤에 조립한다. 읽을 표들이 어느 페이지의 어느
@@ -717,19 +731,6 @@ pub(crate) fn plan_full_translation_installation(
             && encoded_display.pointer_writes.len() == 517,
         all_dialogue_runtime_hooks_emitted: runtime_control_flow.all_planned_hooks_emitted(),
         dynamic_dialogue_producers_bound: dynamic_string_producers_bound,
-    })?;
-    let cross_domain_material = plan_cross_domain_material(CrossDomainMaterialInputs {
-        main_dialogue_runtime_material_byte_count: runtime_material.material.len(),
-        shared_atlas_characters: &composition.glyph_atlas_characters,
-        fixed: &fixed,
-        unit_names: &unit_names,
-        chapter_titles: &chapter_titles,
-        choices: &choices,
-        map_menu: &map_menu,
-        unit_ui: &unit_ui,
-        item_actions: &item_actions,
-        transitions: &transitions,
-        locations: &locations,
     })?;
     let installation_layout = plan_installation_layout(
         &current_candidate,

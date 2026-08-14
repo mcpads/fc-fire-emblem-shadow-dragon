@@ -5,6 +5,12 @@
 //! 추가 글리프를 페이지에 나눠 담고, 원천 이름 ID가 해당 페이지를 고르게 한다.
 
 mod packing;
+mod runtime_material;
+
+pub(in crate::full_translation_install) use runtime_material::{
+    ConsumerCatalogRuntimeMaterialInputs, ConsumerCatalogRuntimeMaterialPlan,
+    plan_consumer_catalog_runtime_material,
+};
 
 use std::collections::{BTreeMap, BTreeSet};
 

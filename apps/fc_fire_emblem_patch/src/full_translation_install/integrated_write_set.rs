@@ -299,7 +299,7 @@ pub(super) fn plan_integrated_write_set(
             appended_chr_page_count,
             static_consumer_font_page_write_count: inputs.consumer_codebook.pages().len(),
             catalog_consumer_font_page_write_count: inputs.consumer_catalog.pages().len(),
-            cross_domain_material_write_count: inputs.cross_domain_material.sections().len(),
+            cross_domain_material_write_count: inputs.cross_domain_material.sections().len() + 1,
             installed_cold_request_presentation_matches_plan: true,
             installed_static_consumer_font_pages_match_plan: true,
             installed_catalog_consumer_font_pages_match_plan: true,
@@ -539,6 +539,25 @@ fn install_cross_domain_material(
             &section.bytes,
         )?;
     }
+    let runtime = plan.consumer_catalog_runtime();
+    let end = runtime
+        .file_offset
+        .checked_add(runtime.bytes.len())
+        .ok_or_else(|| anyhow::anyhow!("consumer catalog runtime material range overflow"))?;
+    let expected = candidate
+        .data()
+        .get(runtime.file_offset..end)
+        .ok_or_else(|| anyhow::anyhow!("consumer catalog runtime material is outside candidate"))?;
+    ensure!(
+        expected.iter().all(|byte| *byte == 0xFF),
+        "consumer catalog runtime material destination is not exact FF"
+    );
+    image.write_expected(
+        "consumer catalog runtime material",
+        runtime.file_offset,
+        expected,
+        &runtime.bytes,
+    )?;
     Ok(())
 }
 
@@ -557,6 +576,15 @@ fn verify_installed_cross_domain_material(
             section.id
         );
     }
+    let runtime = plan.consumer_catalog_runtime();
+    let end = runtime
+        .file_offset
+        .checked_add(runtime.bytes.len())
+        .ok_or_else(|| anyhow::anyhow!("installed consumer catalog runtime range overflow"))?;
+    ensure!(
+        installed.get(runtime.file_offset..end) == Some(runtime.bytes.as_slice()),
+        "installed consumer catalog runtime material does not match its plan"
+    );
     Ok(())
 }
 
