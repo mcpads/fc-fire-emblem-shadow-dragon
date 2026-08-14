@@ -183,23 +183,23 @@ pub(super) fn build_chr_selector(
     let complete_request = next_address(origin, &instructions)?;
     instructions[complete_request_placeholder] = Instruction::BeqAbsolute(complete_request);
     instructions.extend([
-        Instruction::Pla,
-        Instruction::Plp,
         Instruction::LdaImmediate(RIGHT_FD_CHR_REGISTER),
         Instruction::StaAbsolute(bank_select_register),
         Instruction::LdaImmediate(CHR_RAM_BANK_VALUE),
         Instruction::StaAbsolute(bank_value_register),
+        Instruction::Pla,
+        Instruction::Plp,
         Instruction::Rts,
     ]);
     let incomplete_request = next_address(origin, &instructions)?;
     instructions[incomplete_request_placeholder] = Instruction::BneAbsolute(incomplete_request);
     instructions.extend([
-        Instruction::Pla,
-        Instruction::Plp,
         Instruction::LdaImmediate(RIGHT_FD_CHR_REGISTER),
         Instruction::StaAbsolute(bank_select_register),
         Instruction::LdaImmediate(cold_request_mapper_register),
         Instruction::StaAbsolute(bank_value_register),
+        Instruction::Pla,
+        Instruction::Plp,
         Instruction::Rts,
     ]);
     let unsupported_state = next_address(origin, &instructions)?;
@@ -311,12 +311,12 @@ pub(super) fn build_consumer_font_selector(
     let dynamic_valid = next_address(origin, &instructions)?;
     patch_long_jump(&mut instructions, dynamic_valid_a, dynamic_valid);
     instructions.extend([
-        Instruction::Pla,
-        Instruction::Plp,
         Instruction::LdaImmediate(RIGHT_FD_CHR_REGISTER),
         Instruction::StaAbsolute(bank_select_register),
         Instruction::LdaAbsolute(CONSUMER_CATALOG_PAGE),
         Instruction::StaAbsolute(bank_value_register),
+        Instruction::Pla,
+        Instruction::Plp,
         Instruction::Rts,
     ]);
 
@@ -395,12 +395,12 @@ fn append_immediate_page_selection(
     mapper_register: u8,
 ) {
     instructions.extend([
-        Instruction::Pla,
-        Instruction::Plp,
         Instruction::LdaImmediate(RIGHT_FD_CHR_REGISTER),
         Instruction::StaAbsolute(bank_select_register),
         Instruction::LdaImmediate(mapper_register),
         Instruction::StaAbsolute(bank_value_register),
+        Instruction::Pla,
+        Instruction::Plp,
         Instruction::Rts,
     ]);
 }
@@ -588,21 +588,39 @@ mod tests {
         }));
     }
 
-    /// 사슬은 누산기에 페이지 값을 싣고 다닌다. 끼어드는 쪽이 그것을 덮으면 뒤따르는
-    /// 소비자가 남의 값을 페이지로 읽어 화면이 깨진다.
+    /// 사슬은 누산기에 원천 페이지 값을 싣고 다닌다. 성공 경로가 매퍼 페이지를 쓴 뒤
+    /// 그 값을 A에 남기면 호출자가 그것을 자연 페이지 그림자에 저장해 화면이 깨진다.
     #[test]
     fn the_chain_accumulator_survives_both_paths() {
         let routine =
             build_chr_selector(0xF4A0, 0x8000, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
 
-        // 진입에서 `PHP PHA`, 두 갈래 모두 `PLA PLP`로 되돌린다.
         assert_eq!(&routine.bytes[..2], [0x08, 0x48]);
-        let restores = routine
+        let selected_returns = routine
             .bytes
-            .windows(2)
-            .filter(|window| *window == [0x68, 0x28])
+            .windows(6)
+            .filter(|window| *window == [0x8D, 0x01, 0x80, 0x68, 0x28, 0x60])
             .count();
-        assert_eq!(restores, 3, "all paths must hand the accumulator back");
+        assert_eq!(
+            selected_returns, 2,
+            "both selected pages must restore A and P after the mapper write"
+        );
+        assert_eq!(
+            &routine.bytes[routine.bytes.len() - 5..],
+            [
+                0x68,
+                0x28,
+                0x4C,
+                SELECTOR_CHAIN_FALLBACK as u8,
+                (SELECTOR_CHAIN_FALLBACK >> 8) as u8,
+            ]
+        );
+        assert!(
+            !routine
+                .bytes
+                .windows(4)
+                .any(|window| window == [0x68, 0x28, 0xA9, RIGHT_FD_CHR_REGISTER])
+        );
     }
 
     #[test]
@@ -802,6 +820,43 @@ mod tests {
                     ]
             }));
         }
+    }
+
+    #[test]
+    fn consumer_selector_restores_the_chain_accumulator_after_every_mapping() {
+        let pages = consumer_pages();
+        let routine = build_consumer_font_selector(0xF600, 0x8000, 0x8001, pages).unwrap();
+
+        let immediate_selected_returns = routine
+            .bytes
+            .windows(8)
+            .filter(|window| {
+                window[0] == 0xA9
+                    && window[2..5] == [0x8D, 0x01, 0x80]
+                    && window[5..] == [0x68, 0x28, 0x60]
+            })
+            .count();
+        assert_eq!(immediate_selected_returns, 5);
+        assert!(routine.bytes.windows(9).any(|window| {
+            window
+                == [
+                    0xAD,
+                    CONSUMER_CATALOG_PAGE as u8,
+                    (CONSUMER_CATALOG_PAGE >> 8) as u8,
+                    0x8D,
+                    0x01,
+                    0x80,
+                    0x68,
+                    0x28,
+                    0x60,
+                ]
+        }));
+        assert!(
+            !routine
+                .bytes
+                .windows(4)
+                .any(|window| window == [0x68, 0x28, 0xA9, RIGHT_FD_CHR_REGISTER])
+        );
     }
 
     #[test]

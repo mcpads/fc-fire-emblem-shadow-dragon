@@ -190,7 +190,8 @@ fn build_entry_stub(origin: u16, kind: u8) -> Result<Vec<u8>> {
 
 /// 원본 appender는 A·Y·플래그를 보존하지 않고 X만 출력 끝으로 전진시킨다. 브리지는
 /// 그 관측 계약을 그대로 따른다. kind는 Y에, 출력 X는 스택에 잠시 두고 코드 페이지를
-/// 매핑한다. 실행 뒤 갱신된 X만 mapper 복원 호출 너머로 보존하고 A는 원본처럼 ED다.
+/// 매핑한다. X를 복원하면 PLA가 A를 덮으므로 TYA로 kind를 다시 전달한 뒤 appender를
+/// 호출한다. 실행 뒤 갱신된 X만 mapper 복원 호출 너머로 보존하고 A는 원본처럼 ED다.
 fn build_fixed_bridge(origin: u16, appender: u16, code_page: u8) -> Result<Vec<u8>> {
     assemble_at(
         origin,
@@ -208,6 +209,7 @@ fn build_fixed_bridge(origin: u16, appender: u16, code_page: u8) -> Result<Vec<u
             Instruction::Tya,
             Instruction::Pla,
             Instruction::Tax,
+            Instruction::Tya,
             Instruction::JsrAbsolute(appender),
             Instruction::Txa,
             Instruction::Pha,
@@ -541,6 +543,21 @@ mod tests {
 
         assert!(usize::from(FIXED_BRIDGE_ORIGIN) + bytes.len() <= usize::from(FIXED_BRIDGE_END));
         assert_eq!(bytes.last(), Some(&0x60));
+    }
+
+    #[test]
+    fn fixed_bridge_restores_the_catalog_kind_after_restoring_output_x() {
+        let bytes = build_fixed_bridge(FIXED_BRIDGE_ORIGIN, 0xA600, 0x30).unwrap();
+
+        assert!(
+            bytes
+                .windows(6)
+                .any(|window| { window == [0x98, 0x68, 0xAA, 0x98, 0x20, 0x00] })
+        );
+        assert_eq!(
+            bytes.len(),
+            usize::from(FIXED_BRIDGE_END - FIXED_BRIDGE_ORIGIN) - 1
+        );
     }
 
     #[test]
