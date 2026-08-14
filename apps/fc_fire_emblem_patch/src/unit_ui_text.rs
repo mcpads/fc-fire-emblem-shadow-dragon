@@ -8,6 +8,10 @@ use crate::{
     font_slots::active_hangul_codes,
     rom::{EXPECTED_SOURCE_SHA1, HEADER_SIZE, PRG_SIZE, Rom},
     sha1_hex,
+    translation_consumer::{
+        ScreenConsumerSourceBinding, TranslationConsumerSourceEvidence,
+        qualified_source_binding_id, source_binding_id,
+    },
 };
 
 mod command_menu;
@@ -285,6 +289,199 @@ pub(crate) fn command_menu_label_ids() -> Vec<String> {
         .filter(|spec| spec.translation_scope == "japanese_only")
         .map(|spec| format!("unit-ui-label:{:02X}", spec.index))
         .collect()
+}
+
+/// 유닛 UI 도메인의 고정 라벨 population과 세 화면 소비자를 실제 원천 생산자에
+/// 결속한다. 화면 목록은 전역 coverage 표에서 가져오지 않으며, 이 함수가 검증한
+/// composer와 상속 경로만 반환한다.
+pub(crate) fn inspect_unit_ui_translation_consumers(
+    source: &[u8],
+) -> Result<TranslationConsumerSourceEvidence> {
+    let prg = source
+        .get(HEADER_SIZE..HEADER_SIZE + PRG_SIZE)
+        .context("supported source does not contain the complete PRG region")?;
+    validate_code_regions(prg)?;
+    let command_menu = command_menu::analyze(prg)?;
+    validate_fixed_labels(
+        prg,
+        SUMMARY_AND_STATUS_LABEL_SPECS
+            .iter()
+            .chain(command_menu::COMMAND_LABEL_SPECS),
+    )?;
+
+    let mut population_ids = summary_and_status_label_ids();
+    population_ids.extend(command_menu_label_ids());
+    let summary_label_indices = summary_composer_fixed_label_indices(prg)?;
+    let summary_population_ids =
+        translated_summary_status_label_ids(summary_label_indices.iter().copied())?;
+    let status_label_indices = status_composer_fixed_label_indices(prg)?;
+    let status_population_ids = translated_summary_status_label_ids(
+        status_label_indices
+            .into_iter()
+            .chain(summary_label_indices),
+    )?;
+    let command_population_ids = command_menu_label_ids();
+    let dispatch = region("dispatch_composite_text_role_from_05e8");
+    let summary_header = region("compose_unit_summary_header");
+    let summary_items = region("compose_unit_summary_items");
+    let status_stats = region("compose_unit_status_stats");
+    Ok(TranslationConsumerSourceEvidence {
+        population_ids,
+        screen_bindings: vec![
+            ScreenConsumerSourceBinding {
+                screen_role: "unit_summary",
+                population_ids: summary_population_ids,
+                source_binding_ids: vec![
+                    qualified_source_binding_id(
+                        UNIT_UI_BANK,
+                        dispatch.cpu_address,
+                        dispatch.role,
+                        "states=04,07",
+                    ),
+                    source_binding_id(
+                        UNIT_UI_BANK,
+                        summary_header.cpu_address,
+                        summary_header.role,
+                    ),
+                    source_binding_id(UNIT_UI_BANK, summary_items.cpu_address, summary_items.role),
+                ],
+            },
+            ScreenConsumerSourceBinding {
+                screen_role: "unit_command_menu",
+                population_ids: command_population_ids,
+                source_binding_ids: vec![
+                    qualified_source_binding_id(
+                        UNIT_UI_BANK,
+                        dispatch.cpu_address,
+                        dispatch.role,
+                        "state=05",
+                    ),
+                    source_binding_id(
+                        command_menu.composer.prg_bank,
+                        command_menu.composer.cpu_address,
+                        command_menu.composer.role,
+                    ),
+                ],
+            },
+            ScreenConsumerSourceBinding {
+                screen_role: "unit_status",
+                population_ids: status_population_ids,
+                source_binding_ids: vec![
+                    qualified_source_binding_id(
+                        UNIT_UI_BANK,
+                        dispatch.cpu_address,
+                        dispatch.role,
+                        "state=0F",
+                    ),
+                    source_binding_id(UNIT_UI_BANK, status_stats.cpu_address, status_stats.role),
+                    qualified_source_binding_id(
+                        UNIT_UI_BANK,
+                        summary_header.cpu_address,
+                        summary_header.role,
+                        "inherited_by=unit_status",
+                    ),
+                ],
+            },
+        ],
+    })
+}
+
+fn summary_composer_fixed_label_indices(prg: &[u8]) -> Result<Vec<u8>> {
+    let composer = code_region_source(prg, "compose_unit_summary_header")?;
+    let indices = direct_fixed_label_indices(composer);
+    ensure!(
+        append_fixed_string_call_count(composer) == indices.len(),
+        "unit-summary composer contains an unclassified fixed-label producer"
+    );
+    Ok(indices)
+}
+
+fn status_composer_fixed_label_indices(prg: &[u8]) -> Result<Vec<u8>> {
+    let composer = code_region_source(prg, "compose_unit_status_stats")?;
+    let direct_indices = direct_fixed_label_indices(composer);
+    let append_call = append_fixed_string_call();
+    let mut computed_ranges = composer.windows(15).filter_map(|window| {
+        (window[0] == 0xA0
+            && window[2..5] == [0x84, 0x12, 0xC0]
+            && window[6] == 0xF0
+            && window[8..11] == [0x98, 0x38, 0xE9]
+            && window[12..15] == append_call)
+            .then_some((window[1], window[5], window[11]))
+    });
+    let (start, end, subtrahend) = computed_ranges
+        .next()
+        .context("unit-status composer lost its computed fixed-label range")?;
+    ensure!(
+        computed_ranges.next().is_none(),
+        "unit-status composer has multiple computed fixed-label ranges"
+    );
+    let computed_indices = (start..end)
+        .map(|value| {
+            value
+                .checked_sub(subtrahend)
+                .context("unit-status fixed-label range underflow")
+        })
+        .collect::<Result<Vec<_>>>()?;
+    ensure!(
+        append_fixed_string_call_count(composer) == direct_indices.len() + 1,
+        "unit-status composer contains an unclassified fixed-label producer"
+    );
+
+    Ok(computed_indices.into_iter().chain(direct_indices).collect())
+}
+
+fn code_region_source<'a>(prg: &'a [u8], role: &str) -> Result<&'a [u8]> {
+    let spec = region(role);
+    let offset = banked_prg_offset(UNIT_UI_BANK, spec.cpu_address)?;
+    prg.get(offset..offset + spec.expected.len())
+        .with_context(|| format!("unit-UI code region {role} exceeds the source PRG"))
+}
+
+fn direct_fixed_label_indices(composer: &[u8]) -> Vec<u8> {
+    let append_call = append_fixed_string_call();
+    composer
+        .windows(5)
+        .filter_map(|window| {
+            (window[0] == 0xA9 && window[2..5] == append_call).then_some(window[1])
+        })
+        .collect()
+}
+
+fn append_fixed_string_call_count(composer: &[u8]) -> usize {
+    let append_call = append_fixed_string_call();
+    composer
+        .windows(append_call.len())
+        .filter(|window| *window == append_call)
+        .count()
+}
+
+fn append_fixed_string_call() -> [u8; 3] {
+    let [low, high] = region("append_fixed_string").cpu_address.to_le_bytes();
+    [0x20, low, high]
+}
+
+fn translated_summary_status_label_ids(
+    indices: impl IntoIterator<Item = u8>,
+) -> Result<Vec<String>> {
+    let mut ids = BTreeSet::new();
+    for index in indices {
+        let spec = SUMMARY_AND_STATUS_LABEL_SPECS
+            .iter()
+            .find(|spec| spec.index == index)
+            .with_context(|| format!("unknown unit-UI fixed label index 0x{index:02X}"))?;
+        match spec.translation_scope {
+            "japanese_only" => {
+                ids.insert(format!("unit-ui-label:{index:02X}"));
+            }
+            "preserve_original_latin" => {}
+            scope => {
+                anyhow::bail!(
+                    "unit-UI fixed label 0x{index:02X} has unknown translation scope {scope}"
+                );
+            }
+        }
+    }
+    Ok(ids.into_iter().collect())
 }
 
 fn build_report(

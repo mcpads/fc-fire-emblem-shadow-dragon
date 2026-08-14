@@ -1,11 +1,18 @@
-use std::{collections::BTreeSet, fs, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::Path,
+};
 
 use anyhow::{Context, Result, ensure};
 
 use crate::{
-    rom::EXPECTED_SOURCE_SHA1, screen_contracts::inspect_screen_translation_partition, sha1_hex,
+    rom::{EXPECTED_SOURCE_SHA1, Rom},
+    screen_contracts::inspect_screen_translation_partition,
+    sha1_hex,
 };
 
+mod consumer_census;
 mod installed;
 mod lifetimes;
 mod population;
@@ -13,6 +20,7 @@ mod report;
 mod screen_targets;
 mod weapon_shop;
 
+use consumer_census::inspect_known_route_consumer_evidence;
 pub(crate) use installed::inspect_current_installation;
 use lifetimes::{LifetimeInputBindings, inspect_translation_lifetimes};
 use population::{TranslationPopulationInputs, inspect_translation_populations};
@@ -60,6 +68,16 @@ pub(crate) fn analyze_translation_coverage(
 ) -> Result<TranslationCoverageSummary> {
     let partition = inspect_screen_translation_partition()?;
     let screen_targets = bind_domain_screen_targets(&partition)?;
+    let source_rom = Rom::from_path(inputs.source_path)?;
+    let mut consumer_evidence =
+        inspect_known_route_consumer_evidence(&source_rom, &partition, &screen_targets)?
+            .into_iter()
+            .map(|domain| (domain.id, domain))
+            .collect::<BTreeMap<_, _>>();
+    ensure!(
+        consumer_evidence.len() == DOMAIN_SEEDS.len(),
+        "consumer evidence does not cover the complete domain registry"
+    );
     let mut populations = inspect_translation_populations(&TranslationPopulationInputs {
         source_path: inputs.source_path,
         main_dialogue_workspace_path: inputs.main_dialogue_workspace_path,
@@ -102,6 +120,9 @@ pub(crate) fn analyze_translation_coverage(
 
     let mut domains = Vec::with_capacity(screen_targets.len());
     for targets in screen_targets {
+        let consumer = consumer_evidence
+            .remove(targets.id)
+            .with_context(|| format!("consumer evidence lost domain {}", targets.id))?;
         let population = populations
             .remove(targets.id)
             .with_context(|| format!("translation population lost domain {}", targets.id))?;
@@ -124,6 +145,16 @@ pub(crate) fn analyze_translation_coverage(
             .iter()
             .map(String::as_str)
             .collect::<BTreeSet<_>>();
+        let consumer_complete_roles = installed
+            .consumer_complete_screen_roles
+            .iter()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>();
+        ensure!(
+            consumer_complete_roles.is_subset(&installed_roles),
+            "domain {} marks a declared consumer complete before that screen is installed",
+            targets.id
+        );
         ensure!(
             installed
                 .runtime_bound_screen_roles
@@ -148,16 +179,27 @@ pub(crate) fn analyze_translation_coverage(
         let all_target_units_installed = population
             .target_unit_count
             .is_some_and(|count| installed.installed_target_unit_count == count);
-        let all_consumers_installed = all_target_units_installed && installed_roles == target_roles;
+        let all_declared_consumers_installed =
+            all_target_units_installed && consumer_complete_roles == target_roles;
         let runtime_roles = installed
             .runtime_bound_screen_roles
             .iter()
             .map(String::as_str)
             .collect::<BTreeSet<_>>();
-        let all_consumers_runtime_bound = all_consumers_installed && runtime_roles == target_roles;
+        ensure!(
+            runtime_roles.is_subset(&consumer_complete_roles),
+            "domain {} runtime-binds a declared consumer before it is complete",
+            targets.id
+        );
+        let all_declared_consumers_runtime_bound =
+            all_declared_consumers_installed && runtime_roles == consumer_complete_roles;
         domains.push(TranslationDomainReport {
             id: targets.id,
             target_unit: targets.target_unit,
+            consumer_evidence_state: consumer.state,
+            consumer_census_complete: consumer.consumer_census_complete,
+            consumer_population_ids: consumer.population_ids,
+            consumer_source_bindings: consumer.source_bindings,
             source_binding: population.source_binding,
             target_unit_count: population.target_unit_count,
             translated_target_unit_count: population.translated_target_unit_count,
@@ -167,15 +209,16 @@ pub(crate) fn analyze_translation_coverage(
             installed_target_unit_count: installed.installed_target_unit_count,
             target_screen_roles: targets.screen_roles,
             installed_screen_roles: installed.installed_screen_roles,
+            declared_consumer_complete_screen_roles: installed.consumer_complete_screen_roles,
             runtime_bound_screen_roles: installed.runtime_bound_screen_roles,
             all_target_units_installed,
-            all_consumers_installed,
-            all_consumers_runtime_bound,
+            all_declared_consumers_installed,
+            all_declared_consumers_runtime_bound,
             capacity_state: CapacityState::NotEvaluatedInGlobalContext,
         });
     }
     ensure!(
-        populations.is_empty() && installation.domains.is_empty(),
+        populations.is_empty() && installation.domains.is_empty() && consumer_evidence.is_empty(),
         "translation coverage left unmatched domain data"
     );
 
@@ -193,17 +236,33 @@ pub(crate) fn analyze_translation_coverage(
             .iter()
             .filter(|domain| domain.review_complete)
             .count(),
-        all_consumers_installed_domain_count: domains
+        all_declared_consumers_installed_domain_count: domains
             .iter()
-            .filter(|domain| domain.all_consumers_installed)
+            .filter(|domain| domain.all_declared_consumers_installed)
             .count(),
-        all_consumers_runtime_bound_domain_count: domains
+        all_declared_consumers_runtime_bound_domain_count: domains
             .iter()
-            .filter(|domain| domain.all_consumers_runtime_bound)
+            .filter(|domain| domain.all_declared_consumers_runtime_bound)
             .count(),
         unresolved_source_domain_ids: domains
             .iter()
             .filter(|domain| domain.source_binding == SourceBindingState::Unresolved)
+            .map(|domain| domain.id)
+            .collect(),
+        known_routes_bound_domain_count: domains
+            .iter()
+            .filter(|domain| {
+                domain.consumer_evidence_state
+                    == consumer_census::ConsumerEvidenceState::KnownRoutesBound
+            })
+            .count(),
+        complete_consumer_census_domain_count: domains
+            .iter()
+            .filter(|domain| domain.consumer_census_complete)
+            .count(),
+        incomplete_consumer_census_domain_ids: domains
+            .iter()
+            .filter(|domain| !domain.consumer_census_complete)
             .map(|domain| domain.id)
             .collect(),
         incomplete_translation_input_domain_ids: domains
@@ -216,9 +275,9 @@ pub(crate) fn analyze_translation_coverage(
             .filter(|domain| !domain.review_complete)
             .map(|domain| domain.id)
             .collect(),
-        incomplete_installation_domain_ids: domains
+        incomplete_declared_consumer_installation_domain_ids: domains
             .iter()
-            .filter(|domain| !domain.all_consumers_installed)
+            .filter(|domain| !domain.all_declared_consumers_installed)
             .map(|domain| domain.id)
             .collect(),
     };
@@ -305,7 +364,7 @@ pub(crate) fn analyze_translation_coverage(
         &japanese_bearing_screen_roles,
     )?;
     let report = GlobalTranslationCoverageReport {
-        schema: 2,
+        schema: 3,
         source_sha1: EXPECTED_SOURCE_SHA1,
         build_output_sha1: installation.build_output_sha1,
         screen_population: ScreenPopulationReport {
@@ -313,8 +372,8 @@ pub(crate) fn analyze_translation_coverage(
             japanese_bearing_screen_count: partition.japanese_bearing_screens.len(),
             preserved_original_only_screen_count: partition.preserved_original_only_screen_count,
             no_text_screen_count: partition.no_text_screen_count,
-            mapped_japanese_bearing_screen_count: partition.japanese_bearing_screens.len(),
-            unmapped_japanese_bearing_screen_roles: Vec::new(),
+            declared_mapped_japanese_bearing_screen_count: partition.japanese_bearing_screens.len(),
+            undeclared_japanese_bearing_screen_roles: Vec::new(),
         },
         domains,
         lifetime_demands: lifetime_inventory.demands,
@@ -338,6 +397,14 @@ pub(crate) fn analyze_translation_coverage(
         japanese_bearing_screen_count: report.screen_population.japanese_bearing_screen_count,
         domain_count: report.summary.domain_count,
         unresolved_source_domain_count: report.summary.unresolved_source_domain_ids.len(),
-        all_consumers_installed_domain_count: report.summary.all_consumers_installed_domain_count,
+        known_routes_bound_domain_count: report.summary.known_routes_bound_domain_count,
+        complete_consumer_census_domain_count: report.summary.complete_consumer_census_domain_count,
+        incomplete_consumer_census_domain_count: report
+            .summary
+            .incomplete_consumer_census_domain_ids
+            .len(),
+        all_declared_consumers_installed_domain_count: report
+            .summary
+            .all_declared_consumers_installed_domain_count,
     })
 }

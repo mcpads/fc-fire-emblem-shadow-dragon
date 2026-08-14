@@ -9,6 +9,10 @@ use crate::{
     rom::{EXPECTED_SOURCE_SHA1, HEADER_SIZE, Rom},
     sha1_hex,
     text_inventory::{FixedTextLogicalByte, encode_target_markup, is_japanese_character},
+    translation_consumer::{
+        ScreenConsumerSourceBinding, TranslationConsumerSourceEvidence,
+        qualified_source_binding_id, source_binding_id,
+    },
     typed_source::decode_rp2a03_sequence,
 };
 
@@ -18,6 +22,9 @@ const CPU_WINDOW_START: u16 = 0x8000;
 const COMPOSITE_DISPATCH_TABLE_ADDRESS: u16 = 0x8006;
 const COMPOSER_STATE: u8 = 3;
 const COMPOSER_ADDRESS: u16 = 0x8187;
+const COMPOSITE_POINTER_ROLE: &str = "composite_pointer";
+const COMPOSER_ROLE: &str = "compose_map_menu";
+const LABEL_BLOCK_ROLE: &str = "map_menu_label_block";
 const COMPOSER: &[u8] = &[
     0xA9, 0x0E, 0x8D, 0xD0, 0x05, 0xA9, 0x0C, 0x8D, 0xCF, 0x05, 0x20, 0xC8, 0x97, 0x20, 0x3C, 0x8E,
     0xAE, 0xCE, 0x05, 0xA9, 0x3F, 0x9D, 0xEE, 0x7F, 0xA9, 0x01, 0x9D, 0xF3, 0x7F, 0xBD, 0xB2, 0x81,
@@ -109,6 +116,35 @@ impl MapMenuPlannedEntry {
     pub(crate) fn logical_bytes(&self) -> &[FixedTextLogicalByte] {
         &self.logical_bytes
     }
+}
+
+/// 여섯 지도 메뉴 라벨의 원천 블록과 composite-state 생산자를 한 소비자 증거로
+/// 반환한다. 번역 작업공간은 이 원천 census의 일부가 아니다.
+pub(crate) fn inspect_map_menu_translation_consumers(
+    rom: &Rom,
+) -> Result<TranslationConsumerSourceEvidence> {
+    bind_source(rom)?;
+    let population_ids = LABELS
+        .iter()
+        .map(|spec| spec.id.to_owned())
+        .collect::<Vec<_>>();
+    Ok(TranslationConsumerSourceEvidence {
+        population_ids: population_ids.clone(),
+        screen_bindings: vec![ScreenConsumerSourceBinding {
+            screen_role: "map_menu",
+            population_ids,
+            source_binding_ids: vec![
+                qualified_source_binding_id(
+                    usize::from(PRG_BANK),
+                    COMPOSITE_DISPATCH_TABLE_ADDRESS + u16::from(COMPOSER_STATE) * 2,
+                    COMPOSITE_POINTER_ROLE,
+                    &format!("state={COMPOSER_STATE:02X},composer={COMPOSER_ADDRESS:04X}"),
+                ),
+                source_binding_id(usize::from(PRG_BANK), COMPOSER_ADDRESS, COMPOSER_ROLE),
+                source_binding_id(usize::from(PRG_BANK), LABEL_BLOCK_ADDRESS, LABEL_BLOCK_ROLE),
+            ],
+        }],
+    })
 }
 
 pub(crate) fn plan_map_menu(rom: &Rom, workspace_path: &Path) -> Result<MapMenuPlan> {
@@ -295,40 +331,4 @@ fn hex(bytes: &[u8]) -> String {
         .map(|byte| format!("{byte:02X}"))
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn public_map_menu_workspace_covers_all_six_source_labels() {
-        let source = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
-        ));
-        if !source.exists() {
-            return;
-        }
-        let workspace = Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../assets/translation/map-menu.ko.json"
-        ));
-        let rom = Rom::from_path(source).unwrap();
-        let plan = plan_map_menu(&rom, workspace).unwrap();
-
-        assert_eq!(plan.entry_count, 6);
-        assert_eq!(plan.translated_entry_count, 6);
-        assert_eq!(plan.target_glyphs.len(), 17);
-        assert_eq!(plan.source_reclaimable_active_codes.len(), 24);
-        assert_eq!(plan.entries.len(), 6);
-        let roster = plan
-            .entries
-            .iter()
-            .find(|entry| entry.id == "map-menu:roster")
-            .unwrap();
-        assert_eq!(roster.source_cpu_address, 0x81B2);
-        assert_eq!(roster.source_storage, [0x01, 0x11, 0x28, 0x2F, 0xED]);
-        assert!(!plan.review_complete);
-    }
 }

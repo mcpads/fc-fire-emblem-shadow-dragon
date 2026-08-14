@@ -1,5 +1,9 @@
 use serde::Serialize;
 
+use crate::translation_consumer::ScreenConsumerSourceBinding;
+
+use super::consumer_census::ConsumerEvidenceState;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum SourceBindingState {
@@ -62,14 +66,18 @@ pub(crate) struct ScreenPopulationReport {
     pub(crate) japanese_bearing_screen_count: usize,
     pub(crate) preserved_original_only_screen_count: usize,
     pub(crate) no_text_screen_count: usize,
-    pub(crate) mapped_japanese_bearing_screen_count: usize,
-    pub(crate) unmapped_japanese_bearing_screen_roles: Vec<String>,
+    pub(crate) declared_mapped_japanese_bearing_screen_count: usize,
+    pub(crate) undeclared_japanese_bearing_screen_roles: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
 pub(crate) struct TranslationDomainReport {
     pub(crate) id: &'static str,
     pub(crate) target_unit: &'static str,
+    pub(crate) consumer_evidence_state: ConsumerEvidenceState,
+    pub(crate) consumer_census_complete: bool,
+    pub(crate) consumer_population_ids: Vec<String>,
+    pub(crate) consumer_source_bindings: Vec<ScreenConsumerSourceBinding>,
     pub(crate) source_binding: SourceBindingState,
     pub(crate) target_unit_count: Option<usize>,
     pub(crate) translated_target_unit_count: usize,
@@ -80,10 +88,11 @@ pub(crate) struct TranslationDomainReport {
     pub(crate) installed_target_unit_count: usize,
     pub(crate) target_screen_roles: Vec<String>,
     pub(crate) installed_screen_roles: Vec<String>,
+    pub(crate) declared_consumer_complete_screen_roles: Vec<String>,
     pub(crate) runtime_bound_screen_roles: Vec<String>,
     pub(crate) all_target_units_installed: bool,
-    pub(crate) all_consumers_installed: bool,
-    pub(crate) all_consumers_runtime_bound: bool,
+    pub(crate) all_declared_consumers_installed: bool,
+    pub(crate) all_declared_consumers_runtime_bound: bool,
     pub(crate) capacity_state: CapacityState,
 }
 
@@ -116,14 +125,17 @@ pub(crate) struct TranslationLifetimeDemandReport {
 pub(crate) struct CoverageSummary {
     pub(crate) domain_count: usize,
     pub(crate) source_bound_domain_count: usize,
+    pub(crate) known_routes_bound_domain_count: usize,
+    pub(crate) complete_consumer_census_domain_count: usize,
     pub(crate) translation_input_complete_domain_count: usize,
     pub(crate) review_complete_domain_count: usize,
-    pub(crate) all_consumers_installed_domain_count: usize,
-    pub(crate) all_consumers_runtime_bound_domain_count: usize,
+    pub(crate) all_declared_consumers_installed_domain_count: usize,
+    pub(crate) all_declared_consumers_runtime_bound_domain_count: usize,
     pub(crate) unresolved_source_domain_ids: Vec<&'static str>,
+    pub(crate) incomplete_consumer_census_domain_ids: Vec<&'static str>,
     pub(crate) incomplete_translation_input_domain_ids: Vec<&'static str>,
     pub(crate) pending_review_domain_ids: Vec<&'static str>,
-    pub(crate) incomplete_installation_domain_ids: Vec<&'static str>,
+    pub(crate) incomplete_declared_consumer_installation_domain_ids: Vec<&'static str>,
 }
 
 pub(crate) struct TranslationCoverageSummary {
@@ -131,5 +143,8 @@ pub(crate) struct TranslationCoverageSummary {
     pub(crate) japanese_bearing_screen_count: usize,
     pub(crate) domain_count: usize,
     pub(crate) unresolved_source_domain_count: usize,
-    pub(crate) all_consumers_installed_domain_count: usize,
+    pub(crate) known_routes_bound_domain_count: usize,
+    pub(crate) complete_consumer_census_domain_count: usize,
+    pub(crate) incomplete_consumer_census_domain_count: usize,
+    pub(crate) all_declared_consumers_installed_domain_count: usize,
 }

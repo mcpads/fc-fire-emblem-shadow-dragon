@@ -47,6 +47,10 @@ pub(super) const ITEM_FLOW_STATES: &[(u8, &str, u16)] = &[
     (0x1E, "run_item_action_result", 0x9579),
     (0x26, "close_nested_unit_window", 0xAF66),
 ];
+pub(super) const ITEM_COMPOSITE_STATES: &[(u8, u16, &str)] = &[
+    (0x07, 0x85BE, "compose_item_inventory_rows"),
+    (0x09, 0x8613, "compose_item_action_menu"),
+];
 
 #[derive(Clone, Copy)]
 pub(super) struct SourceRegionSpec {
@@ -443,14 +447,11 @@ pub(super) fn validate_state_routes(rom: &Rom) -> Result<()> {
         );
     }
 
-    for (state, expected_handler, role) in [
-        (0x07_u8, 0x85BE, "item inventory row composer"),
-        (0x09, 0x8613, "item action composer"),
-    ] {
-        let address = COMPOSITE_POINTER_TABLE_ADDRESS + u16::from(state) * 2;
+    for (state, expected_handler, role) in ITEM_COMPOSITE_STATES {
+        let address = COMPOSITE_POINTER_TABLE_ADDRESS + u16::from(*state) * 2;
         let actual = read_u16(rom, 0x0B, address)?;
         ensure!(
-            actual == expected_handler,
+            actual == *expected_handler,
             "{role} for composite state 0x{state:02X} changed"
         );
     }
@@ -558,6 +559,14 @@ pub(super) fn bind_source_region(rom: &Rom, spec: SourceRegionSpec) -> Result<So
         byte_count: spec.byte_count,
         source_sha1: actual_sha1,
     })
+}
+
+pub(super) fn validate_source_region_role(rom: &Rom, role: &str) -> Result<SourceRegionBinding> {
+    let spec = SOURCE_REGIONS
+        .iter()
+        .find(|spec| spec.role == role)
+        .with_context(|| format!("unknown item-flow source region role {role}"))?;
+    bind_source_region(rom, *spec)
 }
 
 fn read_u16(rom: &Rom, prg_bank: u8, cpu_address: u16) -> Result<u16> {

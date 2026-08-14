@@ -43,6 +43,7 @@ mod test_support;
 mod text_inventory;
 mod title_graphics;
 mod tracked;
+mod translation_consumer;
 mod translation_coverage;
 mod typed_source;
 mod unit_names;
@@ -1192,11 +1193,14 @@ fn main() -> Result<()> {
             println!("wrote {}", report.display());
             println!("report SHA-1: {}", summary.report_sha1);
             println!(
-                "translation coverage: {} Japanese-bearing screens, {} domains, {} unresolved source domains, {} domains installed for all consumers",
+                "translation coverage: {} Japanese-bearing screens, {} domains, {} unresolved source domains, {} known-routes-bound domains, {} complete consumer censuses, {} incomplete consumer censuses, {} domains installed for all declared consumers",
                 summary.japanese_bearing_screen_count,
                 summary.domain_count,
                 summary.unresolved_source_domain_count,
-                summary.all_consumers_installed_domain_count
+                summary.known_routes_bound_domain_count,
+                summary.complete_consumer_census_domain_count,
+                summary.incomplete_consumer_census_domain_count,
+                summary.all_declared_consumers_installed_domain_count
             );
         }
         Command::PlanFullTranslationInstallation {

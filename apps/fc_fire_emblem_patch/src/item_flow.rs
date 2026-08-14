@@ -6,6 +6,10 @@ use serde::Serialize;
 use crate::{
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
+    translation_consumer::{
+        ScreenConsumerSourceBinding, TranslationConsumerSourceEvidence,
+        qualified_source_binding_id, source_binding_id,
+    },
 };
 
 mod item_use_families;
@@ -15,16 +19,20 @@ mod source_contract;
 mod special_use_runtime;
 mod translation_workspace;
 
+const MAP_STATE_POINTER_ROLE: &str = "map_state_pointer";
+const COMPOSITE_POINTER_ROLE: &str = "composite_pointer";
+
 use runtime_evidence::{RuntimeObservation, runtime_observations};
 use screen_roles::{ItemActionChoice, ItemScreen, action_choices, item_screens};
 pub(crate) use source_contract::ITEM_ACTION_LABELS;
 use source_contract::{
-    COMPOSITE_STATE_ADDRESS, ELIGIBLE_RECIPIENT_COUNT_ADDRESS, ITEM_FLOW_STATES,
-    MAIN_STATE_ADDRESS, MENU_CHOICE_MASK_BASE_ADDRESS, MENU_CONTROLLER_INDEX_ADDRESS,
-    MENU_RESULT_ADDRESS, MENU_SELECTION_BASE_ADDRESS, SELECTED_ITEM_ACTION_ADDRESS,
-    SELECTED_ITEM_ADDRESS, SELECTED_ITEM_SLOT_ADDRESS, SOURCE_REGIONS, bind_source_region,
-    validate_action_result_dialogue_indices, validate_item_action_labels, validate_state_routes,
-    validate_vulnerary_family,
+    COMPOSITE_POINTER_TABLE_ADDRESS, COMPOSITE_STATE_ADDRESS, ELIGIBLE_RECIPIENT_COUNT_ADDRESS,
+    ITEM_COMPOSITE_STATES, ITEM_FLOW_STATES, MAIN_STATE_ADDRESS, MAP_STATE_POINTER_TABLE_ADDRESS,
+    MENU_CHOICE_MASK_BASE_ADDRESS, MENU_CONTROLLER_INDEX_ADDRESS, MENU_RESULT_ADDRESS,
+    MENU_SELECTION_BASE_ADDRESS, SELECTED_ITEM_ACTION_ADDRESS, SELECTED_ITEM_ADDRESS,
+    SELECTED_ITEM_SLOT_ADDRESS, SOURCE_REGIONS, bind_source_region,
+    validate_action_result_dialogue_indices, validate_item_action_labels,
+    validate_source_region_role, validate_state_routes, validate_vulnerary_family,
 };
 pub(crate) use translation_workspace::plan_item_action_labels;
 
@@ -157,6 +165,61 @@ pub(crate) fn inspect_item_action_label_count(rom: &Rom) -> Result<usize> {
         .into_iter()
         .filter(|label| label.translation_scope == "japanese_only")
         .count())
+}
+
+/// 아이템 행동 라벨의 네 원천 레코드와 실제 조건부 행동 메뉴 소비자를 함께 검증한다.
+pub(crate) fn inspect_item_action_translation_consumers(
+    rom: &Rom,
+) -> Result<TranslationConsumerSourceEvidence> {
+    validate_state_routes(rom)?;
+    validate_item_action_labels(rom)?;
+    let input_handler = validate_source_region_role(rom, "handle_item_action_input")?;
+    let composer = validate_source_region_role(rom, "compose_item_action_menu")?;
+    let (main_state, main_role, _) = ITEM_FLOW_STATES
+        .iter()
+        .find(|(_, role, _)| *role == "wait_for_item_action_input")
+        .context("item action input state disappeared")?;
+    let (composite_state, _, composite_role) = ITEM_COMPOSITE_STATES
+        .iter()
+        .find(|(_, _, role)| *role == "compose_item_action_menu")
+        .context("item action composite state disappeared")?;
+    let population_ids = ITEM_ACTION_LABELS
+        .iter()
+        .filter(|spec| spec.translation_scope == "japanese_only")
+        .map(|spec| format!("item-action-label:{:02X}", spec.index))
+        .collect::<Vec<_>>();
+
+    Ok(TranslationConsumerSourceEvidence {
+        population_ids: population_ids.clone(),
+        screen_bindings: vec![ScreenConsumerSourceBinding {
+            screen_role: "item_action_menu",
+            population_ids,
+            source_binding_ids: vec![
+                qualified_source_binding_id(
+                    0x06,
+                    MAP_STATE_POINTER_TABLE_ADDRESS + u16::from(*main_state) * 2,
+                    MAP_STATE_POINTER_ROLE,
+                    &format!("state={main_state:02X},role={main_role}"),
+                ),
+                source_binding_id(
+                    usize::from(input_handler.prg_bank),
+                    input_handler.cpu_address,
+                    input_handler.role,
+                ),
+                qualified_source_binding_id(
+                    0x0B,
+                    COMPOSITE_POINTER_TABLE_ADDRESS + u16::from(*composite_state) * 2,
+                    COMPOSITE_POINTER_ROLE,
+                    &format!("state={composite_state:02X},role={composite_role}"),
+                ),
+                source_binding_id(
+                    usize::from(composer.prg_bank),
+                    composer.cpu_address,
+                    composer.role,
+                ),
+            ],
+        }],
+    })
 }
 
 pub(crate) fn validate_item_lifetime_source(rom: &Rom) -> Result<()> {
