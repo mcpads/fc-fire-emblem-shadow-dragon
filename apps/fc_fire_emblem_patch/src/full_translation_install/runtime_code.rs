@@ -17,6 +17,7 @@ use super::{
     runtime_bank_contract::bind_bank_restore_contract, runtime_nmi_contract::bind_quiet_frame_gate,
 };
 use crate::{
+    mapper165::executable_mapper_writes::{Mapper165Register, decode_mapper165_write},
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
     typed_source::{Rp2a03DirectControlFlow, rp2a03_direct_control_flow},
@@ -572,11 +573,14 @@ fn verify_generated_executable_mapper_select_pairs(
                 continue;
             };
             match memory {
-                MemoryAddress::Direct(target) => match mapper165_direct_port(target) {
-                    Some(Mapper165Port::Select) => anyhow::bail!(
+                MemoryAddress::Direct(target) => match decode_mapper165_write(target) {
+                    Some(Mapper165Register::BankSelect) => anyhow::bail!(
                         "generated executable {role} directly writes mapper-select alias ${target:04X} at +{offset:04X}"
                     ),
-                    Some(Mapper165Port::Value) => direct_value_write = true,
+                    Some(Mapper165Register::BankData) => direct_value_write = true,
+                    Some(register) => anyhow::bail!(
+                        "generated executable {role} directly writes unexpected mapper165 {register:?} alias ${target:04X} at +{offset:04X}"
+                    ),
                     None => {}
                 },
                 MemoryAddress::Effective {
@@ -585,7 +589,7 @@ fn verify_generated_executable_mapper_select_pairs(
                 } => {
                     ensure!(
                         !(0..=u8::MAX).any(|index| {
-                            mapper165_direct_port(base.wrapping_add(u16::from(index))).is_some()
+                            decode_mapper165_write(base.wrapping_add(u16::from(index))).is_some()
                         }),
                         "generated executable {role} has an absolute-indexed write whose effective range can enter mapper165 ports at +{offset:04X}"
                     );
@@ -672,24 +676,6 @@ fn verify_generated_executable_mapper_select_pairs(
         );
     }
     Ok(())
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Mapper165Port {
-    Select,
-    Value,
-}
-
-/// MMC3-compatible mapper165 decodes `$8000..=$9FFF` as even selector / odd value mirrors.
-fn mapper165_direct_port(address: u16) -> Option<Mapper165Port> {
-    if address & 0xE000 != 0x8000 {
-        return None;
-    }
-    Some(if address & 1 == 0 {
-        Mapper165Port::Select
-    } else {
-        Mapper165Port::Value
-    })
 }
 
 /// ROM의 한 자리에 놓이는 실행 코드 조각이다.
@@ -834,6 +820,28 @@ mod tests {
                 .unwrap_err();
 
         assert!(error.to_string().contains("mapper-select alias"));
+    }
+
+    #[test]
+    fn generated_code_cannot_write_an_unowned_mapper_register_alias() {
+        let direct = assemble_at(
+            0xA000,
+            &[
+                Instruction::LdaImmediate(0),
+                Instruction::StaAbsolute(0xBFFE),
+                Instruction::Rts,
+            ],
+        )
+        .unwrap();
+
+        let error = verify_generated_executable_mapper_select_pairs(
+            "direct mirroring alias",
+            0xA000,
+            &direct,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("Mirroring alias $BFFE"));
     }
 
     #[test]
