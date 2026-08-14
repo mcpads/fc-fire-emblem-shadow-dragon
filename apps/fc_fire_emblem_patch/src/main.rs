@@ -1244,8 +1244,8 @@ fn main() -> Result<()> {
             println!("wrote {}", report.display());
             println!("report SHA-1: {}", summary.report_sha1);
             println!(
-                "full translation installation: {} required domains, {} dialogue records, {} page worksets, {} glyphs with a {}-page static upper bound and maximum {}-slot page demand, {} pointer writes, {} planned bytes",
-                summary.required_domain_count,
+                "full translation installation: {} declared installation domains, {} dialogue records, {} page worksets, {} glyphs with a {}-page static upper bound and maximum {}-slot page demand, {} pointer writes, {} planned bytes",
+                summary.declared_installation_domain_count,
                 summary.dialogue_record_count,
                 summary.dialogue_page_workset_count,
                 summary.dialogue_glyph_count,

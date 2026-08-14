@@ -31,6 +31,9 @@ use super::transport::{PHASE_RESTORE, RESTORE_CHUNK_COUNT};
 use super::{RuntimeRoutine, next_address};
 use crate::rp2a03::{Instruction, assemble_at};
 
+pub(in crate::full_translation_install) const INITIAL_PAGE_REQUEST_RESOLVER_ROLE: &str =
+    "dialogue initial-page request resolver";
+
 /// 원본이 디렉터리 선택자를 담아 두는 자리다.
 pub(super) const SOURCE_DIRECTORY_SELECTOR: u16 = 0x77F4;
 /// 원본이 엔트리 색인을 담아 두는 자리다.
@@ -411,7 +414,7 @@ pub(in crate::full_translation_install) fn build_resolve_request(
         origin,
         instructions,
         failure_branches,
-        "dialogue initial-page request resolver",
+        INITIAL_PAGE_REQUEST_RESOLVER_ROLE,
     )
 }
 

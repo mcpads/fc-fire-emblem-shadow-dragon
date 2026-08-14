@@ -80,8 +80,6 @@ pub(super) struct ConsumerCodebookPlan {
     every_preserved_code_avoided: bool,
     static_pages_fit_reclaimable_tail: bool,
     page_bytes_planned: bool,
-    storage_projections_installed: bool,
-    page_selectors_installed: bool,
 }
 
 impl ConsumerCodebookPlan {
@@ -357,7 +355,5 @@ pub(super) fn plan_consumer_codebook(
         every_preserved_code_avoided: true,
         static_pages_fit_reclaimable_tail: true,
         page_bytes_planned: true,
-        storage_projections_installed: false,
-        page_selectors_installed: false,
     })
 }

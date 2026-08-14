@@ -1,10 +1,13 @@
-use anyhow::{Result, ensure};
+use std::collections::BTreeSet;
+
+use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
     dialogue_assets::EncodedMainDialogueBundle,
     font_slots::FONT_PAGE_SIZE,
     rom::{HEADER_SIZE, PRG_SIZE, Rom},
+    sha1_hex,
     tracked::TrackedImage,
 };
 
@@ -24,6 +27,12 @@ use super::{
 use crate::dialogue_inventory::switchable_cpu_to_file_offset;
 
 const FIXED_BANK_SIZE: usize = 16 * 1024;
+const MMC3_PAGE_BYTE_COUNT: usize = 8 * 1024;
+const RUNTIME_CODE_WINDOW_START: u16 = 0xA000;
+const CHR_APPEND_FILL_BYTE: u8 = 0xFF;
+const CHR_APPEND_ROLE: &str = "append integrated candidate CHR capacity";
+const CHR_HEADER_ROLE: &str = "expand integrated candidate CHR";
+const RUNTIME_MATERIAL_DATA_ROLE: &str = "main dialogue runtime material data";
 
 pub(super) struct IntegratedWriteSetInputs<'a> {
     pub(super) candidate: &'a Rom,
@@ -40,16 +49,35 @@ pub(super) struct IntegratedWriteSetInputs<'a> {
     pub(super) ending_record_projection: &'a EndingRecordProjectionPlan,
     pub(super) consumer_installation: &'a ConsumerInstallationPlan,
     pub(super) required_domains: &'a [&'static str],
+    pub(super) all_required_dialogue_runtime_hook_roles_assembled: bool,
     pub(super) output_will_be_emitted: bool,
 }
 
 #[derive(Serialize)]
 pub(super) struct IntegratedWriteSetPlan {
-    required_domain_count: usize,
+    declared_domain_count: usize,
     domains: Vec<DomainWriteContribution>,
-    contributing_domain_count: usize,
-    fully_planned_domain_count: usize,
+    declared_domain_with_expected_writes_count: usize,
+    statically_accounted_declared_domain_count: usize,
+    original_candidate_sha1: String,
+    original_candidate_byte_count: usize,
+    expanded_baseline_sha1: String,
+    planned_final_image_byte_count: usize,
+    original_chr_bank_count: u8,
+    final_chr_bank_count: u8,
+    planned_appended_chr_byte_count: usize,
+    actual_appended_chr_byte_count: usize,
+    required_mutation_identity_count: usize,
+    actual_mutation_identity_count: usize,
     expected_write_count: usize,
+    required_mutation_identity_sha1: String,
+    actual_mutation_identity_sha1: String,
+    required_runtime_routine_identity_count: usize,
+    required_runtime_hook_identity_count: usize,
+    required_runtime_state_initializer_identity_count: usize,
+    actual_runtime_state_initializer_identity_count: usize,
+    runtime_state_initializer_clears_full_reserved_range: bool,
+    runtime_state_initializer_installed: bool,
     dialogue_runtime_hook_count: usize,
     dialogue_runtime_hook_roles: Vec<DialogueRuntimeHookRole>,
     dialogue_runtime_fixed_routine_count: usize,
@@ -75,8 +103,14 @@ pub(super) struct IntegratedWriteSetPlan {
     installed_dialogue_matches_current_encoding: bool,
     installed_chapter_titles_match_resident_encoding: bool,
     every_change_tracked: bool,
+    image_growth_complete: bool,
+    required_mutation_identity_set_complete: bool,
+    required_runtime_routine_identities_installed: bool,
+    required_runtime_hook_identities_installed: bool,
+    final_replacement_bytes_match_manifest: bool,
+    technical_installation_complete: bool,
     one_shared_image: bool,
-    all_domains_contribute_expected_writes: bool,
+    all_declared_domains_contribute_expected_writes: bool,
     integrated_image_sha1: String,
     output_materialized_in_memory_only: bool,
     rom_emitted: bool,
@@ -92,32 +126,43 @@ struct DomainWriteContribution {
     font_supply_writes_contributed: bool,
     carried_consumer_writes_bound_to_exact_candidate: bool,
     new_global_consumer_writes_contributed: bool,
-    all_consumer_writes_contributed: bool,
+    all_declared_consumer_writes_contributed: bool,
     expected_write_count: usize,
-    complete_in_integrated_plan: bool,
+    complete_for_declared_domain_plan: bool,
 }
 
+mod technical_installation;
+
+use technical_installation::{
+    IntegratedImage, MutationDerivation, TechnicalInstallationCheckInputs, mutation_expected_slice,
+    plan_candidate_image_growth, plan_required_mutation_identities, runtime_hook_file_offset,
+    runtime_hook_site_identity, runtime_material_routine_file_offset,
+    verify_runtime_material_code_projection, verify_runtime_state_initializer_installation,
+    verify_technical_installation,
+};
 pub(super) fn plan_integrated_write_set(
     inputs: IntegratedWriteSetInputs<'_>,
 ) -> Result<(Vec<u8>, IntegratedWriteSetPlan)> {
-    let (expanded_base, appended_chr_page_count) = expand_candidate_for_consumer_pages(&inputs)?;
-    let mut image = TrackedImage::new(expanded_base.clone());
+    let image_growth = plan_candidate_image_growth(&inputs)?;
+    let expanded_base = image_growth.apply(inputs.candidate.data())?;
+    let required_mutations =
+        plan_required_mutation_identities(&inputs, &image_growth, &expanded_base)?;
+    let mut image = IntegratedImage::new(expanded_base.clone(), image_growth.append_identity());
+    let appended_chr_page_count = image_growth.appended_chr_page_count;
     let chr_expansion_header_write_count = usize::from(appended_chr_page_count != 0);
     if appended_chr_page_count != 0 {
-        let expanded_chr_bank_count = u8::try_from(
-            (inputs.candidate.chr().len() / FONT_PAGE_SIZE + appended_chr_page_count) / 2,
-        )
-        .map_err(|_| anyhow::anyhow!("expanded CHR bank count exceeds iNES byte 5"))?;
         image.write_expected(
-            "expand integrated candidate CHR",
+            CHR_HEADER_ROLE,
             5,
             &[inputs.candidate.data()[5]],
-            &[expanded_chr_bank_count],
+            &[image_growth.final_chr_bank_count],
         )?;
     }
     let dialogue_storage_write_count =
         inputs.encoded_dialogue.regions.len() + inputs.encoded_dialogue.pointer_writes.len();
     let chapter_title_storage_write_count = inputs.encoded_chapter_titles.len() * 2;
+    let dialogue_runtime_fixed_routine_count = inputs.dialogue_runtime_code.fixed_routines.len()
+        + inputs.dialogue_runtime_code.reclaimed_fixed_routines.len();
     install_encoded_dialogue(&mut image, inputs.candidate, inputs.encoded_dialogue)?;
     install_encoded_chapter_titles(&mut image, inputs.candidate, inputs.encoded_chapter_titles)?;
     ensure!(
@@ -145,24 +190,11 @@ pub(super) fn plan_integrated_write_set(
         &expanded_base,
         inputs.consumer_catalog,
     )?;
-    let runtime_material_offset = main_dialogue_runtime_material_file_offset()?;
-    let runtime_material_end = runtime_material_offset
-        .checked_add(inputs.dialogue_runtime_material.len())
-        .ok_or_else(|| anyhow::anyhow!("dialogue runtime material range overflow"))?;
-    let expected_runtime_material = inputs
-        .candidate
-        .data()
-        .get(runtime_material_offset..runtime_material_end)
-        .ok_or_else(|| anyhow::anyhow!("dialogue runtime material is outside candidate"))?;
-    ensure!(
-        expected_runtime_material.iter().all(|byte| *byte == 0xFF),
-        "dialogue runtime material destination is not exact FF"
-    );
-    image.write_expected(
-        "main dialogue runtime material",
-        runtime_material_offset,
-        expected_runtime_material,
+    install_dialogue_runtime_material(
+        &mut image,
+        inputs.candidate,
         inputs.dialogue_runtime_material,
+        inputs.dialogue_runtime_code,
     )?;
     // 고정 뱅크 동굴의 조각들이다. 자리가 아직 `FF`여야 원본을 덮지 않는다.
     for routine in &inputs.dialogue_runtime_code.fixed_routines {
@@ -177,7 +209,13 @@ pub(super) fn plan_integrated_write_set(
             "{} would overwrite bytes that are not reserved",
             routine.role
         );
-        image.write_expected(routine.role, offset, existing, &routine.bytes)?;
+        image.write_runtime_routine(
+            routine.role,
+            offset,
+            existing,
+            &routine.bytes,
+            routine.address,
+        )?;
     }
     // 표본 전용 코드가 차지한 구간은 `FF` 동굴로 가장하지 않는다. 계획이 고정한
     // 전체 digest가 맞는 경우에만 전역 런타임으로 대체한다.
@@ -205,26 +243,26 @@ pub(super) fn plan_integrated_write_set(
             "{} source digest changed",
             routine.role
         );
-        image.write_expected(routine.role, offset, existing, &routine.bytes)?;
+        image.write_runtime_routine(
+            routine.role,
+            offset,
+            existing,
+            &routine.bytes,
+            routine.address,
+        )?;
     }
 
     // 훅 역할과 원본 자리와 쓸 바이트는 코드 계획이 한 단위로 제공한다. 설치자가
     // 별도 배열로 다시 세면 새 훅을 추가할 때 보고서와 실제 쓰기가 갈라진다.
-    let mut hook_roles = std::collections::BTreeSet::new();
+    let mut installed_hook_roles = BTreeSet::new();
     for hook in &inputs.dialogue_runtime_code.hooks {
         ensure!(
-            hook_roles.insert(hook.role),
+            installed_hook_roles.insert(hook.role),
             "dialogue runtime hook role {:?} is emitted more than once",
             hook.role
         );
-        let offset = match hook.site {
-            DialogueRuntimeHookSite::Fixed(address) => {
-                fixed_file_offset(inputs.candidate, address)?
-            }
-            DialogueRuntimeHookSite::Switchable { bank, address } => {
-                switchable_cpu_to_file_offset(bank, address)?
-            }
-        };
+        let site = runtime_hook_site_identity(&hook.site);
+        let offset = runtime_hook_file_offset(inputs.candidate, site)?;
         let existing = inputs
             .candidate
             .data()
@@ -235,7 +273,14 @@ pub(super) fn plan_integrated_write_set(
             "{} is already installed; the candidate is not a clean base",
             hook.write_role
         );
-        image.write_expected(hook.write_role, offset, existing, &hook.bytes)?;
+        image.write_runtime_hook(
+            hook.write_role,
+            offset,
+            existing,
+            &hook.bytes,
+            hook.role,
+            site,
+        )?;
     }
 
     install_fixed_ui_projection(&mut image, inputs.fixed_ui_projection)?;
@@ -247,6 +292,7 @@ pub(super) fn plan_integrated_write_set(
 
     image.verify_all_changes_tracked(&expanded_base)?;
     let expected_write_count = image.writes().len();
+    let actual_mutations = image.mutation_identities().to_vec();
     let output = image.into_data();
     verify_installed_dialogue(&output, inputs.encoded_dialogue)?;
     verify_installed_chapter_titles(&output, inputs.candidate, inputs.encoded_chapter_titles)?;
@@ -269,12 +315,31 @@ pub(super) fn plan_integrated_write_set(
     verify_installed_fixed_ui_projection(&output, inputs.fixed_ui_projection)?;
     verify_installed_chapter_save_projection(&output, inputs.chapter_save_projection)?;
     verify_installed_ending_record_projection(&output, inputs.ending_record_projection)?;
+    let runtime_state_initializer = verify_runtime_state_initializer_installation(
+        &required_mutations,
+        &actual_mutations,
+        &output,
+    )?;
+    let technical_installation = verify_technical_installation(TechnicalInstallationCheckInputs {
+        source: inputs.candidate.data(),
+        installed: &output,
+        required_mutations: &required_mutations,
+        actual_mutations: &actual_mutations,
+        tracked_write_count: expected_write_count,
+        all_required_dialogue_runtime_hook_roles_assembled: inputs
+            .all_required_dialogue_runtime_hook_roles_assembled,
+        runtime_state_initializer_installed: runtime_state_initializer.installed,
+    })?;
     let installed_image = output.clone();
-    let changed_byte_count = expanded_base
+    let changed_byte_count = inputs
+        .candidate
+        .data()
         .iter()
         .zip(&output)
         .filter(|(before, after)| before != after)
-        .count();
+        .count()
+        + output.len()
+        - inputs.candidate.data().len();
 
     let domains = domain_contributions(
         inputs.required_domains,
@@ -286,34 +351,70 @@ pub(super) fn plan_integrated_write_set(
         inputs.ending_record_projection,
         inputs.consumer_installation,
     )?;
-    let contributing_domain_count = domains
+    let declared_domain_with_expected_writes_count = domains
         .iter()
         .filter(|domain| domain.expected_write_count != 0)
         .count();
-    let fully_planned_domain_count = domains
+    let statically_accounted_declared_domain_count = domains
         .iter()
-        .filter(|domain| domain.complete_in_integrated_plan)
+        .filter(|domain| domain.complete_for_declared_domain_plan)
         .count();
     ensure!(
-        contributing_domain_count == inputs.required_domains.len()
-            && fully_planned_domain_count
-                == inputs.consumer_installation.fully_planned_domain_count(),
+        declared_domain_with_expected_writes_count == inputs.required_domains.len()
+            && statically_accounted_declared_domain_count
+                == inputs
+                    .consumer_installation
+                    .statically_accounted_declared_domain_count(),
         "integrated write gate advanced without every domain layer"
     );
     let integrated_image_sha1 = crate::sha1_hex(&installed_image);
+    let actual_appended_chr_byte_count = installed_image.len() - inputs.candidate.data().len();
 
     Ok((
         installed_image,
         IntegratedWriteSetPlan {
-            required_domain_count: inputs.required_domains.len(),
+            declared_domain_count: inputs.required_domains.len(),
             domains,
-            contributing_domain_count,
-            fully_planned_domain_count,
+            declared_domain_with_expected_writes_count,
+            statically_accounted_declared_domain_count,
+            original_candidate_sha1: sha1_hex(inputs.candidate.data()),
+            original_candidate_byte_count: inputs.candidate.data().len(),
+            expanded_baseline_sha1: sha1_hex(&expanded_base),
+            planned_final_image_byte_count: image_growth.final_byte_count,
+            original_chr_bank_count: inputs.candidate.data()[5],
+            final_chr_bank_count: image_growth.final_chr_bank_count,
+            planned_appended_chr_byte_count: image_growth.appended_chr_byte_count,
+            actual_appended_chr_byte_count,
+            required_mutation_identity_count: required_mutations.len(),
+            actual_mutation_identity_count: actual_mutations.len(),
             expected_write_count,
-            dialogue_runtime_hook_count: hook_roles.len(),
-            dialogue_runtime_hook_roles: hook_roles.into_iter().collect(),
-            dialogue_runtime_fixed_routine_count: inputs.dialogue_runtime_code.fixed_routines.len()
-                + inputs.dialogue_runtime_code.reclaimed_fixed_routines.len(),
+            required_mutation_identity_sha1: technical_installation.required_mutation_identity_sha1,
+            actual_mutation_identity_sha1: technical_installation.actual_mutation_identity_sha1,
+            required_runtime_routine_identity_count: required_mutations
+                .iter()
+                .filter(|identity| {
+                    matches!(
+                        identity.derivation,
+                        MutationDerivation::RuntimeRoutine { .. }
+                    )
+                })
+                .count(),
+            required_runtime_hook_identity_count: required_mutations
+                .iter()
+                .filter(|identity| {
+                    matches!(identity.derivation, MutationDerivation::RuntimeHook { .. })
+                })
+                .count(),
+            required_runtime_state_initializer_identity_count: runtime_state_initializer
+                .required_identity_count,
+            actual_runtime_state_initializer_identity_count: runtime_state_initializer
+                .actual_identity_count,
+            runtime_state_initializer_clears_full_reserved_range: runtime_state_initializer
+                .clears_full_reserved_range,
+            runtime_state_initializer_installed: runtime_state_initializer.installed,
+            dialogue_runtime_hook_count: installed_hook_roles.len(),
+            dialogue_runtime_hook_roles: installed_hook_roles.into_iter().collect(),
+            dialogue_runtime_fixed_routine_count,
             dialogue_runtime_code_routine_count: inputs.dialogue_runtime_code.code_routines.len(),
             dialogue_storage_region_count: inputs.encoded_dialogue.regions.len(),
             dialogue_pointer_write_count: inputs.encoded_dialogue.pointer_writes.len(),
@@ -335,14 +436,30 @@ pub(super) fn plan_integrated_write_set(
             changed_byte_count,
             installed_dialogue_matches_current_encoding: true,
             installed_chapter_titles_match_resident_encoding: true,
-            every_change_tracked: true,
+            every_change_tracked: technical_installation.every_change_tracked,
+            image_growth_complete: technical_installation.image_growth_complete,
+            required_mutation_identity_set_complete: technical_installation
+                .required_mutation_identity_set_complete,
+            required_runtime_routine_identities_installed: technical_installation
+                .required_runtime_routine_identities_installed,
+            required_runtime_hook_identities_installed: technical_installation
+                .required_runtime_hook_identities_installed,
+            final_replacement_bytes_match_manifest: technical_installation
+                .final_replacement_bytes_match_manifest,
+            technical_installation_complete: technical_installation.technical_installation_complete,
             one_shared_image: true,
-            all_domains_contribute_expected_writes: true,
+            all_declared_domains_contribute_expected_writes: true,
             integrated_image_sha1,
             output_materialized_in_memory_only: !inputs.output_will_be_emitted,
             rom_emitted: inputs.output_will_be_emitted,
         },
     ))
+}
+
+impl IntegratedWriteSetPlan {
+    pub(super) fn technical_installation_complete(&self) -> bool {
+        self.technical_installation_complete
+    }
 }
 
 fn cold_request_presentation_file_offset(
@@ -358,7 +475,7 @@ fn cold_request_presentation_file_offset(
 }
 
 fn install_cold_request_presentation(
-    image: &mut TrackedImage,
+    image: &mut IntegratedImage,
     candidate: &Rom,
     baseline: &[u8],
     page: &ColdRequestPresentationPage,
@@ -394,7 +511,7 @@ fn verify_installed_cold_request_presentation(
 }
 
 fn install_static_consumer_font_pages(
-    image: &mut TrackedImage,
+    image: &mut IntegratedImage,
     candidate: &Rom,
     baseline: &[u8],
     plan: &ConsumerCodebookPlan,
@@ -445,7 +562,7 @@ fn verify_installed_static_consumer_font_pages(
 }
 
 fn install_catalog_consumer_font_pages(
-    image: &mut TrackedImage,
+    image: &mut IntegratedImage,
     candidate: &Rom,
     baseline: &[u8],
     plan: &ConsumerCatalogPlan,
@@ -467,53 +584,6 @@ fn install_catalog_consumer_font_pages(
         image.write_expected("catalog consumer font page", offset, expected, &page.bytes)?;
     }
     Ok(())
-}
-
-fn expand_candidate_for_consumer_pages(
-    inputs: &IntegratedWriteSetInputs<'_>,
-) -> Result<(Vec<u8>, usize)> {
-    ensure!(
-        inputs.candidate.chr().len().is_multiple_of(FONT_PAGE_SIZE),
-        "integrated candidate CHR is not a whole number of 4 KiB pages"
-    );
-    let highest_required_page = std::iter::once(inputs.cold_request_presentation.physical_page)
-        .chain(
-            inputs
-                .consumer_codebook
-                .pages()
-                .iter()
-                .map(|page| page.physical_page()),
-        )
-        .chain(
-            inputs
-                .consumer_catalog
-                .pages()
-                .iter()
-                .map(|page| page.physical_page()),
-        )
-        .max()
-        .ok_or_else(|| anyhow::anyhow!("integrated consumer page set is empty"))?;
-    let required_page_count = usize::from(highest_required_page) + 1;
-    let required_bank_aligned_page_count = required_page_count.div_ceil(2) * 2;
-    ensure!(
-        required_bank_aligned_page_count <= 64,
-        "integrated consumer pages exceed mapper 165 CHR capacity"
-    );
-    let current_page_count = inputs.candidate.chr().len() / FONT_PAGE_SIZE;
-    ensure!(
-        current_page_count <= required_bank_aligned_page_count,
-        "integrated page plan would shrink the current candidate CHR"
-    );
-    let appended_page_count = required_bank_aligned_page_count - current_page_count;
-    let mut expanded = inputs.candidate.data().to_vec();
-    expanded.resize(
-        expanded
-            .len()
-            .checked_add(appended_page_count * FONT_PAGE_SIZE)
-            .ok_or_else(|| anyhow::anyhow!("integrated CHR expansion overflow"))?,
-        0xFF,
-    );
-    Ok((expanded, appended_page_count))
 }
 
 fn verify_installed_catalog_consumer_font_pages(
@@ -539,7 +609,7 @@ fn static_consumer_page_file_offset(candidate: &Rom, physical_page: u8) -> Resul
 }
 
 fn install_cross_domain_material(
-    image: &mut TrackedImage,
+    image: &mut IntegratedImage,
     candidate: &Rom,
     plan: &CrossDomainMaterialPlan,
 ) -> Result<()> {
@@ -618,7 +688,7 @@ fn verify_installed_cross_domain_material(
 }
 
 fn install_encoded_chapter_titles(
-    image: &mut TrackedImage,
+    image: &mut IntegratedImage,
     candidate: &Rom,
     titles: &[EncodedChapterTitle],
 ) -> Result<()> {
@@ -744,7 +814,7 @@ fn verify_installed_dialogue(installed: &[u8], encoded: &EncodedMainDialogueBund
 /// 저장소와 포인터를 한 이미지에 등록한다. 런타임 재료만 새로 쓰고 이전 단계의
 /// 코드북 바이트를 남겨 두는 산출물은 이 경계를 통과할 수 없다.
 fn install_encoded_dialogue(
-    image: &mut TrackedImage,
+    image: &mut IntegratedImage,
     candidate: &Rom,
     encoded: &EncodedMainDialogueBundle,
 ) -> Result<()> {
@@ -795,7 +865,7 @@ fn fixed_file_offset(rom: &Rom, address: u16) -> Result<usize> {
 }
 
 fn install_fixed_ui_projection(
-    image: &mut TrackedImage,
+    image: &mut IntegratedImage,
     plan: &FixedUiProjectionPlan,
 ) -> Result<()> {
     ensure!(
@@ -829,7 +899,7 @@ fn verify_installed_fixed_ui_projection(
 }
 
 fn install_chapter_save_projection(
-    image: &mut TrackedImage,
+    image: &mut IntegratedImage,
     plan: &ChapterSaveProjectionPlan,
 ) -> Result<()> {
     ensure!(
@@ -863,7 +933,7 @@ fn verify_installed_chapter_save_projection(
 }
 
 fn install_ending_record_projection(
-    image: &mut TrackedImage,
+    image: &mut IntegratedImage,
     plan: &EndingRecordProjectionPlan,
 ) -> Result<()> {
     ensure!(
@@ -939,8 +1009,8 @@ fn domain_contributions(
             let fixed_ui_write_count = fixed_ui_projection.write_count_for_domain(id);
             let chapter_save_write_count = chapter_save_projection.write_count_for_domain(id);
             let ending_record_write_count = ending_record_projection.write_count_for_domain(id);
-            let all_consumers_statically_accounted =
-                consumer_installation.domain_all_consumers_statically_accounted(id);
+            let all_declared_consumers_statically_accounted =
+                consumer_installation.domain_has_all_declared_consumers_statically_accounted(id);
             DomainWriteContribution {
                 id,
                 translation_input_loaded: true,
@@ -950,14 +1020,15 @@ fn domain_contributions(
                     || fixed_ui_write_count != 0
                     || chapter_save_write_count != 0
                     || ending_record_write_count != 0
-                    || all_consumers_statically_accounted,
+                    || all_declared_consumers_statically_accounted,
                 runtime_material_writes_contributed: dialogue || material,
                 font_supply_writes_contributed: true,
                 carried_consumer_writes_bound_to_exact_candidate: consumer_installation
                     .domain_has_carried_consumers(id),
                 new_global_consumer_writes_contributed: consumer_installation
                     .domain_has_newly_planned_consumers(id),
-                all_consumer_writes_contributed: all_consumers_statically_accounted,
+                all_declared_consumer_writes_contributed:
+                    all_declared_consumers_statically_accounted,
                 expected_write_count: usize::from(material)
                     + fixed_ui_write_count
                     + chapter_save_write_count
@@ -969,10 +1040,54 @@ fn domain_contributions(
                     } else {
                         0
                     },
-                complete_in_integrated_plan: all_consumers_statically_accounted,
+                complete_for_declared_domain_plan: all_declared_consumers_statically_accounted,
             }
         })
         .collect())
+}
+
+fn install_dialogue_runtime_material(
+    image: &mut IntegratedImage,
+    candidate: &Rom,
+    material: &[u8],
+    runtime_code: &DialogueRuntimeCodePlan,
+) -> Result<()> {
+    let material_offset = main_dialogue_runtime_material_file_offset()?;
+    let code_page_offset = verify_runtime_material_code_projection(material, runtime_code)?;
+    let whole_expected = mutation_expected_slice(
+        candidate.data(),
+        material_offset,
+        material.len(),
+        "main dialogue runtime material",
+    )?;
+    ensure!(
+        whole_expected.iter().all(|byte| *byte == 0xFF),
+        "dialogue runtime material destination is not exact FF"
+    );
+    image.write_expected(
+        RUNTIME_MATERIAL_DATA_ROLE,
+        material_offset,
+        &whole_expected[..code_page_offset],
+        &material[..code_page_offset],
+    )?;
+    for routine in &runtime_code.code_routines {
+        let offset = runtime_material_routine_file_offset(
+            material_offset,
+            code_page_offset,
+            routine.address,
+            routine.bytes.len(),
+        )?;
+        let expected =
+            mutation_expected_slice(candidate.data(), offset, routine.bytes.len(), routine.role)?;
+        image.write_runtime_routine(
+            routine.role,
+            offset,
+            expected,
+            &routine.bytes,
+            routine.address,
+        )?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1004,7 +1119,7 @@ mod tests {
                 planned_pointer: 0x8123,
             }],
         };
-        let mut image = TrackedImage::new(candidate.data().to_vec());
+        let mut image = IntegratedImage::new(candidate.data().to_vec(), None);
 
         install_encoded_dialogue(&mut image, &candidate, &encoded).unwrap();
 
@@ -1026,7 +1141,7 @@ mod tests {
                 encoded_storage: vec![index as u8 + 1, 0xED],
             })
             .collect::<Vec<_>>();
-        let mut image = TrackedImage::new(candidate.data().to_vec());
+        let mut image = IntegratedImage::new(candidate.data().to_vec(), None);
 
         install_encoded_chapter_titles(&mut image, &candidate, &titles).unwrap();
 

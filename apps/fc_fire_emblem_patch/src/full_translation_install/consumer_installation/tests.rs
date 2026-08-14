@@ -78,30 +78,34 @@ fn global_dialogue_plan_advances_only_proven_cross_domain_consumers() {
         .map(|domain| (domain.id, domain))
         .collect::<BTreeMap<_, _>>();
 
-    assert!(by_id["main_dialogue"].all_consumers_statically_accounted);
-    assert!(!by_id["unit_names"].all_consumers_statically_accounted);
-    assert!(by_id["location_names"].all_consumers_statically_accounted);
+    assert!(by_id["main_dialogue"].all_declared_consumers_statically_accounted);
+    assert!(!by_id["unit_names"].all_declared_consumers_statically_accounted);
+    assert!(by_id["location_names"].all_declared_consumers_statically_accounted);
     assert_eq!(
-        by_id["unit_names"].newly_planned_screen_roles,
+        by_id["unit_names"].newly_planned_declared_screen_roles,
         [ENDING_CHARACTER_EPILOGUE]
     );
-    assert!(by_id["item_names"].globally_planned_screen_roles.is_empty());
+    assert!(
+        by_id["item_names"]
+            .globally_planned_declared_screen_roles
+            .is_empty()
+    );
     assert!(
         !by_id["item_names"]
-            .remaining_screen_roles
+            .unaccounted_declared_screen_roles
             .iter()
             .any(|role| role == "battle_animation")
     );
     assert!(
         by_id["item_names"]
-            .remaining_screen_roles
+            .unaccounted_declared_screen_roles
             .iter()
             .any(|role| role == "item_inventory_list")
     );
     assert_eq!(
         domains
             .iter()
-            .filter(|domain| domain.all_consumers_statically_accounted)
+            .filter(|domain| domain.all_declared_consumers_statically_accounted)
             .count(),
         2
     );
@@ -147,94 +151,97 @@ fn exact_additional_consumer_roles_close_only_the_named_domain_screens() {
     .unwrap();
 
     assert_eq!(domains[0].globally_planned_target_unit_count, 6);
-    assert_eq!(domains[0].globally_planned_screen_roles, ["map_menu"]);
-    assert!(domains[0].all_consumers_statically_accounted);
+    assert_eq!(
+        domains[0].globally_planned_declared_screen_roles,
+        ["map_menu"]
+    );
+    assert!(domains[0].all_declared_consumers_statically_accounted);
 }
 
 #[test]
-fn final_artifact_runtime_roles_bind_to_every_domain_that_uses_the_screen() {
+fn declared_runtime_roles_bind_to_every_domain_that_declares_the_screen() {
     let mut plan = ConsumerInstallationPlan {
         strategy: "test",
         current_candidate_sha1: "candidate".to_owned(),
         current_build_report_sha1: "report".to_owned(),
-        required_domain_count: 2,
+        declared_domain_count: 2,
         domains: vec![
             DomainConsumerInstallation {
                 id: "main_dialogue",
                 target_unit_count: 1,
                 current_candidate_installed_target_unit_count: 1,
                 globally_planned_target_unit_count: 1,
-                target_screen_roles: vec!["shared_screen".to_owned()],
-                current_candidate_carried_screen_roles: vec![],
-                globally_planned_screen_roles: vec!["shared_screen".to_owned()],
-                newly_planned_screen_roles: vec!["shared_screen".to_owned()],
-                statically_accounted_screen_roles: vec!["shared_screen".to_owned()],
-                remaining_screen_roles: vec![],
-                current_candidate_historical_runtime_roles: vec![],
-                final_artifact_runtime_bound_screen_roles: vec![],
-                all_consumers_statically_accounted: true,
+                declared_screen_roles: vec!["shared_screen".to_owned()],
+                current_candidate_carried_declared_screen_roles: vec![],
+                globally_planned_declared_screen_roles: vec!["shared_screen".to_owned()],
+                newly_planned_declared_screen_roles: vec!["shared_screen".to_owned()],
+                statically_accounted_declared_screen_roles: vec!["shared_screen".to_owned()],
+                unaccounted_declared_screen_roles: vec![],
+                current_candidate_historical_declared_runtime_roles: vec![],
+                runtime_observed_declared_screen_roles: vec![],
+                all_declared_consumers_statically_accounted: true,
             },
             DomainConsumerInstallation {
                 id: "choice_labels",
                 target_unit_count: 1,
                 current_candidate_installed_target_unit_count: 1,
                 globally_planned_target_unit_count: 1,
-                target_screen_roles: vec!["shared_screen".to_owned()],
-                current_candidate_carried_screen_roles: vec![],
-                globally_planned_screen_roles: vec!["shared_screen".to_owned()],
-                newly_planned_screen_roles: vec!["shared_screen".to_owned()],
-                statically_accounted_screen_roles: vec!["shared_screen".to_owned()],
-                remaining_screen_roles: vec![],
-                current_candidate_historical_runtime_roles: vec![],
-                final_artifact_runtime_bound_screen_roles: vec![],
-                all_consumers_statically_accounted: true,
+                declared_screen_roles: vec!["shared_screen".to_owned()],
+                current_candidate_carried_declared_screen_roles: vec![],
+                globally_planned_declared_screen_roles: vec!["shared_screen".to_owned()],
+                newly_planned_declared_screen_roles: vec!["shared_screen".to_owned()],
+                statically_accounted_declared_screen_roles: vec!["shared_screen".to_owned()],
+                unaccounted_declared_screen_roles: vec![],
+                current_candidate_historical_declared_runtime_roles: vec![],
+                runtime_observed_declared_screen_roles: vec![],
+                all_declared_consumers_statically_accounted: true,
             },
         ],
-        carried_consumer_domain_count: 0,
-        globally_advanced_domain_count: 2,
-        all_consumers_statically_accounted_domain_count: 2,
-        unresolved_consumer_domain_count: 0,
-        current_candidate_historical_runtime_role_count: 0,
-        final_artifact_runtime_bound_role_count: 0,
-        all_required_consumers_statically_accounted: true,
+        declared_domain_with_carried_consumers_count: 0,
+        declared_domain_with_global_plan_count: 2,
+        statically_accounted_declared_domain_count: 2,
+        declared_domain_with_unaccounted_consumers_count: 0,
+        declared_consumer_historical_runtime_role_count: 0,
+        declared_consumer_runtime_observed_role_count: 0,
+        all_declared_consumers_statically_accounted: true,
         current_candidate_runtime_evidence_inherited: false,
-        final_artifact_runtime_replay_required: true,
+        declared_consumer_runtime_replay_required: true,
     };
 
     let roles = BTreeSet::from(["shared_screen".to_owned()]);
-    plan.bind_final_artifact_runtime_roles(&roles, &roles)
+    plan.bind_declared_consumer_runtime_roles(&roles, &roles)
         .unwrap();
 
-    assert_eq!(plan.final_artifact_runtime_bound_role_count, 1);
-    assert!(!plan.final_artifact_runtime_replay_required);
+    assert_eq!(plan.declared_consumer_runtime_observed_role_count, 1);
+    assert!(!plan.declared_consumer_runtime_replay_required);
     assert!(
-        plan.domains.iter().all(|domain| {
-            domain.final_artifact_runtime_bound_screen_roles == ["shared_screen"]
-        })
+        plan.domains
+            .iter()
+            .all(|domain| { domain.runtime_observed_declared_screen_roles == ["shared_screen"] })
     );
 }
 
 #[test]
-fn unknown_final_artifact_runtime_role_is_rejected() {
+fn unknown_declared_consumer_runtime_role_is_rejected() {
     let mut plan = ConsumerInstallationPlan {
         strategy: "test",
         current_candidate_sha1: "candidate".to_owned(),
         current_build_report_sha1: "report".to_owned(),
-        required_domain_count: 0,
+        declared_domain_count: 0,
         domains: vec![],
-        carried_consumer_domain_count: 0,
-        globally_advanced_domain_count: 0,
-        all_consumers_statically_accounted_domain_count: 0,
-        unresolved_consumer_domain_count: 0,
-        current_candidate_historical_runtime_role_count: 0,
-        final_artifact_runtime_bound_role_count: 0,
-        all_required_consumers_statically_accounted: true,
+        declared_domain_with_carried_consumers_count: 0,
+        declared_domain_with_global_plan_count: 0,
+        statically_accounted_declared_domain_count: 0,
+        declared_domain_with_unaccounted_consumers_count: 0,
+        declared_consumer_historical_runtime_role_count: 0,
+        declared_consumer_runtime_observed_role_count: 0,
+        all_declared_consumers_statically_accounted: true,
         current_candidate_runtime_evidence_inherited: false,
-        final_artifact_runtime_replay_required: true,
+        declared_consumer_runtime_replay_required: true,
     };
 
     let error = plan
-        .bind_final_artifact_runtime_roles(
+        .bind_declared_consumer_runtime_roles(
             &BTreeSet::from(["unknown".to_owned()]),
             &BTreeSet::new(),
         )

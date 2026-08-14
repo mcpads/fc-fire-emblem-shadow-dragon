@@ -137,13 +137,13 @@ pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) current_build_report_path: &'a Path,
     pub(crate) final_runtime_evidence_path: Option<&'a Path>,
     pub(crate) report_path: &'a Path,
-    /// 모든 정적 게이트를 통과한 통합 이미지를 명시적으로 쓸 자리다.
+    /// 선언된 설치 계획의 기술 게이트를 통과한 통합 이미지를 명시적으로 쓸 자리다.
     pub(crate) output_path: Option<&'a Path>,
 }
 
 pub(crate) struct FullTranslationInstallSummary {
     pub(crate) report_sha1: String,
-    pub(crate) required_domain_count: usize,
+    pub(crate) declared_installation_domain_count: usize,
     pub(crate) dialogue_record_count: usize,
     pub(crate) dialogue_page_workset_count: usize,
     pub(crate) dialogue_glyph_count: usize,
@@ -159,8 +159,8 @@ struct FullTranslationInstallReport {
     schema: u8,
     source_sha1: &'static str,
     strategy: &'static str,
-    required_domain_count: usize,
-    required_domains: [&'static str; REQUIRED_DOMAIN_COUNT],
+    declared_installation_domain_count: usize,
+    declared_installation_domains: [&'static str; REQUIRED_DOMAIN_COUNT],
     translation_inputs: TranslationInputs,
     dialogue_codebook: DialogueCodebook,
     chapter_intro_residency: ChapterIntroResidency,
@@ -174,8 +174,8 @@ struct FullTranslationInstallReport {
     fixed_ui_projection: FixedUiProjectionPlan,
     installation_layout: InstallationLayoutPlan,
     integrated_write_set: IntegratedWriteSetPlan,
-    dialogue_runtime_control_flow: DialogueRuntimeControlFlowPlan,
-    dialogue_runtime_state_storage: DialogueRuntimeStateStoragePlan,
+    dialogue_runtime_control_flow_static_contract: DialogueRuntimeControlFlowPlan,
+    dialogue_runtime_state_storage_source_reservation: DialogueRuntimeStateStoragePlan,
     dialogue_runtime_composition: DialogueRuntimeComposition,
     consumer_installation: ConsumerInstallationPlan,
     final_artifact_runtime_evidence: FinalArtifactRuntimeEvidence,
@@ -222,7 +222,7 @@ struct DialogueCodebook {
     static_page_pack_sha1: String,
     canonical_records_connected: bool,
     page_local_bundle_encoding_connected: bool,
-    glyph_characters_emitted: bool,
+    glyph_characters_encoded_into_installed_runtime_atlas: bool,
     transition_stable_lifetime_count: usize,
     multi_record_transition_stable_lifetime_count: usize,
     maximum_transition_stable_lifetime_record_count: usize,
@@ -343,15 +343,15 @@ struct DialogueRuntimeComposition {
     atlas_and_scan_material_byte_count: usize,
     dialogue_runtime_identity: DialogueRuntimeIdentityPlan,
     atlas_scan_and_identity_byte_count: usize,
-    runtime_material: DialogueRuntimeMaterialPlan,
-    runtime_page_scan_bound_to_control_flow: bool,
+    runtime_material_layout_and_assembly: DialogueRuntimeMaterialPlan,
+    runtime_page_scan_bound_to_assembled_control_flow: bool,
     current_battle_glyph_atlas_tile_count: usize,
     current_battle_maximum_ppu_write_count: usize,
     current_battle_runtime_routine_byte_count: usize,
     current_battle_runtime_bound_to_build: bool,
     battle_compositor_is_directly_reusable: bool,
     main_dialogue_page_identity_material_serialized: bool,
-    main_dialogue_page_identity_bound: bool,
+    main_dialogue_page_identity_bound_to_assembled_control_flow: bool,
     main_dialogue_transition_hook_planned: bool,
 }
 
@@ -379,10 +379,10 @@ struct InstallationGates {
     all_chapter_title_storage_writes_planned: bool,
     cold_request_presentation_page_planned: bool,
     cold_request_presentation_write_planned: bool,
-    static_prebuilt_dialogue_page_pool_fits: bool,
     dialogue_runtime_composition_planned: bool,
-    cross_domain_consumer_writes_planned: bool,
-    integrated_candidate_ready: bool,
+    all_declared_consumer_writes_planned: bool,
+    declared_plan_technical_installation_complete: bool,
+    declared_consumer_runtime_observation_complete: bool,
 }
 
 pub(crate) fn plan_full_translation_installation(
@@ -710,18 +710,25 @@ pub(crate) fn plan_full_translation_installation(
             catalog: consumer_catalog.mapper_registers()?,
         },
     )?;
-    let emitted_hook_roles = dialogue_runtime_code.hook_roles();
-    dynamic_producer_encoding.bind_runtime_hooks(&emitted_hook_roles)?;
+    let assembled_hook_roles = dialogue_runtime_code.hook_roles();
+    dynamic_producer_encoding.bind_runtime_hooks(&assembled_hook_roles)?;
     let dynamic_string_producers_bound = dynamic_input_producers
         .every_record_selector_route_bound()
         && dynamic_producer_encoding.canonical_outputs_ready();
     for routine in &dialogue_runtime_code.code_routines {
         runtime_material.place_runtime_code(routine.address, &routine.bytes)?;
     }
+    let runtime_code_routines_assembled = !dialogue_runtime_code.code_routines.is_empty()
+        && runtime_material.runtime_code_routine_placement_count()
+            == dialogue_runtime_code.code_routines.len();
+    ensure!(
+        runtime_code_routines_assembled,
+        "dialogue runtime material did not assemble every planned code routine"
+    );
 
     let runtime_state_storage = plan_dialogue_runtime_state_storage(&rom)?;
     ensure!(
-        runtime_state_storage.selection_complete(),
+        runtime_state_storage.source_reservation_selection_complete(),
         "dialogue runtime-state storage selection is incomplete"
     );
     let selected_runtime_state_cpu_range = runtime_state_storage
@@ -734,8 +741,8 @@ pub(crate) fn plan_full_translation_installation(
         runtime_code_byte_count: runtime_material.material.len()
             - runtime_material.runtime_code_offset,
         selected_runtime_state_cpu_range,
-        runtime_code_emitted: true,
-        emitted_hook_roles: &emitted_hook_roles,
+        runtime_code_routines_assembled,
+        assembled_hook_roles: &assembled_hook_roles,
         chr_restore_callee_cycles: dialogue_runtime_code.chr_restore_callee_cycles,
         canonical_dynamic_codes_are_page_physical_codes: dynamic_page_codes
             .canonical_codes_are_page_physical_codes,
@@ -822,6 +829,8 @@ pub(crate) fn plan_full_translation_installation(
             );
         }
     }
+    let all_required_dialogue_runtime_hook_roles_assembled =
+        runtime_control_flow.all_required_hook_roles_assembled();
     let mut consumer_installation = plan_consumer_installation(ConsumerInstallationInputs {
         current_candidate_path: inputs.current_candidate_path,
         current_build_report_path: inputs.current_build_report_path,
@@ -831,7 +840,8 @@ pub(crate) fn plan_full_translation_installation(
             == chapter_titles.entry_count,
         all_dialogue_records_encoded: dialogue.record_ids.len() == 504
             && encoded_display.pointer_writes.len() == 517,
-        all_dialogue_runtime_hooks_emitted: runtime_control_flow.all_planned_hooks_emitted(),
+        all_dialogue_runtime_hook_roles_assembled:
+            all_required_dialogue_runtime_hook_roles_assembled,
         dynamic_dialogue_producers_bound: dynamic_string_producers_bound,
         globally_planned_consumer_roles: &globally_planned_consumer_roles,
     })?;
@@ -858,6 +868,7 @@ pub(crate) fn plan_full_translation_installation(
             ending_record_projection: &ending_record_projection,
             consumer_installation: &consumer_installation,
             required_domains: &REQUIRED_DOMAINS,
+            all_required_dialogue_runtime_hook_roles_assembled,
             output_will_be_emitted: inputs.output_path.is_some(),
         })?;
     let translation_input_complete = dialogue_validation.translation_input_complete;
@@ -873,8 +884,9 @@ pub(crate) fn plan_full_translation_installation(
         && transitions.ending_record.review_complete
         && locations.review_complete
         && translation_input_complete;
-    let all_required_consumers_statically_accounted =
-        consumer_installation.all_required_consumers_statically_accounted();
+    let all_declared_consumers_statically_accounted =
+        consumer_installation.all_declared_consumers_statically_accounted();
+    let technical_installation_complete = integrated_write_set.technical_installation_complete();
     let integrated_image_sha1 = sha1_hex(&installed_image);
     let final_artifact_runtime_evidence = load_final_artifact_runtime_evidence(
         inputs.final_runtime_evidence_path,
@@ -885,36 +897,40 @@ pub(crate) fn plan_full_translation_installation(
             .into_iter()
             .flat_map(|domain| domain.screen_roles)
             .collect::<BTreeSet<_>>();
-    consumer_installation.bind_final_artifact_runtime_roles(
+    consumer_installation.bind_declared_consumer_runtime_roles(
         &final_artifact_runtime_evidence.bound_screen_roles(),
         &registered_runtime_screen_roles,
     )?;
     let dynamic_verification_started = final_artifact_runtime_evidence.verification_started();
+    let declared_consumer_runtime_observation_complete =
+        !consumer_installation.declared_consumer_runtime_replay_required();
     let next_gate = if translation_input_complete
-        && runtime_state_storage.selection_complete()
-        && all_required_consumers_statically_accounted
-        && !consumer_installation.final_artifact_runtime_replay_required()
+        && runtime_state_storage.source_reservation_selection_complete()
+        && all_declared_consumers_statically_accounted
+        && declared_consumer_runtime_observation_complete
     {
-        "rebind maximum-dialogue, title, defeat, save, ending, and release regressions to the exact integrated artifact"
+        "return from the closed declared consumer replay to the separate whole-game consumer census and release regressions for the exact integrated artifact"
     } else if translation_input_complete
-        && runtime_state_storage.selection_complete()
-        && all_required_consumers_statically_accounted
+        && runtime_state_storage.source_reservation_selection_complete()
+        && all_declared_consumers_statically_accounted
         && dynamic_verification_started
     {
-        "continue representative and worst-case consumer-path replay on the exact integrated artifact"
+        "continue representative and worst-case declared consumer-path replay on the exact integrated artifact"
     } else if translation_input_complete
-        && runtime_state_storage.selection_complete()
-        && all_required_consumers_statically_accounted
+        && runtime_state_storage.source_reservation_selection_complete()
+        && all_declared_consumers_statically_accounted
         && inputs.output_path.is_some()
     {
-        "bind representative and worst-case consumer paths to the exact emitted artifact before any release claim"
+        "bind representative and worst-case declared consumer paths to the exact emitted artifact before returning to the separate whole-game census"
     } else if translation_input_complete
-        && runtime_state_storage.selection_complete()
-        && all_required_consumers_statically_accounted
+        && runtime_state_storage.source_reservation_selection_complete()
+        && all_declared_consumers_statically_accounted
     {
-        "materialize the exact integrated ROM, then bind representative and worst-case consumer paths to that artifact before any release claim"
-    } else if translation_input_complete && runtime_state_storage.selection_complete() {
-        "finish every remaining consumer storage projection against its already-planned font page; do not emit or run a partial ROM"
+        "materialize the exact integrated ROM, then bind representative and worst-case declared consumer paths to that artifact before returning to the separate whole-game census"
+    } else if translation_input_complete
+        && runtime_state_storage.source_reservation_selection_complete()
+    {
+        "finish every remaining declared consumer storage projection against its already-planned font page; do not treat this declared plan as the whole-game census"
     } else if translation_input_complete {
         "close the exact volatile runtime-state storage selection against source access, queue, save/load, and battle lifetimes; do not emit or run a partial ROM"
     } else {
@@ -932,13 +948,12 @@ pub(crate) fn plan_full_translation_installation(
     } else {
         false
     };
-
     let report = FullTranslationInstallReport {
-        schema: 14,
+        schema: 15,
         source_sha1: EXPECTED_SOURCE_SHA1,
-        strategy: "install all remaining translation domains in one cumulative candidate, run complete static gates, then run consumer-path dynamic regression on that same ROM",
-        required_domain_count: REQUIRED_DOMAIN_COUNT,
-        required_domains: REQUIRED_DOMAINS,
+        strategy: "install the declared translation domains in one cumulative candidate, close declared installation gates, then run declared consumer-path dynamic regression on that same ROM; whole-game consumer census remains separate",
+        declared_installation_domain_count: REQUIRED_DOMAIN_COUNT,
+        declared_installation_domains: REQUIRED_DOMAINS,
         translation_inputs: TranslationInputs {
             main_dialogue_record_count: dialogue.record_ids.len(),
             fixed_text_physical_entry_count: fixed.entries.len(),
@@ -973,7 +988,7 @@ pub(crate) fn plan_full_translation_installation(
             static_page_pack_sha1: sha1_hex(&font_page_pack),
             canonical_records_connected: true,
             page_local_bundle_encoding_connected: true,
-            glyph_characters_emitted: false,
+            glyph_characters_encoded_into_installed_runtime_atlas: technical_installation_complete,
             transition_stable_lifetime_count: transition_residency.lifetime_count,
             multi_record_transition_stable_lifetime_count: transition_residency
                 .multi_record_lifetime_count,
@@ -1023,8 +1038,8 @@ pub(crate) fn plan_full_translation_installation(
         fixed_ui_projection,
         installation_layout,
         integrated_write_set,
-        dialogue_runtime_control_flow: runtime_control_flow,
-        dialogue_runtime_state_storage: runtime_state_storage,
+        dialogue_runtime_control_flow_static_contract: runtime_control_flow,
+        dialogue_runtime_state_storage_source_reservation: runtime_state_storage,
         dialogue_runtime_composition: DialogueRuntimeComposition {
             strategy_selected: true,
             glyph_atlas_tile_count: composition.glyph_atlas_tile_count,
@@ -1128,8 +1143,8 @@ pub(crate) fn plan_full_translation_installation(
                 + composition.scan_material_byte_count,
             dialogue_runtime_identity: runtime_identity,
             atlas_scan_and_identity_byte_count,
-            runtime_material,
-            runtime_page_scan_bound_to_control_flow: false,
+            runtime_material_layout_and_assembly: runtime_material,
+            runtime_page_scan_bound_to_assembled_control_flow: technical_installation_complete,
             current_battle_glyph_atlas_tile_count: page_capacity.battle_glyph_atlas_tile_count,
             current_battle_maximum_ppu_write_count: page_capacity.battle_maximum_ppu_write_count,
             current_battle_runtime_routine_byte_count: page_capacity
@@ -1137,7 +1152,8 @@ pub(crate) fn plan_full_translation_installation(
             current_battle_runtime_bound_to_build: page_capacity.battle_runtime_bound_to_build,
             battle_compositor_is_directly_reusable: false,
             main_dialogue_page_identity_material_serialized: true,
-            main_dialogue_page_identity_bound: false,
+            main_dialogue_page_identity_bound_to_assembled_control_flow:
+                technical_installation_complete,
             main_dialogue_transition_hook_planned: true,
         },
         consumer_installation,
@@ -1164,11 +1180,11 @@ pub(crate) fn plan_full_translation_installation(
             all_chapter_title_storage_writes_planned: true,
             cold_request_presentation_page_planned: true,
             cold_request_presentation_write_planned: true,
-            static_prebuilt_dialogue_page_pool_fits: codebook.page_assignments.len()
-                <= remaining_available_page_count,
             dialogue_runtime_composition_planned: true,
-            cross_domain_consumer_writes_planned: all_required_consumers_statically_accounted,
-            integrated_candidate_ready: all_required_consumers_statically_accounted,
+            all_declared_consumer_writes_planned: all_declared_consumers_statically_accounted,
+            declared_plan_technical_installation_complete:
+                all_declared_consumers_statically_accounted && technical_installation_complete,
+            declared_consumer_runtime_observation_complete,
         },
         rom_emitted,
         dynamic_verification_started,
@@ -1185,7 +1201,7 @@ pub(crate) fn plan_full_translation_installation(
 
     Ok(FullTranslationInstallSummary {
         report_sha1: sha1_hex(&report_bytes),
-        required_domain_count: REQUIRED_DOMAIN_COUNT,
+        declared_installation_domain_count: REQUIRED_DOMAIN_COUNT,
         dialogue_record_count: dialogue.record_ids.len(),
         dialogue_page_workset_count: display.page_worksets.len(),
         dialogue_glyph_count: codebook.glyph_count,

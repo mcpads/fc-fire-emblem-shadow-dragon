@@ -18,8 +18,6 @@ use crate::{
 const FIXED_BANK_SIZE: usize = 16 * 1024;
 const MAIN_DIALOGUE_BANK: u8 = 0x0A;
 const SOURCE_POINTER_RESOLVER: u16 = 0xE6B2;
-/// 대사 소비자가 들어가는 자리다. `$C191`이 아닌 이유는 의사결정 64번에 있다.
-const NMI_HOOK: u16 = 0xC179;
 /// 전투 합성이 계속 쓰는 자리다. 소유자가 다르므로 그대로 둔다.
 const BATTLE_NMI_HOOK: u16 = 0xC191;
 const SHARED_NMI_DISPATCH: u16 = 0xFC20;
@@ -88,17 +86,16 @@ pub(super) struct DialogueRuntimeControlFlowPlan {
     quiet_frame_gated_branch_count: usize,
     runtime_material_execution_address_bound: bool,
     runtime_state_storage_bound: bool,
-    runtime_code_emitted: bool,
-    planned_hook_roles: Vec<DialogueRuntimeHookRole>,
-    emitted_hook_roles: Vec<DialogueRuntimeHookRole>,
-    missing_hook_roles: Vec<DialogueRuntimeHookRole>,
-    runtime_hooks_contributed: bool,
-    complete: bool,
+    runtime_code_routines_assembled: bool,
+    required_hook_roles: Vec<DialogueRuntimeHookRole>,
+    assembled_hook_roles: Vec<DialogueRuntimeHookRole>,
+    missing_assembled_hook_roles: Vec<DialogueRuntimeHookRole>,
+    all_required_hook_roles_assembled: bool,
 }
 
 impl DialogueRuntimeControlFlowPlan {
-    pub(super) fn all_planned_hooks_emitted(&self) -> bool {
-        self.runtime_hooks_contributed && self.missing_hook_roles.is_empty()
+    pub(super) fn all_required_hook_roles_assembled(&self) -> bool {
+        self.all_required_hook_roles_assembled && self.missing_assembled_hook_roles.is_empty()
     }
 }
 
@@ -210,21 +207,24 @@ pub(super) struct RuntimeControlFlowInputs<'a> {
     pub(super) runtime_code_offset: usize,
     pub(super) runtime_code_byte_count: usize,
     pub(super) selected_runtime_state_cpu_range: &'a str,
-    /// 전송 루틴이 재료 용기의 예약 자리에 들어갔는지다.
-    pub(super) runtime_code_emitted: bool,
-    /// 이번 빌드가 실제로 건 훅의 역할이다.
-    pub(super) emitted_hook_roles: &'a [DialogueRuntimeHookRole],
+    /// 모든 실행 루틴이 재료 용기의 예약 자리에 조립됐는지다.
+    pub(super) runtime_code_routines_assembled: bool,
+    /// 정적 코드 계획이 조립한 훅의 역할이다. 최종 ROM 설치 여부는 별도 write set이 맡는다.
+    pub(super) assembled_hook_roles: &'a [DialogueRuntimeHookRole],
     pub(super) chr_restore_callee_cycles: [(u16, u32); 2],
     pub(super) canonical_dynamic_codes_are_page_physical_codes: bool,
 }
 
-fn classify_emitted_hook_roles(
-    emitted_hook_roles: &[DialogueRuntimeHookRole],
+fn classify_assembled_hook_roles(
+    assembled_hook_roles: &[DialogueRuntimeHookRole],
 ) -> Result<(Vec<DialogueRuntimeHookRole>, Vec<DialogueRuntimeHookRole>)> {
-    let emitted = emitted_hook_roles.iter().copied().collect::<BTreeSet<_>>();
+    let assembled = assembled_hook_roles
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
     ensure!(
-        emitted.len() == emitted_hook_roles.len(),
-        "dialogue runtime emitted the same hook role more than once"
+        assembled.len() == assembled_hook_roles.len(),
+        "dialogue runtime assembled the same hook role more than once"
     );
     let planned = PLANNED_HOOK_ROLES.into_iter().collect::<BTreeSet<_>>();
     ensure!(
@@ -232,11 +232,11 @@ fn classify_emitted_hook_roles(
         "dialogue runtime planned the same hook role more than once"
     );
     ensure!(
-        emitted.is_subset(&planned),
-        "dialogue runtime emitted a hook role outside the planned control flow"
+        assembled.is_subset(&planned),
+        "dialogue runtime assembled a hook role outside the planned control flow"
     );
-    let missing = planned.difference(&emitted).copied().collect();
-    Ok((emitted.into_iter().collect(), missing))
+    let missing = planned.difference(&assembled).copied().collect();
+    Ok((assembled.into_iter().collect(), missing))
 }
 
 pub(super) fn plan_dialogue_runtime_control_flow(
@@ -246,8 +246,8 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         inputs.canonical_dynamic_codes_are_page_physical_codes,
         "dynamic dialogue strings still need an unimplemented consumer projection"
     );
-    let (emitted_hook_roles, missing_hook_roles) =
-        classify_emitted_hook_roles(inputs.emitted_hook_roles)?;
+    let (assembled_hook_roles, missing_assembled_hook_roles) =
+        classify_assembled_hook_roles(inputs.assembled_hook_roles)?;
     let [
         (fd_helper, fd_restore_cycles),
         (fe_helper, fe_restore_cycles),
@@ -576,12 +576,11 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         quiet_frame_gated_branch_count: quiet_frame_gate.gated_branch_count,
         runtime_material_execution_address_bound: true,
         runtime_state_storage_bound: true,
-        runtime_code_emitted: inputs.runtime_code_emitted,
-        planned_hook_roles: PLANNED_HOOK_ROLES.to_vec(),
-        emitted_hook_roles,
-        runtime_hooks_contributed: missing_hook_roles.is_empty(),
-        missing_hook_roles,
-        complete: false,
+        runtime_code_routines_assembled: inputs.runtime_code_routines_assembled,
+        required_hook_roles: PLANNED_HOOK_ROLES.to_vec(),
+        assembled_hook_roles,
+        all_required_hook_roles_assembled: missing_assembled_hook_roles.is_empty(),
+        missing_assembled_hook_roles,
     })
 }
 
@@ -616,20 +615,20 @@ fn mmc3_page_bytes(rom: &Rom, page: u8, len: usize) -> Result<&[u8]> {
 mod tests {
     use super::*;
 
-    /// 설치된 훅 수가 어떤 목표 수와 같아도 역할이 빠졌다면 완료가 아니다. 현재 방출
-    /// 집합은 전이·수명 종료가 빠졌음을 그대로 드러내야 한다.
+    /// 조립된 훅 수가 어떤 목표 수와 같아도 역할이 빠졌다면 정적 계약 완료가 아니다.
+    /// 현재 조립 집합은 전이·수명 종료가 빠졌음을 그대로 드러내야 한다.
     #[test]
     fn partial_hook_roles_report_what_is_missing() {
-        let emitted = [
+        let assembled = [
             DialogueRuntimeHookRole::InitialDirectEntryRequest,
             DialogueRuntimeHookRole::NmiPageComposer,
             DialogueRuntimeHookRole::DispatcherGate,
             DialogueRuntimeHookRole::ChrRamSelector,
         ];
 
-        let (classified, missing) = classify_emitted_hook_roles(&emitted).unwrap();
+        let (classified, missing) = classify_assembled_hook_roles(&assembled).unwrap();
 
-        assert_eq!(classified.len(), emitted.len());
+        assert_eq!(classified.len(), assembled.len());
         assert!(missing.contains(&DialogueRuntimeHookRole::E4TransitionEntryRequest));
         assert!(missing.contains(&DialogueRuntimeHookRole::E6TransitionEntryRequest));
         assert!(missing.contains(&DialogueRuntimeHookRole::CompletedPageAdvanceOrLifetimeEnd));
@@ -642,12 +641,12 @@ mod tests {
     /// 같은 역할을 두 번 세어 빠진 역할을 메운 척할 수 없어야 한다.
     #[test]
     fn duplicate_hook_roles_are_not_counted_as_progress() {
-        let emitted = [
+        let assembled = [
             DialogueRuntimeHookRole::NmiPageComposer,
             DialogueRuntimeHookRole::NmiPageComposer,
         ];
 
-        let error = classify_emitted_hook_roles(&emitted).unwrap_err();
+        let error = classify_assembled_hook_roles(&assembled).unwrap_err();
 
         assert!(error.to_string().contains("same hook role more than once"));
     }

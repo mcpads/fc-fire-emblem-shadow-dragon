@@ -58,12 +58,9 @@ pub(super) struct DialogueRuntimeStateStoragePlan {
     main_dialogue_queue_bound_proven: bool,
     battle_reservation_excludes_candidate: bool,
     inactive_lifetime_may_clobber_candidate: bool,
-    future_runtime_lifecycle_contract: RuntimeLifecycleContract,
-    every_entry_cold_initializes_all_bytes: bool,
-    runtime_initializer_emitted: bool,
+    runtime_lifecycle_contract: RuntimeLifecycleContract,
     selected_cpu_range_hex: Option<&'static str>,
-    selection_complete: bool,
-    complete: bool,
+    source_reservation_selection_complete: bool,
 }
 
 #[derive(Serialize)]
@@ -73,7 +70,6 @@ struct RuntimeLifecycleContract {
     ownership_invalidate: &'static str,
     cold_entry_writes_all_five_bytes_before_any_selector_read: bool,
     inactive_selector_ignores_all_five_bytes: bool,
-    implementation_required_before_rom_emission: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -135,19 +131,15 @@ pub(super) fn plan_dialogue_runtime_state_storage(
         main_dialogue_queue_bound_proven,
         battle_reservation_excludes_candidate,
         inactive_lifetime_may_clobber_candidate: true,
-        future_runtime_lifecycle_contract: RuntimeLifecycleContract {
+        runtime_lifecycle_contract: RuntimeLifecycleContract {
             ownership_begin: "every direct entry and E7 resume resolves a request before publishing cold or ready state",
             ownership_continue: "E4, E6, visible-page transitions, and E7 suspension retain ownership while no shared CHR-RAM writer has invalidated it",
             ownership_invalidate: "battle CHR-RAM composition, every terminal path, reset, save/load boundary, and unclassified inactive writers invalidate ownership",
             cold_entry_writes_all_five_bytes_before_any_selector_read: true,
             inactive_selector_ignores_all_five_bytes: true,
-            implementation_required_before_rom_emission: true,
         },
-        every_entry_cold_initializes_all_bytes: false,
-        runtime_initializer_emitted: false,
         selected_cpu_range_hex: selection_complete.then_some("0x07F0..0x07FD"),
-        selection_complete,
-        complete: false,
+        source_reservation_selection_complete: selection_complete,
     })
 }
 
@@ -156,8 +148,8 @@ impl DialogueRuntimeStateStoragePlan {
         self.selected_cpu_range_hex
     }
 
-    pub(super) fn selection_complete(&self) -> bool {
-        self.selection_complete
+    pub(super) fn source_reservation_selection_complete(&self) -> bool {
+        self.source_reservation_selection_complete
     }
 }
 

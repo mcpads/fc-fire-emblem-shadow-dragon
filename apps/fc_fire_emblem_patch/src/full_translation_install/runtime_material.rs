@@ -24,7 +24,7 @@ pub(super) const RUNTIME_CODE_MMC3_PAGE: u8 =
     RUNTIME_MATERIAL_FIRST_PAGE + RUNTIME_MATERIAL_PAGE_COUNT as u8 - 1;
 const MMC3_PAGE_BYTE_COUNT: usize = 8 * 1024;
 const RUNTIME_MATERIAL_CAPACITY: usize = RUNTIME_MATERIAL_PAGE_COUNT * MMC3_PAGE_BYTE_COUNT;
-const CONTENT_EMITTED_FLAG: u8 = 1;
+const CONTENT_SUPPLIED_DURING_LAYOUT_FLAG: u8 = 1;
 const RUNTIME_CODE_SECTION_ID: u8 = 5;
 /// 자료 구역 넷과 실행 코드 예약 하나다. 용기 안에서 payload가 시작하는 자리를
 /// 계산할 때 쓴다.
@@ -52,7 +52,7 @@ pub(super) struct DialogueRuntimeMaterialPlan {
     payload_byte_count: usize,
     pub(super) runtime_code_offset: usize,
     runtime_code_reserved_byte_count: usize,
-    runtime_code_emitted: bool,
+    runtime_code_routine_placement_count: usize,
     stable_fixed_page_layout: bool,
     material_sha1: String,
     #[serde(skip)]
@@ -65,7 +65,7 @@ struct RuntimeMaterialSection {
     role: &'static str,
     offset: usize,
     byte_count: usize,
-    content_emitted: bool,
+    content_supplied_during_layout: bool,
     content_sha1: Option<String>,
 }
 
@@ -193,7 +193,7 @@ fn encode_runtime_material(
         write_descriptor(
             &mut material,
             section.id,
-            CONTENT_EMITTED_FLAG,
+            CONTENT_SUPPLIED_DURING_LAYOUT_FLAG,
             offset,
             content.len(),
         )?;
@@ -202,7 +202,7 @@ fn encode_runtime_material(
             role: section.role,
             offset,
             byte_count: content.len(),
-            content_emitted: true,
+            content_supplied_during_layout: true,
             content_sha1: Some(sha1_hex(content)),
         });
         offset += content.len();
@@ -219,7 +219,7 @@ fn encode_runtime_material(
         role: "runtime_code",
         offset: runtime_code_offset,
         byte_count: runtime_code_byte_count,
-        content_emitted: false,
+        content_supplied_during_layout: false,
         content_sha1: None,
     });
     ensure!(
@@ -252,7 +252,7 @@ fn encode_runtime_material(
         payload_byte_count,
         runtime_code_offset,
         runtime_code_reserved_byte_count: runtime_code_byte_count,
-        runtime_code_emitted: false,
+        runtime_code_routine_placement_count: 0,
         stable_fixed_page_layout: capacity == RUNTIME_MATERIAL_CAPACITY,
         material_sha1: sha1_hex(&material),
         material,
@@ -306,9 +306,16 @@ impl DialogueRuntimeMaterialPlan {
             "runtime code placement is not exact FF before writing"
         );
         destination.copy_from_slice(code);
-        self.runtime_code_emitted = true;
+        self.runtime_code_routine_placement_count = self
+            .runtime_code_routine_placement_count
+            .checked_add(1)
+            .context("runtime code routine placement count overflow")?;
         self.material_sha1 = sha1_hex(&self.material);
         Ok(())
+    }
+
+    pub(super) fn runtime_code_routine_placement_count(&self) -> usize {
+        self.runtime_code_routine_placement_count
     }
 }
 

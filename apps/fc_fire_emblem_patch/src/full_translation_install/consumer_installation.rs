@@ -19,7 +19,7 @@ pub(super) struct ConsumerInstallationInputs<'a> {
     pub(super) target_unit_counts: &'a BTreeMap<&'static str, usize>,
     pub(super) all_chapter_titles_encoded: bool,
     pub(super) all_dialogue_records_encoded: bool,
-    pub(super) all_dialogue_runtime_hooks_emitted: bool,
+    pub(super) all_dialogue_runtime_hook_roles_assembled: bool,
     pub(super) dynamic_dialogue_producers_bound: bool,
     pub(super) globally_planned_consumer_roles: &'a BTreeMap<&'static str, BTreeSet<String>>,
 }
@@ -29,17 +29,17 @@ pub(super) struct ConsumerInstallationPlan {
     strategy: &'static str,
     current_candidate_sha1: String,
     current_build_report_sha1: String,
-    required_domain_count: usize,
+    declared_domain_count: usize,
     domains: Vec<DomainConsumerInstallation>,
-    carried_consumer_domain_count: usize,
-    globally_advanced_domain_count: usize,
-    all_consumers_statically_accounted_domain_count: usize,
-    unresolved_consumer_domain_count: usize,
-    current_candidate_historical_runtime_role_count: usize,
-    final_artifact_runtime_bound_role_count: usize,
-    all_required_consumers_statically_accounted: bool,
+    declared_domain_with_carried_consumers_count: usize,
+    declared_domain_with_global_plan_count: usize,
+    statically_accounted_declared_domain_count: usize,
+    declared_domain_with_unaccounted_consumers_count: usize,
+    declared_consumer_historical_runtime_role_count: usize,
+    declared_consumer_runtime_observed_role_count: usize,
+    all_declared_consumers_statically_accounted: bool,
     current_candidate_runtime_evidence_inherited: bool,
-    final_artifact_runtime_replay_required: bool,
+    declared_consumer_runtime_replay_required: bool,
 }
 
 #[derive(Serialize)]
@@ -48,38 +48,45 @@ struct DomainConsumerInstallation {
     target_unit_count: usize,
     current_candidate_installed_target_unit_count: usize,
     globally_planned_target_unit_count: usize,
-    target_screen_roles: Vec<String>,
-    current_candidate_carried_screen_roles: Vec<String>,
-    globally_planned_screen_roles: Vec<String>,
-    newly_planned_screen_roles: Vec<String>,
-    statically_accounted_screen_roles: Vec<String>,
-    remaining_screen_roles: Vec<String>,
-    current_candidate_historical_runtime_roles: Vec<String>,
-    final_artifact_runtime_bound_screen_roles: Vec<String>,
-    all_consumers_statically_accounted: bool,
+    declared_screen_roles: Vec<String>,
+    current_candidate_carried_declared_screen_roles: Vec<String>,
+    globally_planned_declared_screen_roles: Vec<String>,
+    newly_planned_declared_screen_roles: Vec<String>,
+    statically_accounted_declared_screen_roles: Vec<String>,
+    unaccounted_declared_screen_roles: Vec<String>,
+    current_candidate_historical_declared_runtime_roles: Vec<String>,
+    runtime_observed_declared_screen_roles: Vec<String>,
+    all_declared_consumers_statically_accounted: bool,
 }
 
 impl ConsumerInstallationPlan {
-    pub(super) fn all_required_consumers_statically_accounted(&self) -> bool {
-        self.all_required_consumers_statically_accounted
+    pub(super) fn all_declared_consumers_statically_accounted(&self) -> bool {
+        self.all_declared_consumers_statically_accounted
     }
 
-    pub(super) fn fully_planned_domain_count(&self) -> usize {
-        self.all_consumers_statically_accounted_domain_count
+    pub(super) fn statically_accounted_declared_domain_count(&self) -> usize {
+        self.statically_accounted_declared_domain_count
     }
 
-    pub(super) fn domain_all_consumers_statically_accounted(&self, domain_id: &str) -> bool {
+    pub(super) fn domain_has_all_declared_consumers_statically_accounted(
+        &self,
+        domain_id: &str,
+    ) -> bool {
         self.domains
             .iter()
             .find(|domain| domain.id == domain_id)
-            .is_some_and(|domain| domain.all_consumers_statically_accounted)
+            .is_some_and(|domain| domain.all_declared_consumers_statically_accounted)
     }
 
     pub(super) fn domain_has_carried_consumers(&self, domain_id: &str) -> bool {
         self.domains
             .iter()
             .find(|domain| domain.id == domain_id)
-            .is_some_and(|domain| !domain.current_candidate_carried_screen_roles.is_empty())
+            .is_some_and(|domain| {
+                !domain
+                    .current_candidate_carried_declared_screen_roles
+                    .is_empty()
+            })
     }
 
     pub(super) fn domain_has_newly_planned_consumers(&self, domain_id: &str) -> bool {
@@ -87,14 +94,14 @@ impl ConsumerInstallationPlan {
             .iter()
             .find(|domain| domain.id == domain_id)
             .is_some_and(|domain| {
-                !domain.globally_planned_screen_roles.is_empty()
-                    && (!domain.newly_planned_screen_roles.is_empty()
+                !domain.globally_planned_declared_screen_roles.is_empty()
+                    && (!domain.newly_planned_declared_screen_roles.is_empty()
                         || domain.current_candidate_installed_target_unit_count
                             < domain.target_unit_count)
             })
     }
 
-    pub(super) fn bind_final_artifact_runtime_roles(
+    pub(super) fn bind_declared_consumer_runtime_roles(
         &mut self,
         observed_roles: &BTreeSet<String>,
         registered_roles: &BTreeSet<String>,
@@ -102,7 +109,7 @@ impl ConsumerInstallationPlan {
         let target_roles = self
             .domains
             .iter()
-            .flat_map(|domain| domain.target_screen_roles.iter().cloned())
+            .flat_map(|domain| domain.declared_screen_roles.iter().cloned())
             .collect::<BTreeSet<_>>();
         let unknown_roles = observed_roles
             .difference(registered_roles)
@@ -115,8 +122,8 @@ impl ConsumerInstallationPlan {
         );
 
         for domain in &mut self.domains {
-            domain.final_artifact_runtime_bound_screen_roles = domain
-                .target_screen_roles
+            domain.runtime_observed_declared_screen_roles = domain
+                .declared_screen_roles
                 .iter()
                 .filter(|role| observed_roles.contains(*role))
                 .cloned()
@@ -126,13 +133,13 @@ impl ConsumerInstallationPlan {
             .intersection(&target_roles)
             .cloned()
             .collect::<BTreeSet<_>>();
-        self.final_artifact_runtime_bound_role_count = required_observed_roles.len();
-        self.final_artifact_runtime_replay_required = required_observed_roles != target_roles;
+        self.declared_consumer_runtime_observed_role_count = required_observed_roles.len();
+        self.declared_consumer_runtime_replay_required = required_observed_roles != target_roles;
         Ok(())
     }
 
-    pub(super) fn final_artifact_runtime_replay_required(&self) -> bool {
-        self.final_artifact_runtime_replay_required
+    pub(super) fn declared_consumer_runtime_replay_required(&self) -> bool {
+        self.declared_consumer_runtime_replay_required
     }
 }
 
@@ -153,50 +160,59 @@ pub(super) fn plan_consumer_installation(
             .collect(),
         &current.domains,
         inputs.all_chapter_titles_encoded,
-        inputs.all_dialogue_records_encoded && inputs.all_dialogue_runtime_hooks_emitted,
+        inputs.all_dialogue_records_encoded && inputs.all_dialogue_runtime_hook_roles_assembled,
         inputs.dynamic_dialogue_producers_bound,
         inputs.globally_planned_consumer_roles,
     )?;
 
-    let carried_consumer_domain_count = domains
-        .iter()
-        .filter(|domain| !domain.current_candidate_carried_screen_roles.is_empty())
-        .count();
-    let globally_advanced_domain_count = domains
+    let declared_domain_with_carried_consumers_count = domains
         .iter()
         .filter(|domain| {
-            !domain.globally_planned_screen_roles.is_empty()
-                && (!domain.newly_planned_screen_roles.is_empty()
+            !domain
+                .current_candidate_carried_declared_screen_roles
+                .is_empty()
+        })
+        .count();
+    let declared_domain_with_global_plan_count = domains
+        .iter()
+        .filter(|domain| {
+            !domain.globally_planned_declared_screen_roles.is_empty()
+                && (!domain.newly_planned_declared_screen_roles.is_empty()
                     || domain.current_candidate_installed_target_unit_count
                         < domain.target_unit_count)
         })
         .count();
-    let all_consumers_statically_accounted_domain_count = domains
+    let statically_accounted_declared_domain_count = domains
         .iter()
-        .filter(|domain| domain.all_consumers_statically_accounted)
+        .filter(|domain| domain.all_declared_consumers_statically_accounted)
         .count();
-    let unresolved_consumer_domain_count =
-        inputs.required_domains.len() - all_consumers_statically_accounted_domain_count;
-    let current_candidate_historical_runtime_role_count = domains
+    let declared_domain_with_unaccounted_consumers_count =
+        inputs.required_domains.len() - statically_accounted_declared_domain_count;
+    let declared_consumer_historical_runtime_role_count = domains
         .iter()
-        .map(|domain| domain.current_candidate_historical_runtime_roles.len())
+        .map(|domain| {
+            domain
+                .current_candidate_historical_declared_runtime_roles
+                .len()
+        })
         .sum();
 
     Ok(ConsumerInstallationPlan {
-        strategy: "bind the exact cumulative candidate first, union only source-bound global runtime and storage-projection consumers, and leave every other screen unresolved",
+        strategy: "bind the exact cumulative candidate first, union only source-bound runtime and storage-projection consumers within the declared domain plan, and report every remaining declared screen role as unaccounted without implying a whole-game census",
         current_candidate_sha1: current.build_output_sha1,
         current_build_report_sha1: current.build_report_sha1,
-        required_domain_count: inputs.required_domains.len(),
+        declared_domain_count: inputs.required_domains.len(),
         domains,
-        carried_consumer_domain_count,
-        globally_advanced_domain_count,
-        all_consumers_statically_accounted_domain_count,
-        unresolved_consumer_domain_count,
-        current_candidate_historical_runtime_role_count,
-        final_artifact_runtime_bound_role_count: 0,
-        all_required_consumers_statically_accounted: unresolved_consumer_domain_count == 0,
+        declared_domain_with_carried_consumers_count,
+        declared_domain_with_global_plan_count,
+        statically_accounted_declared_domain_count,
+        declared_domain_with_unaccounted_consumers_count,
+        declared_consumer_historical_runtime_role_count,
+        declared_consumer_runtime_observed_role_count: 0,
+        all_declared_consumers_statically_accounted:
+            declared_domain_with_unaccounted_consumers_count == 0,
         current_candidate_runtime_evidence_inherited: false,
-        final_artifact_runtime_replay_required: true,
+        declared_consumer_runtime_replay_required: true,
     })
 }
 
@@ -217,14 +233,14 @@ fn assemble_domain_consumers(
             .collect::<BTreeSet<_>>()
             .len()
             == required_domains.len(),
-        "consumer installation contains duplicate required domains"
+        "consumer installation contains duplicate declared domains"
     );
 
     required_domains
         .iter()
         .copied()
         .map(|id| {
-            let target_screen_roles = targets
+            let declared_screen_roles = targets
                 .get(id)
                 .with_context(|| format!("required translation domain {id} has no screen targets"))?
                 .iter()
@@ -247,7 +263,7 @@ fn assemble_domain_consumers(
                 .into_iter()
                 .collect::<BTreeSet<_>>();
             ensure!(
-                current_candidate_carried_screen_roles.is_subset(&target_screen_roles),
+                current_candidate_carried_screen_roles.is_subset(&declared_screen_roles),
                 "current candidate installs {id} outside its canonical consumer set"
             );
             let current_candidate_historical_runtime_roles = installation
@@ -266,7 +282,7 @@ fn assemble_domain_consumers(
                     .insert("chapter_intro_title_dialogue_composite".to_owned());
             }
             if global_dialogue_runtime_planned && id == "main_dialogue" {
-                globally_planned_screen_roles.extend(target_screen_roles.iter().cloned());
+                globally_planned_screen_roles.extend(declared_screen_roles.iter().cloned());
             }
             if global_dialogue_runtime_planned && dynamic_dialogue_producers_bound {
                 match id {
@@ -287,7 +303,7 @@ fn assemble_domain_consumers(
                     .cloned(),
             );
             ensure!(
-                globally_planned_screen_roles.is_subset(&target_screen_roles),
+                globally_planned_screen_roles.is_subset(&declared_screen_roles),
                 "global dialogue runtime plans {id} outside its canonical consumer set"
             );
 
@@ -299,7 +315,7 @@ fn assemble_domain_consumers(
                 .union(&globally_planned_screen_roles)
                 .cloned()
                 .collect::<BTreeSet<_>>();
-            let remaining_screen_roles = target_screen_roles
+            let unaccounted_declared_screen_roles = declared_screen_roles
                 .difference(&statically_accounted_screen_roles)
                 .cloned()
                 .collect::<Vec<_>>();
@@ -314,22 +330,26 @@ fn assemble_domain_consumers(
                 } else {
                     target_unit_count
                 },
-                target_screen_roles: target_screen_roles.into_iter().collect(),
-                current_candidate_carried_screen_roles: current_candidate_carried_screen_roles
+                declared_screen_roles: declared_screen_roles.into_iter().collect(),
+                current_candidate_carried_declared_screen_roles:
+                    current_candidate_carried_screen_roles.into_iter().collect(),
+                globally_planned_declared_screen_roles: globally_planned_screen_roles
                     .into_iter()
                     .collect(),
-                globally_planned_screen_roles: globally_planned_screen_roles.into_iter().collect(),
-                newly_planned_screen_roles: newly_planned_screen_roles.into_iter().collect(),
-                statically_accounted_screen_roles: statically_accounted_screen_roles
+                newly_planned_declared_screen_roles: newly_planned_screen_roles
                     .into_iter()
                     .collect(),
-                all_consumers_statically_accounted: remaining_screen_roles.is_empty(),
-                remaining_screen_roles,
-                current_candidate_historical_runtime_roles:
+                statically_accounted_declared_screen_roles: statically_accounted_screen_roles
+                    .into_iter()
+                    .collect(),
+                all_declared_consumers_statically_accounted: unaccounted_declared_screen_roles
+                    .is_empty(),
+                unaccounted_declared_screen_roles,
+                current_candidate_historical_declared_runtime_roles:
                     current_candidate_historical_runtime_roles
                         .into_iter()
                         .collect(),
-                final_artifact_runtime_bound_screen_roles: Vec::new(),
+                runtime_observed_declared_screen_roles: Vec::new(),
             })
         })
         .collect()
