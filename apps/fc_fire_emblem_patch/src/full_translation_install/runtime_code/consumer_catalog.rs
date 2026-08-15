@@ -14,10 +14,14 @@ use super::{
 };
 use crate::{
     dialogue_inventory::switchable_cpu_to_file_offset,
+    front_end_menu::RECORD_ACTION_COMPOSITE_STATE,
     full_translation_install::consumer_catalog::ConsumerCatalogRuntimeLayout,
+    mapper165::font_pair_projection::TRANSLATED_FE_PAGE_FLAG,
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
 };
+
+use super::consumer_font_page::COMPOSITE_STATE;
 
 const UNIT_UI_BANK: u8 = 0x0B;
 const ENTRY_STUB_CAVE_END: u16 = 0xF807;
@@ -384,6 +388,30 @@ fn build_catalog_append_runtime(
     patch_jump(&mut instructions, name_prefix, name_prefix_target);
     instructions.extend([
         Instruction::LdaIndirectY(0x00),
+        Instruction::Pha,
+        Instruction::LdaAbsolute(COMPOSITE_STATE),
+        Instruction::CmpImmediate(RECORD_ACTION_COMPOSITE_STATE),
+    ]);
+    let mirror_name_route = append_jump_if_equal(origin, &mut instructions)?;
+    instructions.push(Instruction::Pla);
+    let activate_preserved_name_route = push_jump(&mut instructions, origin);
+    let mirror_name_route_target = next_address(origin, &instructions)?;
+    patch_jump(
+        &mut instructions,
+        mirror_name_route,
+        mirror_name_route_target,
+    );
+    instructions.extend([
+        Instruction::Pla,
+        Instruction::OraImmediate(TRANSLATED_FE_PAGE_FLAG),
+    ]);
+    let activate_name_route_target = next_address(origin, &instructions)?;
+    patch_jump(
+        &mut instructions,
+        activate_preserved_name_route,
+        activate_name_route_target,
+    );
+    instructions.extend([
         Instruction::JsrAbsolute(font_page_activation),
         Instruction::Iny,
     ]);
@@ -569,28 +597,45 @@ mod tests {
     }
 
     #[test]
-    fn dynamic_name_page_uses_the_shared_screen_page_activation() {
+    fn dynamic_name_page_mirrors_the_record_action_route_before_shared_activation() {
         let activation = 0xF620;
+        let origin = 0xA600;
         let runtime =
-            build_consumer_catalog_runtime(0xA600, 0x30, 0xF7F8, activation, layout()).unwrap();
-        let call = [
+            build_consumer_catalog_runtime(origin, 0x30, 0xF7F8, activation, layout()).unwrap();
+        let prefix = [
             0xB1,
             0x00,
-            0x20,
-            activation as u8,
-            (activation >> 8) as u8,
-            0xC8,
+            0x48,
+            0xAD,
+            COMPOSITE_STATE as u8,
+            (COMPOSITE_STATE >> 8) as u8,
+            0xC9,
+            RECORD_ACTION_COMPOSITE_STATE,
+            0xD0,
+            0x03,
         ];
+        let offset = runtime
+            .code_routine
+            .bytes
+            .windows(prefix.len())
+            .position(|window| window == prefix)
+            .expect("unit/enemy page prefix did not test the record-action lifetime");
+        let sequence = &runtime.code_routine.bytes[offset..offset + 24];
+        let sequence_address = origin + u16::try_from(offset).unwrap();
 
         assert_eq!(
-            runtime
-                .code_routine
-                .bytes
-                .windows(call.len())
-                .filter(|window| *window == call)
-                .count(),
-            1,
-            "unit/enemy page prefix must publish and map through the shared activation"
+            u16::from_le_bytes([sequence[11], sequence[12]]),
+            sequence_address + 17
+        );
+        assert_eq!(sequence[13], 0x68);
+        assert_eq!(
+            u16::from_le_bytes([sequence[15], sequence[16]]),
+            sequence_address + 20
+        );
+        assert_eq!(&sequence[17..20], &[0x68, 0x09, TRANSLATED_FE_PAGE_FLAG]);
+        assert_eq!(
+            &sequence[20..24],
+            &[0x20, activation as u8, (activation >> 8) as u8, 0xC8,]
         );
     }
 }

@@ -28,6 +28,7 @@ pub(crate) mod direct_chr_pairs;
 pub(crate) mod executable_mapper_writes;
 pub(crate) mod font_pair_projection;
 mod front_end_page;
+pub(crate) use front_end_page::bind_installed_front_end_mapper_register;
 pub(crate) mod hangul_page_probe;
 mod maximum_dialogue_boundary;
 mod maximum_dialogue_page;

@@ -24,8 +24,8 @@ use super::super::runtime_cursor_storage::{
     REQUEST_SOURCE_DIRECTORY_SELECTOR, REQUEST_SOURCE_ENTRY_INDEX,
 };
 use super::super::runtime_state_storage::{
-    CANDIDATE_END, CANDIDATE_START, CURRENT_PAGE_GROUP, RECORD_INDEX_HIGH, RECORD_INDEX_LOW,
-    REQUEST_STATE, VISIBLE_PAGE_INDEX,
+    CANDIDATE_START, CURRENT_PAGE_GROUP, DIALOGUE_RUNTIME_STATE_END, RECORD_INDEX_HIGH,
+    RECORD_INDEX_LOW, REQUEST_STATE, VISIBLE_PAGE_INDEX,
 };
 use super::transport::{PHASE_RESTORE, RESTORE_CHUNK_COUNT};
 use super::{RuntimeRoutine, next_address};
@@ -132,7 +132,7 @@ fn save_scratch(instructions: &mut Vec<Instruction>) {
 
 fn clear_runtime_state(instructions: &mut Vec<Instruction>) {
     instructions.push(Instruction::LdaImmediate(0));
-    for address in CANDIDATE_START..=CANDIDATE_END {
+    for address in CANDIDATE_START..=DIALOGUE_RUNTIME_STATE_END {
         instructions.push(Instruction::StaAbsolute(address));
     }
 }
@@ -477,14 +477,18 @@ mod tests {
     /// 새 대사 수명은 조회 성공 여부와 관계없이 이전 정체성과 전송 커서를 먼저
     /// 지운다. 하나라도 남으면 실패 경로가 이전 `ready`를 재사용할 수 있다.
     #[test]
-    fn an_initial_request_clears_the_whole_volatile_reservation_first() {
+    fn an_initial_request_clears_dialogue_state_but_preserves_the_consumer_page() {
         let routine = build_resolve_request(0xA400, layout()).unwrap();
         let mut expected = vec![0xA9, 0x00];
-        for address in CANDIDATE_START..=CANDIDATE_END {
+        for address in CANDIDATE_START..=DIALOGUE_RUNTIME_STATE_END {
             expected.extend([0x8D, address as u8, (address >> 8) as u8]);
         }
 
         assert!(routine.bytes.starts_with(&expected));
+        assert_ne!(
+            routine.bytes.get(expected.len()..expected.len() + 3),
+            Some(&[0x8D, 0xFD, 0x07][..])
+        );
     }
 
     #[test]

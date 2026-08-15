@@ -38,6 +38,7 @@ pub(super) struct ConsumerCatalogInputs<'a> {
     pub(super) first_physical_page: u8,
     pub(super) available_page_count: usize,
     pub(super) preserved_unit_ui_display_codes: &'a BTreeSet<u8>,
+    pub(super) resident_front_end_glyph_codes: &'a BTreeMap<char, u8>,
     pub(super) fixed: &'a FixedTextPlan,
     pub(super) unit_names: &'a UnitNamePlan,
     pub(super) unit_ui: &'a SemanticTranslationPlan,
@@ -49,6 +50,8 @@ pub(super) struct ConsumerCatalogPlan {
     schema: u8,
     strategy: &'static str,
     base_glyph_count: usize,
+    resident_front_end_glyph_count: usize,
+    resident_front_end_assignment_sha1: String,
     preserved_active_code_count: usize,
     per_page_name_slot_count: usize,
     playable_name_count: usize,
@@ -61,6 +64,7 @@ pub(super) struct ConsumerCatalogPlan {
     pages: Vec<ConsumerCatalogPage>,
     identity_pages: Vec<CatalogIdentityPage>,
     every_base_glyph_has_one_stable_code: bool,
+    every_page_preserves_the_record_action_menu_codes: bool,
     every_name_identity_fits_one_page: bool,
     every_page_fits_active_codes: bool,
     pages_fit_reclaimable_tail: bool,
@@ -198,7 +202,12 @@ pub(super) fn plan_consumer_catalog(
                 .with_context(|| format!("consumer catalog lost item action {id}"))?,
         );
     }
-    let base_glyphs = target_glyphs(&base_logical);
+    let mut base_glyphs = target_glyphs(&base_logical);
+    ensure!(
+        !inputs.resident_front_end_glyph_codes.is_empty(),
+        "consumer catalog has no resident front-end menu glyphs"
+    );
+    base_glyphs.extend(inputs.resident_front_end_glyph_codes.keys().copied());
 
     let mut all_logical = base_logical.clone();
     all_logical.extend(
@@ -217,18 +226,11 @@ pub(super) fn plan_consumer_catalog(
         FixedTextLogicalByte::Encoded(_) | FixedTextLogicalByte::TargetGlyph(_) => None,
     }));
     let available_codes = assignable_catalog_codes(&preserved_active_codes)?;
-    ensure!(
-        base_glyphs.len() < available_codes.len(),
-        "consumer catalog base needs {} glyphs but only {} active codes remain",
-        base_glyphs.len(),
-        available_codes.len()
-    );
-    let base_assignments = base_glyphs
-        .iter()
-        .copied()
-        .zip(available_codes.iter().copied())
-        .collect::<BTreeMap<_, _>>();
-    let extra_codes = available_codes[base_assignments.len()..].to_vec();
+    let (base_assignments, extra_codes) = assign_catalog_base_glyph_codes(
+        &base_glyphs,
+        &available_codes,
+        inputs.resident_front_end_glyph_codes,
+    )?;
 
     let demands = inputs
         .unit_names
@@ -257,6 +259,13 @@ pub(super) fn plan_consumer_catalog(
             .context("catalog physical page overflow")?;
         let mut assignments = base_assignments.clone();
         assignments.extend(name_glyphs.iter().copied().zip(extra_codes.iter().copied()));
+        ensure!(
+            inputs
+                .resident_front_end_glyph_codes
+                .iter()
+                .all(|(glyph, code)| assignments.get(glyph) == Some(code)),
+            "catalog page {page_index} lost a front-end menu assignment"
+        );
         ensure!(
             assignments.len() + preserved_active_codes.len() <= ACTIVE_HANGUL_SLOT_COUNT,
             "catalog page {page_index} exceeds the active code ceiling"
@@ -346,9 +355,11 @@ pub(super) fn plan_consumer_catalog(
         .context("consumer catalog emitted no pages")?;
 
     Ok(ConsumerCatalogPlan {
-        schema: 1,
-        strategy: "preserve source-bound direct unit-UI glyphs; keep item, class, summary/status, and item-action glyphs at stable codes on every page; partition mutually exclusive unit and enemy name identities across deterministic best-fit pages",
+        schema: 2,
+        strategy: "preserve source-bound direct unit-UI glyphs and every installed front-end menu code; keep item, class, summary/status, and item-action glyphs at stable codes on every page; partition mutually exclusive unit and enemy name identities across deterministic best-fit pages",
         base_glyph_count: base_glyphs.len(),
+        resident_front_end_glyph_count: inputs.resident_front_end_glyph_codes.len(),
+        resident_front_end_assignment_sha1: assignment_sha1(inputs.resident_front_end_glyph_codes),
         preserved_active_code_count: preserved_active_codes.len(),
         per_page_name_slot_count: extra_codes.len(),
         playable_name_count: inputs.unit_names.entries.len(),
@@ -361,11 +372,74 @@ pub(super) fn plan_consumer_catalog(
         pages,
         identity_pages,
         every_base_glyph_has_one_stable_code: true,
+        every_page_preserves_the_record_action_menu_codes: true,
         every_name_identity_fits_one_page: true,
         every_page_fits_active_codes: true,
         pages_fit_reclaimable_tail: true,
         base_assignments,
     })
+}
+
+fn assign_catalog_base_glyph_codes(
+    base_glyphs: &BTreeSet<char>,
+    available_codes: &[u8],
+    fixed_assignments: &BTreeMap<char, u8>,
+) -> Result<(BTreeMap<char, u8>, Vec<u8>)> {
+    ensure!(
+        fixed_assignments
+            .keys()
+            .all(|glyph| base_glyphs.contains(glyph)),
+        "consumer catalog fixed assignment names a non-base glyph"
+    );
+    let available_codes = available_codes.iter().copied().collect::<BTreeSet<_>>();
+    let fixed_codes = fixed_assignments.values().copied().collect::<BTreeSet<_>>();
+    ensure!(
+        fixed_codes.len() == fixed_assignments.len(),
+        "consumer catalog fixed assignments alias one code across glyphs"
+    );
+    ensure!(
+        fixed_codes.is_subset(&available_codes),
+        "consumer catalog fixed assignment uses a preserved or reserved code"
+    );
+    ensure!(
+        base_glyphs.len() < available_codes.len(),
+        "consumer catalog base needs {} glyphs but only {} active codes remain",
+        base_glyphs.len(),
+        available_codes.len()
+    );
+
+    let mut assignments = fixed_assignments.clone();
+    let unassigned_glyphs = base_glyphs
+        .difference(&fixed_assignments.keys().copied().collect())
+        .copied()
+        .collect::<Vec<_>>();
+    let unassigned_codes = available_codes
+        .difference(&fixed_codes)
+        .copied()
+        .collect::<Vec<_>>();
+    ensure!(
+        unassigned_glyphs.len() < unassigned_codes.len(),
+        "consumer catalog fixed assignments leave no code for name-specific glyphs"
+    );
+    assignments.extend(
+        unassigned_glyphs
+            .into_iter()
+            .zip(unassigned_codes.iter().copied()),
+    );
+    let used_codes = assignments.values().copied().collect::<BTreeSet<_>>();
+    ensure!(
+        used_codes.len() == assignments.len()
+            && assignments.len() == base_glyphs.len()
+            && assignments
+                .iter()
+                .all(|(glyph, code)| base_glyphs.contains(glyph) && available_codes.contains(code)),
+        "consumer catalog base assignment is not total and injective"
+    );
+    let extra_codes = available_codes
+        .difference(&used_codes)
+        .copied()
+        .collect::<Vec<_>>();
+    Ok((assignments, extra_codes))
 }
 
 fn assignable_catalog_codes(preserved_active_codes: &BTreeSet<u8>) -> Result<Vec<u8>> {
@@ -434,5 +508,33 @@ mod tests {
 
         assert!(preserved.iter().all(|code| !assignable.contains(code)));
         assert_eq!(assignable.len() + preserved.len(), ACTIVE_HANGUL_SLOT_COUNT);
+    }
+
+    #[test]
+    fn installed_front_end_codes_are_fixed_before_catalog_codes_are_assigned() {
+        let base = BTreeSet::from(['가', '기', '록', '옮']);
+        let available = vec![0x00, 0x01, 0x02, 0x03, 0x04, 0x05];
+        let fixed = BTreeMap::from([('기', 0x04), ('록', 0x01), ('옮', 0x05)]);
+
+        let (assignments, extra) =
+            assign_catalog_base_glyph_codes(&base, &available, &fixed).unwrap();
+
+        assert_eq!(assignments[&'기'], 0x04);
+        assert_eq!(assignments[&'록'], 0x01);
+        assert_eq!(assignments[&'옮'], 0x05);
+        assert_eq!(assignments[&'가'], 0x00);
+        assert_eq!(extra, vec![0x02, 0x03]);
+    }
+
+    #[test]
+    fn fixed_front_end_code_aliases_fail_closed() {
+        let error = assign_catalog_base_glyph_codes(
+            &BTreeSet::from(['기', '록']),
+            &[0x00, 0x01, 0x02],
+            &BTreeMap::from([('기', 0x01), ('록', 0x01)]),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("alias"));
     }
 }

@@ -2,7 +2,7 @@ use super::*;
 use crate::{
     full_translation_install::{
         runtime_code::resolve_request::INITIAL_PAGE_REQUEST_RESOLVER_ROLE,
-        runtime_state_storage::{CANDIDATE_END, CANDIDATE_START},
+        runtime_state_storage::{CANDIDATE_START, CONSUMER_FONT_PAGE, DIALOGUE_RUNTIME_STATE_END},
     },
     rp2a03::{Instruction, assemble_at},
 };
@@ -27,7 +27,8 @@ pub(in crate::full_translation_install::integrated_write_set) struct TechnicalIn
 pub(in crate::full_translation_install::integrated_write_set) struct RuntimeStateInitializerProof {
     pub(in crate::full_translation_install::integrated_write_set) required_identity_count: usize,
     pub(in crate::full_translation_install::integrated_write_set) actual_identity_count: usize,
-    pub(in crate::full_translation_install::integrated_write_set) clears_full_reserved_range: bool,
+    pub(in crate::full_translation_install::integrated_write_set) preserves_consumer_font_page:
+        bool,
     pub(in crate::full_translation_install::integrated_write_set) installed: bool,
 }
 
@@ -139,12 +140,12 @@ pub(in crate::full_translation_install::integrated_write_set) fn verify_runtime_
     let actual_initializers = runtime_state_initializer_identities(actual);
     let required_identity_count = required_initializers.len();
     let actual_identity_count = actual_initializers.len();
-    let clears_full_reserved_range = required_initializers
+    let preserves_consumer_font_page = required_initializers
         .first()
-        .is_some_and(|identity| initializer_has_typed_full_range_prefix(identity))
+        .is_some_and(|identity| initializer_has_typed_dialogue_range_prefix(identity))
         && actual_initializers
             .first()
-            .is_some_and(|identity| initializer_has_typed_full_range_prefix(identity));
+            .is_some_and(|identity| initializer_has_typed_dialogue_range_prefix(identity));
     let installed_bytes_match = actual_initializers.first().is_some_and(|identity| {
         identity
             .offset
@@ -155,16 +156,16 @@ pub(in crate::full_translation_install::integrated_write_set) fn verify_runtime_
     let installed = required_identity_count == 1
         && actual_identity_count == 1
         && required_initializers == actual_initializers
-        && clears_full_reserved_range
+        && preserves_consumer_font_page
         && installed_bytes_match;
     ensure!(
         installed,
-        "runtime-state cold initializer is not one exact installed typed routine clearing 0x{CANDIDATE_START:04X}..0x{CANDIDATE_END:04X}"
+        "runtime-state cold initializer is not one exact installed typed routine clearing 0x{CANDIDATE_START:04X}..0x{DIALOGUE_RUNTIME_STATE_END:04X} while preserving consumer page 0x{CONSUMER_FONT_PAGE:04X}"
     );
     Ok(RuntimeStateInitializerProof {
         required_identity_count,
         actual_identity_count,
-        clears_full_reserved_range,
+        preserves_consumer_font_page,
         installed,
     })
 }
@@ -182,12 +183,13 @@ fn runtime_state_initializer_identities(identities: &[MutationIdentity]) -> Vec<
         .collect()
 }
 
-fn initializer_has_typed_full_range_prefix(identity: &MutationIdentity) -> bool {
+fn initializer_has_typed_dialogue_range_prefix(identity: &MutationIdentity) -> bool {
     let MutationDerivation::RuntimeRoutine { cpu_address } = identity.derivation else {
         return false;
     };
     let mut instructions = vec![Instruction::LdaImmediate(0)];
-    instructions.extend((CANDIDATE_START..=CANDIDATE_END).map(Instruction::StaAbsolute));
+    instructions
+        .extend((CANDIDATE_START..=DIALOGUE_RUNTIME_STATE_END).map(Instruction::StaAbsolute));
     assemble_at(cpu_address, &instructions)
         .is_ok_and(|prefix| identity.replacement.starts_with(&prefix))
 }

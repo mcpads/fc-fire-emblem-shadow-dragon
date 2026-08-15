@@ -22,7 +22,7 @@ use super::super::{
         REQUEST_SOURCE_DIRECTORY_SELECTOR, REQUEST_SOURCE_ENTRY_INDEX,
     },
     runtime_nmi_contract::PPU_CONTROL_SHADOW,
-    runtime_state_storage::CURRENT_PAGE_GROUP,
+    runtime_state_storage::{CONSUMER_FONT_PAGE, CURRENT_PAGE_GROUP},
 };
 use super::{
     dispatcher_gate::{STATE_COLD_REQUESTED, STATE_RESIDENT_GROUP_OVERLAY_REQUESTED},
@@ -105,6 +105,8 @@ pub(super) fn build_resolved_page_publication(
         Instruction::StaAbsolute(PUBLISHED_SOURCE_DIRECTORY_SELECTOR),
         Instruction::LdaAbsolute(REQUEST_SOURCE_ENTRY_INDEX),
         Instruction::StaAbsolute(PUBLISHED_SOURCE_ENTRY_INDEX),
+        Instruction::LdaImmediate(0),
+        Instruction::StaAbsolute(CONSUMER_FONT_PAGE),
         Instruction::LdaImmediate(STATE_READY),
     ]);
     let publish_ready = instructions.len();

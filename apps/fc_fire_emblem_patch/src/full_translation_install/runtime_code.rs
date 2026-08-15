@@ -66,6 +66,7 @@ pub(in crate::full_translation_install) enum DialogueRuntimeHookRole {
     ConsumerFontPagePublisher,
     ConsumerFontPageOpen,
     ConsumerFontPageClose,
+    ConsumerFontPageGameplayHandoff,
     EndingRecordFontPageEnter,
     EndingRecordFontPageExit,
     EndingCharacterEpilogueFontPageExit,
@@ -150,6 +151,7 @@ impl DialogueRuntimeCodePlan {
             DialogueRuntimeHookRole::ConsumerFontPagePublisher,
             DialogueRuntimeHookRole::ConsumerFontPageOpen,
             DialogueRuntimeHookRole::ConsumerFontPageClose,
+            DialogueRuntimeHookRole::ConsumerFontPageGameplayHandoff,
             DialogueRuntimeHookRole::EndingRecordFontPageEnter,
             DialogueRuntimeHookRole::EndingRecordFontPageExit,
             DialogueRuntimeHookRole::EndingCharacterEpilogueFontPageExit,
@@ -305,6 +307,13 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         consumer_font_page_close_origin,
         restore_source_pair_address,
     )?;
+    let consumer_font_page_gameplay_handoff_origin = consumer_font_page_close.address
+        + u16::try_from(consumer_font_page_close.bytes.len())
+            .context("consumer font page close length overflow")?;
+    let consumer_font_page_gameplay_handoff =
+        consumer_font_page::build_consumer_font_page_gameplay_handoff(
+            consumer_font_page_gameplay_handoff_origin,
+        )?;
     let lifecycle = lifecycle::build_lifecycle_suite(
         next_page_resolver.address,
         code_page,
@@ -444,6 +453,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
             &composite_font_page_publisher,
             &consumer_font_page_open,
             &consumer_font_page_close,
+            &consumer_font_page_gameplay_handoff,
         ],
         chr_selector::SELECTOR_CAVE_END,
     )?;
@@ -462,6 +472,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         composite_font_page_publisher,
         consumer_font_page_open,
         consumer_font_page_close,
+        consumer_font_page_gameplay_handoff,
         ending_font_lifetime.exit_head,
     ];
     fixed_routines.extend(dynamic_producers.fixed_routines);
@@ -583,6 +594,9 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     hooks.extend(consumer_font_page::screen_lifetime_hooks(
         consumer_font_page_open_origin,
         consumer_font_page_close_origin,
+    )?);
+    hooks.push(consumer_font_page::gameplay_handoff_hook(
+        consumer_font_page_gameplay_handoff_origin,
     )?);
     hooks.extend(ending_font_lifetime_hooks);
 

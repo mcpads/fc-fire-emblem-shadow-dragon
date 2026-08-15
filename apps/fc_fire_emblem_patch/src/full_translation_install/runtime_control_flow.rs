@@ -34,7 +34,7 @@ const CENTRAL_SELECTOR_FALLBACK: u16 = 0xFF40;
 /// 완성된 대사 수명이 원본 제어 흐름에 끼어들어야 하는 모든 역할이다.
 ///
 /// 주소의 개수가 아니다. 완료 판정은 이 역할 집합에서 빠진 것이 없는지를 본다.
-const PLANNED_HOOK_ROLES: [DialogueRuntimeHookRole; 24] = [
+const PLANNED_HOOK_ROLES: [DialogueRuntimeHookRole; 25] = [
     DialogueRuntimeHookRole::InitialDirectEntryRequest,
     DialogueRuntimeHookRole::E4TransitionEntryRequest,
     DialogueRuntimeHookRole::E6TransitionEntryRequest,
@@ -56,6 +56,7 @@ const PLANNED_HOOK_ROLES: [DialogueRuntimeHookRole; 24] = [
     DialogueRuntimeHookRole::ConsumerFontPagePublisher,
     DialogueRuntimeHookRole::ConsumerFontPageOpen,
     DialogueRuntimeHookRole::ConsumerFontPageClose,
+    DialogueRuntimeHookRole::ConsumerFontPageGameplayHandoff,
     DialogueRuntimeHookRole::EndingRecordFontPageEnter,
     DialogueRuntimeHookRole::EndingRecordFontPageExit,
     DialogueRuntimeHookRole::EndingCharacterEpilogueFontPageExit,

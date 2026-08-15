@@ -47,7 +47,10 @@ use super::super::runtime_cursor_storage::{
     REQUEST_SOURCE_DIRECTORY_SELECTOR, REQUEST_SOURCE_ENTRY_INDEX,
 };
 use super::{RuntimeRoutine, next_address, worst_case_cycles, worst_case_cycles_with_calls};
-use crate::rp2a03::{Instruction, assemble_at};
+use crate::{
+    full_translation_install::runtime_state_storage::CONSUMER_FONT_PAGE,
+    rp2a03::{Instruction, assemble_at},
+};
 
 /// 한 프레임에 올리는 타일 수다. 사이클 예산에서 유도한 값이므로 늘리려면
 /// 아래 예산 시험이 먼저 통과해야 한다.
@@ -385,6 +388,8 @@ fn frame_epilogue(
         crate::mapper165::selector_safety::select_register_instruction(),
         Instruction::LdaImmediate(CHR_RAM_BANK_VALUE),
         Instruction::StaAbsolute(BANK_VALUE_REGISTER),
+        Instruction::LdaImmediate(0),
+        Instruction::StaAbsolute(CONSUMER_FONT_PAGE),
         Instruction::LdaImmediate(STATE_READY),
         Instruction::StaAbsolute(REQUEST_STATE),
     ]);

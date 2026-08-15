@@ -22,6 +22,10 @@ use super::{
     chr_source_state::RIGHT_FD_SOURCE_SHADOW, next_address,
 };
 use crate::{
+    front_end_menu::{
+        RECORD_ACTION_COMPOSITE_STATE, RECORD_LIST_COMPOSITE_STATE,
+        SAVE_SLOT_SELECTION_COMPOSITE_STATE, START_MENU_COMPOSITE_STATE,
+    },
     full_translation_install::runtime_state_storage::CONSUMER_FONT_PAGE,
     mapper165::font_pair_projection::mapper_register_from_route,
     rom::Rom,
@@ -34,7 +38,7 @@ const FIXED_BANK_BYTE_COUNT: usize = 16 * 1024;
 const SOURCE_PRG_BANK_COUNT: usize = 16;
 const UNIT_UI_BANK: u8 = 0x0B;
 
-const COMPOSITE_STATE: u16 = 0x05E8;
+pub(super) const COMPOSITE_STATE: u16 = 0x05E8;
 const COMPOSITE_PAGE_ENTRY: u16 = 0xE690;
 const COMPOSITE_PAGE_ENTRY_SOURCE: [u8; 12] = [
     0x8D, 0xE8, 0x05, 0xA9, 0x01, 0x85, 0x44, 0xA9, 0x0B, 0x4C, 0xFA, 0xC9,
@@ -54,6 +58,11 @@ const SCREEN_CLOSE_SEQUENCE_ADDRESS: u16 = 0x931C;
 const SCREEN_CLOSE_SEQUENCE: [u8; 14] = [
     0x20, 0x0D, 0xC7, 0xA4, 0x99, 0xB9, 0xE4, 0xC1, 0x20, 0xBE, 0xC9, 0x20, 0x0C, 0xE7,
 ];
+const GAMEPLAY_HANDOFF_SEQUENCE_ADDRESS: u16 = 0xF302;
+const GAMEPLAY_HANDOFF_SEQUENCE: [u8; 8] = [0xA9, 0x00, 0x85, 0x23, 0x85, 0x24, 0x85, 0x84];
+const GAMEPLAY_HANDOFF_HOOK_ADDRESS: u16 = 0xF304;
+const GAMEPLAY_PHASE_LOW: u8 = 0x23;
+const GAMEPLAY_PHASE_HIGH: u8 = 0x24;
 
 const MAP_MENU_COMPOSITE_STATE: u8 = 0x03;
 const UNIT_SUMMARY_COMPOSITE_STATE: u8 = 0x04;
@@ -65,6 +74,7 @@ const UNIT_STATUS_COMPOSITE_STATE: u8 = 0x0F;
 const CHAPTER_SAVE_OFFER_COMPOSITE_STATE: u8 = 0x1C;
 #[derive(Clone, Copy)]
 pub(in crate::full_translation_install) struct ConsumerFontPageRoutes {
+    pub(in crate::full_translation_install) front_end: u8,
     pub(in crate::full_translation_install) unit_command: u8,
     pub(in crate::full_translation_install) map_menu: u8,
     pub(in crate::full_translation_install) ending_record: u8,
@@ -74,13 +84,15 @@ pub(in crate::full_translation_install) struct ConsumerFontPageRoutes {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum FontPageRole {
+    FrontEnd,
     UnitCommand,
     MapMenu,
     ChapterSaveOffer,
     CatalogDefault,
+    RetainCurrent,
 }
 
-const COMPOSITE_PAGE_ROUTES: [(u8, FontPageRole); 6] = [
+const COMPOSITE_PAGE_ROUTES: [(u8, FontPageRole); 10] = [
     (MAP_MENU_COMPOSITE_STATE, FontPageRole::MapMenu),
     (UNIT_COMMAND_COMPOSITE_STATE, FontPageRole::UnitCommand),
     (
@@ -93,11 +105,24 @@ const COMPOSITE_PAGE_ROUTES: [(u8, FontPageRole); 6] = [
         CHAPTER_SAVE_OFFER_COMPOSITE_STATE,
         FontPageRole::ChapterSaveOffer,
     ),
+    (START_MENU_COMPOSITE_STATE, FontPageRole::FrontEnd),
+    (RECORD_LIST_COMPOSITE_STATE, FontPageRole::RetainCurrent),
+    (
+        SAVE_SLOT_SELECTION_COMPOSITE_STATE,
+        FontPageRole::RetainCurrent,
+    ),
+    (RECORD_ACTION_COMPOSITE_STATE, FontPageRole::RetainCurrent),
 ];
 
 const EXPECTED_DIRECT_COMPOSITE_PRODUCER_COUNT: usize = 50;
 const EXPECTED_DIRECT_COMPOSITE_PRODUCER_SHA1: &str = "eba4ee041d3af03bd5c2d71cc443e81fb01590a1";
-const EXPECTED_FONT_PAGE_STATE_PRODUCERS: [CompositeStateProducer; 7] = [
+const EXPECTED_FONT_PAGE_STATE_PRODUCERS: [CompositeStateProducer; 13] = [
+    CompositeStateProducer::new(0x02, 0xA693, 0x4C, START_MENU_COMPOSITE_STATE),
+    CompositeStateProducer::new(0x02, 0xA6CC, 0x4C, SAVE_SLOT_SELECTION_COMPOSITE_STATE),
+    CompositeStateProducer::new(0x02, 0xA6D5, 0x4C, RECORD_LIST_COMPOSITE_STATE),
+    CompositeStateProducer::new(0x02, 0xA6DE, 0x4C, RECORD_LIST_COMPOSITE_STATE),
+    CompositeStateProducer::new(0x02, 0xA6E7, 0x4C, RECORD_LIST_COMPOSITE_STATE),
+    CompositeStateProducer::new(0x02, 0xA79A, 0x20, RECORD_ACTION_COMPOSITE_STATE),
     CompositeStateProducer::new(0x06, 0x903C, 0x20, UNIT_COMMAND_COMPOSITE_STATE),
     CompositeStateProducer::new(0x06, 0x90AF, 0x20, ATTACK_WEAPON_SELECTION_COMPOSITE_STATE),
     CompositeStateProducer::new(0x06, 0x93E2, 0x4C, UNIT_ITEM_LIST_COMPOSITE_STATE),
@@ -129,17 +154,20 @@ impl CompositeStateProducer {
 impl FontPageRole {
     fn mapper_route(self, pages: ConsumerFontPageRoutes) -> u8 {
         match self {
+            Self::FrontEnd => pages.front_end,
             Self::UnitCommand => pages.unit_command,
             Self::MapMenu => pages.map_menu,
             Self::ChapterSaveOffer => pages.chapter_save_offer,
             Self::CatalogDefault => pages.catalog[0],
+            Self::RetainCurrent => unreachable!("retained pages do not select a mapper route"),
         }
     }
 }
 
 impl ConsumerFontPageRoutes {
-    fn all(self) -> [u8; 6] {
+    fn all(self) -> [u8; 7] {
         [
+            self.front_end,
             self.unit_command,
             self.map_menu,
             self.ending_record,
@@ -207,6 +235,21 @@ pub(super) fn bind_consumer_font_page_lifetime(source: &Rom, candidate: &Rom) ->
             );
             decode_rp2a03_sequence(actual, address, role)?;
         }
+
+        let gameplay_handoff = fixed_slice(
+            rom,
+            GAMEPLAY_HANDOFF_SEQUENCE_ADDRESS,
+            GAMEPLAY_HANDOFF_SEQUENCE.len(),
+        )?;
+        ensure!(
+            gameplay_handoff == GAMEPLAY_HANDOFF_SEQUENCE,
+            "{image_role} gameplay initialization handoff changed at {GAMEPLAY_HANDOFF_SEQUENCE_ADDRESS:04X}"
+        );
+        decode_rp2a03_sequence(
+            gameplay_handoff,
+            GAMEPLAY_HANDOFF_SEQUENCE_ADDRESS,
+            "clear the front-end font lifetime while initializing gameplay state",
+        )?;
 
         let transfers = direct_transfer_sites_in_bank(rom, UNIT_UI_BANK, CENTRAL_RIGHT_FD_WRITER)?;
         ensure!(
@@ -338,38 +381,36 @@ pub(super) fn screen_lifetime_hooks(open: u16, close: u16) -> Result<[DialogueRu
     ])
 }
 
-/// A의 계획된 FD/FE route를 현재 UI 페이지로 게시하고 즉시 적용한다.
-/// 합성기와 이름 appender가 이 routine 하나를 공유하므로 첫 열기와 같은 화면 재그리기가
-/// 서로 다른 페이지 적용 규칙을 가질 수 없다. 알 수 없는 값은 0으로 지우고 매퍼를
-/// 건드리지 않는다.
+/// 저장 기록을 불러온 뒤 맵 초기화가 시작되는 원본의 두 제로 페이지 저장을 같은
+/// 의미의 고정 루틴으로 보낸다. 네 바이트 자리를 그대로 소유하므로 뒤의 `$84` 상태
+/// 초기화 경계는 움직이지 않는다.
+pub(super) fn gameplay_handoff_hook(handoff: u16) -> Result<DialogueRuntimeHook> {
+    Ok(DialogueRuntimeHook {
+        role: DialogueRuntimeHookRole::ConsumerFontPageGameplayHandoff,
+        write_role: "front-end font page gameplay-handoff hook",
+        site: DialogueRuntimeHookSite::Fixed(GAMEPLAY_HANDOFF_HOOK_ADDRESS),
+        bytes: assemble_at(
+            GAMEPLAY_HANDOFF_HOOK_ADDRESS,
+            &[Instruction::JsrAbsolute(handoff), Instruction::Nop],
+        )?,
+    })
+}
+
+/// 계획 단계에서 검증한 FD/FE route를 현재 UI 페이지로 게시하고 즉시 적용한다.
+/// 합성기는 `ConsumerFontPageRoutes`의 상수만 넘기고, 이름 appender는 경계가 검증된
+/// catalog record의 첫 바이트만 넘긴다. `$07FD=0`인 화면 열기는 이 routine을 부르기
+/// 전에 원본 writer로 빠지므로, 이 작은 routine에는 실행 중 allowlist를 다시 복제하지
+/// 않는다.
 pub(super) fn build_consumer_font_page_activation(
     origin: u16,
     apply_route: u16,
     pages: ConsumerFontPageRoutes,
 ) -> Result<RuntimeRoutine> {
     pages.validate()?;
-    let mut instructions = Vec::new();
-    let mut valid_jumps = Vec::new();
-    for page in pages.all() {
-        instructions.push(Instruction::CmpImmediate(page));
-        let jump = instructions.len();
-        instructions.push(Instruction::BeqAbsolute(origin));
-        valid_jumps.push(jump);
-    }
-    instructions.extend([
-        Instruction::LdaImmediate(0),
-        Instruction::StaAbsolute(CONSUMER_FONT_PAGE),
-        Instruction::Rts,
-    ]);
-
-    let valid = next_address(origin, &instructions)?;
-    for jump in valid_jumps {
-        instructions[jump] = Instruction::BeqAbsolute(valid);
-    }
-    instructions.extend([
+    let instructions = [
         Instruction::StaAbsolute(CONSUMER_FONT_PAGE),
         Instruction::JmpAbsolute(apply_route),
-    ]);
+    ];
 
     Ok(RuntimeRoutine {
         role: "consumer font page activation",
@@ -409,7 +450,15 @@ pub(super) fn build_composite_font_page_publisher(
         Instruction::StaAbsolute(CONSUMER_FONT_PAGE),
         Instruction::Rts,
     ]);
+    let retain_current = next_address(origin, &instructions)?;
+    for (jump, page_role) in &route_jumps {
+        if *page_role == FontPageRole::RetainCurrent {
+            instructions[*jump] = Instruction::BeqAbsolute(retain_current);
+        }
+    }
+    instructions.push(Instruction::Rts);
     for page in [
+        FontPageRole::FrontEnd,
         FontPageRole::CatalogDefault,
         FontPageRole::UnitCommand,
         FontPageRole::MapMenu,
@@ -440,14 +489,11 @@ pub(super) fn build_consumer_font_page_open(
     origin: u16,
     activation: u16,
 ) -> Result<RuntimeRoutine> {
-    let mut instructions = vec![
-        Instruction::LdaAbsolute(CONSUMER_FONT_PAGE),
-        Instruction::JsrAbsolute(activation),
-        Instruction::CmpImmediate(0),
-    ];
+    let mut instructions = vec![Instruction::LdaAbsolute(CONSUMER_FONT_PAGE)];
     let no_page = instructions.len();
     instructions.push(Instruction::BeqAbsolute(origin));
     instructions.extend([
+        Instruction::JsrAbsolute(activation),
         Instruction::LdaImmediate(0),
         Instruction::StaZeroPage(RIGHT_FD_SOURCE_SHADOW),
         Instruction::Rts,
@@ -461,6 +507,22 @@ pub(super) fn build_consumer_font_page_open(
 
     Ok(RuntimeRoutine {
         role: "consumer font page screen open",
+        address: origin,
+        bytes: assemble_at(origin, &instructions)?,
+    })
+}
+
+/// 프런트엔드에서 저장 기록을 불러와 맵 초기화로 넘어가는 경계다. 원본의 `$23`과
+/// `$24` 초기화를 보존하면서, 첫 맵 프레임 전에 프런트엔드 글꼴 소유권을 반납한다.
+pub(super) fn build_consumer_font_page_gameplay_handoff(origin: u16) -> Result<RuntimeRoutine> {
+    let instructions = [
+        Instruction::StaZeroPage(GAMEPLAY_PHASE_LOW),
+        Instruction::StaZeroPage(GAMEPLAY_PHASE_HIGH),
+        Instruction::StaAbsolute(CONSUMER_FONT_PAGE),
+        Instruction::Rts,
+    ];
+    Ok(RuntimeRoutine {
+        role: "front-end font page gameplay handoff",
         address: origin,
         bytes: assemble_at(origin, &instructions)?,
     })
@@ -543,6 +605,7 @@ mod tests {
 
     fn pages() -> ConsumerFontPageRoutes {
         ConsumerFontPageRoutes {
+            front_end: 0xA9,
             unit_command: 0xCC,
             map_menu: 0xD0,
             ending_record: 0xD9,
@@ -600,6 +663,7 @@ mod tests {
             for _ in 0..256 {
                 let opcode = self.read_pc();
                 match opcode {
+                    0xEA => {}
                     0x08 => self.push(self.p),
                     0x20 => {
                         let target = self.read_word_pc();
@@ -814,6 +878,49 @@ mod tests {
     }
 
     #[test]
+    fn front_end_redraw_reasserts_its_page_and_nested_surfaces_retain_their_selection() {
+        let pages = pages();
+        let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
+        let publisher_origin = ORIGIN + u16::try_from(activation.bytes.len()).unwrap();
+        let publisher =
+            build_composite_font_page_publisher(publisher_origin, activation.address, pages)
+                .unwrap();
+
+        let memory = vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
+        let (memory, start_menu) = run_routines(
+            memory,
+            &[&activation, &publisher],
+            publisher.address,
+            START_MENU_COMPOSITE_STATE,
+            0xA5,
+        );
+        assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], pages.front_end);
+        assert_eq!(start_menu.applied_route, Some(pages.front_end));
+
+        for state in [
+            RECORD_LIST_COMPOSITE_STATE,
+            SAVE_SLOT_SELECTION_COMPOSITE_STATE,
+            RECORD_ACTION_COMPOSITE_STATE,
+        ] {
+            let mut memory: Box<[u8; 0x10000]> =
+                vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
+            memory[usize::from(CONSUMER_FONT_PAGE)] = pages.catalog[0];
+
+            let (memory, result) = run_routines(
+                memory,
+                &[&activation, &publisher],
+                publisher.address,
+                state,
+                0xA5,
+            );
+
+            assert_eq!(memory[usize::from(COMPOSITE_STATE)], state);
+            assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], pages.catalog[0]);
+            assert_eq!(result.applied_route, None);
+        }
+    }
+
+    #[test]
     fn unsupported_composite_clears_the_previous_screen_page() {
         let pages = pages();
         let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
@@ -829,11 +936,11 @@ mod tests {
             memory,
             &[&activation, &publisher],
             publisher.address,
-            0x0D,
+            0x0A,
             0x00,
         );
 
-        assert_eq!(memory[usize::from(COMPOSITE_STATE)], 0x0D);
+        assert_eq!(memory[usize::from(COMPOSITE_STATE)], 0x0A);
         assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], 0);
         assert_eq!(result.applied_route, None);
     }
@@ -883,14 +990,12 @@ mod tests {
     }
 
     #[test]
-    fn invalid_page_is_cleared_and_screen_open_uses_the_source_writer() {
+    fn empty_page_uses_the_source_writer_without_calling_activation() {
         let pages = pages();
         let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
         let open_origin = ORIGIN + u16::try_from(activation.bytes.len()).unwrap();
         let open = build_consumer_font_page_open(open_origin, activation.address).unwrap();
-        let mut memory: Box<[u8; 0x10000]> =
-            vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
-        memory[usize::from(CONSUMER_FONT_PAGE)] = 0x7F;
+        let memory: Box<[u8; 0x10000]> = vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
 
         let (memory, result) =
             run_routines(memory, &[&activation, &open], open.address, 0x11, 0xA4);
@@ -898,6 +1003,38 @@ mod tests {
         assert_eq!(result.central_writer_value, Some(0));
         assert_eq!(result.applied_route, None);
         assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], 0);
+    }
+
+    #[test]
+    fn gameplay_handoff_releases_the_front_end_page_before_state_reset() {
+        let routine = build_consumer_font_page_gameplay_handoff(ORIGIN).unwrap();
+        let mut memory: Box<[u8; 0x10000]> =
+            vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
+        memory[usize::from(CONSUMER_FONT_PAGE)] = pages().front_end;
+        memory[usize::from(GAMEPLAY_PHASE_LOW)] = 0xA5;
+        memory[usize::from(GAMEPLAY_PHASE_HIGH)] = 0x5A;
+
+        let (memory, result) = run_routines(memory, &[&routine], routine.address, 0, 0x64);
+
+        assert_eq!(result.a, 0);
+        assert_eq!(memory[usize::from(GAMEPLAY_PHASE_LOW)], 0);
+        assert_eq!(memory[usize::from(GAMEPLAY_PHASE_HIGH)], 0);
+        assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], 0);
+
+        let hook = gameplay_handoff_hook(routine.address).unwrap();
+        assert!(matches!(
+            hook.site,
+            DialogueRuntimeHookSite::Fixed(GAMEPLAY_HANDOFF_HOOK_ADDRESS)
+        ));
+        assert_eq!(
+            hook.bytes,
+            [
+                0x20,
+                routine.address as u8,
+                (routine.address >> 8) as u8,
+                0xEA,
+            ]
+        );
     }
 
     #[test]

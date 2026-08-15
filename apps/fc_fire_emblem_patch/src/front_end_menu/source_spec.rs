@@ -8,7 +8,10 @@ pub(super) const COMPOSITE_STATE_WRITER_ADDRESS: u16 = 0xE690;
 pub(super) const COMPOSITE_STATE_WRITER_BINDING: &[u8] = &[
     0x8D, 0xE8, 0x05, 0xA9, 0x01, 0x85, 0x44, 0xA9, 0x0B, 0x4C, 0xFA, 0xC9,
 ];
+pub(crate) const START_MENU_COMPOSITE_STATE: u8 = 0x0D;
+pub(crate) const RECORD_LIST_COMPOSITE_STATE: u8 = 0x0E;
 pub(crate) const SAVE_SLOT_SELECTION_COMPOSITE_STATE: u8 = 0x21;
+pub(crate) const RECORD_ACTION_COMPOSITE_STATE: u8 = 0x22;
 pub(crate) const FRONT_END_RESULT_DIALOGUE_RECORD_IDS: [&str; 4] = [
     "shop-and-item-dialogue:083",
     "shop-and-item-dialogue:084",

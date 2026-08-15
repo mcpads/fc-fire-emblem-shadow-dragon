@@ -7,9 +7,22 @@ use crate::{
 };
 
 const SOURCE_PRG_BANK: u8 = 0x02;
+const SAVE_SUMMARY_PRG_BANK: u8 = 0x0B;
+const SAVE_SUMMARY_COMPOSER_ADDRESS: u16 = 0x8D4B;
 const RESULT_INDEX_ADDRESS: u16 = 0x77F1;
 const RESULT_DIRECTORY_ADDRESS: u16 = 0x77F4;
 const RESULT_DIRECTORY: u8 = 0xB1;
+
+/// 선택한 기록의 5바이트 유닛 레코드를 `$76F4..=$76F8`로 복사한 뒤 공용 유닛
+/// 요약 작성기 `$826C`를 부른다. 그 작성기 안의 이름·병종 appender는 소비자
+/// 카탈로그 런타임이 별도로 source-bound한다.
+const SAVE_SUMMARY_COMPOSER: &[u8] = &[
+    0xA9, 0x00, 0x85, 0x00, 0xA9, 0x60, 0x85, 0x01, 0xA9, 0x19, 0x85, 0x02, 0xA9, 0x65, 0x85, 0x03,
+    0xA5, 0x67, 0xF0, 0x10, 0xA9, 0x44, 0x85, 0x00, 0xA9, 0x65, 0x85, 0x01, 0xA9, 0x5D, 0x85, 0x02,
+    0xA9, 0x6A, 0x85, 0x03, 0xA0, 0x04, 0xB1, 0x00, 0x99, 0xF4, 0x76, 0x88, 0x10, 0xF8, 0xAD, 0x7E,
+    0x76, 0x8D, 0x0D, 0x05, 0xA0, 0x0D, 0xB1, 0x02, 0x8D, 0x7E, 0x76, 0x20, 0x6C, 0x82, 0xAD, 0x0D,
+    0x05, 0x8D, 0x7E, 0x76, 0xA9, 0x30, 0x85, 0x70, 0xA9, 0x90, 0x85, 0x71, 0x60,
+];
 
 const RESULT_INDEX_WRITERS: [(u16, u8); 4] = [
     (0xA7B0, 0x53),
@@ -57,6 +70,7 @@ struct RouteSlice {
 pub(super) struct FrontEndResultSourceBinding {
     pub(super) result_index_writer_count: usize,
     pub(super) directory_writer_count: usize,
+    pub(super) summary_composer_count: usize,
     pub(super) route_binding_sha1: String,
 }
 
@@ -127,9 +141,28 @@ pub(super) fn bind_front_end_result_routes(source: &Rom) -> Result<FrontEndResul
         "front-end result dialogue directory-writer routes changed"
     );
 
+    let summary_offset =
+        switchable_bank_file_offset(SAVE_SUMMARY_PRG_BANK, SAVE_SUMMARY_COMPOSER_ADDRESS)?;
+    let summary_actual = source
+        .data()
+        .get(summary_offset..summary_offset + SAVE_SUMMARY_COMPOSER.len())
+        .context("front-end save-summary composer is outside the source image")?;
+    ensure!(
+        summary_actual == SAVE_SUMMARY_COMPOSER,
+        "front-end save-summary composer source bytes changed"
+    );
+    decode_rp2a03_sequence(
+        summary_actual,
+        SAVE_SUMMARY_COMPOSER_ADDRESS,
+        "compose front-end selected-save summary",
+    )?;
+    bound_bytes.extend_from_slice(&SAVE_SUMMARY_COMPOSER_ADDRESS.to_le_bytes());
+    bound_bytes.extend_from_slice(summary_actual);
+
     Ok(FrontEndResultSourceBinding {
         result_index_writer_count: actual_index_writers.len(),
         directory_writer_count,
+        summary_composer_count: 1,
         route_binding_sha1: sha1_hex(&bound_bytes),
     })
 }

@@ -16,8 +16,12 @@ use crate::{
     front_end_menu::plan_front_end_menu,
     item_flow::plan_item_action_labels,
     map_menu::plan_map_menu,
-    mapper165::battle_codebook_plan::{
-        build_glyph_workset_font_page_pack, plan_glyph_workset_page_upper_bound,
+    mapper165::{
+        battle_codebook_plan::{
+            build_glyph_workset_font_page_pack, plan_glyph_workset_page_upper_bound,
+        },
+        bind_installed_front_end_mapper_register,
+        font_pair_projection::RightFontPageProjection,
     },
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
@@ -83,7 +87,10 @@ use final_runtime_evidence::{FinalArtifactRuntimeEvidence, load_final_artifact_r
 use fixed_ui_projection::{
     FixedUiProjectionInputs, FixedUiProjectionPlan, plan_fixed_ui_projection,
 };
-use front_end_result_residency::{FrontEndResultResidencyPlan, plan_front_end_result_residency};
+use front_end_result_residency::{
+    FrontEndResultResidencyPlan, plan_front_end_result_menu_residency,
+    plan_front_end_result_residency,
+};
 use installation_layout::{InstallationLayoutPlan, plan_installation_layout};
 use integrated_write_set::{
     IntegratedWriteSetInputs, IntegratedWriteSetPlan, plan_integrated_write_set,
@@ -110,6 +117,8 @@ const MMC3_PAGE_BYTE_COUNT: usize = 8 * 1024;
 const IDENTITY_HEADER_BYTE_COUNT: usize = 16;
 /// 그 뒤 selector 디렉터리의 길이다.
 const IDENTITY_SELECTOR_DIRECTORY_BYTE_COUNT: usize = 256;
+const FRONT_END_SAVE_SUMMARY_UNIT_SOURCE_INDEX: usize = 0;
+const FRONT_END_SAVE_SUMMARY_CLASS_SOURCE_INDEX: usize = 20;
 
 const REQUIRED_DOMAIN_COUNT: usize = 13;
 const REQUIRED_DOMAINS: [&str; REQUIRED_DOMAIN_COUNT] = [
@@ -411,6 +420,13 @@ pub(crate) fn plan_full_translation_installation(
         sha1_hex(current_candidate.data()) == page_capacity.current_candidate_sha1,
         "relocated dialogue bank plan and page-pool plan use different current candidates"
     );
+    let front_end_mapper_register = bind_installed_front_end_mapper_register(&current_candidate)?;
+    let front_end_mapper_route = RightFontPageProjection::for_screen_roles(
+        rom.chr(),
+        &["new_game_choice", "save_slot_selection"],
+        0,
+    )?
+    .encode_mapper_route(front_end_mapper_register)?;
 
     let dialogue_validation =
         validate_main_dialogue_workspace(inputs.source_path, inputs.main_dialogue_workspace_path)?;
@@ -488,32 +504,19 @@ pub(crate) fn plan_full_translation_installation(
         &chapter_titles,
         &dynamic_inputs.augmented_worksets,
     )?;
-    let choice_residency = plan_choice_residency(
-        &rom,
-        &display,
-        &choices,
-        &chapter_intro_residency.augmented_worksets,
-    )?;
-    let front_end_result_residency = plan_front_end_result_residency(
+    let front_end_result_menu_residency = plan_front_end_result_menu_residency(
         &rom,
         &current_candidate,
         &display,
         &front_end,
-        &choice_residency.augmented_worksets,
+        &chapter_intro_residency.augmented_worksets,
     )?;
-    let dialogue_graph = inspect_main_dialogue_graph(rom.data())?;
-    let transition_residency = plan_transition_residency(
+    let choice_residency = plan_choice_residency(
+        &rom,
         &display,
-        &dialogue_graph,
-        &front_end_result_residency.augmented_worksets,
+        &choices,
+        &front_end_result_menu_residency.augmented_worksets,
     )?;
-    let codebook = plan_glyph_workset_page_upper_bound(&transition_residency.augmented_worksets)?;
-    let dynamic_page_codes = bind_dynamic_string_page_codes(&dynamic_inputs, &codebook)?;
-    ensure!(
-        codebook.workset_count == display.page_worksets.len()
-            && codebook.workset_page_indices.len() == display.page_worksets.len(),
-        "dialogue codebook lost visible page worksets"
-    );
     let source_font_page = rom
         .chr()
         .get(..FONT_PAGE_SIZE)
@@ -566,11 +569,34 @@ pub(crate) fn plan_full_translation_installation(
         first_physical_page: consumer_codebook.next_physical_page()?,
         available_page_count: consumer_codebook.remaining_page_count()?,
         preserved_unit_ui_display_codes: &preserved_unit_ui_display_codes(rom.data())?,
+        resident_front_end_glyph_codes: front_end_result_menu_residency
+            .installed_menu_glyph_codes(),
         fixed: &fixed,
         unit_names: &unit_names,
         unit_ui: &unit_ui,
         item_actions: &item_actions,
     })?;
+    let front_end_result_residency = plan_front_end_result_residency(
+        &display,
+        &fixed,
+        &unit_names,
+        &consumer_catalog,
+        front_end_result_menu_residency,
+        &choice_residency.augmented_worksets,
+    )?;
+    let dialogue_graph = inspect_main_dialogue_graph(rom.data())?;
+    let transition_residency = plan_transition_residency(
+        &display,
+        &dialogue_graph,
+        &front_end_result_residency.augmented_worksets,
+    )?;
+    let codebook = plan_glyph_workset_page_upper_bound(&transition_residency.augmented_worksets)?;
+    let dynamic_page_codes = bind_dynamic_string_page_codes(&dynamic_inputs, &codebook)?;
+    ensure!(
+        codebook.workset_count == display.page_worksets.len()
+            && codebook.workset_page_indices.len() == display.page_worksets.len(),
+        "dialogue codebook lost visible page worksets"
+    );
     let fixed_ui_projection = plan_fixed_ui_projection(FixedUiProjectionInputs {
         candidate: &current_candidate,
         unit_ui: &unit_ui,
@@ -725,6 +751,7 @@ pub(crate) fn plan_full_translation_installation(
         cross_domain_material.consumer_catalog_runtime_layout()?,
         cold_request_presentation.mapper_register,
         runtime_code::consumer_font_page::ConsumerFontPageRoutes {
+            front_end: front_end_mapper_route,
             unit_command: consumer_codebook.mapper_route_for("unit_command_menu")?,
             map_menu: consumer_codebook.mapper_route_for("map_menu")?,
             ending_record: consumer_codebook.mapper_route_for("ending_chapter_record")?,

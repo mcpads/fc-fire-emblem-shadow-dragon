@@ -13,6 +13,7 @@ use crate::{
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     rp2a03::{Instruction, assemble_at},
     sha1_hex,
+    typed_source::decode_rp2a03_sequence,
 };
 
 use super::{
@@ -27,6 +28,8 @@ pub(super) const PAGE_ROUTINE_ADDRESS: u16 = 0xFC60;
 pub(super) const PAGE_ROUTINE_END: u16 = 0xFC99;
 const CHECK_COMPOSITE_PAIR_ADDRESS: u16 = 0xFC70;
 const FALLBACK_ADDRESS: u16 = 0xFC94;
+const PAGE_REGISTER_OPERAND_ADDRESS: u16 = 0xFC85;
+const FALLBACK_TARGET_OPERAND_ADDRESS: u16 = 0xFC97;
 const SOURCE_FONT_PHYSICAL_PAGE: usize = 2;
 const EXTENSION_PAGE_COUNT: usize = 2;
 const NAMETABLE_MEMORY_SIZE: usize = 2 * 1024;
@@ -186,6 +189,40 @@ pub(super) fn build_page_selector(mapper_register: u8, fallback_target: u16) -> 
             Instruction::JmpAbsolute(fallback_target),
         ],
     )
+}
+
+pub(crate) fn bind_installed_front_end_mapper_register(candidate: &Rom) -> Result<u8> {
+    let selector_len = usize::from(PAGE_ROUTINE_END - PAGE_ROUTINE_ADDRESS);
+    let fixed_bank = candidate
+        .prg()
+        .get(candidate.prg().len().saturating_sub(16 * 1024)..)
+        .context("candidate has no active fixed PRG bank")?;
+    let start = usize::from(PAGE_ROUTINE_ADDRESS - 0xC000);
+    let actual = fixed_bank
+        .get(start..start + selector_len)
+        .context("candidate front-end page selector is outside the active fixed bank")?;
+    decode_rp2a03_sequence(
+        actual,
+        PAGE_ROUTINE_ADDRESS,
+        "select the installed front-end font page",
+    )?;
+
+    let register_offset = usize::from(PAGE_REGISTER_OPERAND_ADDRESS - PAGE_ROUTINE_ADDRESS);
+    let fallback_offset = usize::from(FALLBACK_TARGET_OPERAND_ADDRESS - PAGE_ROUTINE_ADDRESS);
+    let mapper_register = actual[register_offset];
+    let fallback_target =
+        u16::from_le_bytes([actual[fallback_offset], actual[fallback_offset + 1]]);
+    ensure!(
+        build_page_selector(mapper_register, fallback_target)? == actual,
+        "candidate front-end page selector no longer matches its generated structure"
+    );
+    let physical_page = mapper_register / 4;
+    ensure!(
+        encode_chr_page_register(physical_page)? == mapper_register
+            && usize::from(physical_page) < candidate.chr().len() / FONT_PAGE_SIZE,
+        "candidate front-end selector names an invalid physical CHR page"
+    );
+    Ok(mapper_register)
 }
 
 fn load_screen_codes(manifest_path: &Path) -> Result<(String, usize, usize, BTreeSet<u8>)> {

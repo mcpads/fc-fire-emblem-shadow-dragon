@@ -29,6 +29,11 @@ pub(super) const CANDIDATE_END: u16 = 0x07FD;
 /// 합성기와 이름 appender가 게시·즉시 적용하고, 화면 열기가 재적용 뒤 소비하며,
 /// 화면 닫기가 재합성 뒤 남은 값을 지운다.
 pub(in crate::full_translation_install) const CONSUMER_FONT_PAGE: u16 = CANDIDATE_END;
+/// 대사 해석기와 전송기가 냉간 진입에서 지워야 하는 마지막 바이트다.
+///
+/// 바로 다음 `$07FD`는 동시에 준비되는 비대사 화면의 글꼴 페이지이므로, 대사 요청이
+/// 아직 `ready`가 되기 전에 지우면 기록 메뉴가 원본 CHR 페이지로 되돌아간다.
+pub(super) const DIALOGUE_RUNTIME_STATE_END: u16 = CONSUMER_FONT_PAGE - 1;
 
 /// 생산자와 소비자가 공유하는 런타임 정체성이다. 앞의 네 바이트가 모두 세워진
 /// 뒤에만 `REQUEST_STATE`를 요청 또는 준비 상태로 올린다.

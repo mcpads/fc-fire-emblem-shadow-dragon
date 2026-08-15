@@ -76,7 +76,7 @@ pub(super) struct IntegratedWriteSetPlan {
     required_runtime_hook_identity_count: usize,
     required_runtime_state_initializer_identity_count: usize,
     actual_runtime_state_initializer_identity_count: usize,
-    runtime_state_initializer_clears_full_reserved_range: bool,
+    runtime_state_initializer_preserves_consumer_font_page: bool,
     runtime_state_initializer_installed: bool,
     dialogue_runtime_hook_count: usize,
     dialogue_runtime_hook_roles: Vec<DialogueRuntimeHookRole>,
@@ -415,8 +415,8 @@ pub(super) fn plan_integrated_write_set(
                 .required_identity_count,
             actual_runtime_state_initializer_identity_count: runtime_state_initializer
                 .actual_identity_count,
-            runtime_state_initializer_clears_full_reserved_range: runtime_state_initializer
-                .clears_full_reserved_range,
+            runtime_state_initializer_preserves_consumer_font_page: runtime_state_initializer
+                .preserves_consumer_font_page,
             runtime_state_initializer_installed: runtime_state_initializer.installed,
             dialogue_runtime_hook_count: installed_hook_roles.len(),
             dialogue_runtime_hook_roles: installed_hook_roles.into_iter().collect(),

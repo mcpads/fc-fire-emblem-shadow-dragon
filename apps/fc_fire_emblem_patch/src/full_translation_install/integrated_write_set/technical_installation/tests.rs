@@ -197,18 +197,21 @@ fn runtime_routine_and_hook_derivations_are_part_of_identity() {
 }
 
 #[test]
-fn runtime_state_initializer_requires_one_typed_full_range_prefix() {
+fn runtime_state_initializer_preserves_the_concurrent_consumer_page() {
     use crate::{
         full_translation_install::{
             runtime_code::resolve_request::INITIAL_PAGE_REQUEST_RESOLVER_ROLE,
-            runtime_state_storage::{CANDIDATE_END, CANDIDATE_START},
+            runtime_state_storage::{
+                CANDIDATE_START, CONSUMER_FONT_PAGE, DIALOGUE_RUNTIME_STATE_END,
+            },
         },
         rp2a03::{Instruction, assemble_at},
     };
 
     let cpu_address = 0xA100;
     let mut instructions = vec![Instruction::LdaImmediate(0)];
-    instructions.extend((CANDIDATE_START..=CANDIDATE_END).map(Instruction::StaAbsolute));
+    instructions
+        .extend((CANDIDATE_START..=DIALOGUE_RUNTIME_STATE_END).map(Instruction::StaAbsolute));
     let mut replacement = assemble_at(cpu_address, &instructions).unwrap();
     replacement.push(0x60);
     let source = vec![0xFF; replacement.len()];
@@ -227,7 +230,15 @@ fn runtime_state_initializer_requires_one_typed_full_range_prefix() {
     )
     .unwrap();
     assert_eq!(proof.required_identity_count, 1);
-    assert!(proof.clears_full_reserved_range);
+    assert!(proof.preserves_consumer_font_page);
+    assert!(!initializer.replacement.windows(3).any(|window| {
+        window
+            == [
+                0x8D,
+                CONSUMER_FONT_PAGE as u8,
+                (CONSUMER_FONT_PAGE >> 8) as u8,
+            ]
+    }));
     assert!(proof.installed);
     assert!(
         verify_technical_installation(check_inputs(
