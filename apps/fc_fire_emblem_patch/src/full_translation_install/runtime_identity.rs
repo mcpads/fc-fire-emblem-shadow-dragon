@@ -318,6 +318,21 @@ mod tests {
         );
     }
 
+    /// 런타임 식별표에서 상위 니블은 플래그가 아니라 디렉터리 정체성의 일부다.
+    /// 실제 아이템 결과 경로가 쓰는 `B1`을 `01`로 줄이면 정상 레코드가 누락되어
+    /// 한글 타일 코드가 원본 CHR로 표시된다.
+    #[test]
+    fn identity_material_keeps_the_full_directory_selector_byte() {
+        let material = encode_identity_material(&[IdentityTable {
+            selector: 0xB1,
+            entries: vec![Some(27)],
+        }])
+        .unwrap();
+
+        assert_eq!(material[MATERIAL_HEADER_BYTE_COUNT + 0xB1], 0);
+        assert_eq!(material[MATERIAL_HEADER_BYTE_COUNT + 0x01], u8::MAX);
+    }
+
     #[test]
     fn identity_material_rejects_duplicate_selectors() {
         let error = encode_identity_material(&[

@@ -541,6 +541,27 @@ mod tests {
         );
     }
 
+    /// 식별 자료는 `B1` 같은 전체 원문 selector를 키로 직렬화한다. 여기서 상위
+    /// 니블을 버리면 아이템 결과뿐 아니라 30/40/71/80/B0/C0 계열도 모두 실패한다.
+    #[test]
+    fn both_identity_paths_use_the_full_directory_selector_byte() {
+        let routine = build_resolve_request(0xA400, layout()).unwrap();
+
+        for selector in [
+            SOURCE_DIRECTORY_SELECTOR,
+            PUBLISHED_SOURCE_DIRECTORY_SELECTOR,
+        ] {
+            let load = assemble_at(0x8000, &[Instruction::LdxAbsolute(selector)]).unwrap();
+            assert!(
+                routine
+                    .bytes
+                    .windows(load.len())
+                    .any(|window| window == load),
+                "selector {selector:04X} is not used as the full identity-table key"
+            );
+        }
+    }
+
     /// 원본 엔트리 0도 유효하다. 엔트리를 임시 저장한 직후 Z 플래그에 기대어
     /// `BNE`로 합류하면 0번만 게시 정체성 경로로 잘못 떨어진다.
     #[test]
