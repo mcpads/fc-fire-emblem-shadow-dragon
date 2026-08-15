@@ -550,7 +550,9 @@ pub(super) fn battle_surface_active() -> Result<Vec<u8>> {
     battle_surface_active_for_layout(PROBE_RUNTIME_LAYOUT)
 }
 
-fn battle_surface_active_for_layout(layout: BattleCompositionRuntimeLayout) -> Result<Vec<u8>> {
+pub(super) fn battle_surface_active_for_layout(
+    layout: BattleCompositionRuntimeLayout,
+) -> Result<Vec<u8>> {
     let mut instructions = vec![
         Instruction::LdaAbsolute(MAIN_STATE_ADDRESS),
         Instruction::CmpImmediate(PLAYER_INITIATED_BATTLE_STATE),

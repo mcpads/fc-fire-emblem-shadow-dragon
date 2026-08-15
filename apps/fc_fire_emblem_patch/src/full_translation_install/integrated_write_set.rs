@@ -299,6 +299,7 @@ pub(super) fn plan_integrated_write_set(
         &output_rom,
         super::runtime_code::trampoline::TRAMPOLINE_ORIGIN,
     )?;
+    super::runtime_code::verify_installed_chr_ram_ownership_gate(&output_rom)?;
     verify_installed_dialogue(&output, inputs.encoded_dialogue)?;
     verify_installed_chapter_titles(&output, inputs.candidate, inputs.encoded_chapter_titles)?;
     verify_installed_cold_request_presentation(

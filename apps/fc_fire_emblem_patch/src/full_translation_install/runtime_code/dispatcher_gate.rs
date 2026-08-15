@@ -20,6 +20,7 @@ use anyhow::{Context, Result, ensure};
 use super::{RuntimeRoutine, next_address};
 use crate::{
     dialogue_inventory::switchable_cpu_to_file_offset,
+    mmc5_prg::count_direct_transfers_to_range,
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
     typed_source::decode_rp2a03_sequence,
@@ -51,6 +52,12 @@ use super::transport::{REQUEST_STATE, STATE_READY};
 /// 호출하지 않으므로 디스패처 게이트가 구간 전체를 digest에 묶어 되찾아 쓴다.
 pub(super) const RECLAIMED_GATE_CAVE_ORIGIN: u16 = 0xF341;
 pub(super) const RECLAIMED_GATE_CAVE_END: u16 = 0xF378;
+/// The source-identity publisher restores the borrowed PRG bank and PPU state in
+/// this fixed-bank tail. Keeping the fourteen-byte tail here lets the exact
+/// battle-surface arbitration predicate fit beside the NMI trampoline without
+/// weakening either routine.
+pub(super) const SOURCE_IDENTITY_PUBLISHER_TAIL_ORIGIN: u16 = 0xF378;
+pub(super) const SOURCE_IDENTITY_PUBLISHER_TAIL_CAVE_END: u16 = 0xF390;
 pub(in crate::full_translation_install) const EXPECTED_RECLAIMED_GATE_CAVE_SHA1: &str =
     "7ad92984b55ad0cdfc465743a52002420d3ae394";
 
@@ -71,6 +78,12 @@ const MAIN_DIALOGUE_BANK: u8 = 0x0A;
 /// `0A:$8000`: `LDA $77F7; JSR $C34C`. 게이트는 앞의 세 바이트만 가져가고 뒤의
 /// 표 분기는 그대로 실행시킨다.
 const DISPATCHER_ENTRY_CODE: [u8; 6] = [0xAD, 0xF7, 0x77, 0x20, 0x4C, 0xC3];
+/// The raw direct-transfer backstop sees the `20` operand of `LDA #$20` as a
+/// possible `JSR $F38D`.  This exact typed sequence proves that the window at
+/// `05:$84D0` is an instruction interior, not an executable transfer.
+const TAIL_CAVE_TRANSFER_INTERIOR_BANK: u8 = 0x05;
+const TAIL_CAVE_TRANSFER_INTERIOR_START: u16 = 0x84CF;
+const TAIL_CAVE_TRANSFER_INTERIOR_CODE: [u8; 6] = [0xA9, 0x20, 0x8D, 0xF3, 0x06, 0x60];
 
 /// 게이트가 입구를 가져가기 전에 그 자리가 아직 원본인지 확인한다.
 ///
@@ -92,6 +105,51 @@ pub(super) fn bind_dispatcher_entry(source: &Rom, candidate: &Rom) -> Result<()>
         &DISPATCHER_ENTRY_CODE,
         DISPATCHER_ENTRY,
         "main-dialogue dispatcher entry",
+    )?;
+    Ok(())
+}
+
+/// Binds the small fixed-bank gap that owns the source-identity publisher tail.
+pub(super) fn bind_source_identity_publisher_tail_cave(
+    source: &Rom,
+    candidate: &Rom,
+) -> Result<()> {
+    for (image_role, rom) in [("source", source), ("candidate", candidate)] {
+        ensure!(
+            fixed_bytes(
+                rom,
+                SOURCE_IDENTITY_PUBLISHER_TAIL_ORIGIN,
+                SOURCE_IDENTITY_PUBLISHER_TAIL_CAVE_END,
+            )?
+            .iter()
+            .all(|byte| *byte == 0xFF),
+            "{image_role} source-identity publisher tail cave is not exact FF"
+        );
+    }
+    ensure!(
+        count_direct_transfers_to_range(
+            source.prg(),
+            SOURCE_IDENTITY_PUBLISHER_TAIL_ORIGIN,
+            SOURCE_IDENTITY_PUBLISHER_TAIL_CAVE_END,
+        )? == 1,
+        "source raw transfer candidates into the source-identity publisher tail cave changed"
+    );
+    for (image_role, rom) in [("source", source), ("candidate", candidate)] {
+        let offset = switchable_cpu_to_file_offset(
+            TAIL_CAVE_TRANSFER_INTERIOR_BANK,
+            TAIL_CAVE_TRANSFER_INTERIOR_START,
+        )?;
+        ensure!(
+            rom.data()
+                .get(offset..offset + TAIL_CAVE_TRANSFER_INTERIOR_CODE.len())
+                == Some(TAIL_CAVE_TRANSFER_INTERIOR_CODE.as_slice()),
+            "{image_role} typed owner of the tail-cave raw transfer candidate changed"
+        );
+    }
+    decode_rp2a03_sequence(
+        &TAIL_CAVE_TRANSFER_INTERIOR_CODE,
+        TAIL_CAVE_TRANSFER_INTERIOR_START,
+        "tail-cave raw transfer instruction interior",
     )?;
     Ok(())
 }
@@ -147,12 +205,17 @@ pub(super) fn build_dispatcher_gate(origin: u16) -> Result<RuntimeRoutine> {
 /// 별도 생산자가 맡는다.
 ///
 /// 실패하면 커서도 요청도 남기지 않는다. 그 경우 원본 일본어 경로가 그대로 돈다.
+pub(super) struct SourceIdentityRequestPublisher {
+    pub(super) head: RuntimeRoutine,
+    pub(super) tail: RuntimeRoutine,
+}
+
 pub(super) fn build_source_identity_request_publisher(
     origin: u16,
     resolver: u16,
     code_page: u8,
     resolved_page_publication: u16,
-) -> Result<RuntimeRoutine> {
+) -> Result<SourceIdentityRequestPublisher> {
     let mut instructions = vec![
         Instruction::LdaAbsolute(REQUEST_STATE),
         Instruction::CmpImmediate(STATE_READY),
@@ -202,19 +265,26 @@ pub(super) fn build_source_identity_request_publisher(
 
     let preserve_group = next_address(origin, &instructions)?;
     instructions[preserve_resident_group] = Instruction::JmpAbsolute(preserve_group);
-    append_guarded_resolver_publication(
-        &mut instructions,
-        resolver,
-        code_page,
-        resolved_page_publication,
-    );
-    // 밀어낸 원본 호출로 넘긴다.
-    instructions.push(Instruction::JmpAbsolute(SOURCE_POINTER_RESOLVER));
+    append_guarded_resolver_publication_prefix(&mut instructions, resolver, code_page);
+    instructions.push(Instruction::JmpAbsolute(
+        SOURCE_IDENTITY_PUBLISHER_TAIL_ORIGIN,
+    ));
 
-    Ok(RuntimeRoutine {
-        role: "dialogue source-identity request publisher",
-        address: origin,
-        bytes: assemble_at(origin, &instructions)?,
+    let mut tail_instructions = guarded_resolver_publication_tail(resolved_page_publication);
+    // 밀어낸 원본 호출로 넘긴다.
+    tail_instructions.push(Instruction::JmpAbsolute(SOURCE_POINTER_RESOLVER));
+
+    Ok(SourceIdentityRequestPublisher {
+        head: RuntimeRoutine {
+            role: "dialogue source-identity request publisher",
+            address: origin,
+            bytes: assemble_at(origin, &instructions)?,
+        },
+        tail: RuntimeRoutine {
+            role: "dialogue source-identity request publisher tail",
+            address: SOURCE_IDENTITY_PUBLISHER_TAIL_ORIGIN,
+            bytes: assemble_at(SOURCE_IDENTITY_PUBLISHER_TAIL_ORIGIN, &tail_instructions)?,
+        },
     })
 }
 
@@ -255,6 +325,15 @@ fn append_guarded_resolver_publication(
     code_page: u8,
     resolved_page_publication: u16,
 ) {
+    append_guarded_resolver_publication_prefix(instructions, resolver, code_page);
+    instructions.extend(guarded_resolver_publication_tail(resolved_page_publication));
+}
+
+fn append_guarded_resolver_publication_prefix(
+    instructions: &mut Vec<Instruction>,
+    resolver: u16,
+    code_page: u8,
+) {
     instructions.extend([
         Instruction::Pha,
         // NMI를 끄기 직전 한 프레임이 끼어도 이전 수명의 `ready`를 고르지 않는다.
@@ -280,6 +359,11 @@ fn append_guarded_resolver_publication(
         // 상태의 NMI 복귀 그림자일 수 있으므로 여기서 사용하면 다른 뱅크의 같은
         // CPU 주소로 돌아간다.
         Instruction::LdaImmediate(MAIN_DIALOGUE_BANK),
+    ]);
+}
+
+fn guarded_resolver_publication_tail(resolved_page_publication: u16) -> Vec<Instruction> {
+    vec![
         Instruction::JsrAbsolute(PAIRED_BANK_HELPER),
         Instruction::Plp,
         // 발행기가 상태를 결정할 때까지 하드웨어 NMI는 꺼 둔다. `PLA`와 `STA`는
@@ -289,7 +373,24 @@ fn append_guarded_resolver_publication(
         // 해석 전 상주 그룹을 A로 넘긴다. 캐리는 그대로 성공 여부다.
         Instruction::Pla,
         Instruction::JsrAbsolute(resolved_page_publication),
-    ]);
+    ]
+}
+
+fn fixed_bytes(rom: &Rom, start: u16, end: u16) -> Result<&[u8]> {
+    ensure!(
+        start >= 0xC000 && start <= end,
+        "fixed publisher-tail range is invalid"
+    );
+    let base = rom
+        .prg()
+        .len()
+        .checked_sub(16 * 1024)
+        .context("PRG is smaller than one fixed bank")?;
+    let relative_start = base + usize::from(start - 0xC000);
+    let relative_end = base + usize::from(end - 0xC000);
+    rom.prg()
+        .get(relative_start..relative_end)
+        .context("source-identity publisher tail cave is outside ROM")
 }
 
 #[cfg(test)]
@@ -298,9 +399,21 @@ mod tests {
 
     const RESOLVED_PAGE_PUBLICATION: u16 = 0xF354;
 
-    fn publisher() -> RuntimeRoutine {
+    fn publisher_suite() -> SourceIdentityRequestPublisher {
         build_source_identity_request_publisher(0xF446, 0xA400, 0x30, RESOLVED_PAGE_PUBLICATION)
             .unwrap()
+    }
+
+    /// Logical execution order used by assertions that span the fixed-bank split.
+    fn publisher() -> RuntimeRoutine {
+        let suite = publisher_suite();
+        let mut bytes = suite.head.bytes;
+        bytes.extend(suite.tail.bytes);
+        RuntimeRoutine {
+            role: "test source-identity request publisher",
+            address: suite.head.address,
+            bytes,
+        }
     }
 
     /// 요청이 걸린 동안 처리기가 돌면 아직 CHR RAM에 없는 글자가 화면에 나온다.
@@ -449,21 +562,83 @@ mod tests {
 
     #[test]
     fn a_dialogue_producer_restores_its_call_site_bank_instead_of_the_outer_shadow() {
-        let routine = publisher();
-        let restore = [
+        let suite = publisher_suite();
+        let handoff = [
             0xA9,
             MAIN_DIALOGUE_BANK,
-            0x20,
-            PAIRED_BANK_HELPER as u8,
-            (PAIRED_BANK_HELPER >> 8) as u8,
+            0x4C,
+            SOURCE_IDENTITY_PUBLISHER_TAIL_ORIGIN as u8,
+            (SOURCE_IDENTITY_PUBLISHER_TAIL_ORIGIN >> 8) as u8,
         ];
 
         assert!(
-            routine
+            suite
+                .head
                 .bytes
-                .windows(restore.len())
-                .any(|window| window == restore)
+                .windows(handoff.len())
+                .any(|window| window == handoff)
         );
+        assert_eq!(
+            &suite.tail.bytes[..3],
+            [
+                0x20,
+                PAIRED_BANK_HELPER as u8,
+                (PAIRED_BANK_HELPER >> 8) as u8,
+            ]
+        );
+    }
+
+    #[test]
+    fn source_identity_publisher_tail_preserves_the_guarded_restore_sequence() {
+        let suite = publisher_suite();
+
+        assert_eq!(
+            &suite.head.bytes[suite.head.bytes.len() - 5..],
+            [
+                0xA9,
+                MAIN_DIALOGUE_BANK,
+                0x4C,
+                SOURCE_IDENTITY_PUBLISHER_TAIL_ORIGIN as u8,
+                (SOURCE_IDENTITY_PUBLISHER_TAIL_ORIGIN >> 8) as u8,
+            ]
+        );
+        assert_eq!(
+            suite.tail.bytes,
+            [
+                0x20,
+                PAIRED_BANK_HELPER as u8,
+                (PAIRED_BANK_HELPER >> 8) as u8,
+                0x28,
+                0x68,
+                0x85,
+                PPU_CONTROL_SHADOW,
+                0x68,
+                0x20,
+                RESOLVED_PAGE_PUBLICATION as u8,
+                (RESOLVED_PAGE_PUBLICATION >> 8) as u8,
+                0x4C,
+                SOURCE_POINTER_RESOLVER as u8,
+                (SOURCE_POINTER_RESOLVER >> 8) as u8,
+            ]
+        );
+        assert!(
+            usize::from(suite.tail.address) + suite.tail.bytes.len()
+                <= usize::from(SOURCE_IDENTITY_PUBLISHER_TAIL_CAVE_END)
+        );
+    }
+
+    #[test]
+    fn changed_source_identity_publisher_tail_cave_refuses_installation() {
+        let source = Rom::parse(crate::test_support::synthetic_mapper165_rom_bytes(0xFF)).unwrap();
+        let mut candidate_bytes = crate::test_support::synthetic_mapper165_rom_bytes(0xFF);
+        let offset = crate::test_support::synthetic_fixed_bank_file_offset(
+            SOURCE_IDENTITY_PUBLISHER_TAIL_ORIGIN,
+        );
+        candidate_bytes[offset] = 0xEA;
+        let candidate = Rom::parse(candidate_bytes).unwrap();
+
+        let error = bind_source_identity_publisher_tail_cave(&source, &candidate).unwrap_err();
+        assert!(error.to_string().contains("tail cave is not exact FF"));
     }
 
     /// 주 흐름이 `$A000`의 임시 코드를 실행할 때 NMI가 뱅크를 되돌리면 복귀 주소의

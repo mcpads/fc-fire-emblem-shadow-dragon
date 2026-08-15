@@ -33,9 +33,13 @@ use dynamic_assignment::{
     build_dynamic_assignment_routines, build_dynamic_assignment_routines_for_layout,
 };
 use runtime::{
-    RuntimeRoutine, build_runtime_routines, build_runtime_routines_for_layout,
-    parse_recipe_directories,
+    RuntimeRoutine, battle_surface_active_for_layout, build_runtime_routines,
+    build_runtime_routines_for_layout, parse_recipe_directories,
 };
+
+pub(crate) fn cumulative_battle_surface_active_bytes() -> Result<Vec<u8>> {
+    battle_surface_active_for_layout(CUMULATIVE_RUNTIME_LAYOUT)
+}
 
 const EXPANDED_PRG_SIZE: usize = 512 * 1024;
 const FIXED_BANK_SIZE: usize = 16 * 1024;
@@ -134,15 +138,15 @@ const PPU_CONTROL_SHADOW: u16 = 0x00CD;
 const PRG_BANK_SHADOW: u8 = 0x29;
 const RIGHT_FE_SHADOW: u8 = 0x5C;
 const CHR_HIGH_BITS_SHADOW: u8 = 0x52;
-const MAIN_STATE_ADDRESS: u16 = 0x0084;
-const PLAYER_INITIATED_BATTLE_STATE: u8 = 0x16;
-const ENEMY_INITIATED_BATTLE_STATE: u8 = 0x32;
-const SOUND_TEST_MAIN_STATE: u8 = 0x04;
-const DIALOGUE_SUBSTATE_ADDRESS: u16 = 0x05EE;
-const SOUND_TEST_BATTLE_SUBSTATE: u8 = 0x0D;
-const SOUND_TEST_BATTLE_PHASE_ADDRESS: u16 = 0x7730;
-const SOUND_TEST_SHARED_BATTLE_PHASE: u8 = 0x05;
-const BATTLE_ACTIVE_FLAG: u16 = 0x047D;
+pub(crate) const MAIN_STATE_ADDRESS: u16 = 0x0084;
+pub(crate) const PLAYER_INITIATED_BATTLE_STATE: u8 = 0x16;
+pub(crate) const ENEMY_INITIATED_BATTLE_STATE: u8 = 0x32;
+pub(crate) const SOUND_TEST_MAIN_STATE: u8 = 0x04;
+pub(crate) const DIALOGUE_SUBSTATE_ADDRESS: u16 = 0x05EE;
+pub(crate) const SOUND_TEST_BATTLE_SUBSTATE: u8 = 0x0D;
+pub(crate) const SOUND_TEST_BATTLE_PHASE_ADDRESS: u16 = 0x7730;
+pub(crate) const SOUND_TEST_SHARED_BATTLE_PHASE: u8 = 0x05;
+pub(crate) const BATTLE_ACTIVE_FLAG: u16 = 0x047D;
 const CACHE_UPLOADED_MARKER: u8 = 0x80;
 const UPLOAD_RENDER_MASK: u8 = 0x06;
 const SELECTED_COLOR_BITMAP_ADDRESS: u16 = 0x07C4;

@@ -151,6 +151,12 @@ impl DialogueRuntimeCodePlan {
     }
 }
 
+pub(in crate::full_translation_install) fn verify_installed_chr_ram_ownership_gate(
+    installed: &Rom,
+) -> Result<()> {
+    chr_ram_ownership::verify_installed_ownership_gate(installed)
+}
+
 /// 실행 코드를 전부 조립한다.
 ///
 /// 고정 뱅크 동굴의 배치는 여기서 한 번에 정한다. 조각마다 시작 주소를 따로 두면
@@ -169,6 +175,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     let bank_restore = bind_bank_restore_contract(candidate)?;
     bind_quiet_frame_gate(source, candidate)?;
     dispatcher_gate::bind_dispatcher_entry(source, candidate)?;
+    dispatcher_gate::bind_source_identity_publisher_tail_cave(source, candidate)?;
     lifecycle::bind_lifecycle_sites(source, candidate)?;
     chr_selector::bind_selector_chain_site(candidate)?;
     chr_selector::bind_selector_cave(candidate)?;
@@ -351,11 +358,15 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
          {SAFETY_MARGIN_PERCENT}% margin, and the {reserve}-cycle trampoline reserve"
     );
 
-    let publisher_address = publisher.address;
+    let publisher_address = publisher.head.address;
     let selector_address = selector.address;
     ensure_disjoint(
-        &[&trampoline_routine, &publisher],
+        &[&trampoline_routine, &publisher.head],
         trampoline::TRAMPOLINE_CAVE_END,
+    )?;
+    ensure_disjoint(
+        &[&publisher.tail],
+        dispatcher_gate::SOURCE_IDENTITY_PUBLISHER_TAIL_CAVE_END,
     )?;
     ensure_disjoint(
         &[
@@ -371,7 +382,8 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     )?;
     let mut fixed_routines = vec![
         trampoline_routine,
-        publisher,
+        publisher.head,
+        publisher.tail,
         selector,
         cold_presentation_selector,
         changed_group_request_initializer,
