@@ -226,6 +226,7 @@ const ENDING_RECORD_PHASE: u16 = 0x7731;
 const MAP_MENU_COMPOSITE_STATE: u8 = 0x03;
 const UNIT_SUMMARY_COMPOSITE_STATE: u8 = 0x04;
 const UNIT_COMMAND_COMPOSITE_STATE: u8 = 0x05;
+const ATTACK_WEAPON_SELECTION_COMPOSITE_STATE: u8 = 0x06;
 const UNIT_ITEM_LIST_COMPOSITE_STATE: u8 = 0x07;
 const ITEM_ACTION_COMPOSITE_STATE: u8 = 0x09;
 const UNIT_STATUS_COMPOSITE_STATE: u8 = 0x0F;
@@ -269,6 +270,10 @@ pub(super) fn build_consumer_font_selector(
     let map_menu = append_long_jump_if_equal(origin, &mut instructions)?;
     instructions.push(Instruction::CmpImmediate(UNIT_COMMAND_COMPOSITE_STATE));
     let unit_command = append_long_jump_if_equal(origin, &mut instructions)?;
+    instructions.push(Instruction::CmpImmediate(
+        ATTACK_WEAPON_SELECTION_COMPOSITE_STATE,
+    ));
+    let catalog_dynamic_from_attack_weapon = append_long_jump_if_equal(origin, &mut instructions)?;
     instructions.push(Instruction::CmpImmediate(ITEM_ACTION_COMPOSITE_STATE));
     let catalog_default_from_action = append_long_jump_if_equal(origin, &mut instructions)?;
     instructions.push(Instruction::CmpImmediate(UNIT_SUMMARY_COMPOSITE_STATE));
@@ -294,6 +299,7 @@ pub(super) fn build_consumer_font_selector(
 
     let dynamic = next_address(origin, &instructions)?;
     for jump in [
+        catalog_dynamic_from_attack_weapon,
         catalog_dynamic_from_summary,
         catalog_dynamic_from_status,
         catalog_dynamic_from_unit_items,
@@ -690,6 +696,7 @@ mod tests {
             MAP_MENU_COMPOSITE_STATE,
             UNIT_SUMMARY_COMPOSITE_STATE,
             UNIT_COMMAND_COMPOSITE_STATE,
+            ATTACK_WEAPON_SELECTION_COMPOSITE_STATE,
             UNIT_ITEM_LIST_COMPOSITE_STATE,
             ITEM_ACTION_COMPOSITE_STATE,
             UNIT_STATUS_COMPOSITE_STATE,
@@ -718,6 +725,52 @@ mod tests {
                 (SELECTOR_CHAIN_FALLBACK >> 8) as u8,
             ]
         );
+    }
+
+    /// 공격 명령 뒤의 무기 선택 화면은 요약 화면과 같은 item appender를 쓰고,
+    /// appender가 `$07FD`에 게시한 두 카탈로그 페이지 중 하나를 표시해야 한다.
+    /// 상태 `06`이 기존 사슬로 빠지면 문자열 바이트는 맞아도 다른 CHR 페이지로
+    /// 해석되어 실제 화면에서 아이템명이 깨진다.
+    #[test]
+    fn attack_weapon_selection_uses_the_published_catalog_page() {
+        let routine = build_consumer_font_selector(0xF600, 0x8001, consumer_pages()).unwrap();
+
+        let dispatch = routine
+            .bytes
+            .windows(7)
+            .find(|window| {
+                window[..5]
+                    == [
+                        0xC9,
+                        ATTACK_WEAPON_SELECTION_COMPOSITE_STATE,
+                        0xD0,
+                        0x03,
+                        0x4C,
+                    ]
+            })
+            .expect("attack weapon-selection state has no explicit selector route");
+        let dynamic_target = u16::from_le_bytes([dispatch[5], dispatch[6]]);
+        let dynamic_offset = usize::from(dynamic_target - routine.address);
+
+        assert_eq!(
+            &routine.bytes[dynamic_offset..dynamic_offset + 3],
+            &[
+                0xAD,
+                CONSUMER_CATALOG_PAGE as u8,
+                (CONSUMER_CATALOG_PAGE >> 8) as u8,
+            ]
+        );
+        assert!(routine.bytes[dynamic_offset..].windows(6).any(|window| {
+            window
+                == [
+                    0xAD,
+                    CONSUMER_CATALOG_PAGE as u8,
+                    (CONSUMER_CATALOG_PAGE >> 8) as u8,
+                    0x8D,
+                    0x01,
+                    0x80,
+                ]
+        }));
     }
 
     /// 이름 문자열이 게시한 페이지는 계획된 두 카탈로그 레지스터 중 하나일 때만
