@@ -9,6 +9,12 @@ pub(super) const COMPOSITE_STATE_WRITER_BINDING: &[u8] = &[
     0x8D, 0xE8, 0x05, 0xA9, 0x01, 0x85, 0x44, 0xA9, 0x0B, 0x4C, 0xFA, 0xC9,
 ];
 pub(crate) const SAVE_SLOT_SELECTION_COMPOSITE_STATE: u8 = 0x21;
+pub(crate) const FRONT_END_RESULT_DIALOGUE_RECORD_IDS: [&str; 4] = [
+    "shop-and-item-dialogue:083",
+    "shop-and-item-dialogue:084",
+    "shop-and-item-dialogue:085",
+    "shop-and-item-dialogue:086",
+];
 
 pub(super) struct MenuLabelSpec {
     pub(super) id: &'static str,

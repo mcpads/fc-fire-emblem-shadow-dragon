@@ -13,6 +13,7 @@ use crate::{
     dialogue_assets::{plan_all_main_dialogue_records, validate_main_dialogue_workspace},
     dialogue_inventory::inspect_main_dialogue_graph,
     font_slots::{FONT_PAGE_SIZE, FONT_TILE_SIZE},
+    front_end_menu::plan_front_end_menu,
     item_flow::plan_item_action_labels,
     map_menu::plan_map_menu,
     mapper165::battle_codebook_plan::{
@@ -41,6 +42,7 @@ mod dynamic_inputs;
 mod ending_record_projection;
 mod final_runtime_evidence;
 mod fixed_ui_projection;
+mod front_end_result_residency;
 mod installation_layout;
 mod integrated_write_set;
 mod main_dialogue_route_population;
@@ -81,6 +83,7 @@ use final_runtime_evidence::{FinalArtifactRuntimeEvidence, load_final_artifact_r
 use fixed_ui_projection::{
     FixedUiProjectionInputs, FixedUiProjectionPlan, plan_fixed_ui_projection,
 };
+use front_end_result_residency::{FrontEndResultResidencyPlan, plan_front_end_result_residency};
 use installation_layout::{InstallationLayoutPlan, plan_installation_layout};
 use integrated_write_set::{
     IntegratedWriteSetInputs, IntegratedWriteSetPlan, plan_integrated_write_set,
@@ -129,6 +132,7 @@ pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) source_path: &'a Path,
     pub(crate) main_dialogue_workspace_path: &'a Path,
     pub(crate) fixed_text_workspace_path: &'a Path,
+    pub(crate) front_end_menu_localization_path: &'a Path,
     pub(crate) unit_name_localization_path: &'a Path,
     pub(crate) chapter_title_localization_path: &'a Path,
     pub(crate) choice_label_localization_path: &'a Path,
@@ -169,6 +173,7 @@ struct FullTranslationInstallReport {
     dialogue_codebook: DialogueCodebook,
     chapter_intro_residency: ChapterIntroResidency,
     choice_residency: ChoiceResidencyPlan,
+    front_end_result_residency: FrontEndResultResidencyPlan,
     chapter_save_projection: ChapterSaveProjectionPlan,
     ending_record_projection: EndingRecordProjectionPlan,
     dialogue_page_pool: DialoguePagePool,
@@ -195,6 +200,7 @@ struct FullTranslationInstallReport {
 struct TranslationInputs {
     main_dialogue_record_count: usize,
     fixed_text_physical_entry_count: usize,
+    front_end_menu_label_count: usize,
     playable_unit_name_count: usize,
     chapter_title_count: usize,
     choice_label_count: usize,
@@ -417,6 +423,7 @@ pub(crate) fn plan_full_translation_installation(
     // 프리픽스 파서 결함이 만든 것이어서 폐기했다. 의사결정 59번을 따른다.
     let display = crate::dialogue_assets::MainDialogueDisplayPlan::from_canonical_bundle(&dialogue);
     let fixed = plan_fixed_text(&rom, inputs.fixed_text_workspace_path)?;
+    let front_end = plan_front_end_menu(&rom, inputs.front_end_menu_localization_path)?;
     let unit_names = plan_unit_names(&rom, inputs.unit_name_localization_path)?;
     let chapter_titles = plan_chapter_titles(&rom, inputs.chapter_title_localization_path)?;
     let choices = plan_choice_labels(&rom, inputs.choice_label_localization_path)?;
@@ -429,6 +436,7 @@ pub(crate) fn plan_full_translation_installation(
     ensure!(
         dialogue.record_ids.len() == 504
             && fixed.entries.len() == 273
+            && front_end.entries.len() == 7
             && unit_names.entries.len() == 53
             && chapter_titles.entry_count == 25
             && chapter_titles.translated_entry_count == 25
@@ -486,11 +494,18 @@ pub(crate) fn plan_full_translation_installation(
         &choices,
         &chapter_intro_residency.augmented_worksets,
     )?;
+    let front_end_result_residency = plan_front_end_result_residency(
+        &rom,
+        &current_candidate,
+        &display,
+        &front_end,
+        &choice_residency.augmented_worksets,
+    )?;
     let dialogue_graph = inspect_main_dialogue_graph(rom.data())?;
     let transition_residency = plan_transition_residency(
         &display,
         &dialogue_graph,
-        &choice_residency.augmented_worksets,
+        &front_end_result_residency.augmented_worksets,
     )?;
     let codebook = plan_glyph_workset_page_upper_bound(&transition_residency.augmented_worksets)?;
     let dynamic_page_codes = bind_dynamic_string_page_codes(&dynamic_inputs, &codebook)?;
@@ -889,6 +904,7 @@ pub(crate) fn plan_full_translation_installation(
     let translation_input_complete = dialogue_validation.translation_input_complete;
     let review_complete = dialogue_validation.review_complete
         && fixed.review_complete
+        && front_end.review_complete
         && unit_names.review_complete
         && chapter_titles.review_complete
         && choices.review_complete
@@ -964,7 +980,7 @@ pub(crate) fn plan_full_translation_installation(
         false
     };
     let report = FullTranslationInstallReport {
-        schema: 15,
+        schema: 16,
         source_sha1: EXPECTED_SOURCE_SHA1,
         strategy: "install the declared translation domains in one cumulative candidate, close declared installation gates, then run declared consumer-path dynamic regression on that same ROM; whole-game consumer census remains separate",
         declared_installation_domain_count: REQUIRED_DOMAIN_COUNT,
@@ -972,6 +988,7 @@ pub(crate) fn plan_full_translation_installation(
         translation_inputs: TranslationInputs {
             main_dialogue_record_count: dialogue.record_ids.len(),
             fixed_text_physical_entry_count: fixed.entries.len(),
+            front_end_menu_label_count: front_end.entries.len(),
             playable_unit_name_count: unit_names.entries.len(),
             chapter_title_count: chapter_titles.entry_count,
             choice_label_count: choices.entries.len(),
@@ -1028,6 +1045,7 @@ pub(crate) fn plan_full_translation_installation(
             title_storage_connected: true,
         },
         choice_residency,
+        front_end_result_residency,
         chapter_save_projection,
         ending_record_projection,
         dialogue_page_pool: DialoguePagePool {

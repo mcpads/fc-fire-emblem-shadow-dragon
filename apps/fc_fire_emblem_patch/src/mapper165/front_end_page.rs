@@ -61,6 +61,7 @@ pub(super) struct FrontEndPagePlan {
     pub(super) unique_nametable_count: usize,
     pub(super) preserved_screen_active_code_count: usize,
     pub(super) preserved_source_active_code_count: usize,
+    pub(super) preserved_result_dialogue_active_code_count: usize,
     pub(super) preserved_active_code_count: usize,
     pub(super) page_sha1: String,
     pub(super) physical_chr_page: u8,
@@ -73,6 +74,7 @@ pub(super) fn plan_front_end_page(
     manifest_path: &Path,
     glyphs: &BTreeSet<char>,
     preserved_source_codes: &BTreeSet<u8>,
+    result_dialogue_preserved_codes: &BTreeSet<u8>,
     physical_chr_page: u8,
 ) -> Result<FrontEndPagePlan> {
     source_rom.verify_supported_japanese()?;
@@ -87,9 +89,14 @@ pub(super) fn plan_front_end_page(
         .intersection(&active_codes)
         .copied()
         .collect::<BTreeSet<_>>();
+    let preserved_result_dialogue_active_codes = result_dialogue_preserved_codes
+        .intersection(&active_codes)
+        .copied()
+        .collect::<BTreeSet<_>>();
     let preserved_active_codes = preserved_screen_active_codes
         .union(&preserved_source_active_codes)
         .copied()
+        .chain(preserved_result_dialogue_active_codes.iter().copied())
         .collect::<BTreeSet<_>>();
     let assignments = assign_glyph_codes_excluding(glyphs, &preserved_active_codes)?;
 
@@ -131,6 +138,7 @@ pub(super) fn plan_front_end_page(
         unique_nametable_count,
         preserved_screen_active_code_count: preserved_screen_active_codes.len(),
         preserved_source_active_code_count: preserved_source_active_codes.len(),
+        preserved_result_dialogue_active_code_count: preserved_result_dialogue_active_codes.len(),
         preserved_active_code_count: preserved_active_codes.len(),
         physical_chr_page,
         mapper_register,

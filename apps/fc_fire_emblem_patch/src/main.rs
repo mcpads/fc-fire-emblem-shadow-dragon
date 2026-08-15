@@ -312,6 +312,8 @@ enum Command {
         main_dialogue_workspace: PathBuf,
         #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
         fixed_text_workspace: PathBuf,
+        #[arg(long, default_value = "assets/translation/front-end-menu.ko.json")]
+        front_end_menu_localization: PathBuf,
         #[arg(long, default_value = "assets/translation/unit-names.ko.json")]
         unit_name_localization: PathBuf,
         #[arg(long, default_value = "assets/translation/chapter-titles.ko.json")]
@@ -1210,6 +1212,7 @@ fn main() -> Result<()> {
             output,
             main_dialogue_workspace,
             fixed_text_workspace,
+            front_end_menu_localization,
             unit_name_localization,
             chapter_title_localization,
             choice_label_localization,
@@ -1228,6 +1231,7 @@ fn main() -> Result<()> {
                     source_path: &source,
                     main_dialogue_workspace_path: &main_dialogue_workspace,
                     fixed_text_workspace_path: &fixed_text_workspace,
+                    front_end_menu_localization_path: &front_end_menu_localization,
                     unit_name_localization_path: &unit_name_localization,
                     chapter_title_localization_path: &chapter_title_localization,
                     choice_label_localization_path: &choice_label_localization,

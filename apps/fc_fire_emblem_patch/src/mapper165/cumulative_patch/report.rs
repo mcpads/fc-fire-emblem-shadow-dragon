@@ -207,6 +207,7 @@ pub(super) struct CumulativeFrontEndMenuReport {
     pub(super) glyph_assignment_sha1: String,
     pub(super) preserved_screen_active_code_count: usize,
     pub(super) preserved_source_active_code_count: usize,
+    pub(super) preserved_result_dialogue_active_code_count: usize,
     pub(super) preserved_active_code_count: usize,
     pub(super) font_physical_page: u8,
     pub(super) font_mapper_register: u8,

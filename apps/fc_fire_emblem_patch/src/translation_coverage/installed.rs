@@ -249,7 +249,7 @@ pub(crate) fn inspect_current_installation(
     let report: CurrentBuildReport = serde_json::from_slice(&report_bytes)
         .with_context(|| format!("parse current build report {}", build_report_path.display()))?;
     ensure!(
-        report.schema == 1 && report.source_sha1 == EXPECTED_SOURCE_SHA1,
+        report.schema == 2 && report.source_sha1 == EXPECTED_SOURCE_SHA1,
         "current build report is not bound to the supported source"
     );
     let output_bytes = fs::read(build_output_path)
@@ -940,7 +940,7 @@ mod tests {
     #[test]
     fn cumulative_battle_stage_projects_each_domain_without_claiming_ending_or_runtime() {
         let mut report: CurrentBuildReport = serde_json::from_value(serde_json::json!({
-            "schema": 1,
+            "schema": 2,
             "source_sha1": EXPECTED_SOURCE_SHA1,
             "output_sha1": "output-sha1",
             "stages": [

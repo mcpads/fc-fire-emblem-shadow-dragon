@@ -11,7 +11,7 @@ use crate::{
         plan_main_dialogue_slice, validate_main_dialogue_workspace,
     },
     font_slots::{ACTIVE_HANGUL_SLOT_COUNT, FONT_PAGE_SIZE},
-    front_end_menu::plan_front_end_menu,
+    front_end_menu::{FRONT_END_RESULT_DIALOGUE_RECORD_IDS, plan_front_end_menu},
     mmc5_prg::{count_direct_transfers_to_range, fixed_bank_file_offset},
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
@@ -192,6 +192,29 @@ pub(crate) fn build_cumulative_patch(
     ensure!(
         front_end_menu_plan.entries.len() == 7,
         "cumulative front-end menu scope no longer has seven entries"
+    );
+    let front_end_result_dialogue_plan = plan_main_dialogue_bundle(
+        &source_rom,
+        inputs.main_dialogue_workspace_path,
+        &FRONT_END_RESULT_DIALOGUE_RECORD_IDS,
+    )?;
+    ensure!(
+        front_end_result_dialogue_plan.workspace_sha1 == dialogue_workspace.workspace_sha1
+            && front_end_result_dialogue_plan
+                .record_ids
+                .iter()
+                .map(String::as_str)
+                .eq(FRONT_END_RESULT_DIALOGUE_RECORD_IDS),
+        "front-end result dialogue plan no longer matches its validated workspace population"
+    );
+    let front_end_result_preserved_codes = front_end_result_dialogue_plan
+        .page_worksets
+        .iter()
+        .flat_map(|page| page.preserved_target_active_codes.iter().copied())
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        !front_end_result_preserved_codes.is_empty(),
+        "front-end result dialogue pages have no protected active codes"
     );
     let unit_name_plan = plan_unit_names(&source_rom, inputs.unit_name_localization_path)?;
     let class_profile_plan =
@@ -542,6 +565,7 @@ pub(crate) fn build_cumulative_patch(
         &chapter_two_output,
         &source_rom,
         &front_end_menu_plan,
+        &front_end_result_preserved_codes,
         inputs.front_end_menu_evidence_path,
         &cumulative_roster_selector,
         &dialogue_selector,
@@ -841,7 +865,7 @@ pub(crate) fn build_cumulative_patch(
         },
     ];
     let report = CumulativePatchReport {
-        schema: 1,
+        schema: 2,
         source_sha1: EXPECTED_SOURCE_SHA1,
         output_sha1: output_sha1.clone(),
         output_mapper: output_rom.mapper(),
@@ -1045,6 +1069,9 @@ pub(crate) fn build_cumulative_patch(
             preserved_source_active_code_count: front_end_stage
                 .page
                 .preserved_source_active_code_count,
+            preserved_result_dialogue_active_code_count: front_end_stage
+                .page
+                .preserved_result_dialogue_active_code_count,
             preserved_active_code_count: front_end_stage.page.preserved_active_code_count,
             font_physical_page: front_end_stage.page.physical_chr_page,
             font_mapper_register: front_end_stage.page.mapper_register,

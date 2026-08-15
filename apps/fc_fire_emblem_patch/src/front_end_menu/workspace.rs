@@ -8,6 +8,7 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    font_slots::active_hangul_codes,
     japanese_encoding::japanese_text_glyph,
     mmc5_chr::switchable_bank_file_offset,
     mmc5_prg::fixed_bank_file_offset,
@@ -139,6 +140,85 @@ impl FrontEndMenuPlan {
             .iter()
             .flat_map(FrontEndMenuPlannedEntry::preserved_source_codes)
             .collect()
+    }
+
+    /// 누적 후보의 고정 문자열 저장소에서 실제 메뉴 글리프 코드를 다시 결속한다.
+    ///
+    /// 앞단의 전용 CHR 페이지와 뒤단의 동적 대사 페이지가 같은 메뉴 타일을 해석해야
+    /// 하는 화면에서는 계획 당시의 추상 배정이 아니라 후보에 실제 설치된 바이트가
+    /// 권위다. 보호 바이트·패딩·종료자까지 함께 확인해 다른 후보의 코드를 섞지 않는다.
+    pub(crate) fn bind_installed_glyph_codes(
+        &self,
+        candidate: &[u8],
+    ) -> Result<BTreeMap<char, u8>> {
+        let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
+        let mut assignments = BTreeMap::<char, u8>::new();
+        let mut glyph_by_code = BTreeMap::<u8, char>::new();
+
+        for entry in &self.entries {
+            let storage = candidate
+                .get(entry.file_offset..entry.file_offset + entry.source_storage_byte_count)
+                .with_context(|| {
+                    format!("{} storage is outside the cumulative candidate", entry.id)
+                })?;
+            let body_capacity = entry
+                .source_storage_byte_count
+                .checked_sub(1)
+                .context("front-end menu storage has no terminator")?;
+            ensure!(
+                entry.logical_bytes.len() <= body_capacity,
+                "{} logical body exceeds its installed storage",
+                entry.id
+            );
+
+            for (offset, logical) in entry.logical_bytes.iter().enumerate() {
+                let installed = storage[offset];
+                match logical {
+                    FixedTextLogicalByte::Encoded(expected) => ensure!(
+                        installed == *expected,
+                        "{} protected byte changed at body offset {offset}",
+                        entry.id
+                    ),
+                    FixedTextLogicalByte::TargetGlyph(glyph) => {
+                        ensure!(
+                            active_codes.contains(&installed),
+                            "{} glyph {glyph:?} uses reserved installed code {installed:02X}",
+                            entry.id
+                        );
+                        if let Some(previous) = assignments.insert(*glyph, installed) {
+                            ensure!(
+                                previous == installed,
+                                "front-end glyph {glyph:?} has two installed codes {previous:02X} and {installed:02X}"
+                            );
+                        }
+                        if let Some(previous_glyph) = glyph_by_code.insert(installed, *glyph) {
+                            ensure!(
+                                previous_glyph == *glyph,
+                                "front-end installed code {installed:02X} means both {previous_glyph:?} and {glyph:?}"
+                            );
+                        }
+                    }
+                }
+            }
+            ensure!(
+                storage[entry.logical_bytes.len()..body_capacity]
+                    .iter()
+                    .all(|byte| *byte == 0xFF),
+                "{} installed padding changed",
+                entry.id
+            );
+            ensure!(
+                storage[body_capacity] == entry.terminator,
+                "{} installed terminator changed",
+                entry.id
+            );
+        }
+
+        ensure!(
+            assignments.keys().copied().collect::<BTreeSet<_>>() == self.unique_glyphs(),
+            "front-end installed code binding lost a target glyph"
+        );
+        Ok(assignments)
     }
 }
 
@@ -472,5 +552,43 @@ mod tests {
             entry.encoded_storage_bytes(&assignments).unwrap(),
             vec![0xC0, 0xC1, 0xFF, 0xFF, 0xED]
         );
+    }
+
+    #[test]
+    fn installed_menu_codes_bind_storage_bytes_and_reject_code_drift() {
+        let entries = vec![
+            FrontEndMenuPlannedEntry {
+                id: "front-end-menu:first".to_owned(),
+                file_offset: 1,
+                source_storage_byte_count: 4,
+                terminator: 0xED,
+                logical_bytes: vec![
+                    FixedTextLogicalByte::TargetGlyph('가'),
+                    FixedTextLogicalByte::Encoded(0x61),
+                ],
+            },
+            FrontEndMenuPlannedEntry {
+                id: "front-end-menu:second".to_owned(),
+                file_offset: 5,
+                source_storage_byte_count: 3,
+                terminator: 0xEF,
+                logical_bytes: vec![FixedTextLogicalByte::TargetGlyph('가')],
+            },
+        ];
+        let plan = FrontEndMenuPlan {
+            workspace_sha1: "synthetic".to_owned(),
+            review_complete: true,
+            entries,
+        };
+        let mut candidate = vec![0x00, 0x84, 0x61, 0xFF, 0xED, 0x84, 0xFF, 0xEF];
+
+        assert_eq!(
+            plan.bind_installed_glyph_codes(&candidate).unwrap(),
+            BTreeMap::from([('가', 0x84)])
+        );
+
+        candidate[5] = 0x85;
+        let error = plan.bind_installed_glyph_codes(&candidate).unwrap_err();
+        assert!(error.to_string().contains("two installed codes"));
     }
 }

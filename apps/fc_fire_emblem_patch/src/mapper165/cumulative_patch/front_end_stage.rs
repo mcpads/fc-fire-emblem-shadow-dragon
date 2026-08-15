@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{collections::BTreeSet, path::Path};
 
 use anyhow::{Context, Result, ensure};
 
@@ -39,6 +39,7 @@ pub(super) fn install_front_end_stage(
     chapter_two_output: &[u8],
     source_rom: &Rom,
     menu_plan: &FrontEndMenuPlan,
+    result_dialogue_preserved_codes: &BTreeSet<u8>,
     evidence_path: &Path,
     prior_roster_selector: &[u8],
     dialogue_selector: &[u8],
@@ -57,6 +58,7 @@ pub(super) fn install_front_end_stage(
         evidence_path,
         &menu_plan.unique_glyphs(),
         &menu_plan.preserved_source_codes(),
+        result_dialogue_preserved_codes,
         physical_chr_page,
     )?;
     let encoded_entries = menu_plan
