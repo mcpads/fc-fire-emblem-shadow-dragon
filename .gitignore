@@ -3,5 +3,5 @@ roms/
 out/
 target/
 .emucap/
-evidence/private/
+evidence/
 private/
