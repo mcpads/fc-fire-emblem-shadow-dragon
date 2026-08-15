@@ -222,6 +222,7 @@ pub(super) fn build_chr_selector(
 const COMPOSITE_STATE: u16 = 0x05E8;
 const MAIN_STATE: u8 = 0x84;
 const ENDING_RECORD_PHASE: u16 = 0x7731;
+const ENDING_RECORD_COMPOSITE_STATE: u8 = 0x20;
 
 const MAP_MENU_COMPOSITE_STATE: u8 = 0x03;
 const UNIT_SUMMARY_COMPOSITE_STATE: u8 = 0x04;
@@ -259,14 +260,11 @@ pub(super) fn build_consumer_font_selector(
     let mut instructions = vec![
         Instruction::Php,
         Instruction::Pha,
-        Instruction::LdaAbsolute(ENDING_RECORD_PHASE),
-        Instruction::CmpImmediate(ENDING_RECORD_ACTIVE_PHASE),
-    ];
-    let ending = append_long_jump_if_equal(origin, &mut instructions)?;
-    instructions.extend([
         Instruction::LdaAbsolute(COMPOSITE_STATE),
-        Instruction::CmpImmediate(MAP_MENU_COMPOSITE_STATE),
-    ]);
+        Instruction::CmpImmediate(ENDING_RECORD_COMPOSITE_STATE),
+    ];
+    let ending_context = append_long_jump_if_equal(origin, &mut instructions)?;
+    instructions.push(Instruction::CmpImmediate(MAP_MENU_COMPOSITE_STATE));
     let map_menu = append_long_jump_if_equal(origin, &mut instructions)?;
     instructions.push(Instruction::CmpImmediate(UNIT_COMMAND_COMPOSITE_STATE));
     let unit_command = append_long_jump_if_equal(origin, &mut instructions)?;
@@ -339,8 +337,13 @@ pub(super) fn build_consumer_font_selector(
     patch_long_jump(&mut instructions, map_menu, map_menu_target);
     append_immediate_page_selection(&mut instructions, bank_value_register, pages.map_menu);
 
-    let ending_target = next_address(origin, &instructions)?;
-    patch_long_jump(&mut instructions, ending, ending_target);
+    let ending_context_target = next_address(origin, &instructions)?;
+    patch_long_jump(&mut instructions, ending_context, ending_context_target);
+    instructions.extend([
+        Instruction::LdaAbsolute(ENDING_RECORD_PHASE),
+        Instruction::CmpImmediate(ENDING_RECORD_ACTIVE_PHASE),
+    ]);
+    let unsupported_ending_phase = append_long_jump_if_not_equal(origin, &mut instructions)?;
     append_immediate_page_selection(&mut instructions, bank_value_register, pages.ending_record);
 
     let chapter_save_offer_target = next_address(origin, &instructions)?;
@@ -356,7 +359,11 @@ pub(super) fn build_consumer_font_selector(
     );
 
     let unsupported = next_address(origin, &instructions)?;
-    for jump in [unsupported_from_state, unsupported_dynamic] {
+    for jump in [
+        unsupported_from_state,
+        unsupported_dynamic,
+        unsupported_ending_phase,
+    ] {
         patch_long_jump(&mut instructions, jump, unsupported);
     }
     instructions.extend([
@@ -723,6 +730,60 @@ mod tests {
                 0x4C,
                 SELECTOR_CHAIN_FALLBACK as u8,
                 (SELECTOR_CHAIN_FALLBACK >> 8) as u8,
+            ]
+        );
+    }
+
+    /// 정규 저장 뒤 제목 메뉴에서는 `$7731=01`이 남을 수 있다. 제목 복합 상태
+    /// `0D`가 엔딩 장 기록 페이지로 가로채이지 않고 기존 프런트엔드 사슬까지
+    /// 도달하려면, 엔딩 phase를 읽기 전에 실제 엔딩 복합 상태 `20`을 요구해야 한다.
+    #[test]
+    fn ending_record_phase_is_scoped_to_the_ending_composite_state() {
+        let pages = consumer_pages();
+        let routine = build_consumer_font_selector(0xF600, 0x8001, pages).unwrap();
+
+        assert_eq!(
+            &routine.bytes[..10],
+            [
+                0x08,
+                0x48,
+                0xAD,
+                COMPOSITE_STATE as u8,
+                (COMPOSITE_STATE >> 8) as u8,
+                0xC9,
+                ENDING_RECORD_COMPOSITE_STATE,
+                0xD0,
+                0x03,
+                0x4C,
+            ]
+        );
+        let ending_context_target = u16::from_le_bytes([routine.bytes[10], routine.bytes[11]]);
+        let ending_context_offset = usize::from(ending_context_target - routine.address);
+        assert_eq!(
+            &routine.bytes[ending_context_offset..ending_context_offset + 7],
+            [
+                0xAD,
+                ENDING_RECORD_PHASE as u8,
+                (ENDING_RECORD_PHASE >> 8) as u8,
+                0xC9,
+                ENDING_RECORD_ACTIVE_PHASE,
+                0xF0,
+                0x03,
+            ]
+        );
+        assert_eq!(
+            &routine.bytes[ending_context_offset + 10..ending_context_offset + 20],
+            [
+                0xA9,
+                RIGHT_FD_CHR_REGISTER,
+                0x20,
+                0x58,
+                0xFA,
+                0xA9,
+                pages.ending_record,
+                0x8D,
+                0x01,
+                0x80,
             ]
         );
     }
