@@ -702,7 +702,7 @@ pub(crate) fn plan_full_translation_installation(
         layout,
         cross_domain_material.consumer_catalog_runtime_layout()?,
         cold_request_presentation.mapper_register,
-        runtime_code::chr_selector::ConsumerFontPageRegisters {
+        runtime_code::consumer_font_page::ConsumerFontPageRegisters {
             unit_command: consumer_codebook.mapper_register_for("unit_command_menu")?,
             map_menu: consumer_codebook.mapper_register_for("map_menu")?,
             ending_record: consumer_codebook.mapper_register_for("ending_chapter_record")?,

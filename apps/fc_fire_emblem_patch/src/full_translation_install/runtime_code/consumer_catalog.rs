@@ -14,10 +14,7 @@ use super::{
 };
 use crate::{
     dialogue_inventory::switchable_cpu_to_file_offset,
-    full_translation_install::{
-        consumer_catalog::ConsumerCatalogRuntimeLayout,
-        runtime_state_storage::CONSUMER_CATALOG_PAGE,
-    },
+    full_translation_install::consumer_catalog::ConsumerCatalogRuntimeLayout,
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
 };
@@ -123,9 +120,10 @@ pub(super) fn build_consumer_catalog_runtime(
     code_origin: u16,
     code_page: u8,
     entry_stub_origin: u16,
+    font_page_activation: u16,
     layout: ConsumerCatalogRuntimeLayout,
 ) -> Result<ConsumerCatalogRuntime> {
-    let code_routine = build_catalog_append_runtime(code_origin, layout)?;
+    let code_routine = build_catalog_append_runtime(code_origin, font_page_activation, layout)?;
     let mut next = entry_stub_origin;
     let mut fixed_routines = Vec::new();
     for site in HOOK_SITES {
@@ -226,6 +224,7 @@ fn build_fixed_bridge(origin: u16, appender: u16, code_page: u8) -> Result<Vec<u
 
 fn build_catalog_append_runtime(
     origin: u16,
+    font_page_activation: u16,
     layout: ConsumerCatalogRuntimeLayout,
 ) -> Result<RuntimeRoutine> {
     let mut instructions = vec![Instruction::Tay];
@@ -385,7 +384,7 @@ fn build_catalog_append_runtime(
     patch_jump(&mut instructions, name_prefix, name_prefix_target);
     instructions.extend([
         Instruction::LdaIndirectY(0x00),
-        Instruction::StaAbsolute(CONSUMER_CATALOG_PAGE),
+        Instruction::JsrAbsolute(font_page_activation),
         Instruction::Iny,
     ]);
     let copy_loop = next_address(origin, &instructions)?;
@@ -522,7 +521,8 @@ mod tests {
 
     #[test]
     fn three_five_byte_stubs_fill_the_remaining_producer_cave() {
-        let runtime = build_consumer_catalog_runtime(0xA600, 0x30, 0xF7F8, layout()).unwrap();
+        let runtime =
+            build_consumer_catalog_runtime(0xA600, 0x30, 0xF7F8, 0xF620, layout()).unwrap();
 
         assert_eq!(runtime.fixed_routines.len(), 4);
         assert!(
@@ -561,9 +561,36 @@ mod tests {
 
     #[test]
     fn all_catalog_hooks_are_typed_three_byte_calls() {
-        let runtime = build_consumer_catalog_runtime(0xA600, 0x30, 0xF7F8, layout()).unwrap();
+        let runtime =
+            build_consumer_catalog_runtime(0xA600, 0x30, 0xF7F8, 0xF620, layout()).unwrap();
 
         assert_eq!(runtime.hooks.len(), HOOK_SITES.len());
         assert!(runtime.hooks.iter().all(|hook| hook.bytes.len() == 3));
+    }
+
+    #[test]
+    fn dynamic_name_page_uses_the_shared_screen_page_activation() {
+        let activation = 0xF620;
+        let runtime =
+            build_consumer_catalog_runtime(0xA600, 0x30, 0xF7F8, activation, layout()).unwrap();
+        let call = [
+            0xB1,
+            0x00,
+            0x20,
+            activation as u8,
+            (activation >> 8) as u8,
+            0xC8,
+        ];
+
+        assert_eq!(
+            runtime
+                .code_routine
+                .bytes
+                .windows(call.len())
+                .filter(|window| *window == call)
+                .count(),
+            1,
+            "unit/enemy page prefix must publish and map through the shared activation"
+        );
     }
 }

@@ -55,7 +55,7 @@ pub(super) const REQUEST_SOURCE_ENTRY_INDEX: u16 = REQUEST_SOURCE_DIRECTORY_SELE
 
 #[cfg(test)]
 mod tests {
-    use super::super::runtime_state_storage::{CANDIDATE_END, CONSUMER_CATALOG_PAGE};
+    use super::super::runtime_state_storage::{CANDIDATE_END, CONSUMER_FONT_PAGE};
     use super::*;
 
     /// 커서와 요청 정체성은 공유 계약 뒤에 붙고 카탈로그 페이지 바로 앞에서 끝나야
@@ -67,7 +67,7 @@ mod tests {
             CANDIDATE_START + SHARED_CONTRACT_BYTE_COUNT
         );
         assert!(CURSOR_OVERLAY_TILES < CANDIDATE_END);
-        assert_eq!(REQUEST_SOURCE_ENTRY_INDEX + 1, CONSUMER_CATALOG_PAGE);
+        assert_eq!(REQUEST_SOURCE_ENTRY_INDEX + 1, CONSUMER_FONT_PAGE);
     }
 
     /// 네 바이트에 무엇이 들어가는지가 설계 결정이다. 주소는 항목이 담으므로
@@ -101,7 +101,7 @@ mod tests {
 
     #[test]
     fn catalog_page_ends_the_reservation_after_the_dialogue_identity() {
-        assert_eq!(REQUEST_SOURCE_ENTRY_INDEX + 1, CONSUMER_CATALOG_PAGE);
-        assert_eq!(CONSUMER_CATALOG_PAGE, CANDIDATE_END);
+        assert_eq!(REQUEST_SOURCE_ENTRY_INDEX + 1, CONSUMER_FONT_PAGE);
+        assert_eq!(CONSUMER_FONT_PAGE, CANDIDATE_END);
     }
 }

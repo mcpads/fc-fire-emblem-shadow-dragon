@@ -27,6 +27,7 @@ mod chr_ram_ownership;
 pub(in crate::full_translation_install) mod chr_selector;
 pub(in crate::full_translation_install) mod chr_source_state;
 mod consumer_catalog;
+pub(in crate::full_translation_install) mod consumer_font_page;
 pub(in crate::full_translation_install) mod dispatcher_gate;
 mod dynamic_producer;
 mod fixed_cfg_cycles;
@@ -61,6 +62,9 @@ pub(in crate::full_translation_install) enum DialogueRuntimeHookRole {
     ConsumerCatalogItemAppender,
     ConsumerCatalogUnitAppender,
     ConsumerCatalogClassAppender,
+    ConsumerFontPagePublisher,
+    ConsumerFontPageOpen,
+    ConsumerFontPageClose,
 }
 
 /// 훅이 가져가는 원본 자리다.
@@ -141,13 +145,16 @@ impl DialogueRuntimeCodePlan {
             DialogueRuntimeHookRole::ConsumerCatalogItemAppender,
             DialogueRuntimeHookRole::ConsumerCatalogUnitAppender,
             DialogueRuntimeHookRole::ConsumerCatalogClassAppender,
+            DialogueRuntimeHookRole::ConsumerFontPagePublisher,
+            DialogueRuntimeHookRole::ConsumerFontPageOpen,
+            DialogueRuntimeHookRole::ConsumerFontPageClose,
         ]
         .iter()
         .all(|role| roles.contains(role))
             && self
                 .fixed_routines
                 .iter()
-                .any(|routine| routine.role == "fixed and catalog consumer CHR page selector")
+                .any(|routine| routine.role == "consumer font page activation")
     }
 }
 
@@ -170,7 +177,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     layout: resolve_request::MaterialLayout,
     consumer_catalog_layout: ConsumerCatalogRuntimeLayout,
     cold_request_mapper_register: u8,
-    consumer_font_pages: chr_selector::ConsumerFontPageRegisters,
+    consumer_font_pages: consumer_font_page::ConsumerFontPageRegisters,
 ) -> Result<DialogueRuntimeCodePlan> {
     let bank_restore = bind_bank_restore_contract(candidate)?;
     bind_quiet_frame_gate(source, candidate)?;
@@ -179,12 +186,13 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     lifecycle::bind_lifecycle_sites(source, candidate)?;
     chr_selector::bind_selector_chain_site(candidate)?;
     chr_selector::bind_selector_cave(candidate)?;
+    consumer_font_page::bind_consumer_font_page_lifetime(source, candidate)?;
     chr_ram_ownership::bind_shared_chr_ram_ownership_boundary(candidate)?;
     dynamic_producer::bind_hook_sites(source, candidate)?;
     consumer_catalog::bind_consumer_catalog_sites(source, candidate)?;
     let chr_source_state = chr_source_state::bind_chr_source_state(candidate)?;
 
-    let mut selector = chr_selector::build_chr_selector(
+    let selector = chr_selector::build_chr_selector(
         chr_selector::SELECTOR_CAVE_ORIGIN,
         CHR_BANK_VALUE_REGISTER,
         cold_request_mapper_register,
@@ -251,20 +259,34 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         resolved_page_publication_address,
     )?;
     let initial_request_publisher_address = initial_request_publisher.address;
-    let consumer_font_selector_origin = initial_request_publisher.address
+    let consumer_font_page_activation_origin = initial_request_publisher.address
         + u16::try_from(initial_request_publisher.bytes.len())
             .context("initial request publisher length overflow")?;
-    let consumer_font_selector = chr_selector::build_consumer_font_selector(
-        consumer_font_selector_origin,
+    let consumer_font_page_activation = consumer_font_page::build_consumer_font_page_activation(
+        consumer_font_page_activation_origin,
         CHR_BANK_VALUE_REGISTER,
         consumer_font_pages,
     )?;
-    selector = chr_selector::build_chr_selector(
-        chr_selector::SELECTOR_CAVE_ORIGIN,
-        CHR_BANK_VALUE_REGISTER,
-        cold_request_mapper_register,
-        consumer_font_selector.address,
+    let composite_font_page_publisher_origin = consumer_font_page_activation.address
+        + u16::try_from(consumer_font_page_activation.bytes.len())
+            .context("consumer font page activation length overflow")?;
+    let composite_font_page_publisher = consumer_font_page::build_composite_font_page_publisher(
+        composite_font_page_publisher_origin,
+        consumer_font_page_activation.address,
+        consumer_font_pages,
     )?;
+    let consumer_font_page_open_origin = composite_font_page_publisher.address
+        + u16::try_from(composite_font_page_publisher.bytes.len())
+            .context("composite font page publisher length overflow")?;
+    let consumer_font_page_open = consumer_font_page::build_consumer_font_page_open(
+        consumer_font_page_open_origin,
+        consumer_font_page_activation.address,
+    )?;
+    let consumer_font_page_close_origin = consumer_font_page_open.address
+        + u16::try_from(consumer_font_page_open.bytes.len())
+            .context("consumer font page open length overflow")?;
+    let consumer_font_page_close =
+        consumer_font_page::build_consumer_font_page_close(consumer_font_page_close_origin)?;
     let lifecycle = lifecycle::build_lifecycle_suite(
         next_page_resolver.address,
         code_page,
@@ -296,6 +318,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         catalog_code_origin,
         code_page,
         catalog_stub_origin,
+        consumer_font_page_activation.address,
         consumer_catalog_layout,
     )?;
     ensure_disjoint(&[&gate], dispatcher_gate::RECLAIMED_GATE_CAVE_END)?;
@@ -376,7 +399,10 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
             &ownership_transfer,
             &resolved_page_publication,
             &initial_request_publisher,
-            &consumer_font_selector,
+            &consumer_font_page_activation,
+            &composite_font_page_publisher,
+            &consumer_font_page_open,
+            &consumer_font_page_close,
         ],
         chr_selector::SELECTOR_CAVE_END,
     )?;
@@ -390,7 +416,10 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         ownership_transfer,
         resolved_page_publication,
         initial_request_publisher,
-        consumer_font_selector,
+        consumer_font_page_activation,
+        composite_font_page_publisher,
+        consumer_font_page_open,
+        consumer_font_page_close,
     ];
     fixed_routines.extend(dynamic_producers.fixed_routines);
     fixed_routines.extend(consumer_catalog.fixed_routines);
@@ -505,6 +534,13 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     ]);
     hooks.extend(dynamic_producers.hooks);
     hooks.extend(consumer_catalog.hooks);
+    hooks.push(consumer_font_page::page_publisher_hook(
+        composite_font_page_publisher_origin,
+    )?);
+    hooks.extend(consumer_font_page::screen_lifetime_hooks(
+        consumer_font_page_open_origin,
+        consumer_font_page_close_origin,
+    )?);
 
     let plan = DialogueRuntimeCodePlan {
         code_routines,
