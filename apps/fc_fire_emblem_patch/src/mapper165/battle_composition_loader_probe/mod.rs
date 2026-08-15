@@ -26,9 +26,14 @@ use super::{
     },
 };
 
+mod dialogue_cache_refresh;
 mod dynamic_assignment;
 mod runtime;
 
+use dialogue_cache_refresh::{
+    bind_final_dialogue_cache_refresh_base, bind_final_dialogue_cache_refresh_source,
+    install_final_dialogue_cache_refresh,
+};
 use dynamic_assignment::{
     build_dynamic_assignment_routines, build_dynamic_assignment_routines_for_layout,
 };
@@ -151,6 +156,10 @@ const CACHE_UPLOADED_MARKER: u8 = 0x80;
 const UPLOAD_RENDER_MASK: u8 = 0x06;
 const SELECTED_COLOR_BITMAP_ADDRESS: u16 = 0x07C4;
 const SELECTED_COLOR_BITMAP_BYTE_COUNT: u8 = 27;
+// The bitmap is dead after remap allocation. Its final byte then records which projected
+// dialogue recipe was actually composed, without claiming another persistent RAM range.
+const CACHED_DIALOGUE_SELECTOR_ADDRESS: u16 =
+    SELECTED_COLOR_BITMAP_ADDRESS + SELECTED_COLOR_BITMAP_BYTE_COUNT as u16 - 1;
 const REMAP_STATE_ADDRESS: u16 = 0x07DF;
 const REMAP_PAIR_COUNT_MASK: u8 = 0x1E;
 const REMAP_PAIR_TABLE_ADDRESS: u16 = 0x07E0;
@@ -326,6 +335,7 @@ pub(crate) fn build_battle_composition_loader(
     } = build;
     let source_rom = Rom::from_path(source_path)?;
     source_rom.verify_supported_japanese()?;
+    bind_final_dialogue_cache_refresh_source(&source_rom)?;
     let base = fs::read(base_path).with_context(|| format!("read {}", base_path.display()))?;
     let base_sha1 = sha1_hex(&base);
     let base_report_bytes = fs::read(base_report_path)
@@ -335,6 +345,7 @@ pub(crate) fn build_battle_composition_loader(
             .with_context(|| format!("parse {}", base_report_path.display()))?;
     validate_base_contract(&base_contract, &base_sha1)?;
     let base_rom = Rom::parse(base.clone()).context("parse battle text runtime base")?;
+    bind_final_dialogue_cache_refresh_base(&base_rom)?;
     ensure!(
         base_rom.mapper() == OUTPUT_MAPPER && base_rom.prg().len() == EXPANDED_PRG_SIZE,
         "battle composition loader base layout changed"
@@ -500,6 +511,7 @@ pub(crate) fn build_battle_composition_loader(
             )],
         )?,
     )?;
+    install_final_dialogue_cache_refresh(&mut image, layout)?;
     image.verify_all_changes_tracked(&base)?;
     let runtime_tracked_write_count = image.writes().len();
     let output = image.into_data();

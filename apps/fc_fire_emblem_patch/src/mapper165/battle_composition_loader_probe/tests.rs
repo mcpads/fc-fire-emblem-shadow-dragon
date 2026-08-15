@@ -101,6 +101,41 @@ fn dynamic_assignment_collects_every_runtime_field_and_projected_dialogue() {
 }
 
 #[test]
+fn successful_allocation_records_the_projected_dialogue_cache_key() {
+    let routines = build_dynamic_assignment_routines(RecipeDirectoryAddresses {
+        unit: 0xB020,
+        enemy: 0xB088,
+        class: 0xB112,
+        item: 0xB142,
+        terrain: 0xB1F8,
+        dialogue: 0xB218,
+    })
+    .unwrap();
+    let bytes = &routines
+        .iter()
+        .find(|routine| routine.role == "protected-color remap allocation")
+        .unwrap()
+        .bytes;
+
+    assert!(bytes.windows(11).any(|window| {
+        window
+            == [
+                0x8D,
+                REMAP_STATE_ADDRESS as u8,
+                (REMAP_STATE_ADDRESS >> 8) as u8,
+                0x20,
+                PROJECT_DIALOGUE_SELECTOR_ADDRESS as u8,
+                (PROJECT_DIALOGUE_SELECTOR_ADDRESS >> 8) as u8,
+                0x8D,
+                CACHED_DIALOGUE_SELECTOR_ADDRESS as u8,
+                (CACHED_DIALOGUE_SELECTOR_ADDRESS >> 8) as u8,
+                0xA9,
+                0x00,
+            ]
+    }));
+}
+
+#[test]
 fn participant_recipe_dispatch_preserves_the_computed_source_index() {
     let directories = RecipeDirectoryAddresses {
         unit: 0xB020,
