@@ -11,10 +11,6 @@ use super::super::maximum_dialogue_page::{COMPLETED_PAGE_COUNT, SCREEN_ROLE, TAR
 const EXPECTED_FRAME_OFFSETS: [u64; 6] = [0, 7, 19, 43, 82, 171];
 const EXPECTED_SAMPLE_ARTIFACT_ROLES: [&str; 4] =
     ["state.json", "prgram.bin", "nametable.bin", "screen.png"];
-const EXPECTED_INITIAL_SELECTOR_ARTIFACT_ROLES: [&str; 2] = [
-    "initial-selector/events.json",
-    "initial-selector/c8-write.mss",
-];
 const EXPECTED_TEMPORAL_VISUAL_ARTIFACT_ROLES: [&str; 6] = [
     "temporal-contact-sheets/frame-0000.png",
     "temporal-contact-sheets/frame-0007.png",
@@ -44,7 +40,6 @@ const MAIN_STATE_ADDRESS: usize = 0x84;
 const INITIAL_SELECTOR_ADDRESS: u64 = 0xF990;
 const INITIAL_SELECTOR_WRITE_ADDRESS: u64 = 0x8001;
 const INITIAL_SELECTOR_WRITE_PC: u64 = 0xF375;
-const INITIAL_SELECTOR_MAPPER_REGISTER: u64 = 0xC8;
 const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1A\n";
 
 pub(super) struct MaximumDialogueRuntimeEvidence {
@@ -200,7 +195,11 @@ pub(super) fn verify_maximum_dialogue_runtime_evidence(
     let parent = manifest_path
         .parent()
         .context("installed maximum-dialogue evidence has no parent directory")?;
-    verify_initial_selector_evidence(parent, &manifest.initial_selector)?;
+    let initial_mapper_register = group_mapper_registers
+        .first()
+        .copied()
+        .context("maximum-dialogue runtime has no initial mapper register")?;
+    verify_initial_selector_evidence(parent, &manifest.initial_selector, initial_mapper_register)?;
     let mut sample_tree = Vec::new();
     let mut unique_nametables = BTreeSet::new();
     let mut pages_with_visual_phase_change = 0;
@@ -350,21 +349,31 @@ pub(super) fn verify_maximum_dialogue_runtime_evidence(
 fn verify_initial_selector_evidence(
     parent: &Path,
     observation: &InitialSelectorObservation,
+    expected_mapper_register: u8,
 ) -> Result<()> {
+    let expected_write_artifact =
+        format!("initial-selector/{expected_mapper_register:02x}-write.mss");
+    let expected_artifact_roles = [
+        "initial-selector/events.json",
+        expected_write_artifact.as_str(),
+    ];
     ensure!(
         observation.entry_method == "mapper165_bridge_then_chapter_7_pre_castle_command_state"
             && observation.selector_address == "0xF990"
             && observation.target_hit_ordinal == 2
             && observation.supply_state == "0x05"
             && observation.supply_pointer == "0x8FF1"
-            && observation.selected_mapper_register == "0xC8"
-            && observation.artifact_roles == EXPECTED_INITIAL_SELECTOR_ARTIFACT_ROLES,
+            && parse_hex_u8(
+                &observation.selected_mapper_register,
+                "initial-selector mapper register",
+            )? == expected_mapper_register
+            && observation.artifact_roles == expected_artifact_roles,
         "installed maximum-dialogue initial-selector observation changed"
     );
 
     let mut tree = Vec::new();
     let events_bytes = read_tree_artifact(parent, "initial-selector/events.json", &mut tree)?;
-    read_tree_artifact(parent, "initial-selector/c8-write.mss", &mut tree)?;
+    read_tree_artifact(parent, &expected_write_artifact, &mut tree)?;
     ensure!(
         sha1_hex(&tree) == observation.artifact_tree_sha1,
         "installed maximum-dialogue initial-selector artifact tree SHA-1 changed"
@@ -389,7 +398,7 @@ fn verify_initial_selector_evidence(
             && event_string(&events[2], "kind")? == "write"
             && event_u64(&events[2], "address")? == INITIAL_SELECTOR_WRITE_ADDRESS
             && event_u64(&events[2], "pc")? == INITIAL_SELECTOR_WRITE_PC
-            && event_u64(&events[2], "value")? == INITIAL_SELECTOR_MAPPER_REGISTER
+            && event_u64(&events[2], "value")? == u64::from(expected_mapper_register)
             && event_u64(&events[1], "frame")? == event_u64(&events[2], "frame")?,
         "installed maximum-dialogue initial-selector event sequence changed"
     );

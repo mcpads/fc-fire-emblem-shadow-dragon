@@ -29,6 +29,13 @@ const FIRST_CANDIDATE_ID: u8 = 0x35;
 const LAST_CANDIDATE_ID: u8 = 0x01;
 const CANDIDATE_COUNT: usize = 53;
 
+/// The ending phase that selects one surviving/dead character record.
+pub(crate) const ENDING_CHARACTER_EPILOGUE_SELECTOR_PHASE: u8 = 0x0F;
+/// The following phase keeps the selected dialogue page visible until its outer
+/// wait handler advances. The main-dialogue terminal state alone does not end
+/// font ownership while this phase is active.
+pub(crate) const ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE: u8 = 0x10;
+
 pub(super) const SOURCE_REGIONS: &[SourceRegionSpec] = &[
     SourceRegionSpec::code_sha1(
         "initialize_ending_character_epilogue",
@@ -218,9 +225,9 @@ pub(super) fn bind_ending_character_epilogue(
 
     Ok(EndingCharacterEpilogueTranslationSurface {
         screen_role: "ending_character_epilogue",
-        selector_phase: 0x0F,
+        selector_phase: ENDING_CHARACTER_EPILOGUE_SELECTOR_PHASE,
         selector_phase_hex: "0x0F",
-        visible_dialogue_phase: 0x10,
+        visible_dialogue_phase: ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE,
         visible_dialogue_phase_hex: "0x10",
         table_selector_address: 0x77F4,
         table_selector_address_hex: "0x77F4",

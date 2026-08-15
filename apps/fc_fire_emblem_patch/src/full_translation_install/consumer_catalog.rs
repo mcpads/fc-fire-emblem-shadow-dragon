@@ -19,7 +19,10 @@ use serde::Serialize;
 
 use crate::{
     font_slots::{ACTIVE_HANGUL_SLOT_COUNT, FONT_PAGE_SIZE, active_hangul_codes},
-    mapper165::{dialogue_probe_font::build_font_page_by_code, encode_chr_page_register},
+    mapper165::{
+        dialogue_probe_font::build_font_page_by_code, encode_chr_page_register,
+        font_pair_projection::RightFontPageProjection,
+    },
     semantic_translation::SemanticTranslationPlan,
     sha1_hex,
     text_inventory::{FixedTextLogicalByte, FixedTextPlan, FixedTextPlannedEntry},
@@ -31,6 +34,7 @@ use packing::{CatalogNameDemand, pack_name_demands};
 
 pub(super) struct ConsumerCatalogInputs<'a> {
     pub(super) source_font_page: &'a [u8],
+    pub(super) source_chr: &'a [u8],
     pub(super) first_physical_page: u8,
     pub(super) available_page_count: usize,
     pub(super) preserved_unit_ui_display_codes: &'a BTreeSet<u8>,
@@ -73,15 +77,12 @@ impl ConsumerCatalogPlan {
         &self.base_assignments
     }
 
-    pub(super) fn mapper_registers(&self) -> Result<[u8; 2]> {
+    pub(super) fn mapper_routes(&self) -> Result<[u8; 2]> {
         ensure!(
             self.pages.len() == 2,
             "consumer catalog selector requires exactly two pages"
         );
-        Ok([
-            self.pages[0].mapper_register(),
-            self.pages[1].mapper_register(),
-        ])
+        Ok([self.pages[0].mapper_route(), self.pages[1].mapper_route()])
     }
 
     pub(super) fn page_for_name(
@@ -122,6 +123,7 @@ pub(super) struct ConsumerCatalogPage {
     page_index: usize,
     physical_page: u8,
     mapper_register: u8,
+    mapper_route: u8,
     base_glyph_count: usize,
     additional_name_glyph_count: usize,
     slot_demand: usize,
@@ -140,8 +142,8 @@ impl ConsumerCatalogPage {
         self.physical_page
     }
 
-    pub(super) fn mapper_register(&self) -> u8 {
-        self.mapper_register
+    pub(super) fn mapper_route(&self) -> u8 {
+        self.mapper_route
     }
 
     pub(super) fn assignments(&self) -> &BTreeMap<char, u8> {
@@ -267,7 +269,20 @@ pub(super) fn plan_consumer_catalog(
             glyphs_by_code.len() == assignments.len(),
             "catalog page {page_index} assigns one code to multiple glyphs"
         );
-        let bytes = build_font_page_by_code(inputs.source_font_page, &glyphs_by_code)?;
+        let mut bytes = build_font_page_by_code(inputs.source_font_page, &glyphs_by_code)?;
+        let pair_projection = RightFontPageProjection::for_screen_roles(
+            inputs.source_chr,
+            &[
+                "unit_summary",
+                "unit_status",
+                "item_inventory_list",
+                "item_action_menu",
+                "item_equip_result",
+                "item_use_result",
+            ],
+            0,
+        )?;
+        pair_projection.apply_to_page(&mut bytes)?;
         for code in &preserved_active_codes {
             let tile_start = usize::from(*code) * crate::font_slots::FONT_TILE_SIZE;
             let tile_end = tile_start + crate::font_slots::FONT_TILE_SIZE;
@@ -285,11 +300,13 @@ pub(super) fn plan_consumer_catalog(
                 })
                 .count()
         };
+        let mapper_register = encode_chr_page_register(physical_page)?;
         pages.push(ConsumerCatalogPage {
             id: format!("unit_ui_catalog_{page_index:02}"),
             page_index,
             physical_page,
-            mapper_register: encode_chr_page_register(physical_page)?,
+            mapper_register,
+            mapper_route: pair_projection.encode_mapper_route(mapper_register)?,
             base_glyph_count: base_glyphs.len(),
             additional_name_glyph_count: name_glyphs.len(),
             slot_demand: assignments.len() + preserved_active_codes.len(),

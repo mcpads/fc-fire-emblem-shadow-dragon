@@ -36,12 +36,12 @@ pub(crate) use battle_workspace::{
     import_battle_dialogue_draft, plan_battle_dialogue_records, plan_battle_dialogue_reinsertion,
     validate_battle_dialogue_workspace,
 };
+#[cfg(test)]
+pub(crate) use bundle::EncodedMainDialogueRegion;
 pub(crate) use bundle::{
     EncodedMainDialogueBundle, MainDialogueBundlePlan, MainDialoguePageWorkset,
-    plan_all_main_dialogue_records, plan_main_dialogue_bundle,
+    MainDialoguePointerWrite, plan_all_main_dialogue_records, plan_main_dialogue_bundle,
 };
-#[cfg(test)]
-pub(crate) use bundle::{EncodedMainDialogueRegion, MainDialoguePointerWrite};
 pub(crate) use display_plan::MainDialogueDisplayPlan;
 pub(crate) use glyph_workset::{
     RuntimeEvidence as MaximumDialogueRuntimeEvidence, analyze_main_dialogue_glyph_workset,

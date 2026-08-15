@@ -39,8 +39,7 @@ use anyhow::{Context, Result, ensure};
 use super::{
     RuntimeRoutine,
     chr_source_state::{
-        CHR_RAM_BANK_VALUE, CHR_SOURCE_HIGH_BITS, DIALOGUE_FD_SOURCE_PAGE, RIGHT_FD_CHR_REGISTER,
-        RIGHT_FD_SOURCE_SHADOW,
+        CHR_RAM_BANK_VALUE, CHR_SOURCE_HIGH_BITS, DIALOGUE_FD_SOURCE_PAGE, RIGHT_FD_SOURCE_SHADOW,
     },
     dispatcher_gate::{
         DISPATCHER_STATE, STATE_COLD_REQUESTED, STATE_RESIDENT_GROUP_OVERLAY_REQUESTED,
@@ -50,7 +49,7 @@ use super::{
     transport::{REQUEST_STATE, STATE_READY},
 };
 use crate::{
-    mapper165::selector_safety::select_register_instruction,
+    chapter_transition::{ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE, ENDING_RECORD_PHASE_ADDRESS},
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
     typed_source::decode_rp2a03_sequence,
@@ -130,9 +129,9 @@ pub(super) fn selector_hook_bytes(selector: u16) -> [u8; 3] {
 
 pub(super) fn build_chr_selector(
     origin: u16,
-    bank_value_register: u16,
     cold_request_mapper_register: u8,
     fallback: u16,
+    project_dialogue_page: u16,
 ) -> Result<RuntimeRoutine> {
     let mut instructions = vec![
         // 사슬이 나르는 누산기와 상태를 밀어 둔다.
@@ -161,8 +160,18 @@ pub(super) fn build_chr_selector(
         Instruction::LdaAbsolute(DISPATCHER_STATE),
         Instruction::CmpImmediate(TERMINAL_STATE),
     ]);
-    let terminal_placeholder = instructions.len();
-    instructions.push(Instruction::BcsAbsolute(origin));
+    let active_dialogue_placeholder = instructions.len();
+    instructions.push(Instruction::BccAbsolute(origin));
+    let past_terminal_placeholder = instructions.len();
+    instructions.push(Instruction::BneAbsolute(origin));
+    instructions.extend([
+        Instruction::LdaAbsolute(ENDING_RECORD_PHASE_ADDRESS),
+        Instruction::CmpImmediate(ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE),
+    ]);
+    let terminal_outside_epilogue_placeholder = instructions.len();
+    instructions.push(Instruction::BneAbsolute(origin));
+    let visible_dialogue = next_address(origin, &instructions)?;
+    instructions[active_dialogue_placeholder] = Instruction::BccAbsolute(visible_dialogue);
     instructions.extend([
         Instruction::LdaZeroPage(RIGHT_FD_SOURCE_SHADOW),
         Instruction::OraZeroPage(CHR_SOURCE_HIGH_BITS),
@@ -182,10 +191,8 @@ pub(super) fn build_chr_selector(
     let complete_request = next_address(origin, &instructions)?;
     instructions[complete_request_placeholder] = Instruction::BeqAbsolute(complete_request);
     instructions.extend([
-        Instruction::LdaImmediate(RIGHT_FD_CHR_REGISTER),
-        select_register_instruction(),
         Instruction::LdaImmediate(CHR_RAM_BANK_VALUE),
-        Instruction::StaAbsolute(bank_value_register),
+        Instruction::JsrAbsolute(project_dialogue_page),
         Instruction::Pla,
         Instruction::Plp,
         Instruction::Rts,
@@ -193,17 +200,17 @@ pub(super) fn build_chr_selector(
     let incomplete_request = next_address(origin, &instructions)?;
     instructions[incomplete_request_placeholder] = Instruction::BneAbsolute(incomplete_request);
     instructions.extend([
-        Instruction::LdaImmediate(RIGHT_FD_CHR_REGISTER),
-        select_register_instruction(),
         Instruction::LdaImmediate(cold_request_mapper_register),
-        Instruction::StaAbsolute(bank_value_register),
+        Instruction::JsrAbsolute(project_dialogue_page),
         Instruction::Pla,
         Instruction::Plp,
         Instruction::Rts,
     ]);
     let unsupported_state = next_address(origin, &instructions)?;
     instructions[unsupported_state_placeholder] = Instruction::BneAbsolute(unsupported_state);
-    instructions[terminal_placeholder] = Instruction::BcsAbsolute(unsupported_state);
+    instructions[past_terminal_placeholder] = Instruction::BneAbsolute(unsupported_state);
+    instructions[terminal_outside_epilogue_placeholder] =
+        Instruction::BneAbsolute(unsupported_state);
     instructions[wrong_fd_source_placeholder] = Instruction::BneAbsolute(unsupported_state);
     instructions.extend([
         Instruction::Pla,
@@ -221,15 +228,12 @@ pub(super) fn build_chr_selector(
 /// 요청 발행기가 NMI를 다시 켜기 전에 냉간 표시 페이지를 원자적으로 고른다.
 pub(super) fn build_cold_request_presentation_selector(
     origin: u16,
-    bank_value_register: u16,
     cold_request_mapper_register: u8,
+    project_dialogue_page: u16,
 ) -> Result<RuntimeRoutine> {
     let instructions = [
-        Instruction::LdaImmediate(RIGHT_FD_CHR_REGISTER),
-        select_register_instruction(),
         Instruction::LdaImmediate(cold_request_mapper_register),
-        Instruction::StaAbsolute(bank_value_register),
-        Instruction::Rts,
+        Instruction::JmpAbsolute(project_dialogue_page),
     ];
     Ok(RuntimeRoutine {
         role: "cold-request dialogue presentation selector",
@@ -242,10 +246,14 @@ pub(super) fn build_cold_request_presentation_selector(
 mod tests {
     use super::*;
 
+    const PROJECT_DIALOGUE_PAGE: u16 = 0xF480;
+
     /// 알 수 없는 상태에서 새 페이지를 고르면 원본의 다른 화면을 침범할 수 있다.
     #[test]
     fn an_unsupported_state_hands_the_existing_chain_control() {
-        let routine = build_chr_selector(0xF4A0, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
+        let routine =
+            build_chr_selector(0xF4A0, 0xC8, SELECTOR_CHAIN_FALLBACK, PROJECT_DIALOGUE_PAGE)
+                .unwrap();
 
         assert_eq!(
             &routine.bytes[routine.bytes.len() - 3..],
@@ -261,7 +269,9 @@ mod tests {
     /// 다른 값이므로 selector가 그것을 읽으면 준비된 페이지를 영원히 고르지 못한다.
     #[test]
     fn prg_bank_shadow_is_not_used_as_the_dialogue_lifetime() {
-        let routine = build_chr_selector(0xF4A0, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
+        let routine =
+            build_chr_selector(0xF4A0, 0xC8, SELECTOR_CHAIN_FALLBACK, PROJECT_DIALOGUE_PAGE)
+                .unwrap();
 
         assert!(!routine.bytes.windows(2).any(|window| window
             == [
@@ -280,13 +290,15 @@ mod tests {
         }));
     }
 
-    /// 준비 표식이 남아 있어도 원본 상태 머신이 종단·유휴 상태면 RAM을 다시 고르면
-    /// 안 된다. 수명 이탈 훅과 소비자 양쪽이 같은 경계를 지킨다.
+    /// 일반 대사는 terminal에서 원본 사슬로 돌아가지만, 엔딩 후일담은 바깥 phase
+    /// 0x10이 화면을 보존하는 동안 같은 준비된 페이지를 계속 선택한다.
     #[test]
-    fn terminal_dialogue_state_falls_through_to_the_existing_chain() {
-        let routine = build_chr_selector(0xF4A0, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
+    fn terminal_dialogue_state_is_retained_only_for_the_visible_epilogue_phase() {
+        let routine =
+            build_chr_selector(0xF4A0, 0xC8, SELECTOR_CHAIN_FALLBACK, PROJECT_DIALOGUE_PAGE)
+                .unwrap();
 
-        assert!(routine.bytes.windows(5).any(|window| {
+        assert!(routine.bytes.windows(14).any(|window| {
             window
                 == [
                     0xAD,
@@ -294,47 +306,53 @@ mod tests {
                     (DISPATCHER_STATE >> 8) as u8,
                     0xC9,
                     TERMINAL_STATE,
+                    0x90,
+                    window[6],
+                    0xD0,
+                    window[8],
+                    0xAD,
+                    ENDING_RECORD_PHASE_ADDRESS as u8,
+                    (ENDING_RECORD_PHASE_ADDRESS >> 8) as u8,
+                    0xC9,
+                    ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE,
                 ]
         }));
     }
 
-    /// 표시 중에는 FD만 CHR RAM을 보고 FE는 원본 배경을 계속 봐야 한다. 둘 다 RAM으로
-    /// 바꾸면 같은 타일 코드의 FD 글꼴과 FE 맵 패턴이 한 페이지에서 충돌한다.
-    /// MMC3는 «레지스터를 고른 뒤 값을 쓴다»는 순서도 함께 지킨다.
+    /// 표시 페이지 선택은 여기서 FD 하나를 하드코딩하지 않고, live FE 원천을 아는
+    /// 공통 투영기에 ready/cold 페이지를 모두 넘긴다.
     #[test]
-    fn the_ready_path_selects_only_fd_chr_ram_and_keeps_fe_on_source_rom() {
-        let routine = build_chr_selector(0xF4A0, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
-
-        let mut selections = Vec::new();
-        let mut index = 0;
-        while index + 9 < routine.bytes.len() {
-            if routine.bytes[index] == 0xA9
-                && routine.bytes[index + 2..index + 5] == [0x20, 0x58, 0xFA]
-                && routine.bytes[index + 5] == 0xA9
-                && routine.bytes[index + 7..index + 10] == [0x8D, 0x01, 0x80]
-            {
-                selections.push((routine.bytes[index + 1], routine.bytes[index + 6]));
-                index += 10;
-                continue;
-            }
-            index += 1;
-        }
+    fn ready_and_cold_paths_delegate_to_the_pair_projection() {
+        let routine =
+            build_chr_selector(0xF4A0, 0xC8, SELECTOR_CHAIN_FALLBACK, PROJECT_DIALOGUE_PAGE)
+                .unwrap();
 
         assert_eq!(
-            selections,
-            [
-                (RIGHT_FD_CHR_REGISTER, CHR_RAM_BANK_VALUE),
-                (RIGHT_FD_CHR_REGISTER, 0xC8),
-            ]
+            routine
+                .bytes
+                .windows(5)
+                .filter(|window| {
+                    window[0] == 0xA9
+                        && window[2..]
+                            == [
+                                0x20,
+                                PROJECT_DIALOGUE_PAGE as u8,
+                                (PROJECT_DIALOGUE_PAGE >> 8) as u8,
+                            ]
+                })
+                .map(|window| window[1])
+                .collect::<Vec<_>>(),
+            [CHR_RAM_BANK_VALUE, 0xC8]
         );
-        assert!(!selections.iter().any(|(register, _)| *register == 4));
     }
 
     /// RAM 내용은 원본 FD 페이지 0의 복제본 위에 만들어진다. 중앙 원천이 다른
     /// 페이지면 준비 표식만 믿지 않고 기존 selector 사슬로 넘겨야 한다.
     #[test]
     fn the_ready_path_is_guarded_by_the_dialogue_fd_source_page() {
-        let routine = build_chr_selector(0xF4A0, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
+        let routine =
+            build_chr_selector(0xF4A0, 0xC8, SELECTOR_CHAIN_FALLBACK, PROJECT_DIALOGUE_PAGE)
+                .unwrap();
 
         assert!(routine.bytes.windows(8).any(|window| {
             window
@@ -355,13 +373,25 @@ mod tests {
     /// 그 값을 A에 남기면 호출자가 그것을 자연 페이지 그림자에 저장해 화면이 깨진다.
     #[test]
     fn the_chain_accumulator_survives_both_paths() {
-        let routine = build_chr_selector(0xF4A0, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
+        let routine =
+            build_chr_selector(0xF4A0, 0xC8, SELECTOR_CHAIN_FALLBACK, PROJECT_DIALOGUE_PAGE)
+                .unwrap();
 
         assert_eq!(&routine.bytes[..2], [0x08, 0x48]);
         let selected_returns = routine
             .bytes
             .windows(6)
-            .filter(|window| *window == [0x8D, 0x01, 0x80, 0x68, 0x28, 0x60])
+            .filter(|window| {
+                *window
+                    == [
+                        0x20,
+                        PROJECT_DIALOGUE_PAGE as u8,
+                        (PROJECT_DIALOGUE_PAGE >> 8) as u8,
+                        0x68,
+                        0x28,
+                        0x60,
+                    ]
+            })
             .count();
         assert_eq!(
             selected_returns, 2,
@@ -377,17 +407,13 @@ mod tests {
                 (SELECTOR_CHAIN_FALLBACK >> 8) as u8,
             ]
         );
-        assert!(
-            !routine
-                .bytes
-                .windows(4)
-                .any(|window| window == [0x68, 0x28, 0xA9, RIGHT_FD_CHR_REGISTER])
-        );
     }
 
     #[test]
     fn cold_request_selection_uses_chr_rom_instead_of_partial_chr_ram() {
-        let routine = build_chr_selector(0xF4A0, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
+        let routine =
+            build_chr_selector(0xF4A0, 0xC8, SELECTOR_CHAIN_FALLBACK, PROJECT_DIALOGUE_PAGE)
+                .unwrap();
 
         assert_eq!(
             &routine.bytes[2..7],
@@ -405,26 +431,23 @@ mod tests {
             [0xC9, STATE_COLD_REQUESTED],
             "the same state load must next admit cold_requested"
         );
-        assert!(routine.bytes.windows(10).any(|window| {
+        assert!(routine.bytes.windows(5).any(|window| {
             window
                 == [
                     0xA9,
-                    RIGHT_FD_CHR_REGISTER,
-                    0x20,
-                    0x58,
-                    0xFA,
-                    0xA9,
                     0xC8,
-                    0x8D,
-                    0x01,
-                    0x80,
+                    0x20,
+                    PROJECT_DIALOGUE_PAGE as u8,
+                    (PROJECT_DIALOGUE_PAGE >> 8) as u8,
                 ]
         }));
     }
 
     #[test]
     fn resident_group_overlay_uses_the_same_safe_presentation() {
-        let routine = build_chr_selector(0xF4A0, 0x8001, 0xC8, SELECTOR_CHAIN_FALLBACK).unwrap();
+        let routine =
+            build_chr_selector(0xF4A0, 0xC8, SELECTOR_CHAIN_FALLBACK, PROJECT_DIALOGUE_PAGE)
+                .unwrap();
 
         assert!(
             routine
@@ -432,41 +455,31 @@ mod tests {
                 .windows(3)
                 .any(|window| { window == [0xC9, STATE_RESIDENT_GROUP_OVERLAY_REQUESTED, 0xF0] })
         );
-        assert!(routine.bytes.windows(10).any(|window| {
+        assert!(routine.bytes.windows(5).any(|window| {
             window
                 == [
                     0xA9,
-                    RIGHT_FD_CHR_REGISTER,
-                    0x20,
-                    0x58,
-                    0xFA,
-                    0xA9,
                     0xC8,
-                    0x8D,
-                    0x01,
-                    0x80,
+                    0x20,
+                    PROJECT_DIALOGUE_PAGE as u8,
+                    (PROJECT_DIALOGUE_PAGE >> 8) as u8,
                 ]
         }));
     }
 
     #[test]
-    fn atomic_cold_selector_maps_only_the_fd_window() {
-        let routine = build_cold_request_presentation_selector(0xF5A0, 0x8001, 0xC8).unwrap();
+    fn atomic_cold_selector_tail_calls_the_pair_projection() {
+        let routine =
+            build_cold_request_presentation_selector(0xF5A0, 0xC8, PROJECT_DIALOGUE_PAGE).unwrap();
 
         assert_eq!(
             routine.bytes,
             [
                 0xA9,
-                RIGHT_FD_CHR_REGISTER,
-                0x20,
-                0x58,
-                0xFA,
-                0xA9,
                 0xC8,
-                0x8D,
-                0x01,
-                0x80,
-                0x60
+                0x4C,
+                PROJECT_DIALOGUE_PAGE as u8,
+                (PROJECT_DIALOGUE_PAGE >> 8) as u8,
             ]
         );
     }

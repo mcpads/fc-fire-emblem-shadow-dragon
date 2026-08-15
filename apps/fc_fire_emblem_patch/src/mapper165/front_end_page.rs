@@ -18,6 +18,9 @@ use crate::{
 use super::{
     dialogue_probe_font::{assign_glyph_codes_excluding, build_font_page},
     encode_chr_page_register,
+    font_pair_projection::{
+        RightFontPageProjection, TranslatedFePageSelection, WRITE_TRANSLATED_CHR_PAGE_ADDRESS,
+    },
 };
 
 pub(super) const PAGE_ROUTINE_ADDRESS: u16 = 0xFC60;
@@ -66,11 +69,13 @@ pub(super) struct FrontEndPagePlan {
 
 pub(super) fn plan_front_end_page(
     parity_rom: &Rom,
+    source_rom: &Rom,
     manifest_path: &Path,
     glyphs: &BTreeSet<char>,
     preserved_source_codes: &BTreeSet<u8>,
     physical_chr_page: u8,
 ) -> Result<FrontEndPagePlan> {
+    source_rom.verify_supported_japanese()?;
     let (manifest_sha1, temporal_sample_count, unique_nametable_count, screen_codes) =
         load_screen_codes(manifest_path)?;
     let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
@@ -102,7 +107,18 @@ pub(super) fn plan_front_end_page(
         .chr()
         .get(source_start..source_end)
         .context("front-end source font page pair is outside parity CHR")?;
-    let mut page_pack = build_font_page(&source_pair[..FONT_PAGE_SIZE], &assignments)?;
+    let mut translated_page = build_font_page(&source_pair[..FONT_PAGE_SIZE], &assignments)?;
+    let projection = RightFontPageProjection::for_screen_roles(
+        source_rom.chr(),
+        &["new_game_choice", "save_slot_selection"],
+        0,
+    )?;
+    ensure!(
+        projection.fe_selection() == TranslatedFePageSelection::UseTranslatedPage,
+        "front-end screen roles no longer require one translated FD/FE page"
+    );
+    projection.apply_to_page(&mut translated_page)?;
+    let mut page_pack = translated_page;
     page_pack.extend_from_slice(&source_pair[FONT_PAGE_SIZE..]);
     let mapper_register = encode_chr_page_register(physical_chr_page)?;
 
@@ -148,15 +164,14 @@ pub(super) fn build_page_selector(mapper_register: u8, fallback_target: u16) -> 
             Instruction::OraZeroPage(0x52),
             Instruction::AndImmediate(0x1F),
             Instruction::BneAbsolute(FALLBACK_ADDRESS),
-            Instruction::LdaImmediate(2),
-            crate::mapper165::selector_safety::select_register_instruction(),
             Instruction::LdaImmediate(mapper_register),
-            Instruction::StaAbsolute(0x8001),
+            Instruction::LdxImmediate(2),
+            Instruction::JsrAbsolute(WRITE_TRANSLATED_CHR_PAGE_ADDRESS),
+            Instruction::LdxImmediate(4),
+            Instruction::JsrAbsolute(WRITE_TRANSLATED_CHR_PAGE_ADDRESS),
             Instruction::Pla,
             Instruction::Plp,
             Instruction::Rts,
-            Instruction::Nop,
-            Instruction::Nop,
             Instruction::Nop,
             Instruction::Pla,
             Instruction::Plp,
@@ -341,7 +356,21 @@ mod tests {
             !routine.windows(2).any(|bytes| bytes == [0xA5, 0x5C]),
             "front-end FD codebook selection must not depend on the unrelated FE backdrop"
         );
-        assert!(routine.windows(2).any(|bytes| bytes == [0xA9, 0xA8]));
+        assert!(
+            routine
+                .windows(4)
+                .any(|bytes| bytes == [0xA9, 0xA8, 0xA2, 0x02])
+        );
+        assert!(routine.windows(5).any(|bytes| {
+            bytes
+                == [
+                    0x20,
+                    WRITE_TRANSLATED_CHR_PAGE_ADDRESS as u8,
+                    (WRITE_TRANSLATED_CHR_PAGE_ADDRESS >> 8) as u8,
+                    0xA2,
+                    0x04,
+                ]
+        }));
         assert_eq!(&routine[routine.len() - 3..], &[0x4C, 0xC0, 0xFA]);
     }
 }

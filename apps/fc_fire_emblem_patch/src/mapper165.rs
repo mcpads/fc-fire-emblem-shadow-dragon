@@ -26,6 +26,7 @@ pub(crate) mod dialogue_probe_font;
 pub(crate) mod dialogue_slice_probe;
 pub(crate) mod direct_chr_pairs;
 pub(crate) mod executable_mapper_writes;
+pub(crate) mod font_pair_projection;
 mod front_end_page;
 pub(crate) mod hangul_page_probe;
 mod maximum_dialogue_boundary;

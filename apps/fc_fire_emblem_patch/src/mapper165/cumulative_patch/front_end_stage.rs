@@ -16,6 +16,9 @@ use super::{
     build_chained_roster_selector,
 };
 use crate::mapper165::SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS;
+use crate::mapper165::font_pair_projection::{
+    WRITE_TRANSLATED_CHR_PAGE_ADDRESS, build_translated_chr_page_writer,
+};
 use crate::mapper165::front_end_page::{
     FrontEndPagePlan, PAGE_ROUTINE_ADDRESS, PAGE_ROUTINE_END, build_page_selector,
     plan_front_end_page,
@@ -50,6 +53,7 @@ pub(super) fn install_front_end_stage(
     );
     let page = plan_front_end_page(
         &chapter_two_rom,
+        source_rom,
         evidence_path,
         &menu_plan.unique_glyphs(),
         &menu_plan.preserved_source_codes(),
@@ -61,6 +65,7 @@ pub(super) fn install_front_end_stage(
         .map(|entry| entry.encoded_storage_bytes(&page.assignments))
         .collect::<Result<Vec<_>>>()?;
     let selector = build_page_selector(page.mapper_register, DIALOGUE_SELECTOR_ADDRESS)?;
+    let translated_page_writer = build_translated_chr_page_writer()?;
     let roster_selector = build_chained_roster_selector(
         ROSTER_PAGE_REGISTERS[0],
         ROSTER_PAGE_REGISTERS[1],
@@ -120,6 +125,12 @@ pub(super) fn install_front_end_stage(
         &roster_selector,
     )?;
     image.write_expected(
+        "shared translated FD/FE CHR page writer",
+        fixed_bank_file_offset(WRITE_TRANSLATED_CHR_PAGE_ADDRESS)?,
+        &vec![0xFF; translated_page_writer.len()],
+        &translated_page_writer,
+    )?;
+    image.write_expected(
         "front-end menu font-page selector",
         selector_offset,
         &vec![0xFF; selector.len()],
@@ -174,6 +185,13 @@ pub(super) fn install_front_end_stage(
         output[companion_refresh_offset..companion_refresh_offset + companion_refresh.len()]
             == *companion_refresh,
         "front-end output central FE companion FD refresh bypasses the lifetime selector chain"
+    );
+    let translated_page_writer_offset = fixed_bank_file_offset(WRITE_TRANSLATED_CHR_PAGE_ADDRESS)?;
+    ensure!(
+        output[translated_page_writer_offset
+            ..translated_page_writer_offset + translated_page_writer.len()]
+            == *translated_page_writer,
+        "front-end output changed the shared translated CHR page writer"
     );
     let dialogue_offset = fixed_bank_file_offset(DIALOGUE_SELECTOR_ADDRESS)?;
     ensure!(

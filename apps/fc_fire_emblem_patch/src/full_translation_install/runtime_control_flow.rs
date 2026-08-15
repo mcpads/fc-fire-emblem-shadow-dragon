@@ -34,7 +34,7 @@ const CENTRAL_SELECTOR_FALLBACK: u16 = 0xFF40;
 /// 완성된 대사 수명이 원본 제어 흐름에 끼어들어야 하는 모든 역할이다.
 ///
 /// 주소의 개수가 아니다. 완료 판정은 이 역할 집합에서 빠진 것이 없는지를 본다.
-const PLANNED_HOOK_ROLES: [DialogueRuntimeHookRole; 21] = [
+const PLANNED_HOOK_ROLES: [DialogueRuntimeHookRole; 24] = [
     DialogueRuntimeHookRole::InitialDirectEntryRequest,
     DialogueRuntimeHookRole::E4TransitionEntryRequest,
     DialogueRuntimeHookRole::E6TransitionEntryRequest,
@@ -56,6 +56,9 @@ const PLANNED_HOOK_ROLES: [DialogueRuntimeHookRole; 21] = [
     DialogueRuntimeHookRole::ConsumerFontPagePublisher,
     DialogueRuntimeHookRole::ConsumerFontPageOpen,
     DialogueRuntimeHookRole::ConsumerFontPageClose,
+    DialogueRuntimeHookRole::EndingRecordFontPageEnter,
+    DialogueRuntimeHookRole::EndingRecordFontPageExit,
+    DialogueRuntimeHookRole::EndingCharacterEpilogueFontPageExit,
 ];
 use super::runtime_material::{
     RUNTIME_CODE_MMC3_PAGE, RUNTIME_MATERIAL_FIRST_PAGE, RUNTIME_MATERIAL_PAGE_COUNT,
@@ -65,7 +68,8 @@ const BATTLE_SOURCE_PAGE_MMC3_PAGE: u8 = 0x21;
 const EXPECTED_COMPLETED_PAGE_SOURCE_SHA1: &str = "8c2a9f5a6e028a59409f9cc254add2b81f318b21";
 const EXPECTED_COMPLETED_PAGE_CANDIDATE_SHA1: &str = "965de5bfca83263ac587e5c7c316ed6324d95ca8";
 const EXPECTED_SHARED_NMI_DISPATCH_SHA1: &str = "9f0090bd11866f7a4786db24a30e6660588b7758";
-const EXPECTED_SAMPLE_INITIAL_SELECTOR_SHA1: &str = "67856cd2b7a26ef43649181f5e86ffe2741eb8b3";
+pub(in crate::full_translation_install) const EXPECTED_SAMPLE_INITIAL_SELECTOR_SHA1: &str =
+    "67856cd2b7a26ef43649181f5e86ffe2741eb8b3";
 
 #[derive(Serialize)]
 pub(super) struct DialogueRuntimeControlFlowPlan {

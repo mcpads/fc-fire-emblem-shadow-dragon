@@ -20,6 +20,10 @@ use anyhow::{Context, Result, ensure};
 use super::{RuntimeRoutine, next_address};
 use crate::{
     dialogue_inventory::switchable_cpu_to_file_offset,
+    mapper165::font_pair_projection::{
+        WRITE_TRANSLATED_CHR_PAGE_ADDRESS, WRITE_TRANSLATED_CHR_PAGE_END,
+        build_translated_chr_page_writer,
+    },
     mmc5_prg::count_direct_transfers_to_range,
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
@@ -57,7 +61,7 @@ pub(super) const RECLAIMED_GATE_CAVE_END: u16 = 0xF378;
 /// battle-surface arbitration predicate fit beside the NMI trampoline without
 /// weakening either routine.
 pub(super) const SOURCE_IDENTITY_PUBLISHER_TAIL_ORIGIN: u16 = 0xF378;
-pub(super) const SOURCE_IDENTITY_PUBLISHER_TAIL_CAVE_END: u16 = 0xF390;
+pub(super) const SOURCE_IDENTITY_PUBLISHER_TAIL_CAVE_END: u16 = WRITE_TRANSLATED_CHR_PAGE_ADDRESS;
 pub(in crate::full_translation_install) const EXPECTED_RECLAIMED_GATE_CAVE_SHA1: &str =
     "7ad92984b55ad0cdfc465743a52002420d3ae394";
 
@@ -131,8 +135,26 @@ pub(super) fn bind_source_identity_publisher_tail_cave(
             source.prg(),
             SOURCE_IDENTITY_PUBLISHER_TAIL_ORIGIN,
             SOURCE_IDENTITY_PUBLISHER_TAIL_CAVE_END,
-        )? == 1,
+        )? == 0,
         "source raw transfer candidates into the source-identity publisher tail cave changed"
+    );
+    ensure!(
+        fixed_bytes(
+            source,
+            WRITE_TRANSLATED_CHR_PAGE_ADDRESS,
+            WRITE_TRANSLATED_CHR_PAGE_END,
+        )?
+        .iter()
+        .all(|byte| *byte == 0xFF),
+        "source translated CHR page writer gap is not exact FF"
+    );
+    ensure!(
+        fixed_bytes(
+            candidate,
+            WRITE_TRANSLATED_CHR_PAGE_ADDRESS,
+            WRITE_TRANSLATED_CHR_PAGE_END,
+        )? == build_translated_chr_page_writer()?,
+        "candidate translated CHR page writer changed"
     );
     for (image_role, rom) in [("source", source), ("candidate", candidate)] {
         let offset = switchable_cpu_to_file_offset(

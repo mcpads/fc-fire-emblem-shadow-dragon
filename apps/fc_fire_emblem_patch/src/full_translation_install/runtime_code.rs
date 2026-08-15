@@ -31,6 +31,7 @@ pub(in crate::full_translation_install) mod consumer_font_page;
 pub(in crate::full_translation_install) mod dispatcher_gate;
 mod dynamic_producer;
 mod fixed_cfg_cycles;
+mod font_page_route;
 pub(in crate::full_translation_install) mod lifecycle;
 pub(in crate::full_translation_install) mod resolve_request;
 mod resolved_page_publication;
@@ -65,6 +66,9 @@ pub(in crate::full_translation_install) enum DialogueRuntimeHookRole {
     ConsumerFontPagePublisher,
     ConsumerFontPageOpen,
     ConsumerFontPageClose,
+    EndingRecordFontPageEnter,
+    EndingRecordFontPageExit,
+    EndingCharacterEpilogueFontPageExit,
 }
 
 /// 훅이 가져가는 원본 자리다.
@@ -108,8 +112,6 @@ const MAPPER_VBLANK_REMAINDER: u32 =
 const SAFETY_MARGIN_PERCENT: u32 = 20;
 /// `$C179`의 `JSR`가 쓰는 몫이다.
 const CONSUMER_HOOK_CALL_CYCLES: u32 = 6;
-/// MMC3 뱅크 값 레지스터다.
-const CHR_BANK_VALUE_REGISTER: u16 = 0x8001;
 /// 전송 루틴이 한 프레임에 쓸 수 있는 사이클이다.
 ///
 /// `trampoline_reserve`는 훅 호출과 트램폴린이 실제로 쓰는 최악 사이클이고 방출한
@@ -148,6 +150,9 @@ impl DialogueRuntimeCodePlan {
             DialogueRuntimeHookRole::ConsumerFontPagePublisher,
             DialogueRuntimeHookRole::ConsumerFontPageOpen,
             DialogueRuntimeHookRole::ConsumerFontPageClose,
+            DialogueRuntimeHookRole::EndingRecordFontPageEnter,
+            DialogueRuntimeHookRole::EndingRecordFontPageExit,
+            DialogueRuntimeHookRole::EndingCharacterEpilogueFontPageExit,
         ]
         .iter()
         .all(|role| roles.contains(role))
@@ -177,7 +182,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     layout: resolve_request::MaterialLayout,
     consumer_catalog_layout: ConsumerCatalogRuntimeLayout,
     cold_request_mapper_register: u8,
-    consumer_font_pages: consumer_font_page::ConsumerFontPageRegisters,
+    consumer_font_pages: consumer_font_page::ConsumerFontPageRoutes,
 ) -> Result<DialogueRuntimeCodePlan> {
     let bank_restore = bind_bank_restore_contract(candidate)?;
     bind_quiet_frame_gate(source, candidate)?;
@@ -187,23 +192,25 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     chr_selector::bind_selector_chain_site(candidate)?;
     chr_selector::bind_selector_cave(candidate)?;
     consumer_font_page::bind_consumer_font_page_lifetime(source, candidate)?;
+    consumer_font_page::ending_lifetime::bind_ending_font_lifetime(source, candidate)?;
     chr_ram_ownership::bind_shared_chr_ram_ownership_boundary(candidate)?;
     dynamic_producer::bind_hook_sites(source, candidate)?;
     consumer_catalog::bind_consumer_catalog_sites(source, candidate)?;
     let chr_source_state = chr_source_state::bind_chr_source_state(candidate)?;
 
+    let font_page_routes = font_page_route::build_font_page_route_runtime()?;
     let selector = chr_selector::build_chr_selector(
-        chr_selector::SELECTOR_CAVE_ORIGIN,
-        CHR_BANK_VALUE_REGISTER,
+        font_page_routes.dialogue_selector,
         cold_request_mapper_register,
         chr_selector::SELECTOR_CHAIN_FALLBACK,
+        font_page_routes.project_dialogue_page,
     )?;
     let cold_presentation_selector_origin = selector.address
         + u16::try_from(selector.bytes.len()).context("dialogue selector length overflow")?;
     let cold_presentation_selector = chr_selector::build_cold_request_presentation_selector(
         cold_presentation_selector_origin,
-        CHR_BANK_VALUE_REGISTER,
         cold_request_mapper_register,
+        font_page_routes.project_dialogue_page,
     )?;
     let cold_presentation_selector_address = cold_presentation_selector.address;
     let changed_group_request_initializer_origin = cold_presentation_selector.address
@@ -264,9 +271,18 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
             .context("initial request publisher length overflow")?;
     let consumer_font_page_activation = consumer_font_page::build_consumer_font_page_activation(
         consumer_font_page_activation_origin,
-        CHR_BANK_VALUE_REGISTER,
+        font_page_routes.apply_route,
         consumer_font_pages,
     )?;
+    let reclaimed_support_origin = gate.address
+        + u16::try_from(gate.bytes.len()).context("dispatcher gate length overflow")?;
+    let ending_font_lifetime = consumer_font_page::ending_lifetime::build_ending_font_lifetime(
+        reclaimed_support_origin,
+        consumer_font_page_activation.address,
+        consumer_font_pages.ending_record,
+    )?;
+    let restore_source_pair_address = ending_font_lifetime.restore_source_pair.address;
+    let ending_font_lifetime_hooks = ending_font_lifetime.hooks()?;
     let composite_font_page_publisher_origin = consumer_font_page_activation.address
         + u16::try_from(consumer_font_page_activation.bytes.len())
             .context("consumer font page activation length overflow")?;
@@ -285,8 +301,10 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     let consumer_font_page_close_origin = consumer_font_page_open.address
         + u16::try_from(consumer_font_page_open.bytes.len())
             .context("consumer font page open length overflow")?;
-    let consumer_font_page_close =
-        consumer_font_page::build_consumer_font_page_close(consumer_font_page_close_origin)?;
+    let consumer_font_page_close = consumer_font_page::build_consumer_font_page_close(
+        consumer_font_page_close_origin,
+        restore_source_pair_address,
+    )?;
     let lifecycle = lifecycle::build_lifecycle_suite(
         next_page_resolver.address,
         code_page,
@@ -321,9 +339,28 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         consumer_font_page_activation.address,
         consumer_catalog_layout,
     )?;
-    ensure_disjoint(&[&gate], dispatcher_gate::RECLAIMED_GATE_CAVE_END)?;
-    let fixed_support_executable_byte_count = gate.bytes.len();
+    ensure_disjoint(
+        &[
+            &gate,
+            &ending_font_lifetime.restore_source_pair,
+            &ending_font_lifetime.enter_ending_record,
+            &ending_font_lifetime.exit_tail,
+        ],
+        dispatcher_gate::RECLAIMED_GATE_CAVE_END,
+    )?;
     let mut fixed_support_bytes = gate.bytes;
+    for routine in ending_font_lifetime.reclaimed_support_routines() {
+        let expected_address = dispatcher_gate::RECLAIMED_GATE_CAVE_ORIGIN
+            + u16::try_from(fixed_support_bytes.len())
+                .context("reclaimed fixed support length overflow")?;
+        ensure!(
+            routine.address == expected_address,
+            "{} is not contiguous with the reclaimed fixed support",
+            routine.role
+        );
+        fixed_support_bytes.extend_from_slice(&routine.bytes);
+    }
+    let fixed_support_executable_byte_count = fixed_support_bytes.len();
     let fixed_support_capacity = usize::from(
         dispatcher_gate::RECLAIMED_GATE_CAVE_END - dispatcher_gate::RECLAIMED_GATE_CAVE_ORIGIN,
     );
@@ -333,7 +370,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     );
     fixed_support_bytes.resize(fixed_support_capacity, 0xFF);
     let fixed_support = RuntimeRoutine {
-        role: "dialogue dispatcher gate",
+        role: "dialogue dispatcher and ending font support",
         address: dispatcher_gate::RECLAIMED_GATE_CAVE_ORIGIN,
         bytes: fixed_support_bytes,
     };
@@ -382,7 +419,6 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     );
 
     let publisher_address = publisher.head.address;
-    let selector_address = selector.address;
     ensure_disjoint(
         &[&trampoline_routine, &publisher.head],
         trampoline::TRAMPOLINE_CAVE_END,
@@ -392,7 +428,12 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         dispatcher_gate::SOURCE_IDENTITY_PUBLISHER_TAIL_CAVE_END,
     )?;
     ensure_disjoint(
+        &[&ending_font_lifetime.exit_head],
+        consumer_font_page::ending_lifetime::ENDING_FONT_EXIT_HEAD_END,
+    )?;
+    ensure_disjoint(
         &[
+            &font_page_routes.routine,
             &selector,
             &cold_presentation_selector,
             &changed_group_request_initializer,
@@ -407,6 +448,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         chr_selector::SELECTOR_CAVE_END,
     )?;
     let mut fixed_routines = vec![
+        font_page_routes.routine,
         trampoline_routine,
         publisher.head,
         publisher.tail,
@@ -420,6 +462,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         composite_font_page_publisher,
         consumer_font_page_open,
         consumer_font_page_close,
+        ending_font_lifetime.exit_head,
     ];
     fixed_routines.extend(dynamic_producers.fixed_routines);
     fixed_routines.extend(consumer_catalog.fixed_routines);
@@ -448,7 +491,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
             role: DialogueRuntimeHookRole::ChrRamSelector,
             write_role: "dialogue CHR RAM selector hook",
             site: DialogueRuntimeHookSite::Fixed(chr_selector::SELECTOR_CHAIN_SITE),
-            bytes: chr_selector::selector_hook_bytes(selector_address).to_vec(),
+            bytes: chr_selector::selector_hook_bytes(font_page_routes.select_active_page).to_vec(),
         },
         DialogueRuntimeHook {
             role: DialogueRuntimeHookRole::NmiPageComposer,
@@ -541,6 +584,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         consumer_font_page_open_origin,
         consumer_font_page_close_origin,
     )?);
+    hooks.extend(ending_font_lifetime_hooks);
 
     let plan = DialogueRuntimeCodePlan {
         code_routines,

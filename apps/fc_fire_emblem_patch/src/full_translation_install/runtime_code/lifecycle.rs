@@ -19,6 +19,7 @@ use super::super::{
 use super::transport::{REQUEST_STATE, STATE_READY};
 use super::{RuntimeRoutine, next_address};
 use crate::{
+    chapter_transition::{ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE, ENDING_RECORD_PHASE_ADDRESS},
     dialogue_inventory::switchable_cpu_to_file_offset,
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
@@ -265,10 +266,18 @@ pub(super) fn build_lifecycle_suite(
     instructions[terminal_placeholder] = Instruction::BneAbsolute(invalidate_and_store_state);
     instructions.extend([
         Instruction::Pha,
+        Instruction::LdaAbsolute(ENDING_RECORD_PHASE_ADDRESS),
+        Instruction::CmpImmediate(ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE),
+    ]);
+    let visible_epilogue_placeholder = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(origin));
+    instructions.extend([
         Instruction::LdaImmediate(0),
         Instruction::StaAbsolute(REQUEST_STATE),
-        Instruction::Pla,
     ]);
+    let restore_terminal_state = next_address(origin, &instructions)?;
+    instructions[visible_epilogue_placeholder] = Instruction::BeqAbsolute(restore_terminal_state);
+    instructions.push(Instruction::Pla);
 
     // state 10에서는 상주권만 보존하고 원본 처리기로 돌아간다. 완료 훅에서 요청을
     // 먼저 발행하면 dispatcher gate가 원본 state-10 처리기를 막는다. 그러면 그
@@ -394,7 +403,7 @@ mod tests {
     }
 
     #[test]
-    fn e6_idle_transition_retains_the_resident_page_while_terminal_invalidates_it() {
+    fn only_the_visible_ending_epilogue_retains_a_terminal_page() {
         let suite = lifecycle_suite();
         let bytes = &suite.routine.bytes;
         let idle_load = bytes
@@ -415,8 +424,16 @@ mod tests {
             (DIALOGUE_STATE >> 8) as u8,
             0x60,
         ];
-        let invalidate = [
+        let ending_guard = [
             0x48,
+            0xAD,
+            ENDING_RECORD_PHASE_ADDRESS as u8,
+            (ENDING_RECORD_PHASE_ADDRESS >> 8) as u8,
+            0xC9,
+            ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE,
+            0xF0,
+        ];
+        let invalidate = [
             0xA9,
             0x00,
             0x8D,
@@ -425,7 +442,20 @@ mod tests {
         ];
 
         assert_eq!(&bytes[idle_target..idle_target + 4], store_and_return);
-        assert_eq!(&bytes[terminal_target..terminal_target + 6], invalidate);
+        assert_eq!(
+            &bytes[terminal_target..terminal_target + ending_guard.len()],
+            ending_guard
+        );
+        let retain_target = relative_branch_target(
+            suite.routine.address,
+            bytes,
+            terminal_target + ending_guard.len() - 1,
+        );
+        assert_eq!(
+            &bytes[terminal_target + ending_guard.len() + 1..retain_target],
+            invalidate
+        );
+        assert_eq!(bytes[retain_target], 0x68, "terminal state A is restored");
     }
 
     #[test]
@@ -596,7 +626,10 @@ mod tests {
     }
 
     fn relative_branch_target(origin: u16, bytes: &[u8], opcode_index: usize) -> usize {
-        assert_eq!(bytes[opcode_index], 0xD0, "expected BNE");
+        assert!(
+            matches!(bytes[opcode_index], 0xD0 | 0xF0),
+            "expected BEQ or BNE"
+        );
         let after_branch = i32::from(origin) + i32::try_from(opcode_index).unwrap() + 2;
         let target = after_branch + i32::from(bytes[opcode_index + 1] as i8);
         usize::try_from(target - i32::from(origin)).unwrap()

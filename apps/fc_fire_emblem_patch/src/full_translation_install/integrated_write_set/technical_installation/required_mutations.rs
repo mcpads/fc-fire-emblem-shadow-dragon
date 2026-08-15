@@ -339,10 +339,36 @@ pub(in crate::full_translation_install::integrated_write_set) fn plan_required_m
         &runtime.bytes,
     ));
 
+    let mut ordered = required
+        .iter()
+        .filter(|identity| !identity.is_growth())
+        .collect::<Vec<_>>();
+    ordered.sort_by_key(|identity| identity.offset);
+    for adjacent in ordered.windows(2) {
+        let earlier = adjacent[0];
+        let later = adjacent[1];
+        let earlier_end = earlier
+            .offset
+            .checked_add(earlier.expected.len())
+            .with_context(|| format!("{} mutation range overflow", earlier.role))?;
+        ensure!(
+            earlier_end <= later.offset,
+            "required mutation {} [{:#X}..{:#X}) overlaps {} [{:#X}..{:#X})",
+            earlier.role,
+            earlier.offset,
+            earlier_end,
+            later.role,
+            later.offset,
+            later.offset + later.expected.len(),
+        );
+    }
     ensure!(
-        unique_mutation_identity_set(&required).is_some()
-            && materialize_mutation_plan(inputs.candidate.data(), &required).is_some(),
-        "required mutation identities overlap, escape the image, or do not bind the immutable candidate"
+        unique_mutation_identity_set(&required).is_some(),
+        "required mutation identity is duplicated"
+    );
+    ensure!(
+        materialize_mutation_plan(inputs.candidate.data(), &required).is_some(),
+        "required mutation identities escape the image or do not bind the immutable candidate"
     );
     Ok(required)
 }

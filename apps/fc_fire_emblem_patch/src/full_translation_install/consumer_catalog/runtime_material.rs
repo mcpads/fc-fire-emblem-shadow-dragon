@@ -66,7 +66,7 @@ pub(in crate::full_translation_install) struct ConsumerCatalogRuntimeMaterialPla
     maximum_encoded_string_byte_count: usize,
     content_sha1: String,
     every_entry_uses_the_selected_catalog_page_codes: bool,
-    every_name_carries_its_mapper_register: bool,
+    every_name_carries_its_page_route: bool,
     one_mmc3_page_bound: bool,
     #[serde(skip)]
     pub(in crate::full_translation_install) bytes: Vec<u8>,
@@ -149,7 +149,7 @@ pub(in crate::full_translation_install) fn plan_consumer_catalog_runtime_materia
             let page = inputs
                 .catalog
                 .page_for_name("unit_names", entry.source_index)?;
-            Ok((Some(page.mapper_register()), page.assignments().clone()))
+            Ok((Some(page.mapper_route()), page.assignments().clone()))
         },
         &mut maximum_encoded_string_byte_count,
     )?;
@@ -161,7 +161,7 @@ pub(in crate::full_translation_install) fn plan_consumer_catalog_runtime_materia
             let page = inputs
                 .catalog
                 .page_for_name("enemy_names", entry.source_index)?;
-            Ok((Some(page.mapper_register()), page.assignments().clone()))
+            Ok((Some(page.mapper_route()), page.assignments().clone()))
         },
         &mut maximum_encoded_string_byte_count,
     )?;
@@ -174,7 +174,7 @@ pub(in crate::full_translation_install) fn plan_consumer_catalog_runtime_materia
 
     Ok(ConsumerCatalogRuntimeMaterialPlan {
         schema: MATERIAL_SCHEMA,
-        strategy: "encode item, class, playable-unit, and enemy strings with the exact physical codes of their consumer catalog page; prefix variable names with the mapper register selected by their source identity",
+        strategy: "encode item, class, playable-unit, and enemy strings with the exact physical codes of their consumer catalog page; prefix variable names with the FD/FE page route selected by their source identity",
         file_offset: inputs.file_offset,
         mmc3_page: inputs.mmc3_page,
         byte_count: bytes.len(),
@@ -190,7 +190,7 @@ pub(in crate::full_translation_install) fn plan_consumer_catalog_runtime_materia
         maximum_encoded_string_byte_count,
         content_sha1,
         every_entry_uses_the_selected_catalog_page_codes: true,
-        every_name_carries_its_mapper_register: true,
+        every_name_carries_its_page_route: true,
         one_mmc3_page_bound: true,
         bytes,
     })
@@ -210,9 +210,9 @@ where
         let relative = output.len();
         let pointer_offset = directory_offset + entry_index * 2;
         write_u16(&mut output[pointer_offset..pointer_offset + 2], relative)?;
-        let (mapper_register, assignments) = assignment(entry)?;
-        if let Some(mapper_register) = mapper_register {
-            output.push(mapper_register);
+        let (page_route, assignments) = assignment(entry)?;
+        if let Some(page_route) = page_route {
+            output.push(page_route);
         }
         let encoded = entry
             .logical_bytes

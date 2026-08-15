@@ -32,6 +32,12 @@ const ENDING_SCROLL_AGGREGATE_RECORD_INDEX: usize = 93;
 const ENDING_SCROLL_TRAILING_BLANK_RECORD_COUNT: usize = 19;
 const ENDING_SCROLL_TURN_SUFFIX: [u8; 3] = [0x40, 0x3F, 0x5F];
 
+/// 엔딩 전적 스크롤을 다른 `$05E8=20` 합성기 호출과 구분하는 실제 수명 상태다.
+/// 새 게임 진입도 같은 합성기 상태를 재사용하므로, 글꼴 페이지 선택은 이 값을
+/// 함께 확인해야 한다.
+pub(crate) const ENDING_RECORD_PHASE_ADDRESS: u16 = 0x7731;
+pub(crate) const ENDING_RECORD_ACTIVE_PHASE: u8 = 0x01;
+
 #[derive(Debug, Serialize)]
 pub(super) struct EndingChapterRecordTranslationSurface {
     screen_role: &'static str,
@@ -400,9 +406,9 @@ pub(super) fn bind_ending_chapter_record_translation_surface(
 
     Ok(EndingChapterRecordTranslationSurface {
         screen_role: "ending_chapter_record_scroll",
-        ending_phase_address: 0x7731,
+        ending_phase_address: ENDING_RECORD_PHASE_ADDRESS,
         ending_phase_address_hex: "0x7731",
-        ending_phase: 0x01,
+        ending_phase: ENDING_RECORD_ACTIVE_PHASE,
         ending_phase_hex: "0x01",
         inner_state_address: 0x7733,
         inner_state_address_hex: "0x7733",

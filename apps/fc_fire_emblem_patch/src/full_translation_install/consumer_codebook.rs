@@ -20,7 +20,7 @@ use crate::{
     map_menu::MapMenuPlan,
     mapper165::{
         MAXIMUM_CHR_PAGE_COUNT, dialogue_probe_font::build_font_page_by_code,
-        encode_chr_page_register,
+        encode_chr_page_register, font_pair_projection::RightFontPageProjection,
     },
     semantic_translation::SemanticTranslationPlan,
     sha1_hex,
@@ -40,6 +40,7 @@ use super::{
 
 pub(super) struct ConsumerCodebookInputs<'a> {
     pub(super) source_font_page: &'a [u8],
+    pub(super) source_chr: &'a [u8],
     pub(super) first_physical_page: u8,
     pub(super) available_page_count: usize,
     pub(super) dynamic_inputs: &'a DynamicDialogueInputPlan,
@@ -99,11 +100,11 @@ impl ConsumerCodebookPlan {
             .context("consumer codebook exhausted the available page range")
     }
 
-    pub(super) fn mapper_register_for(&self, page_id: &str) -> Result<u8> {
+    pub(super) fn mapper_route_for(&self, page_id: &str) -> Result<u8> {
         self.pages
             .iter()
             .find(|page| page.id == page_id)
-            .map(StaticConsumerPage::mapper_register)
+            .map(StaticConsumerPage::mapper_route)
             .with_context(|| format!("consumer codebook has no {page_id} page"))
     }
 
@@ -164,6 +165,7 @@ pub(super) struct StaticConsumerPage {
     slot_demand: usize,
     physical_page: u8,
     mapper_register: u8,
+    mapper_route: u8,
     assignment_sha1: String,
     page_sha1: String,
     #[serde(skip)]
@@ -181,8 +183,8 @@ impl StaticConsumerPage {
         self.assignments.len()
     }
 
-    pub(super) fn mapper_register(&self) -> u8 {
-        self.mapper_register
+    pub(super) fn mapper_route(&self) -> u8 {
+        self.mapper_route
     }
 }
 
@@ -311,7 +313,14 @@ pub(super) fn plan_consumer_codebook(
                 "consumer page {} assigns one code to multiple visible glyph sources",
                 lifetime.id
             );
-            let bytes = build_font_page_by_code(inputs.source_font_page, &glyphs_by_code)?;
+            let mut bytes = build_font_page_by_code(inputs.source_font_page, &glyphs_by_code)?;
+            let pair_projection = RightFontPageProjection::for_screen_roles(
+                inputs.source_chr,
+                &lifetime.screen_roles,
+                0,
+            )?;
+            pair_projection.apply_to_page(&mut bytes)?;
+            let mapper_register = encode_chr_page_register(physical_page)?;
             Ok(StaticConsumerPage {
                 id: lifetime.id,
                 variant: lifetime.variant,
@@ -321,7 +330,8 @@ pub(super) fn plan_consumer_codebook(
                 preserved_active_code_count: lifetime.preserved_active_codes.len(),
                 slot_demand: lifetime.target_glyphs.len() + lifetime.preserved_active_codes.len(),
                 physical_page,
-                mapper_register: encode_chr_page_register(physical_page)?,
+                mapper_register,
+                mapper_route: pair_projection.encode_mapper_route(mapper_register)?,
                 assignment_sha1: assignment_sha1(&page_assignments),
                 page_sha1: sha1_hex(&bytes),
                 assignments: page_assignments,

@@ -43,6 +43,7 @@ mod final_runtime_evidence;
 mod fixed_ui_projection;
 mod installation_layout;
 mod integrated_write_set;
+mod main_dialogue_route_population;
 mod resident_glyph_assignment;
 mod runtime_bank_contract;
 mod runtime_code;
@@ -83,6 +84,9 @@ use fixed_ui_projection::{
 use installation_layout::{InstallationLayoutPlan, plan_installation_layout};
 use integrated_write_set::{
     IntegratedWriteSetInputs, IntegratedWriteSetPlan, plan_integrated_write_set,
+};
+use main_dialogue_route_population::{
+    MainDialogueRoutePopulationPlan, plan_main_dialogue_route_population,
 };
 use runtime_code::{plan_dialogue_runtime_code, resolve_request::MaterialLayout};
 use runtime_control_flow::{
@@ -177,6 +181,7 @@ struct FullTranslationInstallReport {
     dialogue_runtime_control_flow_static_contract: DialogueRuntimeControlFlowPlan,
     dialogue_runtime_state_storage_source_reservation: DialogueRuntimeStateStoragePlan,
     dialogue_runtime_composition: DialogueRuntimeComposition,
+    main_dialogue_route_population: MainDialogueRoutePopulationPlan,
     consumer_installation: ConsumerInstallationPlan,
     final_artifact_runtime_evidence: FinalArtifactRuntimeEvidence,
     dialogue_storage: DialogueStorage,
@@ -508,6 +513,7 @@ pub(crate) fn plan_full_translation_installation(
         .context("cold-request presentation exhausted the reclaimable CHR page pool")?;
     let consumer_codebook = plan_consumer_codebook(ConsumerCodebookInputs {
         source_font_page,
+        source_chr: rom.chr(),
         first_physical_page: cold_request_presentation
             .physical_page
             .checked_add(1)
@@ -541,6 +547,7 @@ pub(crate) fn plan_full_translation_installation(
     })?;
     let consumer_catalog = plan_consumer_catalog(ConsumerCatalogInputs {
         source_font_page,
+        source_chr: rom.chr(),
         first_physical_page: consumer_codebook.next_physical_page()?,
         available_page_count: consumer_codebook.remaining_page_count()?,
         preserved_unit_ui_display_codes: &preserved_unit_ui_display_codes(rom.data())?,
@@ -702,12 +709,12 @@ pub(crate) fn plan_full_translation_installation(
         layout,
         cross_domain_material.consumer_catalog_runtime_layout()?,
         cold_request_presentation.mapper_register,
-        runtime_code::consumer_font_page::ConsumerFontPageRegisters {
-            unit_command: consumer_codebook.mapper_register_for("unit_command_menu")?,
-            map_menu: consumer_codebook.mapper_register_for("map_menu")?,
-            ending_record: consumer_codebook.mapper_register_for("ending_chapter_record")?,
-            chapter_save_offer: consumer_codebook.mapper_register_for("chapter_save_offer")?,
-            catalog: consumer_catalog.mapper_registers()?,
+        runtime_code::consumer_font_page::ConsumerFontPageRoutes {
+            unit_command: consumer_codebook.mapper_route_for("unit_command_menu")?,
+            map_menu: consumer_codebook.mapper_route_for("map_menu")?,
+            ending_record: consumer_codebook.mapper_route_for("ending_chapter_record")?,
+            chapter_save_offer: consumer_codebook.mapper_route_for("chapter_save_offer")?,
+            catalog: consumer_catalog.mapper_routes()?,
         },
     )?;
     let assembled_hook_roles = dialogue_runtime_code.hook_roles();
@@ -715,6 +722,14 @@ pub(crate) fn plan_full_translation_installation(
     let dynamic_string_producers_bound = dynamic_input_producers
         .every_record_selector_route_bound()
         && dynamic_producer_encoding.canonical_outputs_ready();
+    let main_dialogue_route_population = plan_main_dialogue_route_population(
+        &rom,
+        &display,
+        &encoded_display,
+        &dialogue_graph,
+        &dynamic_input_producers,
+        &assembled_hook_roles,
+    )?;
     for routine in &dialogue_runtime_code.code_routines {
         runtime_material.place_runtime_code(routine.address, &routine.bytes)?;
     }
@@ -1040,6 +1055,7 @@ pub(crate) fn plan_full_translation_installation(
         integrated_write_set,
         dialogue_runtime_control_flow_static_contract: runtime_control_flow,
         dialogue_runtime_state_storage_source_reservation: runtime_state_storage,
+        main_dialogue_route_population,
         dialogue_runtime_composition: DialogueRuntimeComposition {
             strategy_selected: true,
             glyph_atlas_tile_count: composition.glyph_atlas_tile_count,
