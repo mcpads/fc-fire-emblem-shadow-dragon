@@ -126,6 +126,24 @@ impl ConsumerCodebookPlan {
         self.encode_for(page_id, CodeOwner::ChapterTitle, logical)
     }
 
+    pub(super) fn validate_unit_command_residency(
+        &self,
+        required_fixed_ui_glyphs: &BTreeSet<char>,
+        options_glyph_codes: &BTreeMap<char, u8>,
+    ) -> Result<()> {
+        let page = self
+            .pages
+            .iter()
+            .find(|page| page.id == "unit_command_menu")
+            .context("consumer codebook lost the unit-command page")?;
+        ensure_unit_command_assignments(
+            &page.assignments,
+            required_fixed_ui_glyphs,
+            options_glyph_codes,
+        )?;
+        Ok(())
+    }
+
     fn encode_for(
         &self,
         page_id: &str,
@@ -401,6 +419,24 @@ fn ensure_options_parent_assignments(
     Ok(())
 }
 
+fn ensure_unit_command_assignments(
+    assignments: &BTreeMap<GlyphKey, u8>,
+    required_fixed_ui_glyphs: &BTreeSet<char>,
+    options_glyph_codes: &BTreeMap<char, u8>,
+) -> Result<()> {
+    ensure!(
+        required_fixed_ui_glyphs.iter().all(|glyph| {
+            assignments.contains_key(&GlyphKey {
+                owner: CodeOwner::FixedUi,
+                glyph: *glyph,
+            })
+        }),
+        "unit-command page lost a command or fixed-menu glyph"
+    );
+    ensure_options_parent_assignments(assignments, options_glyph_codes)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -448,6 +484,25 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("resident options-label")
+        );
+    }
+
+    #[test]
+    fn unit_command_page_rejects_a_missing_fixed_ui_surface_glyph() {
+        let required = BTreeSet::from(['공', '격']);
+        let assignments = BTreeMap::from([(
+            GlyphKey {
+                owner: CodeOwner::FixedUi,
+                glyph: '공',
+            },
+            0x20,
+        )]);
+
+        assert!(
+            ensure_unit_command_assignments(&assignments, &required, &BTreeMap::new())
+                .unwrap_err()
+                .to_string()
+                .contains("lost a command or fixed-menu glyph")
         );
     }
 }

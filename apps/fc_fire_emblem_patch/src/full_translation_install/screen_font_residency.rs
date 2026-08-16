@@ -4,6 +4,8 @@
 //! 원천 합성 상태와 가시 표면을 합쳐 화면별 경로를 고르고, 런타임 코드는 그 결과를
 //! 그대로 방출한다. 이전 화면이 남긴 `$07FD`를 암묵적인 입력으로 쓰지 않는다.
 
+mod surface_requirements;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, ensure};
@@ -15,11 +17,15 @@ use crate::{
         SAVE_SLOT_SELECTION_COMPOSITE_STATE, START_MENU_COMPOSITE_STATE,
     },
     mapper165::font_pair_projection::{TRANSLATED_FE_PAGE_FLAG, mapper_register_from_route},
+    semantic_translation::SemanticTranslationPlan,
     text_inventory::FixedTextPlan,
     unit_names::UnitNamePlan,
 };
 
-use super::consumer_catalog::ConsumerCatalogPlan;
+use super::{consumer_catalog::ConsumerCatalogPlan, consumer_codebook::ConsumerCodebookPlan};
+use surface_requirements::{
+    ScreenFontSurfaceInputs, ScreenFontSurfacePlan, plan_screen_font_surfaces,
+};
 
 pub(super) const FRONT_END_SAVE_SUMMARY_UNIT_SOURCE_INDEX: usize = 0;
 pub(super) const FRONT_END_SAVE_SUMMARY_CLASS_SOURCE_INDEX: usize = 20;
@@ -48,7 +54,7 @@ pub(in crate::full_translation_install) enum ScreenFontPageRole {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::full_translation_install) enum ScreenFontResidencyPolicy {
     Static(ScreenFontPageRole),
-    UnitNameSelected,
+    UnitOrEnemyNameSelected,
 }
 
 /// 번역 글꼴을 쓰는 원본 합성 상태의 전체 정책 집합이다. 고정 표면은 진입 즉시
@@ -108,11 +114,11 @@ pub(in crate::full_translation_install) const COMPOSITE_FONT_RESIDENCY_POLICIES:
     ),
     (
         UNIT_SUMMARY_COMPOSITE_STATE,
-        ScreenFontResidencyPolicy::UnitNameSelected,
+        ScreenFontResidencyPolicy::UnitOrEnemyNameSelected,
     ),
     (
         UNIT_STATUS_COMPOSITE_STATE,
-        ScreenFontResidencyPolicy::UnitNameSelected,
+        ScreenFontResidencyPolicy::UnitOrEnemyNameSelected,
     ),
 ];
 
@@ -120,7 +126,7 @@ impl ScreenFontResidencyPolicy {
     pub(in crate::full_translation_install) fn static_page(self) -> Option<ScreenFontPageRole> {
         match self {
             Self::Static(page) => Some(page),
-            Self::UnitNameSelected => None,
+            Self::UnitOrEnemyNameSelected => None,
         }
     }
 }
@@ -137,7 +143,7 @@ fn validate_composite_state_policies() -> Result<()> {
     let dynamic_states = COMPOSITE_FONT_RESIDENCY_POLICIES
         .iter()
         .filter_map(|(state, policy)| {
-            (*policy == ScreenFontResidencyPolicy::UnitNameSelected).then_some(*state)
+            (*policy == ScreenFontResidencyPolicy::UnitOrEnemyNameSelected).then_some(*state)
         })
         .collect::<BTreeSet<_>>();
     ensure!(
@@ -224,14 +230,18 @@ impl ScreenFontPageRoutes {
 
 pub(super) struct ScreenFontResidencyInputs<'a> {
     pub(super) front_end_menu_route: u8,
-    pub(super) unit_command_route: u8,
     pub(super) map_menu_route: u8,
     pub(super) ending_record_route: u8,
     pub(super) chapter_save_offer_route: u8,
     pub(super) consumer_catalog: &'a ConsumerCatalogPlan,
+    pub(super) consumer_codebook: &'a ConsumerCodebookPlan,
     pub(super) fixed: &'a FixedTextPlan,
     pub(super) unit_names: &'a UnitNamePlan,
+    pub(super) unit_ui: &'a SemanticTranslationPlan,
+    pub(super) item_actions: &'a SemanticTranslationPlan,
+    pub(super) fixed_menu_labels: &'a SemanticTranslationPlan,
     pub(super) installed_front_end_glyph_codes: &'a BTreeMap<char, u8>,
+    pub(super) options_glyph_codes: &'a BTreeMap<char, u8>,
 }
 
 #[derive(Serialize)]
@@ -240,7 +250,7 @@ pub(super) struct ScreenFontResidencyPlan {
     strategy: &'static str,
     composite_state_policy_count: usize,
     static_state_route_count: usize,
-    unit_name_selected_state_count: usize,
+    unit_or_enemy_name_selected_state_count: usize,
     front_end_composite_state_count: usize,
     front_end_record_action_catalog_page_index: usize,
     front_end_record_action_mapper_route: u8,
@@ -250,6 +260,7 @@ pub(super) struct ScreenFontResidencyPlan {
     every_static_state_selects_an_explicit_route: bool,
     record_action_page_contains_every_menu_glyph: bool,
     record_action_page_contains_the_protagonist_name_and_class: bool,
+    surface_requirements: ScreenFontSurfacePlan,
     #[serde(skip)]
     routes: ScreenFontPageRoutes,
     #[serde(skip)]
@@ -303,10 +314,23 @@ pub(super) fn plan_screen_font_residency(
         &summary_glyphs,
     )?;
     let front_end_record_action_route = record_action_page.mapper_route() | TRANSLATED_FE_PAGE_FLAG;
+    let surface_requirements = plan_screen_font_surfaces(ScreenFontSurfaceInputs {
+        consumer_catalog: inputs.consumer_catalog,
+        consumer_codebook: inputs.consumer_codebook,
+        fixed: inputs.fixed,
+        unit_names: inputs.unit_names,
+        unit_ui: inputs.unit_ui,
+        item_actions: inputs.item_actions,
+        fixed_menu_labels: inputs.fixed_menu_labels,
+        installed_front_end_glyph_codes: inputs.installed_front_end_glyph_codes,
+        options_glyph_codes: inputs.options_glyph_codes,
+    })?;
     let routes = ScreenFontPageRoutes {
         front_end_menu: inputs.front_end_menu_route,
         front_end_record_action: front_end_record_action_route,
-        unit_command: inputs.unit_command_route,
+        unit_command: inputs
+            .consumer_codebook
+            .mapper_route_for("unit_command_menu")?,
         map_menu: inputs.map_menu_route,
         ending_record: inputs.ending_record_route,
         chapter_save_offer: inputs.chapter_save_offer_route,
@@ -329,15 +353,15 @@ pub(super) fn plan_screen_font_residency(
 
     Ok(ScreenFontResidencyPlan {
         schema: 2,
-        strategy: "derive every composite-screen font policy from one residency plan; publish static pages at entry, let unit-name appenders select name-dependent pages, and select the protagonist catalog page explicitly for the front-end record-action lifetime",
+        strategy: "derive every composite-screen font policy from one residency plan; publish static pages at entry, let unit-or-enemy-name appenders select name-dependent pages, and select the protagonist catalog page explicitly for the front-end record-action lifetime",
         composite_state_policy_count: COMPOSITE_FONT_RESIDENCY_POLICIES.len(),
         static_state_route_count: COMPOSITE_FONT_RESIDENCY_POLICIES
             .iter()
             .filter(|(_, policy)| policy.static_page().is_some())
             .count(),
-        unit_name_selected_state_count: COMPOSITE_FONT_RESIDENCY_POLICIES
+        unit_or_enemy_name_selected_state_count: COMPOSITE_FONT_RESIDENCY_POLICIES
             .iter()
-            .filter(|(_, policy)| *policy == ScreenFontResidencyPolicy::UnitNameSelected)
+            .filter(|(_, policy)| *policy == ScreenFontResidencyPolicy::UnitOrEnemyNameSelected)
             .count(),
         front_end_composite_state_count: FRONT_END_FONT_STATES.len(),
         front_end_record_action_catalog_page_index: record_action_catalog_page_index,
@@ -348,6 +372,7 @@ pub(super) fn plan_screen_font_residency(
         every_static_state_selects_an_explicit_route: true,
         record_action_page_contains_every_menu_glyph: true,
         record_action_page_contains_the_protagonist_name_and_class: true,
+        surface_requirements,
         routes,
         record_action_summary_glyph_codes,
     })
@@ -441,7 +466,7 @@ mod tests {
         let dynamic_states = COMPOSITE_FONT_RESIDENCY_POLICIES
             .iter()
             .filter_map(|(state, policy)| {
-                (*policy == ScreenFontResidencyPolicy::UnitNameSelected).then_some(*state)
+                (*policy == ScreenFontResidencyPolicy::UnitOrEnemyNameSelected).then_some(*state)
             })
             .collect::<BTreeSet<_>>();
 
