@@ -80,6 +80,13 @@ pub(crate) const FIXED_MENU_LABEL_SPECS: [FixedMenuLabelSpec; 7] = [
     ),
 ];
 
+pub(crate) fn translated_fixed_string_indices() -> BTreeSet<u8> {
+    FIXED_MENU_LABEL_SPECS
+        .iter()
+        .map(|spec| spec.index)
+        .collect()
+}
+
 const fn label(
     index: u8,
     pointer: u16,

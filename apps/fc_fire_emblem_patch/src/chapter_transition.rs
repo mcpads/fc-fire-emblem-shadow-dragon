@@ -46,7 +46,9 @@ use sound_test_routes::*;
 pub(crate) use source_binding::bind_chapter_intro_lifetime_contexts;
 use source_binding::*;
 use source_spec::*;
-pub(crate) use source_spec::{SAVE_OFFER_LABEL_ADDRESS, SAVE_OFFER_LABEL_BYTES};
+pub(crate) use source_spec::{
+    SAVE_OFFER_FIXED_STRING_INDEX, SAVE_OFFER_LABEL_ADDRESS, SAVE_OFFER_LABEL_BYTES,
+};
 pub(crate) use title_localization::{
     ChapterTitlePlan, ChapterTitlePlannedEntry, extract_chapter_title_workspace,
     plan_chapter_titles,

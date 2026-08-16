@@ -61,6 +61,8 @@ mod weapon_shop_shared_text;
 mod writer_census;
 mod writer_sites;
 
+pub(crate) const ROSTER_HEADER_FIXED_STRING_INDEX: u8 = roster_page::HEADER_RESOURCE_ID;
+
 use runtime::{
     build_routines, replace_central_chr_writer, replace_central_prg_writer, replace_direct_writer,
     replace_mirroring_writer, validate_routine_placements,

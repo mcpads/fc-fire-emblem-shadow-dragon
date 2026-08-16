@@ -14,6 +14,7 @@ use crate::{
     dialogue_inventory::inspect_main_dialogue_graph,
     fixed_menu_labels::plan_fixed_menu_labels,
     fixed_string_consumers::{FixedStringConsumerCensus, inspect_fixed_string_consumers},
+    fixed_string_ownership::{FixedStringOwnershipReport, inspect_fixed_string_ownership},
     font_slots::{FONT_PAGE_SIZE, FONT_TILE_SIZE},
     front_end_menu::plan_front_end_menu,
     item_flow::plan_item_action_labels,
@@ -173,7 +174,7 @@ pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) output_path: Option<&'a Path>,
 }
 
-pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 20;
+pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 21;
 
 pub(crate) struct FullTranslationInstallSummary {
     pub(crate) report_sha1: String,
@@ -197,6 +198,7 @@ struct FullTranslationInstallReport {
     declared_installation_domains: [&'static str; REQUIRED_DOMAIN_COUNT],
     translation_inputs: TranslationInputs,
     fixed_string_consumers: FixedStringConsumerCensus,
+    fixed_string_ownership: FixedStringOwnershipReport,
     dialogue_codebook: DialogueCodebook,
     chapter_intro_residency: ChapterIntroResidency,
     choice_residency: ChoiceResidencyPlan,
@@ -441,6 +443,7 @@ pub(crate) fn plan_full_translation_installation(
             && fixed_string_consumers.direct_producer_bound_indices.len() == 56,
         "fixed-string source population did not reach its declared consumer boundary"
     );
+    let fixed_string_ownership = inspect_fixed_string_ownership(&fixed_string_consumers)?;
     let page_capacity = inspect_dialogue_page_pool_capacity(CurrentCandidateInputs {
         source_rom: &rom,
         candidate_path: inputs.current_candidate_path,
@@ -1133,6 +1136,7 @@ pub(crate) fn plan_full_translation_installation(
             review_complete,
         },
         fixed_string_consumers: fixed_string_consumers.census,
+        fixed_string_ownership,
         dialogue_codebook: DialogueCodebook {
             canonical_record_count: display.canonical_record_count,
             page_workset_count: display.page_worksets.len(),

@@ -30,6 +30,15 @@ pub(crate) use source_spec::{
 };
 pub(crate) use workspace::plan_unit_ui_labels;
 
+pub(crate) fn translated_fixed_string_indices() -> BTreeSet<u8> {
+    SUMMARY_AND_STATUS_LABEL_SPECS
+        .iter()
+        .chain(command_menu::COMMAND_LABEL_SPECS)
+        .filter(|spec| spec.translation_scope == "japanese_only")
+        .map(|spec| spec.index)
+        .collect()
+}
+
 const PRG_BANK_SIZE: usize = 16 * 1024;
 pub(super) const UNIT_UI_BANK: usize = 0x0B;
 const SWITCHABLE_CPU_BASE: u16 = 0x8000;

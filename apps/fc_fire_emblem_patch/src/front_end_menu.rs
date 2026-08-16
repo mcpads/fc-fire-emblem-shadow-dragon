@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 mod source_spec;
 mod workspace;
 
@@ -8,3 +10,10 @@ pub(crate) use source_spec::{
 pub(crate) use workspace::{
     FrontEndMenuPlan, extract_front_end_menu_workspace, plan_front_end_menu,
 };
+
+pub(crate) fn translated_fixed_string_indices() -> BTreeSet<u8> {
+    source_spec::MENU_LABEL_SPECS
+        .iter()
+        .map(|spec| spec.index)
+        .collect()
+}

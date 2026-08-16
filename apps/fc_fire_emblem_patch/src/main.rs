@@ -9,6 +9,7 @@ mod dialogue_inventory;
 mod epilogue_variant_evidence;
 mod fixed_menu_labels;
 mod fixed_string_consumers;
+mod fixed_string_ownership;
 mod font;
 mod font_slots;
 mod front_end_menu;

@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{collections::BTreeSet, fs, path::Path};
 
 use anyhow::{Context, Result};
 use serde::Serialize;
@@ -35,6 +35,14 @@ use source_contract::{
     validate_source_region_role, validate_state_routes, validate_vulnerary_family,
 };
 pub(crate) use translation_workspace::plan_item_action_labels;
+
+pub(crate) fn translated_fixed_string_indices() -> BTreeSet<u8> {
+    ITEM_ACTION_LABELS
+        .iter()
+        .filter(|spec| spec.translation_scope == "japanese_only")
+        .map(|spec| spec.index)
+        .collect()
+}
 
 #[derive(Debug, Serialize)]
 struct ItemFlowReport {

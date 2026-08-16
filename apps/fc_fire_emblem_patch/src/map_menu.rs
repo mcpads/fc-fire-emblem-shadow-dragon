@@ -133,6 +133,16 @@ fn labels() -> impl Iterator<Item = &'static LabelSpec> {
     MAP_MENU_LABELS.iter().chain(MAP_FUNDS_SUMMARY_LABELS)
 }
 
+pub(crate) fn translated_fixed_string_indices() -> BTreeSet<u8> {
+    MAP_FUNDS_SUMMARY_LABELS
+        .iter()
+        .map(|spec| {
+            spec.pointer_table_index
+                .expect("map/funds summary labels use the fixed-string table")
+        })
+        .collect()
+}
+
 #[derive(Debug, Deserialize)]
 struct Workspace {
     format_version: u8,
