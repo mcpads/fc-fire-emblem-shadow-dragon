@@ -34,10 +34,11 @@ use crate::{
         runtime_state_storage::CONSUMER_FONT_PAGE,
         screen_font_residency::{
             ATTACK_WEAPON_SELECTION_COMPOSITE_STATE, CHAPTER_SAVE_OFFER_COMPOSITE_STATE,
-            COMPOSITE_FONT_PAGE_ROUTES, ITEM_ACTION_COMPOSITE_STATE, MAP_FUNDS_COMPOSITE_STATE,
-            MAP_MENU_COMPOSITE_STATE, MAP_SUMMARY_COMPOSITE_STATE, ScreenFontPageRole,
-            ScreenFontPageRoutes, UNIT_COMMAND_COMPOSITE_STATE, UNIT_ITEM_LIST_COMPOSITE_STATE,
-            UNIT_STATUS_COMPOSITE_STATE, UNIT_SUMMARY_COMPOSITE_STATE,
+            COMPOSITE_FONT_RESIDENCY_POLICIES, ITEM_ACTION_COMPOSITE_STATE,
+            MAP_FUNDS_COMPOSITE_STATE, MAP_MENU_COMPOSITE_STATE, MAP_SUMMARY_COMPOSITE_STATE,
+            ScreenFontPageRole, ScreenFontPageRoutes, UNIT_COMMAND_COMPOSITE_STATE,
+            UNIT_ITEM_LIST_COMPOSITE_STATE, UNIT_STATUS_COMPOSITE_STATE,
+            UNIT_SUMMARY_COMPOSITE_STATE,
         },
     },
     rom::Rom,
@@ -119,13 +120,15 @@ const FIXED_MENU_FONT_PAGE_CALLS: [(u16, u8, DialogueRuntimeHookRole, &'static s
         "storage-capacity fixed-menu font-page hook",
     ),
 ];
-const EXPECTED_FONT_PAGE_STATE_PRODUCERS: [CompositeStateProducer; 16] = [
+const EXPECTED_FONT_PAGE_STATE_PRODUCERS: [CompositeStateProducer; 19] = [
     CompositeStateProducer::new(0x02, 0xA693, 0x4C, START_MENU_COMPOSITE_STATE),
     CompositeStateProducer::new(0x02, 0xA6CC, 0x4C, SAVE_SLOT_SELECTION_COMPOSITE_STATE),
     CompositeStateProducer::new(0x02, 0xA6D5, 0x4C, RECORD_LIST_COMPOSITE_STATE),
     CompositeStateProducer::new(0x02, 0xA6DE, 0x4C, RECORD_LIST_COMPOSITE_STATE),
     CompositeStateProducer::new(0x02, 0xA6E7, 0x4C, RECORD_LIST_COMPOSITE_STATE),
     CompositeStateProducer::new(0x02, 0xA79A, 0x20, RECORD_ACTION_COMPOSITE_STATE),
+    CompositeStateProducer::new(0x06, 0x882D, 0x20, UNIT_SUMMARY_COMPOSITE_STATE),
+    CompositeStateProducer::new(0x06, 0x8F1A, 0x20, UNIT_SUMMARY_COMPOSITE_STATE),
     CompositeStateProducer::new(0x06, 0x903C, 0x20, UNIT_COMMAND_COMPOSITE_STATE),
     CompositeStateProducer::new(0x06, 0x90AF, 0x20, ATTACK_WEAPON_SELECTION_COMPOSITE_STATE),
     CompositeStateProducer::new(0x06, 0x93E2, 0x4C, UNIT_ITEM_LIST_COMPOSITE_STATE),
@@ -133,6 +136,7 @@ const EXPECTED_FONT_PAGE_STATE_PRODUCERS: [CompositeStateProducer; 16] = [
     CompositeStateProducer::new(0x06, 0x9EB4, 0x20, UNIT_ITEM_LIST_COMPOSITE_STATE),
     CompositeStateProducer::new(0x06, 0xA0BE, 0x20, MAP_FUNDS_COMPOSITE_STATE),
     CompositeStateProducer::new(0x06, 0xA30D, 0x4C, MAP_MENU_COMPOSITE_STATE),
+    CompositeStateProducer::new(0x06, 0xAF0C, 0x20, UNIT_STATUS_COMPOSITE_STATE),
     CompositeStateProducer::new(0x06, 0xB40B, 0x4C, MAP_SUMMARY_COMPOSITE_STATE),
     CompositeStateProducer::new(0x06, 0xB413, 0x4C, MAP_FUNDS_COMPOSITE_STATE),
     CompositeStateProducer::new(0x06, 0xB78A, 0x4C, CHAPTER_SAVE_OFFER_COMPOSITE_STATE),
@@ -273,7 +277,7 @@ fn bind_direct_composite_state_producers(source: &Rom, candidate: &Rom) -> Resul
         "candidate direct composite-state producer catalog changed"
     );
 
-    let font_page_states = COMPOSITE_FONT_PAGE_ROUTES
+    let font_page_states = COMPOSITE_FONT_RESIDENCY_POLICIES
         .iter()
         .map(|(state, _)| *state)
         .collect::<BTreeSet<_>>();
@@ -443,17 +447,12 @@ pub(super) fn build_composite_font_page_publisher(
     pages: ScreenFontPageRoutes,
 ) -> Result<RuntimeRoutine> {
     pages.validate()?;
-    ensure!(
-        [UNIT_SUMMARY_COMPOSITE_STATE, UNIT_STATUS_COMPOSITE_STATE]
-            .into_iter()
-            .all(|dynamic_state| COMPOSITE_FONT_PAGE_ROUTES
-                .iter()
-                .all(|(state, _)| *state != dynamic_state)),
-        "a name-dependent consumer received a static page request"
-    );
     let mut instructions = vec![Instruction::StaAbsolute(COMPOSITE_STATE)];
-    let mut route_jumps = Vec::with_capacity(COMPOSITE_FONT_PAGE_ROUTES.len());
-    for (state, page) in COMPOSITE_FONT_PAGE_ROUTES {
+    let mut route_jumps = Vec::with_capacity(COMPOSITE_FONT_RESIDENCY_POLICIES.len());
+    for (state, policy) in COMPOSITE_FONT_RESIDENCY_POLICIES {
+        let Some(page) = policy.static_page() else {
+            continue;
+        };
         if [MAP_FUNDS_COMPOSITE_STATE, MAP_SUMMARY_COMPOSITE_STATE].contains(&state) {
             continue;
         }

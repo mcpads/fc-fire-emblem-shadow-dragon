@@ -45,49 +45,108 @@ pub(in crate::full_translation_install) enum ScreenFontPageRole {
     CatalogDefault,
 }
 
-/// 원본 합성 상태 가운데 고정된 번역 페이지를 즉시 게시해야 하는 전체 집합이다.
-/// 이름에 따라 페이지가 달라지는 요약·상태 화면은 이름 appender가 게시하므로 제외한다.
-pub(in crate::full_translation_install) const COMPOSITE_FONT_PAGE_ROUTES: [(
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::full_translation_install) enum ScreenFontResidencyPolicy {
+    Static(ScreenFontPageRole),
+    UnitNameSelected,
+}
+
+/// 번역 글꼴을 쓰는 원본 합성 상태의 전체 정책 집합이다. 고정 표면은 진입 즉시
+/// 페이지를 게시하고, 이름에 따라 페이지가 달라지는 요약·상태 화면은 이름 appender가
+/// 선택한 카탈로그 페이지를 게시한다.
+pub(in crate::full_translation_install) const COMPOSITE_FONT_RESIDENCY_POLICIES: [(
     u8,
-    ScreenFontPageRole,
-); 12] = [
-    (MAP_MENU_COMPOSITE_STATE, ScreenFontPageRole::MapMenu),
-    (MAP_FUNDS_COMPOSITE_STATE, ScreenFontPageRole::MapMenu),
-    (MAP_SUMMARY_COMPOSITE_STATE, ScreenFontPageRole::MapMenu),
+    ScreenFontResidencyPolicy,
+); 14] = [
+    (
+        MAP_MENU_COMPOSITE_STATE,
+        ScreenFontResidencyPolicy::Static(ScreenFontPageRole::MapMenu),
+    ),
+    (
+        MAP_FUNDS_COMPOSITE_STATE,
+        ScreenFontResidencyPolicy::Static(ScreenFontPageRole::MapMenu),
+    ),
+    (
+        MAP_SUMMARY_COMPOSITE_STATE,
+        ScreenFontResidencyPolicy::Static(ScreenFontPageRole::MapMenu),
+    ),
     (
         UNIT_COMMAND_COMPOSITE_STATE,
-        ScreenFontPageRole::UnitCommand,
+        ScreenFontResidencyPolicy::Static(ScreenFontPageRole::UnitCommand),
     ),
     (
         ATTACK_WEAPON_SELECTION_COMPOSITE_STATE,
-        ScreenFontPageRole::CatalogDefault,
+        ScreenFontResidencyPolicy::Static(ScreenFontPageRole::CatalogDefault),
     ),
     (
         UNIT_ITEM_LIST_COMPOSITE_STATE,
-        ScreenFontPageRole::CatalogDefault,
+        ScreenFontResidencyPolicy::Static(ScreenFontPageRole::CatalogDefault),
     ),
     (
         ITEM_ACTION_COMPOSITE_STATE,
-        ScreenFontPageRole::CatalogDefault,
+        ScreenFontResidencyPolicy::Static(ScreenFontPageRole::CatalogDefault),
     ),
     (
         CHAPTER_SAVE_OFFER_COMPOSITE_STATE,
-        ScreenFontPageRole::ChapterSaveOffer,
+        ScreenFontResidencyPolicy::Static(ScreenFontPageRole::ChapterSaveOffer),
     ),
-    (START_MENU_COMPOSITE_STATE, ScreenFontPageRole::FrontEndMenu),
+    (
+        START_MENU_COMPOSITE_STATE,
+        ScreenFontResidencyPolicy::Static(ScreenFontPageRole::FrontEndMenu),
+    ),
     (
         RECORD_LIST_COMPOSITE_STATE,
-        ScreenFontPageRole::FrontEndMenu,
+        ScreenFontResidencyPolicy::Static(ScreenFontPageRole::FrontEndMenu),
     ),
     (
         SAVE_SLOT_SELECTION_COMPOSITE_STATE,
-        ScreenFontPageRole::FrontEndMenu,
+        ScreenFontResidencyPolicy::Static(ScreenFontPageRole::FrontEndMenu),
     ),
     (
         RECORD_ACTION_COMPOSITE_STATE,
-        ScreenFontPageRole::FrontEndRecordAction,
+        ScreenFontResidencyPolicy::Static(ScreenFontPageRole::FrontEndRecordAction),
+    ),
+    (
+        UNIT_SUMMARY_COMPOSITE_STATE,
+        ScreenFontResidencyPolicy::UnitNameSelected,
+    ),
+    (
+        UNIT_STATUS_COMPOSITE_STATE,
+        ScreenFontResidencyPolicy::UnitNameSelected,
     ),
 ];
+
+impl ScreenFontResidencyPolicy {
+    pub(in crate::full_translation_install) fn static_page(self) -> Option<ScreenFontPageRole> {
+        match self {
+            Self::Static(page) => Some(page),
+            Self::UnitNameSelected => None,
+        }
+    }
+}
+
+fn validate_composite_state_policies() -> Result<()> {
+    let states = COMPOSITE_FONT_RESIDENCY_POLICIES
+        .iter()
+        .map(|(state, _)| *state)
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        states.len() == COMPOSITE_FONT_RESIDENCY_POLICIES.len(),
+        "screen font residency assigns more than one policy to a composite state"
+    );
+    let dynamic_states = COMPOSITE_FONT_RESIDENCY_POLICIES
+        .iter()
+        .filter_map(|(state, policy)| {
+            (*policy == ScreenFontResidencyPolicy::UnitNameSelected).then_some(*state)
+        })
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        dynamic_states
+            == BTreeSet::from([UNIT_SUMMARY_COMPOSITE_STATE, UNIT_STATUS_COMPOSITE_STATE]),
+        "unit-name-selected screen font residency states changed"
+    );
+    Ok(())
+}
 
 #[derive(Clone, Copy)]
 pub(in crate::full_translation_install) struct ScreenFontPageRoutes {
@@ -179,7 +238,9 @@ pub(super) struct ScreenFontResidencyInputs<'a> {
 pub(super) struct ScreenFontResidencyPlan {
     schema: u8,
     strategy: &'static str,
-    composite_state_route_count: usize,
+    composite_state_policy_count: usize,
+    static_state_route_count: usize,
+    unit_name_selected_state_count: usize,
     front_end_composite_state_count: usize,
     front_end_record_action_catalog_page_index: usize,
     front_end_record_action_mapper_route: u8,
@@ -208,6 +269,7 @@ impl ScreenFontResidencyPlan {
 pub(super) fn plan_screen_font_residency(
     inputs: ScreenFontResidencyInputs<'_>,
 ) -> Result<ScreenFontResidencyPlan> {
+    validate_composite_state_policies()?;
     ensure!(
         !inputs.installed_front_end_glyph_codes.is_empty(),
         "screen font residency has no installed front-end glyphs"
@@ -266,9 +328,17 @@ pub(super) fn plan_screen_font_residency(
         .len();
 
     Ok(ScreenFontResidencyPlan {
-        schema: 1,
-        strategy: "derive every static composite-screen font route from one residency plan; select the protagonist catalog page explicitly for the front-end record-action lifetime",
-        composite_state_route_count: COMPOSITE_FONT_PAGE_ROUTES.len(),
+        schema: 2,
+        strategy: "derive every composite-screen font policy from one residency plan; publish static pages at entry, let unit-name appenders select name-dependent pages, and select the protagonist catalog page explicitly for the front-end record-action lifetime",
+        composite_state_policy_count: COMPOSITE_FONT_RESIDENCY_POLICIES.len(),
+        static_state_route_count: COMPOSITE_FONT_RESIDENCY_POLICIES
+            .iter()
+            .filter(|(_, policy)| policy.static_page().is_some())
+            .count(),
+        unit_name_selected_state_count: COMPOSITE_FONT_RESIDENCY_POLICIES
+            .iter()
+            .filter(|(_, policy)| *policy == ScreenFontResidencyPolicy::UnitNameSelected)
+            .count(),
         front_end_composite_state_count: FRONT_END_FONT_STATES.len(),
         front_end_record_action_catalog_page_index: record_action_catalog_page_index,
         front_end_record_action_mapper_route: front_end_record_action_route,
@@ -337,10 +407,18 @@ mod tests {
     fn every_front_end_state_selects_an_explicit_page() {
         let routes = routes();
         routes.validate().unwrap();
-        let actual = COMPOSITE_FONT_PAGE_ROUTES
+        let actual = COMPOSITE_FONT_RESIDENCY_POLICIES
             .iter()
             .filter(|(state, _)| FRONT_END_FONT_STATES.contains(state))
-            .map(|(state, role)| (*state, role.mapper_route(routes)))
+            .map(|(state, policy)| {
+                (
+                    *state,
+                    policy
+                        .static_page()
+                        .expect("front-end state must have a static page")
+                        .mapper_route(routes),
+                )
+            })
             .collect::<BTreeMap<_, _>>();
 
         assert_eq!(
@@ -354,6 +432,22 @@ mod tests {
                     routes.front_end_record_action,
                 ),
             ])
+        );
+    }
+
+    #[test]
+    fn unit_summary_and_status_select_the_page_published_by_the_name_appender() {
+        validate_composite_state_policies().unwrap();
+        let dynamic_states = COMPOSITE_FONT_RESIDENCY_POLICIES
+            .iter()
+            .filter_map(|(state, policy)| {
+                (*policy == ScreenFontResidencyPolicy::UnitNameSelected).then_some(*state)
+            })
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(
+            dynamic_states,
+            BTreeSet::from([UNIT_SUMMARY_COMPOSITE_STATE, UNIT_STATUS_COMPOSITE_STATE])
         );
     }
 
