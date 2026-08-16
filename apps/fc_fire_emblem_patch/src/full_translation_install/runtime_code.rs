@@ -39,6 +39,7 @@ mod font_page_route;
 pub(in crate::full_translation_install) mod lifecycle;
 pub(in crate::full_translation_install) mod resolve_request;
 mod resolved_page_publication;
+mod speaker_prefix;
 pub(super) mod trampoline;
 pub(in crate::full_translation_install) mod transport;
 
@@ -78,6 +79,7 @@ pub(in crate::full_translation_install) enum DialogueRuntimeHookRole {
     FixedMenuStorageActionAppender,
     FixedMenuStorageOverflowAppender,
     FixedMenuStorageCapacityAppender,
+    DialogueSpeakerPrefixProjection,
     EndingRecordFontPageEnter,
     EndingRecordFontPageExit,
     EndingCharacterEpilogueFontPageExit,
@@ -333,6 +335,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     chr_ram_ownership::bind_shared_chr_ram_ownership_boundary(candidate)?;
     dynamic_producer::bind_hook_sites(source, candidate)?;
     consumer_catalog::bind_consumer_catalog_sites(source, candidate)?;
+    speaker_prefix::bind_speaker_prefix_output(source, candidate)?;
     let chr_source_state = chr_source_state::bind_chr_source_state(candidate)?;
 
     let font_page_routes = font_page_route::build_font_page_route_runtime()?;
@@ -642,6 +645,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     ];
 
     let mut hooks = vec![
+        speaker_prefix::blank_speaker_prefix_output_hook()?,
         DialogueRuntimeHook {
             role: DialogueRuntimeHookRole::ChrRamSelector,
             write_role: "dialogue CHR RAM selector hook",
