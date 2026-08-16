@@ -136,7 +136,7 @@ pub(super) fn collect_section_inputs(
             semantic_entries(inputs.unit_ui)?,
         ),
     ];
-    let expected_entry_counts = [1, 25, 2, 22, 1, 69, 4, 91, 24, 6, 53, 25];
+    let expected_entry_counts = [1, 25, 2, 22, 1, 69, 4, 91, 24, 8, 53, 25];
     ensure!(
         sections.len() == EXPECTED_SECTION_COUNT
             && sections

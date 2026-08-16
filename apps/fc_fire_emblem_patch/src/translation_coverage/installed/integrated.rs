@@ -872,10 +872,10 @@ mod tests {
                 "declared_domain_count": 1,
                 "domains": [{
                     "id": "map_menu_labels",
-                    "target_unit_count": 6,
-                    "globally_planned_target_unit_count": 6,
-                    "declared_screen_roles": ["map_menu"],
-                    "statically_accounted_declared_screen_roles": ["map_menu"],
+                    "target_unit_count": 8,
+                    "globally_planned_target_unit_count": 8,
+                    "declared_screen_roles": ["map_funds_summary", "map_menu"],
+                    "statically_accounted_declared_screen_roles": ["map_funds_summary", "map_menu"],
                     "unaccounted_declared_screen_roles": [],
                     "runtime_observed_declared_screen_roles": runtime_roles,
                     "all_declared_consumers_statically_accounted": true
@@ -984,8 +984,11 @@ mod tests {
         let evidence =
             bind_integrated_installation(&report, b"final", "base-output", "base-report").unwrap();
         let domain = &evidence.domains["map_menu_labels"];
-        assert_eq!(domain.installed_target_unit_count, 6);
-        assert_eq!(domain.consumer_complete_screen_roles, ["map_menu"]);
+        assert_eq!(domain.installed_target_unit_count, 8);
+        assert_eq!(
+            domain.consumer_complete_screen_roles,
+            ["map_funds_summary", "map_menu"]
+        );
         assert_eq!(domain.runtime_bound_screen_roles, ["map_menu"]);
         assert_eq!(evidence.output_sha1, sha1_hex(b"final"));
     }

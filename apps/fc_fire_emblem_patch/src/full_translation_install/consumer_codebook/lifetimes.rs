@@ -86,7 +86,7 @@ pub(super) fn build_lifetimes(inputs: &ConsumerCodebookInputs<'_>) -> Result<Vec
     let mut map_lifetime = lifetime(
         "map_menu",
         "all_map_menu_entries",
-        vec!["map_menu"],
+        vec!["map_menu", "map_funds_summary"],
         vec!["map_menu_labels"],
         &[(CodeOwner::FixedUi, map_menu.as_slice())],
         true,

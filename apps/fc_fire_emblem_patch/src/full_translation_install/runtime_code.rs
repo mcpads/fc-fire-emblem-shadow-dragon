@@ -935,8 +935,9 @@ pub(super) fn ensure_disjoint(routines: &[&RuntimeRoutine], cave_end: u16) -> Re
     if let Some(last) = ordered.last() {
         ensure!(
             usize::from(last.address) + last.bytes.len() <= usize::from(cave_end),
-            "{} reaches past the reserved cave end {cave_end:04X}",
-            last.role
+            "{} ends at {:04X} and reaches past the reserved cave end {cave_end:04X}",
+            last.role,
+            usize::from(last.address) + last.bytes.len()
         );
     }
     Ok(())

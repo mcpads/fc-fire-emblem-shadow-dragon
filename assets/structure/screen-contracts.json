@@ -152,6 +152,24 @@
       "contract_state": "observed_partial"
     },
     {
+      "screen_role": "map_funds_summary",
+      "surface_family": "map_ui",
+      "runtime_observed": true,
+      "input_behavior": "input_wait",
+      "translation_scope": "japanese_only",
+      "temporal_behavior": "the funds window opens first, then composite states 13 and 14 publish the map and turn summary until B returns",
+      "known_focus": [
+        "left 1A/1A and right 00/19 CHR pairs",
+        "composite state 13 at bank 0B:88D5 composes the funds window",
+        "composite state 14 at bank 0B:8923 appends fixed-string indices 2D and 0A for map and turn",
+        "the prior integrated artifact displayed the untranslated source labels at state 14",
+        "the rebuilt integrated artifact displayed Korean map and turn labels at state 13, cleared its font page on B, and reproduced the same frame after re-entry"
+      ],
+      "unresolved_focus": ["fresh integrated runtime exercise of the separate state 14 producer route"],
+      "next_gate": "exercise state 14 while preserving the already-verified state 13 enter, B return, and re-entry behavior",
+      "contract_state": "observed_partial"
+    },
+    {
       "screen_role": "options",
       "surface_family": "map_ui",
       "runtime_observed": true,

@@ -95,6 +95,8 @@ pub(crate) const OBSERVED_CHR_PAIRS: &[ObservedChrPair] = &[
     ),
     pair("map_menu", PatternWindow::Left, 0x1A, 0x1A),
     pair("map_menu", PatternWindow::Right, 0x00, 0x19),
+    pair("map_funds_summary", PatternWindow::Left, 0x1A, 0x1A),
+    pair("map_funds_summary", PatternWindow::Right, 0x00, 0x19),
     pair("options", PatternWindow::Left, 0x1A, 0x1A),
     pair("options", PatternWindow::Right, 0x00, 0x15),
     pair("unit_roster", PatternWindow::Left, 0x18, 0x18),

@@ -71,6 +71,8 @@ const ATTACK_WEAPON_SELECTION_COMPOSITE_STATE: u8 = 0x06;
 const UNIT_ITEM_LIST_COMPOSITE_STATE: u8 = 0x07;
 const ITEM_ACTION_COMPOSITE_STATE: u8 = 0x09;
 const UNIT_STATUS_COMPOSITE_STATE: u8 = 0x0F;
+const MAP_FUNDS_COMPOSITE_STATE: u8 = 0x13;
+const MAP_SUMMARY_COMPOSITE_STATE: u8 = 0x14;
 const CHAPTER_SAVE_OFFER_COMPOSITE_STATE: u8 = 0x1C;
 #[derive(Clone, Copy)]
 pub(in crate::full_translation_install) struct ConsumerFontPageRoutes {
@@ -92,8 +94,10 @@ enum FontPageRole {
     RetainCurrent,
 }
 
-const COMPOSITE_PAGE_ROUTES: [(u8, FontPageRole); 10] = [
+const COMPOSITE_PAGE_ROUTES: [(u8, FontPageRole); 12] = [
     (MAP_MENU_COMPOSITE_STATE, FontPageRole::MapMenu),
+    (MAP_FUNDS_COMPOSITE_STATE, FontPageRole::MapMenu),
+    (MAP_SUMMARY_COMPOSITE_STATE, FontPageRole::MapMenu),
     (UNIT_COMMAND_COMPOSITE_STATE, FontPageRole::UnitCommand),
     (
         ATTACK_WEAPON_SELECTION_COMPOSITE_STATE,
@@ -116,7 +120,7 @@ const COMPOSITE_PAGE_ROUTES: [(u8, FontPageRole); 10] = [
 
 const EXPECTED_DIRECT_COMPOSITE_PRODUCER_COUNT: usize = 50;
 const EXPECTED_DIRECT_COMPOSITE_PRODUCER_SHA1: &str = "eba4ee041d3af03bd5c2d71cc443e81fb01590a1";
-const EXPECTED_FONT_PAGE_STATE_PRODUCERS: [CompositeStateProducer; 13] = [
+const EXPECTED_FONT_PAGE_STATE_PRODUCERS: [CompositeStateProducer; 16] = [
     CompositeStateProducer::new(0x02, 0xA693, 0x4C, START_MENU_COMPOSITE_STATE),
     CompositeStateProducer::new(0x02, 0xA6CC, 0x4C, SAVE_SLOT_SELECTION_COMPOSITE_STATE),
     CompositeStateProducer::new(0x02, 0xA6D5, 0x4C, RECORD_LIST_COMPOSITE_STATE),
@@ -128,7 +132,10 @@ const EXPECTED_FONT_PAGE_STATE_PRODUCERS: [CompositeStateProducer; 13] = [
     CompositeStateProducer::new(0x06, 0x93E2, 0x4C, UNIT_ITEM_LIST_COMPOSITE_STATE),
     CompositeStateProducer::new(0x06, 0x941D, 0x20, ITEM_ACTION_COMPOSITE_STATE),
     CompositeStateProducer::new(0x06, 0x9EB4, 0x20, UNIT_ITEM_LIST_COMPOSITE_STATE),
+    CompositeStateProducer::new(0x06, 0xA0BE, 0x20, MAP_FUNDS_COMPOSITE_STATE),
     CompositeStateProducer::new(0x06, 0xA30D, 0x4C, MAP_MENU_COMPOSITE_STATE),
+    CompositeStateProducer::new(0x06, 0xB40B, 0x4C, MAP_SUMMARY_COMPOSITE_STATE),
+    CompositeStateProducer::new(0x06, 0xB413, 0x4C, MAP_FUNDS_COMPOSITE_STATE),
     CompositeStateProducer::new(0x06, 0xB78A, 0x4C, CHAPTER_SAVE_OFFER_COMPOSITE_STATE),
 ];
 
@@ -440,23 +447,34 @@ pub(super) fn build_composite_font_page_publisher(
     let mut instructions = vec![Instruction::StaAbsolute(COMPOSITE_STATE)];
     let mut route_jumps = Vec::with_capacity(COMPOSITE_PAGE_ROUTES.len());
     for (state, page) in COMPOSITE_PAGE_ROUTES {
+        if [MAP_FUNDS_COMPOSITE_STATE, MAP_SUMMARY_COMPOSITE_STATE].contains(&state) {
+            continue;
+        }
         instructions.push(Instruction::CmpImmediate(state));
         let jump = instructions.len();
         instructions.push(Instruction::BeqAbsolute(origin));
         route_jumps.push((jump, page));
     }
+    // States $13 and $14 are adjacent and share the map-menu page. A final
+    // unsigned range check represents both without growing two equality routes.
+    instructions.extend([
+        Instruction::Sec,
+        Instruction::SbcImmediate(MAP_FUNDS_COMPOSITE_STATE),
+        Instruction::CmpImmediate(2),
+    ]);
+    let map_summary_range_jump = instructions.len();
+    instructions.push(Instruction::BccAbsolute(origin));
     instructions.extend([
         Instruction::LdaImmediate(0),
         Instruction::StaAbsolute(CONSUMER_FONT_PAGE),
-        Instruction::Rts,
     ]);
     let retain_current = next_address(origin, &instructions)?;
+    instructions.push(Instruction::Rts);
     for (jump, page_role) in &route_jumps {
         if *page_role == FontPageRole::RetainCurrent {
             instructions[*jump] = Instruction::BeqAbsolute(retain_current);
         }
     }
-    instructions.push(Instruction::Rts);
     for page in [
         FontPageRole::FrontEnd,
         FontPageRole::CatalogDefault,
@@ -470,9 +488,15 @@ pub(super) fn build_composite_font_page_publisher(
                 instructions[*jump] = Instruction::BeqAbsolute(target);
             }
         }
+        if page == FontPageRole::MapMenu {
+            instructions[map_summary_range_jump] = Instruction::BccAbsolute(target);
+        }
         instructions.extend([
             Instruction::LdaImmediate(page.mapper_route(pages)),
-            Instruction::JmpAbsolute(activation),
+            // Every validated mapper route is nonzero. The taken relative branch is
+            // therefore an exact unconditional transfer while keeping the publisher
+            // inside its source-bound fixed-bank cave.
+            Instruction::BneAbsolute(activation),
         ]);
     }
 
@@ -601,6 +625,7 @@ mod tests {
     const APPLY_ROUTE: u16 = 0xF900;
     const RESTORE_SOURCE_PAIR: u16 = 0xF360;
     const REUSED_STATE_WITHOUT_FONT_OWNERSHIP: u8 = 0x20;
+    const STATUS_CARRY: u8 = 0x01;
     const STATUS_ZERO: u8 = 0x02;
 
     fn pages() -> ConsumerFontPageRoutes {
@@ -681,6 +706,7 @@ mod tests {
                     0x28 => {
                         self.p = self.pop();
                     }
+                    0x38 => self.p |= STATUS_CARRY,
                     0x48 => self.push(self.a),
                     0x4C => {
                         let target = self.read_word_pc();
@@ -736,6 +762,16 @@ mod tests {
                     0xC9 => {
                         let value = self.read_pc();
                         self.set_zero(self.a == value);
+                        self.set_carry(self.a >= value);
+                    }
+                    0xE9 => {
+                        let value = self.read_pc();
+                        let borrow = u8::from(self.p & STATUS_CARRY == 0);
+                        let required = u16::from(value) + u16::from(borrow);
+                        let result = self.a.wrapping_sub(value).wrapping_sub(borrow);
+                        self.set_carry(u16::from(self.a) >= required);
+                        self.a = result;
+                        self.set_zero(self.a == 0);
                     }
                     0xF0 => {
                         let displacement = self.read_pc() as i8;
@@ -746,6 +782,12 @@ mod tests {
                     0xD0 => {
                         let displacement = self.read_pc() as i8;
                         if self.p & STATUS_ZERO == 0 {
+                            self.pc = self.pc.wrapping_add_signed(i16::from(displacement));
+                        }
+                    }
+                    0x90 => {
+                        let displacement = self.read_pc() as i8;
+                        if self.p & STATUS_CARRY == 0 {
                             self.pc = self.pc.wrapping_add_signed(i16::from(displacement));
                         }
                     }
@@ -794,6 +836,14 @@ mod tests {
                 self.p |= STATUS_ZERO;
             } else {
                 self.p &= !STATUS_ZERO;
+            }
+        }
+
+        fn set_carry(&mut self, set: bool) {
+            if set {
+                self.p |= STATUS_CARRY;
+            } else {
+                self.p &= !STATUS_CARRY;
             }
         }
     }
@@ -847,6 +897,63 @@ mod tests {
         assert_eq!(closed.central_writer_value, Some(restore_page));
         assert!(closed.restored_source_pair);
         assert_eq!(closed.applied_route, None);
+        assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], 0);
+    }
+
+    #[test]
+    fn map_funds_and_summary_states_share_the_map_menu_page_until_close() {
+        let pages = pages();
+        let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
+        let publisher_origin = ORIGIN + u16::try_from(activation.bytes.len()).unwrap();
+        let publisher =
+            build_composite_font_page_publisher(publisher_origin, activation.address, pages)
+                .unwrap();
+        let close_origin = publisher.address + u16::try_from(publisher.bytes.len()).unwrap();
+        let close = build_consumer_font_page_close(close_origin, RESTORE_SOURCE_PAIR).unwrap();
+        let memory = vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
+
+        let (memory, funds) = run_routines(
+            memory,
+            &[&activation, &publisher],
+            publisher.address,
+            MAP_FUNDS_COMPOSITE_STATE,
+            0xA5,
+        );
+        assert_eq!(funds.applied_route, Some(pages.map_menu));
+        assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], pages.map_menu);
+
+        let (memory, summary) = run_routines(
+            memory,
+            &[&activation, &publisher],
+            publisher.address,
+            MAP_SUMMARY_COMPOSITE_STATE,
+            0x24,
+        );
+        assert_eq!(summary.applied_route, Some(pages.map_menu));
+        assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], pages.map_menu);
+
+        // The compact unsigned range must admit exactly $13 and $14. Adjacent
+        // states are unrelated composites and must release the old page.
+        for state in [
+            MAP_FUNDS_COMPOSITE_STATE - 1,
+            MAP_SUMMARY_COMPOSITE_STATE + 1,
+        ] {
+            let mut adjacent_memory = memory.clone();
+            adjacent_memory[usize::from(CONSUMER_FONT_PAGE)] = pages.map_menu;
+            let (adjacent_memory, adjacent) = run_routines(
+                adjacent_memory,
+                &[&activation, &publisher],
+                publisher.address,
+                state,
+                0x24,
+            );
+            assert_eq!(adjacent.applied_route, None);
+            assert_eq!(adjacent_memory[usize::from(CONSUMER_FONT_PAGE)], 0);
+        }
+
+        let (memory, closed) = run_routines(memory, &[&close], close.address, 0x19, 0x64);
+        assert_eq!(closed.central_writer_value, Some(0x19));
+        assert!(closed.restored_source_pair);
         assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], 0);
     }
 

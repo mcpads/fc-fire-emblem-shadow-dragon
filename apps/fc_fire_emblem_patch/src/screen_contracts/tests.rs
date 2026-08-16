@@ -4,10 +4,10 @@ use super::*;
 fn registry_covers_every_observed_chr_pair() {
     let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
 
-    assert_eq!(report.screen_count, 46);
+    assert_eq!(report.screen_count, 47);
     assert_eq!(report.unpartitioned_surface_family_count, 0);
-    assert_eq!(report.runtime_observed_screen_count, 46);
-    assert_eq!(report.chr_pair_observed_screen_count, 43);
+    assert_eq!(report.runtime_observed_screen_count, 47);
+    assert_eq!(report.chr_pair_observed_screen_count, 44);
     assert_eq!(report.mixed_original_latin_screen_count, 20);
     assert_eq!(report.preserved_original_only_screen_count, 5);
     assert_eq!(report.page_switch_verified_screen_count, 1);

@@ -113,7 +113,7 @@ pub(crate) struct StrongestLifetimeReport {
     pub(crate) next_gate: &'static str,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub(crate) struct TranslationLifetimeDemandReport {
     pub(crate) screen_role: &'static str,
     pub(crate) measurement_basis: &'static str,

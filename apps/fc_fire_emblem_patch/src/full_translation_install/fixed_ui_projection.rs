@@ -87,7 +87,7 @@ impl FixedUiProjectionPlan {
         match domain {
             "unit_ui_labels" => &["unit_command_menu", "unit_status", "unit_summary"],
             "item_action_labels" => &["item_action_menu"],
-            "map_menu_labels" => &["map_menu"],
+            "map_menu_labels" => &["map_menu", "map_funds_summary"],
             _ => &[],
         }
     }
@@ -246,22 +246,13 @@ pub(super) fn plan_fixed_ui_projection(
         let encoded = inputs
             .consumer_codebook
             .encode_fixed_ui_for("map_menu", entry.logical_bytes())?;
-        ensure!(
-            encoded.len() < entry.source_storage.len(),
-            "map menu projection exceeds the source storage for {}",
-            entry.id
-        );
         bind_candidate(
             inputs.candidate,
             entry.source_file_offset,
             &entry.source_storage,
             &format!("{} source storage", entry.id),
         )?;
-        let mut replacement = vec![0xFF; entry.source_storage.len()];
-        replacement[..encoded.len()].copy_from_slice(&encoded);
-        *replacement
-            .last_mut()
-            .context("map menu source slot is empty")? = SEGMENT_END;
+        let replacement = project_map_menu_entry(entry, &encoded)?;
         assignment_identity.extend_from_slice(entry.id.as_bytes());
         assignment_identity.extend_from_slice(&replacement);
         writes.push(FixedUiExpectedWrite {
@@ -301,6 +292,81 @@ pub(super) fn plan_fixed_ui_projection(
         every_map_menu_entry_fits_owned_storage: true,
         writes,
     })
+}
+
+fn project_map_menu_entry(
+    entry: &crate::map_menu::MapMenuPlannedEntry,
+    encoded: &[u8],
+) -> Result<Vec<u8>> {
+    project_map_menu_storage(
+        &entry.id,
+        &entry.source_storage,
+        &entry.preserved_suffix,
+        entry.source_display_cell_count,
+        encoded,
+    )
+}
+
+fn project_map_menu_storage(
+    id: &str,
+    source_storage: &[u8],
+    preserved_suffix: &[u8],
+    source_display_cell_count: Option<usize>,
+    encoded: &[u8],
+) -> Result<Vec<u8>> {
+    ensure!(
+        !encoded.contains(&STRING_END) && !encoded.contains(&SEGMENT_END),
+        "translated map-menu label contains a structural terminator for {}",
+        id
+    );
+    ensure!(
+        !preserved_suffix.is_empty(),
+        "map-menu label lost its structural suffix for {}",
+        id
+    );
+
+    let mut replacement = vec![0xFF; source_storage.len()];
+    if let Some(source_display_cell_count) = source_display_cell_count {
+        let suffix_display_cell_count =
+            terminated_composite_display_cell_count(preserved_suffix, STRING_END)?;
+        let target_display_cell_count = composite_payload_display_cell_count(encoded)
+            .checked_add(suffix_display_cell_count)
+            .context("map funds-summary display span overflow")?;
+        ensure!(
+            target_display_cell_count <= source_display_cell_count,
+            "map funds-summary projection exceeds the source display span for {}",
+            id
+        );
+        let padding = source_display_cell_count - target_display_cell_count;
+        let projected_len = encoded.len() + padding + preserved_suffix.len();
+        ensure!(
+            projected_len <= replacement.len(),
+            "map funds-summary projection exceeds the source storage for {}",
+            id
+        );
+        let mut cursor = 0;
+        replacement[cursor..cursor + encoded.len()].copy_from_slice(encoded);
+        cursor += encoded.len() + padding;
+        replacement[cursor..cursor + preserved_suffix.len()].copy_from_slice(preserved_suffix);
+        ensure!(
+            terminated_composite_display_cell_count(
+                &replacement[..cursor + preserved_suffix.len()],
+                STRING_END,
+            )? == source_display_cell_count,
+            "map funds-summary projection changed the source display span for {}",
+            id
+        );
+    } else {
+        ensure!(
+            encoded.len() + preserved_suffix.len() <= replacement.len(),
+            "map menu projection exceeds the source storage for {}",
+            id
+        );
+        replacement[..encoded.len()].copy_from_slice(encoded);
+        let suffix_start = replacement.len() - preserved_suffix.len();
+        replacement[suffix_start..].copy_from_slice(preserved_suffix);
+    }
+    Ok(replacement)
 }
 
 fn project_summary_status_label(
@@ -482,6 +548,24 @@ mod tests {
         assert_eq!(projected, [0xFF, 0x40, 0x41, 0x8D, 0xEF]);
         assert_eq!(
             terminated_composite_display_cell_count(&projected, STRING_END).unwrap(),
+            4
+        );
+    }
+
+    #[test]
+    fn map_and_turn_labels_keep_the_number_column_while_replacing_japanese() {
+        let projected = project_map_menu_storage(
+            "map-funds-summary:map",
+            &[0x50, 0x89, 0x4C, 0x1F, 0x8D, 0xEF],
+            &[0x8D, 0xEF],
+            Some(4),
+            &[0xA0],
+        )
+        .unwrap();
+
+        assert_eq!(projected, [0xA0, 0xFF, 0xFF, 0x8D, 0xEF, 0xFF]);
+        assert_eq!(
+            terminated_composite_display_cell_count(&projected[..5], STRING_END).unwrap(),
             4
         );
     }

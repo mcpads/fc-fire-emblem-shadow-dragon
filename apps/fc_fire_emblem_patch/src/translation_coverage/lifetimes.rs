@@ -94,7 +94,7 @@ struct ConsumerLifetimeDemands {
     front_end_menu: Vec<TranslationLifetimeDemandReport>,
     options_menu: TranslationLifetimeDemandReport,
     title_graphics: TranslationLifetimeDemandReport,
-    map_menu: TranslationLifetimeDemandReport,
+    map_menu: Vec<TranslationLifetimeDemandReport>,
     chapter_save: Vec<TranslationLifetimeDemandReport>,
     ending_chapter_record: TranslationLifetimeDemandReport,
     intro_dialogue: Vec<TranslationLifetimeDemandReport>,
@@ -373,7 +373,7 @@ fn build_translation_lifetime_inventory(
     demands.extend(consumer_demands.front_end_menu);
     demands.push(consumer_demands.options_menu);
     demands.push(consumer_demands.title_graphics);
-    demands.push(consumer_demands.map_menu);
+    demands.extend(consumer_demands.map_menu);
     demands.extend(consumer_demands.chapter_save);
     demands.push(consumer_demands.ending_chapter_record);
     demands.extend(consumer_demands.intro_dialogue);
@@ -559,6 +559,8 @@ mod tests {
             fits_active_page: true,
             evidence_report_sha1: "map-menu-evidence".to_owned(),
         };
+        let mut map_funds_summary_demand = map_menu_demand.clone();
+        map_funds_summary_demand.screen_role = "map_funds_summary";
         let mut roles = [
             "battle_animation",
             "class_profile",
@@ -567,6 +569,7 @@ mod tests {
             "ending_chapter_record_scroll",
             "ending_character_epilogue",
             "game_over",
+            "map_funds_summary",
             "map_menu",
             "new_game_choice",
             "save_slot_selection",
@@ -656,7 +659,7 @@ mod tests {
                     evidence_report_sha1: "build-report",
                 })
                 .unwrap(),
-                map_menu: map_menu_demand,
+                map_menu: vec![map_menu_demand, map_funds_summary_demand],
                 chapter_save: Vec::new(),
                 ending_chapter_record: TranslationLifetimeDemandReport {
                     screen_role: "ending_chapter_record_scroll",
@@ -686,7 +689,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(inventory.demands.len(), 31);
+        assert_eq!(inventory.demands.len(), 32);
         assert_eq!(inventory.strongest.state, "complete");
         assert_eq!(inventory.strongest.selected_screen_role, Some("map_menu"));
         assert_eq!(inventory.strongest.selected_slot_demand, Some(203));

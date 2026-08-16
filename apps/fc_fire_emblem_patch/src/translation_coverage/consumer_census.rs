@@ -389,7 +389,10 @@ mod tests {
             ),
             DomainSourceEvidence::known_routes(
                 "map_menu_labels",
-                source(&["map-menu:roster"], &["map_menu"]),
+                source(
+                    &["map-menu:roster", "map-funds-summary:map"],
+                    &["map_menu", "map_funds_summary"],
+                ),
             ),
             DomainSourceEvidence::known_routes(
                 "terrain_names",

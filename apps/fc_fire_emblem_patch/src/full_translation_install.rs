@@ -472,8 +472,8 @@ pub(crate) fn plan_full_translation_installation(
             && chapter_titles.entry_count == 25
             && chapter_titles.translated_entry_count == 25
             && choices.entries.len() == 2
-            && map_menu.entry_count == 6
-            && map_menu.translated_entry_count == 6
+            && map_menu.entry_count == 8
+            && map_menu.translated_entry_count == 8
             && unit_ui.entry_count == 25
             && item_actions.entry_count == 4
             && transitions.save_offer.entry_count == 1

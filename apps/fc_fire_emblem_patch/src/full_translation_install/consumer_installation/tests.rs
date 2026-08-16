@@ -33,7 +33,7 @@ fn global_dialogue_plan_advances_only_proven_cross_domain_consumers() {
         ("item_names", 91),
         ("location_names", 24),
         ("main_dialogue", 2_541),
-        ("map_menu_labels", 6),
+        ("map_menu_labels", 8),
         ("unit_names", 53),
         ("unit_ui_labels", 25),
     ]);
@@ -133,10 +133,16 @@ fn installation_with_complete_screens(
 #[test]
 fn exact_additional_consumer_roles_close_only_the_named_domain_screens() {
     let required = ["map_menu_labels"];
-    let target_unit_counts = BTreeMap::from([("map_menu_labels", 6)]);
-    let targets = BTreeMap::from([("map_menu_labels", vec!["map_menu".to_owned()])]);
+    let target_unit_counts = BTreeMap::from([("map_menu_labels", 8)]);
+    let targets = BTreeMap::from([(
+        "map_menu_labels",
+        vec!["map_funds_summary".to_owned(), "map_menu".to_owned()],
+    )]);
     let current = BTreeMap::new();
-    let additional = BTreeMap::from([("map_menu_labels", BTreeSet::from(["map_menu".to_owned()]))]);
+    let additional = BTreeMap::from([(
+        "map_menu_labels",
+        BTreeSet::from(["map_funds_summary".to_owned(), "map_menu".to_owned()]),
+    )]);
 
     let domains = assemble_domain_consumers(
         &required,
@@ -150,10 +156,10 @@ fn exact_additional_consumer_roles_close_only_the_named_domain_screens() {
     )
     .unwrap();
 
-    assert_eq!(domains[0].globally_planned_target_unit_count, 6);
+    assert_eq!(domains[0].globally_planned_target_unit_count, 8);
     assert_eq!(
         domains[0].globally_planned_declared_screen_roles,
-        ["map_menu"]
+        ["map_funds_summary", "map_menu"]
     );
     assert!(domains[0].all_declared_consumers_statically_accounted);
 }

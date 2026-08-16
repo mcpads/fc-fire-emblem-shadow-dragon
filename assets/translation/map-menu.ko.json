@@ -58,6 +58,24 @@
       "japanese_markup": "ターンおわる",
       "korean_markup": "턴종료",
       "status": "needs_human_review"
+    },
+    {
+      "id": "map-funds-summary:map",
+      "source_cpu_address_hex": "0x9195",
+      "source_bytes_hex": "50 89 4C 1F 8D EF",
+      "source_sha1": "bf224d794e3a4b4aaeddbc7760e93d82569d5058",
+      "japanese_markup": "マッフ゜",
+      "korean_markup": "맵",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "map-funds-summary:turn",
+      "source_cpu_address_hex": "0x90AA",
+      "source_bytes_hex": "40 3F 5F 8D EF",
+      "source_sha1": "8c1181bb15af230f0870f4125dff35362235a1f9",
+      "japanese_markup": "ターン",
+      "korean_markup": "턴",
+      "status": "needs_human_review"
     }
   ]
 }
