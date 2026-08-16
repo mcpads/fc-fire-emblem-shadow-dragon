@@ -50,6 +50,7 @@ mod roster_page;
 mod runtime;
 pub(crate) mod selector_safety;
 mod shop_dialogue_page;
+mod source_indexed_mapper_aliases;
 mod source_mapper_write_audit;
 #[cfg(test)]
 mod tests;
@@ -66,6 +67,10 @@ pub(crate) const ROSTER_HEADER_FIXED_STRING_INDEX: u8 = roster_page::HEADER_RESO
 use runtime::{
     build_routines, replace_central_chr_writer, replace_central_prg_writer, replace_direct_writer,
     replace_mirroring_writer, validate_routine_placements,
+};
+use source_indexed_mapper_aliases::{
+    SourceIndexedMapperAliasSafety, bind_source_indexed_mapper_aliases,
+    install_guarded_menu_mask_clears, verify_installed_guarded_menu_mask_clears,
 };
 use source_mapper_write_audit::{SourceMapperWriteAudit, audit_source_mapper_writes};
 
@@ -130,6 +135,7 @@ struct Mapper165ParityReport {
     prg_writer_count: usize,
     central_chr_writer_count: usize,
     direct_chr_writer_count: usize,
+    source_indexed_mapper_alias_safety: SourceIndexedMapperAliasSafety,
     source_mapper_write_audit: SourceMapperWriteAudit,
     absolute_chr_writer_census: AbsoluteChrWriterCensus,
     tracked_writes: Vec<TrackedWrite>,
@@ -208,6 +214,7 @@ struct AssembledParityImage {
     routines: Vec<runtime::AssembledRoutine>,
     tracked_writes: Vec<TrackedWrite>,
     source_mapper_write_audit: SourceMapperWriteAudit,
+    source_indexed_mapper_alias_safety: SourceIndexedMapperAliasSafety,
     absolute_chr_writer_census: AbsoluteChrWriterCensus,
 }
 
@@ -294,12 +301,13 @@ pub fn build_mapper165_parity_probe(
         prg_writer_count: SOURCE_PRG_BANK_WRITERS.len() + 1,
         central_chr_writer_count: CENTRAL_CHR_WRITERS.len(),
         direct_chr_writer_count: DIRECT_CHR_WRITERS.len(),
+        source_indexed_mapper_alias_safety: assembled.source_indexed_mapper_alias_safety,
         source_mapper_write_audit: assembled.source_mapper_write_audit,
         absolute_chr_writer_census: assembled.absolute_chr_writer_census,
         tracked_writes: assembled.tracked_writes,
         unresolved_boundaries: vec![
             "Observed central PPU $1000 pairs use generated trigger-plane variants; unobserved pairs still require visible parity measurement.",
-            "The legacy documented non-indexed absolute CHR census remains a verified subset of the root-independent source-MMC4 all-byte mapper-write denominator; executable ownership for the denominator's unresolved starts is not yet complete, and the final mapper165 image requires its own $8000-$FFFF denominator.",
+            "All sixteen exact source STA $7FEE,X sites in banks 06 and 0B are redirected through bank-local bounded routines; executable ownership for every other source effective write remains incomplete, and the final mapper165 image still requires its own $8000-$FFFF denominator.",
             "Converted direct-writer values are source-bound, but their complete runtime FD/FE co-lifetime population still requires battle-phase validation.",
             "The probe preserves and relocates the source CHR but does not add Korean glyphs or translation assets.",
             "Runtime parity covers suspend persistence, one adverse game-over path, and the chapter-one completion/save/cold-load transition, not whole-game regression.",
@@ -323,6 +331,7 @@ pub fn build_mapper165_parity_probe(
 fn assemble_mapper165_parity_image(source_rom: &Rom) -> Result<AssembledParityImage> {
     verify_complete_prg_writer_inventory(source_rom)?;
     let source_mapper_write_audit = audit_source_mapper_writes(source_rom)?;
+    let source_indexed_mapper_alias_safety = bind_source_indexed_mapper_aliases(source_rom)?;
     let absolute_chr_writer_census = bind_absolute_chr_writer_census(source_rom)?;
     selector_safety::bind_source_contract(source_rom)?;
 
@@ -367,6 +376,8 @@ fn assemble_mapper165_parity_image(source_rom: &Rom) -> Result<AssembledParityIm
             &routine.bytes,
         )?;
     }
+
+    install_guarded_menu_mask_clears(&mut image)?;
 
     replace_central_prg_writer(&mut image)?;
     selector_safety::install_source_hooks(&mut image)?;
@@ -413,6 +424,7 @@ fn assemble_mapper165_parity_image(source_rom: &Rom) -> Result<AssembledParityIm
     verify_output(source_rom, &output_rom, &output, &trigger_variant_plan)?;
     selector_safety::verify_installed_contract(&output_rom)?;
     selector_safety::verify_parity_nonindexed_absolute_mapper_select_store(&output_rom)?;
+    verify_installed_guarded_menu_mask_clears(&output_rom)?;
 
     Ok(AssembledParityImage {
         output,
@@ -422,6 +434,7 @@ fn assemble_mapper165_parity_image(source_rom: &Rom) -> Result<AssembledParityIm
         routines,
         tracked_writes,
         source_mapper_write_audit,
+        source_indexed_mapper_alias_safety,
         absolute_chr_writer_census,
     })
 }
