@@ -173,6 +173,8 @@ pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) output_path: Option<&'a Path>,
 }
 
+pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 20;
+
 pub(crate) struct FullTranslationInstallSummary {
     pub(crate) report_sha1: String,
     pub(crate) declared_installation_domain_count: usize,
@@ -1108,7 +1110,7 @@ pub(crate) fn plan_full_translation_installation(
         false
     };
     let report = FullTranslationInstallReport {
-        schema: 20,
+        schema: FULL_TRANSLATION_REPORT_SCHEMA,
         source_sha1: EXPECTED_SOURCE_SHA1,
         strategy: "install the declared translation domains in one cumulative candidate, close declared installation gates, then run declared consumer-path dynamic regression on that same ROM; whole-game consumer census remains separate",
         declared_installation_domain_count: REQUIRED_DOMAIN_COUNT,

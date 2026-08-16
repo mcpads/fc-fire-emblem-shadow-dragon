@@ -18,12 +18,12 @@ use serde::Deserialize;
 
 use super::{CurrentInstallation, inspect_current_installation};
 use crate::{
+    full_translation_install::FULL_TRANSLATION_REPORT_SCHEMA,
     rom::EXPECTED_SOURCE_SHA1,
     sha1_hex,
     translation_coverage::{DomainInstallation, inspect_domain_screen_targets},
 };
 
-const INTEGRATED_REPORT_SCHEMA: u8 = 19;
 const CARRIED_BATTLE_DOMAIN_IDS: [&str; 4] = [
     "battle_dialogue",
     "battle_forecast_label",
@@ -254,7 +254,8 @@ fn bind_integrated_installation(
     let report: IntegratedBuildReport =
         serde_json::from_slice(report_bytes).context("parse integrated build report")?;
     ensure!(
-        report.schema == INTEGRATED_REPORT_SCHEMA && report.source_sha1 == EXPECTED_SOURCE_SHA1,
+        report.schema == FULL_TRANSLATION_REPORT_SCHEMA
+            && report.source_sha1 == EXPECTED_SOURCE_SHA1,
         "integrated build report is not bound to the supported source"
     );
     let output_sha1 = sha1_hex(output_bytes);
@@ -862,7 +863,7 @@ mod tests {
             carried_battle_domain("terrain_names", 16),
         ];
         serde_json::to_vec(&serde_json::json!({
-            "schema": INTEGRATED_REPORT_SCHEMA,
+            "schema": FULL_TRANSLATION_REPORT_SCHEMA,
             "source_sha1": EXPECTED_SOURCE_SHA1,
             "declared_installation_domain_count": 1,
             "declared_installation_domains": ["map_menu_labels"],
