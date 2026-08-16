@@ -142,10 +142,10 @@ pub(in crate::full_translation_install::integrated_write_set) fn verify_runtime_
     let actual_identity_count = actual_initializers.len();
     let preserves_consumer_font_page = required_initializers
         .first()
-        .is_some_and(|identity| initializer_has_typed_dialogue_range_prefix(identity))
+        .is_some_and(|identity| initializer_has_typed_dialogue_range_clear(identity))
         && actual_initializers
             .first()
-            .is_some_and(|identity| initializer_has_typed_dialogue_range_prefix(identity));
+            .is_some_and(|identity| initializer_has_typed_dialogue_range_clear(identity));
     let installed_bytes_match = actual_initializers.first().is_some_and(|identity| {
         identity
             .offset
@@ -160,7 +160,7 @@ pub(in crate::full_translation_install::integrated_write_set) fn verify_runtime_
         && installed_bytes_match;
     ensure!(
         installed,
-        "runtime-state cold initializer is not one exact installed typed routine clearing 0x{CANDIDATE_START:04X}..0x{DIALOGUE_RUNTIME_STATE_END:04X} while preserving consumer page 0x{CONSUMER_FONT_PAGE:04X}"
+        "runtime-state cold initializer is not one exact installed typed routine containing a clear of 0x{CANDIDATE_START:04X}..0x{DIALOGUE_RUNTIME_STATE_END:04X} while preserving consumer page 0x{CONSUMER_FONT_PAGE:04X}"
     );
     Ok(RuntimeStateInitializerProof {
         required_identity_count,
@@ -183,15 +183,27 @@ fn runtime_state_initializer_identities(identities: &[MutationIdentity]) -> Vec<
         .collect()
 }
 
-fn initializer_has_typed_dialogue_range_prefix(identity: &MutationIdentity) -> bool {
+fn initializer_has_typed_dialogue_range_clear(identity: &MutationIdentity) -> bool {
     let MutationDerivation::RuntimeRoutine { cpu_address } = identity.derivation else {
         return false;
     };
     let mut instructions = vec![Instruction::LdaImmediate(0)];
     instructions
         .extend((CANDIDATE_START..=DIALOGUE_RUNTIME_STATE_END).map(Instruction::StaAbsolute));
-    assemble_at(cpu_address, &instructions)
-        .is_ok_and(|prefix| identity.replacement.starts_with(&prefix))
+    assemble_at(cpu_address, &instructions).is_ok_and(|clear| {
+        identity
+            .replacement
+            .windows(clear.len())
+            .any(|window| window == clear)
+            && !identity.replacement.windows(3).any(|window| {
+                window
+                    == [
+                        0x8D,
+                        CONSUMER_FONT_PAGE as u8,
+                        (CONSUMER_FONT_PAGE >> 8) as u8,
+                    ]
+            })
+    })
 }
 
 pub(in crate::full_translation_install::integrated_write_set) fn unique_mutation_identity_set(

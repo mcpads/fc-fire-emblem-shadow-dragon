@@ -30,6 +30,10 @@ const EXPECTED_ENTRY_BINDING_COUNT: usize = 517;
 const EXPECTED_HANDLER_ENTRY_COUNT: usize = 6;
 const EXPECTED_TRANSITION_EDGE_COUNT: usize = 213;
 const EXPECTED_DYNAMIC_CONTROL_COUNT: usize = 37;
+const EXPECTED_E4_LOOKAHEAD_RECORD_COUNT: usize = 92;
+const EXPECTED_E6_LOOKAHEAD_RECORD_COUNT: usize = 121;
+const EXPECTED_E7_CALLER_RESUME_RECORD_COUNT: usize = 84;
+const EXPECTED_TERMINAL_RECORD_COUNT: usize = 207;
 
 #[derive(Clone, Copy)]
 struct ExpectedRouteFamily {
@@ -87,12 +91,23 @@ pub(super) struct MainDialogueRoutePopulationPlan {
     cross_family_transition_edge_count: usize,
     dynamic_string_control_count: usize,
     common_runtime_hook_roles: Vec<DialogueRuntimeHookRole>,
+    identity_lookup_boundary_partition: IdentityLookupBoundaryPartition,
     every_route_family_fully_installed: bool,
     every_transition_target_installed: bool,
     dynamic_string_producer_routes_bound: bool,
     natural_gameplay_branch_semantics_complete: bool,
     route_families: Vec<MainDialogueRouteFamilyPlan>,
     unresolved: [&'static str; 2],
+}
+
+#[derive(Serialize)]
+struct IdentityLookupBoundaryPartition {
+    e4_published_lookahead_record_count: usize,
+    e6_published_lookahead_record_count: usize,
+    e7_live_caller_resume_record_count: usize,
+    terminal_without_followup_lookup_record_count: usize,
+    transition_graph_sources_equal_e4_and_e6_records: bool,
+    every_canonical_record_has_one_identity_lookup_boundary: bool,
 }
 
 #[derive(Serialize)]
@@ -335,6 +350,42 @@ fn build_route_population(
         cross_family_transition_edge_count +=
             usize::from(edge.source_table_id != edge.target_table_id);
     }
+    let transition_graph_source_ids = graph
+        .transition_edges
+        .iter()
+        .map(|edge| {
+            format!(
+                "{}:{:03}",
+                edge.source_table_id, edge.source_canonical_entry_index
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    let transition_boundary_record_ids = records
+        .iter()
+        .filter(|record| matches!(record.boundary_control, 0xE4 | 0xE6))
+        .map(|record| record.record_id.clone())
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        transition_graph_source_ids == transition_boundary_record_ids
+            && transition_graph_source_ids.len() == graph.transition_edges.len(),
+        "E4/E6 identity-lookahead records and transition graph sources disagree"
+    );
+    let e4_lookahead_record_count = records
+        .iter()
+        .filter(|record| record.boundary_control == 0xE4)
+        .count();
+    let e6_lookahead_record_count = records
+        .iter()
+        .filter(|record| record.boundary_control == 0xE6)
+        .count();
+    let e7_caller_resume_record_count = records
+        .iter()
+        .filter(|record| record.boundary_control == 0xE7)
+        .count();
+    let terminal_record_count = records
+        .iter()
+        .filter(|record| record.boundary_control == 0xEF)
+        .count();
 
     let actual_hook_roles = assembled_hook_roles
         .iter()
@@ -467,7 +518,16 @@ fn build_route_population(
             && installed_pointer_binding_count == EXPECTED_ENTRY_BINDING_COUNT
             && handler_entry_count == EXPECTED_HANDLER_ENTRY_COUNT
             && graph.transition_edges.len() == EXPECTED_TRANSITION_EDGE_COUNT
-            && dynamic_string_control_count == EXPECTED_DYNAMIC_CONTROL_COUNT,
+            && dynamic_string_control_count == EXPECTED_DYNAMIC_CONTROL_COUNT
+            && e4_lookahead_record_count == EXPECTED_E4_LOOKAHEAD_RECORD_COUNT
+            && e6_lookahead_record_count == EXPECTED_E6_LOOKAHEAD_RECORD_COUNT
+            && e7_caller_resume_record_count == EXPECTED_E7_CALLER_RESUME_RECORD_COUNT
+            && terminal_record_count == EXPECTED_TERMINAL_RECORD_COUNT
+            && e4_lookahead_record_count
+                + e6_lookahead_record_count
+                + e7_caller_resume_record_count
+                + terminal_record_count
+                == canonical_record_count,
         "supported main-dialogue route population changed"
     );
 
@@ -483,6 +543,14 @@ fn build_route_population(
         cross_family_transition_edge_count,
         dynamic_string_control_count,
         common_runtime_hook_roles: REQUIRED_COMMON_HOOKS.to_vec(),
+        identity_lookup_boundary_partition: IdentityLookupBoundaryPartition {
+            e4_published_lookahead_record_count: e4_lookahead_record_count,
+            e6_published_lookahead_record_count: e6_lookahead_record_count,
+            e7_live_caller_resume_record_count: e7_caller_resume_record_count,
+            terminal_without_followup_lookup_record_count: terminal_record_count,
+            transition_graph_sources_equal_e4_and_e6_records: true,
+            every_canonical_record_has_one_identity_lookup_boundary: true,
+        },
         every_route_family_fully_installed: true,
         every_transition_target_installed: true,
         dynamic_string_producer_routes_bound: true,

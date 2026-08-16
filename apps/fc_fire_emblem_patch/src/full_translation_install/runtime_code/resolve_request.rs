@@ -41,9 +41,9 @@ pub(super) const SOURCE_ENTRY_INDEX: u16 = 0x77F1;
 /// 식별표에서 «없는 선택자»를 뜻하는 값이다.
 const MISSING_TABLE: u8 = 0xFF;
 /// 새 대사 수명에서 살아 있는 원본 selector/index를 현재 레코드로 해석한다.
-pub(super) const LOOKUP_LIVE_SOURCE_IDENTITY: u8 = 0;
+pub(super) const LOOKUP_LIVE_SOURCE_IDENTITY: u8 = 1;
 /// 연속 대사에서 직전에 게시한 선행 조회값을 현재 레코드로 승격한다.
-pub(super) const LOOKUP_PUBLISHED_SOURCE_IDENTITY: u8 = 1;
+pub(super) const LOOKUP_PUBLISHED_SOURCE_IDENTITY: u8 = 0;
 
 const BANK_VALUE_REGISTER: u16 = 0x8001;
 const PRG_8000_REGISTER: u8 = 6;
@@ -312,24 +312,20 @@ fn finish_resolver(
 
 /// 새 레코드의 0번 가시 페이지를 찾는다. X는 현재 레코드를 식별할 원천을 고른다.
 /// 새 수명은 살아 있는 원본 정체성을 쓰고, 연속 수명은 직전에 게시한 선행 조회값을
-/// 현재 레코드로 승격한다. 어느 쪽이든 살아 있는 값은 다음 호출의 승격 후보로 따로
-/// 고정한다. 모든 휘발 상태를 먼저 지우므로 실패해도 selector가 이전 수명의
-/// `ready`를 볼 수 없다.
+/// 현재 레코드로 승격한다. 게시 정체성은 커서와 같은 두 바이트를 공유하므로 지우기
+/// 전에 X와 빌린 제로 페이지로 옮긴다. 그 뒤 모든 휘발 상태를 지우고 살아 있는 값은
+/// 다음 호출의 승격 후보로 따로 고정한다. 따라서 실패해도 selector가 이전 수명의
+/// `ready`나 게시 정체성을 다시 볼 수 없다.
 pub(in crate::full_translation_install) fn build_resolve_request(
     origin: u16,
     layout: MaterialLayout,
 ) -> Result<RuntimeRoutine> {
     let mut instructions = Vec::new();
     let mut failure_branches = Vec::new();
-    clear_runtime_state(&mut instructions);
-    instructions.extend([
-        Instruction::LdaAbsolute(SOURCE_DIRECTORY_SELECTOR),
-        Instruction::StaAbsolute(REQUEST_SOURCE_DIRECTORY_SELECTOR),
-        Instruction::LdaAbsolute(SOURCE_ENTRY_INDEX),
-        Instruction::StaAbsolute(REQUEST_SOURCE_ENTRY_INDEX),
-    ]);
     save_scratch(&mut instructions);
 
+    // 연속 수명에서는 게시 정체성도 아래 clear 범위에 들어 있다. 어느 정체성을
+    // 해석할지 먼저 고른 뒤에만 휘발 상태를 지운다.
     instructions.push(Instruction::CpxImmediate(LOOKUP_PUBLISHED_SOURCE_IDENTITY));
     let use_published_identity = instructions.len();
     instructions.push(Instruction::BeqAbsolute(origin));
@@ -351,6 +347,13 @@ pub(in crate::full_translation_install) fn build_resolve_request(
 
     let resolve_identity = next_address(origin, &instructions)?;
     instructions[identity_selected] = Instruction::JmpAbsolute(resolve_identity);
+    clear_runtime_state(&mut instructions);
+    instructions.extend([
+        Instruction::LdaAbsolute(SOURCE_DIRECTORY_SELECTOR),
+        Instruction::StaAbsolute(REQUEST_SOURCE_DIRECTORY_SELECTOR),
+        Instruction::LdaAbsolute(SOURCE_ENTRY_INDEX),
+        Instruction::StaAbsolute(REQUEST_SOURCE_ENTRY_INDEX),
+    ]);
 
     // 1. 식별표에서 레코드 색인을 얻는다.
     instructions.extend(map_page(Instruction::LdaImmediate(layout.identity_page)));
@@ -453,6 +456,7 @@ pub(in crate::full_translation_install) fn build_resolve_next_page_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::full_translation_install::runtime_state_storage::CONSUMER_FONT_PAGE;
 
     fn layout() -> MaterialLayout {
         MaterialLayout {
@@ -474,21 +478,48 @@ mod tests {
         }
     }
 
-    /// 새 대사 수명은 조회 성공 여부와 관계없이 이전 정체성과 전송 커서를 먼저
-    /// 지운다. 하나라도 남으면 실패 경로가 이전 `ready`를 재사용할 수 있다.
-    #[test]
-    fn an_initial_request_clears_dialogue_state_but_preserves_the_consumer_page() {
-        let routine = build_resolve_request(0xA400, layout()).unwrap();
-        let mut expected = vec![0xA9, 0x00];
-        for address in CANDIDATE_START..=DIALOGUE_RUNTIME_STATE_END {
-            expected.extend([0x8D, address as u8, (address >> 8) as u8]);
-        }
+    fn runtime_state_clear_bytes() -> Vec<u8> {
+        let mut instructions = vec![Instruction::LdaImmediate(0)];
+        instructions
+            .extend((CANDIDATE_START..=DIALOGUE_RUNTIME_STATE_END).map(Instruction::StaAbsolute));
+        assemble_at(0x8000, &instructions).unwrap()
+    }
 
-        assert!(routine.bytes.starts_with(&expected));
-        assert_ne!(
-            routine.bytes.get(expected.len()..expected.len() + 3),
-            Some(&[0x8D, 0xFD, 0x07][..])
+    /// 새 대사 수명은 조회 성공 여부와 관계없이 이전 정체성과 전송 커서를 모두
+    /// 지운다. 단, 연속 수명의 게시 정체성은 그 전에 읽어야 한다.
+    #[test]
+    fn an_initial_request_selects_its_identity_before_clearing_dialogue_state() {
+        let routine = build_resolve_request(0xA400, layout()).unwrap();
+        let published = assemble_at(
+            0x8000,
+            &[
+                Instruction::LdxAbsolute(PUBLISHED_SOURCE_DIRECTORY_SELECTOR),
+                Instruction::LdaAbsolute(PUBLISHED_SOURCE_ENTRY_INDEX),
+                Instruction::StaZeroPage(0x05),
+            ],
         );
+        let published = published.unwrap();
+        let published_at = routine
+            .bytes
+            .windows(published.len())
+            .position(|window| window == published)
+            .expect("the continuing identity is never selected");
+        let clear = runtime_state_clear_bytes();
+        let clear_at = routine
+            .bytes
+            .windows(clear.len())
+            .position(|window| window == clear)
+            .expect("the previous dialogue state is never cleared");
+
+        assert!(published_at + published.len() <= clear_at);
+        assert!(!routine.bytes.windows(3).any(|window| {
+            window
+                == [
+                    0x8D,
+                    CONSUMER_FONT_PAGE as u8,
+                    (CONSUMER_FONT_PAGE >> 8) as u8,
+                ]
+        }));
     }
 
     #[test]
@@ -537,12 +568,35 @@ mod tests {
         assert!(routine.bytes.windows(selection.len()).any(|window| {
             window[0] == selection[0] && window[1] == selection[1] && window[2] == 0xF0
         }));
-        assert!(
-            routine
-                .bytes
-                .windows(published.len())
-                .any(|window| window == published)
-        );
+        let published_at = routine
+            .bytes
+            .windows(published.len())
+            .position(|window| window == published)
+            .expect("the continuing identity is never selected");
+        let clear = runtime_state_clear_bytes();
+        let clear_at = routine
+            .bytes
+            .windows(clear.len())
+            .position(|window| window == clear)
+            .expect("the previous dialogue state is never cleared");
+        let capture = assemble_at(
+            0x8000,
+            &[
+                Instruction::LdaAbsolute(SOURCE_DIRECTORY_SELECTOR),
+                Instruction::StaAbsolute(REQUEST_SOURCE_DIRECTORY_SELECTOR),
+                Instruction::LdaAbsolute(SOURCE_ENTRY_INDEX),
+                Instruction::StaAbsolute(REQUEST_SOURCE_ENTRY_INDEX),
+            ],
+        )
+        .unwrap();
+        let capture_at = routine
+            .bytes
+            .windows(capture.len())
+            .position(|window| window == capture)
+            .expect("the live lookahead identity is never captured");
+
+        assert!(published_at + published.len() <= clear_at);
+        assert!(clear_at + clear.len() <= capture_at);
     }
 
     /// 식별 자료는 `B1` 같은 전체 원문 selector를 키로 직렬화한다. 여기서 상위

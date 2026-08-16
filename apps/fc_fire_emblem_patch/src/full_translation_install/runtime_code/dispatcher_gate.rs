@@ -47,7 +47,10 @@ use super::super::runtime_cursor_storage::{
 };
 use super::super::runtime_nmi_contract::PPU_CONTROL_SHADOW;
 use super::super::runtime_state_storage::CURRENT_PAGE_GROUP;
-use super::resolve_request::{LOOKUP_LIVE_SOURCE_IDENTITY, LOOKUP_PUBLISHED_SOURCE_IDENTITY};
+use super::lifecycle::E7_CALLER_RESUME_FLAG;
+use super::resolve_request::LOOKUP_LIVE_SOURCE_IDENTITY;
+#[cfg(test)]
+use super::resolve_request::LOOKUP_PUBLISHED_SOURCE_IDENTITY;
 use super::resolve_request::{SOURCE_DIRECTORY_SELECTOR, SOURCE_ENTRY_INDEX};
 use super::resolved_page_publication::NO_RESIDENT_PAGE_GROUP;
 use super::transport::{REQUEST_STATE, STATE_READY};
@@ -255,7 +258,10 @@ pub(super) fn build_source_identity_request_publisher(
 
     let ready_identity_comparison = next_address(origin, &instructions)?;
     instructions[completed_page] = Instruction::BeqAbsolute(ready_identity_comparison);
-    instructions.push(Instruction::LdxImmediate(LOOKUP_PUBLISHED_SOURCE_IDENTITY));
+    // The source state machine owns this distinction already: E4/E6 enter with
+    // caller flag 0, while an E7 handoff increments it and the resume path
+    // clears it immediately after this displaced resolver call.
+    instructions.push(Instruction::LdxAbsolute(E7_CALLER_RESUME_FLAG));
     instructions.extend([
         Instruction::LdaAbsolute(SOURCE_DIRECTORY_SELECTOR),
         Instruction::CmpAbsolute(PUBLISHED_SOURCE_DIRECTORY_SELECTOR),
@@ -623,25 +629,23 @@ mod tests {
                 (SOURCE_IDENTITY_PUBLISHER_TAIL_ORIGIN >> 8) as u8,
             ]
         );
-        assert_eq!(
-            suite.tail.bytes,
-            [
-                0x20,
-                PAIRED_BANK_HELPER as u8,
-                (PAIRED_BANK_HELPER >> 8) as u8,
-                0x28,
-                0x68,
-                0x85,
-                PPU_CONTROL_SHADOW,
-                0x68,
-                0x20,
-                RESOLVED_PAGE_PUBLICATION as u8,
-                (RESOLVED_PAGE_PUBLICATION >> 8) as u8,
-                0x4C,
-                SOURCE_POINTER_RESOLVER as u8,
-                (SOURCE_POINTER_RESOLVER >> 8) as u8,
-            ]
-        );
+        let restore_and_handoff = [
+            0x20,
+            PAIRED_BANK_HELPER as u8,
+            (PAIRED_BANK_HELPER >> 8) as u8,
+            0x28,
+            0x68,
+            0x85,
+            PPU_CONTROL_SHADOW,
+            0x68,
+            0x20,
+            RESOLVED_PAGE_PUBLICATION as u8,
+            (RESOLVED_PAGE_PUBLICATION >> 8) as u8,
+            0x4C,
+            SOURCE_POINTER_RESOLVER as u8,
+            (SOURCE_POINTER_RESOLVER >> 8) as u8,
+        ];
+        assert_eq!(suite.tail.bytes, restore_and_handoff);
         assert!(
             usize::from(suite.tail.address) + suite.tail.bytes.len()
                 <= usize::from(SOURCE_IDENTITY_PUBLISHER_TAIL_CAVE_END)
@@ -735,15 +739,19 @@ mod tests {
     /// 초기화도 밀어낸 원본 호출로 끝나야 대사가 이어진다.
     #[test]
     fn the_initializer_reaches_the_displaced_source_resolver() {
-        let routine = publisher();
+        let suite = publisher_suite();
+        let displaced_resolver = [
+            0x4C,
+            SOURCE_POINTER_RESOLVER as u8,
+            (SOURCE_POINTER_RESOLVER >> 8) as u8,
+        ];
 
-        assert_eq!(
-            &routine.bytes[routine.bytes.len() - 3..],
-            [
-                0x4C,
-                SOURCE_POINTER_RESOLVER as u8,
-                (SOURCE_POINTER_RESOLVER >> 8) as u8
-            ]
+        assert!(
+            suite
+                .tail
+                .bytes
+                .windows(displaced_resolver.len())
+                .any(|window| window == displaced_resolver)
         );
     }
 
@@ -831,11 +839,12 @@ mod tests {
         );
     }
 
-    /// 새 수명은 살아 있는 정체성을 바로 해석하지만, 준비된 수명의 다음 선행 조회는
-    /// 직전에 게시한 정체성을 현재 레코드로 승격해야 한다. 이 모드를 뒤집으면
-    /// `80:03`을 보고 아직 표시 중인 레코드 002 대신 레코드 003의 코드북을 올린다.
+    /// 새 수명과 E7 호출자 복귀는 살아 있는 정체성을 해석한다. 반면 E4/E6의 다음
+    /// 선행 조회는 직전에 게시한 정체성을 현재 레코드로 승격해야 한다. 이 둘을 한
+    /// 모드로 합치면 `80:03` 전이는 다음 코드북을 너무 일찍 올리고, B0:01 같은
+    /// 호출자 복귀는 직전 B0:00 코드북으로 새 레코드를 해석한다.
     #[test]
-    fn new_and_continuing_lifetimes_select_different_identity_sources() {
+    fn transitions_promote_the_publication_but_caller_resumes_use_the_live_identity() {
         let routine = publisher();
 
         let new_lifetime = [
@@ -850,13 +859,19 @@ mod tests {
                 .bytes
                 .windows(new_lifetime.len())
                 .any(|window| window == new_lifetime),
-            "new-lifetime mode must be followed by an unconditional JMP because LDX #0 sets Z"
+            "new-lifetime mode must join the resolver independently of the incoming flags"
         );
+        let ready_mode = [
+            0xAE,
+            E7_CALLER_RESUME_FLAG as u8,
+            (E7_CALLER_RESUME_FLAG >> 8) as u8,
+        ];
         assert!(
             routine
                 .bytes
-                .windows(2)
-                .any(|window| { window == [0xA2, LOOKUP_PUBLISHED_SOURCE_IDENTITY] })
+                .windows(ready_mode.len())
+                .any(|window| window == ready_mode),
+            "a ready lifetime never reads the boundary-owned identity mode"
         );
         assert_eq!(
             routine
@@ -865,7 +880,13 @@ mod tests {
                 .filter(|window| *window == [0xA2, LOOKUP_LIVE_SOURCE_IDENTITY])
                 .count(),
             1,
-            "only a new lifetime resolves the live identity"
+            "only a new lifetime hard-codes live identity; ready lifetimes use their boundary mode"
+        );
+        assert!(
+            !routine
+                .bytes
+                .windows(2)
+                .any(|window| window == [0xA2, LOOKUP_PUBLISHED_SOURCE_IDENTITY])
         );
     }
 

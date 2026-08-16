@@ -49,6 +49,9 @@ const FIRST_COMPLETION_FLAG: u16 = 0x7802;
 const SECOND_COMPLETION_FLAG: u16 = 0x780A;
 const PAGE_ADVANCE_CLEAR: u16 = 0x7804;
 const E7_DECODER_FLAG: u16 = 0x7808;
+/// E7 외부 호출자가 복귀를 요청할 때 올리고, `$871C`의 resolver 직후 지우는
+/// 원본 플래그다. E4/E6 lookahead에서는 0, caller resume에서는 1이다.
+pub(super) const E7_CALLER_RESUME_FLAG: u16 = 0x7809;
 
 const BANK_VALUE_REGISTER: u16 = 0x8001;
 const PAIRED_BANK_HELPER: u16 = 0xFA20;
@@ -72,6 +75,10 @@ const EXPECTED_SAMPLE_COMPLETED_PAGE_SHA1: &str = "965de5bfca83263ac587e5c7c316e
 const E7_HANDOFF_SOURCE: [u8; 17] = [
     0xAD, 0x08, 0x78, 0xF0, 0x0C, 0xA9, 0x01, 0x8D, 0x31, 0x78, 0xEE, 0x09, 0x78, 0xA9, 0x11, 0xD0,
     0x18,
+];
+const E7_RESUME_SOURCE: [u8; 20] = [
+    0x20, 0xB2, 0xE6, 0xA9, 0x00, 0x8D, 0x08, 0x78, 0x8D, 0x09, 0x78, 0x8D, 0x31, 0x78, 0xA9, 0x09,
+    0x8D, 0xF7, 0x77, 0x60,
 ];
 
 pub(super) struct LifecycleSuite {
@@ -99,7 +106,7 @@ pub(super) fn bind_lifecycle_sites(source: &Rom, candidate: &Rom) -> Result<()> 
         "main-dialogue completed-page predecessor",
     )?;
 
-    for address in [E4_TRANSITION_SITE, E6_TRANSITION_SITE, E7_RESUME_SITE] {
+    for address in [E4_TRANSITION_SITE, E6_TRANSITION_SITE] {
         for rom in [source, candidate] {
             ensure!(
                 switchable_bytes(rom, address, SOURCE_POINTER_CALL.len())? == SOURCE_POINTER_CALL,
@@ -112,6 +119,17 @@ pub(super) fn bind_lifecycle_sites(source: &Rom, candidate: &Rom) -> Result<()> 
             "main-dialogue lifecycle source pointer call",
         )?;
     }
+    for rom in [source, candidate] {
+        ensure!(
+            switchable_bytes(rom, E7_RESUME_SITE, E7_RESUME_SOURCE.len())? == E7_RESUME_SOURCE,
+            "main-dialogue E7 resume and flag clear changed"
+        );
+    }
+    decode_rp2a03_sequence(
+        &E7_RESUME_SOURCE,
+        E7_RESUME_SITE,
+        "main-dialogue E7 resume and flag clear",
+    )?;
 
     ensure!(
         switchable_bytes(source, COMPLETED_PAGE_SITE, COMPLETED_PAGE_SPAN)?
@@ -627,6 +645,32 @@ mod tests {
                 SOURCE_POINTER_RESOLVER as u8,
                 (SOURCE_POINTER_RESOLVER >> 8) as u8
             ]
+        );
+    }
+
+    #[test]
+    fn e7_caller_flag_selects_live_identity_only_until_the_resume_resolver_returns() {
+        assert_eq!(&E7_RESUME_SOURCE[..3], SOURCE_POINTER_CALL);
+        assert_eq!(
+            &E7_RESUME_SOURCE[3..11],
+            [
+                0xA9,
+                0x00,
+                0x8D,
+                E7_DECODER_FLAG as u8,
+                (E7_DECODER_FLAG >> 8) as u8,
+                0x8D,
+                E7_CALLER_RESUME_FLAG as u8,
+                (E7_CALLER_RESUME_FLAG >> 8) as u8,
+            ]
+        );
+        assert_eq!(
+            super::super::resolve_request::LOOKUP_PUBLISHED_SOURCE_IDENTITY,
+            0
+        );
+        assert_eq!(
+            super::super::resolve_request::LOOKUP_LIVE_SOURCE_IDENTITY,
+            1
         );
     }
 
