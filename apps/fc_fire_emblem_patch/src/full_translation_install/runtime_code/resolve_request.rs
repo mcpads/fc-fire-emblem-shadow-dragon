@@ -1,4 +1,5 @@
-//! 대사 진입에서 «어느 그룹을 올려야 하는가»를 찾아 커서를 세운다.
+//! 대사 진입에서 «현재 가시 페이지에 필요한 어느 레시피를 올려야 하는가»를 찾아
+//! 커서를 세운다.
 //!
 //! 이 루틴은 NMI가 아니라 주 흐름에서 돈다. 생산자가 대사에 들어가는 순간 한 번만
 //! 불리므로 vblank 예산과 무관하다. 그래서 여기서는 사이클보다 정확성을 본다.
@@ -7,9 +8,9 @@
 //!
 //! 1. `$77F4`(디렉터리 선택자)와 `$77F1`(엔트리 색인)로 런타임 식별표에서 레코드
 //!    색인을 얻는다.
-//! 2. 레코드 색인으로 스캔 재료의 레코드 디렉터리에서 그 레코드의 페이지 선택자
-//!    구간을 얻고, 첫 가시 페이지의 그룹 선택자를 읽는다.
-//! 3. 그룹 선택자로 그룹 덩이 오프셋 표에서 덩이의 자리를 얻는다.
+//! 2. 레코드 색인으로 스캔 재료의 레코드 디렉터리에서 그 레코드의 페이지 레시피
+//!    구간을 얻고, 현재 가시 페이지의 레시피 덩이 오프셋을 읽는다.
+//! 3. 그 오프셋으로 레시피 덩이의 자리를 얻는다.
 //! 4. 덩이의 첫 바이트가 항목 수다. 그것과 항목 시작 주소·페이지를 커서에 쓴다.
 //!
 //! 어느 단계든 범위를 벗어나면 커서를 세우지 않고 실패로 돌아간다. 생산자는 그때
@@ -19,12 +20,12 @@
 use anyhow::{Context, Result};
 
 use super::super::runtime_cursor_storage::{
-    CURSOR_ENTRY_HIGH, CURSOR_ENTRY_LOW, CURSOR_GROUP_PAGE, CURSOR_OVERLAY_TILES, CURSOR_PHASE,
+    CURSOR_ENTRY_HIGH, CURSOR_ENTRY_LOW, CURSOR_OVERLAY_TILES, CURSOR_PHASE, CURSOR_RECIPE_PAGE,
     CURSOR_REMAINING_TILES, PUBLISHED_SOURCE_DIRECTORY_SELECTOR, PUBLISHED_SOURCE_ENTRY_INDEX,
     REQUEST_SOURCE_DIRECTORY_SELECTOR, REQUEST_SOURCE_ENTRY_INDEX,
 };
 use super::super::runtime_state_storage::{
-    CANDIDATE_START, CURRENT_PAGE_GROUP, DIALOGUE_RUNTIME_STATE_END, RECORD_INDEX_HIGH,
+    CANDIDATE_START, CURRENT_PAGE_RESIDENCY, DIALOGUE_RUNTIME_STATE_END, RECORD_INDEX_HIGH,
     RECORD_INDEX_LOW, REQUEST_STATE, VISIBLE_PAGE_INDEX,
 };
 use super::transport::{PHASE_RESTORE, RESTORE_CHUNK_COUNT};
@@ -64,16 +65,14 @@ pub(in crate::full_translation_install) struct MaterialLayout {
     pub(in crate::full_translation_install) identity_selector_directory: u16,
     /// 표 서술자가 시작하는 CPU 주소다.
     pub(in crate::full_translation_install) identity_table_descriptors: u16,
-    /// 스캔 조회표가 들어 있는 MMC3 페이지다.
-    pub(in crate::full_translation_install) scan_page: u8,
-    /// 페이지 작업집합마다 하나씩인 그룹 선택자 배열의 CPU 주소다.
-    pub(in crate::full_translation_install) page_selectors: u16,
-    /// 레코드마다 두 바이트인 선택자 구간 표의 CPU 주소다.
+    /// 레시피 참조와 레코드 디렉터리가 들어 있는 MMC3 페이지다.
+    pub(in crate::full_translation_install) scan_index_page: u8,
+    /// 페이지 작업집합마다 하나씩인 16비트 레시피 덩이 오프셋 배열이다.
+    pub(in crate::full_translation_install) page_recipe_references: u16,
+    /// 레코드마다 두 바이트인 페이지 구간 표의 CPU 주소다.
     pub(in crate::full_translation_install) record_directory: u16,
-    /// 그룹마다 두 바이트인 덩이 오프셋 표의 CPU 주소다.
-    pub(in crate::full_translation_install) group_directory: u16,
-    /// 그룹 덩이들이 재료 용기 안에서 시작하는 자리다.
-    pub(in crate::full_translation_install) group_block_container_base: u16,
+    /// 레시피 덩이들이 재료 용기 안에서 시작하는 자리다.
+    pub(in crate::full_translation_install) page_recipe_block_container_base: u16,
     /// 재료 용기가 시작하는 MMC3 페이지다.
     pub(in crate::full_translation_install) container_first_page: u8,
     /// `{EC}` 생산자 전용 정규 문자열이 들어 있는 MMC3 페이지다.
@@ -146,7 +145,7 @@ fn append_page_request_resolution(
     origin: u16,
     layout: MaterialLayout,
 ) -> Result<()> {
-    instructions.extend(map_page(Instruction::LdaImmediate(layout.scan_page)));
+    instructions.extend(map_page(Instruction::LdaImmediate(layout.scan_index_page)));
     instructions.extend([
         // 레코드 색인 × 2가 디렉터리 안의 자리다.
         Instruction::LdaZeroPage(0x02),
@@ -209,31 +208,30 @@ fn append_page_request_resolution(
     instructions[lower_high_byte] = Instruction::BccAbsolute(selected_page_is_bounded);
 
     instructions.extend([
-        // 페이지 선택자 배열 안의 정확한 한 바이트를 읽는다.
+        // 페이지 참조는 16비트 레시피 덩이 오프셋이므로 색인을 두 배로 만든다.
+        Instruction::AslZeroPage(0x04),
+        Instruction::RolZeroPage(0x05),
         Instruction::Clc,
         Instruction::LdaZeroPage(0x04),
-        Instruction::AdcImmediate(layout.page_selectors as u8),
+        Instruction::AdcImmediate(layout.page_recipe_references as u8),
         Instruction::StaZeroPage(0x00),
         Instruction::LdaZeroPage(0x05),
-        Instruction::AdcImmediate((layout.page_selectors >> 8) as u8),
+        Instruction::AdcImmediate((layout.page_recipe_references >> 8) as u8),
         Instruction::StaZeroPage(0x01),
+        // 참조 배열에서 레시피 덩이의 상대 오프셋을 읽는다.
         Instruction::LdyImmediate(0),
         Instruction::LdaIndirectY(0x00),
-        Instruction::StaAbsolute(CURRENT_PAGE_GROUP),
-        // 그룹 선택자 × 2가 덩이 오프셋 표의 자리다.
-        Instruction::AslAccumulator,
-        Instruction::Tax,
-        Instruction::LdaAbsoluteX(layout.group_directory),
         Instruction::StaZeroPage(0x02),
-        Instruction::LdaAbsoluteX(layout.group_directory + 1),
+        Instruction::Iny,
+        Instruction::LdaIndirectY(0x00),
         Instruction::StaZeroPage(0x03),
         // 덩이의 용기 안 자리를 만든다.
         Instruction::Clc,
         Instruction::LdaZeroPage(0x02),
-        Instruction::AdcImmediate(layout.group_block_container_base as u8),
+        Instruction::AdcImmediate(layout.page_recipe_block_container_base as u8),
         Instruction::StaZeroPage(0x02),
         Instruction::LdaZeroPage(0x03),
-        Instruction::AdcImmediate((layout.group_block_container_base >> 8) as u8),
+        Instruction::AdcImmediate((layout.page_recipe_block_container_base >> 8) as u8),
         Instruction::StaZeroPage(0x03),
         // 페이지는 상위 바이트의 위 세 비트에서, 창 안 주소는 나머지에서 나온다.
         Instruction::LsrAccumulator,
@@ -243,7 +241,7 @@ fn append_page_request_resolution(
         Instruction::LsrAccumulator,
         Instruction::Clc,
         Instruction::AdcImmediate(layout.container_first_page),
-        Instruction::StaAbsolute(CURSOR_GROUP_PAGE),
+        Instruction::StaAbsolute(CURSOR_RECIPE_PAGE),
         Instruction::LdaZeroPage(0x03),
         Instruction::AndImmediate(((DATA_WINDOW_SIZE - 1) >> 8) as u8),
         Instruction::OraImmediate((DATA_WINDOW_BASE >> 8) as u8),
@@ -251,7 +249,7 @@ fn append_page_request_resolution(
     ]);
 
     // 덩이의 첫 바이트가 항목 수다. 항목은 그다음부터다.
-    instructions.extend(map_page(Instruction::LdaAbsolute(CURSOR_GROUP_PAGE)));
+    instructions.extend(map_page(Instruction::LdaAbsolute(CURSOR_RECIPE_PAGE)));
     instructions.extend([
         Instruction::LdaZeroPage(0x02),
         Instruction::StaZeroPage(0x00),
@@ -268,6 +266,10 @@ fn append_page_request_resolution(
         Instruction::BneAbsolute,
     )?);
     instructions.extend([
+        // 이 바이트는 정확한 그룹 번호가 아니라 완성 페이지 상주권의 존재를 뜻한다.
+        // 새 레시피는 실제로 쓰는 코드를 전부 다시 덮으므로 그룹 정체성은 불필요하다.
+        Instruction::LdaImmediate(0),
+        Instruction::StaAbsolute(CURRENT_PAGE_RESIDENCY),
         Instruction::Clc,
         Instruction::LdaZeroPage(0x02),
         Instruction::AdcImmediate(1),
@@ -464,11 +466,10 @@ mod tests {
             identity_material_base: 0x9800,
             identity_selector_directory: 0x9424,
             identity_table_descriptors: 0x9524,
-            scan_page: 0x2C,
-            page_selectors: 0x9676,
+            scan_index_page: 0x2C,
+            page_recipe_references: 0x9676,
             record_directory: 0x9A16,
-            group_directory: 0x9E08,
-            group_block_container_base: 7_758,
+            page_recipe_block_container_base: 7_758,
             container_first_page: 0x2C,
             producer_encoding_page: 0x2F,
             producer_item_directory: 0x9000,
@@ -772,7 +773,7 @@ mod tests {
         for cursor in [
             CURSOR_ENTRY_LOW,
             CURSOR_ENTRY_HIGH,
-            CURSOR_GROUP_PAGE,
+            CURSOR_RECIPE_PAGE,
             CURSOR_REMAINING_TILES,
             CURSOR_PHASE,
             CURSOR_OVERLAY_TILES,
@@ -799,8 +800,8 @@ mod tests {
 
         for (routine, page) in [
             (&initial, layout().identity_page),
-            (&initial, layout().scan_page),
-            (&next, layout().scan_page),
+            (&initial, layout().scan_index_page),
+            (&next, layout().scan_index_page),
         ] {
             let select = [0xA9, PRG_8000_REGISTER, 0x20, 0x58, 0xFA, 0xA9, page];
             assert!(

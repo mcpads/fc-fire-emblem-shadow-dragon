@@ -14,7 +14,7 @@ use anyhow::{Context, Result, ensure};
 
 use super::super::{
     runtime_bank_contract::PRG_A000_REGISTER, runtime_nmi_contract::PPU_CONTROL_SHADOW,
-    runtime_state_storage::CURRENT_PAGE_GROUP,
+    runtime_state_storage::CURRENT_PAGE_RESIDENCY,
 };
 use super::transport::{REQUEST_STATE, STATE_READY};
 use super::{RuntimeRoutine, next_address};
@@ -257,7 +257,7 @@ pub(super) fn build_lifecycle_suite(
         Instruction::Pha,
         Instruction::Tya,
         Instruction::Pha,
-        Instruction::LdaAbsolute(CURRENT_PAGE_GROUP),
+        Instruction::LdaAbsolute(CURRENT_PAGE_RESIDENCY),
         Instruction::Pha,
     ]);
     append_guarded_banked_resolver_call(

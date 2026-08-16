@@ -26,7 +26,7 @@ use super::runtime_state_storage::CANDIDATE_START;
 /// 공유 계약이 쓰는 바이트 수다. 커서는 그 뒤에서 시작한다.
 const SHARED_CONTRACT_BYTE_COUNT: u16 = 5;
 
-/// 다음에 읽을 그룹 덩이 항목의 CPU 주소 하위 바이트다. 주소는 `$8000` 창 안이다.
+/// 다음에 읽을 레시피 덩이 항목의 CPU 주소 하위 바이트다. 주소는 `$8000` 창 안이다.
 pub(super) const CURSOR_ENTRY_LOW: u16 = CANDIDATE_START + SHARED_CONTRACT_BYTE_COUNT;
 /// 그 상위 바이트다.
 pub(super) const CURSOR_ENTRY_HIGH: u16 = CURSOR_ENTRY_LOW + 1;
@@ -36,8 +36,8 @@ pub(super) const PUBLISHED_SOURCE_DIRECTORY_SELECTOR: u16 = CURSOR_ENTRY_LOW;
 /// `ready`일 때 이 페이지를 만든 원문 엔트리 색인이다. 요청 중에는 같은 자리를
 /// `CURSOR_ENTRY_HIGH`가 소유한다.
 pub(super) const PUBLISHED_SOURCE_ENTRY_INDEX: u16 = CURSOR_ENTRY_HIGH;
-/// 그룹 덩이가 들어 있는 MMC3 페이지다. 소비자가 타일마다 이 페이지를 건다.
-pub(super) const CURSOR_GROUP_PAGE: u16 = CURSOR_ENTRY_LOW + 2;
+/// 레시피 덩이가 들어 있는 MMC3 페이지다. 소비자가 타일마다 이 페이지를 건다.
+pub(super) const CURSOR_RECIPE_PAGE: u16 = CURSOR_ENTRY_LOW + 2;
 /// 이번 단계에서 아직 처리하지 못한 몫이다. 복원 단계에서는 덩어리 수, 덮기 단계에서는
 /// 타일 수다.
 pub(super) const CURSOR_REMAINING_TILES: u16 = CURSOR_ENTRY_LOW + 3;
@@ -78,7 +78,7 @@ mod tests {
         let slots = [
             CURSOR_ENTRY_LOW,
             CURSOR_ENTRY_HIGH,
-            CURSOR_GROUP_PAGE,
+            CURSOR_RECIPE_PAGE,
             CURSOR_REMAINING_TILES,
             CURSOR_PHASE,
             CURSOR_OVERLAY_TILES,

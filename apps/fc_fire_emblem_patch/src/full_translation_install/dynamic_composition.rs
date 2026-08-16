@@ -10,15 +10,15 @@ use crate::{
     dialogue_inventory::MainDialogueGraphReport,
     font::{load_dalmoori, rasterize_glyph},
     font_slots::{FONT_PAGE_SIZE, FONT_TILE_SIZE},
-    mapper165::battle_codebook_plan::GlyphWorksetPagePlan,
+    mapper165::battle_codebook_plan::{GlyphWorkset, GlyphWorksetPagePlan},
 };
 
 use super::dynamic_inputs::DynamicStringPageCodePlan;
 
-/// MMC3 뱅크 한 장이다. 그룹 덩이는 이 경계를 걸치면 안 된다.
+/// MMC3 뱅크 한 장이다. 레시피 덩이는 이 경계를 걸치면 안 된다.
 const MMC3_PAGE_BYTE_COUNT: usize = 8 * 1024;
-/// 그룹 덩이 항목 하나의 크기다. 코드 하나와 atlas CPU 주소 둘이다.
-const GROUP_BLOCK_ENTRY_BYTE_COUNT: usize = 3;
+/// 가시 페이지 레시피 항목 하나의 크기다. 코드 하나와 atlas CPU 주소 둘이다.
+const PAGE_RECIPE_ENTRY_BYTE_COUNT: usize = 3;
 /// atlas가 타일 하나에 쓰는 바이트다. 1bpp 8×8.
 const GLYPH_ATLAS_TILE_BYTE_COUNT: usize = 8;
 
@@ -27,6 +27,8 @@ pub(super) struct DialogueRuntimeCompositionPlan {
     pub(super) glyph_atlas_characters: Vec<char>,
     pub(super) scan_material: Vec<u8>,
     pub(super) scan_material_sha1: String,
+    pub(super) page_recipe_blocks: Vec<u8>,
+    pub(super) page_recipe_blocks_sha1: String,
     pub(super) glyph_atlas_tile_count: usize,
     pub(super) dialogue_codebook_glyph_count: usize,
     pub(super) additional_cross_domain_glyph_count: usize,
@@ -46,7 +48,6 @@ pub(super) struct DialogueRuntimeCompositionPlan {
     pub(super) resident_group_transition_count: usize,
     pub(super) resident_group_change_count: usize,
     pub(super) resident_group_reuse_count: usize,
-    pub(super) maximum_resident_group_overlay_tile_count: usize,
     pub(super) maximum_delta_tile_count: usize,
     pub(super) maximum_delta_ppu_write_count: usize,
     pub(super) total_delta_ppu_write_count: usize,
@@ -58,18 +59,14 @@ pub(super) struct DialogueRuntimeCompositionPlan {
     pub(super) direct_delta_recipe_byte_count: usize,
     pub(super) bitpacked_delta_recipe_byte_count: usize,
     pub(super) dense_group_lookup_byte_count: usize,
-    /// 그룹 덩이 오프셋 표의 길이다. 그룹마다 2바이트다.
-    pub(super) group_block_directory_byte_count: usize,
-    /// 그룹 덩이 전체의 길이다. 페이지 정렬 여백을 포함한다.
-    pub(super) group_block_byte_count: usize,
-    /// 스캔 재료 안에서 그룹 덩이 오프셋 표가 시작하는 자리다.
-    pub(super) group_block_directory_offset: usize,
-    pub(super) group_block_container_offset: usize,
-    /// 그룹마다 그 덩이가 재료 용기 안에서 시작하는 자리다. 소비자가 걸 MMC3 페이지와
-    /// `$8000` 창 안의 주소가 여기서 나온다.
-    pub(super) group_block_container_offsets: Vec<usize>,
-    pub(super) record_page_group_selector_byte_count: usize,
-    pub(super) record_selector_directory_byte_count: usize,
+    /// 작업집합마다 하나씩인 가시 페이지 레시피 오프셋 표의 길이다.
+    pub(super) page_recipe_reference_byte_count: usize,
+    /// 레시피 덩이 전체의 길이다. 페이지 정렬 여백을 포함한다.
+    pub(super) page_recipe_block_byte_count: usize,
+    /// 스캔 재료 안에서 레시피 오프셋 표와 레코드 디렉터리가 시작하는 자리다.
+    pub(super) page_recipe_reference_offset: usize,
+    pub(super) record_recipe_directory_offset: usize,
+    pub(super) record_recipe_directory_byte_count: usize,
     pub(super) scan_material_byte_count: usize,
     pub(super) dynamic_string_control_count: usize,
     pub(super) dynamic_string_page_count: usize,
@@ -85,6 +82,7 @@ struct VisiblePageRecipe {
 pub(super) fn plan_dialogue_runtime_composition(
     dialogue: &MainDialogueDisplayPlan,
     transition_graph: &MainDialogueGraphReport,
+    runtime_worksets: &[GlyphWorkset],
     codebook: &GlyphWorksetPagePlan,
     dynamic_page_codes: &DynamicStringPageCodePlan,
     source_font_page: &[u8],
@@ -153,29 +151,15 @@ pub(super) fn plan_dialogue_runtime_composition(
         .max()
         .unwrap_or(0);
 
-    let workset_recipes = dialogue
-        .page_worksets
-        .iter()
-        .enumerate()
-        .map(|(workset_index, workset)| {
-            let static_page_group_index = codebook.workset_page_indices[workset_index];
-            let group_assignments = codebook
-                .page_assignments
-                .get(static_page_group_index)
-                .context("visible dialogue page refers to a missing static page group")?;
-            ensure!(
-                workset
-                    .target_glyphs
-                    .iter()
-                    .all(|glyph| group_assignments.contains_key(glyph)),
-                "visible dialogue page lost a page-local glyph assignment"
-            );
-            Ok(VisiblePageRecipe {
-                static_page_group_index,
-                target_glyphs: workset.target_glyphs.iter().copied().collect(),
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
+    ensure!(
+        runtime_worksets.len() == dialogue.page_worksets.len(),
+        "dialogue runtime workset population changed"
+    );
+    let workset_recipes = build_visible_page_recipes(
+        runtime_worksets,
+        &codebook.workset_page_indices,
+        &codebook.page_assignments,
+    )?;
     let unique_recipes = workset_recipes.iter().cloned().collect::<BTreeSet<_>>();
     let recipe_indices = unique_recipes
         .iter()
@@ -271,22 +255,6 @@ pub(super) fn plan_dialogue_runtime_composition(
         .filter(|transition| transition.from_selector != transition.to_selector)
         .count();
     let resident_group_reuse_count = resident_group_transition_count - resident_group_change_count;
-    let maximum_resident_group_overlay_tile_count = resident_transitions
-        .iter()
-        .filter(|transition| transition.from_selector & 0x7F != transition.to_selector & 0x7F)
-        .map(|transition| {
-            let group = usize::from(transition.to_selector & 0x7F);
-            codebook
-                .page_assignments
-                .get(group)
-                .map(BTreeMap::len)
-                .with_context(|| format!("resident transition selects missing page group {group}"))
-        })
-        .collect::<Result<Vec<_>>>()?
-        .into_iter()
-        .max()
-        .unwrap_or(0);
-
     let rebuild_every_visible_page_ppu_write_count = dialogue.page_worksets.len() * FONT_PAGE_SIZE
         + visible_page_overlay_reference_count * FONT_TILE_SIZE;
     let initial_rebuild_then_delta_ppu_write_count = record_worksets.len() * FONT_PAGE_SIZE
@@ -307,9 +275,9 @@ pub(super) fn plan_dialogue_runtime_composition(
     let bitpacked_delta_recipe_byte_count =
         (distinct_delta_reference_count * 18).div_ceil(8) + delta_recipe_directory_byte_count;
     let dense_group_lookup_byte_count = codebook.page_assignments.len() * (256 + 64);
-    let record_page_group_selector_byte_count = dialogue.page_worksets.len();
-    let record_selector_directory_byte_count = (record_worksets.len() + 1) * 2;
-    // 스캔 재료는 용기 안에서 헤더·구역 표·글리프 atlas 뒤에 놓인다. 그룹 덩이의
+    let page_recipe_reference_byte_count = dialogue.page_worksets.len() * 2;
+    let record_recipe_directory_byte_count = (record_worksets.len() + 1) * 2;
+    // 스캔 재료는 용기 안에서 헤더·구역 표·글리프 atlas 뒤에 놓인다. 레시피 덩이의
     // 페이지 정렬은 이 절대 위치를 알아야 정해진다.
     let atlas_container_offset =
         MATERIAL_HEADER_BYTE_COUNT + MATERIAL_SECTION_COUNT * SECTION_DESCRIPTOR_BYTE_COUNT;
@@ -320,31 +288,23 @@ pub(super) fn plan_dialogue_runtime_composition(
     let atlas_cpu_base = u16::try_from(0x8000 + atlas_container_offset)
         .context("glyph atlas CPU base does not fit the 8000 window")?;
     let scan_section_container_offset = atlas_container_offset + glyph_atlas.len();
-    let group_block_directory_byte_count = codebook.page_assignments.len() * 2;
     let encoded_scan = encode_scan_material(
         dialogue,
         codebook,
         dynamic_page_codes,
         &glyph_atlas_indices,
         &record_worksets,
+        &workset_recipe_indices,
+        &unique_recipes.iter().cloned().collect::<Vec<_>>(),
         atlas_cpu_base,
         scan_section_container_offset,
     )?;
     let scan_material = encoded_scan.bytes;
-    let group_block_directory_offset = encoded_scan.group_block_directory_offset;
-    let group_block_container_offset = encoded_scan.group_block_container_offset;
+    let page_recipe_reference_offset = encoded_scan.page_recipe_reference_offset;
+    let record_recipe_directory_offset = encoded_scan.record_recipe_directory_offset;
+    let page_recipe_blocks = encoded_scan.page_recipe_blocks;
     let scan_material_byte_count = scan_material.len();
-    let group_block_base = scan_section_container_offset + group_block_container_offset;
-    let group_block_container_offsets = (0..codebook.page_assignments.len())
-        .map(|group| {
-            let entry = scan_material
-                .get(group_block_directory_offset + group * 2..)
-                .and_then(|slice| slice.get(..2))
-                .context("page group directory is shorter than its group count")?;
-            Ok(group_block_base + usize::from(u16::from_le_bytes([entry[0], entry[1]])))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let group_block_byte_count = scan_material_byte_count - group_block_container_offset;
+    let page_recipe_block_byte_count = page_recipe_blocks.len();
     let dynamic_string_control_count = dialogue
         .page_worksets
         .iter()
@@ -367,6 +327,8 @@ pub(super) fn plan_dialogue_runtime_composition(
         glyph_atlas_characters: dialogue_glyphs.clone(),
         scan_material_sha1: crate::sha1_hex(&scan_material),
         scan_material,
+        page_recipe_blocks_sha1: crate::sha1_hex(&page_recipe_blocks),
+        page_recipe_blocks,
         glyph_atlas_tile_count: dialogue_glyphs.len(),
         dialogue_codebook_glyph_count: codebook.glyph_count,
         additional_cross_domain_glyph_count,
@@ -386,7 +348,6 @@ pub(super) fn plan_dialogue_runtime_composition(
         resident_group_transition_count,
         resident_group_change_count,
         resident_group_reuse_count,
-        maximum_resident_group_overlay_tile_count,
         maximum_delta_tile_count,
         maximum_delta_ppu_write_count,
         total_delta_ppu_write_count,
@@ -398,18 +359,51 @@ pub(super) fn plan_dialogue_runtime_composition(
         direct_delta_recipe_byte_count,
         bitpacked_delta_recipe_byte_count,
         dense_group_lookup_byte_count,
-        group_block_directory_byte_count,
-        group_block_byte_count,
-        group_block_directory_offset,
-        group_block_container_offset,
-        group_block_container_offsets,
-        record_page_group_selector_byte_count,
-        record_selector_directory_byte_count,
+        page_recipe_reference_byte_count,
+        page_recipe_block_byte_count,
+        page_recipe_reference_offset,
+        record_recipe_directory_offset,
+        record_recipe_directory_byte_count,
         scan_material_byte_count,
         dynamic_string_control_count,
         dynamic_string_page_count,
         dynamic_string_selector_count,
     })
+}
+
+/// 가시 대사 본문뿐 아니라 같은 수명에 머무는 이름·장 제목·선택지·결과 화면의
+/// 글리프까지 페이지 레시피에 넣는다. 정적 그룹 전체를 싣지는 않지만, 최종 상주권
+/// 계획이 요구한 글리프를 하나라도 줄여서는 안 된다.
+fn build_visible_page_recipes(
+    runtime_worksets: &[GlyphWorkset],
+    workset_page_indices: &[usize],
+    page_assignments: &[BTreeMap<char, u8>],
+) -> Result<Vec<VisiblePageRecipe>> {
+    ensure!(
+        runtime_worksets.len() == workset_page_indices.len(),
+        "visible-page recipe inputs have different workset counts"
+    );
+    runtime_worksets
+        .iter()
+        .zip(workset_page_indices)
+        .enumerate()
+        .map(|(workset_index, (workset, static_page_group_index))| {
+            let group_assignments = page_assignments
+                .get(*static_page_group_index)
+                .context("visible dialogue page refers to a missing static page group")?;
+            ensure!(
+                workset
+                    .target_glyphs
+                    .iter()
+                    .all(|glyph| group_assignments.contains_key(glyph)),
+                "visible dialogue page {workset_index} lost a runtime-lifetime glyph assignment"
+            );
+            Ok(VisiblePageRecipe {
+                static_page_group_index: *static_page_group_index,
+                target_glyphs: workset.target_glyphs.iter().copied().collect(),
+            })
+        })
+        .collect()
 }
 
 struct ResidentGroupTransition {
@@ -596,8 +590,9 @@ fn record_workset_indices(
 
 struct EncodedScanMaterial {
     bytes: Vec<u8>,
-    group_block_directory_offset: usize,
-    group_block_container_offset: usize,
+    page_recipe_blocks: Vec<u8>,
+    page_recipe_reference_offset: usize,
+    record_recipe_directory_offset: usize,
 }
 
 fn encode_scan_material(
@@ -606,65 +601,205 @@ fn encode_scan_material(
     dynamic_page_codes: &DynamicStringPageCodePlan,
     glyph_atlas_indices: &BTreeMap<char, usize>,
     record_worksets: &BTreeMap<&str, Vec<usize>>,
+    workset_recipe_indices: &[usize],
+    unique_recipes: &[VisiblePageRecipe],
     atlas_cpu_base: u16,
     section_container_offset: usize,
 ) -> Result<EncodedScanMaterial> {
     let mut encoded = Vec::new();
-    let mut selectors = Vec::with_capacity(dialogue.page_worksets.len());
+    let reference_byte_count = dialogue.page_worksets.len() * 2;
+    let directory_byte_count = (dialogue.record_ids.len() + 1) * 2;
+    let index_byte_count = reference_byte_count + directory_byte_count;
+    ensure!(
+        index_byte_count <= MMC3_PAGE_BYTE_COUNT,
+        "dialogue visible-page index does not fit one mapped MMC3 page"
+    );
+    let within_page = section_container_offset % MMC3_PAGE_BYTE_COUNT;
+    if within_page + index_byte_count > MMC3_PAGE_BYTE_COUNT {
+        encoded.resize(MMC3_PAGE_BYTE_COUNT - within_page, 0xFF);
+    }
+    let page_recipe_reference_offset = encoded.len();
+    let record_recipe_directory_offset = page_recipe_reference_offset + reference_byte_count;
+    let index_end = record_recipe_directory_offset + directory_byte_count;
+
+    let (recipe_offsets, recipe_blocks) = encode_visible_page_recipe_blocks(
+        unique_recipes,
+        &codebook.page_assignments,
+        glyph_atlas_indices,
+        atlas_cpu_base,
+        0,
+    )?;
+
+    let mut references = Vec::with_capacity(reference_byte_count);
     let mut directory = Vec::with_capacity((dialogue.record_ids.len() + 1) * 2);
     ensure!(
         dynamic_page_codes.workset_page_selectors.len() == dialogue.page_worksets.len(),
-        "dialogue scan material lost page selectors"
+        "dialogue scan material lost codebook selectors"
+    );
+    ensure!(
+        workset_recipe_indices.len() == dialogue.page_worksets.len(),
+        "dialogue scan material lost visible-page recipe references"
     );
     for record_id in &dialogue.record_ids {
         directory.extend_from_slice(
-            &u16::try_from(selectors.len())
-                .context("dialogue page-selector material exceeds a 16-bit offset")?
+            &u16::try_from(references.len() / 2)
+                .context("dialogue page-recipe material exceeds a 16-bit index")?
                 .to_le_bytes(),
         );
         let indices = record_worksets
             .get(record_id.as_str())
-            .with_context(|| format!("{record_id} has no runtime page selectors"))?;
-        selectors.extend(
-            indices
-                .iter()
-                .map(|index| dynamic_page_codes.workset_page_selectors[*index]),
-        );
+            .with_context(|| format!("{record_id} has no runtime page recipes"))?;
+        for workset_index in indices {
+            let recipe_index = workset_recipe_indices[*workset_index];
+            let recipe_offset = recipe_offsets.get(recipe_index).with_context(|| {
+                format!("workset {workset_index} selects missing recipe {recipe_index}")
+            })?;
+            references.extend_from_slice(&recipe_offset.to_le_bytes());
+        }
     }
     directory.extend_from_slice(
-        &u16::try_from(selectors.len())
-            .context("dialogue page-selector end exceeds a 16-bit offset")?
+        &u16::try_from(references.len() / 2)
+            .context("dialogue page-recipe end exceeds a 16-bit index")?
             .to_le_bytes(),
     );
     ensure!(
-        selectors.len() == dialogue.page_worksets.len(),
-        "dialogue scan material did not serialize every page selector exactly once"
+        references.len() == reference_byte_count,
+        "dialogue scan material did not serialize every page recipe exactly once"
     );
-    encoded.extend_from_slice(&selectors);
-    encoded.extend_from_slice(&directory);
-    let group_directory_length = codebook.page_assignments.len() * 2;
-    let group_block_directory_offset = encoded.len();
-    let group_block_container_offset = encoded.len() + group_directory_length;
-    let (group_directory, group_blocks) = encode_group_blocks(
-        &codebook.page_assignments,
-        glyph_atlas_indices,
-        atlas_cpu_base,
-        section_container_offset + group_block_container_offset,
-    )?;
     ensure!(
-        group_directory.len() == group_directory_length,
-        "page group directory length changed"
+        directory.len() == directory_byte_count,
+        "dialogue page-recipe directory length changed"
     );
-    encoded.extend_from_slice(&group_directory);
-    encoded.extend_from_slice(&group_blocks);
+    let record_page_counts = dialogue
+        .record_ids
+        .iter()
+        .map(|record_id| {
+            record_worksets
+                .get(record_id.as_str())
+                .map(Vec::len)
+                .with_context(|| format!("{record_id} has no runtime page recipes"))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    verify_visible_page_recipe_material(
+        &references,
+        &directory,
+        &recipe_offsets,
+        &recipe_blocks,
+        &record_page_counts,
+    )?;
+    encoded.extend_from_slice(&references);
+    encoded.extend_from_slice(&directory);
+    ensure!(
+        encoded.len() == index_end,
+        "dialogue page-recipe index length changed"
+    );
     Ok(EncodedScanMaterial {
         bytes: encoded,
-        group_block_directory_offset,
-        group_block_container_offset,
+        page_recipe_blocks: recipe_blocks,
+        page_recipe_reference_offset,
+        record_recipe_directory_offset,
     })
 }
 
-/// 그룹 하나가 런타임에 필요한 전부를 한 덩이로 묶는다.
+/// 레코드→페이지→레시피의 두 단계 색인과 레시피 덩이를 서로 다시 결속한다.
+///
+/// 직렬화 코드는 이 자료를 같은 함수에서 만들지만, 소비자는 서로 다른 PRG 창에서
+/// 읽는다. 따라서 참조 하나가 덩이 중간이나 정렬 여백을 가리키는 회귀도 빌드에서
+/// 닫아야 한다.
+fn verify_visible_page_recipe_material(
+    references: &[u8],
+    directory: &[u8],
+    recipe_offsets: &[u16],
+    recipe_blocks: &[u8],
+    record_page_counts: &[usize],
+) -> Result<()> {
+    ensure!(
+        references.len().is_multiple_of(2),
+        "visible-page recipe reference table has a partial entry"
+    );
+    ensure!(
+        directory.len() == (record_page_counts.len() + 1) * 2,
+        "visible-page recipe record directory length changed"
+    );
+    ensure!(
+        recipe_offsets.windows(2).all(|pair| pair[0] < pair[1]),
+        "visible-page recipe block offsets are not strictly increasing"
+    );
+
+    let block_starts = recipe_offsets.iter().copied().collect::<BTreeSet<_>>();
+    ensure!(
+        block_starts.len() == recipe_offsets.len(),
+        "visible-page recipe block offset is duplicated"
+    );
+    for (index, offset) in recipe_offsets.iter().copied().enumerate() {
+        let start = usize::from(offset);
+        let count = usize::from(
+            *recipe_blocks
+                .get(start)
+                .with_context(|| format!("visible-page recipe {index} starts outside its pool"))?,
+        );
+        let end = start
+            .checked_add(1 + count * PAGE_RECIPE_ENTRY_BYTE_COUNT)
+            .context("visible-page recipe block length overflow")?;
+        ensure!(
+            end <= recipe_blocks.len(),
+            "visible-page recipe {index} ends outside its pool"
+        );
+        ensure!(
+            start / MMC3_PAGE_BYTE_COUNT == (end - 1) / MMC3_PAGE_BYTE_COUNT,
+            "visible-page recipe {index} crosses an MMC3 page"
+        );
+        let next = recipe_offsets
+            .get(index + 1)
+            .map(|offset| usize::from(*offset))
+            .unwrap_or(recipe_blocks.len());
+        ensure!(
+            end <= next,
+            "visible-page recipe {index} overlaps the next block"
+        );
+        ensure!(
+            recipe_blocks[end..next].iter().all(|byte| *byte == 0xFF),
+            "visible-page recipe {index} has non-padding bytes before the next block"
+        );
+    }
+
+    let referenced_offsets = references
+        .chunks_exact(2)
+        .map(|entry| u16::from_le_bytes([entry[0], entry[1]]))
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        referenced_offsets == block_starts,
+        "visible-page recipe references do not cover every block exactly by its start"
+    );
+
+    let mut expected_page_start = 0usize;
+    for (record_index, page_count) in record_page_counts.iter().copied().enumerate() {
+        let directory_offset = record_index * 2;
+        let actual_page_start = usize::from(u16::from_le_bytes([
+            directory[directory_offset],
+            directory[directory_offset + 1],
+        ]));
+        ensure!(
+            actual_page_start == expected_page_start,
+            "visible-page recipe directory record {record_index} starts at {actual_page_start}, expected {expected_page_start}"
+        );
+        expected_page_start = expected_page_start
+            .checked_add(page_count)
+            .context("visible-page recipe page count overflow")?;
+    }
+    let final_offset = record_page_counts.len() * 2;
+    let actual_page_end = usize::from(u16::from_le_bytes([
+        directory[final_offset],
+        directory[final_offset + 1],
+    ]));
+    ensure!(
+        actual_page_end == references.len() / 2 && actual_page_end == expected_page_start,
+        "visible-page recipe directory end does not cover every workset"
+    );
+    Ok(())
+}
+
+/// 가시 페이지 하나가 런타임에 필요한 전부를 한 덩이로 묶는다.
 ///
 /// 덩이는 `[항목 수][코드, atlas 주소 하위, atlas 주소 상위] × n`이다. atlas 주소를
 /// 그대로 담는 이유는 소비자가 계산을 하나도 하지 않게 하려는 것이다.
@@ -677,21 +812,33 @@ fn encode_scan_material(
 ///
 /// 덩이가 8 KiB 페이지 경계를 걸치면 소비자가 타일마다 뱅크를 한 번 더 바꿔야
 /// 하므로, 걸칠 자리에서는 다음 페이지로 밀어 정렬한다.
-fn encode_group_blocks(
+fn encode_visible_page_recipe_blocks(
+    recipes: &[VisiblePageRecipe],
     page_assignments: &[BTreeMap<char, u8>],
     glyph_atlas_indices: &BTreeMap<char, usize>,
     atlas_cpu_base: u16,
     section_container_offset: usize,
-) -> Result<(Vec<u8>, Vec<u8>)> {
-    let mut directory = Vec::with_capacity(page_assignments.len() * 2);
+) -> Result<(Vec<u16>, Vec<u8>)> {
+    let mut offsets = Vec::with_capacity(recipes.len());
     let mut blocks: Vec<u8> = Vec::new();
-    for (group_index, assignments) in page_assignments.iter().enumerate() {
+    for (recipe_index, recipe) in recipes.iter().enumerate() {
+        let assignments = page_assignments
+            .get(recipe.static_page_group_index)
+            .with_context(|| {
+                format!(
+                    "visible-page recipe {recipe_index} selects missing codebook group {}",
+                    recipe.static_page_group_index
+                )
+            })?;
         // 코드 오름차순이라야 다시 만들었을 때 같은 바이트가 나오고, 커서가 중간에서
         // 이어받을 수 있다.
-        let mut entries: Vec<(u8, u16)> = Vec::with_capacity(assignments.len());
-        for (glyph, code) in assignments {
+        let mut entries: Vec<(u8, u16)> = Vec::with_capacity(recipe.target_glyphs.len());
+        for glyph in &recipe.target_glyphs {
+            let code = assignments.get(glyph).copied().with_context(|| {
+                format!("visible-page recipe {recipe_index} lost codebook glyph {glyph:?}")
+            })?;
             let atlas_index = glyph_atlas_indices.get(glyph).copied().with_context(|| {
-                format!("dialogue page group {group_index} lost atlas glyph {glyph:?}")
+                format!("visible-page recipe {recipe_index} lost atlas glyph {glyph:?}")
             })?;
             let offset = u16::try_from(atlas_index * GLYPH_ATLAS_TILE_BYTE_COUNT)
                 .context("glyph atlas offset does not fit a 16-bit address")?;
@@ -702,31 +849,37 @@ fn encode_group_blocks(
                 address < 0xA000,
                 "glyph atlas address {address:04X} leaves the 8000 window"
             );
-            entries.push((*code, address));
+            entries.push((code, address));
         }
         entries.sort_unstable();
-        let block_length = 1 + entries.len() * GROUP_BLOCK_ENTRY_BYTE_COUNT;
+        ensure!(
+            entries.windows(2).all(|pair| pair[0].0 != pair[1].0),
+            "visible-page recipe {recipe_index} assigns one code more than once"
+        );
+        let block_length = 1 + entries.len() * PAGE_RECIPE_ENTRY_BYTE_COUNT;
         ensure!(
             block_length <= MMC3_PAGE_BYTE_COUNT,
-            "page group {group_index} needs {block_length} bytes and cannot fit one MMC3 page"
+            "visible-page recipe {recipe_index} needs {block_length} bytes and cannot fit one MMC3 page"
         );
         let start = section_container_offset + blocks.len();
         if start / MMC3_PAGE_BYTE_COUNT != (start + block_length - 1) / MMC3_PAGE_BYTE_COUNT {
             let next_page = (start / MMC3_PAGE_BYTE_COUNT + 1) * MMC3_PAGE_BYTE_COUNT;
             blocks.resize(blocks.len() + (next_page - start), 0xFF);
         }
-        directory.extend_from_slice(
-            &u16::try_from(blocks.len())
-                .context("page group block offset exceeds a 16-bit offset")?
-                .to_le_bytes(),
+        offsets.push(
+            u16::try_from(blocks.len())
+                .context("visible-page recipe block offset exceeds a 16-bit offset")?,
         );
-        blocks.push(u8::try_from(entries.len()).context("page group entry count does not fit u8")?);
+        blocks.push(
+            u8::try_from(entries.len())
+                .context("visible-page recipe entry count does not fit u8")?,
+        );
         for (code, address) in entries {
             blocks.push(code);
             blocks.extend_from_slice(&address.to_le_bytes());
         }
     }
-    Ok((directory, blocks))
+    Ok((offsets, blocks))
 }
 
 fn encode_dense_group_lookups(
@@ -810,6 +963,29 @@ mod tests {
     }
 
     #[test]
+    fn visible_page_recipe_keeps_every_runtime_lifetime_glyph() {
+        let worksets = [GlyphWorkset {
+            target_glyphs: BTreeSet::from(['대', '사', '시', '더', '장']),
+            preserved_active_codes: BTreeSet::new(),
+            fixed_glyph_codes: BTreeMap::new(),
+        }];
+        let assignments = [BTreeMap::from([
+            ('대', 1),
+            ('사', 2),
+            ('시', 3),
+            ('더', 4),
+            ('장', 5),
+            // 같은 정적 그룹의 다른 화면 글자는 현재 레시피에 들어오지 않는다.
+            ('외', 6),
+        ])];
+
+        let recipes = build_visible_page_recipes(&worksets, &[0], &assignments).unwrap();
+
+        assert_eq!(recipes.len(), 1);
+        assert_eq!(recipes[0].target_glyphs, vec!['대', '더', '사', '시', '장']);
+    }
+
+    #[test]
     fn packed_recipe_estimates_include_directory_offsets() {
         let overlay_count = 100usize;
         let recipe_count = 4usize;
@@ -867,33 +1043,37 @@ mod tests {
         assert_eq!(encoded[256] & 0b11, 0b11);
     }
 
-    /// 덩이는 그 그룹이 쓰는 코드를 하나도 빠뜨리지 않고, 쓰지 않는 코드를 담지
-    /// 않아야 한다. 빠지면 그 글자가 CHR RAM에 안 올라가고, 남으면 원본 글꼴 타일을
-    /// 덮는다. 둘 다 화면에 잘못된 글자를 낸다.
+    /// 레시피는 그 가시 페이지가 쓰는 코드만 담아야 한다. 같은 그룹의 다른 페이지
+    /// 글자를 함께 올리면 첫 표시가 수백 프레임 늦어지고, 빠뜨리면 화면이 깨진다.
     #[test]
-    fn every_group_block_holds_exactly_the_codes_that_group_assigns() {
+    fn every_visible_page_block_holds_exactly_its_target_codes() {
         let assignments = vec![
             BTreeMap::from([('가', 0x42u8), ('나', 0x10)]),
             BTreeMap::from([('다', 0x80u8)]),
         ];
         let atlas = BTreeMap::from([('가', 0usize), ('나', 1), ('다', 2)]);
+        let recipes = vec![
+            VisiblePageRecipe {
+                static_page_group_index: 0,
+                target_glyphs: vec!['가'],
+            },
+            VisiblePageRecipe {
+                static_page_group_index: 1,
+                target_glyphs: vec!['다'],
+            },
+        ];
 
-        let (directory, blocks) = encode_group_blocks(&assignments, &atlas, 0x802E, 0).unwrap();
+        let (offsets, blocks) =
+            encode_visible_page_recipe_blocks(&recipes, &assignments, &atlas, 0x802E, 0).unwrap();
 
-        assert_eq!(directory.len(), assignments.len() * 2);
-        for (group, expected) in assignments.iter().enumerate() {
-            let start = usize::from(u16::from_le_bytes([
-                directory[group * 2],
-                directory[group * 2 + 1],
-            ]));
+        assert_eq!(offsets.len(), recipes.len());
+        for (recipe_index, expected) in [vec![0x42], vec![0x80]].iter().enumerate() {
+            let start = usize::from(offsets[recipe_index]);
             let count = usize::from(blocks[start]);
             let codes: Vec<u8> = (0..count)
-                .map(|entry| blocks[start + 1 + entry * GROUP_BLOCK_ENTRY_BYTE_COUNT])
+                .map(|entry| blocks[start + 1 + entry * PAGE_RECIPE_ENTRY_BYTE_COUNT])
                 .collect();
-            let mut wanted: Vec<u8> = expected.values().copied().collect();
-            wanted.sort_unstable();
-
-            assert_eq!(codes, wanted);
+            assert_eq!(&codes, expected);
         }
     }
 
@@ -903,8 +1083,13 @@ mod tests {
     fn an_entry_addresses_the_atlas_tile_of_its_glyph() {
         let assignments = vec![BTreeMap::from([('가', 0x42u8)])];
         let atlas = BTreeMap::from([('가', 7usize)]);
+        let recipes = vec![VisiblePageRecipe {
+            static_page_group_index: 0,
+            target_glyphs: vec!['가'],
+        }];
 
-        let (_, blocks) = encode_group_blocks(&assignments, &atlas, 0x802E, 0).unwrap();
+        let (_, blocks) =
+            encode_visible_page_recipe_blocks(&recipes, &assignments, &atlas, 0x802E, 0).unwrap();
 
         let address = u16::from_le_bytes([blocks[2], blocks[3]]);
         assert_eq!(address, 0x802E + 7 * GLYPH_ATLAS_TILE_BYTE_COUNT as u16);
@@ -916,14 +1101,81 @@ mod tests {
     fn a_block_that_would_straddle_a_page_boundary_moves_to_the_next_page() {
         let assignments = vec![BTreeMap::from([('가', 1u8), ('나', 2u8)])];
         let atlas = BTreeMap::from([('가', 0usize), ('나', 1)]);
+        let recipes = vec![VisiblePageRecipe {
+            static_page_group_index: 0,
+            target_glyphs: vec!['가', '나'],
+        }];
         // 덩이가 일곱 바이트이므로 페이지 끝 세 바이트 앞에서는 걸친다.
         let section_offset = MMC3_PAGE_BYTE_COUNT - 3;
 
-        let (directory, blocks) =
-            encode_group_blocks(&assignments, &atlas, 0x802E, section_offset).unwrap();
+        let (offsets, blocks) = encode_visible_page_recipe_blocks(
+            &recipes,
+            &assignments,
+            &atlas,
+            0x802E,
+            section_offset,
+        )
+        .unwrap();
 
-        let start = section_offset + usize::from(u16::from_le_bytes([directory[0], directory[1]]));
+        let start = section_offset + usize::from(offsets[0]);
         assert_eq!(start % MMC3_PAGE_BYTE_COUNT, 0);
         assert!(blocks[..3].iter().all(|byte| *byte == 0xFF));
+    }
+
+    #[test]
+    fn recipe_index_covers_every_workset_and_exact_block_start() {
+        let references = [0u8, 0, 4, 0, 0, 0];
+        let directory = [0u8, 0, 2, 0, 3, 0];
+        let offsets = [0u16, 4];
+        let blocks = [1u8, 0x42, 0x2E, 0x80, 1, 0x43, 0x36, 0x80];
+
+        verify_visible_page_recipe_material(&references, &directory, &offsets, &blocks, &[2, 1])
+            .unwrap();
+    }
+
+    #[test]
+    fn recipe_index_rejects_an_interior_reference_or_missing_block() {
+        let directory = [0u8, 0, 2, 0];
+        let offsets = [0u16, 4];
+        let blocks = [1u8, 0x42, 0x2E, 0x80, 1, 0x43, 0x36, 0x80];
+
+        assert!(
+            verify_visible_page_recipe_material(
+                &[0, 0, 5, 0],
+                &directory,
+                &offsets,
+                &blocks,
+                &[2],
+            )
+            .is_err()
+        );
+        assert!(
+            verify_visible_page_recipe_material(
+                &[0, 0, 0, 0],
+                &directory,
+                &offsets,
+                &blocks,
+                &[2],
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn recipe_index_rejects_a_record_directory_gap() {
+        let references = [0u8, 0, 4, 0];
+        let offsets = [0u16, 4];
+        let blocks = [1u8, 0x42, 0x2E, 0x80, 1, 0x43, 0x36, 0x80];
+
+        assert!(
+            verify_visible_page_recipe_material(
+                &references,
+                &[0, 0, 1, 0, 3, 0],
+                &offsets,
+                &blocks,
+                &[2, 0],
+            )
+            .is_err()
+        );
     }
 }

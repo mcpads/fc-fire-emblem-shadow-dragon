@@ -9,8 +9,8 @@ pub(super) const MATERIAL_HEADER_BYTE_COUNT: usize = 16;
 pub(super) const SECTION_DESCRIPTOR_BYTE_COUNT: usize = 6;
 /// 용기가 차지하는 MMC3 8 KiB 페이지 수다.
 ///
-/// 셋에서 넷, 넷에서 다섯이 됐다. 그룹 덩이가 항목마다 atlas 주소를 담으면서
-/// 커졌기 때문이다.
+/// 다섯 장 가운데 앞 넷은 작은 조회 자료, 마지막 한 장은 실행 코드다. 큰 가시
+/// 페이지 레시피 블록은 교차 도메인 재료 풀에 따로 둔다.
 ///
 /// 이 교환을 받아들이는 이유는 두 자원의 여유가 다르기 때문이다. PRG는 페이지
 /// `31`부터 `3D`까지 13장이 아직 비어 있고, vblank는 프레임당 1,243사이클이 전부다.

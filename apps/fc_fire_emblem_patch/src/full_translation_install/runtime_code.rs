@@ -350,18 +350,18 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         font_page_routes.project_dialogue_page,
     )?;
     let cold_presentation_selector_address = cold_presentation_selector.address;
-    let changed_group_request_initializer_origin = cold_presentation_selector.address
+    let page_recipe_request_initializer_origin = cold_presentation_selector.address
         + u16::try_from(cold_presentation_selector.bytes.len())
             .context("cold-request presentation selector length overflow")?;
-    let changed_group_request_initializer =
-        resolved_page_publication::build_changed_group_request_initializer(
-            changed_group_request_initializer_origin,
+    let page_recipe_request_initializer =
+        resolved_page_publication::build_page_recipe_request_initializer(
+            page_recipe_request_initializer_origin,
             cold_presentation_selector_address,
         )?;
-    let changed_group_request_initializer_address = changed_group_request_initializer.address;
-    let ownership_transfer_origin = changed_group_request_initializer.address
-        + u16::try_from(changed_group_request_initializer.bytes.len())
-            .context("changed-group request initializer length overflow")?;
+    let page_recipe_request_initializer_address = page_recipe_request_initializer.address;
+    let ownership_transfer_origin = page_recipe_request_initializer.address
+        + u16::try_from(page_recipe_request_initializer.bytes.len())
+            .context("page-recipe request initializer length overflow")?;
     let ownership_transfer =
         chr_ram_ownership::build_battle_composition_ownership_transfer(ownership_transfer_origin)?;
     let ownership_transfer_address = ownership_transfer.address;
@@ -390,7 +390,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
             .context("ownership-transfer routine length overflow")?;
     let resolved_page_publication = resolved_page_publication::build_resolved_page_publication(
         publication_origin,
-        changed_group_request_initializer_address,
+        page_recipe_request_initializer_address,
     )?;
     let resolved_page_publication_address = resolved_page_publication.address;
     let initial_request_publisher_origin = resolved_page_publication.address
@@ -588,7 +588,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
             &font_page_routes.routine,
             &selector,
             &cold_presentation_selector,
-            &changed_group_request_initializer,
+            &page_recipe_request_initializer,
             &ownership_transfer,
             &resolved_page_publication,
             &initial_request_publisher,
@@ -607,7 +607,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         publisher.tail,
         selector,
         cold_presentation_selector,
-        changed_group_request_initializer,
+        page_recipe_request_initializer,
         ownership_transfer,
         resolved_page_publication,
         initial_request_publisher,

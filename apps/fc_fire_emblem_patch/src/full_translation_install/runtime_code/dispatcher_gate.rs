@@ -46,13 +46,13 @@ use super::super::runtime_cursor_storage::{
     PUBLISHED_SOURCE_DIRECTORY_SELECTOR, PUBLISHED_SOURCE_ENTRY_INDEX,
 };
 use super::super::runtime_nmi_contract::PPU_CONTROL_SHADOW;
-use super::super::runtime_state_storage::CURRENT_PAGE_GROUP;
+use super::super::runtime_state_storage::CURRENT_PAGE_RESIDENCY;
 use super::lifecycle::E7_CALLER_RESUME_FLAG;
 use super::resolve_request::LOOKUP_LIVE_SOURCE_IDENTITY;
 #[cfg(test)]
 use super::resolve_request::LOOKUP_PUBLISHED_SOURCE_IDENTITY;
 use super::resolve_request::{SOURCE_DIRECTORY_SELECTOR, SOURCE_ENTRY_INDEX};
-use super::resolved_page_publication::NO_RESIDENT_PAGE_GROUP;
+use super::resolved_page_publication::NO_RESIDENT_PAGE_RECIPE;
 use super::transport::{REQUEST_STATE, STATE_READY};
 
 /// 폐기된 표본 그룹 selector가 차지한 동굴이다. 전역 런타임에서는 그 selector를
@@ -75,9 +75,9 @@ const PAIRED_BANK_HELPER: u16 = 0xFA20;
 
 /// 합성을 기다리는 중이라는 요청이다.
 pub(in crate::full_translation_install) const STATE_COLD_REQUESTED: u8 = 1;
-/// 완성된 이전 그룹 위에 새 그룹 전체를 덮는 요청이다. 원본 4 KiB 복원은 생략하지만
-/// 대상 그룹의 모든 글리프를 다시 써 같은 그룹의 후속 페이지까지 상주시킨다.
-pub(in crate::full_translation_install) const STATE_RESIDENT_GROUP_OVERLAY_REQUESTED: u8 = 2;
+/// 완성된 이전 페이지 위에 새 가시 페이지 레시피를 덮는 요청이다. 원본 4 KiB 복원은
+/// 생략하지만 새 페이지가 실제로 쓰는 글리프는 전부 다시 써 이전 페이지와 독립시킨다.
+pub(in crate::full_translation_install) const STATE_RESIDENT_PAGE_OVERLAY_REQUESTED: u8 = 2;
 
 /// 대사 뱅크다.
 const MAIN_DIALOGUE_BANK: u8 = 0x0A;
@@ -248,7 +248,7 @@ pub(super) fn build_source_identity_request_publisher(
     instructions.push(Instruction::BeqAbsolute(origin));
 
     instructions.extend([
-        Instruction::LdaImmediate(NO_RESIDENT_PAGE_GROUP),
+        Instruction::LdaImmediate(NO_RESIDENT_PAGE_RECIPE),
         // 새 수명에는 게시된 선행 조회값이 없으므로 살아 있는 원본 정체성이 현재
         // 레코드다.
         Instruction::LdxImmediate(LOOKUP_LIVE_SOURCE_IDENTITY),
@@ -286,7 +286,7 @@ pub(super) fn build_source_identity_request_publisher(
         instructions[index] = Instruction::BneAbsolute(ready_rebuild);
     }
     instructions.extend([
-        Instruction::LdaAbsolute(CURRENT_PAGE_GROUP),
+        Instruction::LdaAbsolute(CURRENT_PAGE_RESIDENCY),
         // 준비된 수명의 전이는 직전에 게시한 선행 조회값을 현재 레코드로 승격한다.
     ]);
 
@@ -325,7 +325,7 @@ pub(super) fn build_initial_request_publisher(
     resolved_page_publication: u16,
 ) -> Result<RuntimeRoutine> {
     let mut instructions = vec![
-        Instruction::LdaImmediate(NO_RESIDENT_PAGE_GROUP),
+        Instruction::LdaImmediate(NO_RESIDENT_PAGE_RECIPE),
         Instruction::LdxImmediate(LOOKUP_LIVE_SOURCE_IDENTITY),
     ];
     append_guarded_resolver_publication(
@@ -849,7 +849,7 @@ mod tests {
 
         let new_lifetime = [
             0xA9,
-            NO_RESIDENT_PAGE_GROUP,
+            NO_RESIDENT_PAGE_RECIPE,
             0xA2,
             LOOKUP_LIVE_SOURCE_IDENTITY,
             0x4C,
@@ -900,7 +900,7 @@ mod tests {
             &routine.bytes[..4],
             [
                 0xA9,
-                NO_RESIDENT_PAGE_GROUP,
+                NO_RESIDENT_PAGE_RECIPE,
                 0xA2,
                 LOOKUP_LIVE_SOURCE_IDENTITY,
             ]

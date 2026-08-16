@@ -430,7 +430,7 @@ pub(super) fn plan_integrated_write_set(
             appended_chr_page_count,
             static_consumer_font_page_write_count: inputs.consumer_codebook.pages().len(),
             catalog_consumer_font_page_write_count: inputs.consumer_catalog.pages().len(),
-            cross_domain_material_write_count: inputs.cross_domain_material.sections().len() + 1,
+            cross_domain_material_write_count: inputs.cross_domain_material.sections().len() + 2,
             fixed_ui_projection_write_count: inputs.fixed_ui_projection.write_count(),
             chapter_save_projection_write_count: inputs.chapter_save_projection.write_count(),
             ending_record_projection_write_count: inputs.ending_record_projection.write_count(),
@@ -623,6 +623,25 @@ fn install_cross_domain_material(
         plan.sections().len() == 13,
         "integrated cross-domain material must contain thirteen non-dialogue sections"
     );
+    let recipes = plan.dialogue_page_recipes();
+    let recipe_end = recipes
+        .file_offset
+        .checked_add(recipes.bytes.len())
+        .ok_or_else(|| anyhow::anyhow!("dialogue page-recipe material range overflow"))?;
+    let recipe_expected = candidate
+        .data()
+        .get(recipes.file_offset..recipe_end)
+        .ok_or_else(|| anyhow::anyhow!("dialogue page-recipe material is outside candidate"))?;
+    ensure!(
+        recipe_expected.iter().all(|byte| *byte == 0xFF),
+        "dialogue page-recipe material destination is not exact FF"
+    );
+    image.write_expected(
+        "dialogue visible-page recipe material",
+        recipes.file_offset,
+        recipe_expected,
+        &recipes.bytes,
+    )?;
     for section in plan.sections() {
         let end = section
             .file_offset
@@ -670,6 +689,15 @@ fn verify_installed_cross_domain_material(
     installed: &[u8],
     plan: &CrossDomainMaterialPlan,
 ) -> Result<()> {
+    let recipes = plan.dialogue_page_recipes();
+    let recipe_end = recipes
+        .file_offset
+        .checked_add(recipes.bytes.len())
+        .ok_or_else(|| anyhow::anyhow!("installed dialogue page-recipe range overflow"))?;
+    ensure!(
+        installed.get(recipes.file_offset..recipe_end) == Some(recipes.bytes.as_slice()),
+        "installed dialogue page-recipe material does not match its plan"
+    );
     for section in plan.sections() {
         let end = section
             .file_offset

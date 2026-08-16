@@ -164,7 +164,7 @@ struct FontPageBuilder {
     runtime_code_capacity_byte_count: usize,
     cold_request_action: &'static str,
     continuous_request_action: &'static str,
-    dynamic_values_covered_by_page_group: bool,
+    dynamic_values_covered_by_visible_page_recipe: bool,
 }
 
 #[derive(Serialize)]
@@ -382,7 +382,7 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         inputs.runtime_code_offset >= runtime_code_page_offset
             && inputs.runtime_code_offset + inputs.runtime_code_byte_count
                 == RUNTIME_MATERIAL_PAGE_COUNT * 8 * 1024,
-        "dialogue runtime code is not the tail of MMC3 page 2E"
+        "dialogue runtime code is not the final page of its material container"
     );
     let runtime_code_cpu_start = RUNTIME_CODE_WINDOW_START
         .checked_add(
@@ -487,7 +487,7 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         .collect();
 
     Ok(DialogueRuntimeControlFlowPlan {
-        strategy: "treat the original selector and entry as a one-record lookahead pipeline: seed a new lifetime from the live identity, promote the previously published identity on a changed producer call, freeze the new live identity for the following transition, advance exactly one four-line workset only when the original completed-page state chooses 09 continue, retain the transition-stable resident group through E6 and E7 non-dialogue states, invalidate it at the actual battle CHR-RAM writer, reuse an unchanged group without skipping the displaced source resolver, overlay a changed resident group without restoring 4 KiB, and cold-compose only without valid residency",
+        strategy: "treat the original selector and entry as a one-record lookahead pipeline: seed a new lifetime from the live identity, promote the previously published identity on a changed producer call, freeze the new live identity for the following transition, advance exactly one four-line workset only when the original completed-page state chooses 09 continue, retain the completed CHR page through E6 and E7 non-dialogue states, invalidate it at the actual battle CHR-RAM writer, reuse only the exact repeated identity without skipping the displaced source resolver, overlay every glyph used by each newly resolved visible page without restoring 4 KiB when residency exists, and cold-compose only without valid residency",
         states: vec![
             RuntimeState {
                 id: "inactive",
@@ -495,15 +495,15 @@ pub(super) fn plan_dialogue_runtime_control_flow(
             },
             RuntimeState {
                 id: "cold_requested",
-                meaning: "build the source font page and the requested group before selection",
+                meaning: "build the source font page and the requested visible-page recipe before selection",
             },
             RuntimeState {
-                id: "resident_group_overlay_requested",
-                meaning: "keep the completed source page, hide it from display, and overlay every glyph in the changed current group",
+                id: "resident_page_overlay_requested",
+                meaning: "keep the completed source page, hide it from display, and overlay every glyph used by the newly resolved visible page",
             },
             RuntimeState {
                 id: "ready",
-                meaning: "the CHR-RAM page matches the current path and page-group identity",
+                meaning: "the CHR-RAM page contains every glyph used by the current visible page",
             },
         ],
         producers,
@@ -525,7 +525,7 @@ pub(super) fn plan_dialogue_runtime_control_flow(
             chr_fe_restore_callee_worst_case_cycles: fe_restore_cycles,
         },
         font_page_builder: FontPageBuilder {
-            strategy: "cold dialogue-FD source-page rebuild plus dense page-group atlas overlay for every current request while native FE remains the backdrop",
+            strategy: "cold dialogue-FD source-page rebuild plus direct visible-page recipe overlay while native FE remains the backdrop",
             source_page_mmc3_page_hex: "0x21",
             source_page_sha1: sha1_hex(source_page),
             source_page_matches_original_font: true,
@@ -536,9 +536,9 @@ pub(super) fn plan_dialogue_runtime_control_flow(
             runtime_code_cpu_start_hex: format!("0x{runtime_code_cpu_start:04X}"),
             runtime_code_cpu_end_exclusive_hex: "0xC000",
             runtime_code_capacity_byte_count: inputs.runtime_code_byte_count,
-            cold_request_action: "copy all 4096 original font bytes then overlay every assigned target glyph in the selected page group",
-            continuous_request_action: "the original completed-page 09 outcome advances exactly one workset; a repeated producer reuses that selected page when ready and both lookahead bytes match but still executes the displaced source resolver; a changed producer promotes the previously published lookahead to the current record while freezing the new live lookahead; an unchanged group republishes ready without CHR writes, while a changed resident group overlays all target glyphs without restoring the source page",
-            dynamic_values_covered_by_page_group: true,
+            cold_request_action: "copy all 4096 original font bytes then overlay only the target glyphs used by the selected visible page",
+            continuous_request_action: "the original completed-page 09 outcome advances exactly one workset; an exact repeated identity reuses the selected page when ready and still executes the displaced source resolver; every newly resolved page overlays all of its own target glyphs without restoring the source page; a changed producer promotes the previously published lookahead to the current record while freezing the new live lookahead",
+            dynamic_values_covered_by_visible_page_recipe: true,
         },
         selector_consumer: SelectorConsumer {
             chain_owner_cpu_address_hex: "0xFF1D",
@@ -570,7 +570,7 @@ pub(super) fn plan_dialogue_runtime_control_flow(
                 "display_path_index_low",
                 "display_path_index_high",
                 "visible_page_index",
-                "page_group_selector",
+                "page_recipe_residency",
                 "inactive_cold_overlay_or_ready_state",
             ],
             ownership_rule: "select no address until every direct and indirect source access, save lifetime, PPU queue lifetime, and existing battle runtime reservation excludes it",

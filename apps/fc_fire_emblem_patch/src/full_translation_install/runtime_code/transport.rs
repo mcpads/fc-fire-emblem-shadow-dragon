@@ -4,10 +4,10 @@
 //! `$C179`의 vblank 잔여 1,704사이클에서 안전 여유 20%를 뺀 값 안에 실제 코드의
 //! 최악 사이클이 들어가도록 정한다. 의사결정 64번을 따른다.
 //!
-//! 옮기는 것은 그룹 덩이의 항목이다. 항목은 `[코드][atlas 주소 하위][atlas 주소 상위]`
+//! 옮기는 것은 가시 페이지 레시피의 항목이다. 항목은 `[코드][atlas 주소 하위][atlas 주소 상위]`
 //! 세 바이트이고, 빌드가 주소를 미리 더해 두어 소비자는 계산을 하지 않는다.
 //!
-//! 한 타일에 `$8000` 창을 두 번 바꾼다. 항목은 그룹 덩이 페이지에, 타일 자료는
+//! 한 타일에 `$8000` 창을 두 번 바꾼다. 항목은 레시피 페이지에, 타일 자료는
 //! atlas 페이지에 있고 두 페이지를 동시에 걸 수 없기 때문이다.
 //!
 //! 프레임 시작에서 CHR RAM을 두 CHR 창에 걸고 끝에서 되돌린다. 걸지 않으면 `$2007`
@@ -16,7 +16,7 @@
 //! 렌더링은 그 사이를 보지 못한다.
 //!
 //! 합성은 두 단계다. 먼저 원본 배경 페이지 4 KiB를 CHR RAM으로 복원하고, 그 위에
-//! 그 그룹의 한글 타일을 덮는다. 복원이 필요한 이유는 맵 타일과 대사 글꼴이 같은
+//! 그 가시 페이지가 실제로 쓰는 한글 타일을 덮는다. 복원이 필요한 이유는 맵 타일과 대사 글꼴이 같은
 //! 4 KiB 페이지 안에 함께 있기 때문이다 — 덮기만 하면 맵이 사라진다. 실행으로
 //! 확인했다.
 //!
@@ -42,7 +42,7 @@
 use anyhow::{Context, Result, ensure};
 
 use super::super::runtime_cursor_storage::{
-    CURSOR_ENTRY_HIGH, CURSOR_ENTRY_LOW, CURSOR_GROUP_PAGE, CURSOR_OVERLAY_TILES, CURSOR_PHASE,
+    CURSOR_ENTRY_HIGH, CURSOR_ENTRY_LOW, CURSOR_OVERLAY_TILES, CURSOR_PHASE, CURSOR_RECIPE_PAGE,
     CURSOR_REMAINING_TILES, PUBLISHED_SOURCE_DIRECTORY_SELECTOR, PUBLISHED_SOURCE_ENTRY_INDEX,
     REQUEST_SOURCE_DIRECTORY_SELECTOR, REQUEST_SOURCE_ENTRY_INDEX,
 };
@@ -60,15 +60,15 @@ const RESTORE_CHUNK_BYTE_COUNT: u8 = 32;
 /// 4 KiB 페이지를 그 크기로 나눈 덩어리 수다.
 pub(in crate::full_translation_install) const RESTORE_CHUNK_COUNT: u8 = 128;
 /// 한 프레임에 옮기는 덩어리 수다. 타일 수와 같은 예산에서 따로 유도한다.
-const RESTORE_CHUNKS_PER_FRAME: u8 = 1;
+pub(in crate::full_translation_install) const RESTORE_CHUNKS_PER_FRAME: u8 = 1;
 /// 원본 배경 페이지를 복제해 둔 PRG 페이지다.
 pub(in crate::full_translation_install) const SOURCE_PAGE_MMC3_PAGE: u8 = 0x21;
 /// 복원 단계를 뜻하는 값이다.
 pub(in crate::full_translation_install) const PHASE_RESTORE: u8 = 0;
 /// 덮기 단계를 뜻하는 값이다.
 pub(in crate::full_translation_install) const PHASE_OVERLAY: u8 = 1;
-/// 그룹 덩이 항목 하나의 크기다. 코드 하나와 atlas CPU 주소 둘이다.
-const GROUP_BLOCK_ENTRY_BYTE_COUNT: u8 = 3;
+/// 가시 페이지 레시피 항목 하나의 크기다. 코드 하나와 atlas CPU 주소 둘이다.
+const PAGE_RECIPE_ENTRY_BYTE_COUNT: u8 = 3;
 /// atlas가 타일 하나에 쓰는 바이트다. 1bpp 8×8.
 pub(super) const ATLAS_TILE_BYTE_COUNT: u8 = 8;
 /// 타일 하나가 CHR에서 차지하는 바이트다. 2bpp 8×8.
@@ -190,8 +190,8 @@ fn frame_prologue(origin: u16) -> Result<(Vec<Instruction>, usize)> {
 /// 타일 하나를 올리는 몸통이다. 길이가 고정이라 자료가 반복 횟수를 늘릴 수 없다.
 fn tile_body(loop_start: u16, atlas_page: u8) -> Result<Vec<Instruction>> {
     let mut instructions = Vec::new();
-    // 항목을 읽으려면 그룹 덩이 페이지가 걸려 있어야 한다.
-    instructions.extend(map_data_page(Instruction::LdaAbsolute(CURSOR_GROUP_PAGE)));
+    // 항목을 읽으려면 레시피 페이지가 걸려 있어야 한다.
+    instructions.extend(map_data_page(Instruction::LdaAbsolute(CURSOR_RECIPE_PAGE)));
     instructions.extend([
         Instruction::LdyImmediate(0),
         Instruction::LdaIndirectY(ENTRY_POINTER_LOW),
@@ -205,7 +205,7 @@ fn tile_body(loop_start: u16, atlas_page: u8) -> Result<Vec<Instruction>> {
         // 다음 항목으로 옮긴다.
         Instruction::Clc,
         Instruction::LdaZeroPage(ENTRY_POINTER_LOW),
-        Instruction::AdcImmediate(GROUP_BLOCK_ENTRY_BYTE_COUNT),
+        Instruction::AdcImmediate(PAGE_RECIPE_ENTRY_BYTE_COUNT),
         Instruction::StaZeroPage(ENTRY_POINTER_LOW),
         Instruction::LdaZeroPage(ENTRY_POINTER_HIGH),
         Instruction::AdcImmediate(0),
@@ -782,7 +782,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("the body is missing {wanted:?}"))
         };
 
-        let block_map = position(Instruction::LdaAbsolute(CURSOR_GROUP_PAGE));
+        let block_map = position(Instruction::LdaAbsolute(CURSOR_RECIPE_PAGE));
         let entry_read = position(Instruction::LdaIndirectY(ENTRY_POINTER_LOW));
         let atlas_map = position(Instruction::LdaImmediate(ATLAS_PAGE));
         let atlas_read = position(Instruction::LdaIndirectY(ATLAS_POINTER_LOW));

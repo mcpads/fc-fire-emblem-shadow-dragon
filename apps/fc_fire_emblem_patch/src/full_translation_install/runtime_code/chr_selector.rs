@@ -42,7 +42,7 @@ use super::{
         CHR_RAM_BANK_VALUE, CHR_SOURCE_HIGH_BITS, DIALOGUE_FD_SOURCE_PAGE, RIGHT_FD_SOURCE_SHADOW,
     },
     dispatcher_gate::{
-        DISPATCHER_STATE, STATE_COLD_REQUESTED, STATE_RESIDENT_GROUP_OVERLAY_REQUESTED,
+        DISPATCHER_STATE, STATE_COLD_REQUESTED, STATE_RESIDENT_PAGE_OVERLAY_REQUESTED,
     },
     lifecycle::TERMINAL_STATE,
     next_address,
@@ -149,7 +149,7 @@ pub(super) fn build_chr_selector(
     let cold_state_placeholder = instructions.len();
     instructions.push(Instruction::BeqAbsolute(origin));
     instructions.push(Instruction::CmpImmediate(
-        STATE_RESIDENT_GROUP_OVERLAY_REQUESTED,
+        STATE_RESIDENT_PAGE_OVERLAY_REQUESTED,
     ));
     let resident_overlay_state_placeholder = instructions.len();
     instructions.push(Instruction::BeqAbsolute(origin));
@@ -620,7 +620,7 @@ mod tests {
             routine
                 .bytes
                 .windows(3)
-                .any(|window| { window == [0xC9, STATE_RESIDENT_GROUP_OVERLAY_REQUESTED, 0xF0] })
+                .any(|window| { window == [0xC9, STATE_RESIDENT_PAGE_OVERLAY_REQUESTED, 0xF0] })
         );
         assert!(routine.bytes.windows(5).any(|window| {
             window

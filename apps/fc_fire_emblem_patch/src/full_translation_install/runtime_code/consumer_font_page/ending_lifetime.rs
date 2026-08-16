@@ -19,13 +19,13 @@ use super::super::{
 use crate::{
     chapter_transition::ENDING_RECORD_PHASE_ADDRESS,
     dialogue_inventory::switchable_cpu_to_file_offset,
-    full_translation_install::runtime_state_storage::{CONSUMER_FONT_PAGE, CURRENT_PAGE_GROUP},
+    full_translation_install::runtime_state_storage::{CONSUMER_FONT_PAGE, CURRENT_PAGE_RESIDENCY},
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
     typed_source::decode_rp2a03_sequence,
 };
 
-use super::super::{resolved_page_publication::NO_RESIDENT_PAGE_GROUP, transport::REQUEST_STATE};
+use super::super::{resolved_page_publication::NO_RESIDENT_PAGE_RECIPE, transport::REQUEST_STATE};
 
 const ENDING_BANK: u8 = 0x04;
 const ENDING_RECORD_ENTER_SITE: u16 = 0xA3DC;
@@ -358,7 +358,7 @@ fn build_exit_head(exit_tail: u16) -> Result<RuntimeRoutine> {
         // the two exact fixed-bank gaps.
         Instruction::StaAbsolute(CONSUMER_FONT_PAGE),
         Instruction::StaAbsolute(REQUEST_STATE),
-        Instruction::LdaImmediate(NO_RESIDENT_PAGE_GROUP),
+        Instruction::LdaImmediate(NO_RESIDENT_PAGE_RECIPE),
         Instruction::JmpAbsolute(exit_tail),
     ];
     Ok(RuntimeRoutine {
@@ -370,7 +370,7 @@ fn build_exit_head(exit_tail: u16) -> Result<RuntimeRoutine> {
 
 fn build_exit_tail(origin: u16, restore_source_pair: u16) -> Result<RuntimeRoutine> {
     let instructions = [
-        Instruction::StaAbsolute(CURRENT_PAGE_GROUP),
+        Instruction::StaAbsolute(CURRENT_PAGE_RESIDENCY),
         Instruction::JsrAbsolute(restore_source_pair),
         Instruction::Pla,
         Instruction::Plp,
@@ -676,7 +676,7 @@ mod tests {
             memory[usize::from(ENDING_RECORD_PHASE_ADDRESS)] = phase;
             memory[usize::from(CONSUMER_FONT_PAGE)] = ENDING_ROUTE;
             memory[usize::from(REQUEST_STATE)] = 3;
-            memory[usize::from(CURRENT_PAGE_GROUP)] = 0x12;
+            memory[usize::from(CURRENT_PAGE_RESIDENCY)] = 0x12;
             memory[usize::from(RIGHT_FD_SOURCE_SHADOW)] = 0x12;
             memory[usize::from(RIGHT_FE_SOURCE_SHADOW)] = 0x17;
             memory[usize::from(CHR_SOURCE_HIGH_BITS)] = 0x20;
@@ -690,8 +690,8 @@ mod tests {
             assert_eq!(cpu.memory[usize::from(CONSUMER_FONT_PAGE)], 0);
             assert_eq!(cpu.memory[usize::from(REQUEST_STATE)], 0);
             assert_eq!(
-                cpu.memory[usize::from(CURRENT_PAGE_GROUP)],
-                NO_RESIDENT_PAGE_GROUP
+                cpu.memory[usize::from(CURRENT_PAGE_RESIDENCY)],
+                NO_RESIDENT_PAGE_RECIPE
             );
             assert_eq!(
                 cpu.restored_pages,
@@ -748,7 +748,7 @@ mod tests {
         memory[0x7809] = 1;
         memory[usize::from(CONSUMER_FONT_PAGE)] = ENDING_ROUTE;
         memory[usize::from(REQUEST_STATE)] = 3;
-        memory[usize::from(CURRENT_PAGE_GROUP)] = 0x11;
+        memory[usize::from(CURRENT_PAGE_RESIDENCY)] = 0x11;
         memory[usize::from(RIGHT_FD_SOURCE_SHADOW)] = 0x12;
         memory[usize::from(RIGHT_FE_SOURCE_SHADOW)] = 0x17;
         memory[usize::from(CHR_SOURCE_HIGH_BITS)] = 0x20;
@@ -821,8 +821,8 @@ mod tests {
         assert_eq!(transitioning.memory[usize::from(CONSUMER_FONT_PAGE)], 0);
         assert_eq!(transitioning.memory[usize::from(REQUEST_STATE)], 0);
         assert_eq!(
-            transitioning.memory[usize::from(CURRENT_PAGE_GROUP)],
-            NO_RESIDENT_PAGE_GROUP
+            transitioning.memory[usize::from(CURRENT_PAGE_RESIDENCY)],
+            NO_RESIDENT_PAGE_RECIPE
         );
         assert_eq!(
             transitioning.restored_pages,

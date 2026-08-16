@@ -302,6 +302,23 @@ pub(in crate::full_translation_install::integrated_write_set) fn plan_required_m
             &write.replacement,
         ));
     }
+    let recipes = inputs.cross_domain_material.dialogue_page_recipes();
+    let expected = mutation_expected_slice(
+        inputs.candidate.data(),
+        recipes.file_offset,
+        recipes.bytes.len(),
+        "dialogue visible-page recipe material",
+    )?;
+    ensure!(
+        expected.iter().all(|byte| *byte == 0xFF),
+        "dialogue page-recipe material destination is not exact FF"
+    );
+    required.push(MutationIdentity::exact(
+        "dialogue visible-page recipe material",
+        recipes.file_offset,
+        expected,
+        &recipes.bytes,
+    ));
     for section in inputs.cross_domain_material.sections() {
         let expected = mutation_expected_slice(
             inputs.candidate.data(),

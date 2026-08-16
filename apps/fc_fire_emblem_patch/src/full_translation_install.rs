@@ -175,7 +175,7 @@ pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) output_path: Option<&'a Path>,
 }
 
-pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 21;
+pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 22;
 
 pub(crate) struct FullTranslationInstallSummary {
     pub(crate) report_sha1: String,
@@ -323,15 +323,20 @@ struct DialogueRuntimeComposition {
     four_by_four_block_index_bit_count: usize,
     four_by_four_block_atlas_byte_count: usize,
     static_page_group_count: usize,
-    group_block_directory_byte_count: usize,
-    group_block_byte_count: usize,
-    group_block_directory_offset: usize,
+    page_recipe_reference_byte_count: usize,
+    page_recipe_block_byte_count: usize,
+    page_recipe_blocks_sha1: String,
+    page_recipe_reference_offset: usize,
+    record_recipe_directory_offset: usize,
     static_page_group_overlay_reference_count: usize,
     maximum_static_page_group_overlay_tile_count: usize,
     visible_page_recipe_count: usize,
     visible_page_recipe_reference_count: usize,
     visible_page_overlay_reference_count: usize,
     maximum_visible_page_overlay_tile_count: usize,
+    cold_page_restore_frame_count: usize,
+    maximum_cold_page_preparation_frame_count: usize,
+    maximum_resident_page_overlay_frame_count: usize,
     maximum_visible_page_rebuild_ppu_write_count: usize,
     sequential_page_transition_count: usize,
     distinct_visible_page_recipe_transition_count: usize,
@@ -339,8 +344,6 @@ struct DialogueRuntimeComposition {
     resident_group_transition_count: usize,
     resident_group_change_count: usize,
     resident_group_reuse_count: usize,
-    maximum_resident_group_overlay_tile_count: usize,
-    maximum_resident_group_overlay_frame_count: usize,
     maximum_delta_tile_count: usize,
     maximum_delta_ppu_write_count: usize,
     total_delta_ppu_write_count: usize,
@@ -351,7 +354,7 @@ struct DialogueRuntimeComposition {
     bitmap_and_atlas_index_visible_page_recipe_byte_count: usize,
     direct_delta_recipe_byte_count: usize,
     bitpacked_delta_recipe_byte_count: usize,
-    encoded_page_scan_strategy_selected: bool,
+    visible_page_recipe_strategy_selected: bool,
     script_scan_covers_dynamic_strings: bool,
     dynamic_string_control_count: usize,
     dynamic_string_page_count: usize,
@@ -380,8 +383,7 @@ struct DialogueRuntimeComposition {
     dynamic_string_producers: DynamicInputProducerPlan,
     dynamic_producer_encoding: DynamicProducerEncodingPlan,
     dense_group_lookup_byte_count: usize,
-    record_page_group_selector_byte_count: usize,
-    record_selector_directory_byte_count: usize,
+    record_recipe_directory_byte_count: usize,
     scan_material_byte_count: usize,
     scan_material_sha1: String,
     scan_material_serialized: bool,
@@ -691,6 +693,7 @@ pub(crate) fn plan_full_translation_installation(
     let composition = plan_dialogue_runtime_composition(
         &display,
         &dialogue_graph,
+        &transition_residency.augmented_worksets,
         &codebook,
         &dynamic_page_codes,
         source_font_page,
@@ -703,12 +706,6 @@ pub(crate) fn plan_full_translation_installation(
             .binary_search(glyph)
             .is_ok()),
         "shared glyph atlas lost a required cross-domain glyph"
-    );
-    ensure!(
-        composition.resident_group_change_count == 0
-            && composition.resident_group_reuse_count
-                == composition.resident_group_transition_count,
-        "a visible dialogue transition changes its resident codebook"
     );
     let source_owned_storage_byte_count = baseline_encoded
         .regions
@@ -737,6 +734,8 @@ pub(crate) fn plan_full_translation_installation(
     })?;
     let cross_domain_material = plan_cross_domain_material(CrossDomainMaterialInputs {
         main_dialogue_runtime_material_byte_count: runtime_material.material.len(),
+        dialogue_page_recipe_blocks: &composition.page_recipe_blocks,
+        dialogue_page_recipe_count: composition.visible_page_recipe_count,
         shared_atlas_characters: &composition.glyph_atlas_characters,
         fixed: &fixed,
         unit_names: &unit_names,
@@ -778,6 +777,15 @@ pub(crate) fn plan_full_translation_installation(
         u16::try_from(0x8000 + offset % MMC3_PAGE_BYTE_COUNT)
             .context("material CPU address does not fit the 8000 window")
     };
+    let page_recipe_reference_address = scan_offset + composition.page_recipe_reference_offset;
+    let record_recipe_directory_address = scan_offset + composition.record_recipe_directory_offset;
+    ensure!(
+        page_recipe_reference_address / MMC3_PAGE_BYTE_COUNT
+            == (record_recipe_directory_address + composition.record_recipe_directory_byte_count
+                - 1)
+                / MMC3_PAGE_BYTE_COUNT,
+        "dialogue page-recipe references and record directory do not share one mapped page"
+    );
     let layout = MaterialLayout {
         identity_page: page(identity_offset)?,
         identity_material_base: window(identity_offset)?,
@@ -785,15 +793,13 @@ pub(crate) fn plan_full_translation_installation(
         identity_table_descriptors: window(
             identity_offset + IDENTITY_HEADER_BYTE_COUNT + IDENTITY_SELECTOR_DIRECTORY_BYTE_COUNT,
         )?,
-        scan_page: page(scan_offset)?,
-        page_selectors: window(scan_offset)?,
-        record_directory: window(scan_offset + composition.record_page_group_selector_byte_count)?,
-        group_directory: window(scan_offset + composition.group_block_directory_offset)?,
-        group_block_container_base: u16::try_from(
-            scan_offset + composition.group_block_container_offset,
-        )
-        .context("page group block base does not fit a 16-bit container offset")?,
-        container_first_page: MAIN_DIALOGUE_MATERIAL_FIRST_PAGE,
+        scan_index_page: page(scan_offset + composition.page_recipe_reference_offset)?,
+        page_recipe_references: window(scan_offset + composition.page_recipe_reference_offset)?,
+        record_directory: window(scan_offset + composition.record_recipe_directory_offset)?,
+        page_recipe_block_container_base: 0,
+        container_first_page: cross_domain_material
+            .dialogue_page_recipes()
+            .first_mmc3_page,
         producer_encoding_page: page(producer_encoding_offset)?,
         producer_item_directory: window(
             producer_encoding_offset + dynamic_producer_encoding.item_directory_offset,
@@ -1228,9 +1234,11 @@ pub(crate) fn plan_full_translation_installation(
             glyph_atlas_prg_8k_page_count: composition.glyph_atlas.len().div_ceil(8 * 1024),
             glyph_atlas_sha1: sha1_hex(&composition.glyph_atlas),
             generated_high_bitplane_is_zero: true,
-            group_block_directory_byte_count: composition.group_block_directory_byte_count,
-            group_block_byte_count: composition.group_block_byte_count,
-            group_block_directory_offset: composition.group_block_directory_offset,
+            page_recipe_reference_byte_count: composition.page_recipe_reference_byte_count,
+            page_recipe_block_byte_count: composition.page_recipe_block_byte_count,
+            page_recipe_blocks_sha1: composition.page_recipe_blocks_sha1,
+            page_recipe_reference_offset: composition.page_recipe_reference_offset,
+            record_recipe_directory_offset: composition.record_recipe_directory_offset,
             four_by_four_block_count: composition.four_by_four_block_count,
             four_by_four_block_index_bit_count: composition.four_by_four_block_index_bit_count,
             four_by_four_block_atlas_byte_count: composition.four_by_four_block_atlas_byte_count,
@@ -1244,6 +1252,23 @@ pub(crate) fn plan_full_translation_installation(
             visible_page_overlay_reference_count: composition.visible_page_overlay_reference_count,
             maximum_visible_page_overlay_tile_count: composition
                 .maximum_visible_page_overlay_tile_count,
+            cold_page_restore_frame_count: usize::from(
+                runtime_code::transport::RESTORE_CHUNK_COUNT,
+            )
+            .div_ceil(usize::from(
+                runtime_code::transport::RESTORE_CHUNKS_PER_FRAME,
+            )),
+            maximum_cold_page_preparation_frame_count: usize::from(
+                runtime_code::transport::RESTORE_CHUNK_COUNT,
+            )
+            .div_ceil(usize::from(
+                runtime_code::transport::RESTORE_CHUNKS_PER_FRAME,
+            )) + composition
+                .maximum_visible_page_overlay_tile_count
+                .div_ceil(usize::from(runtime_code::transport::TILES_PER_FRAME)),
+            maximum_resident_page_overlay_frame_count: composition
+                .maximum_visible_page_overlay_tile_count
+                .div_ceil(usize::from(runtime_code::transport::TILES_PER_FRAME)),
             maximum_visible_page_rebuild_ppu_write_count: FONT_PAGE_SIZE
                 + composition.maximum_visible_page_overlay_tile_count * FONT_TILE_SIZE,
             sequential_page_transition_count: composition.sequential_page_transition_count,
@@ -1254,11 +1279,6 @@ pub(crate) fn plan_full_translation_installation(
             resident_group_transition_count: composition.resident_group_transition_count,
             resident_group_change_count: composition.resident_group_change_count,
             resident_group_reuse_count: composition.resident_group_reuse_count,
-            maximum_resident_group_overlay_tile_count: composition
-                .maximum_resident_group_overlay_tile_count,
-            maximum_resident_group_overlay_frame_count: composition
-                .maximum_resident_group_overlay_tile_count
-                .div_ceil(usize::from(runtime_code::transport::TILES_PER_FRAME)),
             maximum_delta_tile_count: composition.maximum_delta_tile_count,
             maximum_delta_ppu_write_count: composition.maximum_delta_ppu_write_count,
             total_delta_ppu_write_count: composition.total_delta_ppu_write_count,
@@ -1274,7 +1294,7 @@ pub(crate) fn plan_full_translation_installation(
                 .bitmap_and_atlas_index_visible_page_recipe_byte_count,
             direct_delta_recipe_byte_count: composition.direct_delta_recipe_byte_count,
             bitpacked_delta_recipe_byte_count: composition.bitpacked_delta_recipe_byte_count,
-            encoded_page_scan_strategy_selected: false,
+            visible_page_recipe_strategy_selected: true,
             script_scan_covers_dynamic_strings: false,
             dynamic_string_control_count: composition.dynamic_string_control_count,
             dynamic_string_page_count: composition.dynamic_string_page_count,
@@ -1309,9 +1329,7 @@ pub(crate) fn plan_full_translation_installation(
             dynamic_string_producers: dynamic_input_producers,
             dynamic_producer_encoding,
             dense_group_lookup_byte_count: composition.dense_group_lookup_byte_count,
-            record_page_group_selector_byte_count: composition
-                .record_page_group_selector_byte_count,
-            record_selector_directory_byte_count: composition.record_selector_directory_byte_count,
+            record_recipe_directory_byte_count: composition.record_recipe_directory_byte_count,
             scan_material_byte_count: composition.scan_material_byte_count,
             scan_material_sha1: composition.scan_material_sha1,
             scan_material_serialized: true,

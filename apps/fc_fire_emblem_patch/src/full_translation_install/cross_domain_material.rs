@@ -32,6 +32,8 @@ const MMC3_PAGE_BYTE_COUNT: usize = 8 * 1024;
 
 pub(super) struct CrossDomainMaterialInputs<'a> {
     pub(super) main_dialogue_runtime_material_byte_count: usize,
+    pub(super) dialogue_page_recipe_blocks: &'a [u8],
+    pub(super) dialogue_page_recipe_count: usize,
     pub(super) shared_atlas_characters: &'a [char],
     pub(super) fixed: &'a FixedTextPlan,
     pub(super) unit_names: &'a UnitNamePlan,
@@ -58,6 +60,7 @@ pub(super) struct CrossDomainMaterialPlan {
     entry_count: usize,
     shared_atlas_tile_count: usize,
     sections: Vec<CrossDomainMaterialSection>,
+    pub(super) dialogue_page_recipes: DialoguePageRecipeMaterial,
     consumer_catalog_runtime: ConsumerCatalogRuntimeMaterialPlan,
     every_required_non_dialogue_domain_serialized: bool,
     every_target_glyph_resolves_to_shared_atlas: bool,
@@ -73,6 +76,10 @@ impl CrossDomainMaterialPlan {
         &self.sections
     }
 
+    pub(super) fn dialogue_page_recipes(&self) -> &DialoguePageRecipeMaterial {
+        &self.dialogue_page_recipes
+    }
+
     pub(super) fn consumer_catalog_runtime(&self) -> &ConsumerCatalogRuntimeMaterialPlan {
         &self.consumer_catalog_runtime
     }
@@ -80,6 +87,17 @@ impl CrossDomainMaterialPlan {
     pub(super) fn consumer_catalog_runtime_layout(&self) -> Result<ConsumerCatalogRuntimeLayout> {
         self.consumer_catalog_runtime.layout()
     }
+}
+
+#[derive(Serialize)]
+pub(super) struct DialoguePageRecipeMaterial {
+    pub(super) first_mmc3_page: u8,
+    pub(super) file_offset: usize,
+    recipe_count: usize,
+    byte_count: usize,
+    sha1: String,
+    #[serde(skip)]
+    pub(super) bytes: Vec<u8>,
 }
 
 #[derive(Serialize)]
@@ -122,8 +140,29 @@ pub(super) fn plan_cross_domain_material(
     let section_inputs = collect_section_inputs(&inputs)?;
 
     let pool = cross_domain_material_pool(inputs.main_dialogue_runtime_material_byte_count)?;
-    let mut cursor = pool.file_offset;
-    let mut payload_byte_count = 0usize;
+    ensure!(
+        !inputs.dialogue_page_recipe_blocks.is_empty() && inputs.dialogue_page_recipe_count > 0,
+        "dialogue visible-page recipe material is empty"
+    );
+    let recipe_file_offset = align_mmc3_page(pool.file_offset)?;
+    ensure!(
+        recipe_file_offset == pool.file_offset,
+        "cross-domain pool no longer begins on an MMC3 page"
+    );
+    let recipe_first_page = u8::try_from((recipe_file_offset - HEADER_SIZE) / MMC3_PAGE_BYTE_COUNT)
+        .context("dialogue page-recipe material page exceeds u8")?;
+    let dialogue_page_recipes = DialoguePageRecipeMaterial {
+        first_mmc3_page: recipe_first_page,
+        file_offset: recipe_file_offset,
+        recipe_count: inputs.dialogue_page_recipe_count,
+        byte_count: inputs.dialogue_page_recipe_blocks.len(),
+        sha1: sha1_hex(inputs.dialogue_page_recipe_blocks),
+        bytes: inputs.dialogue_page_recipe_blocks.to_vec(),
+    };
+    let mut cursor = recipe_file_offset
+        .checked_add(dialogue_page_recipes.bytes.len())
+        .context("dialogue page-recipe material address overflow")?;
+    let mut payload_byte_count = dialogue_page_recipes.bytes.len();
     let mut alignment_padding_byte_count = 0usize;
     let mut sections = Vec::with_capacity(section_inputs.len());
     for input in section_inputs {
@@ -185,10 +224,11 @@ pub(super) fn plan_cross_domain_material(
         material_span_byte_count,
         material_payload_byte_count: payload_byte_count,
         alignment_padding_byte_count,
-        section_count: sections.len(),
+        section_count: sections.len() + 1,
         entry_count,
         shared_atlas_tile_count: atlas_indices.len(),
         sections,
+        dialogue_page_recipes,
         consumer_catalog_runtime,
         every_required_non_dialogue_domain_serialized: true,
         every_target_glyph_resolves_to_shared_atlas: true,

@@ -46,8 +46,10 @@ pub(super) const DIALOGUE_RUNTIME_STATE_END: u16 = CONSUMER_FONT_PAGE - 1;
 pub(super) const RECORD_INDEX_LOW: u16 = CANDIDATE_START;
 pub(super) const RECORD_INDEX_HIGH: u16 = RECORD_INDEX_LOW + 1;
 pub(super) const VISIBLE_PAGE_INDEX: u16 = RECORD_INDEX_HIGH + 1;
-pub(super) const CURRENT_PAGE_GROUP: u16 = VISIBLE_PAGE_INDEX + 1;
-pub(super) const REQUEST_STATE: u16 = CURRENT_PAGE_GROUP + 1;
+/// 현재 CHR RAM에 완성된 대사 페이지가 상주하는지를 나타내는 바이트다. 레시피는
+/// 가시 페이지가 쓰는 모든 코드를 다시 덮으므로 정확한 과거 그룹 번호는 필요 없다.
+pub(super) const CURRENT_PAGE_RESIDENCY: u16 = VISIBLE_PAGE_INDEX + 1;
+pub(super) const REQUEST_STATE: u16 = CURRENT_PAGE_RESIDENCY + 1;
 
 #[derive(Serialize)]
 pub(super) struct DialogueRuntimeStateStoragePlan {
@@ -242,8 +244,8 @@ mod tests {
         assert_eq!(RECORD_INDEX_LOW, CANDIDATE_START);
         assert_eq!(RECORD_INDEX_HIGH, RECORD_INDEX_LOW + 1);
         assert_eq!(VISIBLE_PAGE_INDEX, RECORD_INDEX_HIGH + 1);
-        assert_eq!(CURRENT_PAGE_GROUP, VISIBLE_PAGE_INDEX + 1);
-        assert_eq!(REQUEST_STATE, CURRENT_PAGE_GROUP + 1);
+        assert_eq!(CURRENT_PAGE_RESIDENCY, VISIBLE_PAGE_INDEX + 1);
+        assert_eq!(REQUEST_STATE, CURRENT_PAGE_RESIDENCY + 1);
     }
 
     /// 색인 판정은 보수적이어야 한다. 기준 주소가 예약보다 아래여도 색인이
