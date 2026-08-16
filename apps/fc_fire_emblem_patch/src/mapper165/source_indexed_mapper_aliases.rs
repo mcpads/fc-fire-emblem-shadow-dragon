@@ -43,6 +43,10 @@ const INDEXED_MENU_MASK_STORE_SITES: [(u8, u16); 16] = [
     (FRONT_END_PRG_BANK, 0x8E5B),
 ];
 
+pub(super) const fn source_indexed_menu_mask_store_sites() -> [(u8, u16); 16] {
+    INDEXED_MENU_MASK_STORE_SITES
+}
+
 #[derive(Clone, Copy)]
 enum AccumulatorProducer {
     Immediate(u8),

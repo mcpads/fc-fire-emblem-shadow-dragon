@@ -16,6 +16,8 @@ use super::{
 
 mod source_contract;
 
+pub(in crate::mapper165) use source_contract::bind_indirect_write_sites_below_mapper_space;
+
 const PAIR_TABLE_BYTE_COUNT: usize = 16;
 const MAXIMUM_REMAP_PAIR_COUNT: usize = 8;
 const BATTLE_ACTIVE_FLAG: u16 = 0x047D;

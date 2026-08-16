@@ -25,6 +25,7 @@ mod indirect_destinations;
 
 #[cfg(test)]
 use indirect_destinations::DESTINATION_CLASS_COUNT;
+pub(in crate::mapper165) use indirect_destinations::bind_indirect_write_sites_below_mapper_space;
 use indirect_destinations::{
     EXPECTED_INDIRECT_STORES, IndirectStoreDestinationClass,
     bind_indirect_store_destination_classes,

@@ -33,6 +33,8 @@ pub(super) struct RuntimeStateSourceAccessContract {
     every_indirect_site_classified_once: bool,
     every_role_excludes_candidate: bool,
     source_lifetime_accesses_exclude_candidate: bool,
+    #[serde(skip)]
+    indirect_write_sites_below_mapper_space: BTreeSet<(u8, u16, u8)>,
 }
 
 impl RuntimeStateSourceAccessContract {
@@ -47,6 +49,10 @@ impl RuntimeStateSourceAccessContract {
 
     pub(super) fn indirect_access_ranges_proven(&self) -> bool {
         self.every_indirect_site_classified_once && self.every_role_excludes_candidate
+    }
+
+    pub(super) fn indirect_write_sites_below_mapper_space(&self) -> &BTreeSet<(u8, u16, u8)> {
+        &self.indirect_write_sites_below_mapper_space
     }
 }
 
@@ -305,6 +311,7 @@ pub(super) fn bind_runtime_state_source_accesses(
     let whole_prg_direct_operand_backstop = bind_whole_prg_direct_operand_backstop(source)?;
     let indexed_queue_contract = bind_indexed_queue_contract(source, trace)?;
     let mut classified_indirect_sites = BTreeSet::new();
+    let mut indirect_write_sites_below_mapper_space = BTreeSet::new();
     let mut indirect_pointer_roles = Vec::new();
 
     for spec in POINTER_ROLE_SPECS {
@@ -334,6 +341,23 @@ pub(super) fn bind_runtime_state_source_accesses(
             "runtime-state pointer role {} reaches the candidate range",
             spec.role
         );
+        for site in sites
+            .iter()
+            .filter(|site| site.access == AccessDirection::Write)
+        {
+            ensure!(
+                spec.possible_ranges
+                    .iter()
+                    .all(|range| range.start <= range.end && range.end < 0x8000),
+                "runtime-state pointer role {} can write mapper register space",
+                spec.role
+            );
+            indirect_write_sites_below_mapper_space.insert((
+                site.bank,
+                site.address,
+                u8::try_from(site.operand).context("indirect write operand exceeds zero page")?,
+            ));
+        }
         let pointer_pair_hex = sites
             .iter()
             .map(|site| format!("0x{:02X}/0x{:02X}", site.operand, site.operand + 1))
@@ -386,6 +410,7 @@ pub(super) fn bind_runtime_state_source_accesses(
         every_indirect_site_classified_once: true,
         every_role_excludes_candidate,
         source_lifetime_accesses_exclude_candidate,
+        indirect_write_sites_below_mapper_space,
     })
 }
 
@@ -539,6 +564,21 @@ mod tests {
             spec.possible_ranges.iter().all(|range| {
                 !ranges_overlap(range.start, range.end, CANDIDATE_START, CANDIDATE_END)
             })
+        }));
+    }
+
+    #[test]
+    fn every_indirect_write_role_stays_below_mapper_register_space() {
+        assert!(POINTER_ROLE_SPECS.iter().all(|spec| {
+            let writes = spec
+                .sites
+                .iter()
+                .any(|site| site.access == AccessDirection::Write);
+            !writes
+                || spec
+                    .possible_ranges
+                    .iter()
+                    .all(|range| range.start <= range.end && range.end < 0x8000)
         }));
     }
 }

@@ -158,6 +158,28 @@ pub(super) fn plan_dialogue_runtime_state_storage(
     })
 }
 
+pub(crate) struct DialogueInterruptAudioMapperWriteSlice {
+    pub(crate) reachable_instruction_starts: BTreeSet<(u8, u16)>,
+    pub(crate) indirect_write_sites_below_mapper_space: BTreeSet<(u8, u16, u8)>,
+}
+
+pub(crate) fn bind_dialogue_interrupt_audio_mapper_write_slice(
+    source: &Rom,
+) -> Result<DialogueInterruptAudioMapperWriteSlice> {
+    let main_dialogue_trace =
+        trace_main_dialogue_accesses(source, &main_dialogue_runtime_handler_roots())?;
+    let source_accesses = bind_runtime_state_source_accesses(source, &main_dialogue_trace)?;
+    let mut starts = main_dialogue_trace.visited;
+    starts.extend(access_trace::trace_fixed_interrupt_accesses(source, &[0xC163])?.visited);
+    starts.extend(access_trace::trace_switchable_accesses(source, 0x0E, &[0x8000])?.visited);
+    Ok(DialogueInterruptAudioMapperWriteSlice {
+        reachable_instruction_starts: starts,
+        indirect_write_sites_below_mapper_space: source_accesses
+            .indirect_write_sites_below_mapper_space()
+            .clone(),
+    })
+}
+
 impl DialogueRuntimeStateStoragePlan {
     pub(super) fn selected_cpu_range_hex(&self) -> Option<&'static str> {
         self.selected_cpu_range_hex

@@ -114,6 +114,7 @@ use runtime_identity::{DialogueRuntimeIdentityPlan, plan_dialogue_runtime_identi
 use runtime_material::{
     DialogueRuntimeMaterialPlan, RuntimeMaterialInputs, plan_dialogue_runtime_material,
 };
+pub(crate) use runtime_state_storage::bind_dialogue_interrupt_audio_mapper_write_slice;
 use runtime_state_storage::{DialogueRuntimeStateStoragePlan, plan_dialogue_runtime_state_storage};
 use transition_residency::plan_transition_residency;
 

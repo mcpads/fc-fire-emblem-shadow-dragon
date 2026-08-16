@@ -19,6 +19,10 @@ use super::{
     },
 };
 
+mod target_mapper_migration;
+
+use target_mapper_migration::{TargetMapperMigrationAudit, audit_target_mapper_migration};
+
 const SOURCE_PRG_8K_PAGE_COUNT: usize = 32;
 const SOURCE_PRG_8K_PAGE_LEN: usize = 0x2000;
 const SOURCE_PRG_BANK_COUNT: u8 = 16;
@@ -51,6 +55,7 @@ pub(super) struct SourceMapperWriteAudit {
     executable_root_ledger_complete: bool,
     global_complete: bool,
     candidate_digest_sha1: String,
+    target_mapper_migration: TargetMapperMigrationAudit,
 }
 
 #[derive(Clone, Debug)]
@@ -109,6 +114,8 @@ pub(super) fn audit_source_mapper_writes(source: &Rom) -> Result<SourceMapperWri
         "declared source mapper writer count changed: expected {DECLARED_SOURCE_WRITER_COUNT}, found {}",
         declarations.len()
     );
+    let target_mapper_migration =
+        audit_target_mapper_migration(&pages, &projections, &declarations, source)?;
     let declared_starts = bind_declared_starts(&scan, &declarations)?;
     let audio = bind_audio_record_data_region(source)?;
     let (audio_page, audio_offset) = physical_page_and_offset(audio.prg_bank, audio.cpu_address)?;
@@ -194,6 +201,7 @@ pub(super) fn audit_source_mapper_writes(source: &Rom) -> Result<SourceMapperWri
         executable_root_ledger_complete: partition.executable_root_ledger_complete,
         global_complete: partition.is_global_closed(),
         candidate_digest_sha1,
+        target_mapper_migration,
     })
 }
 
@@ -396,7 +404,7 @@ fn lower_projection_role(prg_bank: u8, cpu_start: u16) -> String {
     format!("source-bank-{prg_bank:02X}-{cpu_start:04X}")
 }
 
-fn mapper_write_candidate_digest(scan: &AllByteMapperWriteScan<SourceMmc4Register>) -> String {
+fn mapper_write_candidate_digest<R: std::fmt::Debug>(scan: &AllByteMapperWriteScan<R>) -> String {
     let mut canonical = String::new();
     for candidate in &scan.candidates {
         canonical.push_str(&format!("{candidate:?}\n"));

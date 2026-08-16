@@ -457,6 +457,25 @@ pub(super) fn bind_indirect_store_destination_classes(
         .collect()
 }
 
+pub(in crate::mapper165) fn bind_indirect_write_sites_below_mapper_space(
+    rom: &Rom,
+) -> Result<BTreeSet<(u8, u16, u8)>> {
+    let classes = bind_indirect_store_destination_classes(rom)?;
+    ensure!(
+        classes.len() == INDIRECT_STORE_CLASS_SPECS.len(),
+        "indirect-store destination class binding changed"
+    );
+    ensure!(
+        INDIRECT_STORE_CLASS_SPECS.iter().all(|spec| spec
+            .destination_ranges
+            .iter()
+            .all(|range| range.start <= range.end && range.end < 0x8000)),
+        "a source-bound battle indirect write can reach mapper register space"
+    );
+
+    Ok(EXPECTED_INDIRECT_STORES.into_iter().collect())
+}
+
 fn bind_indirect_destination_inputs(rom: &Rom) -> Result<()> {
     ensure!(
         read_u16_table(rom, 0x04, 0x83E8, 5)? == [0x7953, 0x797B, 0x79A3, 0x79CB, 0x79F3],
@@ -532,6 +551,15 @@ mod tests {
                 range.start <= range.end
                     && (range.end < REMAP_STORAGE_START || range.start > REMAP_STORAGE_END)
             })
+        }));
+    }
+
+    #[test]
+    fn every_indirect_store_destination_stays_below_mapper_register_space() {
+        assert!(INDIRECT_STORE_CLASS_SPECS.iter().all(|spec| {
+            spec.destination_ranges
+                .iter()
+                .all(|range| range.start <= range.end && range.end < 0x8000)
         }));
     }
 }
