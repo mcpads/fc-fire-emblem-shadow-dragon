@@ -15,6 +15,7 @@ use typed_isa_core::{AccessKind, StaticSemantics};
 use super::{
     consumer_catalog::ConsumerCatalogRuntimeLayout,
     runtime_bank_contract::bind_bank_restore_contract, runtime_nmi_contract::bind_quiet_frame_gate,
+    screen_font_residency::ScreenFontPageRoutes,
 };
 use crate::{
     mapper165::{
@@ -321,7 +322,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     layout: resolve_request::MaterialLayout,
     consumer_catalog_layout: ConsumerCatalogRuntimeLayout,
     cold_request_mapper_register: u8,
-    consumer_font_pages: consumer_font_page::ConsumerFontPageRoutes,
+    consumer_font_pages: ScreenFontPageRoutes,
 ) -> Result<DialogueRuntimeCodePlan> {
     let bank_restore = bind_bank_restore_contract(candidate)?;
     bind_quiet_frame_gate(source, candidate)?;
@@ -489,6 +490,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         code_page,
         catalog_stub_origin,
         consumer_font_page_activation.address,
+        consumer_font_pages.front_end_record_action,
         consumer_catalog_layout,
     )?;
     ensure_disjoint(

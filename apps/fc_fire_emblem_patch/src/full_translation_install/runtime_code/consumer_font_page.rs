@@ -30,8 +30,16 @@ use crate::{
         RECORD_ACTION_COMPOSITE_STATE, RECORD_LIST_COMPOSITE_STATE,
         SAVE_SLOT_SELECTION_COMPOSITE_STATE, START_MENU_COMPOSITE_STATE,
     },
-    full_translation_install::runtime_state_storage::CONSUMER_FONT_PAGE,
-    mapper165::font_pair_projection::mapper_register_from_route,
+    full_translation_install::{
+        runtime_state_storage::CONSUMER_FONT_PAGE,
+        screen_font_residency::{
+            ATTACK_WEAPON_SELECTION_COMPOSITE_STATE, CHAPTER_SAVE_OFFER_COMPOSITE_STATE,
+            COMPOSITE_FONT_PAGE_ROUTES, ITEM_ACTION_COMPOSITE_STATE, MAP_FUNDS_COMPOSITE_STATE,
+            MAP_MENU_COMPOSITE_STATE, MAP_SUMMARY_COMPOSITE_STATE, ScreenFontPageRole,
+            ScreenFontPageRoutes, UNIT_COMMAND_COMPOSITE_STATE, UNIT_ITEM_LIST_COMPOSITE_STATE,
+            UNIT_STATUS_COMPOSITE_STATE, UNIT_SUMMARY_COMPOSITE_STATE,
+        },
+    },
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
     typed_source::decode_rp2a03_sequence,
@@ -68,17 +76,6 @@ const GAMEPLAY_HANDOFF_SEQUENCE: [u8; 8] = [0xA9, 0x00, 0x85, 0x23, 0x85, 0x24, 
 const GAMEPLAY_HANDOFF_HOOK_ADDRESS: u16 = 0xF304;
 const GAMEPLAY_PHASE_LOW: u8 = 0x23;
 const GAMEPLAY_PHASE_HIGH: u8 = 0x24;
-
-const MAP_MENU_COMPOSITE_STATE: u8 = 0x03;
-const UNIT_SUMMARY_COMPOSITE_STATE: u8 = 0x04;
-const UNIT_COMMAND_COMPOSITE_STATE: u8 = 0x05;
-const ATTACK_WEAPON_SELECTION_COMPOSITE_STATE: u8 = 0x06;
-const UNIT_ITEM_LIST_COMPOSITE_STATE: u8 = 0x07;
-const ITEM_ACTION_COMPOSITE_STATE: u8 = 0x09;
-const UNIT_STATUS_COMPOSITE_STATE: u8 = 0x0F;
-const MAP_FUNDS_COMPOSITE_STATE: u8 = 0x13;
-const MAP_SUMMARY_COMPOSITE_STATE: u8 = 0x14;
-const CHAPTER_SAVE_OFFER_COMPOSITE_STATE: u8 = 0x1C;
 
 /// Each site is the first fixed-menu label append on its execution path.  The speed selector has
 /// two mutually exclusive paths, so both calls are hooked.  The storage screens append their
@@ -122,50 +119,6 @@ const FIXED_MENU_FONT_PAGE_CALLS: [(u16, u8, DialogueRuntimeHookRole, &'static s
         "storage-capacity fixed-menu font-page hook",
     ),
 ];
-#[derive(Clone, Copy)]
-pub(in crate::full_translation_install) struct ConsumerFontPageRoutes {
-    pub(in crate::full_translation_install) front_end: u8,
-    pub(in crate::full_translation_install) unit_command: u8,
-    pub(in crate::full_translation_install) map_menu: u8,
-    pub(in crate::full_translation_install) ending_record: u8,
-    pub(in crate::full_translation_install) chapter_save_offer: u8,
-    pub(in crate::full_translation_install) catalog: [u8; 2],
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum FontPageRole {
-    FrontEnd,
-    UnitCommand,
-    MapMenu,
-    ChapterSaveOffer,
-    CatalogDefault,
-    RetainCurrent,
-}
-
-const COMPOSITE_PAGE_ROUTES: [(u8, FontPageRole); 12] = [
-    (MAP_MENU_COMPOSITE_STATE, FontPageRole::MapMenu),
-    (MAP_FUNDS_COMPOSITE_STATE, FontPageRole::MapMenu),
-    (MAP_SUMMARY_COMPOSITE_STATE, FontPageRole::MapMenu),
-    (UNIT_COMMAND_COMPOSITE_STATE, FontPageRole::UnitCommand),
-    (
-        ATTACK_WEAPON_SELECTION_COMPOSITE_STATE,
-        FontPageRole::CatalogDefault,
-    ),
-    (UNIT_ITEM_LIST_COMPOSITE_STATE, FontPageRole::CatalogDefault),
-    (ITEM_ACTION_COMPOSITE_STATE, FontPageRole::CatalogDefault),
-    (
-        CHAPTER_SAVE_OFFER_COMPOSITE_STATE,
-        FontPageRole::ChapterSaveOffer,
-    ),
-    (START_MENU_COMPOSITE_STATE, FontPageRole::FrontEnd),
-    (RECORD_LIST_COMPOSITE_STATE, FontPageRole::RetainCurrent),
-    (
-        SAVE_SLOT_SELECTION_COMPOSITE_STATE,
-        FontPageRole::RetainCurrent,
-    ),
-    (RECORD_ACTION_COMPOSITE_STATE, FontPageRole::RetainCurrent),
-];
-
 const EXPECTED_FONT_PAGE_STATE_PRODUCERS: [CompositeStateProducer; 16] = [
     CompositeStateProducer::new(0x02, 0xA693, 0x4C, START_MENU_COMPOSITE_STATE),
     CompositeStateProducer::new(0x02, 0xA6CC, 0x4C, SAVE_SLOT_SELECTION_COMPOSITE_STATE),
@@ -184,54 +137,6 @@ const EXPECTED_FONT_PAGE_STATE_PRODUCERS: [CompositeStateProducer; 16] = [
     CompositeStateProducer::new(0x06, 0xB413, 0x4C, MAP_FUNDS_COMPOSITE_STATE),
     CompositeStateProducer::new(0x06, 0xB78A, 0x4C, CHAPTER_SAVE_OFFER_COMPOSITE_STATE),
 ];
-
-impl FontPageRole {
-    fn mapper_route(self, pages: ConsumerFontPageRoutes) -> u8 {
-        match self {
-            Self::FrontEnd => pages.front_end,
-            Self::UnitCommand => pages.unit_command,
-            Self::MapMenu => pages.map_menu,
-            Self::ChapterSaveOffer => pages.chapter_save_offer,
-            Self::CatalogDefault => pages.catalog[0],
-            Self::RetainCurrent => unreachable!("retained pages do not select a mapper route"),
-        }
-    }
-}
-
-impl ConsumerFontPageRoutes {
-    fn all(self) -> [u8; 7] {
-        [
-            self.front_end,
-            self.unit_command,
-            self.map_menu,
-            self.ending_record,
-            self.chapter_save_offer,
-            self.catalog[0],
-            self.catalog[1],
-        ]
-    }
-
-    fn validate(self) -> Result<()> {
-        let routes = self.all();
-        ensure!(
-            routes.iter().all(|route| *route != 0),
-            "consumer font page uses the empty sentinel as a mapper route"
-        );
-        let mapper_registers = routes.map(mapper_register_from_route);
-        ensure!(
-            mapper_registers.into_iter().collect::<BTreeSet<_>>().len() == mapper_registers.len(),
-            "consumer font page maps two roles to the same translated page"
-        );
-        ensure!(
-            routes.iter().all(|route| {
-                let mapper_register = mapper_register_from_route(*route);
-                mapper_register != 0 && mapper_register & 0x03 == 0 && *route & !0xFD == 0
-            }),
-            "consumer font page is not an encoded FD/FE page route"
-        );
-        Ok(())
-    }
-}
 
 /// 합성 진입과 화면 열기·닫기의 중앙 FD 공급을 원본과 후보 양쪽에 묶는다.
 /// bank 0B에서 `$C9BE`를 직접 부르는 곳이 이 두 자리뿐이어야, 열기만 현재 UI
@@ -368,7 +273,7 @@ fn bind_direct_composite_state_producers(source: &Rom, candidate: &Rom) -> Resul
         "candidate direct composite-state producer catalog changed"
     );
 
-    let font_page_states = COMPOSITE_PAGE_ROUTES
+    let font_page_states = COMPOSITE_FONT_PAGE_ROUTES
         .iter()
         .map(|(state, _)| *state)
         .collect::<BTreeSet<_>>();
@@ -483,14 +388,14 @@ pub(super) fn fixed_menu_font_page_appender_installation(
 }
 
 /// 계획 단계에서 검증한 FD/FE route를 현재 UI 페이지로 게시하고 즉시 적용한다.
-/// 합성기는 `ConsumerFontPageRoutes`의 상수만 넘기고, 이름 appender는 경계가 검증된
+/// 합성기는 `ScreenFontPageRoutes`의 상수만 넘기고, 이름 appender는 경계가 검증된
 /// catalog record의 첫 바이트만 넘긴다. `$07FD=0`인 화면 열기는 이 routine을 부르기
 /// 전에 원본 writer로 빠지므로, 이 작은 routine에는 실행 중 allowlist를 다시 복제하지
 /// 않는다.
 pub(super) fn build_consumer_font_page_activation(
     origin: u16,
     apply_route: u16,
-    pages: ConsumerFontPageRoutes,
+    pages: ScreenFontPageRoutes,
 ) -> Result<RuntimeRoutine> {
     pages.validate()?;
     let instructions = [
@@ -511,7 +416,7 @@ pub(super) fn build_consumer_font_page_activation(
 pub(super) fn build_fixed_menu_font_page_appender(
     origin: u16,
     activation: u16,
-    pages: ConsumerFontPageRoutes,
+    pages: ScreenFontPageRoutes,
 ) -> Result<RuntimeRoutine> {
     pages.validate()?;
     let instructions = [
@@ -535,20 +440,20 @@ pub(super) fn build_fixed_menu_font_page_appender(
 pub(super) fn build_composite_font_page_publisher(
     origin: u16,
     activation: u16,
-    pages: ConsumerFontPageRoutes,
+    pages: ScreenFontPageRoutes,
 ) -> Result<RuntimeRoutine> {
     pages.validate()?;
     ensure!(
         [UNIT_SUMMARY_COMPOSITE_STATE, UNIT_STATUS_COMPOSITE_STATE]
             .into_iter()
-            .all(|dynamic_state| COMPOSITE_PAGE_ROUTES
+            .all(|dynamic_state| COMPOSITE_FONT_PAGE_ROUTES
                 .iter()
                 .all(|(state, _)| *state != dynamic_state)),
         "a name-dependent consumer received a static page request"
     );
     let mut instructions = vec![Instruction::StaAbsolute(COMPOSITE_STATE)];
-    let mut route_jumps = Vec::with_capacity(COMPOSITE_PAGE_ROUTES.len());
-    for (state, page) in COMPOSITE_PAGE_ROUTES {
+    let mut route_jumps = Vec::with_capacity(COMPOSITE_FONT_PAGE_ROUTES.len());
+    for (state, page) in COMPOSITE_FONT_PAGE_ROUTES {
         if [MAP_FUNDS_COMPOSITE_STATE, MAP_SUMMARY_COMPOSITE_STATE].contains(&state) {
             continue;
         }
@@ -570,19 +475,14 @@ pub(super) fn build_composite_font_page_publisher(
         Instruction::LdaImmediate(0),
         Instruction::StaAbsolute(CONSUMER_FONT_PAGE),
     ]);
-    let retain_current = next_address(origin, &instructions)?;
     instructions.push(Instruction::Rts);
-    for (jump, page_role) in &route_jumps {
-        if *page_role == FontPageRole::RetainCurrent {
-            instructions[*jump] = Instruction::BeqAbsolute(retain_current);
-        }
-    }
     for page in [
-        FontPageRole::FrontEnd,
-        FontPageRole::CatalogDefault,
-        FontPageRole::UnitCommand,
-        FontPageRole::MapMenu,
-        FontPageRole::ChapterSaveOffer,
+        ScreenFontPageRole::FrontEndMenu,
+        ScreenFontPageRole::FrontEndRecordAction,
+        ScreenFontPageRole::CatalogDefault,
+        ScreenFontPageRole::UnitCommand,
+        ScreenFontPageRole::MapMenu,
+        ScreenFontPageRole::ChapterSaveOffer,
     ] {
         let target = next_address(origin, &instructions)?;
         for (jump, page_role) in &route_jumps {
@@ -590,7 +490,7 @@ pub(super) fn build_composite_font_page_publisher(
                 instructions[*jump] = Instruction::BeqAbsolute(target);
             }
         }
-        if page == FontPageRole::MapMenu {
+        if page == ScreenFontPageRole::MapMenu {
             instructions[map_summary_range_jump] = Instruction::BccAbsolute(target);
         }
         instructions.extend([
@@ -730,9 +630,10 @@ mod tests {
     const STATUS_CARRY: u8 = 0x01;
     const STATUS_ZERO: u8 = 0x02;
 
-    fn pages() -> ConsumerFontPageRoutes {
-        ConsumerFontPageRoutes {
-            front_end: 0xA9,
+    fn pages() -> ScreenFontPageRoutes {
+        ScreenFontPageRoutes {
+            front_end_menu: 0xA9,
+            front_end_record_action: 0xDD,
             unit_command: 0xCC,
             map_menu: 0xD0,
             ending_record: 0xD9,
@@ -1134,7 +1035,7 @@ mod tests {
     }
 
     #[test]
-    fn front_end_redraw_reasserts_its_page_and_nested_surfaces_retain_their_selection() {
+    fn every_front_end_state_selects_its_page_without_prior_residency() {
         let pages = pages();
         let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
         let publisher_origin = ORIGIN + u16::try_from(activation.bytes.len()).unwrap();
@@ -1150,17 +1051,19 @@ mod tests {
             START_MENU_COMPOSITE_STATE,
             0xA5,
         );
-        assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], pages.front_end);
-        assert_eq!(start_menu.applied_route, Some(pages.front_end));
+        assert_eq!(
+            memory[usize::from(CONSUMER_FONT_PAGE)],
+            pages.front_end_menu
+        );
+        assert_eq!(start_menu.applied_route, Some(pages.front_end_menu));
 
-        for state in [
-            RECORD_LIST_COMPOSITE_STATE,
-            SAVE_SLOT_SELECTION_COMPOSITE_STATE,
-            RECORD_ACTION_COMPOSITE_STATE,
+        for (state, expected_route) in [
+            (RECORD_LIST_COMPOSITE_STATE, pages.front_end_menu),
+            (SAVE_SLOT_SELECTION_COMPOSITE_STATE, pages.front_end_menu),
+            (RECORD_ACTION_COMPOSITE_STATE, pages.front_end_record_action),
         ] {
-            let mut memory: Box<[u8; 0x10000]> =
+            let memory: Box<[u8; 0x10000]> =
                 vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
-            memory[usize::from(CONSUMER_FONT_PAGE)] = pages.catalog[0];
 
             let (memory, result) = run_routines(
                 memory,
@@ -1171,8 +1074,8 @@ mod tests {
             );
 
             assert_eq!(memory[usize::from(COMPOSITE_STATE)], state);
-            assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], pages.catalog[0]);
-            assert_eq!(result.applied_route, None);
+            assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], expected_route);
+            assert_eq!(result.applied_route, Some(expected_route));
         }
     }
 
@@ -1266,7 +1169,7 @@ mod tests {
         let routine = build_consumer_font_page_gameplay_handoff(ORIGIN).unwrap();
         let mut memory: Box<[u8; 0x10000]> =
             vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
-        memory[usize::from(CONSUMER_FONT_PAGE)] = pages().front_end;
+        memory[usize::from(CONSUMER_FONT_PAGE)] = pages().front_end_menu;
         memory[usize::from(GAMEPLAY_PHASE_LOW)] = 0xA5;
         memory[usize::from(GAMEPLAY_PHASE_HIGH)] = 0x5A;
 
@@ -1322,7 +1225,7 @@ mod tests {
                 .validate()
                 .unwrap_err()
                 .to_string()
-                .contains("encoded FD/FE page route")
+                .contains("invalid FD/FE page route")
         );
     }
 }

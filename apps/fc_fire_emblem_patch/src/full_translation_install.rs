@@ -67,6 +67,7 @@ mod runtime_identity;
 mod runtime_material;
 mod runtime_nmi_contract;
 mod runtime_state_storage;
+mod screen_font_residency;
 mod transition_residency;
 
 use chapter_intro_residency::plan_chapter_intro_residency;
@@ -116,6 +117,9 @@ use runtime_material::{
 };
 pub(crate) use runtime_state_storage::bind_dialogue_interrupt_audio_mapper_write_slice;
 use runtime_state_storage::{DialogueRuntimeStateStoragePlan, plan_dialogue_runtime_state_storage};
+use screen_font_residency::{
+    ScreenFontResidencyInputs, ScreenFontResidencyPlan, plan_screen_font_residency,
+};
 use transition_residency::{bind_transition_lifetime_worksets, plan_transition_residency};
 
 /// 대사 런타임 재료 용기가 시작하는 MMC3 8 KiB 페이지다.
@@ -126,9 +130,6 @@ const MMC3_PAGE_BYTE_COUNT: usize = 8 * 1024;
 const IDENTITY_HEADER_BYTE_COUNT: usize = 16;
 /// 그 뒤 selector 디렉터리의 길이다.
 const IDENTITY_SELECTOR_DIRECTORY_BYTE_COUNT: usize = 256;
-const FRONT_END_SAVE_SUMMARY_UNIT_SOURCE_INDEX: usize = 0;
-const FRONT_END_SAVE_SUMMARY_CLASS_SOURCE_INDEX: usize = 20;
-
 const REQUIRED_DOMAIN_COUNT: usize = 14;
 const REQUIRED_DOMAINS: [&str; REQUIRED_DOMAIN_COUNT] = [
     "chapter_save_offer_label",
@@ -175,7 +176,7 @@ pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) output_path: Option<&'a Path>,
 }
 
-pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 22;
+pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 23;
 
 pub(crate) struct FullTranslationInstallSummary {
     pub(crate) report_sha1: String,
@@ -203,6 +204,7 @@ struct FullTranslationInstallReport {
     dialogue_codebook: DialogueCodebook,
     chapter_intro_residency: ChapterIntroResidency,
     choice_residency: ChoiceResidencyPlan,
+    screen_font_residency: ScreenFontResidencyPlan,
     front_end_result_residency: FrontEndResultResidencyPlan,
     chapter_save_projection: ChapterSaveProjectionPlan,
     ending_record_projection: EndingRecordProjectionPlan,
@@ -635,11 +637,21 @@ pub(crate) fn plan_full_translation_installation(
         unit_ui: &unit_ui,
         item_actions: &item_actions,
     })?;
+    let screen_font_residency = plan_screen_font_residency(ScreenFontResidencyInputs {
+        front_end_menu_route: front_end_mapper_route,
+        unit_command_route: consumer_codebook.mapper_route_for("unit_command_menu")?,
+        map_menu_route: consumer_codebook.mapper_route_for("map_menu")?,
+        ending_record_route: consumer_codebook.mapper_route_for("ending_chapter_record")?,
+        chapter_save_offer_route: consumer_codebook.mapper_route_for("chapter_save_offer")?,
+        consumer_catalog: &consumer_catalog,
+        fixed: &fixed,
+        unit_names: &unit_names,
+        installed_front_end_glyph_codes: front_end_result_menu_residency
+            .installed_menu_glyph_codes(),
+    })?;
     let front_end_result_residency = plan_front_end_result_residency(
         &display,
-        &fixed,
-        &unit_names,
-        &consumer_catalog,
+        &screen_font_residency,
         front_end_result_menu_residency,
         &choice_residency.augmented_worksets,
     )?;
@@ -821,14 +833,7 @@ pub(crate) fn plan_full_translation_installation(
         layout,
         cross_domain_material.consumer_catalog_runtime_layout()?,
         cold_request_presentation.mapper_register,
-        runtime_code::consumer_font_page::ConsumerFontPageRoutes {
-            front_end: front_end_mapper_route,
-            unit_command: consumer_codebook.mapper_route_for("unit_command_menu")?,
-            map_menu: consumer_codebook.mapper_route_for("map_menu")?,
-            ending_record: consumer_codebook.mapper_route_for("ending_chapter_record")?,
-            chapter_save_offer: consumer_codebook.mapper_route_for("chapter_save_offer")?,
-            catalog: consumer_catalog.mapper_routes()?,
-        },
+        screen_font_residency.routes(),
     )?;
     let assembled_hook_roles = dialogue_runtime_code.hook_roles();
     dynamic_producer_encoding.bind_runtime_hooks(&assembled_hook_roles)?;
@@ -1193,6 +1198,7 @@ pub(crate) fn plan_full_translation_installation(
             title_storage_connected: true,
         },
         choice_residency,
+        screen_font_residency,
         front_end_result_residency,
         chapter_save_projection,
         ending_record_projection,

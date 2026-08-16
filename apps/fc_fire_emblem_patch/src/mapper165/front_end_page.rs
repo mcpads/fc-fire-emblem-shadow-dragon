@@ -9,7 +9,7 @@ use serde::Deserialize;
 
 use crate::{
     font_slots::{FONT_PAGE_SIZE, active_hangul_codes},
-    front_end_menu::SAVE_SLOT_SELECTION_COMPOSITE_STATE,
+    front_end_menu::FRONT_END_MENU_FONT_STATES,
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     rp2a03::{Instruction, assemble_at},
     sha1_hex,
@@ -153,6 +153,11 @@ pub(super) fn build_page_selector(mapper_register: u8, fallback_target: u16) -> 
         mapper_register != 0,
         "front-end page register cannot be zero"
     );
+    let [start_menu_state, record_list_state, save_slot_state] = FRONT_END_MENU_FONT_STATES;
+    ensure!(
+        record_list_state == start_menu_state + 1 && save_slot_state > record_list_state,
+        "front-end cumulative page states no longer fit the compact selector"
+    );
     assemble_at(
         PAGE_ROUTINE_ADDRESS,
         &[
@@ -160,10 +165,10 @@ pub(super) fn build_page_selector(mapper_register: u8, fallback_target: u16) -> 
             Instruction::Pha,
             Instruction::LdaAbsolute(0x05E8),
             Instruction::Sec,
-            Instruction::SbcImmediate(0x0D),
-            Instruction::CmpImmediate(0x02),
+            Instruction::SbcImmediate(start_menu_state),
+            Instruction::CmpImmediate(record_list_state - start_menu_state + 1),
             Instruction::BccAbsolute(CHECK_COMPOSITE_PAIR_ADDRESS),
-            Instruction::CmpImmediate(SAVE_SLOT_SELECTION_COMPOSITE_STATE - 0x0D),
+            Instruction::CmpImmediate(save_slot_state - start_menu_state),
             Instruction::BneAbsolute(FALLBACK_ADDRESS),
             Instruction::LdaZeroPage(0x59),
             Instruction::CmpImmediate(0x1A),
@@ -383,13 +388,13 @@ mod tests {
                     0x05,
                     0x38,
                     0xE9,
-                    0x0D,
+                    FRONT_END_MENU_FONT_STATES[0],
                     0xC9,
                     0x02,
                     0x90,
                     0x04,
                     0xC9,
-                    SAVE_SLOT_SELECTION_COMPOSITE_STATE - 0x0D,
+                    FRONT_END_MENU_FONT_STATES[2] - FRONT_END_MENU_FONT_STATES[0],
                 ]
         }));
         assert!(

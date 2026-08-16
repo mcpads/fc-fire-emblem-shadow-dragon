@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Result, ensure};
 use serde::Serialize;
 
 use crate::{
@@ -16,13 +16,14 @@ use crate::{
     front_end_menu::{FRONT_END_RESULT_DIALOGUE_RECORD_IDS, FrontEndMenuPlan},
     mapper165::battle_codebook_plan::GlyphWorkset,
     rom::Rom,
-    text_inventory::FixedTextPlan,
-    unit_names::UnitNamePlan,
 };
 
 use super::{
-    FRONT_END_SAVE_SUMMARY_CLASS_SOURCE_INDEX, FRONT_END_SAVE_SUMMARY_UNIT_SOURCE_INDEX,
-    consumer_catalog::ConsumerCatalogPlan, resident_glyph_assignment::assignment_sha1,
+    resident_glyph_assignment::assignment_sha1,
+    screen_font_residency::{
+        FRONT_END_SAVE_SUMMARY_CLASS_SOURCE_INDEX, FRONT_END_SAVE_SUMMARY_UNIT_SOURCE_INDEX,
+        ScreenFontResidencyPlan,
+    },
 };
 
 mod source_binding;
@@ -105,9 +106,7 @@ pub(super) fn plan_front_end_result_menu_residency(
 
 pub(super) fn plan_front_end_result_residency(
     display: &MainDialogueDisplayPlan,
-    fixed: &FixedTextPlan,
-    unit_names: &UnitNamePlan,
-    consumer_catalog: &ConsumerCatalogPlan,
+    screen_font_residency: &ScreenFontResidencyPlan,
     menu: FrontEndResultMenuResidency,
     dialogue_worksets: &[GlyphWorkset],
 ) -> Result<FrontEndResultResidencyPlan> {
@@ -125,47 +124,14 @@ pub(super) fn plan_front_end_result_residency(
         );
     }
 
-    let unit = unit_names
-        .entries
-        .get(FRONT_END_SAVE_SUMMARY_UNIT_SOURCE_INDEX)
-        .context("front-end save summary lost the protagonist unit name")?;
-    ensure!(
-        unit.table_id == "unit-names"
-            && unit.source_index == FRONT_END_SAVE_SUMMARY_UNIT_SOURCE_INDEX,
-        "front-end save summary protagonist identity changed"
-    );
-    let class = fixed
-        .entry_for_source_index("class-names", FRONT_END_SAVE_SUMMARY_CLASS_SOURCE_INDEX)
-        .context("front-end save summary lost the protagonist class name")?;
-    let summary_glyphs = unit
-        .unique_glyphs()
-        .union(&class.unique_glyphs())
-        .copied()
-        .collect::<BTreeSet<_>>();
-    let catalog_page =
-        consumer_catalog.page_for_name("unit_names", FRONT_END_SAVE_SUMMARY_UNIT_SOURCE_INDEX)?;
-    let summary_glyph_codes = summary_glyphs
-        .iter()
-        .map(|glyph| {
-            Ok((
-                *glyph,
-                catalog_page
-                    .assignments()
-                    .get(glyph)
-                    .copied()
-                    .with_context(|| {
-                        format!("front-end save summary catalog lost glyph {glyph:?}")
-                    })?,
-            ))
-        })
-        .collect::<Result<BTreeMap<_, _>>>()?;
+    let summary_glyph_codes = screen_font_residency.record_action_summary_glyph_codes();
 
     let (augmented_worksets, resident_workset_indices, maximum_slot_demand) =
         augment_result_worksets(
             display,
             dialogue_worksets,
             &FRONT_END_RESULT_DIALOGUE_RECORD_IDS,
-            &summary_glyph_codes,
+            summary_glyph_codes,
         )?;
     ensure!(
         resident_workset_indices == menu.resident_workset_indices,
@@ -173,7 +139,7 @@ pub(super) fn plan_front_end_result_residency(
     );
     let fixed_codes = merge_fixed_assignments(
         "front-end result residency",
-        [&menu.installed_menu_glyph_codes, &summary_glyph_codes],
+        [&menu.installed_menu_glyph_codes, summary_glyph_codes],
     )?;
 
     Ok(FrontEndResultResidencyPlan {

@@ -125,9 +125,15 @@ pub(super) fn build_consumer_catalog_runtime(
     code_page: u8,
     entry_stub_origin: u16,
     font_page_activation: u16,
+    front_end_record_action_route: u8,
     layout: ConsumerCatalogRuntimeLayout,
 ) -> Result<ConsumerCatalogRuntime> {
-    let code_routine = build_catalog_append_runtime(code_origin, font_page_activation, layout)?;
+    let code_routine = build_catalog_append_runtime(
+        code_origin,
+        font_page_activation,
+        front_end_record_action_route,
+        layout,
+    )?;
     let mut next = entry_stub_origin;
     let mut fixed_routines = Vec::new();
     for site in HOOK_SITES {
@@ -229,8 +235,13 @@ fn build_fixed_bridge(origin: u16, appender: u16, code_page: u8) -> Result<Vec<u
 fn build_catalog_append_runtime(
     origin: u16,
     font_page_activation: u16,
+    front_end_record_action_route: u8,
     layout: ConsumerCatalogRuntimeLayout,
 ) -> Result<RuntimeRoutine> {
+    ensure!(
+        front_end_record_action_route & TRANSLATED_FE_PAGE_FLAG != 0,
+        "consumer catalog record-action route does not select the translated FE page"
+    );
     let mut instructions = vec![Instruction::Tay];
     for address in 0x00..=0x05 {
         instructions.extend([Instruction::LdaZeroPage(address), Instruction::Pha]);
@@ -403,7 +414,7 @@ fn build_catalog_append_runtime(
     );
     instructions.extend([
         Instruction::Pla,
-        Instruction::OraImmediate(TRANSLATED_FE_PAGE_FLAG),
+        Instruction::LdaImmediate(front_end_record_action_route),
     ]);
     let activate_name_route_target = next_address(origin, &instructions)?;
     patch_jump(
@@ -550,7 +561,7 @@ mod tests {
     #[test]
     fn three_five_byte_stubs_fill_the_remaining_producer_cave() {
         let runtime =
-            build_consumer_catalog_runtime(0xA600, 0x30, 0xF7F8, 0xF620, layout()).unwrap();
+            build_consumer_catalog_runtime(0xA600, 0x30, 0xF7F8, 0xF620, 0xDD, layout()).unwrap();
 
         assert_eq!(runtime.fixed_routines.len(), 4);
         assert!(
@@ -590,18 +601,26 @@ mod tests {
     #[test]
     fn all_catalog_hooks_are_typed_three_byte_calls() {
         let runtime =
-            build_consumer_catalog_runtime(0xA600, 0x30, 0xF7F8, 0xF620, layout()).unwrap();
+            build_consumer_catalog_runtime(0xA600, 0x30, 0xF7F8, 0xF620, 0xDD, layout()).unwrap();
 
         assert_eq!(runtime.hooks.len(), HOOK_SITES.len());
         assert!(runtime.hooks.iter().all(|hook| hook.bytes.len() == 3));
     }
 
     #[test]
-    fn dynamic_name_page_mirrors_the_record_action_route_before_shared_activation() {
+    fn record_action_name_uses_the_planned_screen_route_before_shared_activation() {
         let activation = 0xF620;
         let origin = 0xA600;
-        let runtime =
-            build_consumer_catalog_runtime(origin, 0x30, 0xF7F8, activation, layout()).unwrap();
+        let record_action_route = 0xDD;
+        let runtime = build_consumer_catalog_runtime(
+            origin,
+            0x30,
+            0xF7F8,
+            activation,
+            record_action_route,
+            layout(),
+        )
+        .unwrap();
         let prefix = [
             0xB1,
             0x00,
@@ -632,7 +651,7 @@ mod tests {
             u16::from_le_bytes([sequence[15], sequence[16]]),
             sequence_address + 20
         );
-        assert_eq!(&sequence[17..20], &[0x68, 0x09, TRANSLATED_FE_PAGE_FLAG]);
+        assert_eq!(&sequence[17..20], &[0x68, 0xA9, record_action_route]);
         assert_eq!(
             &sequence[20..24],
             &[0x20, activation as u8, (activation >> 8) as u8, 0xC8,]
