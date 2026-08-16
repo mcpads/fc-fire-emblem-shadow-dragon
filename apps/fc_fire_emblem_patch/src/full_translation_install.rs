@@ -12,6 +12,7 @@ use crate::{
     choice_labels::plan_choice_labels,
     dialogue_assets::{plan_all_main_dialogue_records, validate_main_dialogue_workspace},
     dialogue_inventory::inspect_main_dialogue_graph,
+    fixed_string_consumers::{FixedStringConsumerCensus, inspect_fixed_string_consumers},
     font_slots::{FONT_PAGE_SIZE, FONT_TILE_SIZE},
     front_end_menu::plan_front_end_menu,
     item_flow::plan_item_action_labels,
@@ -189,6 +190,7 @@ struct FullTranslationInstallReport {
     declared_installation_domain_count: usize,
     declared_installation_domains: [&'static str; REQUIRED_DOMAIN_COUNT],
     translation_inputs: TranslationInputs,
+    fixed_string_consumers: FixedStringConsumerCensus,
     dialogue_codebook: DialogueCodebook,
     chapter_intro_residency: ChapterIntroResidency,
     choice_residency: ChoiceResidencyPlan,
@@ -425,6 +427,13 @@ pub(crate) fn plan_full_translation_installation(
 ) -> Result<FullTranslationInstallSummary> {
     let rom = Rom::from_path(inputs.source_path)?;
     rom.verify_supported_japanese()?;
+    let fixed_string_consumers = inspect_fixed_string_consumers(&rom)?;
+    ensure!(
+        fixed_string_consumers.records.len() == 72
+            && fixed_string_consumers.call_sites.len() == 49
+            && fixed_string_consumers.direct_producer_bound_indices.len() == 56,
+        "fixed-string source population did not reach its declared consumer boundary"
+    );
     let page_capacity = inspect_dialogue_page_pool_capacity(CurrentCandidateInputs {
         source_rom: &rom,
         candidate_path: inputs.current_candidate_path,
@@ -1067,7 +1076,7 @@ pub(crate) fn plan_full_translation_installation(
         false
     };
     let report = FullTranslationInstallReport {
-        schema: 19,
+        schema: 20,
         source_sha1: EXPECTED_SOURCE_SHA1,
         strategy: "install the declared translation domains in one cumulative candidate, close declared installation gates, then run declared consumer-path dynamic regression on that same ROM; whole-game consumer census remains separate",
         declared_installation_domain_count: REQUIRED_DOMAIN_COUNT,
@@ -1088,6 +1097,7 @@ pub(crate) fn plan_full_translation_installation(
             translation_input_complete,
             review_complete,
         },
+        fixed_string_consumers: fixed_string_consumers.census,
         dialogue_codebook: DialogueCodebook {
             canonical_record_count: display.canonical_record_count,
             page_workset_count: display.page_worksets.len(),

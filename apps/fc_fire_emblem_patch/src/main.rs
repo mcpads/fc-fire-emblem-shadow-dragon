@@ -7,6 +7,7 @@ mod class_profile;
 mod dialogue_assets;
 mod dialogue_inventory;
 mod epilogue_variant_evidence;
+mod fixed_string_consumers;
 mod font;
 mod font_slots;
 mod front_end_menu;

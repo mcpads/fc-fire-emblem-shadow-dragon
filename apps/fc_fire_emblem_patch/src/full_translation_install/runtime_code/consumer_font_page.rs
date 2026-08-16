@@ -22,6 +22,10 @@ use super::{
     chr_source_state::RIGHT_FD_SOURCE_SHADOW, next_address,
 };
 use crate::{
+    fixed_string_consumers::{
+        CompositeStateProducer, bind_direct_composite_state_producer_catalog,
+        scan_direct_composite_state_producers,
+    },
     front_end_menu::{
         RECORD_ACTION_COMPOSITE_STATE, RECORD_LIST_COMPOSITE_STATE,
         SAVE_SLOT_SELECTION_COMPOSITE_STATE, START_MENU_COMPOSITE_STATE,
@@ -30,12 +34,10 @@ use crate::{
     mapper165::font_pair_projection::mapper_register_from_route,
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
-    sha1_hex,
     typed_source::decode_rp2a03_sequence,
 };
 
 const FIXED_BANK_BYTE_COUNT: usize = 16 * 1024;
-const SOURCE_PRG_BANK_COUNT: usize = 16;
 const UNIT_UI_BANK: u8 = 0x0B;
 
 pub(super) const COMPOSITE_STATE: u16 = 0x05E8;
@@ -118,8 +120,6 @@ const COMPOSITE_PAGE_ROUTES: [(u8, FontPageRole); 12] = [
     (RECORD_ACTION_COMPOSITE_STATE, FontPageRole::RetainCurrent),
 ];
 
-const EXPECTED_DIRECT_COMPOSITE_PRODUCER_COUNT: usize = 50;
-const EXPECTED_DIRECT_COMPOSITE_PRODUCER_SHA1: &str = "eba4ee041d3af03bd5c2d71cc443e81fb01590a1";
 const EXPECTED_FONT_PAGE_STATE_PRODUCERS: [CompositeStateProducer; 16] = [
     CompositeStateProducer::new(0x02, 0xA693, 0x4C, START_MENU_COMPOSITE_STATE),
     CompositeStateProducer::new(0x02, 0xA6CC, 0x4C, SAVE_SLOT_SELECTION_COMPOSITE_STATE),
@@ -138,25 +138,6 @@ const EXPECTED_FONT_PAGE_STATE_PRODUCERS: [CompositeStateProducer; 16] = [
     CompositeStateProducer::new(0x06, 0xB413, 0x4C, MAP_FUNDS_COMPOSITE_STATE),
     CompositeStateProducer::new(0x06, 0xB78A, 0x4C, CHAPTER_SAVE_OFFER_COMPOSITE_STATE),
 ];
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-struct CompositeStateProducer {
-    prg_bank: u8,
-    cpu_address: u16,
-    transfer_opcode: u8,
-    state: u8,
-}
-
-impl CompositeStateProducer {
-    const fn new(prg_bank: u8, cpu_address: u16, transfer_opcode: u8, state: u8) -> Self {
-        Self {
-            prg_bank,
-            cpu_address,
-            transfer_opcode,
-            state,
-        }
-    }
-}
 
 impl FontPageRole {
     fn mapper_route(self, pages: ConsumerFontPageRoutes) -> u8 {
@@ -275,22 +256,7 @@ pub(super) fn bind_consumer_font_page_lifetime(source: &Rom, candidate: &Rom) ->
 /// 페이지를 게시하는 상태의 생산자 집합도 별도로 고정해, 재사용 상태가 늘거나 새
 /// 호출자가 생겼을 때 화면 역할을 추측한 채 통과하지 못하게 한다.
 fn bind_direct_composite_state_producers(source: &Rom, candidate: &Rom) -> Result<()> {
-    let source_catalog = scan_direct_composite_state_producers(source)?;
-    ensure!(
-        source_catalog.len() == EXPECTED_DIRECT_COMPOSITE_PRODUCER_COUNT,
-        "direct composite-state producer population changed"
-    );
-    let mut identity = Vec::with_capacity(source_catalog.len() * 5);
-    for producer in &source_catalog {
-        identity.push(producer.prg_bank);
-        identity.extend_from_slice(&producer.cpu_address.to_le_bytes());
-        identity.push(producer.transfer_opcode);
-        identity.push(producer.state);
-    }
-    ensure!(
-        sha1_hex(&identity) == EXPECTED_DIRECT_COMPOSITE_PRODUCER_SHA1,
-        "direct composite-state producer catalog changed"
-    );
+    let source_catalog = bind_direct_composite_state_producer_catalog(source)?;
     ensure!(
         scan_direct_composite_state_producers(candidate)? == source_catalog,
         "candidate direct composite-state producer catalog changed"
@@ -309,44 +275,6 @@ fn bind_direct_composite_state_producers(source: &Rom, candidate: &Rom) -> Resul
         "font-page composite-state producer routes changed: {page_producers:?}"
     );
     Ok(())
-}
-
-fn scan_direct_composite_state_producers(rom: &Rom) -> Result<Vec<CompositeStateProducer>> {
-    let prg = rom
-        .prg()
-        .get(..SOURCE_PRG_BANK_COUNT * FIXED_BANK_BYTE_COUNT)
-        .context("image has fewer than sixteen source PRG banks")?;
-    let target = COMPOSITE_PAGE_ENTRY.to_le_bytes();
-    let mut producers = Vec::new();
-    for (bank_index, bank) in prg.chunks_exact(FIXED_BANK_BYTE_COUNT).enumerate() {
-        for offset in 2..bank.len() - 2 {
-            let opcode = bank[offset];
-            if ![JSR_ABSOLUTE_OPCODE, JMP_ABSOLUTE_OPCODE].contains(&opcode)
-                || bank[offset + 1..offset + 3] != target
-            {
-                continue;
-            }
-            ensure!(
-                bank[offset - 2] == 0xA9,
-                "direct composite-state transfer has no immediate state producer at bank {bank_index:02X} offset {offset:04X}"
-            );
-            let cpu_address =
-                0x8000 + u16::try_from(offset).context("composite producer offset exceeds u16")?;
-            decode_rp2a03_sequence(
-                &bank[offset - 2..offset + 3],
-                cpu_address - 2,
-                "load one composite state and transfer to its fixed writer",
-            )?;
-            producers.push(CompositeStateProducer::new(
-                u8::try_from(bank_index).context("composite producer bank exceeds u8")?,
-                cpu_address,
-                opcode,
-                bank[offset - 1],
-            ));
-        }
-    }
-    producers.sort_unstable();
-    Ok(producers)
 }
 
 /// 원본 `STA $05E8`를 같은 길이의 호출로 바꾼다. 호출 뒤의 `LDA #$01`이 A와
