@@ -5,7 +5,12 @@ use serde::Serialize;
 
 use crate::{
     dialogue_inventory::main_dialogue_runtime_handler_roots,
-    mapper165::battle_codebook_plan::BATTLE_RUNTIME_STORAGE_END, rom::Rom, sha1_hex,
+    rom::Rom,
+    runtime_storage_layout::{
+        DIALOGUE_RUNTIME_STORAGE_END, PROVEN_RUNTIME_STORAGE_END, PROVEN_RUNTIME_STORAGE_START,
+        bind_integrated_runtime_storage_layout,
+    },
+    sha1_hex,
 };
 
 mod access_trace;
@@ -16,19 +21,20 @@ use access_trace::{AccessDirection, AccessForm, AccessSite, trace_main_dialogue_
 use concurrent_access::{ConcurrentRuntimeAccessContract, bind_concurrent_runtime_accesses};
 use source_contract::{RuntimeStateSourceAccessContract, bind_runtime_state_source_accesses};
 
-pub(super) const CANDIDATE_START: u16 = 0x07F0;
+pub(super) const CANDIDATE_START: u16 = PROVEN_RUNTIME_STORAGE_START;
 /// 다섯 바이트는 생산자와 소비자의 공유 계약이고, 뒤의 여섯 바이트는 소비자만
 /// 쓰는 전송 커서다. 마지막 두 바이트는 생산자 시점의 원문 선행 조회값을 전송
 /// 완료까지 붙잡는다. 마지막 한 바이트는 비대사 복합 UI가 자기 수명 동안 게시하는
 /// 현재 CHR 페이지다. 서로 동시에 활성화되지 않으며 같은
 /// 원본·NMI·전투 접근 배제 증명을 쓰므로 한 연속 범위로 묶는다. 증명을 둘로 나누면
 /// 약한 쪽이 생긴다.
-pub(super) const CANDIDATE_END: u16 = 0x07FD;
+pub(super) const CANDIDATE_END: u16 = PROVEN_RUNTIME_STORAGE_END;
 
 /// 비대사 복합 UI가 현재 사용하는 CHR mapper register다. 0은 소유한 페이지 없음이다.
 /// 합성기와 이름 appender가 게시·즉시 적용하고, 화면 열기가 재적용 뒤 소비하며,
 /// 화면 닫기가 재합성 뒤 남은 값을 지운다.
-pub(in crate::full_translation_install) const CONSUMER_FONT_PAGE: u16 = CANDIDATE_END;
+pub(in crate::full_translation_install) const CONSUMER_FONT_PAGE: u16 =
+    DIALOGUE_RUNTIME_STORAGE_END;
 /// 대사 해석기와 전송기가 냉간 진입에서 지워야 하는 마지막 바이트다.
 ///
 /// 바로 다음 `$07FD`는 동시에 준비되는 비대사 화면의 글꼴 페이지이므로, 대사 요청이
@@ -64,7 +70,7 @@ pub(super) struct DialogueRuntimeStateStoragePlan {
     main_dialogue_indexed_access_bounds_proven: bool,
     main_dialogue_indirect_access_ranges_proven: bool,
     main_dialogue_queue_bound_proven: bool,
-    battle_reservation_excludes_candidate: bool,
+    integrated_storage_layout_is_disjoint: bool,
     inactive_lifetime_may_clobber_candidate: bool,
     runtime_lifecycle_contract: RuntimeLifecycleContract,
     selected_cpu_range_hex: Option<&'static str>,
@@ -92,6 +98,7 @@ struct MemoryAccessSite {
 pub(super) fn plan_dialogue_runtime_state_storage(
     source: &Rom,
 ) -> Result<DialogueRuntimeStateStoragePlan> {
+    bind_integrated_runtime_storage_layout()?;
     let roots = main_dialogue_runtime_handler_roots();
     let trace = trace_main_dialogue_accesses(source, &roots)?;
     let catalog = trace
@@ -110,16 +117,16 @@ pub(super) fn plan_dialogue_runtime_state_storage(
     // 의사결정 59번을 따른다.
     let concurrent_access_contract =
         bind_concurrent_runtime_accesses(source, main_dialogue_queue_bound_proven)?;
-    let battle_reservation_excludes_candidate = CANDIDATE_START > BATTLE_RUNTIME_STORAGE_END;
+    let integrated_storage_layout_is_disjoint = true;
     let selection_complete = direct_accesses_exclude_candidate
         && source_lifetime_accesses_exclude_candidate
         && concurrent_access_contract.every_concurrent_writer_excludes_candidate()
         && main_dialogue_queue_bound_proven
-        && battle_reservation_excludes_candidate;
+        && integrated_storage_layout_is_disjoint;
 
     Ok(DialogueRuntimeStateStoragePlan {
-        strategy: "own one fourteen-byte scratch range proven free of source, NMI, queue, save, and battle writers; the first thirteen bytes belong to the main-dialogue lifetime and the final byte carries the screen-scoped non-dialogue consumer font page",
-        candidate_cpu_range_hex: "0x07F0..0x07FD",
+        strategy: "prove one sixteen-byte integrated scratch range free of source, NMI, queue, and save writers; fourteen bytes belong to dialogue and composite UI while the last two battle metadata bytes have separate owners",
+        candidate_cpu_range_hex: "0x07F0..0x07FF",
         required_byte_count: usize::from(CANDIDATE_END - CANDIDATE_START + 1),
         ownership_lifetime: "main dialogue active plus an E7-suspended resident page, or from a non-dialogue composite publication through immediate selection, screen open, redraw, and screen close; open consumes its publication, close clears redraw state, and source/concurrent writers exclude the whole range",
         main_dialogue_handler_root_count: roots.len(),
@@ -137,7 +144,7 @@ pub(super) fn plan_dialogue_runtime_state_storage(
         main_dialogue_indexed_access_bounds_proven: main_dialogue_queue_bound_proven,
         main_dialogue_indirect_access_ranges_proven,
         main_dialogue_queue_bound_proven,
-        battle_reservation_excludes_candidate,
+        integrated_storage_layout_is_disjoint,
         inactive_lifetime_may_clobber_candidate: true,
         runtime_lifecycle_contract: RuntimeLifecycleContract {
             ownership_begin: "every direct entry and E7 resume resolves a request before publishing cold or ready state",
@@ -146,7 +153,7 @@ pub(super) fn plan_dialogue_runtime_state_storage(
             cold_entry_writes_all_five_bytes_before_any_selector_read: true,
             inactive_selector_ignores_all_five_bytes: true,
         },
-        selected_cpu_range_hex: selection_complete.then_some("0x07F0..0x07FD"),
+        selected_cpu_range_hex: selection_complete.then_some("0x07F0..0x07FF"),
         source_reservation_selection_complete: selection_complete,
     })
 }
@@ -187,24 +194,25 @@ fn report_sites(sites: &BTreeSet<AccessSite>) -> Vec<MemoryAccessSite> {
 mod tests {
     use super::*;
 
-    /// 예약은 전투 예약 바로 뒤에서 시작해야 두 소유자가 겹치지 않는다.
-    /// 길이는 공유 계약 다섯 바이트, 소비자 전용 커서 여섯 바이트, 요청 시점 원문
-    /// 정체성 두 바이트, 상호 배타적인 카탈로그 페이지 한 바이트의 합이다.
+    /// 통합 예약은 대사·복합 UI 열네 바이트와 전투 메타데이터 두 바이트를 함께
+    /// 증명하되, 각 소유자는 중앙 저장소 배치에서 서로 겹치지 않아야 한다.
     #[test]
-    fn the_reservation_starts_after_the_battle_reservation_and_covers_both_owners() {
+    fn the_reservation_covers_dialogue_ui_and_battle_metadata_owners() {
         const SHARED_CONTRACT_BYTES: u16 = 5;
         const TRANSPORT_CURSOR_BYTES: u16 = 6;
         const REQUEST_SOURCE_IDENTITY_BYTES: u16 = 2;
         const CONSUMER_FONT_PAGE_BYTES: u16 = 1;
+        const BATTLE_METADATA_BYTES: u16 = 2;
 
-        assert_eq!(CANDIDATE_START, BATTLE_RUNTIME_STORAGE_END + 1);
         assert_eq!(
             CANDIDATE_END - CANDIDATE_START + 1,
             SHARED_CONTRACT_BYTES
                 + TRANSPORT_CURSOR_BYTES
                 + REQUEST_SOURCE_IDENTITY_BYTES
                 + CONSUMER_FONT_PAGE_BYTES
+                + BATTLE_METADATA_BYTES
         );
+        assert_eq!(CONSUMER_FONT_PAGE + 2, CANDIDATE_END);
     }
 
     #[test]

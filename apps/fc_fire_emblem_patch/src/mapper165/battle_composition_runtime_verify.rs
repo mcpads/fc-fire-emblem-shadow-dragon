@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     font_slots::{FONT_PAGE_SIZE, FONT_TILE_SIZE},
     rom::Rom,
+    runtime_storage_layout::{BATTLE_REMAP_PAIR_TABLE_START, BATTLE_REMAP_STATE_ADDRESS},
     sha1_hex,
 };
 
@@ -27,10 +28,10 @@ const OBSERVED_DIALOGUE_SELECTOR_ADDRESS: usize = 0x7936;
 const SELECTOR_62_REQUIRED_NONZERO_ADDRESSES: [usize; 3] = [0x0334, 0x0479, 0x0335];
 const SELECTOR_62_REQUIRED_ZERO_ADDRESS: usize = 0x05DF;
 const SELECTOR_62_VALUE: u8 = 0x3E;
-const REMAP_STATE_ADDRESS: usize = 0x07DF;
+const REMAP_STATE_ADDRESS: usize = BATTLE_REMAP_STATE_ADDRESS as usize;
 const CACHE_UPLOADED_MARKER: u8 = 0x80;
 const REMAP_PAIR_COUNT_MASK: u8 = 0x1E;
-const REMAP_PAIR_TABLE_ADDRESS: usize = 0x07E0;
+const REMAP_PAIR_TABLE_ADDRESS: usize = BATTLE_REMAP_PAIR_TABLE_START as usize;
 const RECIPE_HEADER_BYTE_COUNT: usize = 32;
 const RECIPE_MAGIC: &[u8; 4] = b"FBRC";
 

@@ -272,11 +272,11 @@ mod tests {
         assert_eq!(
             bytes,
             [
-                0xAD, 0xDF, 0x07, // LDA $07DF: cache validity
+                0xAD, 0xFE, 0x07, // LDA $07FE: cache validity
                 0x29, 0x80, // AND #$80
                 0xF0, 0x08, // invalid -> refresh
                 0x20, 0x30, 0xFD, // project the current dialogue selector
-                0xCD, 0xDE, 0x07, // compare the key composed into $07DE
+                0xCD, 0xFF, 0x07, // compare the key composed into $07FF
                 0xF0, 0x08, // matching key -> return without touching the PPU
                 0xA9, 0x06, // mismatched key: blank live rendering
                 0x8D, 0x01, 0x20, 0x20, 0x30, 0xFB, // rebuild from all current recipe inputs

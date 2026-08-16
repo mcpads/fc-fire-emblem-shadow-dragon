@@ -48,7 +48,6 @@ use enemy_domain::{EnemyBattleDomain, EnemyBattleDomainBinding, bind_enemy_battl
 use item_domain::{BattleItemDomain, BattleItemDomainBinding, bind_battle_item_domain};
 pub(super) use physical_assignment::ScreenCodeConstraint;
 use physical_assignment::assign_physical_codes;
-pub(crate) use remap_storage::{BATTLE_RUNTIME_STORAGE_END, BATTLE_RUNTIME_STORAGE_START};
 use runtime_demand::{BattleRuntimeDemandPlan, ExactModeledRuntimeInput, plan_runtime_demand};
 use runtime_inputs::{BattleRuntimeInputBinding, bind_battle_runtime_inputs};
 pub(crate) use workset_pages::{

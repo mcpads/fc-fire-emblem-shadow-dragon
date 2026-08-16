@@ -8,9 +8,9 @@
 //! 처리기의 도달 명령, 원본 NMI, 오디오, 그리고 PRG 전체 직접 피연산자 조사를
 //! 거친다. 커서만 따로 원시 바이트 훑기로 정당화하면 약한 증명이 하나 생긴다.
 //!
-//! 아래로 두지 않은 이유도 있다. 원본 PPU 블록 큐는 `$0781`에서 **위로** 자라고
-//! 하드 상한이 `$07DF`다. 공유 계약 아래에 네 바이트를 이어 잡으면 `$07EF`에
-//! 걸리는데 그 자리는 원본이 쓴다.
+//! 원본 PPU 블록 큐는 `$0781`에서 **위로** 자라고 하드 상한이 `$07DF`다. 따라서
+//! 전투 쌍 표는 `$07E0..=$07EF`, 이 상태는 `$07F0`부터 배치한다. 통합 예약의 끝
+//! `$07FE/$07FF`는 전투 준비 상태와 대사 캐시 키가 따로 소유한다.
 //!
 //! 앞의 두 바이트는 요청 단계에 따라 소유자가 바뀐다. `cold_requested` 동안에는
 //! NMI 소비자의 항목 커서이고, 전송이 끝나 `ready`를 게시하기 직전에는 그 페이지를
@@ -58,16 +58,17 @@ mod tests {
     use super::super::runtime_state_storage::{CANDIDATE_END, CONSUMER_FONT_PAGE};
     use super::*;
 
-    /// 커서와 요청 정체성은 공유 계약 뒤에 붙고 카탈로그 페이지 바로 앞에서 끝나야
-    /// 한다. 어느 쪽이든 예약 밖으로 나가면 증명받지 못한 바이트를 쓰게 된다.
+    /// 커서와 요청 정체성은 공유 계약 뒤에 붙고 카탈로그 페이지 바로 앞에서 끝난다.
+    /// 통합 예약의 마지막 두 바이트는 별도 전투 메타데이터이므로 소비하지 않는다.
     #[test]
     fn the_cursor_lives_inside_the_proven_reservation() {
         assert_eq!(
             CURSOR_ENTRY_LOW,
             CANDIDATE_START + SHARED_CONTRACT_BYTE_COUNT
         );
-        assert!(CURSOR_OVERLAY_TILES < CANDIDATE_END);
+        assert!(CURSOR_OVERLAY_TILES < CONSUMER_FONT_PAGE);
         assert_eq!(REQUEST_SOURCE_ENTRY_INDEX + 1, CONSUMER_FONT_PAGE);
+        assert_eq!(CONSUMER_FONT_PAGE + 2, CANDIDATE_END);
     }
 
     /// 네 바이트에 무엇이 들어가는지가 설계 결정이다. 주소는 항목이 담으므로
@@ -100,8 +101,8 @@ mod tests {
     }
 
     #[test]
-    fn catalog_page_ends_the_reservation_after_the_dialogue_identity() {
+    fn catalog_page_ends_the_dialogue_fields_before_battle_metadata() {
         assert_eq!(REQUEST_SOURCE_ENTRY_INDEX + 1, CONSUMER_FONT_PAGE);
-        assert_eq!(CONSUMER_FONT_PAGE, CANDIDATE_END);
+        assert_eq!(CONSUMER_FONT_PAGE + 2, CANDIDATE_END);
     }
 }

@@ -30,6 +30,7 @@ mod release_image;
 mod rom;
 mod roster_localization;
 mod rp2a03;
+mod runtime_storage_layout;
 mod screen_contracts;
 mod semantic_translation;
 mod shop_flow;

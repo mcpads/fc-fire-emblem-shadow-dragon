@@ -1,7 +1,13 @@
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
-use crate::rom::Rom;
+use crate::{
+    rom::Rom,
+    runtime_storage_layout::{
+        BATTLE_REMAP_PAIR_TABLE_END, BATTLE_REMAP_PAIR_TABLE_START, BATTLE_REMAP_STATE_ADDRESS,
+        SOURCE_PPU_QUEUE_START, bind_integrated_runtime_storage_layout,
+    },
+};
 
 use super::{
     background_payloads::BattleBackgroundPayloadModel,
@@ -10,12 +16,7 @@ use super::{
 
 mod source_contract;
 
-const SOURCE_QUEUE_START: u16 = 0x0781;
-pub(crate) const BATTLE_RUNTIME_STORAGE_START: u16 = 0x07DF;
-const PAIR_TABLE_START: u16 = 0x07E0;
 const PAIR_TABLE_BYTE_COUNT: usize = 16;
-pub(crate) const BATTLE_RUNTIME_STORAGE_END: u16 =
-    PAIR_TABLE_START + PAIR_TABLE_BYTE_COUNT as u16 - 1;
 const MAXIMUM_REMAP_PAIR_COUNT: usize = 8;
 const BATTLE_ACTIVE_FLAG: u16 = 0x047D;
 const REMAP_COUNT_MASK: u8 = 0x1E;
@@ -40,7 +41,7 @@ pub(super) struct BattleRemapStorageContract {
     maximum_battle_queue_byte_count: usize,
     remap_state_offset_from_queue_start: usize,
     pair_table_offset_from_queue_start: usize,
-    unused_queue_tail_byte_count_before_remap_state: usize,
+    unused_queue_tail_byte_count_before_pair_table: usize,
     source_contract: source_contract::BattleStorageSourceContract,
     count_and_pair_capacity_match: bool,
     remap_state_masks_are_disjoint: bool,
@@ -63,36 +64,37 @@ pub(super) fn bind_battle_remap_storage(
     background: &BattleBackgroundPayloadModel,
     text: &BattleTextConsumerTopology,
 ) -> Result<BattleRemapStorageContract> {
+    bind_integrated_runtime_storage_layout()?;
     let source_contract = source_contract::bind_battle_storage_source_contract(rom)?;
     let maximum_background_queue_byte_count = background.maximum_published_queue_byte_count();
     let maximum_text_queue_byte_count = text.maximum_published_queue_byte_count();
     let maximum_battle_queue_byte_count =
         maximum_background_queue_byte_count.max(maximum_text_queue_byte_count);
     let remap_state_offset_from_queue_start = usize::from(
-        BATTLE_RUNTIME_STORAGE_START
-            .checked_sub(SOURCE_QUEUE_START)
+        BATTLE_REMAP_STATE_ADDRESS
+            .checked_sub(SOURCE_PPU_QUEUE_START)
             .context("remap state precedes the source queue")?,
     );
     let pair_table_offset_from_queue_start = usize::from(
-        PAIR_TABLE_START
-            .checked_sub(SOURCE_QUEUE_START)
+        BATTLE_REMAP_PAIR_TABLE_START
+            .checked_sub(SOURCE_PPU_QUEUE_START)
             .context("remap pair table precedes the source queue")?,
     );
     ensure!(
-        maximum_battle_queue_byte_count <= remap_state_offset_from_queue_start,
-        "battle queue can overlap the remap state"
+        maximum_battle_queue_byte_count <= pair_table_offset_from_queue_start,
+        "battle queue can overlap the remap pair table"
     );
-    let unused_queue_tail_byte_count_before_remap_state = remap_state_offset_from_queue_start
+    let unused_queue_tail_byte_count_before_pair_table = pair_table_offset_from_queue_start
         .checked_sub(maximum_battle_queue_byte_count)
         .context("battle queue tail bound underflow")?;
-    let pair_table_end = PAIR_TABLE_START
+    let pair_table_end = BATTLE_REMAP_PAIR_TABLE_START
         .checked_add(
             u16::try_from(PAIR_TABLE_BYTE_COUNT - 1)
                 .context("remap pair-table byte count exceeds u16")?,
         )
         .context("remap pair-table end overflow")?;
     ensure!(
-        pair_table_end == BATTLE_RUNTIME_STORAGE_END,
+        pair_table_end == BATTLE_REMAP_PAIR_TABLE_END,
         "remap pair-table end changed"
     );
     ensure!(
@@ -112,21 +114,21 @@ pub(super) fn bind_battle_remap_storage(
     Ok(BattleRemapStorageContract {
         logical_remap_payload_byte_count: 1 + PAIR_TABLE_BYTE_COUNT,
         maximum_remap_pair_count: MAXIMUM_REMAP_PAIR_COUNT,
-        pair_table_start_hex: format!("0x{PAIR_TABLE_START:04X}"),
+        pair_table_start_hex: format!("0x{BATTLE_REMAP_PAIR_TABLE_START:04X}"),
         pair_table_end_hex: format!("0x{pair_table_end:04X}"),
         pair_table_byte_count: PAIR_TABLE_BYTE_COUNT,
-        remap_state_address_hex: format!("0x{BATTLE_RUNTIME_STORAGE_START:04X}"),
+        remap_state_address_hex: format!("0x{BATTLE_REMAP_STATE_ADDRESS:04X}"),
         original_active_address_hex: format!("0x{BATTLE_ACTIVE_FLAG:04X}"),
         remap_count_mask_hex: format!("0x{REMAP_COUNT_MASK:02X}"),
         remap_count_shift: REMAP_COUNT_SHIFT,
         cache_ready_mask_hex: format!("0x{CACHE_READY_MASK:02X}"),
-        source_queue_start_hex: format!("0x{SOURCE_QUEUE_START:04X}"),
+        source_queue_start_hex: format!("0x{SOURCE_PPU_QUEUE_START:04X}"),
         maximum_background_queue_byte_count,
         maximum_text_queue_byte_count,
         maximum_battle_queue_byte_count,
         remap_state_offset_from_queue_start,
         pair_table_offset_from_queue_start,
-        unused_queue_tail_byte_count_before_remap_state,
+        unused_queue_tail_byte_count_before_pair_table,
         source_contract,
         count_and_pair_capacity_match: true,
         remap_state_masks_are_disjoint,
@@ -147,7 +149,7 @@ pub(super) fn test_model() -> BattleRemapStorageContract {
         pair_table_start_hex: "0x07E0".to_owned(),
         pair_table_end_hex: "0x07EF".to_owned(),
         pair_table_byte_count: 16,
-        remap_state_address_hex: "0x07DF".to_owned(),
+        remap_state_address_hex: "0x07FE".to_owned(),
         original_active_address_hex: "0x047D".to_owned(),
         remap_count_mask_hex: "0x1E".to_owned(),
         remap_count_shift: 1,
@@ -156,9 +158,9 @@ pub(super) fn test_model() -> BattleRemapStorageContract {
         maximum_background_queue_byte_count: 45,
         maximum_text_queue_byte_count: 67,
         maximum_battle_queue_byte_count: 67,
-        remap_state_offset_from_queue_start: 94,
+        remap_state_offset_from_queue_start: 125,
         pair_table_offset_from_queue_start: 95,
-        unused_queue_tail_byte_count_before_remap_state: 27,
+        unused_queue_tail_byte_count_before_pair_table: 28,
         source_contract: source_contract::test_model(),
         count_and_pair_capacity_match: true,
         remap_state_masks_are_disjoint: true,

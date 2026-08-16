@@ -9,6 +9,10 @@ use crate::{
     mmc5_prg::count_direct_transfers_to_range,
     rom::{EXPECTED_SOURCE_SHA1, HEADER_SIZE, Rom},
     rp2a03::{Instruction, assemble_at},
+    runtime_storage_layout::{
+        BATTLE_DIALOGUE_CACHE_KEY_ADDRESS, BATTLE_REMAP_PAIR_TABLE_START,
+        BATTLE_REMAP_STATE_ADDRESS, bind_integrated_runtime_storage_layout,
+    },
     sha1_hex,
     temporal_surface::load_observed_battle_temporal_evidence,
     tracked::TrackedImage,
@@ -39,8 +43,13 @@ use dynamic_assignment::{
 };
 use runtime::{
     RuntimeRoutine, battle_central_right_fd_selector_for_layout, battle_surface_active_for_layout,
-    build_runtime_routines, build_runtime_routines_for_layout, parse_recipe_directories,
+    build_runtime_routines, build_runtime_routines_for_layout, composition_dispatch_for_layout,
+    parse_recipe_directories,
 };
+
+pub(crate) fn cumulative_battle_composition_dispatch_bytes() -> Result<Vec<u8>> {
+    composition_dispatch_for_layout(CUMULATIVE_RUNTIME_LAYOUT)
+}
 
 pub(crate) fn cumulative_battle_surface_active_bytes() -> Result<Vec<u8>> {
     battle_surface_active_for_layout(CUMULATIVE_RUNTIME_LAYOUT)
@@ -160,13 +169,10 @@ const CACHE_UPLOADED_MARKER: u8 = 0x80;
 const UPLOAD_RENDER_MASK: u8 = 0x06;
 const SELECTED_COLOR_BITMAP_ADDRESS: u16 = 0x07C4;
 const SELECTED_COLOR_BITMAP_BYTE_COUNT: u8 = 27;
-// The bitmap is dead after remap allocation. Its final byte then records which projected
-// dialogue recipe was actually composed, without claiming another persistent RAM range.
-const CACHED_DIALOGUE_SELECTOR_ADDRESS: u16 =
-    SELECTED_COLOR_BITMAP_ADDRESS + SELECTED_COLOR_BITMAP_BYTE_COUNT as u16 - 1;
-const REMAP_STATE_ADDRESS: u16 = 0x07DF;
+const CACHED_DIALOGUE_SELECTOR_ADDRESS: u16 = BATTLE_DIALOGUE_CACHE_KEY_ADDRESS;
+const REMAP_STATE_ADDRESS: u16 = BATTLE_REMAP_STATE_ADDRESS;
 const REMAP_PAIR_COUNT_MASK: u8 = 0x1E;
-const REMAP_PAIR_TABLE_ADDRESS: u16 = 0x07E0;
+const REMAP_PAIR_TABLE_ADDRESS: u16 = BATTLE_REMAP_PAIR_TABLE_START;
 const MAXIMUM_REMAP_PAIR_COUNT: u8 = 8;
 
 const RECIPE_POINTER_LOW: u8 = 0x00;
@@ -337,6 +343,7 @@ pub(crate) fn build_battle_composition_loader(
         layout,
         central_fallback_target,
     } = build;
+    bind_integrated_runtime_storage_layout()?;
     let source_rom = Rom::from_path(source_path)?;
     source_rom.verify_supported_japanese()?;
     bind_final_dialogue_cache_refresh_source(&source_rom)?;

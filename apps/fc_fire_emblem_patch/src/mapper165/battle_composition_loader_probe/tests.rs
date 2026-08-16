@@ -449,7 +449,7 @@ fn composition_report_omits_translation_content_and_private_paths() {
         modeled_runtime_inputs_enabled: true,
         selected_color_bitmap_address_hex: "0x07C4".to_owned(),
         selected_color_bitmap_byte_count: 27,
-        remap_state_address_hex: "0x07DF".to_owned(),
+        remap_state_address_hex: "0x07FE".to_owned(),
         remap_pair_table_address_hex: "0x07E0".to_owned(),
         maximum_remap_pair_count: 8,
         remap_overflow_aborts_composition: true,

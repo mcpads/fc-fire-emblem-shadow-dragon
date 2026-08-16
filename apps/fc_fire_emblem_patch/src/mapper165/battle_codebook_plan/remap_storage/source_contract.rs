@@ -6,6 +6,7 @@ use serde::Serialize;
 
 use crate::{
     rom::Rom,
+    runtime_storage_layout::{BATTLE_DIALOGUE_CACHE_KEY_ADDRESS, BATTLE_REMAP_PAIR_TABLE_START},
     sha1_hex,
     typed_source::{Rp2a03DirectControlFlow, decode_rp2a03_sequence, rp2a03_direct_control_flow},
 };
@@ -32,8 +33,10 @@ use indirect_destinations::{
 const INLINE_POINTER_DISPATCH_ADDRESS: u16 = 0xC34C;
 const COMMON_TEXT_QUEUE_READY_ADDRESS: u16 = 0xE5C7;
 const QUEUE_READY_ZERO_PAGE_ADDRESS: u8 = 0x21;
-const REMAP_STORAGE_START: u16 = 0x07DF;
-const REMAP_STORAGE_END: u16 = 0x07EF;
+// The battle-owned pair table begins here. The enclosing source-access proof remains
+// conservative through the battle metadata at $07FF, including the intervening dialogue state.
+const REMAP_STORAGE_START: u16 = BATTLE_REMAP_PAIR_TABLE_START;
+const REMAP_STORAGE_END: u16 = BATTLE_DIALOGUE_CACHE_KEY_ADDRESS;
 const BATTLE_ACTIVE_FLAG: u16 = 0x047D;
 
 #[derive(Clone, Debug, Serialize)]

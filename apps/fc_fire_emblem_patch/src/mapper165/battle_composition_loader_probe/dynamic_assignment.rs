@@ -301,8 +301,8 @@ fn allocate_remap_pairs(project_dialogue_selector_address: u16) -> Result<Vec<u8
         Instruction::BneAbsolute(protected_loop),
         Instruction::LdaZeroPage(RECIPE_PAIR_COUNT as u8),
         Instruction::StaAbsolute(REMAP_STATE_ADDRESS),
-        // The bitmap is dead after allocation. Reuse its last byte as the exact projected
-        // dialogue key only on success, so an aborted composition cannot look cache-valid.
+        // Publish the exact projected dialogue key only on success, after allocation has
+        // finished, so an aborted composition cannot look cache-valid.
         Instruction::JsrAbsolute(project_dialogue_selector_address),
         Instruction::StaAbsolute(CACHED_DIALOGUE_SELECTOR_ADDRESS),
         Instruction::LdaImmediate(0),

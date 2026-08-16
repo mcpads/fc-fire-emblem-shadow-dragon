@@ -152,7 +152,9 @@ pub(super) fn composition_dispatch() -> Result<Vec<u8>> {
     composition_dispatch_for_layout(PROBE_RUNTIME_LAYOUT)
 }
 
-fn composition_dispatch_for_layout(layout: BattleCompositionRuntimeLayout) -> Result<Vec<u8>> {
+pub(super) fn composition_dispatch_for_layout(
+    layout: BattleCompositionRuntimeLayout,
+) -> Result<Vec<u8>> {
     let mut instructions = vec![
         Instruction::JsrAbsolute(SOURCE_NMI_INPUT_SCAN),
         Instruction::Php,

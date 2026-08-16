@@ -11,6 +11,7 @@ use super::{
 use crate::{
     dialogue_inventory::switchable_cpu_to_file_offset,
     font_slots::FONT_PAGE_SIZE,
+    mapper165::battle_composition_loader_probe::cumulative_battle_composition_dispatch_bytes,
     rom::{HEADER_SIZE, Rom},
     sha1_hex,
     typed_source::decode_rp2a03_sequence,
@@ -68,7 +69,6 @@ const RUNTIME_CODE_WINDOW_START: u16 = 0xA000;
 const BATTLE_SOURCE_PAGE_MMC3_PAGE: u8 = 0x21;
 const EXPECTED_COMPLETED_PAGE_SOURCE_SHA1: &str = "8c2a9f5a6e028a59409f9cc254add2b81f318b21";
 const EXPECTED_COMPLETED_PAGE_CANDIDATE_SHA1: &str = "965de5bfca83263ac587e5c7c316ed6324d95ca8";
-const EXPECTED_SHARED_NMI_DISPATCH_SHA1: &str = "9f0090bd11866f7a4786db24a30e6660588b7758";
 pub(in crate::full_translation_install) const EXPECTED_SAMPLE_INITIAL_SELECTOR_SHA1: &str =
     "67856cd2b7a26ef43649181f5e86ffe2741eb8b3";
 
@@ -337,8 +337,11 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         SHARED_NMI_DISPATCH,
         usize::from(SHARED_NMI_DISPATCH_END - SHARED_NMI_DISPATCH),
     )?;
+    let expected_shared_dispatch = cumulative_battle_composition_dispatch_bytes()?;
     ensure!(
-        sha1_hex(shared_dispatch) == EXPECTED_SHARED_NMI_DISPATCH_SHA1,
+        expected_shared_dispatch.len()
+            == usize::from(SHARED_NMI_DISPATCH_END - SHARED_NMI_DISPATCH)
+            && shared_dispatch == expected_shared_dispatch,
         "shared NMI battle dispatch changed"
     );
     decode_rp2a03_sequence(

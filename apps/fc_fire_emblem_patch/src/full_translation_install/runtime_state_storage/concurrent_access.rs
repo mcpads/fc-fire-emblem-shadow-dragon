@@ -4,8 +4,8 @@ use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
-    mapper165::battle_codebook_plan::{BATTLE_RUNTIME_STORAGE_END, BATTLE_RUNTIME_STORAGE_START},
     rom::{HEADER_SIZE, Rom},
+    runtime_storage_layout::{BATTLE_REMAP_PAIR_TABLE_END, BATTLE_REMAP_PAIR_TABLE_START},
     sha1_hex,
     typed_source::decode_rp2a03_sequence,
 };
@@ -45,8 +45,8 @@ pub(super) struct ConcurrentRuntimeAccessContract {
     source_audio_entry_hex: String,
     source_audio: ConcurrentTraceReport,
     computed_access_contract: ConcurrentComputedAccessContract,
-    existing_mapper165_battle_reservation_hex: String,
-    candidate_begins_after_battle_reservation: bool,
+    battle_remap_pair_table_cpu_range_hex: String,
+    proven_runtime_range_begins_after_battle_pair_table: bool,
     every_concurrent_writer_excludes_candidate: bool,
 }
 
@@ -116,12 +116,13 @@ pub(super) fn bind_concurrent_runtime_accesses(
         &source_audio,
         main_dialogue_queue_bound_proven,
     )?;
-    let candidate_begins_after_battle_reservation = CANDIDATE_START > BATTLE_RUNTIME_STORAGE_END;
+    let proven_runtime_range_begins_after_battle_pair_table =
+        CANDIDATE_START > BATTLE_REMAP_PAIR_TABLE_END;
     let every_concurrent_writer_excludes_candidate = source_nmi_report
         .direct_and_indexed_accesses_exclude_candidate
         && source_audio_report.direct_and_indexed_accesses_exclude_candidate
         && computed_access_contract.every_computed_access_excludes_candidate()
-        && candidate_begins_after_battle_reservation;
+        && proven_runtime_range_begins_after_battle_pair_table;
     ensure!(
         every_concurrent_writer_excludes_candidate,
         "a source NMI, source audio, or mapper-165 battle writer can reach the runtime-state candidate"
@@ -147,10 +148,10 @@ pub(super) fn bind_concurrent_runtime_accesses(
         source_audio_entry_hex: format!("0x{SOURCE_AUDIO_ENTRY:04X}"),
         source_audio: source_audio_report,
         computed_access_contract,
-        existing_mapper165_battle_reservation_hex: format!(
-            "0x{BATTLE_RUNTIME_STORAGE_START:04X}..0x{BATTLE_RUNTIME_STORAGE_END:04X}"
+        battle_remap_pair_table_cpu_range_hex: format!(
+            "0x{BATTLE_REMAP_PAIR_TABLE_START:04X}..0x{BATTLE_REMAP_PAIR_TABLE_END:04X}"
         ),
-        candidate_begins_after_battle_reservation,
+        proven_runtime_range_begins_after_battle_pair_table,
         every_concurrent_writer_excludes_candidate,
     })
 }
