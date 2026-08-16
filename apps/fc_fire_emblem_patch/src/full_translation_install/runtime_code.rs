@@ -71,6 +71,13 @@ pub(in crate::full_translation_install) enum DialogueRuntimeHookRole {
     ConsumerFontPageOpen,
     ConsumerFontPageClose,
     ConsumerFontPageGameplayHandoff,
+    FixedMenuFontPageAppenderRoutine,
+    FixedMenuUnitSelectionAppender,
+    FixedMenuFastSpeedAppender,
+    FixedMenuSlowSpeedAppender,
+    FixedMenuStorageActionAppender,
+    FixedMenuStorageOverflowAppender,
+    FixedMenuStorageCapacityAppender,
     EndingRecordFontPageEnter,
     EndingRecordFontPageExit,
     EndingCharacterEpilogueFontPageExit,
@@ -156,6 +163,13 @@ impl DialogueRuntimeCodePlan {
             DialogueRuntimeHookRole::ConsumerFontPageOpen,
             DialogueRuntimeHookRole::ConsumerFontPageClose,
             DialogueRuntimeHookRole::ConsumerFontPageGameplayHandoff,
+            DialogueRuntimeHookRole::FixedMenuFontPageAppenderRoutine,
+            DialogueRuntimeHookRole::FixedMenuUnitSelectionAppender,
+            DialogueRuntimeHookRole::FixedMenuFastSpeedAppender,
+            DialogueRuntimeHookRole::FixedMenuSlowSpeedAppender,
+            DialogueRuntimeHookRole::FixedMenuStorageActionAppender,
+            DialogueRuntimeHookRole::FixedMenuStorageOverflowAppender,
+            DialogueRuntimeHookRole::FixedMenuStorageCapacityAppender,
             DialogueRuntimeHookRole::EndingRecordFontPageEnter,
             DialogueRuntimeHookRole::EndingRecordFontPageExit,
             DialogueRuntimeHookRole::EndingCharacterEpilogueFontPageExit,
@@ -406,6 +420,11 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     )?;
     let restore_source_pair_address = ending_font_lifetime.restore_source_pair.address;
     let ending_font_lifetime_hooks = ending_font_lifetime.hooks()?;
+    let fixed_menu_font_page_appender = consumer_font_page::build_fixed_menu_font_page_appender(
+        consumer_font_page::FIXED_MENU_FONT_PAGE_APPENDER_ORIGIN,
+        consumer_font_page_activation.address,
+        consumer_font_pages,
+    )?;
     let composite_font_page_publisher_origin = consumer_font_page_activation.address
         + u16::try_from(consumer_font_page_activation.bytes.len())
             .context("consumer font page activation length overflow")?;
@@ -713,6 +732,14 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     ]);
     hooks.extend(dynamic_producers.hooks);
     hooks.extend(consumer_catalog.hooks);
+    hooks.push(
+        consumer_font_page::fixed_menu_font_page_appender_installation(
+            &fixed_menu_font_page_appender,
+        )?,
+    );
+    hooks.extend(consumer_font_page::fixed_menu_font_page_hooks(
+        fixed_menu_font_page_appender.address,
+    )?);
     hooks.push(consumer_font_page::page_publisher_hook(
         composite_font_page_publisher_origin,
     )?);

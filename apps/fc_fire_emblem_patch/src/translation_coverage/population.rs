@@ -7,6 +7,7 @@ use crate::{
     choice_labels::plan_choice_labels,
     class_profile::plan_class_profiles,
     dialogue_assets::{validate_battle_dialogue_workspace, validate_main_dialogue_workspace},
+    fixed_menu_labels::plan_fixed_menu_labels,
     front_end_menu::plan_front_end_menu,
     item_flow::plan_item_action_labels,
     localization::OptionsLocalization,
@@ -39,6 +40,7 @@ pub(crate) struct TranslationPopulationInputs<'a> {
     pub(crate) title_graphics_localization_path: &'a Path,
     pub(crate) unit_ui_label_localization_path: &'a Path,
     pub(crate) item_action_label_localization_path: &'a Path,
+    pub(crate) fixed_menu_label_localization_path: &'a Path,
     pub(crate) transition_label_localization_path: &'a Path,
     pub(crate) location_name_localization_path: &'a Path,
 }
@@ -66,6 +68,8 @@ pub(crate) fn inspect_translation_populations(
     let unit_ui_labels = plan_unit_ui_labels(&rom, inputs.unit_ui_label_localization_path)?;
     let item_action_labels =
         plan_item_action_labels(&rom, inputs.item_action_label_localization_path)?;
+    let fixed_menu_labels =
+        plan_fixed_menu_labels(&rom, inputs.fixed_menu_label_localization_path)?;
     let transition_labels =
         plan_transition_labels(&rom, inputs.transition_label_localization_path)?;
     let location_names = plan_location_name_text(&rom, inputs.location_name_localization_path)?;
@@ -226,6 +230,7 @@ pub(crate) fn inspect_translation_populations(
     for (domain_id, plan) in [
         ("unit_ui_labels", unit_ui_labels),
         ("item_action_labels", item_action_labels),
+        ("fixed_menu_labels", fixed_menu_labels),
     ] {
         insert(
             &mut populations,

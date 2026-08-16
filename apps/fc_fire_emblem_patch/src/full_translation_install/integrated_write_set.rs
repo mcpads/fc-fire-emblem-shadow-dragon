@@ -620,8 +620,8 @@ fn install_cross_domain_material(
     plan: &CrossDomainMaterialPlan,
 ) -> Result<()> {
     ensure!(
-        plan.sections().len() == 12,
-        "integrated cross-domain material must contain twelve non-dialogue sections"
+        plan.sections().len() == 13,
+        "integrated cross-domain material must contain thirteen non-dialogue sections"
     );
     for section in plan.sections() {
         let end = section
@@ -875,8 +875,8 @@ fn install_fixed_ui_projection(
     plan: &FixedUiProjectionPlan,
 ) -> Result<()> {
     ensure!(
-        plan.write_count() == 66,
-        "fixed UI projection must install twenty-nine slots, twenty-nine pointers, six map-menu labels, and two map funds-summary labels"
+        plan.write_count() == 80,
+        "fixed UI projection must install thirty-six slots, thirty-six pointers, six map-menu labels, and two map funds-summary labels"
     );
     for write in plan.writes() {
         image.write_expected(
@@ -983,7 +983,7 @@ fn domain_contributions(
     consumer_installation: &ConsumerInstallationPlan,
 ) -> Result<Vec<DomainWriteContribution>> {
     ensure!(
-        required_domains.len() == 13
+        required_domains.len() == 14
             && required_domains.contains(&"main_dialogue")
             && required_domains
                 .iter()

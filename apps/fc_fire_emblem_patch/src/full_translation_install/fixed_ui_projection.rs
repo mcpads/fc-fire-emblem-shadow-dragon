@@ -1,7 +1,7 @@
 //! 고정 문자열 포인터 표가 소유한 일본어 슬롯을 화면별 코드북 바이트로 다시 묶는다.
 //!
 //! 일부 한국어 명령은 자기 원문 슬롯보다 길다. 새 코드 동굴을 소비하지 않고, 같은
-//! 포인터 표가 가리키는 일본어 전용 슬롯 29개를 길이 내림차순으로 일대일 대응한 뒤
+//! 포인터 표가 가리키는 일본어 전용 슬롯 36개를 길이 내림차순으로 일대일 대응한 뒤
 //! 포인터를 갱신한다. 가장 긴 목표가 가장 긴 슬롯에 들어가는지 모두 확인하므로 이
 //! 대응은 단순 탐욕 추정이 아니라 일대일 용량 조건의 완전한 판정이다. 요약 라벨은
 //! 원문의 오른쪽 정렬과 `$8D,$EF` 꼬리를, 명령·아이템 동작은 `$ED` 종단을 지킨다.
@@ -13,6 +13,7 @@ use serde::Serialize;
 
 use crate::{
     dialogue_inventory::switchable_cpu_to_file_offset,
+    fixed_menu_labels::{FIXED_MENU_LABEL_SPECS, fixed_menu_screen_roles},
     item_flow::ITEM_ACTION_LABELS,
     map_menu::MapMenuPlan,
     rom::Rom,
@@ -37,6 +38,7 @@ pub(super) struct FixedUiProjectionInputs<'a> {
     pub(super) candidate: &'a Rom,
     pub(super) unit_ui: &'a SemanticTranslationPlan,
     pub(super) item_actions: &'a SemanticTranslationPlan,
+    pub(super) fixed_menu_labels: &'a SemanticTranslationPlan,
     pub(super) map_menu: &'a MapMenuPlan,
     pub(super) consumer_codebook: &'a ConsumerCodebookPlan,
     pub(super) consumer_catalog: &'a ConsumerCatalogPlan,
@@ -50,6 +52,7 @@ pub(super) struct FixedUiProjectionPlan {
     projected_pointer_entry_count: usize,
     projected_map_menu_entry_count: usize,
     projected_summary_status_label_count: usize,
+    projected_fixed_menu_label_count: usize,
     source_slot_capacity_byte_count: usize,
     projected_string_byte_count: usize,
     longest_source_slot_byte_count: usize,
@@ -88,6 +91,7 @@ impl FixedUiProjectionPlan {
             "unit_ui_labels" => &["unit_command_menu", "unit_status", "unit_summary"],
             "item_action_labels" => &["item_action_menu"],
             "map_menu_labels" => &["map_menu", "map_funds_summary"],
+            "fixed_menu_labels" => fixed_menu_screen_roles(),
             _ => &[],
         }
     }
@@ -191,9 +195,31 @@ pub(super) fn plan_fixed_ui_projection(
             expected: spec.expected.to_vec(),
         });
     }
+    for spec in FIXED_MENU_LABEL_SPECS {
+        let id = format!("fixed-menu-label:{:02X}", spec.index);
+        let logical = inputs
+            .fixed_menu_labels
+            .entry_logical_bytes(&id)
+            .with_context(|| format!("fixed-menu plan lost {id}"))?;
+        let mut bytes = inputs
+            .consumer_codebook
+            .encode_fixed_ui_for("unit_command_menu", logical)?;
+        bytes.push(spec.terminator);
+        targets.push(TargetString {
+            id,
+            domain: "fixed_menu_labels",
+            pointer_index: spec.index,
+            source_pointer: spec.pointer,
+            bytes,
+        });
+        slots.push(SourceSlot {
+            pointer: spec.pointer,
+            expected: spec.expected.to_vec(),
+        });
+    }
     ensure!(
-        targets.len() == 29 && slots.len() == targets.len(),
-        "fixed UI projection requires twenty-nine Japanese pointer-table labels"
+        targets.len() == 36 && slots.len() == targets.len(),
+        "fixed UI projection requires thirty-six Japanese pointer-table labels"
     );
 
     match_targets_to_slots(&mut targets, &mut slots)?;
@@ -277,6 +303,7 @@ pub(super) fn plan_fixed_ui_projection(
             .iter()
             .filter(|spec| spec.translation_scope == JAPANESE_ONLY)
             .count(),
+        projected_fixed_menu_label_count: FIXED_MENU_LABEL_SPECS.len(),
         source_slot_capacity_byte_count,
         projected_string_byte_count,
         longest_source_slot_byte_count: slots.first().map_or(0, |slot| slot.expected.len()),

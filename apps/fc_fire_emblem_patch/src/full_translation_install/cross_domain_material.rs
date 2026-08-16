@@ -40,6 +40,7 @@ pub(super) struct CrossDomainMaterialInputs<'a> {
     pub(super) map_menu: &'a MapMenuPlan,
     pub(super) unit_ui: &'a SemanticTranslationPlan,
     pub(super) item_actions: &'a SemanticTranslationPlan,
+    pub(super) fixed_menu_labels: &'a SemanticTranslationPlan,
     pub(super) transitions: &'a TransitionTranslationPlans,
     pub(super) locations: &'a FixedTextPlan,
     pub(super) consumer_catalog: &'a ConsumerCatalogPlan,

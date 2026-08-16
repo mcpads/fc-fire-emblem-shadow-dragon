@@ -1,0 +1,51 @@
+{
+  "format_version": 1,
+  "source_sha1": "0179c550d424e0397496078789e7b116601d120c",
+  "translate_from": "ja",
+  "translate_to": "ko",
+  "preserve_existing_english_and_digits": true,
+  "entries": [
+    {
+      "id": "fixed-menu-label:2C",
+      "japanese_markup": "ユニットセレクト{FF}のこり",
+      "korean_markup": "유닛선택{FF}남음",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "fixed-menu-label:30",
+      "japanese_markup": "はやい",
+      "korean_markup": "빠름",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "fixed-menu-label:31",
+      "japanese_markup": "おそい",
+      "korean_markup": "느림",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "fixed-menu-label:35",
+      "japanese_markup": "あずける",
+      "korean_markup": "보관",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "fixed-menu-label:36",
+      "japanese_markup": "ひきだす",
+      "korean_markup": "찾기",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "fixed-menu-label:46",
+      "japanese_markup": "なにかすてる",
+      "korean_markup": "하나버리기",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "fixed-menu-label:47",
+      "japanese_markup": "こ{FF}あずけられます",
+      "korean_markup": "개{FF}보관가능",
+      "status": "needs_human_review"
+    }
+  ]
+}

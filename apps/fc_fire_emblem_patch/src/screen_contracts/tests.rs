@@ -4,7 +4,7 @@ use super::*;
 fn registry_covers_every_observed_chr_pair() {
     let report = build_report(REGISTRY_JSON, OBSERVED_CHR_PAIRS).unwrap();
 
-    assert_eq!(report.screen_count, 47);
+    assert_eq!(report.screen_count, 52);
     assert_eq!(report.unpartitioned_surface_family_count, 0);
     assert_eq!(report.runtime_observed_screen_count, 47);
     assert_eq!(report.chr_pair_observed_screen_count, 44);
@@ -12,7 +12,7 @@ fn registry_covers_every_observed_chr_pair() {
     assert_eq!(report.preserved_original_only_screen_count, 5);
     assert_eq!(report.page_switch_verified_screen_count, 1);
     assert_eq!(report.mixed_text_page_verified_screen_count, 1);
-    assert!(report.unresolved_surface_families.is_empty());
+    assert_eq!(report.unresolved_surface_families, ["fixed_menu"]);
     assert!(report.unpartitioned_surface_families.is_empty());
     assert!(report.screens.iter().any(|screen| {
         screen.screen_role == "ending_character_epilogue"

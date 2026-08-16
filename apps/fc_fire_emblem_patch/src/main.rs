@@ -7,6 +7,7 @@ mod class_profile;
 mod dialogue_assets;
 mod dialogue_inventory;
 mod epilogue_variant_evidence;
+mod fixed_menu_labels;
 mod fixed_string_consumers;
 mod font;
 mod font_slots;
@@ -283,6 +284,8 @@ enum Command {
         unit_ui_label_localization: PathBuf,
         #[arg(long, default_value = "assets/translation/item-action-labels.ko.json")]
         item_action_label_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/fixed-menu-labels.ko.json")]
+        fixed_menu_label_localization: PathBuf,
         #[arg(long, default_value = "assets/translation/transition-labels.ko.json")]
         transition_label_localization: PathBuf,
         #[arg(
@@ -346,6 +349,8 @@ enum Command {
         unit_ui_label_localization: PathBuf,
         #[arg(long, default_value = "assets/translation/item-action-labels.ko.json")]
         item_action_label_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/fixed-menu-labels.ko.json")]
+        fixed_menu_label_localization: PathBuf,
         #[arg(long, default_value = "assets/translation/transition-labels.ko.json")]
         transition_label_localization: PathBuf,
         #[arg(long, default_value = "assets/translation/location-names.ko.json")]
@@ -1173,6 +1178,7 @@ fn main() -> Result<()> {
             title_graphics_localization,
             unit_ui_label_localization,
             item_action_label_localization,
+            fixed_menu_label_localization,
             transition_label_localization,
             chapter_save_continue_prompt_manifest,
             location_name_localization,
@@ -1202,6 +1208,7 @@ fn main() -> Result<()> {
                     title_graphics_localization_path: &title_graphics_localization,
                     unit_ui_label_localization_path: &unit_ui_label_localization,
                     item_action_label_localization_path: &item_action_label_localization,
+                    fixed_menu_label_localization_path: &fixed_menu_label_localization,
                     transition_label_localization_path: &transition_label_localization,
                     chapter_save_continue_prompt_manifest_path:
                         &chapter_save_continue_prompt_manifest,
@@ -1249,6 +1256,7 @@ fn main() -> Result<()> {
             map_menu_localization,
             unit_ui_label_localization,
             item_action_label_localization,
+            fixed_menu_label_localization,
             transition_label_localization,
             location_name_localization,
             current_candidate,
@@ -1274,6 +1282,7 @@ fn main() -> Result<()> {
                     map_menu_localization_path: &map_menu_localization,
                     unit_ui_label_localization_path: &unit_ui_label_localization,
                     item_action_label_localization_path: &item_action_label_localization,
+                    fixed_menu_label_localization_path: &fixed_menu_label_localization,
                     transition_label_localization_path: &transition_label_localization,
                     location_name_localization_path: &location_name_localization,
                     current_candidate_path: &current_candidate,

@@ -12,10 +12,12 @@ use crate::{
     choice_labels::plan_choice_labels,
     dialogue_assets::{plan_all_main_dialogue_records, validate_main_dialogue_workspace},
     dialogue_inventory::inspect_main_dialogue_graph,
+    fixed_menu_labels::plan_fixed_menu_labels,
     fixed_string_consumers::{FixedStringConsumerCensus, inspect_fixed_string_consumers},
     font_slots::{FONT_PAGE_SIZE, FONT_TILE_SIZE},
     front_end_menu::plan_front_end_menu,
     item_flow::plan_item_action_labels,
+    localization::OptionsLocalization,
     map_menu::plan_map_menu,
     mapper165::{
         CarriedBattleDomainInputs, CarriedBattleDomainPreservation, CarriedUiDomainInputs,
@@ -125,7 +127,7 @@ const IDENTITY_SELECTOR_DIRECTORY_BYTE_COUNT: usize = 256;
 const FRONT_END_SAVE_SUMMARY_UNIT_SOURCE_INDEX: usize = 0;
 const FRONT_END_SAVE_SUMMARY_CLASS_SOURCE_INDEX: usize = 20;
 
-const REQUIRED_DOMAIN_COUNT: usize = 13;
+const REQUIRED_DOMAIN_COUNT: usize = 14;
 const REQUIRED_DOMAINS: [&str; REQUIRED_DOMAIN_COUNT] = [
     "chapter_save_offer_label",
     "chapter_titles",
@@ -133,6 +135,7 @@ const REQUIRED_DOMAINS: [&str; REQUIRED_DOMAIN_COUNT] = [
     "class_names",
     "ending_record_labels",
     "enemy_names",
+    "fixed_menu_labels",
     "item_action_labels",
     "item_names",
     "location_names",
@@ -159,6 +162,7 @@ pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) map_menu_localization_path: &'a Path,
     pub(crate) unit_ui_label_localization_path: &'a Path,
     pub(crate) item_action_label_localization_path: &'a Path,
+    pub(crate) fixed_menu_label_localization_path: &'a Path,
     pub(crate) transition_label_localization_path: &'a Path,
     pub(crate) location_name_localization_path: &'a Path,
     pub(crate) current_candidate_path: &'a Path,
@@ -230,6 +234,7 @@ struct TranslationInputs {
     map_menu_label_count: usize,
     unit_ui_label_count: usize,
     item_action_label_count: usize,
+    fixed_menu_label_count: usize,
     transition_label_count: usize,
     location_name_count: usize,
     translation_input_complete: bool,
@@ -470,6 +475,20 @@ pub(crate) fn plan_full_translation_installation(
     let map_menu = plan_map_menu(&rom, inputs.map_menu_localization_path)?;
     let unit_ui = plan_unit_ui_labels(&rom, inputs.unit_ui_label_localization_path)?;
     let item_actions = plan_item_action_labels(&rom, inputs.item_action_label_localization_path)?;
+    let fixed_menu_labels =
+        plan_fixed_menu_labels(&rom, inputs.fixed_menu_label_localization_path)?;
+    let options_localization = OptionsLocalization::from_path(inputs.options_localization_path)?;
+    let validated_options = options_localization.validate()?;
+    let options_glyph_codes = options_localization
+        .glyphs
+        .iter()
+        .map(|glyph| (glyph.character, glyph.code))
+        .collect::<BTreeMap<_, _>>();
+    ensure!(
+        validated_options.entries.len() == 3
+            && options_glyph_codes.len() == options_localization.glyphs.len(),
+        "options localization no longer has three labels with one code per glyph"
+    );
     let transitions = plan_transition_labels(&rom, inputs.transition_label_localization_path)?;
     let locations = plan_location_name_text(&rom, inputs.location_name_localization_path)?;
 
@@ -485,6 +504,7 @@ pub(crate) fn plan_full_translation_installation(
             && map_menu.translated_entry_count == 8
             && unit_ui.entry_count == 25
             && item_actions.entry_count == 4
+            && fixed_menu_labels.entry_count == 7
             && transitions.save_offer.entry_count == 1
             && transitions.ending_record.entry_count == 1
             && locations.entries.len() == 24,
@@ -571,6 +591,8 @@ pub(crate) fn plan_full_translation_installation(
         map_menu: &map_menu,
         unit_ui: &unit_ui,
         item_actions: &item_actions,
+        fixed_menu_labels: &fixed_menu_labels,
+        options_glyph_codes: &options_glyph_codes,
         transitions: &transitions,
     })?;
     let chapter_save_projection = plan_chapter_save_projection(ChapterSaveProjectionInputs {
@@ -625,6 +647,7 @@ pub(crate) fn plan_full_translation_installation(
         candidate: &current_candidate,
         unit_ui: &unit_ui,
         item_actions: &item_actions,
+        fixed_menu_labels: &fixed_menu_labels,
         map_menu: &map_menu,
         consumer_codebook: &consumer_codebook,
         consumer_catalog: &consumer_catalog,
@@ -651,6 +674,7 @@ pub(crate) fn plan_full_translation_installation(
     cross_domain_target_glyphs.extend(map_menu.target_glyphs.iter().copied());
     cross_domain_target_glyphs.extend(unit_ui.unique_target_glyphs());
     cross_domain_target_glyphs.extend(item_actions.unique_target_glyphs());
+    cross_domain_target_glyphs.extend(fixed_menu_labels.unique_target_glyphs());
     cross_domain_target_glyphs.extend(transitions.save_offer.target_glyphs.iter().copied());
     cross_domain_target_glyphs.extend(transitions.ending_record.target_glyphs.iter().copied());
     cross_domain_target_glyphs.extend(locations.unique_glyphs());
@@ -711,6 +735,7 @@ pub(crate) fn plan_full_translation_installation(
         map_menu: &map_menu,
         unit_ui: &unit_ui,
         item_actions: &item_actions,
+        fixed_menu_labels: &fixed_menu_labels,
         transitions: &transitions,
         locations: &locations,
         consumer_catalog: &consumer_catalog,
@@ -862,6 +887,7 @@ pub(crate) fn plan_full_translation_installation(
                 .count(),
         ),
         ("item_action_labels", item_actions.entry_count),
+        ("fixed_menu_labels", fixed_menu_labels.entry_count),
         (
             "item_names",
             fixed
@@ -888,7 +914,12 @@ pub(crate) fn plan_full_translation_installation(
                 .or_default()
                 .extend(roles.iter().map(|role| (*role).to_owned()));
         };
-        for domain in ["unit_ui_labels", "item_action_labels", "map_menu_labels"] {
+        for domain in [
+            "unit_ui_labels",
+            "item_action_labels",
+            "map_menu_labels",
+            "fixed_menu_labels",
+        ] {
             add_roles(domain, fixed_ui_projection.projected_screen_roles(domain));
         }
         for domain in ["unit_names", "enemy_names", "class_names"] {
@@ -1005,6 +1036,7 @@ pub(crate) fn plan_full_translation_installation(
         && map_menu.review_complete
         && unit_ui.review_complete
         && item_actions.review_complete
+        && fixed_menu_labels.review_complete
         && transitions.save_offer.review_complete
         && transitions.ending_record.review_complete
         && locations.review_complete
@@ -1091,6 +1123,7 @@ pub(crate) fn plan_full_translation_installation(
             map_menu_label_count: map_menu.entry_count,
             unit_ui_label_count: unit_ui.entry_count,
             item_action_label_count: item_actions.entry_count,
+            fixed_menu_label_count: fixed_menu_labels.entry_count,
             transition_label_count: transitions.save_offer.entry_count
                 + transitions.ending_record.entry_count,
             location_name_count: locations.entries.len(),

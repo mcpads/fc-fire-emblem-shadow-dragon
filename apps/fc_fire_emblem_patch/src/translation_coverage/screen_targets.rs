@@ -27,6 +27,7 @@ pub(crate) const DOMAIN_SEEDS: &[TranslationDomainSeed] = &[
     domain("ending_record_labels", "ending_aggregate_record"),
     domain("enemy_names", "enemy_name"),
     domain("front_end_menu_labels", "menu_label"),
+    domain("fixed_menu_labels", "fixed_menu_label"),
     domain("item_action_labels", "item_action_label"),
     domain("item_names", "item_name"),
     domain("location_names", "location_name"),
@@ -145,6 +146,11 @@ const SCREEN_TARGETS: &[ScreenTargetSeed] = &[
     screen("item_use_result", &["main_dialogue"]),
     screen("item_transfer_result", &["main_dialogue"]),
     screen("item_discard_result", &["main_dialogue"]),
+    screen("unit_selection", &["fixed_menu_labels"]),
+    screen("game_speed_selection", &["fixed_menu_labels"]),
+    screen("storage_action_menu", &["fixed_menu_labels"]),
+    screen("storage_overflow_action", &["fixed_menu_labels"]),
+    screen("storage_capacity_notice", &["fixed_menu_labels"]),
 ];
 
 struct ScreenTargetSeed {
@@ -248,8 +254,8 @@ mod tests {
         let partition = inspect_screen_translation_partition().unwrap();
         let domains = bind_domain_screen_targets(&partition).unwrap();
 
-        assert_eq!(partition.screen_count, 47);
-        assert_eq!(partition.japanese_bearing_screens.len(), 38);
+        assert_eq!(partition.screen_count, 52);
+        assert_eq!(partition.japanese_bearing_screens.len(), 43);
         assert_eq!(partition.preserved_original_only_screen_count, 5);
         assert_eq!(partition.no_text_screen_count, 4);
         assert_eq!(domains.len(), DOMAIN_SEEDS.len());

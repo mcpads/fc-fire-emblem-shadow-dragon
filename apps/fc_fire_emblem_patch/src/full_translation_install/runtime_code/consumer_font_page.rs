@@ -47,6 +47,9 @@ const COMPOSITE_PAGE_ENTRY_SOURCE: [u8; 12] = [
 ];
 
 const CENTRAL_RIGHT_FD_WRITER: u16 = 0xC9BE;
+const APPEND_FIXED_STRING: u16 = 0x8EEE;
+pub(super) const FIXED_MENU_FONT_PAGE_APPENDER_ORIGIN: u16 = 0xBA6B;
+const FIXED_MENU_FONT_PAGE_APPENDER_END: u16 = 0xBA75;
 const JSR_ABSOLUTE_OPCODE: u8 = 0x20;
 const JMP_ABSOLUTE_OPCODE: u8 = 0x4C;
 const SCREEN_OPEN_RIGHT_FD_CALL: u16 = 0x928A;
@@ -76,6 +79,49 @@ const UNIT_STATUS_COMPOSITE_STATE: u8 = 0x0F;
 const MAP_FUNDS_COMPOSITE_STATE: u8 = 0x13;
 const MAP_SUMMARY_COMPOSITE_STATE: u8 = 0x14;
 const CHAPTER_SAVE_OFFER_COMPOSITE_STATE: u8 = 0x1C;
+
+/// Each site is the first fixed-menu label append on its execution path.  The speed selector has
+/// two mutually exclusive paths, so both calls are hooked.  The storage screens append their
+/// remaining labels linearly after the listed call and retain the selected page for the screen
+/// lifetime.
+const FIXED_MENU_FONT_PAGE_CALLS: [(u16, u8, DialogueRuntimeHookRole, &'static str); 6] = [
+    (
+        0x8A3C,
+        0x2C,
+        DialogueRuntimeHookRole::FixedMenuUnitSelectionAppender,
+        "unit-selection fixed-menu font-page hook",
+    ),
+    (
+        0x8A6D,
+        0x30,
+        DialogueRuntimeHookRole::FixedMenuFastSpeedAppender,
+        "fast-speed fixed-menu font-page hook",
+    ),
+    (
+        0x8A7A,
+        0x31,
+        DialogueRuntimeHookRole::FixedMenuSlowSpeedAppender,
+        "slow-speed fixed-menu font-page hook",
+    ),
+    (
+        0x8B1D,
+        0x35,
+        DialogueRuntimeHookRole::FixedMenuStorageActionAppender,
+        "storage-action fixed-menu font-page hook",
+    ),
+    (
+        0x8DA8,
+        0x35,
+        DialogueRuntimeHookRole::FixedMenuStorageOverflowAppender,
+        "storage-overflow fixed-menu font-page hook",
+    ),
+    (
+        0x8E31,
+        0x47,
+        DialogueRuntimeHookRole::FixedMenuStorageCapacityAppender,
+        "storage-capacity fixed-menu font-page hook",
+    ),
+];
 #[derive(Clone, Copy)]
 pub(in crate::full_translation_install) struct ConsumerFontPageRoutes {
     pub(in crate::full_translation_install) front_end: u8,
@@ -192,7 +238,25 @@ impl ConsumerFontPageRoutes {
 /// 페이지를 적용하고 닫기는 원본 selector 사슬로 복귀한다는 분모가 닫힌다.
 pub(super) fn bind_consumer_font_page_lifetime(source: &Rom, candidate: &Rom) -> Result<()> {
     bind_direct_composite_state_producers(source, candidate)?;
+    bind_fixed_menu_font_page_appender_cave(source, candidate)?;
     for (image_role, rom) in [("source", source), ("candidate", candidate)] {
+        for (call, index, _, role) in FIXED_MENU_FONT_PAGE_CALLS {
+            let producer = call
+                .checked_sub(2)
+                .context("fixed-menu appender producer address underflow")?;
+            let expected = [0xA9, index, 0x20, 0xEE, 0x8E];
+            let actual = switchable_slice(rom, UNIT_UI_BANK, producer, expected.len())?;
+            ensure!(
+                actual == expected,
+                "{image_role} {role} changed at {UNIT_UI_BANK:02X}:{producer:04X}"
+            );
+            decode_rp2a03_sequence(
+                actual,
+                producer,
+                "load and append the first fixed-menu label on one execution path",
+            )?;
+        }
+
         let entry = fixed_slice(rom, COMPOSITE_PAGE_ENTRY, COMPOSITE_PAGE_ENTRY_SOURCE.len())?;
         ensure!(
             entry == COMPOSITE_PAGE_ENTRY_SOURCE,
@@ -249,6 +313,48 @@ pub(super) fn bind_consumer_font_page_lifetime(source: &Rom, candidate: &Rom) ->
             "{image_role} bank {UNIT_UI_BANK:02X} central right-FD direct-transfer census changed: {transfers:?}"
         );
     }
+    Ok(())
+}
+
+/// Bank 0B is already selected while its composite handlers append fixed labels.  Keeping this
+/// ten-byte wrapper in that bank avoids spending scarce fixed-bank selector space.  The selected
+/// range is exact FF in both inputs and no adjacent little-endian source word names any address in
+/// it; a future table, call, or data owner therefore fails this admission instead of being covered.
+fn bind_fixed_menu_font_page_appender_cave(source: &Rom, candidate: &Rom) -> Result<()> {
+    let length =
+        usize::from(FIXED_MENU_FONT_PAGE_APPENDER_END - FIXED_MENU_FONT_PAGE_APPENDER_ORIGIN);
+    for (image_role, rom) in [("source", source), ("candidate", candidate)] {
+        let bytes = switchable_slice(
+            rom,
+            UNIT_UI_BANK,
+            FIXED_MENU_FONT_PAGE_APPENDER_ORIGIN,
+            length,
+        )?;
+        ensure!(
+            bytes.iter().all(|byte| *byte == 0xFF),
+            "{image_role} fixed-menu font-page appender cave is not exact FF"
+        );
+    }
+
+    let bank_start = usize::from(UNIT_UI_BANK) * FIXED_BANK_BYTE_COUNT;
+    let bank = source
+        .prg()
+        .get(bank_start..bank_start + FIXED_BANK_BYTE_COUNT)
+        .context("source bank 0B is missing")?;
+    let literal_references = bank
+        .windows(2)
+        .enumerate()
+        .filter_map(|(offset, bytes)| {
+            let target = u16::from_le_bytes([bytes[0], bytes[1]]);
+            (FIXED_MENU_FONT_PAGE_APPENDER_ORIGIN..FIXED_MENU_FONT_PAGE_APPENDER_END)
+                .contains(&target)
+                .then_some((0x8000_u16 + u16::try_from(offset).ok()?, target))
+        })
+        .collect::<Vec<_>>();
+    ensure!(
+        literal_references.is_empty(),
+        "source bank 0B gained a literal reference into the fixed-menu appender cave: {literal_references:?}"
+    );
     Ok(())
 }
 
@@ -331,6 +437,51 @@ pub(super) fn gameplay_handoff_hook(handoff: u16) -> Result<DialogueRuntimeHook>
     })
 }
 
+/// The six path-leading fixed-menu appender calls have the same three-byte footprint as their
+/// source `JSR $8EEE`.  Redirecting only those calls avoids treating unrelated composite states as
+/// font-page owners.  The wrapper restores the label index before tail-calling the source appender.
+pub(super) fn fixed_menu_font_page_hooks(wrapper: u16) -> Result<Vec<DialogueRuntimeHook>> {
+    FIXED_MENU_FONT_PAGE_CALLS
+        .into_iter()
+        .map(|(address, _, role, write_role)| {
+            Ok(DialogueRuntimeHook {
+                role,
+                write_role,
+                site: DialogueRuntimeHookSite::Switchable {
+                    bank: UNIT_UI_BANK,
+                    address,
+                },
+                bytes: assemble_at(address, &[Instruction::JsrAbsolute(wrapper)])?,
+            })
+        })
+        .collect()
+}
+
+/// Carries the source-bound bank-0B cave routine through the same checked switchable-bank mutation
+/// path as its call-site hooks.  Its distinct role prevents it from being mistaken for one of the
+/// six replaced calls.
+pub(super) fn fixed_menu_font_page_appender_installation(
+    routine: &RuntimeRoutine,
+) -> Result<DialogueRuntimeHook> {
+    ensure!(
+        routine.address == FIXED_MENU_FONT_PAGE_APPENDER_ORIGIN
+            && routine.bytes.len()
+                == usize::from(
+                    FIXED_MENU_FONT_PAGE_APPENDER_END - FIXED_MENU_FONT_PAGE_APPENDER_ORIGIN,
+                ),
+        "fixed-menu font-page appender no longer fills its admitted bank-0B cave"
+    );
+    Ok(DialogueRuntimeHook {
+        role: DialogueRuntimeHookRole::FixedMenuFontPageAppenderRoutine,
+        write_role: "fixed-menu font-page appender routine",
+        site: DialogueRuntimeHookSite::Switchable {
+            bank: UNIT_UI_BANK,
+            address: routine.address,
+        },
+        bytes: routine.bytes.clone(),
+    })
+}
+
 /// 계획 단계에서 검증한 FD/FE route를 현재 UI 페이지로 게시하고 즉시 적용한다.
 /// 합성기는 `ConsumerFontPageRoutes`의 상수만 넘기고, 이름 appender는 경계가 검증된
 /// catalog record의 첫 바이트만 넘긴다. `$07FD=0`인 화면 열기는 이 routine을 부르기
@@ -349,6 +500,29 @@ pub(super) fn build_consumer_font_page_activation(
 
     Ok(RuntimeRoutine {
         role: "consumer font page activation",
+        address: origin,
+        bytes: assemble_at(origin, &instructions)?,
+    })
+}
+
+/// Selects the fixed-menu page without losing the source appender's index in A.  A `JMP` into the
+/// original appender makes its `RTS` return directly to the original screen composer, exactly as
+/// the replaced `JSR $8EEE` did.
+pub(super) fn build_fixed_menu_font_page_appender(
+    origin: u16,
+    activation: u16,
+    pages: ConsumerFontPageRoutes,
+) -> Result<RuntimeRoutine> {
+    pages.validate()?;
+    let instructions = [
+        Instruction::Pha,
+        Instruction::LdaImmediate(pages.unit_command),
+        Instruction::JsrAbsolute(activation),
+        Instruction::Pla,
+        Instruction::JmpAbsolute(APPEND_FIXED_STRING),
+    ];
+    Ok(RuntimeRoutine {
+        role: "fixed-menu font-page appender",
         address: origin,
         bytes: assemble_at(origin, &instructions)?,
     })
@@ -570,6 +744,7 @@ mod tests {
     #[derive(Default)]
     struct RunResult {
         applied_route: Option<u8>,
+        appended_fixed_string_index: Option<u8>,
         central_writer_value: Option<u8>,
         restored_source_pair: bool,
         a: u8,
@@ -582,6 +757,7 @@ mod tests {
         sp: u8,
         pc: u16,
         applied_route: Option<u8>,
+        appended_fixed_string_index: Option<u8>,
         central_writer_value: Option<u8>,
         restored_source_pair: bool,
     }
@@ -607,6 +783,7 @@ mod tests {
                 sp: 0xFD,
                 pc: entry,
                 applied_route: None,
+                appended_fixed_string_index: None,
                 central_writer_value: None,
                 restored_source_pair: false,
             }
@@ -654,6 +831,10 @@ mod tests {
                         }
                         if target == RESTORE_SOURCE_PAIR {
                             self.restored_source_pair = true;
+                            return self.finish();
+                        }
+                        if target == APPEND_FIXED_STRING {
+                            self.appended_fixed_string_index = Some(self.a);
                             return self.finish();
                         }
                         self.pc = target;
@@ -730,6 +911,7 @@ mod tests {
                 self.memory,
                 RunResult {
                     applied_route: self.applied_route,
+                    appended_fixed_string_index: self.appended_fixed_string_index,
                     central_writer_value: self.central_writer_value,
                     restored_source_pair: self.restored_source_pair,
                     a: self.a,
@@ -910,6 +1092,45 @@ mod tests {
         );
         assert_eq!(next_name.applied_route, Some(pages.catalog[0]));
         assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], pages.catalog[0]);
+    }
+
+    #[test]
+    fn fixed_menu_appender_selects_the_static_page_and_preserves_the_label_index() {
+        let pages = pages();
+        let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
+        let wrapper_origin = ORIGIN + u16::try_from(activation.bytes.len()).unwrap();
+        let wrapper =
+            build_fixed_menu_font_page_appender(wrapper_origin, activation.address, pages).unwrap();
+        let memory = vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
+
+        let (memory, result) = run_routines(
+            memory,
+            &[&activation, &wrapper],
+            wrapper.address,
+            0x47,
+            0xA5,
+        );
+
+        assert_eq!(result.applied_route, Some(pages.unit_command));
+        assert_eq!(result.appended_fixed_string_index, Some(0x47));
+        assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], pages.unit_command);
+
+        let hooks = fixed_menu_font_page_hooks(wrapper.address).unwrap();
+        assert_eq!(hooks.len(), FIXED_MENU_FONT_PAGE_CALLS.len());
+        assert_eq!(
+            hooks
+                .iter()
+                .map(|hook| match hook.site {
+                    DialogueRuntimeHookSite::Switchable { bank, address } => (bank, address),
+                    DialogueRuntimeHookSite::Fixed(_) => panic!("fixed-menu hook became fixed"),
+                })
+                .collect::<Vec<_>>(),
+            FIXED_MENU_FONT_PAGE_CALLS
+                .iter()
+                .map(|(address, _, _, _)| (UNIT_UI_BANK, *address))
+                .collect::<Vec<_>>()
+        );
+        assert!(hooks.iter().all(|hook| hook.bytes[0] == 0x20));
     }
 
     #[test]

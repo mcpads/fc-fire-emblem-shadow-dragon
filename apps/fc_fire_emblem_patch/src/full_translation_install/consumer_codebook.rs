@@ -53,6 +53,8 @@ pub(super) struct ConsumerCodebookInputs<'a> {
     pub(super) map_menu: &'a MapMenuPlan,
     pub(super) unit_ui: &'a SemanticTranslationPlan,
     pub(super) item_actions: &'a SemanticTranslationPlan,
+    pub(super) fixed_menu_labels: &'a SemanticTranslationPlan,
+    pub(super) options_glyph_codes: &'a BTreeMap<char, u8>,
     pub(super) transitions: &'a TransitionTranslationPlans,
 }
 
@@ -205,6 +207,7 @@ enum CodeOwner {
     DialogueDynamic,
     ChapterTitle,
     FixedUi,
+    OptionsTable,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -253,6 +256,12 @@ pub(super) fn plan_consumer_codebook(
         CodeOwner::FixedUi,
         inputs.choice_glyph_codes,
         "resident choice labels",
+    )?;
+    merge_preassignments(
+        &mut preassigned,
+        CodeOwner::OptionsTable,
+        inputs.options_glyph_codes,
+        "resident options labels",
     )?;
     ensure!(
         preassigned.values().all(|code| active_codes.contains(code)),
@@ -339,11 +348,16 @@ pub(super) fn plan_consumer_codebook(
             })
         })
         .collect::<Result<Vec<_>>>()?;
+    let fixed_menu_page = pages
+        .iter()
+        .find(|page| page.id == "unit_command_menu")
+        .context("consumer codebook lost the fixed-menu page")?;
+    ensure_options_parent_assignments(&fixed_menu_page.assignments, inputs.options_glyph_codes)?;
     let physical_code_count = assignments.values().copied().collect::<BTreeSet<_>>().len();
 
     Ok(ConsumerCodebookPlan {
         schema: 1,
-        strategy: "prebuild fixed-content command, map-menu, chapter-save, and ending pages; keep dialogue-dynamic, chapter-title, and save-choice producer codes fixed, and require KTX1 runtime projection only for variable unit, item, and shop consumers",
+        strategy: "prebuild fixed-content command, fixed-menu, map-menu, chapter-save, and ending pages; keep dialogue-dynamic, chapter-title, and save-choice producer codes fixed, and require KTX1 runtime projection only for variable unit, item, and shop consumers",
         glyph_count: graph.glyph_count(),
         conflict_edge_count: graph.edge_count(),
         preassigned_glyph_count: preassigned.len(),
@@ -366,4 +380,74 @@ pub(super) fn plan_consumer_codebook(
         static_pages_fit_reclaimable_tail: true,
         page_bytes_planned: true,
     })
+}
+
+/// The speed selector remains over its parent options window.  Rebinding only the new fast/slow
+/// labels would make the already-installed parent strings decode through unrelated fixed-UI
+/// codes, so every resident options glyph must survive at its original table code.
+fn ensure_options_parent_assignments(
+    assignments: &BTreeMap<GlyphKey, u8>,
+    expected: &BTreeMap<char, u8>,
+) -> Result<()> {
+    ensure!(
+        expected.iter().all(|(glyph, code)| {
+            assignments.get(&GlyphKey {
+                owner: CodeOwner::OptionsTable,
+                glyph: *glyph,
+            }) == Some(code)
+        }),
+        "fixed-menu page lost a resident options-label code assignment"
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fixed_menu_page_retains_resident_options_code_assignments() {
+        let expected = BTreeMap::from([('니', 0x3A), ('메', 0x3B)]);
+        let assignments = BTreeMap::from([
+            (
+                GlyphKey {
+                    owner: CodeOwner::OptionsTable,
+                    glyph: '니',
+                },
+                0x3A,
+            ),
+            (
+                GlyphKey {
+                    owner: CodeOwner::OptionsTable,
+                    glyph: '메',
+                },
+                0x3B,
+            ),
+            // The same visible glyph may legitimately have a different code in another storage
+            // producer.  It must not replace the options-table ownership above.
+            (
+                GlyphKey {
+                    owner: CodeOwner::FixedUi,
+                    glyph: '니',
+                },
+                0x0B,
+            ),
+        ]);
+
+        ensure_options_parent_assignments(&assignments, &expected).unwrap();
+
+        let only_unrelated_owner = BTreeMap::from([(
+            GlyphKey {
+                owner: CodeOwner::FixedUi,
+                glyph: '니',
+            },
+            0x0B,
+        )]);
+        assert!(
+            ensure_options_parent_assignments(&only_unrelated_owner, &expected)
+                .unwrap_err()
+                .to_string()
+                .contains("resident options-label")
+        );
+    }
 }

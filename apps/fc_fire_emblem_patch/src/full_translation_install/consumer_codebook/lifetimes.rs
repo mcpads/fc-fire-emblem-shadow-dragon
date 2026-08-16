@@ -31,6 +31,26 @@ pub(super) fn build_lifetimes(inputs: &ConsumerCodebookInputs<'_>) -> Result<Vec
         .collect::<Vec<_>>();
     let summary_labels = semantic_entries(inputs.unit_ui, &summary_and_status_label_ids())?;
     let command_labels = semantic_entries(inputs.unit_ui, &command_menu_label_ids())?;
+    let fixed_menu_labels = inputs
+        .fixed_menu_labels
+        .entry_ids()
+        .map(|id| {
+            inputs
+                .fixed_menu_labels
+                .entry_logical_bytes(id)
+                .with_context(|| format!("fixed-menu plan lost {id}"))
+                .map(<[FixedTextLogicalByte]>::to_vec)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    // The fast/slow selector is drawn over the still-visible options menu.  Its translated page
+    // must therefore retain the three carried option labels at their already-installed codes;
+    // treating the selector as an isolated two-label surface corrupts its parent rows.
+    let option_labels = inputs
+        .options_glyph_codes
+        .keys()
+        .copied()
+        .map(|glyph| vec![FixedTextLogicalByte::TargetGlyph(glyph)])
+        .collect::<Vec<_>>();
     let item_action_labels = inputs
         .item_actions
         .entry_ids()
@@ -76,10 +96,14 @@ pub(super) fn build_lifetimes(inputs: &ConsumerCodebookInputs<'_>) -> Result<Vec
     let _runtime_projected_populations = (&unit_names, &classes, &enemies, &items, &summary_labels);
     lifetimes.push(lifetime(
         "unit_command_menu",
-        "all_command_variants",
-        vec!["unit_command_menu"],
-        vec!["unit_ui_labels"],
-        &[(CodeOwner::FixedUi, command_labels.as_slice())],
+        "commands_fixed_menus_and_options_parent",
+        vec!["unit_command_menu", "options"],
+        vec!["unit_ui_labels", "fixed_menu_labels", "options_menu"],
+        &[
+            (CodeOwner::FixedUi, command_labels.as_slice()),
+            (CodeOwner::FixedUi, fixed_menu_labels.as_slice()),
+            (CodeOwner::OptionsTable, option_labels.as_slice()),
+        ],
         true,
     ));
     let _runtime_projected_item_actions = item_action_labels;

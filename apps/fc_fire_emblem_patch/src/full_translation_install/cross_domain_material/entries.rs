@@ -8,7 +8,7 @@ use crate::{
 
 use super::CrossDomainMaterialInputs;
 
-const EXPECTED_SECTION_COUNT: usize = 12;
+const EXPECTED_SECTION_COUNT: usize = 13;
 
 #[derive(Clone)]
 pub(super) struct MaterialEntry {
@@ -87,6 +87,11 @@ pub(super) fn collect_section_inputs(
             fixed_entries(inputs.fixed, "enemy-names"),
         ),
         section(
+            "fixed_menu_labels",
+            &inputs.fixed_menu_labels.workspace_sha1,
+            semantic_entries(inputs.fixed_menu_labels)?,
+        ),
+        section(
             "item_action_labels",
             &inputs.item_actions.workspace_sha1,
             semantic_entries(inputs.item_actions)?,
@@ -136,7 +141,7 @@ pub(super) fn collect_section_inputs(
             semantic_entries(inputs.unit_ui)?,
         ),
     ];
-    let expected_entry_counts = [1, 25, 2, 22, 1, 69, 4, 91, 24, 8, 53, 25];
+    let expected_entry_counts = [1, 25, 2, 22, 1, 69, 7, 4, 91, 24, 8, 53, 25];
     ensure!(
         sections.len() == EXPECTED_SECTION_COUNT
             && sections

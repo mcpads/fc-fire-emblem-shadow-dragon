@@ -52,6 +52,7 @@ pub(crate) struct TranslationCoverageInputs<'a> {
     pub(crate) title_graphics_localization_path: &'a Path,
     pub(crate) unit_ui_label_localization_path: &'a Path,
     pub(crate) item_action_label_localization_path: &'a Path,
+    pub(crate) fixed_menu_label_localization_path: &'a Path,
     pub(crate) transition_label_localization_path: &'a Path,
     pub(crate) chapter_save_continue_prompt_manifest_path: &'a Path,
     pub(crate) location_name_localization_path: &'a Path,
@@ -96,6 +97,7 @@ pub(crate) fn analyze_translation_coverage(
         title_graphics_localization_path: inputs.title_graphics_localization_path,
         unit_ui_label_localization_path: inputs.unit_ui_label_localization_path,
         item_action_label_localization_path: inputs.item_action_label_localization_path,
+        fixed_menu_label_localization_path: inputs.fixed_menu_label_localization_path,
         transition_label_localization_path: inputs.transition_label_localization_path,
         location_name_localization_path: inputs.location_name_localization_path,
     })?;

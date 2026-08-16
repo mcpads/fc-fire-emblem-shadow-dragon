@@ -4,6 +4,7 @@ use anyhow::{Result, ensure};
 use serde::Serialize;
 
 use crate::{
+    fixed_menu_labels::inspect_fixed_menu_translation_consumers,
     item_flow::inspect_item_action_translation_consumers,
     map_menu::inspect_map_menu_translation_consumers,
     mapper165::battle_codebook_plan::inspect_known_terrain_name_translation_routes,
@@ -15,7 +16,8 @@ use crate::{
 
 use super::screen_targets::{DOMAIN_SEEDS, DomainScreenTargets};
 
-const KNOWN_ROUTE_DOMAIN_IDS: [&str; 4] = [
+const KNOWN_ROUTE_DOMAIN_IDS: [&str; 5] = [
+    "fixed_menu_labels",
     "item_action_labels",
     "map_menu_labels",
     "terrain_names",
@@ -74,6 +76,10 @@ pub(crate) fn inspect_translation_consumer_evidence(
             DomainSourceEvidence::known_routes(
                 "unit_ui_labels",
                 inspect_unit_ui_translation_consumers(rom.data())?,
+            ),
+            DomainSourceEvidence::known_routes(
+                "fixed_menu_labels",
+                inspect_fixed_menu_translation_consumers(rom)?,
             ),
             DomainSourceEvidence::known_routes(
                 "item_action_labels",
@@ -398,16 +404,29 @@ mod tests {
                 "terrain_names",
                 source(&["terrain-names:000"], &["battle_animation"]),
             ),
+            DomainSourceEvidence::known_routes(
+                "fixed_menu_labels",
+                source(
+                    &["fixed-menu-label:2C"],
+                    &[
+                        "unit_selection",
+                        "game_speed_selection",
+                        "storage_action_menu",
+                        "storage_overflow_action",
+                        "storage_capacity_notice",
+                    ],
+                ),
+            ),
         ]
     }
 
     #[test]
-    fn keeps_all_censuses_incomplete_while_binding_four_known_route_sets() {
+    fn keeps_all_censuses_incomplete_while_binding_five_known_route_sets() {
         let (partition, targets) = metadata();
         let census = bind_translation_consumer_evidence(&partition, &targets, evidence()).unwrap();
 
-        assert_eq!(census.len(), 22);
-        assert_eq!(DOMAIN_SEEDS.len(), 22);
+        assert_eq!(census.len(), 23);
+        assert_eq!(DOMAIN_SEEDS.len(), 23);
         assert_eq!(
             census
                 .iter()
@@ -441,7 +460,7 @@ mod tests {
                 .iter()
                 .filter(|domain| domain.state != ConsumerEvidenceState::CompleteCensusBound)
                 .count(),
-            22
+            23
         );
     }
 

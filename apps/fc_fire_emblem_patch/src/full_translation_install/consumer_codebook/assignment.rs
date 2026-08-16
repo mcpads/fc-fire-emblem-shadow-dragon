@@ -318,6 +318,7 @@ pub(super) fn assignment_sha1(assignments: &BTreeMap<GlyphKey, u8>) -> String {
             CodeOwner::DialogueDynamic => 0,
             CodeOwner::ChapterTitle => 1,
             CodeOwner::FixedUi => 2,
+            CodeOwner::OptionsTable => 3,
         });
         bytes.extend_from_slice(key.glyph.to_string().as_bytes());
         bytes.push(*code);
