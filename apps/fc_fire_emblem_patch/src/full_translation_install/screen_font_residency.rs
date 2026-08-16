@@ -5,6 +5,7 @@
 //! 그대로 방출한다. 이전 화면이 남긴 `$07FD`를 암묵적인 입력으로 쓰지 않는다.
 
 mod surface_requirements;
+mod transition_surfaces;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -12,6 +13,8 @@ use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
+    chapter_transition::{ChapterTitlePlan, TransitionTranslationPlans},
+    choice_labels::ChoiceLabelPlan,
     front_end_menu::{
         FRONT_END_FONT_STATES, RECORD_ACTION_COMPOSITE_STATE, RECORD_LIST_COMPOSITE_STATE,
         SAVE_SLOT_SELECTION_COMPOSITE_STATE, START_MENU_COMPOSITE_STATE,
@@ -25,6 +28,9 @@ use crate::{
 use super::{consumer_catalog::ConsumerCatalogPlan, consumer_codebook::ConsumerCodebookPlan};
 use surface_requirements::{
     ScreenFontSurfaceInputs, ScreenFontSurfacePlan, plan_screen_font_surfaces,
+};
+use transition_surfaces::{
+    TransitionSurfaceInputs, TransitionSurfacePlan, plan_transition_surfaces,
 };
 
 pub(super) const FRONT_END_SAVE_SUMMARY_UNIT_SOURCE_INDEX: usize = 0;
@@ -231,10 +237,11 @@ impl ScreenFontPageRoutes {
 pub(super) struct ScreenFontResidencyInputs<'a> {
     pub(super) front_end_menu_route: u8,
     pub(super) map_menu_route: u8,
-    pub(super) ending_record_route: u8,
-    pub(super) chapter_save_offer_route: u8,
     pub(super) consumer_catalog: &'a ConsumerCatalogPlan,
     pub(super) consumer_codebook: &'a ConsumerCodebookPlan,
+    pub(super) chapter_titles: &'a ChapterTitlePlan,
+    pub(super) choices: &'a ChoiceLabelPlan,
+    pub(super) transitions: &'a TransitionTranslationPlans,
     pub(super) fixed: &'a FixedTextPlan,
     pub(super) unit_names: &'a UnitNamePlan,
     pub(super) unit_ui: &'a SemanticTranslationPlan,
@@ -261,6 +268,7 @@ pub(super) struct ScreenFontResidencyPlan {
     record_action_page_contains_every_menu_glyph: bool,
     record_action_page_contains_the_protagonist_name_and_class: bool,
     surface_requirements: ScreenFontSurfacePlan,
+    transition_surfaces: TransitionSurfacePlan,
     #[serde(skip)]
     routes: ScreenFontPageRoutes,
     #[serde(skip)]
@@ -325,6 +333,12 @@ pub(super) fn plan_screen_font_residency(
         installed_front_end_glyph_codes: inputs.installed_front_end_glyph_codes,
         options_glyph_codes: inputs.options_glyph_codes,
     })?;
+    let transition_surfaces = plan_transition_surfaces(TransitionSurfaceInputs {
+        consumer_codebook: inputs.consumer_codebook,
+        chapter_titles: inputs.chapter_titles,
+        choices: inputs.choices,
+        transitions: inputs.transitions,
+    })?;
     let routes = ScreenFontPageRoutes {
         front_end_menu: inputs.front_end_menu_route,
         front_end_record_action: front_end_record_action_route,
@@ -332,8 +346,8 @@ pub(super) fn plan_screen_font_residency(
             .consumer_codebook
             .mapper_route_for("unit_command_menu")?,
         map_menu: inputs.map_menu_route,
-        ending_record: inputs.ending_record_route,
-        chapter_save_offer: inputs.chapter_save_offer_route,
+        ending_record: transition_surfaces.ending_record_route(),
+        chapter_save_offer: transition_surfaces.chapter_save_route(),
         catalog: inputs.consumer_catalog.mapper_routes()?,
     };
     routes.validate()?;
@@ -373,6 +387,7 @@ pub(super) fn plan_screen_font_residency(
         record_action_page_contains_every_menu_glyph: true,
         record_action_page_contains_the_protagonist_name_and_class: true,
         surface_requirements,
+        transition_surfaces,
         routes,
         record_action_summary_glyph_codes,
     })

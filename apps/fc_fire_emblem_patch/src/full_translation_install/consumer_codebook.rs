@@ -144,6 +144,32 @@ impl ConsumerCodebookPlan {
         Ok(())
     }
 
+    pub(super) fn validate_static_page_residency(
+        &self,
+        page_id: &str,
+        required_fixed_ui_glyphs: &BTreeSet<char>,
+        required_chapter_title_glyphs: &BTreeSet<char>,
+    ) -> Result<()> {
+        let page = self
+            .pages
+            .iter()
+            .find(|page| page.id == page_id)
+            .with_context(|| format!("consumer codebook lost the {page_id} page"))?;
+        ensure_owned_glyphs(
+            &page.assignments,
+            CodeOwner::FixedUi,
+            required_fixed_ui_glyphs,
+            page_id,
+        )?;
+        ensure_owned_glyphs(
+            &page.assignments,
+            CodeOwner::ChapterTitle,
+            required_chapter_title_glyphs,
+            page_id,
+        )?;
+        Ok(())
+    }
+
     fn encode_for(
         &self,
         page_id: &str,
@@ -424,16 +450,31 @@ fn ensure_unit_command_assignments(
     required_fixed_ui_glyphs: &BTreeSet<char>,
     options_glyph_codes: &BTreeMap<char, u8>,
 ) -> Result<()> {
-    ensure!(
-        required_fixed_ui_glyphs.iter().all(|glyph| {
-            assignments.contains_key(&GlyphKey {
-                owner: CodeOwner::FixedUi,
-                glyph: *glyph,
-            })
-        }),
-        "unit-command page lost a command or fixed-menu glyph"
-    );
+    ensure_owned_glyphs(
+        assignments,
+        CodeOwner::FixedUi,
+        required_fixed_ui_glyphs,
+        "unit-command",
+    )?;
     ensure_options_parent_assignments(assignments, options_glyph_codes)?;
+    Ok(())
+}
+
+fn ensure_owned_glyphs(
+    assignments: &BTreeMap<GlyphKey, u8>,
+    owner: CodeOwner,
+    required: &BTreeSet<char>,
+    page_id: &str,
+) -> Result<()> {
+    ensure!(
+        required
+            .iter()
+            .all(|glyph| assignments.contains_key(&GlyphKey {
+                owner,
+                glyph: *glyph,
+            })),
+        "consumer page {page_id} lost a required {owner:?} glyph"
+    );
     Ok(())
 }
 
@@ -502,7 +543,30 @@ mod tests {
             ensure_unit_command_assignments(&assignments, &required, &BTreeMap::new())
                 .unwrap_err()
                 .to_string()
-                .contains("lost a command or fixed-menu glyph")
+                .contains("lost a required FixedUi glyph")
+        );
+    }
+
+    #[test]
+    fn ending_page_rejects_a_missing_chapter_title_glyph() {
+        let assignments = BTreeMap::from([(
+            GlyphKey {
+                owner: CodeOwner::FixedUi,
+                glyph: '턴',
+            },
+            0x20,
+        )]);
+
+        assert!(
+            ensure_owned_glyphs(
+                &assignments,
+                CodeOwner::ChapterTitle,
+                &BTreeSet::from(['장']),
+                "ending",
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("lost a required ChapterTitle glyph")
         );
     }
 }

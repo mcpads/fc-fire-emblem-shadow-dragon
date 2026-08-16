@@ -176,7 +176,7 @@ pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) output_path: Option<&'a Path>,
 }
 
-pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 25;
+pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 26;
 
 pub(crate) struct FullTranslationInstallSummary {
     pub(crate) report_sha1: String,
@@ -640,10 +640,11 @@ pub(crate) fn plan_full_translation_installation(
     let screen_font_residency = plan_screen_font_residency(ScreenFontResidencyInputs {
         front_end_menu_route: front_end_mapper_route,
         map_menu_route: consumer_codebook.mapper_route_for("map_menu")?,
-        ending_record_route: consumer_codebook.mapper_route_for("ending_chapter_record")?,
-        chapter_save_offer_route: consumer_codebook.mapper_route_for("chapter_save_offer")?,
         consumer_catalog: &consumer_catalog,
         consumer_codebook: &consumer_codebook,
+        chapter_titles: &chapter_titles,
+        choices: &choices,
+        transitions: &transitions,
         fixed: &fixed,
         unit_names: &unit_names,
         unit_ui: &unit_ui,
