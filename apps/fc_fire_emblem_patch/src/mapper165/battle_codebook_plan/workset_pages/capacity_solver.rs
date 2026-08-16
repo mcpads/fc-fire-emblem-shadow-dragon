@@ -135,7 +135,7 @@ fn solve_page_capacity_with_highs(
             solved.message
         ),
     };
-    verify_assignment(demands, &page_indices, maximum_page_count)?;
+    verify_external_assignment(demands, &page_indices, maximum_page_count)?;
     Ok(CapacitySolverOutput {
         page_indices,
         solver_version: solved.solver_version,
@@ -206,7 +206,7 @@ fn solve_page_capacity_with_z3(
         _ => bail!("Z3 returned an unexpected dialogue page result: {status:?}"),
     }
     let page_indices = parse_page_values(&stdout, demands.len())?;
-    verify_assignment(demands, &page_indices, maximum_page_count)?;
+    verify_external_assignment(demands, &page_indices, maximum_page_count)?;
     Ok(CapacitySolverOutput {
         page_indices,
         solver_version,
@@ -322,14 +322,27 @@ fn parse_page_values(output: &str, expected_count: usize) -> Result<Vec<usize>> 
         .collect()
 }
 
-fn verify_assignment(
+fn verify_external_assignment(
     demands: &[WorksetDemand],
     page_indices: &[usize],
     maximum_page_count: usize,
 ) -> Result<()> {
     ensure!(
+        maximum_page_count > 0,
+        "external dialogue page assignment has no available pages"
+    );
+    ensure!(
         demands.len() == page_indices.len(),
-        "Z3 dialogue page assignment count changed"
+        "external dialogue page assignment count changed"
+    );
+    ensure!(
+        page_indices.iter().all(|page| *page < maximum_page_count),
+        "external dialogue page assignment names a page outside the requested capacity"
+    );
+    let used_pages = page_indices.iter().copied().collect::<BTreeSet<_>>();
+    ensure!(
+        used_pages.iter().copied().eq(0..used_pages.len()),
+        "external dialogue page assignment is not canonically numbered"
     );
     for page in 0..maximum_page_count {
         let mut glyphs = BTreeSet::new();
@@ -342,7 +355,7 @@ fn verify_assignment(
         }
         ensure!(
             glyphs.len() + codes.len() <= ACTIVE_HANGUL_SLOT_COUNT,
-            "Z3 dialogue page {page} exceeds the active slot capacity"
+            "external dialogue page {page} exceeds the active slot capacity"
         );
         let members = page_indices
             .iter()
@@ -353,7 +366,7 @@ fn verify_assignment(
             for right in &members[position + 1..] {
                 ensure!(
                     worksets_can_share_page(&demands[*left].signature, &demands[*right].signature,),
-                    "Z3 dialogue page {page} merges incompatible fixed glyph codes"
+                    "external dialogue page {page} merges incompatible fixed glyph codes"
                 );
             }
         }
@@ -420,16 +433,44 @@ mod tests {
     }
 
     #[test]
-    fn independent_verifier_rejects_an_over_capacity_model() {
+    fn rust_verifier_rejects_an_external_over_capacity_model() {
         let glyphs = (0..=ACTIVE_HANGUL_SLOT_COUNT)
             .map(|index| char::from_u32(0xAC00 + index as u32).unwrap())
             .collect::<String>();
-        let error = verify_assignment(&[demand(&glyphs, &[])], &[0], 1).unwrap_err();
+        let error = verify_external_assignment(&[demand(&glyphs, &[])], &[0], 1).unwrap_err();
 
         assert!(
             error
                 .to_string()
                 .contains("exceeds the active slot capacity")
         );
+    }
+
+    #[test]
+    fn rust_verifier_rejects_an_external_out_of_range_page() {
+        let error = verify_external_assignment(&[demand("가", &[])], &[2], 2).unwrap_err();
+
+        assert!(error.to_string().contains("outside the requested capacity"));
+    }
+
+    #[test]
+    fn rust_verifier_rejects_noncanonical_external_page_numbers() {
+        let error = verify_external_assignment(&[demand("가", &[]), demand("나", &[])], &[0, 2], 3)
+            .unwrap_err();
+
+        assert!(error.to_string().contains("not canonically numbered"));
+    }
+
+    #[test]
+    fn rust_verifier_rejects_external_fixed_code_conflicts() {
+        let code = crate::font_slots::active_hangul_codes()[0];
+        let mut first = demand("가", &[]);
+        first.signature.fixed_glyph_codes = vec![('가', code)];
+        let mut second = demand("나", &[]);
+        second.signature.fixed_glyph_codes = vec![('나', code)];
+
+        let error = verify_external_assignment(&[first, second], &[0, 0], 1).unwrap_err();
+
+        assert!(error.to_string().contains("incompatible fixed glyph codes"));
     }
 }
