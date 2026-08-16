@@ -383,6 +383,8 @@ fn bind_integrated_installation(
             )
         })
         .collect::<BTreeMap<_, _>>();
+    let observed_screen_roles =
+        bind_runtime_evidence(&report.final_artifact_runtime_evidence, &output_sha1)?;
     let carried_domains =
         bind_carried_ui_domains(report.carried_ui_domain_preservation, &canonical_targets)?;
     let carried_domain_ids = carried_domains.keys().cloned().collect::<BTreeSet<_>>();
@@ -447,10 +449,14 @@ fn bind_integrated_installation(
             domain.runtime_observed_declared_screen_roles,
             "integrated domain runtime-observed screen roles",
         )?;
+        let expected_runtime_roles = declared_roles
+            .intersection(&observed_screen_roles)
+            .cloned()
+            .collect::<BTreeSet<_>>();
         ensure!(
             declared_roles == *canonical_roles
                 && statically_accounted_roles == declared_roles
-                && runtime_roles.is_subset(&declared_roles)
+                && runtime_roles == expected_runtime_roles
                 && domain.unaccounted_declared_screen_roles.is_empty()
                 && domain.all_declared_consumers_statically_accounted
                 && domain.target_unit_count > 0
@@ -477,22 +483,28 @@ fn bind_integrated_installation(
     domains.extend(carried_battle_domains);
     let final_static_domain_ids = domains.keys().cloned().collect::<BTreeSet<_>>();
 
-    let observed_screen_roles =
-        bind_runtime_evidence(&report.final_artifact_runtime_evidence, &output_sha1)?;
-    let reported_runtime_roles = domains
-        .values()
-        .flat_map(|domain| domain.runtime_bound_screen_roles.iter().cloned())
-        .collect::<BTreeSet<_>>();
     let declared_screen_roles = domains
         .values()
         .flat_map(|domain| domain.installed_screen_roles.iter().cloned())
         .collect::<BTreeSet<_>>();
     ensure!(
-        reported_runtime_roles
-            == observed_screen_roles
-                .intersection(&declared_screen_roles)
-                .cloned()
-                .collect(),
+        observed_screen_roles.is_subset(&declared_screen_roles),
+        "final-artifact evidence names a screen role outside the integrated installation"
+    );
+    for domain in domains.values_mut() {
+        domain.runtime_bound_screen_roles = domain
+            .installed_screen_roles
+            .iter()
+            .filter(|role| observed_screen_roles.contains(*role))
+            .cloned()
+            .collect();
+    }
+    let projected_runtime_roles = domains
+        .values()
+        .flat_map(|domain| domain.runtime_bound_screen_roles.iter().cloned())
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        projected_runtime_roles == observed_screen_roles,
         "integrated consumer runtime roles do not match final-artifact evidence"
     );
 
@@ -979,6 +991,21 @@ mod tests {
         .unwrap()
     }
 
+    fn report_json_with_carried_runtime_roles(runtime_roles: &[&str]) -> Vec<u8> {
+        let mut value: serde_json::Value = serde_json::from_slice(&report_json(None)).unwrap();
+        let evidence = &mut value["final_artifact_runtime_evidence"];
+        evidence["provided"] = true.into();
+        evidence["manifest_sha1"] = "runtime".into();
+        evidence["run_count"] = 1.into();
+        evidence["observation_count"] = runtime_roles.len().into();
+        evidence["sample_count"] = (runtime_roles.len() * 3).into();
+        evidence["bound_screen_roles"] = serde_json::json!(runtime_roles);
+        evidence["every_run_started_from_cold_boot"] = true.into();
+        evidence["savestate_free"] = true.into();
+        evidence["every_sample_image_digest_bound"] = true.into();
+        serde_json::to_vec(&value).unwrap()
+    }
+
     #[test]
     fn exact_final_report_replaces_declared_domain_installation() {
         let report = report_json(Some("map_menu"));
@@ -1014,6 +1041,56 @@ mod tests {
         assert_eq!(terrain.installed_target_unit_count, 16);
         assert_eq!(terrain.consumer_complete_screen_roles, ["battle_animation"]);
         assert!(terrain.runtime_bound_screen_roles.is_empty());
+    }
+
+    #[test]
+    fn exact_final_evidence_projects_onto_carried_ui_domains() {
+        let report = report_json_with_carried_runtime_roles(&[
+            "class_profile",
+            "new_game_choice",
+            "save_slot_selection",
+        ]);
+        let evidence =
+            bind_integrated_installation(&report, b"final", "base-output", "base-report").unwrap();
+
+        assert_eq!(
+            evidence.domains["class_profiles"].runtime_bound_screen_roles,
+            ["class_profile"]
+        );
+        assert_eq!(
+            evidence.domains["front_end_menu_labels"].runtime_bound_screen_roles,
+            ["new_game_choice", "save_slot_selection"]
+        );
+        assert!(
+            evidence.domains["options_labels"]
+                .runtime_bound_screen_roles
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn exact_final_battle_observation_projects_onto_every_visible_domain() {
+        let report = report_json_with_carried_runtime_roles(&["battle_animation"]);
+        let evidence =
+            bind_integrated_installation(&report, b"final", "base-output", "base-report").unwrap();
+
+        for domain_id in CARRIED_BATTLE_DOMAIN_IDS {
+            assert_eq!(
+                evidence.domains[domain_id].runtime_bound_screen_roles,
+                ["battle_animation"]
+            );
+        }
+    }
+
+    #[test]
+    fn final_evidence_role_outside_the_integrated_installation_fails_closed() {
+        let report = report_json_with_carried_runtime_roles(&["missing_screen_role"]);
+        assert!(
+            bind_integrated_installation(&report, b"final", "base-output", "base-report")
+                .unwrap_err()
+                .to_string()
+                .contains("outside the integrated installation")
+        );
     }
 
     #[test]
