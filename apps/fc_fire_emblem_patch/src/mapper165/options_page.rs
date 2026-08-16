@@ -13,6 +13,16 @@ pub(super) const PAGE_A_REGISTER: u8 = 0x88;
 pub(super) const PAGE_B_REGISTER: u8 = 0x8C;
 pub(super) const OPTIONS_COMPOSITE_STATE_ADDRESS: u16 = 0x05E8;
 pub(super) const OPTIONS_COMPOSITE_STATE: u8 = 0x1B;
+pub(super) const OPTIONS_MAIN_STATE_ADDRESS: u16 = 0x0084;
+pub(super) const OPTIONS_MAIN_STATE: u8 = 0x38;
+
+const OPTIONS_PAGE_OWNER_FIELDS: [(u8, u8); 5] = [
+    (0x52, 0x00),
+    (0x59, 0x1A),
+    (0x5A, 0x1A),
+    (0x5B, 0x00),
+    (OPTIONS_MAIN_STATE_ADDRESS as u8, OPTIONS_MAIN_STATE),
+];
 
 pub(super) fn row_calculation() -> Result<Vec<u8>> {
     assemble_at(
@@ -65,49 +75,41 @@ pub(super) fn build_page_routine_with_fallback(
     const WRITE_MAPPER_ADDRESS: u16 = 0xFB57;
     const FALLBACK_ADDRESS: u16 = 0xFB63;
 
-    assemble_at(
-        PAGE_ROUTINE_ADDRESS,
-        &[
-            Instruction::LdyImmediate(4),
-            Instruction::LdaIndirectY(0x6E),
-            Instruction::Clc,
-            Instruction::AdcAbsoluteX(0x93D8),
-            Instruction::StaZeroPage(0x34),
-            Instruction::Iny,
-            Instruction::Php,
-            Instruction::LdaZeroPage(0x52),
-            Instruction::CmpImmediate(0x00),
+    let mut instructions = vec![
+        Instruction::LdyImmediate(4),
+        Instruction::LdaIndirectY(0x6E),
+        Instruction::Clc,
+        Instruction::AdcAbsoluteX(0x93D8),
+        Instruction::StaZeroPage(0x34),
+        Instruction::Iny,
+        Instruction::Php,
+    ];
+    for (address, expected) in OPTIONS_PAGE_OWNER_FIELDS {
+        instructions.extend([
+            Instruction::LdaZeroPage(address),
+            Instruction::CmpImmediate(expected),
             Instruction::BneAbsolute(FALLBACK_ADDRESS),
-            Instruction::LdaZeroPage(0x59),
-            Instruction::CmpImmediate(0x1A),
-            Instruction::BneAbsolute(FALLBACK_ADDRESS),
-            Instruction::LdaZeroPage(0x5A),
-            Instruction::CmpImmediate(0x1A),
-            Instruction::BneAbsolute(FALLBACK_ADDRESS),
-            Instruction::LdaZeroPage(0x5B),
-            Instruction::CmpImmediate(0x00),
-            Instruction::BneAbsolute(FALLBACK_ADDRESS),
-            Instruction::LdaZeroPage(0x5C),
-            Instruction::CmpImmediate(0x15),
-            Instruction::BneAbsolute(FALLBACK_ADDRESS),
-            Instruction::LdaZeroPage(0x34),
-            Instruction::CmpImmediate(0x30),
-            Instruction::BeqAbsolute(PAGE_B_ADDRESS),
-            Instruction::LdaImmediate(page_a_register),
-            Instruction::JmpAbsolute(WRITE_MAPPER_ADDRESS),
-            Instruction::LdaImmediate(page_b_register),
-            Instruction::Pha,
-            Instruction::LdaImmediate(2),
-            crate::mapper165::selector_safety::select_register_instruction(),
-            Instruction::Pla,
-            Instruction::StaAbsolute(0x8001),
-            Instruction::Plp,
-            Instruction::Rts,
-            Instruction::JsrAbsolute(fallback_target),
-            Instruction::Plp,
-            Instruction::Rts,
-        ],
-    )
+        ]);
+    }
+    instructions.extend([
+        Instruction::LdaZeroPage(0x34),
+        Instruction::CmpImmediate(0x30),
+        Instruction::BeqAbsolute(PAGE_B_ADDRESS),
+        Instruction::LdaImmediate(page_a_register),
+        Instruction::JmpAbsolute(WRITE_MAPPER_ADDRESS),
+        Instruction::LdaImmediate(page_b_register),
+        Instruction::Pha,
+        Instruction::LdaImmediate(2),
+        crate::mapper165::selector_safety::select_register_instruction(),
+        Instruction::Pla,
+        Instruction::StaAbsolute(0x8001),
+        Instruction::Plp,
+        Instruction::Rts,
+        Instruction::JsrAbsolute(fallback_target),
+        Instruction::Plp,
+        Instruction::Rts,
+    ]);
+    assemble_at(PAGE_ROUTINE_ADDRESS, &instructions)
 }
 
 #[cfg(test)]
@@ -169,7 +171,39 @@ mod tests {
         assert!(routine.windows(2).any(|bytes| bytes == [0xA9, 0x88]));
         assert!(routine.windows(2).any(|bytes| bytes == [0xA9, 0x8C]));
         assert!(routine.windows(3).any(|bytes| bytes == [0x20, 0xC0, 0xFA]));
+        assert!(routine.windows(4).any(|bytes| bytes
+            == [
+                0xA5,
+                OPTIONS_MAIN_STATE_ADDRESS as u8,
+                0xC9,
+                OPTIONS_MAIN_STATE,
+            ]));
+        assert!(!routine.windows(2).any(|bytes| bytes == [0xA5, 0x5C]));
         assert_eq!(&routine[..11], row_calculation().unwrap());
+    }
+
+    #[test]
+    fn owner_predicate_ignores_inherited_right_fe_but_requires_the_live_options_state() {
+        let mut iram = [0_u8; 256];
+        for (address, expected) in OPTIONS_PAGE_OWNER_FIELDS {
+            iram[usize::from(address)] = expected;
+        }
+        let matches = |memory: &[u8; 256]| {
+            OPTIONS_PAGE_OWNER_FIELDS
+                .into_iter()
+                .all(|(address, expected)| memory[usize::from(address)] == expected)
+        };
+
+        for inherited_right_fe in [0x15, 0x18, 0x19, 0xFF] {
+            iram[0x5C] = inherited_right_fe;
+            assert!(matches(&iram));
+        }
+
+        iram[usize::from(OPTIONS_MAIN_STATE_ADDRESS)] = OPTIONS_MAIN_STATE - 1;
+        assert!(!matches(&iram));
+        iram[usize::from(OPTIONS_MAIN_STATE_ADDRESS)] = OPTIONS_MAIN_STATE;
+        iram[0x5B] = 1;
+        assert!(!matches(&iram));
     }
 
     #[test]
