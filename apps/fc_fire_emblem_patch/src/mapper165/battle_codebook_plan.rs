@@ -51,7 +51,9 @@ use physical_assignment::assign_physical_codes;
 pub(crate) use remap_storage::{BATTLE_RUNTIME_STORAGE_END, BATTLE_RUNTIME_STORAGE_START};
 use runtime_demand::{BattleRuntimeDemandPlan, ExactModeledRuntimeInput, plan_runtime_demand};
 use runtime_inputs::{BattleRuntimeInputBinding, bind_battle_runtime_inputs};
-pub(crate) use workset_pages::{GlyphWorksetPagePlan, plan_glyph_workset_page_upper_bound};
+pub(crate) use workset_pages::{
+    GlyphWorksetPagePlan, plan_glyph_workset_page_upper_bound, verify_glyph_workset_font_page_pack,
+};
 
 pub(crate) fn build_glyph_workset_font_page_pack(
     source_page: &[u8],

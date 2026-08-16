@@ -19,6 +19,7 @@ use report::{
     GlyphCapacityReport, GlyphSetReport, GlyphWorksetScope, GlyphWorksetStatusCounts,
     MainDialogueGlyphWorksetReport, MaximumTransitionChainReport,
 };
+pub(crate) use screen_lifetimes::ending_character_epilogue_preserved_active_codes;
 use screen_lifetimes::observed_screen_lifetime_reports;
 
 pub(crate) use maximum_source::{

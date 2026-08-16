@@ -45,7 +45,8 @@ pub(crate) use bundle::{
 pub(crate) use display_plan::MainDialogueDisplayPlan;
 pub(crate) use glyph_workset::{
     RuntimeEvidence as MaximumDialogueRuntimeEvidence, analyze_main_dialogue_glyph_workset,
-    bind_chapter_event_dialogue_routes, load_maximum_dialogue_runtime_evidence,
+    bind_chapter_event_dialogue_routes, ending_character_epilogue_preserved_active_codes,
+    load_maximum_dialogue_runtime_evidence,
 };
 use layout_packing::*;
 use markup::*;

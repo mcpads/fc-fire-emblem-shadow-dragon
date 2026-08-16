@@ -1,11 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
-    dialogue_assets::MainDialogueDisplayPlan, font_slots::active_hangul_codes,
-    mapper165::battle_codebook_plan::GlyphWorkset, text_inventory::FixedTextPlannedEntry,
+    dialogue_assets::{MainDialogueDisplayPlan, ending_character_epilogue_preserved_active_codes},
+    font_slots::active_hangul_codes,
+    mapper165::battle_codebook_plan::GlyphWorkset,
+    text_inventory::FixedTextPlannedEntry,
 };
 
 mod page_code_identity;
@@ -97,6 +99,10 @@ pub(super) fn plan_dynamic_dialogue_inputs(
 
     for workset in &dialogue.page_worksets {
         let mut target_glyphs = workset.target_glyphs.clone();
+        let mut preserved_active_codes = workset.preserved_target_active_codes.clone();
+        if is_ending_character_epilogue_record(&workset.record_id) {
+            preserved_active_codes.extend(ending_character_epilogue_preserved_active_codes());
+        }
         let mut possible_domain_glyphs = BTreeSet::new();
         let mut rendered_dynamic_glyph_upper_bound = 0;
         let mut has_translated_domain = false;
@@ -115,10 +121,24 @@ pub(super) fn plan_dynamic_dialogue_inputs(
                 DynamicStringDomain::PreservedNumeric => has_preserved_numeric = true,
                 translated => {
                     has_translated_domain = true;
-                    let domain = &domains[&translated];
-                    possible_domain_glyphs.extend(domain.glyphs.iter().copied());
+                    let glyphs = possible_dynamic_glyphs(
+                        &workset.record_id,
+                        *selector,
+                        translated,
+                        &domains,
+                        unit_names,
+                    )?;
+                    let maximum_entry_glyph_count = if translated
+                        == DynamicStringDomain::PlayableUnitName
+                        && epilogue_unit_name_source_index(&workset.record_id, *selector).is_some()
+                    {
+                        glyphs.len()
+                    } else {
+                        domains[&translated].maximum_entry_glyph_count
+                    };
+                    possible_domain_glyphs.extend(glyphs.iter().copied());
                     rendered_dynamic_glyph_upper_bound +=
-                        *control_count * domain.maximum_entry_glyph_count;
+                        *control_count * maximum_entry_glyph_count;
                 }
             }
         }
@@ -138,12 +158,12 @@ pub(super) fn plan_dynamic_dialogue_inputs(
         maximum_rendered_target_glyph_upper_bound =
             maximum_rendered_target_glyph_upper_bound.max(rendered_target_glyph_upper_bound);
         target_glyphs.extend(possible_domain_glyphs.iter().copied());
-        let slot_demand = target_glyphs.len() + workset.preserved_target_active_codes.len();
+        let slot_demand = target_glyphs.len() + preserved_active_codes.len();
         maximum_augmented_workset_slot_demand =
             maximum_augmented_workset_slot_demand.max(slot_demand);
         augmented_worksets.push(GlyphWorkset {
             target_glyphs,
-            preserved_active_codes: workset.preserved_target_active_codes.clone(),
+            preserved_active_codes,
             fixed_glyph_codes: BTreeMap::new(),
         });
         dynamic_glyphs_by_workset.push(possible_domain_glyphs);
@@ -329,19 +349,52 @@ impl DynamicStringDomain {
 /// `{E2}{E9:05}{EC:00}` 뒤에 그 인물의 결말이 이어진다. 후일담 표는 53분기이고
 /// 라우팅 표가 그중 하나로 합류하므로 항목을 낱낱이 세지 않고 규칙으로 둔다.
 fn epilogue_entry_names_a_playable_unit(record_id: &str, selector: u8) -> bool {
+    epilogue_unit_name_source_index(record_id, selector).is_some()
+}
+
+fn epilogue_unit_name_source_index(record_id: &str, selector: u8) -> Option<usize> {
     if selector != 0 {
-        return false;
+        return None;
     }
     let Some((table, entry)) = record_id.rsplit_once(':') else {
-        return false;
+        return None;
     };
     let entry = entry.parse::<usize>().unwrap_or(usize::MAX);
-    match table {
+    let names_a_unit = match table {
         // 0번은 인물이 아니라 전사 장소를 넣는다. 그쪽은 지명으로 따로 결속돼 있다.
         "epilogue-dialogue" => (1..=53).contains(&entry),
         "epilogue-routing-dialogue" => (2..=53).contains(&entry),
         _ => false,
+    };
+    names_a_unit.then(|| entry - 1)
+}
+
+fn is_ending_character_epilogue_record(record_id: &str) -> bool {
+    record_id.starts_with("epilogue-dialogue:")
+        || record_id.starts_with("epilogue-routing-dialogue:")
+}
+
+fn possible_dynamic_glyphs(
+    record_id: &str,
+    selector: u8,
+    domain: DynamicStringDomain,
+    domains: &BTreeMap<DynamicStringDomain, DomainGlyphs>,
+    unit_names: &[FixedTextPlannedEntry],
+) -> Result<BTreeSet<char>> {
+    if domain == DynamicStringDomain::PlayableUnitName
+        && let Some(source_index) = epilogue_unit_name_source_index(record_id, selector)
+    {
+        let entry = unit_names
+            .iter()
+            .find(|entry| entry.table_id == "unit-names" && entry.source_index == source_index)
+            .with_context(|| {
+                format!(
+                    "ending character epilogue record {record_id} lost unit-name source index {source_index}"
+                )
+            })?;
+        return Ok(entry.unique_glyphs());
     }
+    Ok(domains[&domain].glyphs.clone())
 }
 
 fn dynamic_string_domain(record_id: &str, selector: u8) -> Option<DynamicStringDomain> {
@@ -455,6 +508,40 @@ const PRESERVED_NUMERIC_BINDINGS: [(&str, u8); 19] = [
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{dialogue_assets::MainDialoguePageWorkset, text_inventory::FixedTextLogicalByte};
+
+    fn fixed_entry(table_id: &str, source_index: usize, text: &str) -> FixedTextPlannedEntry {
+        FixedTextPlannedEntry {
+            id: format!("{table_id}:{source_index:03}"),
+            table_id: table_id.to_string(),
+            source_index,
+            alias_indices: Vec::new(),
+            file_offset: 0,
+            source_storage_byte_count: text.chars().count(),
+            review_complete: true,
+            logical_bytes: text
+                .chars()
+                .map(FixedTextLogicalByte::TargetGlyph)
+                .collect(),
+        }
+    }
+
+    fn one_page_display(record_id: &str, selector: u8) -> MainDialogueDisplayPlan {
+        MainDialogueDisplayPlan {
+            canonical_record_count: 1,
+            record_ids: vec![record_id.to_string()],
+            page_worksets: vec![MainDialoguePageWorkset {
+                record_id: record_id.to_string(),
+                page_index: 0,
+                target_glyphs: BTreeSet::from(['끝']),
+                dynamic_string_selectors: BTreeSet::from([selector]),
+                dynamic_string_selector_counts: BTreeMap::from([(selector, 1)]),
+                dynamic_string_control_count: 1,
+                source_reclaimable_active_codes: BTreeSet::new(),
+                preserved_target_active_codes: BTreeSet::new(),
+            }],
+        }
+    }
 
     #[test]
     fn unknown_dynamic_string_binding_fails_closed() {
@@ -503,6 +590,50 @@ mod tests {
         assert_eq!(
             dynamic_string_domain("epilogue-dialogue:000", 1),
             Some(DynamicStringDomain::LocationName)
+        );
+        assert_eq!(
+            epilogue_unit_name_source_index("epilogue-dialogue:001", 0),
+            Some(0)
+        );
+        assert_eq!(
+            epilogue_unit_name_source_index("epilogue-routing-dialogue:053", 0),
+            Some(52)
+        );
+    }
+
+    #[test]
+    fn ending_character_analysis_feeds_emitted_workset_constraints() {
+        let preserved = ending_character_epilogue_preserved_active_codes();
+        let plan = plan_dynamic_dialogue_inputs(
+            &one_page_display("epilogue-dialogue:001", 0),
+            &[fixed_entry("item-names", 0, "검")],
+            &[
+                fixed_entry("unit-names", 0, "마르스"),
+                fixed_entry("unit-names", 1, "치키"),
+            ],
+            &[fixed_entry("location-names", 0, "아리티아")],
+        )
+        .unwrap();
+        let installed_workset = &plan.augmented_worksets[0];
+
+        assert_eq!(preserved.len(), 99);
+        assert_eq!(installed_workset.preserved_active_codes, preserved);
+        assert!(
+            installed_workset
+                .target_glyphs
+                .is_superset(&BTreeSet::from(['끝', '마', '르', '스']))
+        );
+        assert!(!installed_workset.target_glyphs.contains(&'키'));
+        assert!(
+            [0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0xFA]
+                .into_iter()
+                .all(|code| installed_workset.preserved_active_codes.contains(&code))
+        );
+        assert!(
+            installed_workset
+                .fixed_glyph_codes
+                .values()
+                .all(|code| !installed_workset.preserved_active_codes.contains(code))
         );
     }
 

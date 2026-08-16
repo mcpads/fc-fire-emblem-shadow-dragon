@@ -19,7 +19,7 @@ use super::super::{
 use super::transport::{REQUEST_STATE, STATE_READY};
 use super::{RuntimeRoutine, next_address};
 use crate::{
-    chapter_transition::{ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE, ENDING_RECORD_PHASE_ADDRESS},
+    chapter_transition::{ENDING_CHARACTER_EPILOGUE_SELECTOR_PHASE, ENDING_RECORD_PHASE_ADDRESS},
     dialogue_inventory::switchable_cpu_to_file_offset,
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
@@ -267,7 +267,12 @@ pub(super) fn build_lifecycle_suite(
     instructions.extend([
         Instruction::Pha,
         Instruction::LdaAbsolute(ENDING_RECORD_PHASE_ADDRESS),
-        Instruction::CmpImmediate(ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE),
+        // The main-dialogue terminal state is observed while the outer ending
+        // dispatcher is still in selector phase 0x0F. Only after this routine
+        // returns does the source handler advance 0x7731 to the visible 0x10
+        // phase. Preserve the ready font page across that exact handoff; the
+        // 0x13->0x14 ending hook owns the later release after the fade.
+        Instruction::CmpImmediate(ENDING_CHARACTER_EPILOGUE_SELECTOR_PHASE),
     ]);
     let visible_epilogue_placeholder = instructions.len();
     instructions.push(Instruction::BeqAbsolute(origin));
@@ -403,7 +408,7 @@ mod tests {
     }
 
     #[test]
-    fn only_the_visible_ending_epilogue_retains_a_terminal_page() {
+    fn ending_selector_handoff_retains_the_completed_page_for_the_visible_phases() {
         let suite = lifecycle_suite();
         let bytes = &suite.routine.bytes;
         let idle_load = bytes
@@ -430,7 +435,7 @@ mod tests {
             ENDING_RECORD_PHASE_ADDRESS as u8,
             (ENDING_RECORD_PHASE_ADDRESS >> 8) as u8,
             0xC9,
-            ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE,
+            ENDING_CHARACTER_EPILOGUE_SELECTOR_PHASE,
             0xF0,
         ];
         let invalidate = [

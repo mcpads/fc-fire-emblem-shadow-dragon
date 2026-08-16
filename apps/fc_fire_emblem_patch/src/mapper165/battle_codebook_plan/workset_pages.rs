@@ -6,7 +6,7 @@ use std::{
 use anyhow::{Result, ensure};
 
 use crate::{
-    font_slots::{ACTIVE_HANGUL_SLOT_COUNT, active_hangul_codes},
+    font_slots::{ACTIVE_HANGUL_SLOT_COUNT, FONT_PAGE_SIZE, FONT_TILE_SIZE, active_hangul_codes},
     sha1_hex,
 };
 
@@ -271,6 +271,56 @@ pub(crate) fn plan_glyph_workset_page_upper_bound(
     plan_glyph_workset_pages(worksets, usize::MAX)
 }
 
+/// 작업집합의 보존 계약이 실제로 방출한 4 KiB 페이지까지 이어졌는지 확인한다.
+///
+/// 분석 보고서의 보존 코드와 페이지 배치기가 서로 다른 입력을 소비하면 둘 다 개별적으로
+/// 성공할 수 있다. 따라서 최종 작업집합→페이지 색인→방출 바이트를 다시 따라가며, 각 보호
+/// 타일이 원본 글꼴 페이지와 바이트 단위로 같은지 확인한다.
+pub(crate) fn verify_glyph_workset_font_page_pack(
+    source_page: &[u8],
+    worksets: &[GlyphWorkset],
+    plan: &GlyphWorksetPagePlan,
+    page_pack: &[u8],
+) -> Result<()> {
+    ensure!(
+        source_page.len() == FONT_PAGE_SIZE,
+        "glyph workset preservation source page is not 4 KiB"
+    );
+    ensure!(
+        worksets.len() == plan.workset_page_indices.len(),
+        "glyph workset preservation lost a workset-to-page route"
+    );
+    ensure!(
+        page_pack.len() == plan.page_assignments.len() * FONT_PAGE_SIZE,
+        "glyph workset preservation page pack length changed"
+    );
+
+    for (workset_index, workset) in worksets.iter().enumerate() {
+        let page_index = plan.workset_page_indices[workset_index];
+        let assignments = plan
+            .page_assignments
+            .get(page_index)
+            .ok_or_else(|| anyhow::anyhow!("glyph workset {workset_index} selects no page"))?;
+        ensure!(
+            assignments
+                .values()
+                .all(|code| !workset.preserved_active_codes.contains(code)),
+            "glyph workset {workset_index} assigns a Hangul glyph to a preserved screen code"
+        );
+        let page_start = page_index * FONT_PAGE_SIZE;
+        let page = &page_pack[page_start..page_start + FONT_PAGE_SIZE];
+        for code in &workset.preserved_active_codes {
+            let tile_start = usize::from(*code) * FONT_TILE_SIZE;
+            ensure!(
+                page[tile_start..tile_start + FONT_TILE_SIZE]
+                    == source_page[tile_start..tile_start + FONT_TILE_SIZE],
+                "glyph workset {workset_index} changed preserved screen tile {code:02X} in emitted page {page_index}"
+            );
+        }
+    }
+    Ok(())
+}
+
 fn greedy_pack(demands: &[WorksetDemand]) -> (Vec<FontPageDemand>, Vec<usize>) {
     let mut pages = Vec::<FontPageDemand>::new();
     let mut page_indices = Vec::with_capacity(demands.len());
@@ -520,5 +570,24 @@ mod tests {
         .unwrap();
 
         assert_ne!(plan.workset_page_indices[0], plan.workset_page_indices[1]);
+    }
+
+    #[test]
+    fn emitted_page_pack_keeps_preserved_tile_bytes_unchanged() {
+        let code = active_hangul_codes()[17];
+        let worksets = [workset("가나", &[code])];
+        let plan = plan_glyph_workset_pages(&worksets, 1).unwrap();
+        let source_page = (0..FONT_PAGE_SIZE)
+            .map(|offset| (offset & 0xFF) as u8)
+            .collect::<Vec<_>>();
+        let mut page_pack =
+            super::super::build_glyph_workset_font_page_pack(&source_page, &plan).unwrap();
+
+        verify_glyph_workset_font_page_pack(&source_page, &worksets, &plan, &page_pack).unwrap();
+
+        page_pack[usize::from(code) * FONT_TILE_SIZE] ^= 0xFF;
+        let error = verify_glyph_workset_font_page_pack(&source_page, &worksets, &plan, &page_pack)
+            .unwrap_err();
+        assert!(error.to_string().contains("changed preserved screen tile"));
     }
 }

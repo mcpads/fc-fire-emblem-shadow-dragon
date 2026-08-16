@@ -22,6 +22,10 @@ const OBSERVED_NAMETABLE_ACTIVE_CODES: [u8; 99] = [
 const CHARACTER_NAME_DISPLAY_CELL_LIMIT: usize = 7;
 const LOCATION_NAME_DISPLAY_CELL_LIMIT: usize = 11;
 
+pub(crate) fn ending_character_epilogue_preserved_active_codes() -> BTreeSet<u8> {
+    OBSERVED_NAMETABLE_ACTIVE_CODES.into_iter().collect()
+}
+
 pub(super) fn ending_character_family_report(
     filled_glyphs_by_record: &BTreeMap<DialogueRecordKey, BTreeSet<char>>,
     approved_glyphs_by_record: &BTreeMap<DialogueRecordKey, BTreeSet<char>>,
@@ -37,9 +41,7 @@ pub(super) fn ending_character_family_report(
     }
 
     let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
-    let observed_active_codes = OBSERVED_NAMETABLE_ACTIVE_CODES
-        .into_iter()
-        .collect::<BTreeSet<_>>();
+    let observed_active_codes = ending_character_epilogue_preserved_active_codes();
     ensure!(
         observed_active_codes.len() == OBSERVED_NAMETABLE_ACTIVE_CODES.len(),
         "{SCREEN_ROLE} observed source codes contain duplicates"

@@ -19,6 +19,7 @@ use crate::{
     mapper165::{
         battle_codebook_plan::{
             build_glyph_workset_font_page_pack, plan_glyph_workset_page_upper_bound,
+            verify_glyph_workset_font_page_pack,
         },
         bind_installed_front_end_mapper_register,
         font_pair_projection::RightFontPageProjection,
@@ -240,6 +241,7 @@ struct DialogueCodebook {
     page_assignment_sha1: String,
     static_page_upper_bound_count: usize,
     static_page_pack_sha1: String,
+    static_page_pack_preserves_every_workset_code: bool,
     canonical_records_connected: bool,
     page_local_bundle_encoding_connected: bool,
     glyph_characters_encoded_into_installed_runtime_atlas: bool,
@@ -610,6 +612,12 @@ pub(crate) fn plan_full_translation_installation(
         font_page_pack.len() == codebook.page_assignments.len() * FONT_PAGE_SIZE,
         "dialogue font page pack length changed after rasterization"
     );
+    verify_glyph_workset_font_page_pack(
+        source_font_page,
+        &transition_residency.augmented_worksets,
+        &codebook,
+        &font_page_pack,
+    )?;
     // 전이 미러를 함께 내던 인코딩은 이중 진입과 함께 폐기했다. 정규 레코드의
     // 원천 소유 구간과 포인터만 낸다. 의사결정 59번을 따른다.
     let encoded_display = dialogue
@@ -1007,7 +1015,7 @@ pub(crate) fn plan_full_translation_installation(
         false
     };
     let report = FullTranslationInstallReport {
-        schema: 16,
+        schema: 17,
         source_sha1: EXPECTED_SOURCE_SHA1,
         strategy: "install the declared translation domains in one cumulative candidate, close declared installation gates, then run declared consumer-path dynamic regression on that same ROM; whole-game consumer census remains separate",
         declared_installation_domain_count: REQUIRED_DOMAIN_COUNT,
@@ -1045,6 +1053,7 @@ pub(crate) fn plan_full_translation_installation(
             page_assignment_sha1: codebook.page_assignment_sha1,
             static_page_upper_bound_count: codebook.page_assignments.len(),
             static_page_pack_sha1: sha1_hex(&font_page_pack),
+            static_page_pack_preserves_every_workset_code: true,
             canonical_records_connected: true,
             page_local_bundle_encoding_connected: true,
             glyph_characters_encoded_into_installed_runtime_atlas: technical_installation_complete,

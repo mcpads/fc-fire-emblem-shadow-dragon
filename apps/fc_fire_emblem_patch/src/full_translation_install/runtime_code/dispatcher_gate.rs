@@ -57,9 +57,8 @@ use super::transport::{REQUEST_STATE, STATE_READY};
 pub(super) const RECLAIMED_GATE_CAVE_ORIGIN: u16 = 0xF341;
 pub(super) const RECLAIMED_GATE_CAVE_END: u16 = 0xF378;
 /// The source-identity publisher restores the borrowed PRG bank and PPU state in
-/// this fixed-bank tail. Keeping the fourteen-byte tail here lets the exact
-/// battle-surface arbitration predicate fit beside the NMI trampoline without
-/// weakening either routine.
+/// this fixed-bank tail. Keeping the fourteen-byte tail separate from the main
+/// publisher leaves the translated-page writer at $F390 undisturbed.
 pub(super) const SOURCE_IDENTITY_PUBLISHER_TAIL_ORIGIN: u16 = 0xF378;
 pub(super) const SOURCE_IDENTITY_PUBLISHER_TAIL_CAVE_END: u16 = WRITE_TRANSLATED_CHR_PAGE_ADDRESS;
 pub(in crate::full_translation_install) const EXPECTED_RECLAIMED_GATE_CAVE_SHA1: &str =

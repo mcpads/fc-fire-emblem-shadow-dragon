@@ -31,10 +31,22 @@ const CANDIDATE_COUNT: usize = 53;
 
 /// The ending phase that selects one surviving/dead character record.
 pub(crate) const ENDING_CHARACTER_EPILOGUE_SELECTOR_PHASE: u8 = 0x0F;
-/// The following phase keeps the selected dialogue page visible until its outer
-/// wait handler advances. The main-dialogue terminal state alone does not end
-/// font ownership while this phase is active.
-pub(crate) const ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE: u8 = 0x10;
+/// The shared dialogue engine remains visible while the outer ending handler
+/// waits for its terminal state.
+pub(crate) const ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE_START: u8 = 0x10;
+/// Once dialogue reaches terminal, the outer handler keeps the completed page
+/// visible for its own timer in the following phase.
+pub(crate) const ENDING_CHARACTER_EPILOGUE_VISIBLE_WAIT_PHASE: u8 = 0x11;
+/// Phases 0x12 and 0x13 fade the completed page while its translated tile codes
+/// remain visible. They therefore share the same font residency as 0x10/0x11.
+pub(crate) const ENDING_CHARACTER_EPILOGUE_INTERPAGE_PHASE_START: u8 = 0x12;
+/// Mask that recognizes exactly the four residency phases 0x10 through 0x13.
+pub(crate) const ENDING_CHARACTER_EPILOGUE_FONT_RESIDENCY_PHASE_MASK: u8 = 0xFC;
+/// Phase 0x14 begins preparing the next dialogue after the completed page has
+/// faded away. Source CHR owns the pattern window from this boundary onward.
+pub(crate) const ENDING_CHARACTER_EPILOGUE_REPEAT_PHASE: u8 = 0x16;
+/// Only exhausting the candidate scan leaves the repeated character epilogue.
+pub(crate) const ENDING_CHARACTER_EPILOGUE_COMPLETION_PHASE: u8 = 0x17;
 
 pub(super) const SOURCE_REGIONS: &[SourceRegionSpec] = &[
     SourceRegionSpec::code_sha1(
@@ -69,8 +81,29 @@ pub(super) const SOURCE_REGIONS: &[SourceRegionSpec] = &[
         "wait_ending_character_epilogue",
         0x04,
         0xA233,
-        0x1F,
-        "d41db20b99824edaff5fbc6ac30157394a6a2648",
+        0x2A,
+        "7f740b30d6e8411170e6496447149b42b7478e61",
+    ),
+    SourceRegionSpec::code_sha1(
+        "transition_between_ending_character_epilogues",
+        0x04,
+        0xA25D,
+        0x37,
+        "18fc0c4dc3bc84e97c7b25c5d2d6804be27f1393",
+    ),
+    SourceRegionSpec::code_sha1(
+        "wait_between_ending_character_epilogues",
+        0x04,
+        0xA294,
+        0x12,
+        "5f0206a48e3275d8dc2e1b24cd4901260fc7307f",
+    ),
+    SourceRegionSpec::code_sha1(
+        "repeat_ending_character_epilogue",
+        0x04,
+        0xA384,
+        0x06,
+        "34db719e957adfd0be88850ac9d919b3b0f78dc0",
     ),
     SourceRegionSpec::code_sha1(
         "compose_ending_character_name",
@@ -88,6 +121,14 @@ pub(super) struct EndingCharacterEpilogueTranslationSurface {
     selector_phase_hex: &'static str,
     visible_dialogue_phase: u8,
     visible_dialogue_phase_hex: &'static str,
+    visible_wait_phase: u8,
+    visible_wait_phase_hex: &'static str,
+    interpage_phase_start: u8,
+    interpage_phase_start_hex: &'static str,
+    repeat_phase: u8,
+    repeat_phase_hex: &'static str,
+    completion_phase: u8,
+    completion_phase_hex: &'static str,
     table_selector_address: u16,
     table_selector_address_hex: &'static str,
     entry_selector_address: u16,
@@ -227,8 +268,16 @@ pub(super) fn bind_ending_character_epilogue(
         screen_role: "ending_character_epilogue",
         selector_phase: ENDING_CHARACTER_EPILOGUE_SELECTOR_PHASE,
         selector_phase_hex: "0x0F",
-        visible_dialogue_phase: ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE,
+        visible_dialogue_phase: ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE_START,
         visible_dialogue_phase_hex: "0x10",
+        visible_wait_phase: ENDING_CHARACTER_EPILOGUE_VISIBLE_WAIT_PHASE,
+        visible_wait_phase_hex: "0x11",
+        interpage_phase_start: ENDING_CHARACTER_EPILOGUE_INTERPAGE_PHASE_START,
+        interpage_phase_start_hex: "0x12",
+        repeat_phase: ENDING_CHARACTER_EPILOGUE_REPEAT_PHASE,
+        repeat_phase_hex: "0x16",
+        completion_phase: ENDING_CHARACTER_EPILOGUE_COMPLETION_PHASE,
+        completion_phase_hex: "0x17",
         table_selector_address: 0x77F4,
         table_selector_address_hex: "0x77F4",
         entry_selector_address: 0x77F1,
@@ -291,7 +340,7 @@ pub(super) fn bind_ending_character_epilogue(
         dialogue_literal_inventory_scope: "all canonical first linear segments in selector tables 0x40 and 0x41; every routing-table transition targets the included direct epilogue table",
         selector_writer: location(0x04, 0xA17E),
         dialogue_wait_handler: location(0x04, 0xA233),
-        input_behavior: "automatic; phase 0x0F scans and selects an entry, and phase 0x10 waits for the shared dialogue engine before advancing",
+        input_behavior: "automatic; phase 0x0F selects an entry, phases 0x10..0x11 display the completed translated page, phases 0x12..0x13 fade that same page, phase 0x14 releases it before preparing the next dialogue, phase 0x16 loops to 0x0F, and exhausted selection advances to 0x17",
         translation_handling: "translate Japanese character names, location names, and epilogue lines only; preserve original Latin and digit codes",
         unresolved: &[
             "separate causes inside inactive-or-defeated action 0xFF remain unresolved; synthetic branch coverage cannot label every cause as death",

@@ -10,6 +10,8 @@ mod epilogue;
 mod game_over;
 mod shop;
 
+pub(crate) use epilogue::ending_character_epilogue_preserved_active_codes;
+
 pub(super) fn observed_screen_lifetime_reports(
     filled_glyphs_by_record: &BTreeMap<DialogueRecordKey, BTreeSet<char>>,
     approved_glyphs_by_record: &BTreeMap<DialogueRecordKey, BTreeSet<char>>,

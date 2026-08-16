@@ -353,7 +353,6 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
             &gate,
             &ending_font_lifetime.restore_source_pair,
             &ending_font_lifetime.enter_ending_record,
-            &ending_font_lifetime.exit_tail,
         ],
         dispatcher_gate::RECLAIMED_GATE_CAVE_END,
     )?;
@@ -437,6 +436,10 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         dispatcher_gate::SOURCE_IDENTITY_PUBLISHER_TAIL_CAVE_END,
     )?;
     ensure_disjoint(
+        &[&ending_font_lifetime.exit_tail],
+        consumer_font_page::ending_lifetime::ENDING_FONT_EXIT_TAIL_CAVE_END,
+    )?;
+    ensure_disjoint(
         &[&ending_font_lifetime.exit_head],
         consumer_font_page::ending_lifetime::ENDING_FONT_EXIT_HEAD_END,
     )?;
@@ -473,6 +476,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         consumer_font_page_open,
         consumer_font_page_close,
         consumer_font_page_gameplay_handoff,
+        ending_font_lifetime.exit_tail,
         ending_font_lifetime.exit_head,
     ];
     fixed_routines.extend(dynamic_producers.fixed_routines);

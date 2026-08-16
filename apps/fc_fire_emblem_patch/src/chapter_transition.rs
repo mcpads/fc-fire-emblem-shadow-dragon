@@ -30,7 +30,10 @@ use crate::{
     typed_source::{TypedInstructionBinding, decode_rp2a03_sequence},
 };
 
-pub(crate) use ending_epilogue::ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE;
+pub(crate) use ending_epilogue::{
+    ENDING_CHARACTER_EPILOGUE_FONT_RESIDENCY_PHASE_MASK, ENDING_CHARACTER_EPILOGUE_SELECTOR_PHASE,
+    ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE_START,
+};
 pub(crate) use ending_scroll::{
     ENDING_RECORD_PHASE_ADDRESS, EndingChapterRecordStorageSource, EndingChapterRowStorageSource,
     bind_ending_chapter_record_lifetime_source, bind_ending_chapter_record_storage_source,

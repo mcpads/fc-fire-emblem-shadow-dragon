@@ -49,7 +49,10 @@ use super::{
     transport::{REQUEST_STATE, STATE_READY},
 };
 use crate::{
-    chapter_transition::{ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE, ENDING_RECORD_PHASE_ADDRESS},
+    chapter_transition::{
+        ENDING_CHARACTER_EPILOGUE_FONT_RESIDENCY_PHASE_MASK,
+        ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE_START, ENDING_RECORD_PHASE_ADDRESS,
+    },
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
     typed_source::decode_rp2a03_sequence,
@@ -166,7 +169,12 @@ pub(super) fn build_chr_selector(
     instructions.push(Instruction::BneAbsolute(origin));
     instructions.extend([
         Instruction::LdaAbsolute(ENDING_RECORD_PHASE_ADDRESS),
-        Instruction::CmpImmediate(ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE),
+        // Phases 0x10 through 0x13 display or fade the completed character
+        // epilogue and must keep the same translated glyph page. The
+        // 0x13->0x14 hook clears REQUEST_STATE and restores source CHR before
+        // the next dialogue is prepared, so later phases must fall back.
+        Instruction::AndImmediate(ENDING_CHARACTER_EPILOGUE_FONT_RESIDENCY_PHASE_MASK),
+        Instruction::CmpImmediate(ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE_START),
     ]);
     let terminal_outside_epilogue_placeholder = instructions.len();
     instructions.push(Instruction::BneAbsolute(origin));
@@ -184,12 +192,8 @@ pub(super) fn build_chr_selector(
         Instruction::LdaAbsolute(REQUEST_STATE),
         Instruction::CmpImmediate(STATE_READY),
     ]);
-    let complete_request_placeholder = instructions.len();
-    instructions.push(Instruction::BeqAbsolute(origin));
     let incomplete_request_placeholder = instructions.len();
     instructions.push(Instruction::BneAbsolute(origin));
-    let complete_request = next_address(origin, &instructions)?;
-    instructions[complete_request_placeholder] = Instruction::BeqAbsolute(complete_request);
     instructions.extend([
         Instruction::LdaImmediate(CHR_RAM_BANK_VALUE),
         Instruction::JsrAbsolute(project_dialogue_page),
@@ -247,6 +251,147 @@ mod tests {
     use super::*;
 
     const PROJECT_DIALOGUE_PAGE: u16 = 0xF480;
+    const STATUS_CARRY: u8 = 0x01;
+    const STATUS_ZERO: u8 = 0x02;
+
+    #[derive(Debug, Eq, PartialEq)]
+    enum SelectorOutcome {
+        Projected(u8),
+        Fallback,
+    }
+
+    /// Executes the generated selector itself, so the test observes branch
+    /// behavior rather than merely recognizing one byte pattern.
+    fn run_terminal_selector(phase: u8) -> SelectorOutcome {
+        let routine =
+            build_chr_selector(0xF4A0, 0xC8, SELECTOR_CHAIN_FALLBACK, PROJECT_DIALOGUE_PAGE)
+                .unwrap();
+        let mut memory = vec![0u8; 0x10000];
+        let start = usize::from(routine.address);
+        memory[start..start + routine.bytes.len()].copy_from_slice(&routine.bytes);
+        memory[usize::from(REQUEST_STATE)] = STATE_READY;
+        memory[usize::from(DISPATCHER_STATE)] = TERMINAL_STATE;
+        memory[usize::from(ENDING_RECORD_PHASE_ADDRESS)] = phase;
+        memory[usize::from(RIGHT_FD_SOURCE_SHADOW)] = DIALOGUE_FD_SOURCE_PAGE;
+        memory[usize::from(CHR_SOURCE_HIGH_BITS)] = 0;
+
+        let mut a = 0xA7;
+        let mut p = 0x20;
+        let mut sp = 0xFDu8;
+        let mut pc = routine.address;
+        let mut projected = None;
+        for _ in 0..128 {
+            let read_byte = |pc: &mut u16| {
+                let value = memory[usize::from(*pc)];
+                *pc = pc.wrapping_add(1);
+                value
+            };
+            let opcode = read_byte(&mut pc);
+            match opcode {
+                0x05 => {
+                    let address = read_byte(&mut pc);
+                    a |= memory[usize::from(address)];
+                    set_nz(&mut p, a);
+                }
+                0x08 => {
+                    memory[0x100 + usize::from(sp)] = p;
+                    sp = sp.wrapping_sub(1);
+                }
+                0x20 => {
+                    let low = read_byte(&mut pc);
+                    let high = read_byte(&mut pc);
+                    let target = u16::from_le_bytes([low, high]);
+                    assert_eq!(target, PROJECT_DIALOGUE_PAGE);
+                    projected = Some(a);
+                }
+                0x28 => {
+                    sp = sp.wrapping_add(1);
+                    p = memory[0x100 + usize::from(sp)];
+                }
+                0x29 => {
+                    a &= read_byte(&mut pc);
+                    set_nz(&mut p, a);
+                }
+                0x48 => {
+                    memory[0x100 + usize::from(sp)] = a;
+                    sp = sp.wrapping_sub(1);
+                }
+                0x4A => {
+                    let carry = a & 1;
+                    a >>= 1;
+                    p = (p & !STATUS_CARRY) | carry;
+                    set_nz(&mut p, a);
+                }
+                0x4C => {
+                    let low = read_byte(&mut pc);
+                    let high = read_byte(&mut pc);
+                    assert_eq!(u16::from_le_bytes([low, high]), SELECTOR_CHAIN_FALLBACK);
+                    return SelectorOutcome::Fallback;
+                }
+                0x60 => {
+                    assert_eq!(sp, 0xFD);
+                    return SelectorOutcome::Projected(
+                        projected.expect("selector projected no page"),
+                    );
+                }
+                0x68 => {
+                    sp = sp.wrapping_add(1);
+                    a = memory[0x100 + usize::from(sp)];
+                    set_nz(&mut p, a);
+                }
+                0x90 | 0xB0 | 0xD0 | 0xF0 => {
+                    let displacement = read_byte(&mut pc) as i8;
+                    let taken = match opcode {
+                        0x90 => p & STATUS_CARRY == 0,
+                        0xB0 => p & STATUS_CARRY != 0,
+                        0xD0 => p & STATUS_ZERO == 0,
+                        0xF0 => p & STATUS_ZERO != 0,
+                        _ => unreachable!(),
+                    };
+                    if taken {
+                        pc = pc.wrapping_add_signed(i16::from(displacement));
+                    }
+                }
+                0xA5 => {
+                    let address = read_byte(&mut pc);
+                    a = memory[usize::from(address)];
+                    set_nz(&mut p, a);
+                }
+                0xA9 => {
+                    a = read_byte(&mut pc);
+                    set_nz(&mut p, a);
+                }
+                0xAD => {
+                    let low = read_byte(&mut pc);
+                    let high = read_byte(&mut pc);
+                    a = memory[usize::from(u16::from_le_bytes([low, high]))];
+                    set_nz(&mut p, a);
+                }
+                0xC9 => {
+                    let value = read_byte(&mut pc);
+                    p &= !(STATUS_CARRY | STATUS_ZERO);
+                    if a >= value {
+                        p |= STATUS_CARRY;
+                    }
+                    if a == value {
+                        p |= STATUS_ZERO;
+                    }
+                }
+                other => panic!("selector test reached unsupported opcode {other:02X}"),
+            }
+        }
+        panic!("selector test did not return")
+    }
+
+    fn set_nz(status: &mut u8, value: u8) {
+        *status &= !0x82;
+        if value == 0 {
+            *status |= STATUS_ZERO;
+        }
+        if value & 0x80 != 0 {
+            *status |= 0x80;
+        }
+    }
 
     /// 알 수 없는 상태에서 새 페이지를 고르면 원본의 다른 화면을 침범할 수 있다.
     #[test]
@@ -290,15 +435,15 @@ mod tests {
         }));
     }
 
-    /// 일반 대사는 terminal에서 원본 사슬로 돌아가지만, 엔딩 후일담은 바깥 phase
-    /// 0x10이 화면을 보존하는 동안 같은 준비된 페이지를 계속 선택한다.
+    /// 일반 대사는 terminal에서 원본 사슬로 돌아가지만, 엔딩 후일담은 한 인물의
+    /// 대사 표시와 페이드인 phase 0x10..0x13에서 같은 준비된 페이지를 선택한다.
     #[test]
     fn terminal_dialogue_state_is_retained_only_for_the_visible_epilogue_phase() {
         let routine =
             build_chr_selector(0xF4A0, 0xC8, SELECTOR_CHAIN_FALLBACK, PROJECT_DIALOGUE_PAGE)
                 .unwrap();
 
-        assert!(routine.bytes.windows(14).any(|window| {
+        assert!(routine.bytes.windows(18).any(|window| {
             window
                 == [
                     0xAD,
@@ -313,10 +458,32 @@ mod tests {
                     0xAD,
                     ENDING_RECORD_PHASE_ADDRESS as u8,
                     (ENDING_RECORD_PHASE_ADDRESS >> 8) as u8,
+                    0x29,
+                    ENDING_CHARACTER_EPILOGUE_FONT_RESIDENCY_PHASE_MASK,
                     0xC9,
-                    ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE,
+                    ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE_START,
+                    0xD0,
+                    window[17],
                 ]
         }));
+    }
+
+    #[test]
+    fn terminal_epilogue_keeps_ram_until_the_completed_page_finishes_fading() {
+        for phase in 0x10..=0x13 {
+            assert_eq!(
+                run_terminal_selector(phase),
+                SelectorOutcome::Projected(CHR_RAM_BANK_VALUE),
+                "phase {phase:02X} must retain the completed translated page"
+            );
+        }
+        for phase in [0x0F, 0x14, 0x16, 0x17, 0x18] {
+            assert_eq!(
+                run_terminal_selector(phase),
+                SelectorOutcome::Fallback,
+                "phase {phase:02X} is outside the completed-page residency lifetime"
+            );
+        }
     }
 
     /// 표시 페이지 선택은 여기서 FD 하나를 하드코딩하지 않고, live FE 원천을 아는
