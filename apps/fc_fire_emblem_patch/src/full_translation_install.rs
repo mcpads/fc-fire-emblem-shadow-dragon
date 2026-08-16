@@ -17,14 +17,15 @@ use crate::{
     item_flow::plan_item_action_labels,
     map_menu::plan_map_menu,
     mapper165::{
-        CarriedUiDomainInputs, CarriedUiDomainPreservation,
+        CarriedBattleDomainInputs, CarriedBattleDomainPreservation, CarriedUiDomainInputs,
+        CarriedUiDomainPreservation,
         battle_codebook_plan::{
             build_glyph_workset_font_page_pack, plan_glyph_workset_page_upper_bound,
             verify_glyph_workset_font_page_pack,
         },
         bind_installed_front_end_mapper_register,
         font_pair_projection::RightFontPageProjection,
-        inspect_carried_ui_domains,
+        inspect_carried_battle_domains, inspect_carried_ui_domains,
     },
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
@@ -143,6 +144,7 @@ const REQUIRED_DOMAINS: [&str; REQUIRED_DOMAIN_COUNT] = [
 pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) source_path: &'a Path,
     pub(crate) main_dialogue_workspace_path: &'a Path,
+    pub(crate) battle_dialogue_workspace_path: &'a Path,
     pub(crate) fixed_text_workspace_path: &'a Path,
     pub(crate) options_localization_path: &'a Path,
     pub(crate) roster_localization_path: &'a Path,
@@ -206,6 +208,7 @@ struct FullTranslationInstallReport {
     main_dialogue_route_population: MainDialogueRoutePopulationPlan,
     consumer_installation: ConsumerInstallationPlan,
     carried_ui_domain_preservation: CarriedUiDomainPreservation,
+    carried_battle_domain_preservation: CarriedBattleDomainPreservation,
     final_artifact_runtime_evidence: FinalArtifactRuntimeEvidence,
     dialogue_storage: DialogueStorage,
     installation_gates: InstallationGates,
@@ -412,6 +415,7 @@ struct InstallationGates {
     dialogue_runtime_composition_planned: bool,
     all_declared_consumer_writes_planned: bool,
     all_carried_ui_domains_reinspected: bool,
+    all_carried_battle_domains_reinspected: bool,
     declared_plan_technical_installation_complete: bool,
     declared_consumer_runtime_observation_complete: bool,
 }
@@ -966,6 +970,22 @@ pub(crate) fn plan_full_translation_installation(
         carried_ui_domains_complete,
         "carried UI domain final-artifact reinspection is incomplete"
     );
+    let final_battle_consumer_route = dialogue_runtime_code.final_battle_consumer_route()?;
+    let carried_battle_domain_preservation =
+        inspect_carried_battle_domains(CarriedBattleDomainInputs {
+            source: &rom,
+            cumulative: &current_candidate,
+            integrated: &integrated_rom,
+            cumulative_report_path: inputs.current_build_report_path,
+            fixed_workspace_path: inputs.fixed_text_workspace_path,
+            dialogue_workspace_path: inputs.battle_dialogue_workspace_path,
+            final_consumer_route: &final_battle_consumer_route,
+        })?;
+    let carried_battle_domains_complete = carried_battle_domain_preservation.complete();
+    ensure!(
+        carried_battle_domains_complete,
+        "carried battle domain final-artifact reinspection is incomplete"
+    );
     let translation_input_complete = dialogue_validation.translation_input_complete;
     let review_complete = dialogue_validation.review_complete
         && fixed.review_complete
@@ -980,6 +1000,7 @@ pub(crate) fn plan_full_translation_installation(
         && transitions.ending_record.review_complete
         && locations.review_complete
         && carried_ui_domain_preservation.human_review_complete()
+        && carried_battle_domain_preservation.human_review_complete()
         && translation_input_complete;
     let all_declared_consumers_statically_accounted =
         consumer_installation.all_declared_consumers_statically_accounted();
@@ -1046,7 +1067,7 @@ pub(crate) fn plan_full_translation_installation(
         false
     };
     let report = FullTranslationInstallReport {
-        schema: 18,
+        schema: 19,
         source_sha1: EXPECTED_SOURCE_SHA1,
         strategy: "install the declared translation domains in one cumulative candidate, close declared installation gates, then run declared consumer-path dynamic regression on that same ROM; whole-game consumer census remains separate",
         declared_installation_domain_count: REQUIRED_DOMAIN_COUNT,
@@ -1259,6 +1280,7 @@ pub(crate) fn plan_full_translation_installation(
         },
         consumer_installation,
         carried_ui_domain_preservation,
+        carried_battle_domain_preservation,
         final_artifact_runtime_evidence,
         dialogue_storage: DialogueStorage {
             region_count: encoded_display.regions.len(),
@@ -1285,6 +1307,7 @@ pub(crate) fn plan_full_translation_installation(
             dialogue_runtime_composition_planned: true,
             all_declared_consumer_writes_planned: all_declared_consumers_statically_accounted,
             all_carried_ui_domains_reinspected: carried_ui_domains_complete,
+            all_carried_battle_domains_reinspected: carried_battle_domains_complete,
             declared_plan_technical_installation_complete:
                 all_declared_consumers_statically_accounted && technical_installation_complete,
             declared_consumer_runtime_observation_complete,

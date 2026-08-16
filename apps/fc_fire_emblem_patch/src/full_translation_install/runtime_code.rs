@@ -18,7 +18,8 @@ use super::{
 };
 use crate::{
     mapper165::{
-        FinalConsumerRouteRegion, FinalRosterConsumerRoute,
+        FinalBattleConsumerRoute, FinalBattleConsumerRouteRegion, FinalConsumerRouteRegion,
+        FinalRosterConsumerRoute,
         executable_mapper_writes::{Mapper165Register, decode_mapper165_write},
     },
     rom::Rom,
@@ -237,6 +238,50 @@ impl DialogueRuntimeCodePlan {
                     bytes: dialogue_selector.bytes.clone(),
                 },
             ],
+        })
+    }
+
+    pub(in crate::full_translation_install) fn final_battle_consumer_route(
+        &self,
+    ) -> Result<FinalBattleConsumerRoute> {
+        let roster_route = self.final_roster_consumer_route()?;
+        let hook = self
+            .hooks
+            .iter()
+            .find(|hook| {
+                hook.role == DialogueRuntimeHookRole::BattleComposerInvalidatesDialogueResidency
+            })
+            .context("battle composition ownership hook is missing")?;
+        ensure!(
+            matches!(hook.site, DialogueRuntimeHookSite::Fixed(address) if address == chr_ram_ownership::BATTLE_COMPOSITION_CALL_SITE)
+                && hook.bytes.len() == 3
+                && hook.bytes[0] == 0x20,
+            "battle composition ownership hook is no longer JSR absolute"
+        );
+        let ownership_target = u16::from_le_bytes([hook.bytes[1], hook.bytes[2]]);
+        let ownership = self
+            .fixed_routines
+            .iter()
+            .find(|routine| routine.role == "battle-to-dialogue CHR RAM ownership transfer")
+            .context("battle-to-dialogue CHR RAM ownership transfer is missing")?;
+        ensure!(
+            ownership.address == ownership_target,
+            "battle ownership hook no longer targets its generated transfer"
+        );
+        decode_rp2a03_sequence(
+            &ownership.bytes,
+            ownership.address,
+            "integrated battle-to-dialogue ownership transfer",
+        )?;
+        Ok(FinalBattleConsumerRoute {
+            central_fallback_target: roster_route.central_fallback_target,
+            composition_call_address: chr_ram_ownership::BATTLE_COMPOSITION_CALL_SITE,
+            composition_call_bytes: hook.bytes.clone(),
+            regions: vec![FinalBattleConsumerRouteRegion {
+                role: ownership.role,
+                cpu_address: ownership.address,
+                bytes: ownership.bytes.clone(),
+            }],
         })
     }
 }

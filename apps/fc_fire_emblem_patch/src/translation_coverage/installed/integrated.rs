@@ -23,7 +23,13 @@ use crate::{
     translation_coverage::{DomainInstallation, inspect_domain_screen_targets},
 };
 
-const INTEGRATED_REPORT_SCHEMA: u8 = 18;
+const INTEGRATED_REPORT_SCHEMA: u8 = 19;
+const CARRIED_BATTLE_DOMAIN_IDS: [&str; 4] = [
+    "battle_dialogue",
+    "battle_forecast_label",
+    "battle_message_templates",
+    "terrain_names",
+];
 const CARRIED_UI_DOMAIN_IDS: [&str; 5] = [
     "class_profiles",
     "front_end_menu_labels",
@@ -40,6 +46,7 @@ struct IntegratedBuildReport {
     declared_installation_domains: Vec<String>,
     consumer_installation: IntegratedConsumerInstallation,
     carried_ui_domain_preservation: CarriedUiDomainPreservation,
+    carried_battle_domain_preservation: CarriedBattleDomainPreservation,
     integrated_write_set: IntegratedWriteSet,
     final_artifact_runtime_evidence: FinalArtifactRuntimeEvidence,
     installation_gates: IntegratedInstallationGates,
@@ -108,6 +115,33 @@ struct CarriedUiRegion {
 }
 
 #[derive(Debug, Deserialize)]
+struct CarriedBattleDomainPreservation {
+    cumulative_candidate_sha1: String,
+    cumulative_report_sha1: String,
+    integrated_image_sha1: String,
+    domain_count: usize,
+    domains: Vec<CarriedBattleDomain>,
+    shared_screen_roles: Vec<String>,
+    shared_font_regions: Vec<CarriedUiRegion>,
+    shared_consumer_regions: Vec<CarriedUiRegion>,
+    shared_consumer_route_binding_ids: Vec<String>,
+    all_translation_inputs_rebound: bool,
+    all_storage_regions_rebound: bool,
+    shared_font_supply_rebound: bool,
+    shared_consumer_route_rebound: bool,
+    complete: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct CarriedBattleDomain {
+    id: String,
+    target_unit_count: usize,
+    translation_input_bound: bool,
+    storage_regions: Vec<CarriedUiRegion>,
+    complete_for_declared_domain_plan: bool,
+}
+
+#[derive(Debug, Deserialize)]
 struct IntegratedWriteSet {
     declared_domain_count: usize,
     domains: Vec<IntegratedWriteDomain>,
@@ -171,6 +205,7 @@ struct IntegratedInstallationGates {
     all_declared_consumer_writes_planned: bool,
     declared_plan_technical_installation_complete: bool,
     all_carried_ui_domains_reinspected: bool,
+    all_carried_battle_domains_reinspected: bool,
 }
 
 #[derive(Debug)]
@@ -239,7 +274,19 @@ fn bind_integrated_installation(
                 == cumulative_output_sha1
             && report.carried_ui_domain_preservation.cumulative_report_sha1
                 == cumulative_report_sha1
-            && report.carried_ui_domain_preservation.integrated_image_sha1 == output_sha1,
+            && report.carried_ui_domain_preservation.integrated_image_sha1 == output_sha1
+            && report
+                .carried_battle_domain_preservation
+                .cumulative_candidate_sha1
+                == cumulative_output_sha1
+            && report
+                .carried_battle_domain_preservation
+                .cumulative_report_sha1
+                == cumulative_report_sha1
+            && report
+                .carried_battle_domain_preservation
+                .integrated_image_sha1
+                == output_sha1,
         "integrated build report does not descend from the supplied cumulative build"
     );
 
@@ -309,6 +356,19 @@ fn bind_integrated_installation(
                 .carried_ui_domain_preservation
                 .all_consumer_routes_rebound
             && report.carried_ui_domain_preservation.complete
+            && report
+                .carried_battle_domain_preservation
+                .all_translation_inputs_rebound
+            && report
+                .carried_battle_domain_preservation
+                .all_storage_regions_rebound
+            && report
+                .carried_battle_domain_preservation
+                .shared_font_supply_rebound
+            && report
+                .carried_battle_domain_preservation
+                .shared_consumer_route_rebound
+            && report.carried_battle_domain_preservation.complete
             && installation_gates_complete(&report.installation_gates),
         "integrated technical installation gates are incomplete"
     );
@@ -325,8 +385,18 @@ fn bind_integrated_installation(
     let carried_domains =
         bind_carried_ui_domains(report.carried_ui_domain_preservation, &canonical_targets)?;
     let carried_domain_ids = carried_domains.keys().cloned().collect::<BTreeSet<_>>();
+    let carried_battle_domains = bind_carried_battle_domains(
+        report.carried_battle_domain_preservation,
+        &canonical_targets,
+    )?;
+    let carried_battle_domain_ids = carried_battle_domains
+        .keys()
+        .cloned()
+        .collect::<BTreeSet<_>>();
     ensure!(
-        carried_domain_ids.is_disjoint(&declared_domain_ids),
+        carried_domain_ids.is_disjoint(&declared_domain_ids)
+            && carried_battle_domain_ids.is_disjoint(&declared_domain_ids)
+            && carried_domain_ids.is_disjoint(&carried_battle_domain_ids),
         "an integrated domain is both newly installed and carried from the cumulative artifact"
     );
     let mut write_domains = BTreeMap::new();
@@ -403,6 +473,7 @@ fn bind_integrated_installation(
         "integrated consumer domains do not match the declared installation domains"
     );
     domains.extend(carried_domains);
+    domains.extend(carried_battle_domains);
     let final_static_domain_ids = domains.keys().cloned().collect::<BTreeSet<_>>();
 
     let observed_screen_roles =
@@ -539,6 +610,93 @@ fn bind_carried_ui_domains(
     Ok(domains)
 }
 
+fn bind_carried_battle_domains(
+    carried: CarriedBattleDomainPreservation,
+    canonical_targets: &BTreeMap<&'static str, BTreeSet<String>>,
+) -> Result<BTreeMap<String, DomainInstallation>> {
+    let expected_ids = CARRIED_BATTLE_DOMAIN_IDS
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+    let expected_counts = BTreeMap::from([
+        ("battle_dialogue", 70_usize),
+        ("battle_forecast_label", 1),
+        ("battle_message_templates", 22),
+        ("terrain_names", 16),
+    ]);
+    let shared_roles = unique_strings(
+        carried.shared_screen_roles,
+        "carried battle shared screen roles",
+    )?;
+    ensure!(
+        shared_roles == BTreeSet::from(["battle_animation".to_owned()]),
+        "carried battle domains no longer share the battle-animation lifetime"
+    );
+    bind_carried_regions(
+        &carried.shared_font_regions,
+        "carried battle font supply",
+        &["cumulative_bytes_preserved"],
+    )?;
+    bind_carried_regions(
+        &carried.shared_consumer_regions,
+        "carried battle consumer route",
+        &["cumulative_bytes_preserved", "integrated_route_replacement"],
+    )?;
+    let route_ids = unique_strings(
+        carried.shared_consumer_route_binding_ids,
+        "carried battle consumer route binding IDs",
+    )?;
+    ensure!(
+        carried.domain_count == carried.domains.len()
+            && carried.domain_count == expected_ids.len()
+            && !route_ids.is_empty(),
+        "carried battle shared route inventory changed"
+    );
+
+    let mut domains = BTreeMap::new();
+    for domain in carried.domains {
+        ensure!(
+            expected_ids.contains(&domain.id),
+            "integrated report carries unknown battle domain {}",
+            domain.id
+        );
+        let canonical_roles = canonical_targets.get(domain.id.as_str()).with_context(|| {
+            format!(
+                "carried battle domain {} has no canonical screen set",
+                domain.id
+            )
+        })?;
+        ensure!(
+            *canonical_roles == shared_roles
+                && domain.target_unit_count == expected_counts[domain.id.as_str()]
+                && domain.translation_input_bound
+                && domain.complete_for_declared_domain_plan,
+            "carried battle domain {} does not close its exact final plan",
+            domain.id
+        );
+        bind_carried_regions(
+            &domain.storage_regions,
+            "carried battle storage",
+            &["cumulative_bytes_preserved"],
+        )?;
+        let installation = DomainInstallation {
+            installed_target_unit_count: domain.target_unit_count,
+            installed_screen_roles: shared_roles.iter().cloned().collect(),
+            consumer_complete_screen_roles: shared_roles.iter().cloned().collect(),
+            runtime_bound_screen_roles: Vec::new(),
+        };
+        ensure!(
+            domains.insert(domain.id, installation).is_none(),
+            "carried battle installation repeats a domain"
+        );
+    }
+    ensure!(
+        domains.keys().cloned().collect::<BTreeSet<_>>() == expected_ids,
+        "carried battle domain registry is incomplete"
+    );
+    Ok(domains)
+}
+
 fn bind_carried_regions(
     regions: &[CarriedUiRegion],
     role: &str,
@@ -626,6 +784,7 @@ fn installation_gates_complete(gates: &IntegratedInstallationGates) -> bool {
         && gates.all_declared_consumer_writes_planned
         && gates.declared_plan_technical_installation_complete
         && gates.all_carried_ui_domains_reinspected
+        && gates.all_carried_battle_domains_reinspected
 }
 
 fn unique_strings(values: Vec<String>, role: &str) -> Result<BTreeSet<String>> {
@@ -672,6 +831,17 @@ mod tests {
         })
     }
 
+    fn carried_battle_domain(id: &str, target_unit_count: usize) -> serde_json::Value {
+        serde_json::json!({
+            "id": id,
+            "target_unit_count": target_unit_count,
+            "translation_input_bound": true,
+            "review_complete": false,
+            "storage_regions": [region("battle-storage", "0x004000", "cumulative_bytes_preserved")],
+            "complete_for_declared_domain_plan": true
+        })
+    }
+
     fn report_json(runtime_role: Option<&str>) -> Vec<u8> {
         let runtime_roles = runtime_role.into_iter().collect::<Vec<_>>();
         let carried_domains = vec![
@@ -684,6 +854,12 @@ mod tests {
             carried_domain("options_labels", 3, &["options"]),
             carried_domain("roster_header", 1, &["unit_roster"]),
             carried_domain("title_graphics", 1, &["title"]),
+        ];
+        let carried_battle_domains = vec![
+            carried_battle_domain("battle_dialogue", 70),
+            carried_battle_domain("battle_forecast_label", 1),
+            carried_battle_domain("battle_message_templates", 22),
+            carried_battle_domain("terrain_names", 16),
         ];
         serde_json::to_vec(&serde_json::json!({
             "schema": INTEGRATED_REPORT_SCHEMA,
@@ -719,6 +895,23 @@ mod tests {
                 "all_storage_regions_rebound": true,
                 "all_font_regions_rebound": true,
                 "all_consumer_routes_rebound": true,
+                "human_review_complete": false,
+                "complete": true
+            },
+            "carried_battle_domain_preservation": {
+                "cumulative_candidate_sha1": "base-output",
+                "cumulative_report_sha1": "base-report",
+                "integrated_image_sha1": sha1_hex(b"final"),
+                "domain_count": 4,
+                "domains": carried_battle_domains,
+                "shared_screen_roles": ["battle_animation"],
+                "shared_font_regions": [region("battle-font", "0x005000", "cumulative_bytes_preserved")],
+                "shared_consumer_regions": [region("battle-consumer", "0x006000", "integrated_route_replacement")],
+                "shared_consumer_route_binding_ids": ["battle:route"],
+                "all_translation_inputs_rebound": true,
+                "all_storage_regions_rebound": true,
+                "shared_font_supply_rebound": true,
+                "shared_consumer_route_rebound": true,
                 "human_review_complete": false,
                 "complete": true
             },
@@ -777,7 +970,8 @@ mod tests {
                 "dialogue_runtime_composition_planned": true,
                 "all_declared_consumer_writes_planned": true,
                 "declared_plan_technical_installation_complete": true,
-                "all_carried_ui_domains_reinspected": true
+                "all_carried_ui_domains_reinspected": true,
+                "all_carried_battle_domains_reinspected": true
             },
             "rom_emitted": true
         }))
@@ -812,6 +1006,10 @@ mod tests {
             options.runtime_bound_screen_roles.is_empty(),
             "carried cumulative runtime evidence must not be inherited"
         );
+        let terrain = &evidence.domains["terrain_names"];
+        assert_eq!(terrain.installed_target_unit_count, 16);
+        assert_eq!(terrain.consumer_complete_screen_roles, ["battle_animation"]);
+        assert!(terrain.runtime_bound_screen_roles.is_empty());
     }
 
     #[test]

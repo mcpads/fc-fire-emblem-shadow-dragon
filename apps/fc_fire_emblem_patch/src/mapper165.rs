@@ -19,6 +19,7 @@ pub(crate) mod battle_composition_runtime_verify;
 pub(crate) mod battle_dialogue_probe;
 pub(crate) mod battle_text_cache_probe;
 pub(crate) mod battle_text_runtime_base;
+mod carried_battle_domains;
 mod carried_ui_domains;
 mod class_profile_page;
 pub(crate) mod cumulative_patch;
@@ -29,6 +30,10 @@ pub(crate) mod direct_chr_pairs;
 pub(crate) mod executable_mapper_writes;
 pub(crate) mod font_pair_projection;
 mod front_end_page;
+pub(crate) use carried_battle_domains::{
+    CarriedBattleDomainInputs, CarriedBattleDomainPreservation, FinalBattleConsumerRoute,
+    FinalBattleConsumerRouteRegion, inspect_carried_battle_domains,
+};
 pub(crate) use carried_ui_domains::{
     CarriedUiDomainInputs, CarriedUiDomainPreservation, FinalConsumerRouteRegion,
     FinalRosterConsumerRoute, inspect_carried_ui_domains,

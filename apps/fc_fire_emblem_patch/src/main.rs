@@ -316,6 +316,8 @@ enum Command {
         output: Option<PathBuf>,
         #[arg(long, default_value = "private/dialogue/main-workspace.json")]
         main_dialogue_workspace: PathBuf,
+        #[arg(long, default_value = "private/dialogue/battle-workspace.json")]
+        battle_dialogue_workspace: PathBuf,
         #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
         fixed_text_workspace: PathBuf,
         #[arg(long, default_value = "assets/translation/options.ko.json")]
@@ -1231,6 +1233,7 @@ fn main() -> Result<()> {
             source,
             output,
             main_dialogue_workspace,
+            battle_dialogue_workspace,
             fixed_text_workspace,
             options_localization,
             roster_localization,
@@ -1255,6 +1258,7 @@ fn main() -> Result<()> {
                 full_translation_install::FullTranslationInstallInputs {
                     source_path: &source,
                     main_dialogue_workspace_path: &main_dialogue_workspace,
+                    battle_dialogue_workspace_path: &battle_dialogue_workspace,
                     fixed_text_workspace_path: &fixed_text_workspace,
                     options_localization_path: &options_localization,
                     roster_localization_path: &roster_localization,

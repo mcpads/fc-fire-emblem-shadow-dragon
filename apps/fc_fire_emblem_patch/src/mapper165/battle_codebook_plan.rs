@@ -402,6 +402,13 @@ pub(super) fn plan_battle_cache_composition_material(
     Ok(plan_battle_codebook_model(rom, fixed, dialogue)?.composition)
 }
 
+/// Replays the source-owned battle renderer and caller topology without
+/// exposing its internal census model to unrelated installation code.
+pub(crate) fn bind_known_battle_text_consumer_topology(rom: &Rom) -> Result<()> {
+    let _ = text_consumer_topology::bind_battle_text_consumer_topology(rom)?;
+    Ok(())
+}
+
 fn plan_battle_codebook_model(
     rom: &Rom,
     fixed: &FixedTextPlan,
