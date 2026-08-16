@@ -29,7 +29,10 @@ const EXPECTED_POINTER_SLOT_COUNT: usize = 523;
 const EXPECTED_ENTRY_BINDING_COUNT: usize = 517;
 const EXPECTED_HANDLER_ENTRY_COUNT: usize = 6;
 const EXPECTED_TRANSITION_EDGE_COUNT: usize = 213;
-const EXPECTED_DYNAMIC_CONTROL_COUNT: usize = 37;
+// This is the source execution population, not the count of translated literal lines. The old
+// value 37 dropped 105 EC controls from untranslated control-only epilogue records (53 direct
+// character records and 52 routing records), even though those records still publish names.
+const EXPECTED_DYNAMIC_CONTROL_COUNT: usize = 142;
 const EXPECTED_E4_LOOKAHEAD_RECORD_COUNT: usize = 92;
 const EXPECTED_E6_LOOKAHEAD_RECORD_COUNT: usize = 121;
 const EXPECTED_E7_CALLER_RESUME_RECORD_COUNT: usize = 84;

@@ -374,16 +374,27 @@ fn record_page_worksets<'a>(
             let mut preserved_target_active_codes = script_control_codes.clone();
             let mut source_reclaimable_active_codes = BTreeSet::new();
             for (source_line, workspace_line) in source_lines.iter().zip(workspace_lines) {
-                if workspace_line.status == TranslationStatus::Untranslated {
-                    continue;
-                }
-                let logical_line = encode_korean_markup(&workspace_line.korean)?;
-                let line_selectors = dynamic_string_controls(&logical_line)?;
+                // EC/EA are runtime producers, not translated literals. Some records (notably
+                // character epilogues) contain a control-only line whose Korean field is empty
+                // and therefore remains `untranslated`. The source bytes are the authoritative
+                // inventory for those controls; skipping the line would omit the produced name
+                // glyphs from this page's font workset.
+                let source_logical_line = source_line_logical_bytes(source, source_line)?;
+                let line_selectors = dynamic_string_controls(&source_logical_line)?;
                 let line_control_count = line_selectors.values().sum::<usize>();
                 for (selector, count) in line_selectors {
                     *dynamic_string_selector_counts.entry(selector).or_default() += count;
                 }
                 dynamic_string_control_count += line_control_count;
+                preserve_runtime_generated_active_codes(
+                    &source_logical_line,
+                    &mut preserved_target_active_codes,
+                );
+
+                if workspace_line.status == TranslationStatus::Untranslated {
+                    continue;
+                }
+                let logical_line = encode_korean_markup(&workspace_line.korean)?;
                 preserve_runtime_generated_active_codes(
                     &logical_line,
                     &mut preserved_target_active_codes,
@@ -424,6 +435,23 @@ fn record_page_worksets<'a>(
                 preserved_target_active_codes,
             })
         })
+}
+
+fn source_line_logical_bytes(
+    source: &[u8],
+    source_line: &MainDialogueStorageLine,
+) -> Result<Vec<LogicalDialogueByte>> {
+    let end = source_line
+        .file_offset
+        .checked_add(source_line.storage_byte_count)
+        .context("main-dialogue source line range overflow")?;
+    Ok(source
+        .get(source_line.file_offset..end)
+        .context("main-dialogue source line is outside the ROM")?
+        .iter()
+        .copied()
+        .map(LogicalDialogueByte::Encoded)
+        .collect())
 }
 
 /// 대사 바이트 자체가 아니라 제어 코드의 실행 결과로 화면에 생기는 글리프 코드를
@@ -477,6 +505,57 @@ fn encode_logical_bytes(
 mod tests {
     use super::*;
 
+    fn source_record_with_line(source: &[u8]) -> MainDialogueStorageRecord {
+        MainDialogueStorageRecord {
+            table_id: "synthetic-dialogue",
+            source_prg_bank: 0,
+            canonical_entry_index: 0,
+            entry_indices: vec![0],
+            pointer_file_offsets: vec![0],
+            pointer_cpu_address: 0x8000,
+            file_offset: 0,
+            end_file_offset_exclusive: source.len(),
+            storage_byte_count: source.len(),
+            storage_sha1: String::new(),
+            prefix_byte_count: 0,
+            boundary_control: 0xED,
+            literal_file_offsets: Vec::new(),
+            lines: vec![MainDialogueStorageLine {
+                file_offset: 0,
+                storage_byte_count: source.len(),
+                storage_sha1: String::new(),
+                line_end_control: 0xED,
+                literal_file_offsets: Vec::new(),
+            }],
+        }
+    }
+
+    fn workspace_record_with_line(status: TranslationStatus, korean: &str) -> WorkspaceRecord {
+        WorkspaceRecord {
+            id: "synthetic-dialogue:000".to_owned(),
+            table_id: "synthetic-dialogue".to_owned(),
+            source_prg_bank: 0,
+            canonical_entry_index: 0,
+            entry_indices: vec![0],
+            pointer_cpu_address_hex: "8000".to_owned(),
+            prefix_byte_count: 0,
+            boundary_control_hex: "ED".to_owned(),
+            lines: vec![WorkspaceLine {
+                id: "synthetic-dialogue:000:line:00".to_owned(),
+                index: 0,
+                file_offset_hex: "0x00000".to_owned(),
+                source_storage_sha1: String::new(),
+                source_markup: "{E2}{E9:05}{EC:00}{ED}".to_owned(),
+                korean: korean.to_owned(),
+                status,
+                japanese_source_byte_count: 0,
+                safe_japanese_source_byte_count: 0,
+                requires_relocation: false,
+                conflicting_file_offsets_hex: Vec::new(),
+            }],
+        }
+    }
+
     #[test]
     fn dynamic_string_inventory_counts_controls_and_unique_selectors() {
         let logical = encode_korean_markup("{EC:00}한{EC:00}{EC:02}{EF}").unwrap();
@@ -494,5 +573,43 @@ mod tests {
         preserve_runtime_generated_active_codes(&logical, &mut preserved);
 
         assert_eq!(preserved, BTreeSet::from(DIALOGUE_PREFIX_OUTPUT_CODES));
+    }
+
+    #[test]
+    fn untranslated_control_only_line_still_populates_dynamic_name_workset() {
+        let source = [0xE2, 0xE9, 0x05, 0xEC, 0x00, 0xED];
+        let source_record = source_record_with_line(&source);
+        let workspace_record = workspace_record_with_line(TranslationStatus::Untranslated, "");
+
+        let worksets = record_page_worksets(&source, &source_record, &workspace_record)
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+
+        assert_eq!(worksets.len(), 1);
+        assert_eq!(worksets[0].dynamic_string_control_count, 1);
+        assert_eq!(
+            worksets[0].dynamic_string_selector_counts,
+            BTreeMap::from([(0, 1)])
+        );
+        assert_eq!(worksets[0].dynamic_string_selectors, BTreeSet::from([0]));
+        assert!(worksets[0].target_glyphs.is_empty());
+    }
+
+    #[test]
+    fn translated_dynamic_control_is_counted_once_from_its_source_contract() {
+        let source = [0xE2, 0xE9, 0x05, 0xEC, 0x00, 0xED];
+        let source_record = source_record_with_line(&source);
+        let workspace_record =
+            workspace_record_with_line(TranslationStatus::Complete, "{E2}{E9:05}{EC:00}{ED}");
+
+        let worksets = record_page_worksets(&source, &source_record, &workspace_record)
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+
+        assert_eq!(worksets[0].dynamic_string_control_count, 1);
+        assert_eq!(
+            worksets[0].dynamic_string_selector_counts,
+            BTreeMap::from([(0, 1)])
+        );
     }
 }

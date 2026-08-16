@@ -116,7 +116,7 @@ use runtime_material::{
 };
 pub(crate) use runtime_state_storage::bind_dialogue_interrupt_audio_mapper_write_slice;
 use runtime_state_storage::{DialogueRuntimeStateStoragePlan, plan_dialogue_runtime_state_storage};
-use transition_residency::plan_transition_residency;
+use transition_residency::{bind_transition_lifetime_worksets, plan_transition_residency};
 
 /// 대사 런타임 재료 용기가 시작하는 MMC3 8 KiB 페이지다.
 const MAIN_DIALOGUE_MATERIAL_FIRST_PAGE: u8 = 0x2C;
@@ -517,11 +517,15 @@ pub(crate) fn plan_full_translation_installation(
         "full translation installation input population changed"
     );
 
+    let dialogue_graph = inspect_main_dialogue_graph(rom.data())?;
+    let transition_lifetimes = bind_transition_lifetime_worksets(&display, &dialogue_graph)?;
+
     let baseline_dynamic_inputs = plan_dynamic_dialogue_inputs(
         &display,
         &fixed.entries,
         &unit_names.entries,
         &locations.entries,
+        &transition_lifetimes,
     )?;
     let baseline_codebook =
         plan_glyph_workset_page_upper_bound(&baseline_dynamic_inputs.augmented_worksets)?;
@@ -539,6 +543,7 @@ pub(crate) fn plan_full_translation_installation(
         &fixed.entries,
         &unit_names.entries,
         &locations.entries,
+        &transition_lifetimes,
     )?;
     let dynamic_input_producers = inspect_dynamic_input_producers(&rom)?;
     let mut dynamic_producer_encoding = bind_dynamic_producer_encoding(
@@ -636,7 +641,6 @@ pub(crate) fn plan_full_translation_installation(
         front_end_result_menu_residency,
         &choice_residency.augmented_worksets,
     )?;
-    let dialogue_graph = inspect_main_dialogue_graph(rom.data())?;
     let transition_residency = plan_transition_residency(
         &display,
         &dialogue_graph,

@@ -177,10 +177,10 @@ fn observed_epilogue_family_reserves_names_locations_and_the_dialogue_chain() {
     let lifetime = &report.observed_screen_lifetimes[0];
     assert_eq!(lifetime.source_record_count, 1);
     assert_eq!(lifetime.filled_unique_glyph_count, 94);
-    assert_eq!(lifetime.preserved_active_source_code_count, 99);
+    assert_eq!(lifetime.preserved_active_source_code_count, 6);
     assert_eq!(lifetime.additional_target_glyph_reservation_count, 18);
-    assert_eq!(lifetime.filled_slot_demand, 211);
-    assert!(!lifetime.filled_set_fits_one_page_so_far);
+    assert_eq!(lifetime.filled_slot_demand, 118);
+    assert!(lifetime.filled_set_fits_one_page_so_far);
 }
 
 #[test]

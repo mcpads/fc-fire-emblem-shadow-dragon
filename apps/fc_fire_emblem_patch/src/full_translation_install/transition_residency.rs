@@ -23,6 +23,11 @@ pub(super) struct TransitionResidencyPlan {
     pub(super) maximum_lifetime_slot_demand: usize,
 }
 
+pub(super) struct TransitionLifetimeWorksets {
+    pub(super) record_indices: Vec<usize>,
+    pub(super) workset_indices: Vec<usize>,
+}
+
 pub(super) fn plan_transition_residency(
     display: &MainDialogueDisplayPlan,
     graph: &MainDialogueGraphReport,
@@ -33,6 +38,14 @@ pub(super) fn plan_transition_residency(
         "dialogue transition residency lost visible page worksets"
     );
 
+    let lifetimes = bind_transition_lifetime_worksets(display, graph)?;
+    apply_transition_residency(display, worksets, &lifetimes)
+}
+
+pub(super) fn bind_transition_lifetime_worksets(
+    display: &MainDialogueDisplayPlan,
+    graph: &MainDialogueGraphReport,
+) -> Result<Vec<TransitionLifetimeWorksets>> {
     let record_indices = display
         .record_ids
         .iter()
@@ -64,15 +77,25 @@ pub(super) fn plan_transition_residency(
         .iter()
         .map(|(source, target)| (source.as_str(), target.as_str()))
         .collect::<Vec<_>>();
-    build_transition_residency(display, worksets, &record_indices, &edge_refs)
+    build_transition_lifetime_worksets(display, &record_indices, &edge_refs)
 }
 
+#[cfg(test)]
 fn build_transition_residency(
     display: &MainDialogueDisplayPlan,
     worksets: &[GlyphWorkset],
     record_indices: &BTreeMap<&str, usize>,
     edges: &[(&str, &str)],
 ) -> Result<TransitionResidencyPlan> {
+    let lifetimes = build_transition_lifetime_worksets(display, record_indices, edges)?;
+    apply_transition_residency(display, worksets, &lifetimes)
+}
+
+fn build_transition_lifetime_worksets(
+    display: &MainDialogueDisplayPlan,
+    record_indices: &BTreeMap<&str, usize>,
+    edges: &[(&str, &str)],
+) -> Result<Vec<TransitionLifetimeWorksets>> {
     let mut parents = (0..record_indices.len()).collect::<Vec<_>>();
     for (source, target) in edges {
         let source_index = *record_indices
@@ -102,41 +125,70 @@ fn build_transition_residency(
         records_by_root.entry(root).or_default().push(record_index);
     }
 
+    Ok(records_by_root
+        .into_values()
+        .map(|record_indices| {
+            let workset_indices = record_indices
+                .iter()
+                .flat_map(|record_index| worksets_by_record[*record_index].iter().copied())
+                .collect();
+            TransitionLifetimeWorksets {
+                record_indices,
+                workset_indices,
+            }
+        })
+        .collect())
+}
+
+fn apply_transition_residency(
+    display: &MainDialogueDisplayPlan,
+    worksets: &[GlyphWorkset],
+    lifetimes: &[TransitionLifetimeWorksets],
+) -> Result<TransitionResidencyPlan> {
     let mut augmented_worksets = worksets.to_vec();
     let mut multi_record_lifetime_count = 0;
     let mut maximum_lifetime_record_count = 0;
     let mut maximum_lifetime_workset_count = 0;
     let mut maximum_lifetime_slot_demand = 0;
-    for record_group in records_by_root.values() {
-        if record_group.len() > 1 {
+    for lifetime in lifetimes {
+        if lifetime.record_indices.len() > 1 {
             multi_record_lifetime_count += 1;
         }
-        maximum_lifetime_record_count = maximum_lifetime_record_count.max(record_group.len());
+        maximum_lifetime_record_count =
+            maximum_lifetime_record_count.max(lifetime.record_indices.len());
 
-        let workset_indices = record_group
+        maximum_lifetime_workset_count =
+            maximum_lifetime_workset_count.max(lifetime.workset_indices.len());
+        let lifetime_record_ids = lifetime
+            .record_indices
             .iter()
-            .flat_map(|record_index| worksets_by_record[*record_index].iter().copied())
+            .map(|record_index| display.record_ids[*record_index].as_str())
             .collect::<Vec<_>>();
-        maximum_lifetime_workset_count = maximum_lifetime_workset_count.max(workset_indices.len());
         let merged = merge_worksets(
-            workset_indices
+            lifetime
+                .workset_indices
                 .iter()
                 .map(|workset_index| &worksets[*workset_index]),
-        )?;
+        )
+        .with_context(|| {
+            format!("merge dialogue transition lifetime for records {lifetime_record_ids:?}")
+        })?;
         let slot_demand = merged.target_glyphs.len() + merged.preserved_active_codes.len();
         ensure!(
             slot_demand <= ACTIVE_HANGUL_SLOT_COUNT,
-            "dialogue transition lifetime needs {slot_demand} active slots but only {ACTIVE_HANGUL_SLOT_COUNT} exist"
+            "dialogue transition lifetime {lifetime_record_ids:?} needs {slot_demand} active slots ({} target glyphs plus {} preserved codes) but only {ACTIVE_HANGUL_SLOT_COUNT} exist",
+            merged.target_glyphs.len(),
+            merged.preserved_active_codes.len(),
         );
         maximum_lifetime_slot_demand = maximum_lifetime_slot_demand.max(slot_demand);
-        for workset_index in workset_indices {
-            augmented_worksets[workset_index] = merged.clone();
+        for workset_index in &lifetime.workset_indices {
+            augmented_worksets[*workset_index] = merged.clone();
         }
     }
 
     Ok(TransitionResidencyPlan {
         augmented_worksets,
-        lifetime_count: records_by_root.len(),
+        lifetime_count: lifetimes.len(),
         multi_record_lifetime_count,
         maximum_lifetime_record_count,
         maximum_lifetime_workset_count,
@@ -173,11 +225,14 @@ fn merge_worksets<'a>(worksets: impl Iterator<Item = &'a GlyphWorkset>) -> Resul
             .all(|glyph| target_glyphs.contains(glyph)),
         "dialogue transition lifetime fixes a code outside its glyph set"
     );
+    let preserved_collisions = fixed_glyph_codes
+        .iter()
+        .filter(|(_, code)| preserved_active_codes.contains(code))
+        .map(|(glyph, code)| (*glyph, *code))
+        .collect::<Vec<_>>();
     ensure!(
-        fixed_glyph_codes
-            .values()
-            .all(|code| !preserved_active_codes.contains(code)),
-        "dialogue transition lifetime fixes a code preserved by another visible page"
+        preserved_collisions.is_empty(),
+        "dialogue transition lifetime fixes codes preserved by another visible page: {preserved_collisions:?}"
     );
     Ok(GlyphWorkset {
         target_glyphs,

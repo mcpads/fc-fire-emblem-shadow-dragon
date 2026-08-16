@@ -495,7 +495,7 @@ mod tests {
             },
             observed_screen_lifetimes: vec![
                 observed("weapon-shop purchase handoff", 9, 17, 0),
-                observed("ending character epilogue family", 33, 99, 18),
+                observed("ending character epilogue family", 33, 6, 18),
                 observed("turn-boundary game over", 30, 90, 0),
                 observed("chapter-seven maximum dialogue page", 35, 100, 0),
             ],

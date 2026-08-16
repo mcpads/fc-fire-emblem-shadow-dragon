@@ -10,6 +10,8 @@ use crate::{
     text_inventory::FixedTextPlannedEntry,
 };
 
+use super::transition_residency::TransitionLifetimeWorksets;
+
 mod page_code_identity;
 mod producer_encoding;
 
@@ -62,6 +64,7 @@ pub(super) fn plan_dynamic_dialogue_inputs(
     fixed_text: &[FixedTextPlannedEntry],
     unit_names: &[FixedTextPlannedEntry],
     location_names: &[FixedTextPlannedEntry],
+    transition_lifetimes: &[TransitionLifetimeWorksets],
 ) -> Result<DynamicDialogueInputPlan> {
     let item_name_domain = domain_glyphs(fixed_text, "item-names")?;
     let unit_name_domain = domain_glyphs(unit_names, "unit-names")?;
@@ -175,19 +178,12 @@ pub(super) fn plan_dynamic_dialogue_inputs(
     // 나타날 수 있는 모든 페이지의 보존 코드를 먼저 모은 뒤, 그 어느 것과도
     // 충돌하지 않는 물리 코드를 하나씩 배정한다. 이후 페이지 packer가 이 배정을
     // 고정 조건으로 받으므로 생산자가 쓴 canonical 바이트가 곧 소비 바이트다.
-    let mut forbidden_codes_by_glyph = translated_dynamic_glyphs
-        .iter()
-        .copied()
-        .map(|glyph| (glyph, BTreeSet::new()))
-        .collect::<BTreeMap<_, _>>();
-    for (workset, dynamic_glyphs) in augmented_worksets.iter().zip(&dynamic_glyphs_by_workset) {
-        for glyph in dynamic_glyphs {
-            forbidden_codes_by_glyph
-                .get_mut(glyph)
-                .expect("dynamic glyph belongs to the canonical domain")
-                .extend(workset.preserved_active_codes.iter().copied());
-        }
-    }
+    let forbidden_codes_by_glyph = forbidden_dynamic_codes_across_transition_lifetimes(
+        &translated_dynamic_glyphs,
+        &augmented_worksets,
+        &dynamic_glyphs_by_workset,
+        transition_lifetimes,
+    )?;
     let canonical_dynamic_codes =
         assign_canonical_dynamic_codes(&forbidden_codes_by_glyph, &active_codes)?;
     for (workset, dynamic_glyphs) in augmented_worksets
@@ -243,6 +239,59 @@ pub(super) fn plan_dynamic_dialogue_inputs(
         every_dynamic_control_classified: true,
         every_augmented_workset_fits,
     })
+}
+
+fn forbidden_dynamic_codes_across_transition_lifetimes(
+    translated_dynamic_glyphs: &BTreeSet<char>,
+    worksets: &[GlyphWorkset],
+    dynamic_glyphs_by_workset: &[BTreeSet<char>],
+    transition_lifetimes: &[TransitionLifetimeWorksets],
+) -> Result<BTreeMap<char, BTreeSet<u8>>> {
+    ensure!(
+        worksets.len() == dynamic_glyphs_by_workset.len(),
+        "dynamic dialogue lifetime code assignment lost page worksets"
+    );
+    let mut forbidden_codes_by_glyph = translated_dynamic_glyphs
+        .iter()
+        .copied()
+        .map(|glyph| (glyph, BTreeSet::new()))
+        .collect::<BTreeMap<_, _>>();
+    let mut covered_worksets = BTreeSet::new();
+    for lifetime in transition_lifetimes {
+        ensure!(
+            !lifetime.workset_indices.is_empty(),
+            "dynamic dialogue transition lifetime has no visible page"
+        );
+        let mut lifetime_preserved_codes = BTreeSet::new();
+        let mut lifetime_dynamic_glyphs = BTreeSet::new();
+        for workset_index in &lifetime.workset_indices {
+            ensure!(
+                *workset_index < worksets.len() && covered_worksets.insert(*workset_index),
+                "dynamic dialogue transition lifetimes overlap or leave their page domain"
+            );
+            lifetime_preserved_codes.extend(
+                worksets[*workset_index]
+                    .preserved_active_codes
+                    .iter()
+                    .copied(),
+            );
+            lifetime_dynamic_glyphs
+                .extend(dynamic_glyphs_by_workset[*workset_index].iter().copied());
+        }
+        for glyph in lifetime_dynamic_glyphs {
+            forbidden_codes_by_glyph
+                .get_mut(&glyph)
+                .with_context(|| {
+                    format!("transition lifetime contains unknown dynamic glyph {glyph:?}")
+                })?
+                .extend(lifetime_preserved_codes.iter().copied());
+        }
+    }
+    ensure!(
+        covered_worksets.len() == worksets.len(),
+        "dynamic dialogue transition lifetimes do not cover every visible page"
+    );
+    Ok(forbidden_codes_by_glyph)
 }
 
 fn assign_canonical_dynamic_codes(
@@ -612,11 +661,18 @@ mod tests {
                 fixed_entry("unit-names", 1, "치키"),
             ],
             &[fixed_entry("location-names", 0, "아리티아")],
+            &[TransitionLifetimeWorksets {
+                record_indices: vec![0],
+                workset_indices: vec![0],
+            }],
         )
         .unwrap();
         let installed_workset = &plan.augmented_worksets[0];
 
-        assert_eq!(preserved.len(), 99);
+        assert_eq!(
+            preserved,
+            BTreeSet::from([0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0xFA])
+        );
         assert_eq!(installed_workset.preserved_active_codes, preserved);
         assert!(
             installed_workset
@@ -672,5 +728,42 @@ mod tests {
         let error = assign_canonical_dynamic_codes(&forbidden, &active).unwrap_err();
 
         assert!(error.to_string().contains("no injective code assignment"));
+    }
+
+    #[test]
+    fn dynamic_code_avoids_preserved_codes_on_every_page_in_its_visible_lifetime() {
+        let dynamic_glyphs = BTreeSet::from(['훈']);
+        let worksets = vec![
+            GlyphWorkset {
+                target_glyphs: dynamic_glyphs.clone(),
+                preserved_active_codes: BTreeSet::new(),
+                fixed_glyph_codes: BTreeMap::new(),
+            },
+            GlyphWorkset {
+                target_glyphs: BTreeSet::new(),
+                preserved_active_codes: BTreeSet::from([0x03]),
+                fixed_glyph_codes: BTreeMap::new(),
+            },
+        ];
+        let forbidden = forbidden_dynamic_codes_across_transition_lifetimes(
+            &dynamic_glyphs,
+            &worksets,
+            &[dynamic_glyphs.clone(), BTreeSet::new()],
+            &[TransitionLifetimeWorksets {
+                record_indices: vec![0],
+                workset_indices: vec![0, 1],
+            }],
+        )
+        .unwrap();
+
+        assert_eq!(forbidden[&'훈'], BTreeSet::from([0x03]));
+        assert_ne!(
+            assign_canonical_dynamic_codes(
+                &forbidden,
+                &active_hangul_codes().into_iter().collect()
+            )
+            .unwrap()[&'훈'],
+            0x03
+        );
     }
 }
