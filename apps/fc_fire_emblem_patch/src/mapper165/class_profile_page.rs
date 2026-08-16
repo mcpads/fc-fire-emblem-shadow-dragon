@@ -8,7 +8,7 @@ use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 
 use crate::{
-    class_profile::ClassProfilePlan,
+    class_profile::{ClassProfilePlan, PROFILE_PAGE_SPLIT_INDEX},
     font_slots::{FONT_PAGE_SIZE, active_hangul_codes},
     japanese_encoding::is_japanese_text_code,
     rom::{EXPECTED_SOURCE_SHA1, Rom},
@@ -25,8 +25,6 @@ pub(super) const PROFILE_PAGE_SELECTOR_ADDRESS: u16 = 0xBE3C;
 pub(super) const PROFILE_PAGE_SELECTOR_CAVE_END: u16 = 0xBE70;
 pub(super) const TITLE_COMPOSER_HOOK_ADDRESS: u16 = 0x82ED;
 pub(super) const SOURCE_TITLE_COMPOSER_PREFIX: [u8; 4] = [0xA9, 0xA8, 0x85, 0x02];
-pub(super) const PROFILE_PAGE_SPLIT_INDEX: usize = 11;
-
 const FIRST_PAGE_LOAD_ADDRESS: u16 = 0xBE47;
 const WRITE_PAGES_ADDRESS: u16 = 0xBE49;
 const SOURCE_FONT_PHYSICAL_PAGE: usize = 0;

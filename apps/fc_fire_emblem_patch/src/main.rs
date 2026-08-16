@@ -318,8 +318,18 @@ enum Command {
         main_dialogue_workspace: PathBuf,
         #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
         fixed_text_workspace: PathBuf,
+        #[arg(long, default_value = "assets/translation/options.ko.json")]
+        options_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/roster.ko.json")]
+        roster_localization: PathBuf,
         #[arg(long, default_value = "assets/translation/front-end-menu.ko.json")]
         front_end_menu_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/class-profiles.ko.json")]
+        class_profile_localization: PathBuf,
+        #[arg(long, default_value = "assets/translation/title-logo.ko.json")]
+        title_graphics_localization: PathBuf,
+        #[arg(long, default_value = "out/title-logo.asset")]
+        title_logo_asset: PathBuf,
         #[arg(long, default_value = "assets/translation/unit-names.ko.json")]
         unit_name_localization: PathBuf,
         #[arg(long, default_value = "assets/translation/chapter-titles.ko.json")]
@@ -1222,7 +1232,12 @@ fn main() -> Result<()> {
             output,
             main_dialogue_workspace,
             fixed_text_workspace,
+            options_localization,
+            roster_localization,
             front_end_menu_localization,
+            class_profile_localization,
+            title_graphics_localization,
+            title_logo_asset,
             unit_name_localization,
             chapter_title_localization,
             choice_label_localization,
@@ -1241,7 +1256,12 @@ fn main() -> Result<()> {
                     source_path: &source,
                     main_dialogue_workspace_path: &main_dialogue_workspace,
                     fixed_text_workspace_path: &fixed_text_workspace,
+                    options_localization_path: &options_localization,
+                    roster_localization_path: &roster_localization,
                     front_end_menu_localization_path: &front_end_menu_localization,
+                    class_profile_localization_path: &class_profile_localization,
+                    title_graphics_localization_path: &title_graphics_localization,
+                    title_logo_asset_path: &title_logo_asset,
                     unit_name_localization_path: &unit_name_localization,
                     chapter_title_localization_path: &chapter_title_localization,
                     choice_label_localization_path: &choice_label_localization,

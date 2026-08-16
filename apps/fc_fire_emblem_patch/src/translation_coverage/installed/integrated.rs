@@ -23,7 +23,14 @@ use crate::{
     translation_coverage::{DomainInstallation, inspect_domain_screen_targets},
 };
 
-const INTEGRATED_REPORT_SCHEMA: u8 = 17;
+const INTEGRATED_REPORT_SCHEMA: u8 = 18;
+const CARRIED_UI_DOMAIN_IDS: [&str; 5] = [
+    "class_profiles",
+    "front_end_menu_labels",
+    "options_labels",
+    "roster_header",
+    "title_graphics",
+];
 
 #[derive(Debug, Deserialize)]
 struct IntegratedBuildReport {
@@ -32,6 +39,7 @@ struct IntegratedBuildReport {
     declared_installation_domain_count: usize,
     declared_installation_domains: Vec<String>,
     consumer_installation: IntegratedConsumerInstallation,
+    carried_ui_domain_preservation: CarriedUiDomainPreservation,
     integrated_write_set: IntegratedWriteSet,
     final_artifact_runtime_evidence: FinalArtifactRuntimeEvidence,
     installation_gates: IntegratedInstallationGates,
@@ -60,6 +68,43 @@ struct IntegratedConsumerDomain {
     unaccounted_declared_screen_roles: Vec<String>,
     runtime_observed_declared_screen_roles: Vec<String>,
     all_declared_consumers_statically_accounted: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct CarriedUiDomainPreservation {
+    cumulative_candidate_sha1: String,
+    cumulative_report_sha1: String,
+    integrated_image_sha1: String,
+    domain_count: usize,
+    domains: Vec<CarriedUiDomain>,
+    all_translation_inputs_rebound: bool,
+    all_storage_regions_rebound: bool,
+    all_font_regions_rebound: bool,
+    all_consumer_routes_rebound: bool,
+    complete: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct CarriedUiDomain {
+    id: String,
+    target_unit_count: usize,
+    screen_roles: Vec<String>,
+    translation_input_bound: bool,
+    storage_regions: Vec<CarriedUiRegion>,
+    font_regions: Vec<CarriedUiRegion>,
+    consumer_regions: Vec<CarriedUiRegion>,
+    consumer_route_binding_ids: Vec<String>,
+    complete_for_declared_domain_plan: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct CarriedUiRegion {
+    role: String,
+    binding_kind: String,
+    file_offset_hex: String,
+    byte_count: usize,
+    sha1: String,
+    final_bytes_match_binding: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -125,13 +170,14 @@ struct IntegratedInstallationGates {
     dialogue_runtime_composition_planned: bool,
     all_declared_consumer_writes_planned: bool,
     declared_plan_technical_installation_complete: bool,
+    all_carried_ui_domains_reinspected: bool,
 }
 
 #[derive(Debug)]
 struct IntegratedInstallationEvidence {
     output_sha1: String,
     report_sha1: String,
-    declared_domain_ids: BTreeSet<String>,
+    final_static_domain_ids: BTreeSet<String>,
     domains: BTreeMap<String, DomainInstallation>,
 }
 
@@ -186,7 +232,14 @@ fn bind_integrated_installation(
     ensure!(
         report.consumer_installation.current_candidate_sha1 == cumulative_output_sha1
             && report.integrated_write_set.original_candidate_sha1 == cumulative_output_sha1
-            && report.consumer_installation.current_build_report_sha1 == cumulative_report_sha1,
+            && report.consumer_installation.current_build_report_sha1 == cumulative_report_sha1
+            && report
+                .carried_ui_domain_preservation
+                .cumulative_candidate_sha1
+                == cumulative_output_sha1
+            && report.carried_ui_domain_preservation.cumulative_report_sha1
+                == cumulative_report_sha1
+            && report.carried_ui_domain_preservation.integrated_image_sha1 == output_sha1,
         "integrated build report does not descend from the supplied cumulative build"
     );
 
@@ -243,6 +296,19 @@ fn bind_integrated_installation(
                 .integrated_write_set
                 .declared_domain_with_expected_writes_count
                 == declared_domain_ids.len()
+            && report
+                .carried_ui_domain_preservation
+                .all_translation_inputs_rebound
+            && report
+                .carried_ui_domain_preservation
+                .all_storage_regions_rebound
+            && report
+                .carried_ui_domain_preservation
+                .all_font_regions_rebound
+            && report
+                .carried_ui_domain_preservation
+                .all_consumer_routes_rebound
+            && report.carried_ui_domain_preservation.complete
             && installation_gates_complete(&report.installation_gates),
         "integrated technical installation gates are incomplete"
     );
@@ -256,6 +322,13 @@ fn bind_integrated_installation(
             )
         })
         .collect::<BTreeMap<_, _>>();
+    let carried_domains =
+        bind_carried_ui_domains(report.carried_ui_domain_preservation, &canonical_targets)?;
+    let carried_domain_ids = carried_domains.keys().cloned().collect::<BTreeSet<_>>();
+    ensure!(
+        carried_domain_ids.is_disjoint(&declared_domain_ids),
+        "an integrated domain is both newly installed and carried from the cumulative artifact"
+    );
     let mut write_domains = BTreeMap::new();
     for domain in report.integrated_write_set.domains {
         ensure!(
@@ -329,6 +402,8 @@ fn bind_integrated_installation(
         domains.keys().cloned().collect::<BTreeSet<_>>() == declared_domain_ids,
         "integrated consumer domains do not match the declared installation domains"
     );
+    domains.extend(carried_domains);
+    let final_static_domain_ids = domains.keys().cloned().collect::<BTreeSet<_>>();
 
     let observed_screen_roles =
         bind_runtime_evidence(&report.final_artifact_runtime_evidence, &output_sha1)?;
@@ -352,7 +427,7 @@ fn bind_integrated_installation(
     Ok(IntegratedInstallationEvidence {
         output_sha1,
         report_sha1: sha1_hex(report_bytes),
-        declared_domain_ids,
+        final_static_domain_ids,
         domains,
     })
 }
@@ -367,7 +442,7 @@ fn apply_integrated_installation(
     // calling any consumer complete again. Observing another domain on the
     // same screen role must not implicitly promote this one.
     for (id, installation) in &mut current.domains {
-        if !evidence.declared_domain_ids.contains(*id) {
+        if !evidence.final_static_domain_ids.contains(*id) {
             installation.consumer_complete_screen_roles.clear();
             installation.runtime_bound_screen_roles.clear();
         }
@@ -382,6 +457,117 @@ fn apply_integrated_installation(
     }
     current.build_output_sha1 = evidence.output_sha1;
     current.build_report_sha1 = evidence.report_sha1;
+    Ok(())
+}
+
+fn bind_carried_ui_domains(
+    carried: CarriedUiDomainPreservation,
+    canonical_targets: &BTreeMap<&'static str, BTreeSet<String>>,
+) -> Result<BTreeMap<String, DomainInstallation>> {
+    let expected_ids = CARRIED_UI_DOMAIN_IDS
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+    let expected_counts = BTreeMap::from([
+        ("class_profiles", 22_usize),
+        ("front_end_menu_labels", 7),
+        ("options_labels", 3),
+        ("roster_header", 1),
+        ("title_graphics", 1),
+    ]);
+    ensure!(
+        carried.domain_count == carried.domains.len() && carried.domain_count == expected_ids.len(),
+        "carried UI domain count changed"
+    );
+    let mut domains = BTreeMap::new();
+    for domain in carried.domains {
+        ensure!(
+            expected_ids.contains(&domain.id),
+            "integrated report carries unknown UI domain {}",
+            domain.id
+        );
+        let canonical_roles = canonical_targets.get(domain.id.as_str()).with_context(|| {
+            format!(
+                "carried UI domain {} has no canonical screen set",
+                domain.id
+            )
+        })?;
+        let roles = unique_strings(domain.screen_roles, "carried UI screen roles")?;
+        let route_ids = unique_strings(
+            domain.consumer_route_binding_ids,
+            "carried UI consumer route binding IDs",
+        )?;
+        ensure!(
+            roles == *canonical_roles
+                && domain.target_unit_count == expected_counts[domain.id.as_str()]
+                && domain.translation_input_bound
+                && domain.complete_for_declared_domain_plan
+                && !route_ids.is_empty(),
+            "carried UI domain {} does not close its exact final plan",
+            domain.id
+        );
+        bind_carried_regions(
+            &domain.storage_regions,
+            "carried UI storage",
+            &["cumulative_bytes_preserved"],
+        )?;
+        bind_carried_regions(
+            &domain.font_regions,
+            "carried UI font supply",
+            &["cumulative_bytes_preserved"],
+        )?;
+        bind_carried_regions(
+            &domain.consumer_regions,
+            "carried UI consumer route",
+            &["cumulative_bytes_preserved", "integrated_route_replacement"],
+        )?;
+        let installation = DomainInstallation {
+            installed_target_unit_count: domain.target_unit_count,
+            installed_screen_roles: roles.iter().cloned().collect(),
+            consumer_complete_screen_roles: roles.into_iter().collect(),
+            runtime_bound_screen_roles: Vec::new(),
+        };
+        ensure!(
+            domains.insert(domain.id, installation).is_none(),
+            "carried UI installation repeats a domain"
+        );
+    }
+    ensure!(
+        domains.keys().cloned().collect::<BTreeSet<_>>() == expected_ids,
+        "carried UI domain registry is incomplete"
+    );
+    Ok(domains)
+}
+
+fn bind_carried_regions(
+    regions: &[CarriedUiRegion],
+    role: &str,
+    allowed_binding_kinds: &[&str],
+) -> Result<()> {
+    ensure!(!regions.is_empty(), "{role} has no exact final regions");
+    let mut identities = BTreeSet::new();
+    for region in regions {
+        let offset = region
+            .file_offset_hex
+            .strip_prefix("0x")
+            .context("carried UI region offset is not hexadecimal")?;
+        ensure!(
+            !region.role.is_empty()
+                && region.byte_count > 0
+                && !offset.is_empty()
+                && usize::from_str_radix(offset, 16).is_ok()
+                && region.sha1.len() == 40
+                && region.sha1.bytes().all(|byte| byte.is_ascii_hexdigit())
+                && allowed_binding_kinds.contains(&region.binding_kind.as_str())
+                && region.final_bytes_match_binding,
+            "{role} region {} is not bound to the final artifact",
+            region.role
+        );
+        ensure!(
+            identities.insert((region.role.as_str(), region.file_offset_hex.as_str())),
+            "{role} repeats an exact region identity"
+        );
+    }
     Ok(())
 }
 
@@ -439,6 +625,7 @@ fn installation_gates_complete(gates: &IntegratedInstallationGates) -> bool {
         && gates.dialogue_runtime_composition_planned
         && gates.all_declared_consumer_writes_planned
         && gates.declared_plan_technical_installation_complete
+        && gates.all_carried_ui_domains_reinspected
 }
 
 fn unique_strings(values: Vec<String>, role: &str) -> Result<BTreeSet<String>> {
@@ -455,8 +642,49 @@ fn unique_strings(values: Vec<String>, role: &str) -> Result<BTreeSet<String>> {
 mod tests {
     use super::*;
 
+    fn region(role: &str, offset: &str, binding_kind: &str) -> serde_json::Value {
+        serde_json::json!({
+            "role": role,
+            "binding_kind": binding_kind,
+            "file_offset_hex": offset,
+            "byte_count": 1,
+            "sha1": "0000000000000000000000000000000000000000",
+            "final_bytes_match_binding": true
+        })
+    }
+
+    fn carried_domain(
+        id: &str,
+        target_unit_count: usize,
+        screen_roles: &[&str],
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "id": id,
+            "target_unit_count": target_unit_count,
+            "screen_roles": screen_roles,
+            "translation_input_bound": true,
+            "review_complete": false,
+            "storage_regions": [region("storage", "0x001000", "cumulative_bytes_preserved")],
+            "font_regions": [region("font", "0x002000", "cumulative_bytes_preserved")],
+            "consumer_regions": [region("consumer", "0x003000", "integrated_route_replacement")],
+            "consumer_route_binding_ids": [format!("{id}:route")],
+            "complete_for_declared_domain_plan": true
+        })
+    }
+
     fn report_json(runtime_role: Option<&str>) -> Vec<u8> {
         let runtime_roles = runtime_role.into_iter().collect::<Vec<_>>();
+        let carried_domains = vec![
+            carried_domain("class_profiles", 22, &["class_profile"]),
+            carried_domain(
+                "front_end_menu_labels",
+                7,
+                &["new_game_choice", "save_slot_selection"],
+            ),
+            carried_domain("options_labels", 3, &["options"]),
+            carried_domain("roster_header", 1, &["unit_roster"]),
+            carried_domain("title_graphics", 1, &["title"]),
+        ];
         serde_json::to_vec(&serde_json::json!({
             "schema": INTEGRATED_REPORT_SCHEMA,
             "source_sha1": EXPECTED_SOURCE_SHA1,
@@ -480,6 +708,19 @@ mod tests {
                 "declared_domain_with_unaccounted_consumers_count": 0,
                 "all_declared_consumers_statically_accounted": true,
                 "current_candidate_runtime_evidence_inherited": false
+            },
+            "carried_ui_domain_preservation": {
+                "cumulative_candidate_sha1": "base-output",
+                "cumulative_report_sha1": "base-report",
+                "integrated_image_sha1": sha1_hex(b"final"),
+                "domain_count": 5,
+                "domains": carried_domains,
+                "all_translation_inputs_rebound": true,
+                "all_storage_regions_rebound": true,
+                "all_font_regions_rebound": true,
+                "all_consumer_routes_rebound": true,
+                "human_review_complete": false,
+                "complete": true
             },
             "integrated_write_set": {
                 "declared_domain_count": 1,
@@ -535,7 +776,8 @@ mod tests {
                 "cold_request_presentation_write_planned": true,
                 "dialogue_runtime_composition_planned": true,
                 "all_declared_consumer_writes_planned": true,
-                "declared_plan_technical_installation_complete": true
+                "declared_plan_technical_installation_complete": true,
+                "all_carried_ui_domains_reinspected": true
             },
             "rom_emitted": true
         }))
@@ -555,16 +797,7 @@ mod tests {
     }
 
     #[test]
-    fn cumulative_runtime_claims_are_not_inherited_by_the_final_artifact() {
-        let mut domains = BTreeMap::from([(
-            "options_labels",
-            DomainInstallation {
-                installed_target_unit_count: 3,
-                installed_screen_roles: vec!["options".to_owned()],
-                consumer_complete_screen_roles: vec!["options".to_owned()],
-                runtime_bound_screen_roles: vec!["options".to_owned()],
-            },
-        )]);
+    fn carried_static_routes_do_not_inherit_cumulative_runtime_claims() {
         let evidence = bind_integrated_installation(
             &report_json(None),
             b"final",
@@ -572,22 +805,12 @@ mod tests {
             "base-report",
         )
         .unwrap();
-        for (id, installation) in &mut domains {
-            if !evidence.declared_domain_ids.contains(*id) {
-                installation.consumer_complete_screen_roles.clear();
-                installation.runtime_bound_screen_roles.clear();
-            }
-        }
-        assert_eq!(domains["options_labels"].installed_target_unit_count, 3);
+        let options = &evidence.domains["options_labels"];
+        assert_eq!(options.installed_target_unit_count, 3);
+        assert_eq!(options.consumer_complete_screen_roles, ["options"]);
         assert!(
-            domains["options_labels"]
-                .consumer_complete_screen_roles
-                .is_empty()
-        );
-        assert!(
-            domains["options_labels"]
-                .runtime_bound_screen_roles
-                .is_empty()
+            options.runtime_bound_screen_roles.is_empty(),
+            "carried cumulative runtime evidence must not be inherited"
         );
     }
 
@@ -636,6 +859,44 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("repeats a domain")
+        );
+    }
+
+    #[test]
+    fn carried_region_or_registry_drift_fails_closed() {
+        let mut value: serde_json::Value = serde_json::from_slice(&report_json(None)).unwrap();
+        value["carried_ui_domain_preservation"]["domains"][0]["consumer_regions"][0]["final_bytes_match_binding"] =
+            false.into();
+        let report = serde_json::to_vec(&value).unwrap();
+        assert!(
+            bind_integrated_installation(&report, b"final", "base-output", "base-report")
+                .unwrap_err()
+                .to_string()
+                .contains("not bound to the final artifact")
+        );
+
+        let mut value: serde_json::Value = serde_json::from_slice(&report_json(None)).unwrap();
+        value["carried_ui_domain_preservation"]["domains"][0]["id"] =
+            "unknown_carried_domain".into();
+        let report = serde_json::to_vec(&value).unwrap();
+        assert!(
+            bind_integrated_installation(&report, b"final", "base-output", "base-report")
+                .unwrap_err()
+                .to_string()
+                .contains("unknown UI domain")
+        );
+    }
+
+    #[test]
+    fn carried_identity_drift_fails_closed() {
+        let mut value: serde_json::Value = serde_json::from_slice(&report_json(None)).unwrap();
+        value["carried_ui_domain_preservation"]["cumulative_report_sha1"] = "other".into();
+        let report = serde_json::to_vec(&value).unwrap();
+        assert!(
+            bind_integrated_installation(&report, b"final", "base-output", "base-report")
+                .unwrap_err()
+                .to_string()
+                .contains("does not descend")
         );
     }
 }

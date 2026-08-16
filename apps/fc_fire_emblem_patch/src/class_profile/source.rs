@@ -21,6 +21,27 @@ const DESCRIPTION_CONSUMER: [u8; 19] = [
     0xAD, 0x59, 0x05, 0x0A, 0xA8, 0xB9, 0xCC, 0x8D, 0x85, 0x00, 0xB9, 0xCD, 0x8D, 0x85, 0x01, 0xA9,
     0xFF, 0x85, 0x04,
 ];
+
+pub(crate) fn bind_installed_consumers(rom: &Rom) -> Result<Vec<&'static str>> {
+    bind_consumer(rom, TITLE_CONSUMER_ADDRESS, &TITLE_CONSUMER, "title")?;
+    bind_consumer(
+        rom,
+        DESCRIPTION_CONSUMER_ADDRESS,
+        &DESCRIPTION_CONSUMER,
+        "description",
+    )?;
+    ensure!(
+        read_pointer_table(rom, TITLE_POINTER_TABLE_ADDRESS)? == TITLE_POINTERS
+            && read_pointer_table(rom, DESCRIPTION_POINTER_TABLE_ADDRESS)? == DESCRIPTION_POINTERS,
+        "installed class-profile pointer tables changed"
+    );
+    Ok(vec![
+        "0D:82F5:class_profile_title_consumer",
+        "0D:830B:class_profile_description_consumer",
+        "0D:8C98:class_profile_title_pointer_table",
+        "0D:8DCC:class_profile_description_pointer_table",
+    ])
+}
 const TITLE_POINTERS: [u16; PROFILE_COUNT] = [
     0x8CC4, 0x8CD5, 0x8CE6, 0x8CF9, 0x8D06, 0x8D19, 0x8D23, 0x8D2C, 0x8D37, 0x8D42, 0x8D4C, 0x8D57,
     0x8D61, 0x8D6C, 0x8D77, 0x8D83, 0x8D8E, 0x8D99, 0x8DA4, 0x8DAE, 0x8DB7, 0x8DC1,

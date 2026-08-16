@@ -38,12 +38,16 @@ use dynamic_assignment::{
     build_dynamic_assignment_routines, build_dynamic_assignment_routines_for_layout,
 };
 use runtime::{
-    RuntimeRoutine, battle_surface_active_for_layout, build_runtime_routines,
-    build_runtime_routines_for_layout, parse_recipe_directories,
+    RuntimeRoutine, battle_central_right_fd_selector_for_layout, battle_surface_active_for_layout,
+    build_runtime_routines, build_runtime_routines_for_layout, parse_recipe_directories,
 };
 
 pub(crate) fn cumulative_battle_surface_active_bytes() -> Result<Vec<u8>> {
     battle_surface_active_for_layout(CUMULATIVE_RUNTIME_LAYOUT)
+}
+
+pub(crate) fn cumulative_battle_central_right_fd_selector(fallback_target: u16) -> Result<Vec<u8>> {
+    battle_central_right_fd_selector_for_layout(CUMULATIVE_RUNTIME_LAYOUT, fallback_target)
 }
 
 const EXPANDED_PRG_SIZE: usize = 512 * 1024;

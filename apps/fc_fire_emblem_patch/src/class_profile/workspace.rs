@@ -8,6 +8,7 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    font_slots::active_hangul_codes,
     japanese_encoding::is_japanese_text_code,
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
@@ -20,6 +21,7 @@ use super::source::{
 };
 
 const MAXIMUM_VISIBLE_LINE_CELLS: usize = 28;
+pub(crate) const PROFILE_PAGE_SPLIT_INDEX: usize = 11;
 
 #[derive(Debug)]
 pub(crate) struct ClassProfileWorkspaceSummary {
@@ -179,6 +181,177 @@ impl ClassProfilePlan {
             .map(ClassProfilePlannedEntry::description_line_count)
             .sum()
     }
+
+    /// Reconstructs the two installed profile-page codebooks from the exact
+    /// title and description storage in a later cumulative artifact.
+    ///
+    /// The profile renderer changes pages at index 11, so the same byte may
+    /// name different Hangul glyphs on the two sides of that boundary. Within
+    /// either page, however, the mapping must remain injective and every
+    /// protected byte, padding cell, line break, and terminator must still
+    /// match the source-owned storage contract.
+    pub(crate) fn bind_installed_glyph_codes(
+        &self,
+        candidate: &[u8],
+    ) -> Result<[BTreeMap<char, u8>; 2]> {
+        let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
+        let mut assignments = [BTreeMap::<char, u8>::new(), BTreeMap::<char, u8>::new()];
+        let mut glyphs_by_code = [BTreeMap::<u8, char>::new(), BTreeMap::<u8, char>::new()];
+
+        ensure!(
+            self.entries.len() == super::source::PROFILE_COUNT
+                && self
+                    .entries
+                    .iter()
+                    .enumerate()
+                    .all(|(index, entry)| entry.profile_index == index),
+            "class-profile installed-code binding lost the ordered profile population"
+        );
+
+        for entry in &self.entries {
+            let page_index = usize::from(entry.profile_index >= PROFILE_PAGE_SPLIT_INDEX);
+            let title = candidate
+                .get(
+                    entry.title_file_offset
+                        ..entry.title_file_offset + entry.title_source_storage_byte_count,
+                )
+                .with_context(|| format!("{} title storage is outside the candidate", entry.id))?;
+            bind_installed_logical_bytes(
+                &entry.id,
+                "title",
+                &entry.title_logical_bytes,
+                &title[..title.len() - 1],
+                &active_codes,
+                &mut assignments[page_index],
+                &mut glyphs_by_code[page_index],
+            )?;
+            ensure!(
+                title[entry.title_logical_bytes.len()..title.len() - 1]
+                    .iter()
+                    .all(|byte| *byte == 0xFF)
+                    && title.last() == Some(&TITLE_TERMINATOR),
+                "{} installed title padding or terminator changed",
+                entry.id
+            );
+
+            let description = candidate
+                .get(
+                    entry.description_file_offset
+                        ..entry.description_file_offset
+                            + entry.description_source_storage_byte_count,
+                )
+                .with_context(|| {
+                    format!("{} description storage is outside the candidate", entry.id)
+                })?;
+            let mut cursor = 0;
+            for (line_index, (logical, capacity)) in entry
+                .description_line_logical_bytes
+                .iter()
+                .zip(&entry.description_line_capacities)
+                .enumerate()
+            {
+                let body = description
+                    .get(cursor..cursor + *capacity)
+                    .with_context(|| {
+                        format!("{} description line {line_index} exceeds storage", entry.id)
+                    })?;
+                bind_installed_logical_bytes(
+                    &entry.id,
+                    "description",
+                    logical,
+                    body,
+                    &active_codes,
+                    &mut assignments[page_index],
+                    &mut glyphs_by_code[page_index],
+                )?;
+                ensure!(
+                    body[logical.len()..].iter().all(|byte| *byte == 0xFF),
+                    "{} installed description line {line_index} padding changed",
+                    entry.id
+                );
+                cursor += *capacity;
+                ensure!(
+                    description.get(cursor) == Some(&DESCRIPTION_LINE_BREAK),
+                    "{} installed description line {line_index} break changed",
+                    entry.id
+                );
+                cursor += 1;
+            }
+            ensure!(
+                cursor + 1 == description.len()
+                    && description.get(cursor) == Some(&DESCRIPTION_TERMINATOR),
+                "{} installed description terminator changed",
+                entry.id
+            );
+        }
+
+        for (page_index, expected) in [
+            self.entries[..PROFILE_PAGE_SPLIT_INDEX]
+                .iter()
+                .flat_map(ClassProfilePlannedEntry::unique_glyphs)
+                .collect::<BTreeSet<_>>(),
+            self.entries[PROFILE_PAGE_SPLIT_INDEX..]
+                .iter()
+                .flat_map(ClassProfilePlannedEntry::unique_glyphs)
+                .collect::<BTreeSet<_>>(),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            ensure!(
+                assignments[page_index]
+                    .keys()
+                    .copied()
+                    .collect::<BTreeSet<_>>()
+                    == expected,
+                "class-profile installed code binding lost a page-{page_index} glyph"
+            );
+        }
+        Ok(assignments)
+    }
+}
+
+fn bind_installed_logical_bytes(
+    id: &str,
+    role: &str,
+    logical: &[FixedTextLogicalByte],
+    installed: &[u8],
+    active_codes: &BTreeSet<u8>,
+    assignments: &mut BTreeMap<char, u8>,
+    glyphs_by_code: &mut BTreeMap<u8, char>,
+) -> Result<()> {
+    ensure!(
+        logical.len() <= installed.len(),
+        "{id} installed {role} storage is shorter than its logical text"
+    );
+    for (offset, byte) in logical.iter().enumerate() {
+        let actual = installed[offset];
+        match byte {
+            FixedTextLogicalByte::Encoded(expected) => ensure!(
+                actual == *expected,
+                "{id} installed {role} protected byte changed at offset {offset}"
+            ),
+            FixedTextLogicalByte::TargetGlyph(glyph) => {
+                ensure!(
+                    active_codes.contains(&actual),
+                    "{id} installed {role} glyph {glyph:?} uses reserved code {actual:02X}"
+                );
+                if let Some(previous) = assignments.insert(*glyph, actual) {
+                    ensure!(
+                        previous == actual,
+                        "class-profile glyph {glyph:?} has two installed codes on one page"
+                    );
+                }
+                if let Some(previous) = glyphs_by_code.insert(actual, *glyph) {
+                    ensure!(
+                        previous == *glyph,
+                        "class-profile installed code {actual:02X} names two glyphs on one page"
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn extract_class_profile_workspace(

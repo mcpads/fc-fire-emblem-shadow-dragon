@@ -17,12 +17,14 @@ use crate::{
     item_flow::plan_item_action_labels,
     map_menu::plan_map_menu,
     mapper165::{
+        CarriedUiDomainInputs, CarriedUiDomainPreservation,
         battle_codebook_plan::{
             build_glyph_workset_font_page_pack, plan_glyph_workset_page_upper_bound,
             verify_glyph_workset_font_page_pack,
         },
         bind_installed_front_end_mapper_register,
         font_pair_projection::RightFontPageProjection,
+        inspect_carried_ui_domains,
     },
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
@@ -142,7 +144,12 @@ pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) source_path: &'a Path,
     pub(crate) main_dialogue_workspace_path: &'a Path,
     pub(crate) fixed_text_workspace_path: &'a Path,
+    pub(crate) options_localization_path: &'a Path,
+    pub(crate) roster_localization_path: &'a Path,
     pub(crate) front_end_menu_localization_path: &'a Path,
+    pub(crate) class_profile_localization_path: &'a Path,
+    pub(crate) title_graphics_localization_path: &'a Path,
+    pub(crate) title_logo_asset_path: &'a Path,
     pub(crate) unit_name_localization_path: &'a Path,
     pub(crate) chapter_title_localization_path: &'a Path,
     pub(crate) choice_label_localization_path: &'a Path,
@@ -198,6 +205,7 @@ struct FullTranslationInstallReport {
     dialogue_runtime_composition: DialogueRuntimeComposition,
     main_dialogue_route_population: MainDialogueRoutePopulationPlan,
     consumer_installation: ConsumerInstallationPlan,
+    carried_ui_domain_preservation: CarriedUiDomainPreservation,
     final_artifact_runtime_evidence: FinalArtifactRuntimeEvidence,
     dialogue_storage: DialogueStorage,
     installation_gates: InstallationGates,
@@ -403,6 +411,7 @@ struct InstallationGates {
     cold_request_presentation_write_planned: bool,
     dialogue_runtime_composition_planned: bool,
     all_declared_consumer_writes_planned: bool,
+    all_carried_ui_domains_reinspected: bool,
     declared_plan_technical_installation_complete: bool,
     declared_consumer_runtime_observation_complete: bool,
 }
@@ -936,6 +945,27 @@ pub(crate) fn plan_full_translation_installation(
             all_required_dialogue_runtime_hook_roles_assembled,
             output_will_be_emitted: inputs.output_path.is_some(),
         })?;
+    let integrated_rom =
+        Rom::parse(installed_image.clone()).context("parse integrated translation image")?;
+    let final_roster_consumer_route = dialogue_runtime_code.final_roster_consumer_route()?;
+    let carried_ui_domain_preservation = inspect_carried_ui_domains(CarriedUiDomainInputs {
+        source: &rom,
+        cumulative: &current_candidate,
+        integrated: &integrated_rom,
+        cumulative_report_path: inputs.current_build_report_path,
+        options_localization_path: inputs.options_localization_path,
+        roster_localization_path: inputs.roster_localization_path,
+        front_end_menu_localization_path: inputs.front_end_menu_localization_path,
+        class_profile_localization_path: inputs.class_profile_localization_path,
+        title_graphics_localization_path: inputs.title_graphics_localization_path,
+        title_logo_asset_path: inputs.title_logo_asset_path,
+        final_roster_consumer_route: &final_roster_consumer_route,
+    })?;
+    let carried_ui_domains_complete = carried_ui_domain_preservation.complete();
+    ensure!(
+        carried_ui_domains_complete,
+        "carried UI domain final-artifact reinspection is incomplete"
+    );
     let translation_input_complete = dialogue_validation.translation_input_complete;
     let review_complete = dialogue_validation.review_complete
         && fixed.review_complete
@@ -949,6 +979,7 @@ pub(crate) fn plan_full_translation_installation(
         && transitions.save_offer.review_complete
         && transitions.ending_record.review_complete
         && locations.review_complete
+        && carried_ui_domain_preservation.human_review_complete()
         && translation_input_complete;
     let all_declared_consumers_statically_accounted =
         consumer_installation.all_declared_consumers_statically_accounted();
@@ -1015,7 +1046,7 @@ pub(crate) fn plan_full_translation_installation(
         false
     };
     let report = FullTranslationInstallReport {
-        schema: 17,
+        schema: 18,
         source_sha1: EXPECTED_SOURCE_SHA1,
         strategy: "install the declared translation domains in one cumulative candidate, close declared installation gates, then run declared consumer-path dynamic regression on that same ROM; whole-game consumer census remains separate",
         declared_installation_domain_count: REQUIRED_DOMAIN_COUNT,
@@ -1227,6 +1258,7 @@ pub(crate) fn plan_full_translation_installation(
             main_dialogue_transition_hook_planned: true,
         },
         consumer_installation,
+        carried_ui_domain_preservation,
         final_artifact_runtime_evidence,
         dialogue_storage: DialogueStorage {
             region_count: encoded_display.regions.len(),
@@ -1252,6 +1284,7 @@ pub(crate) fn plan_full_translation_installation(
             cold_request_presentation_write_planned: true,
             dialogue_runtime_composition_planned: true,
             all_declared_consumer_writes_planned: all_declared_consumers_statically_accounted,
+            all_carried_ui_domains_reinspected: carried_ui_domains_complete,
             declared_plan_technical_installation_complete:
                 all_declared_consumers_statically_accounted && technical_installation_complete,
             declared_consumer_runtime_observation_complete,

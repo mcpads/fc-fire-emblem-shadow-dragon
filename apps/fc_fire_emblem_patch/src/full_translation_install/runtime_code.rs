@@ -17,10 +17,13 @@ use super::{
     runtime_bank_contract::bind_bank_restore_contract, runtime_nmi_contract::bind_quiet_frame_gate,
 };
 use crate::{
-    mapper165::executable_mapper_writes::{Mapper165Register, decode_mapper165_write},
+    mapper165::{
+        FinalConsumerRouteRegion, FinalRosterConsumerRoute,
+        executable_mapper_writes::{Mapper165Register, decode_mapper165_write},
+    },
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
-    typed_source::{Rp2a03DirectControlFlow, rp2a03_direct_control_flow},
+    typed_source::{Rp2a03DirectControlFlow, decode_rp2a03_sequence, rp2a03_direct_control_flow},
 };
 
 mod chr_ram_ownership;
@@ -162,6 +165,79 @@ impl DialogueRuntimeCodePlan {
                 .fixed_routines
                 .iter()
                 .any(|routine| routine.role == "consumer font page activation")
+    }
+
+    pub(in crate::full_translation_install) fn final_roster_consumer_route(
+        &self,
+    ) -> Result<FinalRosterConsumerRoute> {
+        let hook = self
+            .hooks
+            .iter()
+            .find(|hook| hook.role == DialogueRuntimeHookRole::ChrRamSelector)
+            .context("dialogue CHR selector hook is missing")?;
+        ensure!(
+            matches!(hook.site, DialogueRuntimeHookSite::Fixed(address) if address == chr_selector::SELECTOR_CHAIN_SITE)
+                && hook.bytes.len() == 3
+                && hook.bytes[0] == 0x4C,
+            "dialogue CHR selector hook no longer replaces the central fallback with JMP absolute"
+        );
+        let central_fallback_target = u16::from_le_bytes([hook.bytes[1], hook.bytes[2]]);
+        let page_route = self
+            .fixed_routines
+            .iter()
+            .find(|routine| routine.role == "translated font page route selector")
+            .context("translated font page route selector is missing")?;
+        let dialogue_selector = self
+            .fixed_routines
+            .iter()
+            .find(|routine| routine.role == "dialogue CHR RAM selector")
+            .context("dialogue CHR RAM selector is missing")?;
+        let route_end = page_route
+            .address
+            .checked_add(u16::try_from(page_route.bytes.len())?)
+            .context("translated font page route address overflow")?;
+        ensure!(
+            page_route.address <= central_fallback_target
+                && central_fallback_target < route_end
+                && route_end == dialogue_selector.address,
+            "integrated central fallback no longer enters the contiguous font-page route chain"
+        );
+        let active_offset = usize::from(central_fallback_target - page_route.address);
+        decode_rp2a03_sequence(
+            &page_route.bytes[active_offset..],
+            central_fallback_target,
+            "integrated active font-page route",
+        )?;
+        decode_rp2a03_sequence(
+            &dialogue_selector.bytes,
+            dialogue_selector.address,
+            "integrated dialogue CHR selector",
+        )?;
+        ensure!(
+            dialogue_selector.bytes.ends_with(&[
+                0x68,
+                0x28,
+                0x4C,
+                chr_selector::SELECTOR_CHAIN_FALLBACK as u8,
+                (chr_selector::SELECTOR_CHAIN_FALLBACK >> 8) as u8,
+            ]),
+            "integrated dialogue CHR selector no longer falls through to the roster selector"
+        );
+        Ok(FinalRosterConsumerRoute {
+            central_fallback_target,
+            regions: vec![
+                FinalConsumerRouteRegion {
+                    role: "integrated_font_page_route_selector",
+                    cpu_address: page_route.address,
+                    bytes: page_route.bytes.clone(),
+                },
+                FinalConsumerRouteRegion {
+                    role: "integrated_dialogue_chr_selector",
+                    cpu_address: dialogue_selector.address,
+                    bytes: dialogue_selector.bytes.clone(),
+                },
+            ],
+        })
     }
 }
 

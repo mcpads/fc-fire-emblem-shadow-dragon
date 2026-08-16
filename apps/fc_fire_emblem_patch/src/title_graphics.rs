@@ -12,14 +12,14 @@ use crate::{
 mod install;
 mod logo_asset;
 
-pub(crate) use install::install_title_logo_asset;
+pub(crate) use install::{TITLE_RUNTIME_COMPLETION_STREAM_BYTE_COUNT, install_title_logo_asset};
 pub(crate) use logo_asset::build_title_logo_asset;
 
 const PRG_BANK_SIZE: usize = 16 * 1024;
 const SOURCE_PRG_BANK: u8 = 0x0D;
 const CPU_WINDOW_START: u16 = 0x8000;
 const TITLE_STREAM_ADDRESS: u16 = 0xB2B0;
-pub(super) const TITLE_STREAM_BYTE_COUNT: usize = 180;
+pub(crate) const TITLE_STREAM_BYTE_COUNT: usize = 180;
 const TITLE_ROW_COUNT: usize = 5;
 const TITLE_ROW_WIDTH: usize = 32;
 const TITLE_FIRST_PPU_ADDRESS: u16 = 0x21A0;
@@ -192,10 +192,50 @@ pub(super) fn source_stream(rom: &Rom) -> Result<&[u8]> {
         .with_context(|| format!("title stream exceeds ROM at {offset:05X}"))
 }
 
-pub(super) fn title_stream_file_offset() -> usize {
+pub(crate) fn title_stream_file_offset() -> usize {
     HEADER_SIZE
         + usize::from(SOURCE_PRG_BANK) * PRG_BANK_SIZE
         + usize::from(TITLE_STREAM_ADDRESS - CPU_WINDOW_START)
+}
+
+/// Binds the unchanged source control-flow that publishes and consumes the
+/// installed title stream in a later mapper-165 artifact.
+pub(crate) fn bind_installed_title_consumer_route(
+    source: &Rom,
+    installed: &Rom,
+) -> Result<Vec<&'static str>> {
+    source.verify_supported_japanese()?;
+    let routes = [
+        (
+            "0D:AC45:title_stream_pointer_initialization",
+            0xAC45_u16,
+            10_usize,
+        ),
+        ("0D:AC56:title_stream_reader_call", 0xAC56, 3),
+        ("0D:AC82:title_completion_reader_call", 0xAC82, 3),
+        ("0D:A682:shared_ppu_stream_reader", 0xA682, 0x62),
+    ];
+    for (role, address, byte_count) in routes {
+        let offset = HEADER_SIZE
+            + usize::from(SOURCE_PRG_BANK) * PRG_BANK_SIZE
+            + usize::from(address - CPU_WINDOW_START);
+        let expected = source
+            .data()
+            .get(offset..offset + byte_count)
+            .with_context(|| format!("{role} is outside the supported source"))?;
+        let actual = installed
+            .data()
+            .get(offset..offset + byte_count)
+            .with_context(|| format!("{role} is outside the installed artifact"))?;
+        ensure!(actual == expected, "installed {role} changed");
+    }
+    ensure!(
+        &installed.data()
+            [title_stream_file_offset()..title_stream_file_offset() + TITLE_STREAM_BYTE_COUNT]
+            != source_stream(source)?,
+        "installed title consumer route still points at the untranslated source stream"
+    );
+    Ok(routes.into_iter().map(|(role, _, _)| role).collect())
 }
 
 pub(super) fn title_translation_end_column_exclusive(row: usize) -> usize {

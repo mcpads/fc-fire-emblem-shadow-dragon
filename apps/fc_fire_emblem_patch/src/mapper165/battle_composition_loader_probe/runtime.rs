@@ -758,7 +758,7 @@ pub(super) fn battle_central_right_fd_selector() -> Result<Vec<u8>> {
     )
 }
 
-fn battle_central_right_fd_selector_for_layout(
+pub(super) fn battle_central_right_fd_selector_for_layout(
     layout: BattleCompositionRuntimeLayout,
     fallback_target: u16,
 ) -> Result<Vec<u8>> {

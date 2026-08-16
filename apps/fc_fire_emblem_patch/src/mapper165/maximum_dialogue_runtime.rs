@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, ensure};
+use retro_rp2a03::{AddressingMode, Mnemonic, Operand, decode_bytes};
 
 use crate::{
     rp2a03::{Instruction, assemble_at},
@@ -207,6 +208,71 @@ pub(super) fn build_initial_page_selector(
         "maximum dialogue initial page selector",
     )?;
     Ok(bytes)
+}
+
+pub(super) fn bind_installed_initial_page_selector(
+    bytes: &[u8],
+    fallback_target: u16,
+) -> Result<u16> {
+    let mut offset = 0_usize;
+    let mut pointer_low = None;
+    let mut pointer_high = None;
+    while offset < bytes.len() {
+        let instruction = decode_bytes(&bytes[offset..]).with_context(|| {
+            format!("decode installed maximum-dialogue selector at +0x{offset:X}")
+        })?;
+        ensure!(
+            instruction.opcode_is_documented(),
+            "installed maximum-dialogue selector contains an undocumented instruction"
+        );
+        if instruction.mnemonic() == Mnemonic::Lda
+            && instruction.addressing_mode() == AddressingMode::Absolute
+        {
+            let destination = match instruction.operand() {
+                Operand::Word(destination) => destination,
+                _ => unreachable!("absolute LDA must have a word operand"),
+            };
+            if destination == CURRENT_POINTER_LOW || destination == CURRENT_POINTER_HIGH {
+                let compare_offset = offset + instruction.encoded_len();
+                let compare = decode_bytes(
+                    bytes
+                        .get(compare_offset..)
+                        .context("installed maximum-dialogue pointer compare is truncated")?,
+                )?;
+                ensure!(
+                    compare.opcode_is_documented()
+                        && compare.mnemonic() == Mnemonic::Cmp
+                        && compare.addressing_mode() == AddressingMode::Immediate,
+                    "installed maximum-dialogue pointer load is not followed by CMP immediate"
+                );
+                let value = match compare.operand() {
+                    Operand::Byte(value) => value,
+                    _ => unreachable!("immediate CMP must have a byte operand"),
+                };
+                let slot = if destination == CURRENT_POINTER_LOW {
+                    &mut pointer_low
+                } else {
+                    &mut pointer_high
+                };
+                ensure!(
+                    slot.replace(value).is_none(),
+                    "installed maximum-dialogue selector repeats a pointer comparison"
+                );
+            }
+        }
+        offset += instruction.encoded_len();
+    }
+    ensure!(
+        offset == bytes.len(),
+        "installed maximum-dialogue selector decode did not consume its region"
+    );
+    let pointer = u16::from(pointer_low.context("maximum-dialogue pointer low compare missing")?)
+        | (u16::from(pointer_high.context("maximum-dialogue pointer high compare missing")?) << 8);
+    ensure!(
+        build_initial_page_selector(fallback_target, pointer)? == bytes,
+        "installed maximum-dialogue selector changed outside its bound initial pointer"
+    );
+    Ok(pointer)
 }
 
 #[cfg(test)]
