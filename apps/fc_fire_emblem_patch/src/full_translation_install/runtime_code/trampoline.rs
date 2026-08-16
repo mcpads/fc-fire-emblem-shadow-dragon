@@ -55,11 +55,24 @@ pub(super) fn hook_bytes() -> [u8; 3] {
 
 fn instructions(contract: BankRestoreContract, transport_entry: u16) -> Result<Vec<Instruction>> {
     let origin = TRAMPOLINE_ORIGIN;
+    let main_state =
+        u8::try_from(MAIN_STATE_ADDRESS).expect("the battle/main state must remain in zero page");
     let mut instructions = vec![
+        // 원본 block interpreter는 한 프레임에 PPU command block을 여럿 비울 수 있다.
+        // 이 경로는 실제 후일담 화면에서 vblank 끝까지 닿았으므로, 전투 화면 판정조차
+        // 하기 전에 가장 짧은 경로로 원본 호출에 양보한다. 나머지 busy flag도 전투
+        // 판정보다 먼저 합쳐 검사하되, `$21`의 taken path에는 OR 네 개를 얹지 않는다.
+        Instruction::LdaZeroPage(VBLANK_BUSY_FLAGS[0]),
+        Instruction::BneAbsolute(origin),
+        Instruction::LdaZeroPage(VBLANK_BUSY_FLAGS[1]),
+        Instruction::OraZeroPage(VBLANK_BUSY_FLAGS[2]),
+        Instruction::OraZeroPage(VBLANK_BUSY_FLAGS[3]),
+        Instruction::OraZeroPage(VBLANK_BUSY_FLAGS[4]),
+        Instruction::BneAbsolute(origin),
         // 전투 합성기가 같은 NMI의 뒤쪽에서 4 KiB CHR 페이지를 쓸 수 있는 화면이면
         // 대사 전송은 먼저 물러난다. `$047D`는 비전투에서 FF일 수 있으므로 그것만
         // 보면 안 되고, 전투 디스패처가 쓰는 일반/사운드 화면 조건을 그대로 쓴다.
-        Instruction::LdaAbsolute(MAIN_STATE_ADDRESS),
+        Instruction::LdaZeroPage(main_state),
         Instruction::CmpImmediate(PLAYER_INITIATED_BATTLE_STATE),
         Instruction::BeqAbsolute(origin),
         Instruction::CmpImmediate(ENEMY_INITIATED_BATTLE_STATE),
@@ -73,24 +86,18 @@ fn instructions(contract: BankRestoreContract, transport_entry: u16) -> Result<V
         Instruction::CmpImmediate(SOUND_TEST_SHARED_BATTLE_PHASE),
         Instruction::BeqAbsolute(origin),
     ];
-    let player_battle_placeholder = 2;
-    let enemy_battle_placeholder = 4;
-    let non_sound_test_placeholder = 6;
-    let inactive_sound_test_substate_placeholder = 9;
-    let sound_test_battle_placeholder = 12;
-    let quiet_gate = next_address(origin, &instructions)?;
-    instructions[non_sound_test_placeholder] = Instruction::BneAbsolute(quiet_gate);
-    instructions[inactive_sound_test_substate_placeholder] = Instruction::BneAbsolute(quiet_gate);
-    instructions.extend([
-        // 원본이 이 프레임에 PPU 자료를 쓸 예정이면 비켜난다.
-        Instruction::LdaZeroPage(VBLANK_BUSY_FLAGS[0]),
-        Instruction::OraZeroPage(VBLANK_BUSY_FLAGS[1]),
-        Instruction::OraZeroPage(VBLANK_BUSY_FLAGS[2]),
-        Instruction::OraZeroPage(VBLANK_BUSY_FLAGS[3]),
-        Instruction::OraZeroPage(VBLANK_BUSY_FLAGS[4]),
-    ]);
-    let busy_placeholder = instructions.len();
-    instructions.push(Instruction::BneAbsolute(origin));
+    let block_interpreter_busy_placeholder = 1;
+    let other_busy_placeholder = 6;
+    let surface_predicate_start = 7;
+    let player_battle_placeholder = surface_predicate_start + 2;
+    let enemy_battle_placeholder = surface_predicate_start + 4;
+    let non_sound_test_placeholder = surface_predicate_start + 6;
+    let inactive_sound_test_substate_placeholder = surface_predicate_start + 9;
+    let sound_test_battle_placeholder = surface_predicate_start + 12;
+    let transport_gate = next_address(origin, &instructions)?;
+    instructions[non_sound_test_placeholder] = Instruction::BneAbsolute(transport_gate);
+    instructions[inactive_sound_test_substate_placeholder] =
+        Instruction::BneAbsolute(transport_gate);
 
     // 요청이 없으면(`inactive`) 할 일이 없다.
     instructions.push(Instruction::LdaAbsolute(REQUEST_STATE));
@@ -137,7 +144,8 @@ fn instructions(contract: BankRestoreContract, transport_entry: u16) -> Result<V
     instructions[player_battle_placeholder] = Instruction::BeqAbsolute(done);
     instructions[enemy_battle_placeholder] = Instruction::BeqAbsolute(done);
     instructions[sound_test_battle_placeholder] = Instruction::BeqAbsolute(done);
-    instructions[busy_placeholder] = Instruction::BneAbsolute(done);
+    instructions[block_interpreter_busy_placeholder] = Instruction::BneAbsolute(done);
+    instructions[other_busy_placeholder] = Instruction::BneAbsolute(done);
     instructions[inactive_placeholder] = Instruction::BeqAbsolute(done);
     instructions[settled_placeholder] = Instruction::BcsAbsolute(done);
     // 밀어낸 원본 호출로 넘긴다. `$C3A5`의 `RTS`가 `$C17C`로 돌아간다.
@@ -191,14 +199,18 @@ mod tests {
         dialogue_substate: u8,
         sound_test_phase: u8,
     ) -> SurfaceRoute {
+        const BUSY_GATE_INSTRUCTION_COUNT: usize = 7;
         const PREDICATE_INSTRUCTION_COUNT: usize = 13;
-        let predicate = &listing[..PREDICATE_INSTRUCTION_COUNT];
+        let predicate_start =
+            next_address(TRAMPOLINE_ORIGIN, &listing[..BUSY_GATE_INSTRUCTION_COUNT]).unwrap();
+        let predicate = &listing[BUSY_GATE_INSTRUCTION_COUNT
+            ..BUSY_GATE_INSTRUCTION_COUNT + PREDICATE_INSTRUCTION_COUNT];
         let addresses = (0..=predicate.len())
-            .map(|length| next_address(TRAMPOLINE_ORIGIN, &predicate[..length]).unwrap())
+            .map(|length| next_address(predicate_start, &predicate[..length]).unwrap())
             .collect::<Vec<_>>();
         let quiet_gate = addresses[PREDICATE_INSTRUCTION_COUNT];
         let done = next_address(TRAMPOLINE_ORIGIN, &listing[..listing.len() - 1]).unwrap();
-        let mut pc = TRAMPOLINE_ORIGIN;
+        let mut pc = predicate_start;
         let mut accumulator = 0;
         let mut zero = false;
 
@@ -215,7 +227,9 @@ mod tests {
                 .expect("surface predicate branched outside its emitted instructions");
             let fallthrough = addresses[index + 1];
             match predicate[index] {
-                Instruction::LdaAbsolute(MAIN_STATE_ADDRESS) => accumulator = main_state,
+                Instruction::LdaZeroPage(address) if u16::from(address) == MAIN_STATE_ADDRESS => {
+                    accumulator = main_state;
+                }
                 Instruction::LdaAbsolute(DIALOGUE_SUBSTATE_ADDRESS) => {
                     accumulator = dialogue_substate;
                 }
@@ -256,8 +270,8 @@ mod tests {
 
         let budget = super::super::budgeted_transport_cycles(reserve);
 
-        assert_eq!(reserve, 194);
-        assert_eq!(budget, 1_159);
+        assert_eq!(reserve, 197);
+        assert_eq!(budget, 1_156);
         assert_eq!(
             reserve + budget,
             super::super::MAPPER_VBLANK_REMAINDER * (100 - super::super::SAFETY_MARGIN_PERCENT)
@@ -270,9 +284,7 @@ mod tests {
     #[test]
     fn the_skip_path_touches_neither_the_ppu_nor_the_bank_registers() {
         let listing = instructions(contract(), 0xB000).unwrap();
-        let battle_predicate_len = 13;
-        let gate_branch = battle_predicate_len + VBLANK_BUSY_FLAGS.len();
-        let skip_target = match listing[gate_branch] {
+        let skip_target = match listing[1] {
             Instruction::BneAbsolute(target) => target,
             _ => unreachable!(),
         };
@@ -298,58 +310,92 @@ mod tests {
     #[test]
     fn the_chr_restore_flag_uses_the_same_busy_skip_path() {
         let listing = instructions(contract(), 0xB000).unwrap();
-        let busy_flags_start = 13;
 
         assert_eq!(
-            &listing[busy_flags_start..busy_flags_start + VBLANK_BUSY_FLAGS.len()],
+            &listing[..7],
             &[
                 Instruction::LdaZeroPage(0x21),
-                Instruction::OraZeroPage(0x22),
+                Instruction::BneAbsolute(match listing[1] {
+                    Instruction::BneAbsolute(target) => target,
+                    _ => unreachable!(),
+                }),
+                Instruction::LdaZeroPage(0x22),
                 Instruction::OraZeroPage(0x89),
                 Instruction::OraZeroPage(0x8A),
                 Instruction::OraZeroPage(0x5D),
+                Instruction::BneAbsolute(match listing[6] {
+                    Instruction::BneAbsolute(target) => target,
+                    _ => unreachable!(),
+                }),
             ]
         );
-        assert!(matches!(
-            listing[busy_flags_start + VBLANK_BUSY_FLAGS.len()],
-            Instruction::BneAbsolute(_)
-        ));
+        assert_eq!(listing[1], listing[6]);
+    }
+
+    /// `$21` queue는 실제 후일담에서 vblank 끝까지 썼다. 이 flag가 켜진 경로는
+    /// 전투 상태나 다른 busy flag를 읽기 전에 즉시 원본 interpreter로 돌아가야 한다.
+    #[test]
+    fn the_block_interpreter_queue_uses_the_shortest_busy_path() {
+        let listing = instructions(contract(), 0xB000).unwrap();
+        let done = next_address(TRAMPOLINE_ORIGIN, &listing[..listing.len() - 1]).unwrap();
+
+        assert_eq!(listing[0], Instruction::LdaZeroPage(0x21));
+        assert_eq!(listing[1], Instruction::BneAbsolute(done));
+        assert_eq!(listing[2], Instruction::LdaZeroPage(0x22));
+        assert_eq!(
+            listing[7],
+            Instruction::LdaZeroPage(
+                u8::try_from(MAIN_STATE_ADDRESS).expect("main state is zero-page")
+            )
+        );
+        assert_eq!(
+            listing.last(),
+            Some(&Instruction::JmpAbsolute(DISPLACED_CALL))
+        );
+        assert_eq!(done >> 8, TRAMPOLINE_ORIGIN >> 8);
     }
 
     #[test]
     fn battle_surface_states_preempt_dialogue_transport_in_the_same_nmi() {
         let listing = instructions(contract(), 0xB000).unwrap();
-        let quiet_gate = next_address(TRAMPOLINE_ORIGIN, &listing[..13]).unwrap();
+        let surface_start = 7;
+        let transport_gate =
+            next_address(TRAMPOLINE_ORIGIN, &listing[..surface_start + 13]).unwrap();
 
-        assert_eq!(listing[0], Instruction::LdaAbsolute(MAIN_STATE_ADDRESS));
         assert_eq!(
-            listing[1],
+            listing[surface_start],
+            Instruction::LdaZeroPage(
+                u8::try_from(MAIN_STATE_ADDRESS).expect("main state is zero-page")
+            )
+        );
+        assert_eq!(
+            listing[surface_start + 1],
             Instruction::CmpImmediate(PLAYER_INITIATED_BATTLE_STATE)
         );
-        let player_skip_target = match listing[2] {
+        let player_skip_target = match listing[surface_start + 2] {
             Instruction::BeqAbsolute(target) => target,
             _ => unreachable!(),
         };
-        let enemy_skip_target = match listing[4] {
+        let enemy_skip_target = match listing[surface_start + 4] {
             Instruction::BeqAbsolute(target) => target,
             _ => unreachable!(),
         };
-        let sound_skip_target = match listing[12] {
+        let sound_skip_target = match listing[surface_start + 12] {
             Instruction::BeqAbsolute(target) => target,
             _ => unreachable!(),
         };
-        let non_sound_target = match listing[6] {
+        let non_sound_target = match listing[surface_start + 6] {
             Instruction::BneAbsolute(target) => target,
             _ => unreachable!(),
         };
-        let inactive_sound_substate_target = match listing[9] {
+        let inactive_sound_substate_target = match listing[surface_start + 9] {
             Instruction::BneAbsolute(target) => target,
             _ => unreachable!(),
         };
         assert_eq!(player_skip_target, enemy_skip_target);
         assert_eq!(player_skip_target, sound_skip_target);
-        assert_eq!(non_sound_target, quiet_gate);
-        assert_eq!(inactive_sound_substate_target, quiet_gate);
+        assert_eq!(non_sound_target, transport_gate);
+        assert_eq!(inactive_sound_substate_target, transport_gate);
         assert_eq!(
             listing.last(),
             Some(&Instruction::JmpAbsolute(DISPLACED_CALL))
