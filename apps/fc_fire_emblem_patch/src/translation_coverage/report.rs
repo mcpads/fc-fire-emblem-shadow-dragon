@@ -49,6 +49,11 @@ pub(crate) struct GlobalTranslationCoverageReport {
     pub(crate) schema: u8,
     pub(crate) source_sha1: &'static str,
     pub(crate) build_output_sha1: String,
+    pub(crate) build_report_sha1: String,
+    /// The final artifact may reuse capacity measurements from its exact
+    /// cumulative input. Keep that evidence identity distinct from the final
+    /// installation report instead of silently treating the two as one file.
+    pub(crate) capacity_evidence_report_sha1: String,
     pub(crate) screen_population: ScreenPopulationReport,
     pub(crate) domains: Vec<TranslationDomainReport>,
     pub(crate) lifetime_demands: Vec<TranslationLifetimeDemandReport>,

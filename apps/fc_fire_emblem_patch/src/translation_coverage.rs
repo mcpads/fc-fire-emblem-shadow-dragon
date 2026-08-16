@@ -57,6 +57,8 @@ pub(crate) struct TranslationCoverageInputs<'a> {
     pub(crate) location_name_localization_path: &'a Path,
     pub(crate) current_build_output_path: &'a Path,
     pub(crate) current_build_report_path: &'a Path,
+    pub(crate) integrated_build_output_path: &'a Path,
+    pub(crate) integrated_build_report_path: &'a Path,
     pub(crate) main_dialogue_glyph_workset_report_path: &'a Path,
     pub(crate) battle_surface_constraints_report_path: &'a Path,
     pub(crate) unit_ui_text_report_path: &'a Path,
@@ -97,9 +99,11 @@ pub(crate) fn analyze_translation_coverage(
         transition_label_localization_path: inputs.transition_label_localization_path,
         location_name_localization_path: inputs.location_name_localization_path,
     })?;
-    let mut installation = inspect_current_installation(
+    let mut installation = installed::inspect_integrated_installation(
         inputs.current_build_report_path,
         inputs.current_build_output_path,
+        inputs.integrated_build_report_path,
+        inputs.integrated_build_output_path,
     )?;
 
     let expected_domain_ids = DOMAIN_SEEDS
@@ -352,7 +356,7 @@ pub(crate) fn analyze_translation_coverage(
                 .title_logo_installed_runtime_cleared_top_strip_cell_count,
             title_logo_installed_runtime_reasserted_logo_cell_count: installation
                 .title_logo_installed_runtime_reasserted_logo_cell_count,
-            current_build_report_sha1: &installation.build_report_sha1,
+            current_build_report_sha1: &installation.capacity_evidence_report_sha1,
             roster_page_target_glyph_count: installation.roster_page_target_glyph_count,
             roster_page_preserved_active_code_count: installation
                 .roster_page_preserved_active_code_count,
@@ -375,9 +379,11 @@ pub(crate) fn analyze_translation_coverage(
         &japanese_bearing_screen_roles,
     )?;
     let report = GlobalTranslationCoverageReport {
-        schema: 4,
+        schema: 5,
         source_sha1: EXPECTED_SOURCE_SHA1,
         build_output_sha1: installation.build_output_sha1,
+        build_report_sha1: installation.build_report_sha1,
+        capacity_evidence_report_sha1: installation.capacity_evidence_report_sha1,
         screen_population: ScreenPopulationReport {
             screen_count: partition.screen_count,
             japanese_bearing_screen_count: partition.japanese_bearing_screens.len(),

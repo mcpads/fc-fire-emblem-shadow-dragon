@@ -18,6 +18,9 @@ use super::{
     },
 };
 
+mod integrated;
+pub(crate) use integrated::inspect_integrated_installation;
+
 #[derive(Debug, Deserialize)]
 struct CurrentBuildReport {
     schema: u8,
@@ -211,6 +214,7 @@ struct CurrentBattleText {
 pub(crate) struct CurrentInstallation {
     pub(crate) build_output_sha1: String,
     pub(crate) build_report_sha1: String,
+    pub(crate) capacity_evidence_report_sha1: String,
     pub(crate) domains: BTreeMap<&'static str, DomainInstallation>,
     pub(crate) class_profile_page_target_glyph_counts: Vec<usize>,
     pub(crate) class_profile_preserved_active_code_count: usize,
@@ -280,6 +284,7 @@ pub(crate) fn inspect_current_installation(
     Ok(CurrentInstallation {
         build_output_sha1: output_sha1,
         build_report_sha1: sha1_hex(&report_bytes),
+        capacity_evidence_report_sha1: sha1_hex(&report_bytes),
         domains,
         class_profile_page_target_glyph_counts: report
             .automatic_class_profiles

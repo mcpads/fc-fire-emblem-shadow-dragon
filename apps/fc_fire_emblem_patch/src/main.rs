@@ -294,6 +294,12 @@ enum Command {
         current_build_output: PathBuf,
         #[arg(long, default_value = "out/kr-patch-build.json")]
         current_build_report: PathBuf,
+        /// Exact final ROM emitted by the global installation planner.
+        #[arg(long, default_value = "out/fire-emblem-fe1-korean-integrated.nes")]
+        integrated_build_output: PathBuf,
+        /// Report emitted alongside the exact final integrated ROM.
+        #[arg(long, default_value = "out/full-translation-installation.json")]
+        integrated_build_report: PathBuf,
         #[arg(long, default_value = "out/main-dialogue-glyph-workset.json")]
         main_dialogue_glyph_workset_report: PathBuf,
         #[arg(long, default_value = "out/battle-surface-constraints.json")]
@@ -1158,6 +1164,8 @@ fn main() -> Result<()> {
             location_name_localization,
             current_build_output,
             current_build_report,
+            integrated_build_output,
+            integrated_build_report,
             main_dialogue_glyph_workset_report,
             battle_surface_constraints_report,
             unit_ui_text_report,
@@ -1186,6 +1194,8 @@ fn main() -> Result<()> {
                     location_name_localization_path: &location_name_localization,
                     current_build_output_path: &current_build_output,
                     current_build_report_path: &current_build_report,
+                    integrated_build_output_path: &integrated_build_output,
+                    integrated_build_report_path: &integrated_build_report,
                     main_dialogue_glyph_workset_report_path: &main_dialogue_glyph_workset_report,
                     battle_surface_constraints_report_path: &battle_surface_constraints_report,
                     unit_ui_text_report_path: &unit_ui_text_report,
