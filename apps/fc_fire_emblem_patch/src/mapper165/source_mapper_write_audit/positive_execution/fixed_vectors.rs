@@ -30,6 +30,7 @@ mod special_bank_call;
 
 pub(super) use reset_bank_entries::{InlineDispatchSelectorBounds, trace_fixed_scheduler_contexts};
 
+use super::control_state::ObservedControlStateWrites;
 use reset_bank_entries::bind_reset_bank_entries;
 use special_bank_call::bind_audio_bank_call;
 
@@ -59,6 +60,7 @@ pub(super) struct FixedVectorExecution {
     reset_reachable_instruction_starts: BTreeSet<(u8, u16)>,
     reset_terminal_entry_contexts: BTreeMap<(u8, u16), BTreeSet<(u8, u8)>>,
     indirect_write_sites_below_mapper_space: BTreeSet<(u8, u16, u8)>,
+    reset_control_state_write_values: ObservedControlStateWrites,
 }
 
 impl FixedVectorExecution {
@@ -143,6 +145,10 @@ impl FixedVectorExecution {
 
     pub(super) fn indirect_write_sites_below_mapper_space(&self) -> &BTreeSet<(u8, u16, u8)> {
         &self.indirect_write_sites_below_mapper_space
+    }
+
+    pub(super) fn reset_control_state_write_values(&self) -> &ObservedControlStateWrites {
+        &self.reset_control_state_write_values
     }
 }
 
@@ -286,6 +292,7 @@ pub(super) fn bind_fixed_vector_execution(
             ),
         )]),
         indirect_write_sites_below_mapper_space,
+        reset_control_state_write_values: reset_bank_entries.control_state_write_values().clone(),
     })
 }
 

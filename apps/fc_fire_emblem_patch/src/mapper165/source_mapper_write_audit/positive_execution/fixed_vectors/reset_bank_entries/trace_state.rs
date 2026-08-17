@@ -1,5 +1,11 @@
 use std::ops::RangeInclusive;
 
+use super::super::super::control_state::{
+    COMPOSITE_SCREEN_STATE, DIALOGUE_OR_SOUND_STATE, FIXED_SCHEDULER_STATE, MAIN_STATE,
+    MAP_DIALOGUE_OUTER_STATE, OUTER_SCREEN_STATE, PRG_BANK_SHADOW, SHARED_MENU_STATE,
+    TITLE_ANIMATION_STATE, TITLE_STATE,
+};
+
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 pub(super) enum ByteValueSet {
     #[default]
@@ -143,8 +149,27 @@ struct ResetTraceMemory {
 
 impl ResetTraceMemory {
     const ADDRESSES: [u16; 21] = [
-        0x0000, 0x0001, 0x0008, 0x0009, 0x000A, 0x0024, 0x0025, 0x0029, 0x0044, 0x0051, 0x0084,
-        0x053E, 0x057A, 0x0587, 0x05C6, 0x05C7, 0x05CC, 0x05DB, 0x05DE, 0x05E8, 0x05EE,
+        0x0000,
+        0x0001,
+        0x0008,
+        0x0009,
+        0x000A,
+        OUTER_SCREEN_STATE,
+        FIXED_SCHEDULER_STATE,
+        PRG_BANK_SHADOW,
+        0x0044,
+        0x0051,
+        MAIN_STATE,
+        0x053E,
+        TITLE_STATE,
+        TITLE_ANIMATION_STATE,
+        0x05C6,
+        0x05C7,
+        0x05CC,
+        MAP_DIALOGUE_OUTER_STATE,
+        SHARED_MENU_STATE,
+        COMPOSITE_SCREEN_STATE,
+        DIALOGUE_OR_SOUND_STATE,
     ];
 
     fn read(&self, address: u16) -> ByteValueSet {
@@ -154,22 +179,22 @@ impl ResetTraceMemory {
             0x0008 => self.saved_prg_bank_08.clone(),
             0x0009 => self.pointer_high_09.clone(),
             0x000A => self.title_animation_staging_0a.clone(),
-            0x0024 => self.outer_screen_state_24.clone(),
-            0x0025 => self.scheduler_state_25.clone(),
-            0x0029 => self.primary_prg_bank_shadow_29.clone(),
+            OUTER_SCREEN_STATE => self.outer_screen_state_24.clone(),
+            FIXED_SCHEDULER_STATE => self.scheduler_state_25.clone(),
+            PRG_BANK_SHADOW => self.primary_prg_bank_shadow_29.clone(),
             0x0044 => self.far_call_selector_44.clone(),
             0x0051 => self.restored_prg_bank_shadow_51.clone(),
-            0x0084 => self.main_state_84.clone(),
+            MAIN_STATE => self.main_state_84.clone(),
             0x053E => self.victory_stage_053e.clone(),
-            0x057A => self.title_state_057a.clone(),
-            0x0587 => self.title_animation_state_0587.clone(),
+            TITLE_STATE => self.title_state_057a.clone(),
+            TITLE_ANIMATION_STATE => self.title_animation_state_0587.clone(),
             0x05C6 => self.temporary_sprite_prg_bank_05c6.clone(),
             0x05C7 => self.requested_prg_bank_05c7.clone(),
             0x05CC => self.pending_state_request_05cc.clone(),
-            0x05DB => self.outer_state_05db.clone(),
-            0x05DE => self.menu_state_05de.clone(),
-            0x05E8 => self.composite_state_05e8.clone(),
-            0x05EE => self.dialogue_or_sound_state_05ee.clone(),
+            MAP_DIALOGUE_OUTER_STATE => self.outer_state_05db.clone(),
+            SHARED_MENU_STATE => self.menu_state_05de.clone(),
+            COMPOSITE_SCREEN_STATE => self.composite_state_05e8.clone(),
+            DIALOGUE_OR_SOUND_STATE => self.dialogue_or_sound_state_05ee.clone(),
             _ => ByteValueSet::Unknown,
         }
     }
@@ -181,22 +206,22 @@ impl ResetTraceMemory {
             0x0008 => self.saved_prg_bank_08 = value,
             0x0009 => self.pointer_high_09 = value,
             0x000A => self.title_animation_staging_0a = value,
-            0x0024 => self.outer_screen_state_24 = value,
-            0x0025 => self.scheduler_state_25 = value,
-            0x0029 => self.primary_prg_bank_shadow_29 = value,
+            OUTER_SCREEN_STATE => self.outer_screen_state_24 = value,
+            FIXED_SCHEDULER_STATE => self.scheduler_state_25 = value,
+            PRG_BANK_SHADOW => self.primary_prg_bank_shadow_29 = value,
             0x0044 => self.far_call_selector_44 = value,
             0x0051 => self.restored_prg_bank_shadow_51 = value,
-            0x0084 => self.main_state_84 = value,
+            MAIN_STATE => self.main_state_84 = value,
             0x053E => self.victory_stage_053e = value,
-            0x057A => self.title_state_057a = value,
-            0x0587 => self.title_animation_state_0587 = value,
+            TITLE_STATE => self.title_state_057a = value,
+            TITLE_ANIMATION_STATE => self.title_animation_state_0587 = value,
             0x05C6 => self.temporary_sprite_prg_bank_05c6 = value,
             0x05C7 => self.requested_prg_bank_05c7 = value,
             0x05CC => self.pending_state_request_05cc = value,
-            0x05DB => self.outer_state_05db = value,
-            0x05DE => self.menu_state_05de = value,
-            0x05E8 => self.composite_state_05e8 = value,
-            0x05EE => self.dialogue_or_sound_state_05ee = value,
+            MAP_DIALOGUE_OUTER_STATE => self.outer_state_05db = value,
+            SHARED_MENU_STATE => self.menu_state_05de = value,
+            COMPOSITE_SCREEN_STATE => self.composite_state_05e8 = value,
+            DIALOGUE_OR_SOUND_STATE => self.dialogue_or_sound_state_05ee = value,
             _ => {}
         }
     }

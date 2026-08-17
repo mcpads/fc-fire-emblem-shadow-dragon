@@ -11,6 +11,7 @@ use crate::{
 use super::{FIXED_PRG_BANK, source_mapped_location};
 
 mod chapter_map_loader;
+mod control_state;
 mod fixed_scheduler;
 mod fixed_vectors;
 mod screen_state_dispatches;
@@ -18,6 +19,7 @@ mod shared_menu_request;
 mod state_accesses;
 
 use chapter_map_loader::{CHAPTER_MAP_INDIRECT_WRITE_SITE, bind_chapter_map_loader_destination};
+use control_state::{ObservedControlStateWrites, merge_observed_control_state_writes};
 use fixed_scheduler::bind_fixed_scheduler_execution;
 use fixed_vectors::bind_fixed_vector_execution;
 use screen_state_dispatches::bind_source_screen_state_dispatches;
@@ -283,7 +285,17 @@ pub(super) fn bind_source_positive_execution_graph(
         .copied()
         .collect();
 
-    let state_accesses = bind_positive_state_accesses(source, &instruction_roles)?;
+    let mut observed_control_state_writes = ObservedControlStateWrites::new();
+    merge_observed_control_state_writes(
+        &mut observed_control_state_writes,
+        fixed_vectors.reset_control_state_write_values(),
+    );
+    merge_observed_control_state_writes(
+        &mut observed_control_state_writes,
+        fixed_scheduler.control_state_write_values(),
+    );
+    let state_accesses =
+        bind_positive_state_accesses(source, &instruction_roles, &observed_control_state_writes)?;
     let reset_open_control_facts = fixed_vectors
         .reset_open_control_fact_descriptions()
         .to_vec();

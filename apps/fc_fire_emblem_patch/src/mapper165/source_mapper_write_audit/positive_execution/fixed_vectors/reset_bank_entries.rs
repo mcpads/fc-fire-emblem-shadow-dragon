@@ -1,7 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use anyhow::{Context, Result, ensure};
-use retro_rp2a03::{AddressingMode, Mnemonic, Operand, decode_bytes};
+use retro_rp2a03::{
+    AddressingMode, Location, MemoryAddress, Mnemonic, Operand, Rp2A03, decode_bytes,
+};
+use typed_isa_core::{AccessKind, StaticSemantics};
 
 use crate::{
     mapper165::banked_call_dispatch::{
@@ -16,6 +19,12 @@ use crate::{
     typed_source::{Rp2a03DirectControlFlow, rp2a03_direct_control_flow},
 };
 
+#[cfg(test)]
+use super::super::control_state::OUTER_SCREEN_STATE;
+use super::super::control_state::{
+    ObservedControlStateWrites, PRG_BANK_SHADOW, merge_observed_control_state_writes,
+    positive_control_state,
+};
 use super::{FIXED_CPU_START, FIXED_PRG_BANK, RESET_RAM_CLEAR_CODE, RESET_RAM_CLEAR_START};
 
 mod call_effects;
@@ -162,6 +171,7 @@ pub(in super::super) struct StatefulBankExecution {
     inline_dispatch_entry_banks: BTreeMap<(u8, u16, u8), BTreeSet<u8>>,
     terminal_entry_contexts: BTreeMap<(u8, u16), BTreeSet<(u8, u8)>>,
     indirect_write_sites_below_mapper_space: BTreeSet<(u8, u16, u8)>,
+    control_state_write_values: ObservedControlStateWrites,
 }
 
 impl StatefulBankExecution {
@@ -214,6 +224,10 @@ impl StatefulBankExecution {
         &self,
     ) -> &BTreeSet<(u8, u16, u8)> {
         &self.indirect_write_sites_below_mapper_space
+    }
+
+    pub(in super::super) fn control_state_write_values(&self) -> &ObservedControlStateWrites {
+        &self.control_state_write_values
     }
 }
 
@@ -380,6 +394,7 @@ fn trace_bank_state_entries(
     let mut inline_dispatch_entry_banks = BTreeMap::<_, BTreeSet<_>>::new();
     let mut terminal_entry_contexts = BTreeMap::<_, BTreeSet<_>>::new();
     let mut indirect_write_sites_below_mapper_space = BTreeMap::<_, bool>::new();
+    let mut control_state_write_values = BTreeMap::new();
     let mut transparent_call_summaries =
         BTreeMap::<(u8, u16), Option<StateTransparentCallSummary>>::new();
 
@@ -439,6 +454,7 @@ fn trace_bank_state_entries(
                 &mut reachable_instruction_starts,
                 &mut switchable_roots,
                 &mut open_facts,
+                &mut control_state_write_values,
             )?;
             continue;
         }
@@ -497,6 +513,13 @@ fn trace_bank_state_entries(
                 observation,
             );
         }
+        record_control_state_write_values(
+            &mut control_state_write_values,
+            physical_bank,
+            state.address,
+            &instruction,
+            &state,
+        );
 
         match rp2a03_direct_control_flow(&instruction, state.address)? {
             Rp2a03DirectControlFlow::FallThrough { next } => {
@@ -755,6 +778,7 @@ fn trace_bank_state_entries(
             .into_iter()
             .filter_map(|(site, is_below_mapper_space)| is_below_mapper_space.then_some(site))
             .collect(),
+        control_state_write_values,
     })
 }
 
@@ -888,6 +912,7 @@ fn summarize_prg_bank_selection(
     reachable_instruction_starts: &mut BTreeSet<(u8, u16)>,
     switchable_roots: &mut BTreeSet<(u8, u16)>,
     open_facts: &mut BTreeSet<String>,
+    control_state_write_values: &mut ObservedControlStateWrites,
 ) -> Result<()> {
     let bytes = source_instruction_bytes(
         source,
@@ -912,6 +937,19 @@ fn summarize_prg_bank_selection(
         open_facts.insert("prg_bank_selector@0F:C9A6:return_stack_empty".to_owned());
     }
     let accumulator_values = state.accumulator.known_values();
+    merge_observed_control_state_writes(
+        control_state_write_values,
+        &ObservedControlStateWrites::from([(
+            (
+                FIXED_PRG_BANK,
+                SELECT_PRG_BANK_AND_SAVE_ENTRY,
+                PRG_BANK_SHADOW,
+            ),
+            accumulator_values
+                .as_ref()
+                .map(|values| values.iter().copied().collect()),
+        )]),
+    );
     match accumulator_values {
         Some(values) => {
             for value in values {
@@ -1482,6 +1520,50 @@ fn record_indirect_write_observation(
             *all_contexts_are_below_mapper_space &= observation.is_below_mapper_space;
         })
         .or_insert(observation.is_below_mapper_space);
+}
+
+fn record_control_state_write_values(
+    observations: &mut ObservedControlStateWrites,
+    physical_bank: u8,
+    cpu_address: u16,
+    instruction: &retro_rp2a03::Instruction,
+    state: &ResetTraceState,
+) {
+    let semantics =
+        Rp2A03::semantics(instruction, &cpu_address).expect("RP2A03 semantics are infallible");
+    for access in semantics.location_accesses {
+        if access.kind != AccessKind::Write {
+            continue;
+        }
+        let Location::Memory(MemoryAddress::Direct(target)) = access.location else {
+            continue;
+        };
+        if positive_control_state(target).is_none() {
+            continue;
+        }
+        let values = direct_write_value_is_modeled(instruction)
+            .then(|| {
+                state
+                    .read_memory_values(target)
+                    .known_values()
+                    .map(BTreeSet::from_iter)
+            })
+            .flatten();
+        merge_observed_control_state_writes(
+            observations,
+            &ObservedControlStateWrites::from([((physical_bank, cpu_address, target), values)]),
+        );
+    }
+}
+
+fn direct_write_value_is_modeled(instruction: &retro_rp2a03::Instruction) -> bool {
+    matches!(
+        (instruction.mnemonic(), instruction.addressing_mode()),
+        (
+            Mnemonic::Sta | Mnemonic::Stx | Mnemonic::Sty | Mnemonic::Inc | Mnemonic::Dec,
+            AddressingMode::ZeroPage | AddressingMode::Absolute,
+        )
+    )
 }
 
 fn apply_data_effect(
@@ -2440,7 +2522,16 @@ mod tests {
                         0x10, 0xC1, 0x20, 0xC1, // inline target table
                     ],
                 ),
-                (0xC110, &[0xA9, 0x01, 0x85, 0x25, 0x60]),
+                (
+                    0xC110,
+                    &[
+                        0xA9, 0x03, // LDA #$03
+                        0x85, 0x24, // STA $24
+                        0xA9, 0x01, // LDA #$01
+                        0x85, 0x25, // STA $25
+                        0x60, // RTS
+                    ],
+                ),
                 (0xC120, &[0xA9, 0x02, 0x85, 0x25, 0x60]),
                 (
                     INLINE_POINTER_DISPATCH_ADDRESS,
@@ -2478,6 +2569,12 @@ mod tests {
             !trace
                 .reachable_instruction_starts()
                 .contains(&(FIXED_PRG_BANK, 0xC120))
+        );
+        assert_eq!(
+            trace
+                .control_state_write_values()
+                .get(&(FIXED_PRG_BANK, 0xC112, OUTER_SCREEN_STATE,)),
+            Some(&Some(BTreeSet::from([0x03])))
         );
     }
 }

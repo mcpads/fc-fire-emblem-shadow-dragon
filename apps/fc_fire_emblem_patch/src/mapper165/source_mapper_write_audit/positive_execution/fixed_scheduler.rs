@@ -14,6 +14,7 @@ use crate::{
     typed_source::decode_rp2a03_sequence,
 };
 
+use super::control_state::ObservedControlStateWrites;
 use super::fixed_vectors::{InlineDispatchSelectorBounds, trace_fixed_scheduler_contexts};
 use super::shared_menu_request::SharedMenuExecutionSource;
 
@@ -98,6 +99,7 @@ pub(super) struct FixedSchedulerExecution {
     reachable_instruction_starts: BTreeSet<(u8, u16)>,
     bound_switchable_roots: BTreeSet<(u8, u16)>,
     indirect_write_sites_below_mapper_space: BTreeSet<(u8, u16, u8)>,
+    control_state_write_values: ObservedControlStateWrites,
     open_control_facts: Vec<String>,
 }
 
@@ -140,6 +142,10 @@ impl FixedSchedulerExecution {
 
     pub(super) fn indirect_write_sites_below_mapper_space(&self) -> &BTreeSet<(u8, u16, u8)> {
         &self.indirect_write_sites_below_mapper_space
+    }
+
+    pub(super) fn control_state_write_values(&self) -> &ObservedControlStateWrites {
+        &self.control_state_write_values
     }
 
     pub(super) fn open_control_fact_descriptions(&self) -> &[String] {
@@ -366,6 +372,7 @@ pub(super) fn bind_fixed_scheduler_execution(
         indirect_write_sites_below_mapper_space: handler_trace
             .indirect_write_sites_below_mapper_space()
             .clone(),
+        control_state_write_values: handler_trace.control_state_write_values().clone(),
         open_control_facts,
     })
 }
