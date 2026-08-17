@@ -39,7 +39,11 @@ const MAP_INITIALIZATION_BANK: u8 = 0x02;
 const MAP_INITIALIZATION_TRAMPOLINE: u16 = 0xBFFA;
 const MAP_INITIALIZATION_TRAMPOLINE_BYTES: [u8; 3] = [0x4C, 0x4E, 0xA6];
 const MAP_INITIALIZATION_DISPATCH_CALL: u16 = 0xA653;
-const MAP_INITIALIZATION_SELECTOR_DOMAIN: [u8; 3] = [0x02, 0x03, 0x04];
+const MAP_INITIALIZATION_STATE_COUNT: u8 = 8;
+const MAP_INITIALIZATION_TARGETS: [u16; MAP_INITIALIZATION_STATE_COUNT as usize] = [
+    0xA67B, 0xA696, 0xA6EF, 0xA718, 0xA75D, 0xA7EF, 0xA77A, 0xA8EC,
+];
+const MAP_INITIALIZATION_TRANSITION_SELECTORS: [u8; 3] = [0x02, 0x03, 0x04];
 const MAP_INITIALIZATION_TRANSITION_ROOTS: [u16; 3] = [0xA6EF, 0xA718, 0xA75D];
 const MAP_INITIALIZATION_TRANSITION_REGIONS: [(u16, usize, &str, u16); 3] = [
     (
@@ -210,7 +214,7 @@ pub(super) fn bind_fixed_scheduler_execution(
         ),
         (
             (MAP_INITIALIZATION_BANK, MAP_INITIALIZATION_DISPATCH_CALL),
-            MAP_INITIALIZATION_SELECTOR_DOMAIN.into_iter().collect(),
+            (0..MAP_INITIALIZATION_STATE_COUNT).collect(),
         ),
     ]);
 
@@ -243,21 +247,40 @@ pub(super) fn bind_fixed_scheduler_execution(
                 .collect(),
         "fixed scheduler positive states no longer enter with the restored gameplay PRG bank: {positive_entry_contexts:?}"
     );
+    let title_positive_selectors = handler_trace
+        .inline_dispatch_selectors()
+        .get(&(0x0D, title_state.dispatch_call()))
+        .cloned()
+        .unwrap_or_default();
     ensure!(
-        handler_trace
-            .inline_dispatch_selectors()
-            .get(&(0x0D, title_state.dispatch_call()))
-            == Some(title_state.selector_domain()),
-        "fixed scheduler trace no longer consumes the owner-bound title selector domain"
+        !title_positive_selectors.is_empty()
+            && title_positive_selectors.is_subset(title_state.selector_domain()),
+        "fixed scheduler trace selected outside the owner-bound title selector domain: {title_positive_selectors:?}"
     );
+    let map_owned_selectors = (0..MAP_INITIALIZATION_STATE_COUNT).collect::<BTreeSet<_>>();
+    let map_positive_selectors = handler_trace
+        .inline_dispatch_selectors()
+        .get(&(MAP_INITIALIZATION_BANK, MAP_INITIALIZATION_DISPATCH_CALL))
+        .cloned()
+        .unwrap_or_default();
     ensure!(
-        handler_trace
-            .inline_dispatch_selectors()
-            .get(&(MAP_INITIALIZATION_BANK, MAP_INITIALIZATION_DISPATCH_CALL))
-            == Some(&MAP_INITIALIZATION_SELECTOR_DOMAIN.into_iter().collect()),
-        "fixed scheduler trace no longer consumes the owner-bound map-initialization selector domain"
+        !map_positive_selectors.is_empty()
+            && map_positive_selectors.is_subset(&map_owned_selectors),
+        "fixed scheduler trace selected outside the owner-bound map-initialization selector domain: {map_positive_selectors:?}"
     );
     let mut open_control_facts = handler_trace.open_fact_descriptions();
+    record_untraced_owned_selectors(
+        &mut open_control_facts,
+        "title_state",
+        title_state.selector_domain(),
+        &title_positive_selectors,
+    );
+    record_untraced_owned_selectors(
+        &mut open_control_facts,
+        "map_initialization",
+        &map_owned_selectors,
+        &map_positive_selectors,
+    );
     open_control_facts
         .push("fixed_scheduler_state_04@0F:F2B6:outer_screen_route_unrooted".to_owned());
     open_control_facts.sort();
@@ -275,6 +298,20 @@ pub(super) fn bind_fixed_scheduler_execution(
         bound_switchable_roots: handler_trace.switchable_roots().clone(),
         open_control_facts,
     })
+}
+
+fn record_untraced_owned_selectors(
+    open_control_facts: &mut Vec<String>,
+    role: &str,
+    owned: &BTreeSet<u8>,
+    positive: &BTreeSet<u8>,
+) {
+    let untraced = owned.difference(positive).copied().collect::<Vec<_>>();
+    if !untraced.is_empty() {
+        open_control_facts.push(format!(
+            "owned_inline_dispatch@{role}:selectors_not_positive={untraced:02X?}"
+        ));
+    }
 }
 
 fn bind_map_initialization_transition(
@@ -301,12 +338,20 @@ fn bind_map_initialization_transition(
         source,
         MAP_INITIALIZATION_BANK,
         MAP_INITIALIZATION_DISPATCH_CALL,
-        MAP_INITIALIZATION_SELECTOR_DOMAIN,
+        0..MAP_INITIALIZATION_STATE_COUNT,
         "map-initialization phase dispatch",
     )?;
     ensure!(
-        dispatch.targets_in_selector_order() == MAP_INITIALIZATION_TRANSITION_ROOTS,
-        "map-initialization phases no longer route to the scheduler transitions"
+        dispatch.targets_in_selector_order() == MAP_INITIALIZATION_TARGETS,
+        "map-initialization state-to-handler mapping changed"
+    );
+    ensure!(
+        MAP_INITIALIZATION_TRANSITION_SELECTORS
+            .into_iter()
+            .map(|selector| dispatch.targets_in_selector_order()[usize::from(selector)])
+            .collect::<Vec<_>>()
+            == MAP_INITIALIZATION_TRANSITION_ROOTS,
+        "map-initialization transition phases no longer route to the scheduler writers"
     );
     instruction_starts.insert((MAP_INITIALIZATION_BANK, MAP_INITIALIZATION_DISPATCH_CALL));
 

@@ -44,6 +44,7 @@ struct ResetTraceState {
     scheduler_state_25: Option<u8>,
     prg_bank_shadow_29: Option<u8>,
     far_selector_44: Option<u8>,
+    main_state_84: Option<u8>,
     state_057a: Option<u8>,
     sound_test_state_05ee: Option<u8>,
     mapped_prg_bank: Option<u8>,
@@ -54,7 +55,9 @@ struct ResetTraceState {
 struct ResetTraceLocation {
     address: u16,
     mapped_prg_bank: Option<u8>,
+    outer_screen_state_24: Option<u8>,
     scheduler_state_25: Option<u8>,
+    main_state_84: Option<u8>,
     return_stack: Vec<ReturnFrame>,
 }
 
@@ -74,6 +77,7 @@ impl ResetTraceState {
             scheduler_state_25: None,
             prg_bank_shadow_29: None,
             far_selector_44: None,
+            main_state_84: None,
             state_057a: None,
             sound_test_state_05ee: None,
             mapped_prg_bank: None,
@@ -109,6 +113,7 @@ impl ResetTraceState {
             0x25 => self.scheduler_state_25,
             0x29 => self.prg_bank_shadow_29,
             0x44 => self.far_selector_44,
+            0x84 => self.main_state_84,
             0x057A => self.state_057a,
             0x05EE => self.sound_test_state_05ee,
             _ => None,
@@ -123,6 +128,7 @@ impl ResetTraceState {
             0x25 => self.scheduler_state_25 = value,
             0x29 => self.prg_bank_shadow_29 = value,
             0x44 => self.far_selector_44 = value,
+            0x84 => self.main_state_84 = value,
             0x057A => self.state_057a = value,
             0x05EE => self.sound_test_state_05ee = value,
             _ => {}
@@ -136,6 +142,7 @@ impl ResetTraceState {
         self.scheduler_state_25 = None;
         self.prg_bank_shadow_29 = None;
         self.far_selector_44 = None;
+        self.main_state_84 = None;
         self.state_057a = None;
         self.sound_test_state_05ee = None;
         self.mapped_prg_bank = None;
@@ -146,7 +153,7 @@ impl ResetTraceState {
         destination_ranges: &[std::ops::RangeInclusive<u16>],
     ) {
         for address in [
-            0x0000, 0x0001, 0x0024, 0x0025, 0x0029, 0x0044, 0x057A, 0x05EE,
+            0x0000, 0x0001, 0x0024, 0x0025, 0x0029, 0x0044, 0x0084, 0x057A, 0x05EE,
         ] {
             if destination_ranges
                 .iter()
@@ -161,7 +168,9 @@ impl ResetTraceState {
         ResetTraceLocation {
             address: self.address,
             mapped_prg_bank: self.mapped_prg_bank,
+            outer_screen_state_24: self.outer_screen_state_24,
             scheduler_state_25: self.scheduler_state_25,
+            main_state_84: self.main_state_84,
             return_stack: self.return_stack.clone(),
         }
     }
@@ -185,6 +194,7 @@ impl ResetTraceState {
             scheduler_state_25: join_value(self.scheduler_state_25, other.scheduler_state_25),
             prg_bank_shadow_29: join_value(self.prg_bank_shadow_29, other.prg_bank_shadow_29),
             far_selector_44: join_value(self.far_selector_44, other.far_selector_44),
+            main_state_84: join_value(self.main_state_84, other.main_state_84),
             state_057a: join_value(self.state_057a, other.state_057a),
             sound_test_state_05ee: join_value(
                 self.sound_test_state_05ee,
@@ -584,6 +594,7 @@ fn summarize_reset_ram_clear(
     state.scheduler_state_25 = Some(0);
     state.prg_bank_shadow_29 = Some(0);
     state.far_selector_44 = Some(0);
+    state.main_state_84 = Some(0);
     state.state_057a = Some(0);
     state.sound_test_state_05ee = Some(0);
     state.set_accumulator(Some(0));
@@ -1169,6 +1180,7 @@ mod tests {
         state.scheduler_state_25 = Some(0x05);
         state.prg_bank_shadow_29 = Some(0x06);
         state.far_selector_44 = Some(0x07);
+        state.main_state_84 = Some(0x0F);
         state.state_057a = Some(0x08);
         state.sound_test_state_05ee = Some(0x09);
         state.mapped_prg_bank = Some(0x06);
@@ -1190,6 +1202,7 @@ mod tests {
         assert_eq!(state.scheduler_state_25, None);
         assert_eq!(state.prg_bank_shadow_29, Some(0x06));
         assert_eq!(state.far_selector_44, Some(0x07));
+        assert_eq!(state.main_state_84, Some(0x0F));
         assert_eq!(state.state_057a, Some(0x08));
         assert_eq!(state.sound_test_state_05ee, Some(0x09));
         assert_eq!(state.mapped_prg_bank, Some(0x06));
@@ -1253,6 +1266,31 @@ mod tests {
         state_five.scheduler_state_25 = Some(0x05);
 
         assert_ne!(state_zero.location(), state_five.location());
+    }
+
+    #[test]
+    fn outer_screen_state_is_part_of_the_trace_location() {
+        let mut state_save_offer = ResetTraceState::at(0x8400);
+        state_save_offer.mapped_prg_bank = Some(0x06);
+        state_save_offer.outer_screen_state_24 = Some(0x0D);
+        state_save_offer.scheduler_state_25 = Some(0x05);
+        let mut state_save_complete = state_save_offer.clone();
+        state_save_complete.outer_screen_state_24 = Some(0x0E);
+
+        assert_ne!(state_save_offer.location(), state_save_complete.location());
+    }
+
+    #[test]
+    fn main_state_is_part_of_the_trace_location() {
+        let mut state_input = ResetTraceState::at(0x849D);
+        state_input.mapped_prg_bank = Some(0x06);
+        state_input.outer_screen_state_24 = Some(0x02);
+        state_input.scheduler_state_25 = Some(0x05);
+        state_input.main_state_84 = Some(0x00);
+        let mut state_transition = state_input.clone();
+        state_transition.main_state_84 = Some(0x01);
+
+        assert_ne!(state_input.location(), state_transition.location());
     }
 
     #[test]

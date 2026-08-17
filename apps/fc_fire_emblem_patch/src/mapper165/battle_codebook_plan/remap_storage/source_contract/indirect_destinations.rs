@@ -391,6 +391,32 @@ pub(in crate::mapper165) struct IndirectWriteDestinationBounds {
 }
 
 impl IndirectWriteDestinationBounds {
+    pub(in crate::mapper165) fn from_source_ranges(
+        role: &'static str,
+        destination_ranges: Vec<RangeInclusive<u16>>,
+    ) -> Result<Self> {
+        ensure!(
+            !destination_ranges.is_empty(),
+            "{role} has no indirect-write destination ranges"
+        );
+        ensure!(
+            destination_ranges
+                .iter()
+                .all(|range| range.start() <= range.end() && *range.end() < 0x8000),
+            "{role} indirect-write destination bounds can reach mapper space"
+        );
+        ensure!(
+            destination_ranges
+                .windows(2)
+                .all(|ranges| ranges[0].end() < ranges[1].start()),
+            "{role} indirect-write destination ranges overlap or are not ordered"
+        );
+        Ok(Self {
+            role,
+            destination_ranges,
+        })
+    }
+
     pub(in crate::mapper165) fn role(&self) -> &'static str {
         self.role
     }
@@ -404,10 +430,7 @@ impl IndirectWriteDestinationBounds {
         role: &'static str,
         destination_ranges: Vec<RangeInclusive<u16>>,
     ) -> Self {
-        Self {
-            role,
-            destination_ranges,
-        }
+        Self::from_source_ranges(role, destination_ranges).unwrap()
     }
 }
 
@@ -515,10 +538,10 @@ pub(in crate::mapper165) fn bind_indirect_write_destination_bounds(
                 bounds
                     .insert(
                         site,
-                        IndirectWriteDestinationBounds {
-                            role: spec.role,
-                            destination_ranges: destination_ranges.clone(),
-                        },
+                        IndirectWriteDestinationBounds::from_source_ranges(
+                            spec.role,
+                            destination_ranges.clone(),
+                        )?,
                     )
                     .is_none(),
                 "an indirect write site belongs to more than one destination class"

@@ -10,10 +10,12 @@ use crate::{
 
 use super::{FIXED_PRG_BANK, source_mapped_location};
 
+mod chapter_map_loader;
 mod fixed_scheduler;
 mod fixed_vectors;
 mod state_accesses;
 
+use chapter_map_loader::{CHAPTER_MAP_INDIRECT_WRITE_SITE, bind_chapter_map_loader_destination};
 use fixed_scheduler::bind_fixed_scheduler_execution;
 use fixed_vectors::bind_fixed_vector_execution;
 pub(super) use state_accesses::PositiveStateAccess;
@@ -179,16 +181,23 @@ pub(super) fn bind_source_positive_execution_graph(
         crate::mapper165::battle_codebook_plan::phase_cooccurrence::battle_phase_reachable_instruction_starts(
             source,
         )?;
-    let battle_indirect_bounds =
+    let mut source_bound_indirect_destinations =
         crate::mapper165::battle_codebook_plan::bind_indirect_write_destination_bounds(source)?;
-    let battle_indirect = battle_indirect_bounds
+    let chapter_map_destination = bind_chapter_map_loader_destination(source)?;
+    ensure!(
+        source_bound_indirect_destinations
+            .insert(CHAPTER_MAP_INDIRECT_WRITE_SITE, chapter_map_destination)
+            .is_none(),
+        "chapter map loader writer overlaps an existing indirect-write destination owner"
+    );
+    let source_bound_indirect_sites = source_bound_indirect_destinations
         .keys()
         .copied()
         .collect::<BTreeSet<_>>();
     let dialogue_interrupt_audio =
         crate::full_translation_install::bind_dialogue_interrupt_audio_mapper_write_slice(source)?;
     let title_state: TitleStateExecution = bind_title_state_execution(source)?;
-    let fixed_vectors = bind_fixed_vector_execution(source, &battle_indirect_bounds)?;
+    let fixed_vectors = bind_fixed_vector_execution(source, &source_bound_indirect_destinations)?;
     let fixed_scheduler_entry_contexts = fixed_vectors.reset_inline_dispatch_contexts(
         FIXED_PRG_BANK,
         fixed_scheduler::FIXED_SCHEDULER_DISPATCH_CALL,
@@ -197,8 +206,17 @@ pub(super) fn bind_source_positive_execution_graph(
         source,
         &title_state,
         &fixed_scheduler_entry_contexts,
-        &battle_indirect_bounds,
+        &source_bound_indirect_destinations,
     )?;
+    ensure!(
+        fixed_vectors
+            .reset_reachable_instruction_starts()
+            .contains(&(
+                CHAPTER_MAP_INDIRECT_WRITE_SITE.0,
+                CHAPTER_MAP_INDIRECT_WRITE_SITE.1
+            )),
+        "reset-rooted execution no longer reaches the chapter map RAM writer"
+    );
     ensure!(
         fixed_vectors
             .bound_switchable_roots()
@@ -245,7 +263,7 @@ pub(super) fn bind_source_positive_execution_graph(
 
     // These source contracts already report the physical PRG bank used to bind each instruction.
     // Preserve that identity instead of reinterpreting it as the caller's switchable-bank context.
-    let indirect_write_sites_below_mapper_space = battle_indirect
+    let indirect_write_sites_below_mapper_space = source_bound_indirect_sites
         .iter()
         .chain(
             dialogue_interrupt_audio
