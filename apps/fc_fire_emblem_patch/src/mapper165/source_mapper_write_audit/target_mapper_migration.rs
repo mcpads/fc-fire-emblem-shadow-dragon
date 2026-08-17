@@ -10,7 +10,9 @@ use crate::mapper165::{
         MapperWriteAccess, MapperWriteCandidate, PhysicalPrgPage, ProjectionLedgerCompleteness,
         decode_mapper165_write, scan_all_byte_mapper_write_candidates,
     },
-    source_indexed_mapper_aliases::source_indexed_menu_mask_store_sites,
+    source_indexed_mapper_aliases::{
+        source_indexed_menu_mask_store_sites, source_indexed_menu_selection_store_sites,
+    },
 };
 
 use super::{
@@ -217,9 +219,20 @@ fn bind_target_canonical_writers(
 fn bind_target_indexed_writers(
     scan: &AllByteMapperWriteScan<Mapper165Register>,
 ) -> Result<Vec<DeclaredExecutableStart>> {
-    source_indexed_menu_mask_store_sites()
-        .into_iter()
-        .map(|(bank, address)| {
+    let mut declarations = Vec::new();
+    for (role, operand, sites) in [
+        (
+            "menu-mask",
+            0x7FEE,
+            source_indexed_menu_mask_store_sites().to_vec(),
+        ),
+        (
+            "menu-selection",
+            0x7FF3,
+            source_indexed_menu_selection_store_sites().to_vec(),
+        ),
+    ] {
+        for (bank, address) in sites {
             let location = source_mapped_location(bank, address)?;
             let matches = scan
                 .candidates
@@ -233,26 +246,25 @@ fn bind_target_indexed_writers(
                                     access,
                                     MapperWriteAccess::Effective {
                                         mode: AddressingMode::AbsoluteX,
-                                        operand: Operand::Word(0x7FEE),
+                                        operand: Operand::Word(actual_operand),
                                         ..
-                                    }
+                                    } if *actual_operand == operand
                                 ))
                         )
                 })
                 .collect::<Vec<_>>();
             ensure!(
                 matches.len() == 1,
-                "guarded indexed source writer bank {bank:02X}:${address:04X} matched {} target-mapper candidates",
+                "guarded indexed {role} source writer bank {bank:02X}:${address:04X} matched {} target-mapper candidates",
                 matches.len()
             );
-            Ok(DeclaredExecutableStart {
-                role: format!(
-                    "guarded indexed menu-mask writer at bank {bank:02X}:${address:04X}"
-                ),
+            declarations.push(DeclaredExecutableStart {
+                role: format!("guarded indexed {role} writer at bank {bank:02X}:${address:04X}"),
                 candidate: matches[0].id().clone(),
-            })
-        })
-        .collect()
+            });
+        }
+    }
+    Ok(declarations)
 }
 
 fn decoded_target_direct_candidate_matches(

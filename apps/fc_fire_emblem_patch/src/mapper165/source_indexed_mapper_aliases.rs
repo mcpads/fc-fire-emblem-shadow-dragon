@@ -13,14 +13,20 @@ use super::unit_name_table;
 
 const MENU_MASK_COUNT_ADDRESS: u16 = 0x05CE;
 const MENU_MASK_BASE_ADDRESS: u16 = 0x7FEE;
+const MENU_SELECTION_BASE_ADDRESS: u16 = 0x7FF3;
 const FIRST_MAPPER165_REGISTER_ADDRESS: u16 = 0x8000;
 const SAFE_MENU_MASK_INDEX_LIMIT: u8 = 0x12;
+const SAFE_MENU_SELECTION_INDEX_LIMIT: u8 = 0x0D;
 
 const MAP_MENU_PRG_BANK: u8 = 0x06;
 const MAP_MENU_GUARD_ADDRESS: u16 = 0xBEDE;
 const MAP_MENU_GUARD_END: u16 = 0xBEE8;
+const MAP_MENU_SELECTION_GUARD_ADDRESS: u16 = MAP_MENU_GUARD_END;
+const MAP_MENU_SELECTION_GUARD_END: u16 = 0xBEF2;
 const FRONT_END_PRG_BANK: u8 = 0x0B;
-const FRONT_END_GUARD_ADDRESS: u16 = unit_name_table::CAVE_END_ADDRESS;
+const FRONT_END_SELECTION_GUARD_ADDRESS: u16 = unit_name_table::CAVE_END_ADDRESS;
+const FRONT_END_SELECTION_GUARD_END: u16 = 0xBF90;
+const FRONT_END_GUARD_ADDRESS: u16 = FRONT_END_SELECTION_GUARD_END;
 const FRONT_END_GUARD_END: u16 = 0xBF9A;
 
 const MAP_MENU_CLEAR_SEQUENCE_SITES: [u16; 6] = [0x940C, 0x9A14, 0x9C91, 0x9CDA, 0xB233, 0xB360];
@@ -42,9 +48,28 @@ const INDEXED_MENU_MASK_STORE_SITES: [(u8, u16); 16] = [
     (FRONT_END_PRG_BANK, 0x8B2F),
     (FRONT_END_PRG_BANK, 0x8E5B),
 ];
+const INDEXED_MENU_SELECTION_STORE_SITES: [(u8, u16); 13] = [
+    (MAP_MENU_PRG_BANK, 0xB38C),
+    (MAP_MENU_PRG_BANK, 0xB3A0),
+    (MAP_MENU_PRG_BANK, 0xB3B4),
+    (FRONT_END_PRG_BANK, 0x81A1),
+    (FRONT_END_PRG_BANK, 0x8451),
+    (FRONT_END_PRG_BANK, 0x85B8),
+    (FRONT_END_PRG_BANK, 0x87BE),
+    (FRONT_END_PRG_BANK, 0x89D5),
+    (FRONT_END_PRG_BANK, 0x8ABB),
+    (FRONT_END_PRG_BANK, 0x8B34),
+    (FRONT_END_PRG_BANK, 0x8DC2),
+    (FRONT_END_PRG_BANK, 0x9364),
+    (FRONT_END_PRG_BANK, 0x9376),
+];
 
 pub(super) const fn source_indexed_menu_mask_store_sites() -> [(u8, u16); 16] {
     INDEXED_MENU_MASK_STORE_SITES
+}
+
+pub(super) const fn source_indexed_menu_selection_store_sites() -> [(u8, u16); 13] {
+    INDEXED_MENU_SELECTION_STORE_SITES
 }
 
 #[derive(Clone, Copy)]
@@ -119,6 +144,7 @@ pub(super) struct SourceIndexedMapperAliasSafety {
     rewritten_indexed_store_site_count: usize,
     guarded_routines: Vec<GuardedRoutineEvidence>,
     safe_menu_mask_index_limit: u8,
+    safe_menu_selection_index_limit: u8,
     all_index_and_status_values_preserve_source_effects: bool,
 }
 
@@ -133,6 +159,13 @@ pub(super) fn bind_source_indexed_mapper_aliases(
     ensure!(
         actual_sites == expected_sites,
         "source indexed menu-mask store sites changed: expected {expected_sites:?}, found {actual_sites:?}"
+    );
+    let indexed_selection_store = indexed_menu_selection_store_bytes()?;
+    let actual_selection_sites = find_bank_local_sequence(source.prg(), &indexed_selection_store)?;
+    let expected_selection_sites = INDEXED_MENU_SELECTION_STORE_SITES.to_vec();
+    ensure!(
+        actual_selection_sites == expected_selection_sites,
+        "source indexed menu-selection store sites changed: expected {expected_selection_sites:?}, found {actual_selection_sites:?}"
     );
 
     let map_sequence = unguarded_menu_mask_clear_sequence();
@@ -156,8 +189,11 @@ pub(super) fn bind_source_indexed_mapper_aliases(
     }
 
     let mut guarded_routines = Vec::new();
-    for (bank, address, end) in guarded_routine_sites() {
-        let routine = guarded_indexed_store_routine(address, end)?;
+    for guard in guarded_routine_sites() {
+        let routine = guarded_indexed_store_routine(guard)?;
+        let bank = guard.bank;
+        let address = guard.address;
+        let end = guard.end;
         let cave_file_offset = switchable_bank_file_offset(bank, address)?;
         ensure!(
             source.data()[cave_file_offset..cave_file_offset + routine.len()]
@@ -180,101 +216,131 @@ pub(super) fn bind_source_indexed_mapper_aliases(
     }
 
     ensure!(
-        all_index_and_status_values_preserve_source_effects(),
-        "guarded indexed menu-mask store does not preserve the source effect domain"
+        all_index_and_status_values_preserve_source_effects(
+            MENU_MASK_BASE_ADDRESS,
+            SAFE_MENU_MASK_INDEX_LIMIT,
+        ) && all_index_and_status_values_preserve_source_effects(
+            MENU_SELECTION_BASE_ADDRESS,
+            SAFE_MENU_SELECTION_INDEX_LIMIT,
+        ),
+        "guarded indexed menu store does not preserve the source effect domain"
     );
 
     Ok(SourceIndexedMapperAliasSafety {
-        scope: "all sixteen exact source STA $7FEE,X sites in banks 06 and 0B, including their typed index and accumulator producers",
-        closure_claim: "complete for every source occurrence of this indexed store and its complete 0x00..0xFF index domain; other source indexed, indirect, or synthesized writes that can enter mapper165 registers remain in the global executable-write audit",
+        scope: "all exact source STA $7FEE,X and STA $7FF3,X sites in banks 06 and 0B, including the typed menu-mask producers and the complete 0x00..0xFF effective-address domains",
+        closure_claim: "complete for every source occurrence of these two indexed store forms; other source indexed, indirect, or synthesized writes that can enter mapper165 registers remain in the global executable-write audit",
         source_prg_banks: [MAP_MENU_PRG_BANK, FRONT_END_PRG_BANK],
-        unguarded_indexed_store_site_count: actual_sites.len(),
-        rewritten_indexed_store_site_count: INDEXED_MENU_MASK_STORE_SITES.len(),
+        unguarded_indexed_store_site_count: actual_sites.len() + actual_selection_sites.len(),
+        rewritten_indexed_store_site_count: INDEXED_MENU_MASK_STORE_SITES.len()
+            + INDEXED_MENU_SELECTION_STORE_SITES.len(),
         guarded_routines,
         safe_menu_mask_index_limit: SAFE_MENU_MASK_INDEX_LIMIT,
+        safe_menu_selection_index_limit: SAFE_MENU_SELECTION_INDEX_LIMIT,
         all_index_and_status_values_preserve_source_effects: true,
     })
 }
 
-pub(super) fn install_guarded_menu_mask_clears(image: &mut TrackedImage) -> Result<()> {
-    for (bank, address, end) in guarded_routine_sites() {
-        let routine = guarded_indexed_store_routine(address, end)?;
+pub(super) fn install_guarded_indexed_menu_stores(image: &mut TrackedImage) -> Result<()> {
+    for guard in guarded_routine_sites() {
+        let routine = guarded_indexed_store_routine(guard)?;
         image.write_expected(
             format!(
-                "guard bank {bank:02X} indexed menu-mask stores from mapper165 register aliases"
+                "guard bank {:02X} indexed {} stores from mapper165 register aliases",
+                guard.bank, guard.role,
             ),
-            switchable_bank_file_offset(bank, address)?,
+            switchable_bank_file_offset(guard.bank, guard.address)?,
             &vec![0xFF; routine.len()],
             &routine,
         )?;
     }
 
-    for (bank, cpu_address) in INDEXED_MENU_MASK_STORE_SITES {
-        let expected = assemble_at(
-            cpu_address,
-            &[Instruction::StaAbsoluteX(MENU_MASK_BASE_ADDRESS)],
-        )?;
-        let replacement = assemble_at(
-            cpu_address,
-            &[Instruction::JsrAbsolute(guard_address_for_bank(bank)?)],
-        )?;
-        ensure!(
-            replacement.len() == expected.len(),
-            "guarded indexed menu-mask store replacement length changed"
-        );
-        image.write_expected(
-            format!("route bank {bank:02X}:${cpu_address:04X} indexed menu-mask store through bounded effective address"),
-            switchable_bank_file_offset(bank, cpu_address)?,
-            &expected,
-            &replacement,
-        )?;
+    for (role, base_address, sites) in indexed_store_families() {
+        for (bank, cpu_address) in sites {
+            let expected = assemble_at(cpu_address, &[Instruction::StaAbsoluteX(base_address)])?;
+            let replacement = assemble_at(
+                cpu_address,
+                &[Instruction::JsrAbsolute(guard_address_for_store(
+                    bank,
+                    base_address,
+                )?)],
+            )?;
+            ensure!(
+                replacement.len() == expected.len(),
+                "guarded indexed {role} store replacement length changed"
+            );
+            image.write_expected(
+                format!("route bank {bank:02X}:${cpu_address:04X} indexed {role} store through bounded effective address"),
+                switchable_bank_file_offset(bank, cpu_address)?,
+                &expected,
+                &replacement,
+            )?;
+        }
     }
     Ok(())
 }
 
-pub(super) fn verify_installed_guarded_menu_mask_clears(candidate: &Rom) -> Result<()> {
-    for (bank, address, end) in guarded_routine_sites() {
-        let routine = guarded_indexed_store_routine(address, end)?;
-        let cave_file_offset = switchable_bank_file_offset(bank, address)?;
+pub(super) fn verify_installed_guarded_indexed_menu_stores(candidate: &Rom) -> Result<()> {
+    for guard in guarded_routine_sites() {
+        let routine = guarded_indexed_store_routine(guard)?;
+        let cave_file_offset = switchable_bank_file_offset(guard.bank, guard.address)?;
         ensure!(
             candidate.data()[cave_file_offset..cave_file_offset + routine.len()] == routine,
-            "installed guarded indexed-store routine at bank {bank:02X}:${address:04X} changed"
+            "installed guarded indexed-store routine at bank {:02X}:${:04X} changed",
+            guard.bank,
+            guard.address,
         );
     }
 
-    for (bank, cpu_address) in INDEXED_MENU_MASK_STORE_SITES {
-        let expected_installed = assemble_at(
-            cpu_address,
-            &[Instruction::JsrAbsolute(guard_address_for_bank(bank)?)],
+    for (role, base_address, sites) in indexed_store_families() {
+        for &(bank, cpu_address) in &sites {
+            let expected_installed = assemble_at(
+                cpu_address,
+                &[Instruction::JsrAbsolute(guard_address_for_store(
+                    bank,
+                    base_address,
+                )?)],
+            )?;
+            let file_offset = switchable_bank_file_offset(bank, cpu_address)?;
+            ensure!(
+                candidate.data()[file_offset..file_offset + expected_installed.len()]
+                    == expected_installed,
+                "installed guarded indexed {role} store at bank {bank:02X}:${cpu_address:04X} changed"
+            );
+        }
+
+        let remaining_direct_stores = find_bank_local_sequence(
+            candidate.prg(),
+            &assemble_at(0x8000, &[Instruction::StaAbsoluteX(base_address)])?,
         )?;
-        let file_offset = switchable_bank_file_offset(bank, cpu_address)?;
+        let expected_guarded_store_bodies = guarded_routine_sites()
+            .into_iter()
+            .filter(|guard| guard.base_address == base_address)
+            .map(|guard| (guard.bank, guard.address + 0x05))
+            .collect::<Vec<_>>();
         ensure!(
-            candidate.data()[file_offset..file_offset + expected_installed.len()]
-                == expected_installed,
-            "installed guarded indexed menu-mask store at bank {bank:02X}:${cpu_address:04X} changed"
+            remaining_direct_stores == expected_guarded_store_bodies,
+            "installed indexed {role} stores are not confined to their guarded routine bodies: expected {expected_guarded_store_bodies:?}, found {remaining_direct_stores:?}"
         );
     }
-
-    let remaining_direct_stores =
-        find_bank_local_sequence(candidate.prg(), &indexed_menu_mask_store_bytes()?)?;
-    let expected_guarded_store_bodies = guarded_routine_sites()
-        .into_iter()
-        .map(|(bank, address, _)| (bank, address + 0x05))
-        .collect::<Vec<_>>();
-    ensure!(
-        remaining_direct_stores == expected_guarded_store_bodies,
-        "installed indexed menu-mask stores are not confined to the two guarded routine bodies: expected {expected_guarded_store_bodies:?}, found {remaining_direct_stores:?}"
-    );
-    for (bank, address, end) in guarded_routine_sites() {
-        let expected_count = INDEXED_MENU_MASK_STORE_SITES
-            .iter()
-            .filter(|(site_bank, _)| *site_bank == bank)
-            .count();
+    for guard in guarded_routine_sites() {
+        let expected_count = indexed_store_families()
+            .into_iter()
+            .find_map(|(_, base_address, sites)| {
+                (base_address == guard.base_address).then_some(
+                    sites
+                        .iter()
+                        .filter(|(site_bank, _)| *site_bank == guard.bank)
+                        .count(),
+                )
+            })
+            .context("guard has no indexed store family")?;
         let installed_direct_transfers =
-            count_direct_transfers_to_range(candidate.prg(), address, end)?;
+            count_direct_transfers_to_range(candidate.prg(), guard.address, guard.end)?;
         ensure!(
             installed_direct_transfers == expected_count,
-            "installed bank {bank:02X} indexed-store guard transfer count changed: expected {expected_count}, found {installed_direct_transfers}"
+            "installed bank {:02X} {} guard transfer count changed: expected {expected_count}, found {installed_direct_transfers}",
+            guard.bank,
+            guard.role,
         );
     }
     Ok(())
@@ -291,6 +357,28 @@ fn unguarded_menu_mask_clear_sequence() -> [Instruction; 4] {
 
 fn indexed_menu_mask_store_bytes() -> Result<Vec<u8>> {
     assemble_at(0x8000, &[Instruction::StaAbsoluteX(MENU_MASK_BASE_ADDRESS)])
+}
+
+fn indexed_menu_selection_store_bytes() -> Result<Vec<u8>> {
+    assemble_at(
+        0x8000,
+        &[Instruction::StaAbsoluteX(MENU_SELECTION_BASE_ADDRESS)],
+    )
+}
+
+fn indexed_store_families() -> [(&'static str, u16, Vec<(u8, u16)>); 2] {
+    [
+        (
+            "menu-mask",
+            MENU_MASK_BASE_ADDRESS,
+            INDEXED_MENU_MASK_STORE_SITES.to_vec(),
+        ),
+        (
+            "menu-selection",
+            MENU_SELECTION_BASE_ADDRESS,
+            INDEXED_MENU_SELECTION_STORE_SITES.to_vec(),
+        ),
+    ]
 }
 
 fn front_end_store_sequence(binding: FrontEndStoreBinding) -> Result<(u16, Vec<u8>)> {
@@ -312,45 +400,80 @@ fn front_end_store_sequence(binding: FrontEndStoreBinding) -> Result<(u16, Vec<u
     ))
 }
 
-fn guarded_routine_sites() -> [(u8, u16, u16); 2] {
+#[derive(Clone, Copy)]
+struct IndexedStoreGuard {
+    role: &'static str,
+    bank: u8,
+    address: u16,
+    end: u16,
+    base_address: u16,
+    index_limit: u8,
+}
+
+fn guarded_routine_sites() -> [IndexedStoreGuard; 4] {
     [
-        (
-            MAP_MENU_PRG_BANK,
-            MAP_MENU_GUARD_ADDRESS,
-            MAP_MENU_GUARD_END,
-        ),
-        (
-            FRONT_END_PRG_BANK,
-            FRONT_END_GUARD_ADDRESS,
-            FRONT_END_GUARD_END,
-        ),
+        IndexedStoreGuard {
+            role: "menu-mask",
+            bank: MAP_MENU_PRG_BANK,
+            address: MAP_MENU_GUARD_ADDRESS,
+            end: MAP_MENU_GUARD_END,
+            base_address: MENU_MASK_BASE_ADDRESS,
+            index_limit: SAFE_MENU_MASK_INDEX_LIMIT,
+        },
+        IndexedStoreGuard {
+            role: "menu-selection",
+            bank: MAP_MENU_PRG_BANK,
+            address: MAP_MENU_SELECTION_GUARD_ADDRESS,
+            end: MAP_MENU_SELECTION_GUARD_END,
+            base_address: MENU_SELECTION_BASE_ADDRESS,
+            index_limit: SAFE_MENU_SELECTION_INDEX_LIMIT,
+        },
+        IndexedStoreGuard {
+            role: "menu-selection",
+            bank: FRONT_END_PRG_BANK,
+            address: FRONT_END_SELECTION_GUARD_ADDRESS,
+            end: FRONT_END_SELECTION_GUARD_END,
+            base_address: MENU_SELECTION_BASE_ADDRESS,
+            index_limit: SAFE_MENU_SELECTION_INDEX_LIMIT,
+        },
+        IndexedStoreGuard {
+            role: "menu-mask",
+            bank: FRONT_END_PRG_BANK,
+            address: FRONT_END_GUARD_ADDRESS,
+            end: FRONT_END_GUARD_END,
+            base_address: MENU_MASK_BASE_ADDRESS,
+            index_limit: SAFE_MENU_MASK_INDEX_LIMIT,
+        },
     ]
 }
 
-fn guard_address_for_bank(bank: u8) -> Result<u16> {
-    match bank {
-        MAP_MENU_PRG_BANK => Ok(MAP_MENU_GUARD_ADDRESS),
-        FRONT_END_PRG_BANK => Ok(FRONT_END_GUARD_ADDRESS),
-        _ => anyhow::bail!("bank {bank:02X} has no indexed menu-mask store guard"),
-    }
+fn guard_address_for_store(bank: u8, base_address: u16) -> Result<u16> {
+    guarded_routine_sites()
+        .into_iter()
+        .find(|guard| guard.bank == bank && guard.base_address == base_address)
+        .map(|guard| guard.address)
+        .with_context(|| {
+            format!("bank {bank:02X} has no indexed store guard for ${base_address:04X},X")
+        })
 }
 
-fn guarded_indexed_store_routine(address: u16, end: u16) -> Result<Vec<u8>> {
-    let no_write = address + 0x08;
+fn guarded_indexed_store_routine(guard: IndexedStoreGuard) -> Result<Vec<u8>> {
+    let no_write = guard.address + 0x08;
     let bytes = assemble_at(
-        address,
+        guard.address,
         &[
             Instruction::Php,
-            Instruction::CpxImmediate(SAFE_MENU_MASK_INDEX_LIMIT),
+            Instruction::CpxImmediate(guard.index_limit),
             Instruction::BcsAbsolute(no_write),
-            Instruction::StaAbsoluteX(MENU_MASK_BASE_ADDRESS),
+            Instruction::StaAbsoluteX(guard.base_address),
             Instruction::Plp,
             Instruction::Rts,
         ],
     )?;
     ensure!(
-        usize::from(address) + bytes.len() == usize::from(end),
-        "guarded indexed menu-mask store routine extent changed"
+        usize::from(guard.address) + bytes.len() == usize::from(guard.end),
+        "guarded indexed {} store routine extent changed",
+        guard.role,
     );
     Ok(bytes)
 }
@@ -373,12 +496,21 @@ fn find_bank_local_sequence(prg: &[u8], sequence: &[u8]) -> Result<Vec<(u8, u16)
     Ok(matches)
 }
 
-fn all_index_and_status_values_preserve_source_effects() -> bool {
+fn all_index_and_status_values_preserve_source_effects(
+    base_address: u16,
+    safe_index_limit: u8,
+) -> bool {
     (u8::MIN..=u8::MAX).all(|index| {
         (u8::MIN..=u8::MAX).all(|incoming_status| {
             let accumulator = index.wrapping_add(incoming_status);
-            source_indexed_store_effect(index, accumulator, incoming_status)
-                == guarded_indexed_store_effect(index, accumulator, incoming_status)
+            source_indexed_store_effect(base_address, index, accumulator, incoming_status)
+                == guarded_indexed_store_effect(
+                    base_address,
+                    safe_index_limit,
+                    index,
+                    accumulator,
+                    incoming_status,
+                )
         })
     })
 }
@@ -392,11 +524,12 @@ struct IndexedStoreEffect {
 }
 
 fn source_indexed_store_effect(
+    base_address: u16,
     index: u8,
     accumulator: u8,
     incoming_status: u8,
 ) -> IndexedStoreEffect {
-    let effective_address = MENU_MASK_BASE_ADDRESS.wrapping_add(u16::from(index));
+    let effective_address = base_address.wrapping_add(u16::from(index));
     IndexedStoreEffect {
         accumulator,
         index_x: index,
@@ -407,6 +540,8 @@ fn source_indexed_store_effect(
 }
 
 fn guarded_indexed_store_effect(
+    base_address: u16,
+    safe_index_limit: u8,
     index: u8,
     accumulator: u8,
     incoming_status: u8,
@@ -415,8 +550,8 @@ fn guarded_indexed_store_effect(
         accumulator,
         index_x: index,
         status: incoming_status,
-        prg_ram_write: (index < SAFE_MENU_MASK_INDEX_LIMIT)
-            .then(|| (MENU_MASK_BASE_ADDRESS + u16::from(index), accumulator)),
+        prg_ram_write: (index < safe_index_limit)
+            .then(|| (base_address + u16::from(index), accumulator)),
     }
 }
 
@@ -426,37 +561,57 @@ mod tests {
 
     #[test]
     fn guarded_routines_preserve_every_index_and_status_without_mapper_writes() {
-        assert!(all_index_and_status_values_preserve_source_effects());
-        for (_, address, end) in guarded_routine_sites() {
+        for (base_address, index_limit) in [
+            (MENU_MASK_BASE_ADDRESS, SAFE_MENU_MASK_INDEX_LIMIT),
+            (MENU_SELECTION_BASE_ADDRESS, SAFE_MENU_SELECTION_INDEX_LIMIT),
+        ] {
+            assert!(all_index_and_status_values_preserve_source_effects(
+                base_address,
+                index_limit,
+            ));
+        }
+        for guard in guarded_routine_sites() {
             assert_eq!(
-                guarded_indexed_store_routine(address, end).unwrap().len(),
-                usize::from(end - address)
+                guarded_indexed_store_routine(guard).unwrap().len(),
+                usize::from(guard.end - guard.address)
             );
         }
     }
 
     #[test]
     fn out_of_range_indices_do_not_reach_mapper165_registers() {
-        for index in [0x12u8, 0x13, 0x80, 0xFF] {
-            let effect = guarded_indexed_store_effect(index, 0xA5, 0xFF);
-            let source_effective_address = MENU_MASK_BASE_ADDRESS + u16::from(index);
-            assert!(source_effective_address >= FIRST_MAPPER165_REGISTER_ADDRESS);
-            assert_eq!(effect.prg_ram_write, None);
-            assert_eq!(effect.accumulator, 0xA5);
-            assert_eq!(effect.index_x, index);
-            assert_eq!(effect.status, 0xFF);
+        for (base_address, index_limit) in [
+            (MENU_MASK_BASE_ADDRESS, SAFE_MENU_MASK_INDEX_LIMIT),
+            (MENU_SELECTION_BASE_ADDRESS, SAFE_MENU_SELECTION_INDEX_LIMIT),
+        ] {
+            for index in [index_limit, index_limit + 1, 0x80, 0xFF] {
+                let effect =
+                    guarded_indexed_store_effect(base_address, index_limit, index, 0xA5, 0xFF);
+                let source_effective_address = base_address + u16::from(index);
+                assert!(source_effective_address >= FIRST_MAPPER165_REGISTER_ADDRESS);
+                assert_eq!(effect.prg_ram_write, None);
+                assert_eq!(effect.accumulator, 0xA5);
+                assert_eq!(effect.index_x, index);
+                assert_eq!(effect.status, 0xFF);
+            }
         }
     }
 
     #[test]
     fn valid_indices_keep_the_original_prg_ram_cell_and_value() {
-        for index in 0..SAFE_MENU_MASK_INDEX_LIMIT {
-            let expected = MENU_MASK_BASE_ADDRESS + u16::from(index);
-            assert!(expected < FIRST_MAPPER165_REGISTER_ADDRESS);
-            assert_eq!(
-                guarded_indexed_store_effect(index, 0x5A, 0xA5).prg_ram_write,
-                Some((expected, 0x5A))
-            );
+        for (base_address, index_limit) in [
+            (MENU_MASK_BASE_ADDRESS, SAFE_MENU_MASK_INDEX_LIMIT),
+            (MENU_SELECTION_BASE_ADDRESS, SAFE_MENU_SELECTION_INDEX_LIMIT),
+        ] {
+            for index in 0..index_limit {
+                let expected = base_address + u16::from(index);
+                assert!(expected < FIRST_MAPPER165_REGISTER_ADDRESS);
+                assert_eq!(
+                    guarded_indexed_store_effect(base_address, index_limit, index, 0x5A, 0xA5,)
+                        .prg_ram_write,
+                    Some((expected, 0x5A))
+                );
+            }
         }
     }
 

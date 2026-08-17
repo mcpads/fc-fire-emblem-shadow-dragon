@@ -10,10 +10,10 @@ use crate::{
 pub(super) const SOURCE_PRG_BANK: u8 = 0x0B;
 pub(super) const CAVE_START_ADDRESS: u16 = 0xB6D0;
 /// 뱅크 `0B`에서 `CAVE_START_ADDRESS`부터 이어지는 `FF` 구간의 실측 끝이다.
-/// `$BF90..$BFA0`은 indexed menu-mask store guard가 소유하고, 그 뒤에는 `$9251`로
+/// `$BF86..$BFA0`은 인덱스 메뉴 선택·마스크 저장 가드가 소유하고, 그 뒤에는 `$9251`로
 /// 시작하는 원본 포인터 표와 NMI 뱅크 로컬 디렉터리 `$BFC0`가 있다.
 /// 이 구간은 뱅크 `0B`의 대사 저장 최상단 `$B474`보다 위라 전이 미러 payload와 겹치지 않는다.
-pub(super) const CAVE_END_ADDRESS: u16 = 0xBF90;
+pub(super) const CAVE_END_ADDRESS: u16 = 0xBF86;
 pub(super) const SELECTOR_ADDRESS: u16 = CAVE_START_ADDRESS;
 pub(super) const ROSTER_POINTER_TABLE_ADDRESS: u16 = 0xB700;
 pub(super) const PLAYER_POINTER_LOAD_ADDRESS: u16 = 0x8EA6;

@@ -83,7 +83,7 @@ use runtime::{
 };
 use source_indexed_mapper_aliases::{
     SourceIndexedMapperAliasSafety, bind_source_indexed_mapper_aliases,
-    install_guarded_menu_mask_clears, verify_installed_guarded_menu_mask_clears,
+    install_guarded_indexed_menu_stores, verify_installed_guarded_indexed_menu_stores,
 };
 use source_mapper_write_audit::{SourceMapperWriteAudit, audit_source_mapper_writes};
 
@@ -390,7 +390,7 @@ fn assemble_mapper165_parity_image(source_rom: &Rom) -> Result<AssembledParityIm
         )?;
     }
 
-    install_guarded_menu_mask_clears(&mut image)?;
+    install_guarded_indexed_menu_stores(&mut image)?;
 
     replace_central_prg_writer(&mut image)?;
     selector_safety::install_source_hooks(&mut image)?;
@@ -437,7 +437,7 @@ fn assemble_mapper165_parity_image(source_rom: &Rom) -> Result<AssembledParityIm
     verify_output(source_rom, &output_rom, &output, &trigger_variant_plan)?;
     selector_safety::verify_installed_contract(&output_rom)?;
     selector_safety::verify_parity_nonindexed_absolute_mapper_select_store(&output_rom)?;
-    verify_installed_guarded_menu_mask_clears(&output_rom)?;
+    verify_installed_guarded_indexed_menu_stores(&output_rom)?;
 
     Ok(AssembledParityImage {
         output,
