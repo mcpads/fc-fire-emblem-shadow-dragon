@@ -47,6 +47,17 @@ pub(super) struct SourceMapperWriteAudit {
     hardware_vector_root_count: usize,
     fixed_vector_execution_instruction_count: usize,
     reset_stateful_execution_instruction_count: usize,
+    fixed_scheduler_source_bound_producer_instruction_count: usize,
+    fixed_scheduler_positive_execution_instruction_count: usize,
+    fixed_scheduler_table_selector_count: usize,
+    fixed_scheduler_table_handler_count: usize,
+    fixed_scheduler_positive_handler_root_count: usize,
+    fixed_scheduler_reset_entry_context_count: usize,
+    fixed_scheduler_positive_entry_context_count: usize,
+    fixed_scheduler_known_produced_states: Vec<String>,
+    fixed_scheduler_positive_states: Vec<String>,
+    fixed_scheduler_bound_switchable_roots: Vec<String>,
+    fixed_scheduler_open_control_facts: Vec<String>,
     fixed_vector_bound_switchable_roots: Vec<String>,
     fixed_vector_open_control_edges: Vec<String>,
     reset_bound_switchable_roots: Vec<String>,
@@ -212,7 +223,7 @@ pub(super) fn audit_source_mapper_writes(source: &Rom) -> Result<SourceMapperWri
         .count();
     Ok(SourceMapperWriteAudit {
         candidate_scope: "every byte offset in every declared source MMC4 PRG projection, decoded with RP2A03 StaticSemantics against all MMC4 register aliases",
-        closure_claim: "partial: the physical-page and projection denominator is complete; the three hardware vector slots and positive battle, main-dialogue, NMI, audio, and title-state instruction spans classify only their exact instruction interiors; the title phase schedule owns its bounded inline-dispatch domain, while the outer-screen and fixed-scheduler selector domains remain explicitly open; source-structural writer declarations do not by themselves establish reachability; counts and the candidate digest are diagnostic outputs rather than closure proofs; the whole-program executable-root ledger is incomplete and every remaining possible start stays unresolved",
+        closure_claim: "partial: the physical-page and projection denominator is complete; the three hardware vector slots and positive battle, main-dialogue, NMI, audio, title-state, and fixed-scheduler instruction spans classify only their exact instruction interiors; fixed-scheduler states 00, 01, 02, and 05 are rooted with PRG-bank context 06, while known state 04 remains behind the unresolved outer-screen route and the global scheduler producer denominator remains open; dynamic-bank and nested selector domains remain explicit unresolved facts; source-structural writer declarations do not by themselves establish reachability; counts and the candidate digest are diagnostic outputs rather than closure proofs; the whole-program executable-root ledger is incomplete and every remaining possible start stays unresolved",
         physical_prg_page_count: pages.len(),
         mapped_projection_count: projections.len(),
         mapper_write_candidate_count: scan.candidates.len(),
@@ -223,6 +234,32 @@ pub(super) fn audit_source_mapper_writes(source: &Rom) -> Result<SourceMapperWri
             .fixed_vector_instruction_count(),
         reset_stateful_execution_instruction_count: positive_execution
             .reset_stateful_execution_instruction_count(),
+        fixed_scheduler_source_bound_producer_instruction_count: positive_execution
+            .fixed_scheduler_source_bound_producer_instruction_count(),
+        fixed_scheduler_positive_execution_instruction_count: positive_execution
+            .fixed_scheduler_positive_execution_instruction_count(),
+        fixed_scheduler_table_selector_count: positive_execution
+            .fixed_scheduler_table_selector_count(),
+        fixed_scheduler_table_handler_count: positive_execution
+            .fixed_scheduler_table_handler_count(),
+        fixed_scheduler_positive_handler_root_count: positive_execution
+            .fixed_scheduler_positive_handler_root_count(),
+        fixed_scheduler_reset_entry_context_count: positive_execution
+            .fixed_scheduler_reset_entry_context_count(),
+        fixed_scheduler_positive_entry_context_count: positive_execution
+            .fixed_scheduler_positive_entry_context_count(),
+        fixed_scheduler_known_produced_states: positive_execution
+            .fixed_scheduler_known_produced_states()
+            .to_vec(),
+        fixed_scheduler_positive_states: positive_execution
+            .fixed_scheduler_positive_states()
+            .to_vec(),
+        fixed_scheduler_bound_switchable_roots: positive_execution
+            .fixed_scheduler_bound_switchable_roots()
+            .to_vec(),
+        fixed_scheduler_open_control_facts: positive_execution
+            .fixed_scheduler_open_control_facts()
+            .to_vec(),
         fixed_vector_bound_switchable_roots: positive_execution
             .fixed_vector_bound_switchable_roots()
             .to_vec(),

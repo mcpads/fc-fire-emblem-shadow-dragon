@@ -129,7 +129,7 @@ pub(super) fn audit_target_mapper_migration(
         declared_reachable_slice_candidate_count: reachable_candidates.len(),
         declared_reachable_slice_unclassified_candidate_count: unclassified.len(),
         declared_reachable_slice_unclassified_candidates: unclassified,
-        closure_claim: "partial: this root-independent denominator includes source writes that MMC4 ignored but mapper165 decodes; the fixed hardware-vector, battle, main-dialogue, NMI, and audio graphs are crossed against it, while dynamic switchable-bank, selector-domain inline-dispatch, other missing execution roots, and computed target bounds remain unresolved",
+        closure_claim: "partial: this root-independent denominator includes source writes that MMC4 ignored but mapper165 decodes; the fixed hardware-vector, reset, battle, main-dialogue, NMI, audio, title-state, and positive fixed-scheduler graphs are crossed against it, while dynamic switchable-bank, outer-screen and nested selector domains, other missing execution roots, and computed target bounds remain unresolved",
     })
 }
 

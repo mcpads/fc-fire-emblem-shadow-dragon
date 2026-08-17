@@ -38,6 +38,10 @@ const TITLE_INPUT_OVERRIDE_SELECTOR: u8 = 0x06;
 const TITLE_SEQUENCE_RESET_SELECTOR: u8 = 0x04;
 const TITLE_SEQUENCE_RESET_WRITES: [u8; 10] =
     [0xA9, 0x00, 0x85, 0x25, 0x8D, 0x7B, 0x05, 0x8D, 0x7C, 0x05];
+const TITLE_GAMEPLAY_SCHEDULER_WRITES: [u8; 9] =
+    [0xA5, 0x23, 0xD0, 0x05, 0xA9, 0x05, 0x85, 0x25, 0x60];
+const TITLE_EXIT_SCHEDULER_WRITER: u16 = 0xAFDD;
+const TITLE_EXIT_SCHEDULER_WRITES: [u8; 4] = [0xA9, 0x01, 0x85, 0x25];
 const MAXIMUM_TITLE_HANDLER_INSTRUCTIONS: usize = 8_192;
 
 #[derive(Clone, Debug)]
@@ -45,6 +49,7 @@ pub(crate) struct TitleStateExecution {
     dispatch_call: u16,
     selector_domain: BTreeSet<u8>,
     selector_targets: BTreeMap<u8, u16>,
+    scheduler_produced_values: BTreeSet<u8>,
     reachable_instruction_starts: BTreeSet<(u8, u16)>,
     open_control_facts: BTreeSet<String>,
 }
@@ -60,6 +65,10 @@ impl TitleStateExecution {
 
     pub(crate) fn selector_targets(&self) -> &BTreeMap<u8, u16> {
         &self.selector_targets
+    }
+
+    pub(crate) fn scheduler_produced_values(&self) -> &BTreeSet<u8> {
+        &self.scheduler_produced_values
     }
 
     pub(crate) fn reachable_instruction_starts(&self) -> &BTreeSet<(u8, u16)> {
@@ -106,6 +115,14 @@ pub(crate) fn bind_title_state_execution(source: &Rom) -> Result<TitleStateExecu
         TITLE_SEQUENCE_FRAME_AND_DISPATCH,
         "title sequence frame and state dispatch",
     )?;
+    ensure!(
+        frame
+            .windows(TITLE_GAMEPLAY_SCHEDULER_WRITES.len())
+            .filter(|candidate| *candidate == TITLE_GAMEPLAY_SCHEDULER_WRITES)
+            .count()
+            == 1,
+        "title frame no longer selects the gameplay scheduler state from its owned flag"
+    );
 
     bind_source_region(
         source,
@@ -169,10 +186,32 @@ pub(crate) fn bind_title_state_execution(source: &Rom) -> Result<TitleStateExecu
     );
 
     let trace = trace_title_handler_graph(source, selector_targets.values().copied())?;
+    let exit_writer = source_cpu_bytes(
+        source,
+        SOURCE_PRG_BANK,
+        TITLE_EXIT_SCHEDULER_WRITER - 2,
+        TITLE_EXIT_SCHEDULER_WRITES.len(),
+    )?;
+    ensure!(
+        exit_writer == TITLE_EXIT_SCHEDULER_WRITES,
+        "title exit no longer selects the map-initialization scheduler state"
+    );
+    decode_rp2a03_sequence(
+        &exit_writer,
+        TITLE_EXIT_SCHEDULER_WRITER - 2,
+        "title exit scheduler writer",
+    )?;
+    ensure!(
+        trace
+            .reachable_instruction_starts
+            .contains(&(SOURCE_PRG_BANK, TITLE_EXIT_SCHEDULER_WRITER)),
+        "title exit scheduler writer is no longer rooted by a title state handler"
+    );
     Ok(TitleStateExecution {
         dispatch_call: TITLE_STATE_DISPATCH_CALL,
         selector_domain,
         selector_targets,
+        scheduler_produced_values: BTreeSet::from([0x00, 0x01, 0x05]),
         reachable_instruction_starts: trace.reachable_instruction_starts,
         open_control_facts: trace.open_control_facts,
     })

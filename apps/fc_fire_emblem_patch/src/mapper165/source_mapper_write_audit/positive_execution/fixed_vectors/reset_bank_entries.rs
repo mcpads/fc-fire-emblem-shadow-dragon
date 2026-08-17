@@ -54,6 +54,7 @@ struct ResetTraceState {
 struct ResetTraceLocation {
     address: u16,
     mapped_prg_bank: Option<u8>,
+    scheduler_state_25: Option<u8>,
     return_stack: Vec<ReturnFrame>,
 }
 
@@ -160,6 +161,7 @@ impl ResetTraceState {
         ResetTraceLocation {
             address: self.address,
             mapped_prg_bank: self.mapped_prg_bank,
+            scheduler_state_25: self.scheduler_state_25,
             return_stack: self.return_stack.clone(),
         }
     }
@@ -199,23 +201,53 @@ fn join_value<T: Copy + Eq>(left: Option<T>, right: Option<T>) -> Option<T> {
 }
 
 #[derive(Debug)]
-pub(super) struct ResetBankEntries {
+pub(in super::super) struct StatefulBankExecution {
     switchable_roots: BTreeSet<(u8, u16)>,
     reachable_instruction_starts: BTreeSet<(u8, u16)>,
     open_facts: BTreeSet<String>,
+    inline_dispatch_selectors: BTreeMap<(u8, u16), BTreeSet<u8>>,
+    inline_dispatch_entry_banks: BTreeMap<(u8, u16, u8), BTreeSet<u8>>,
 }
 
-impl ResetBankEntries {
-    pub(super) fn switchable_roots(&self) -> &BTreeSet<(u8, u16)> {
+impl StatefulBankExecution {
+    pub(in super::super) fn switchable_roots(&self) -> &BTreeSet<(u8, u16)> {
         &self.switchable_roots
     }
 
-    pub(super) fn reachable_instruction_starts(&self) -> &BTreeSet<(u8, u16)> {
+    pub(in super::super) fn reachable_instruction_starts(&self) -> &BTreeSet<(u8, u16)> {
         &self.reachable_instruction_starts
     }
 
-    pub(super) fn open_fact_descriptions(&self) -> Vec<String> {
+    pub(in super::super) fn open_fact_descriptions(&self) -> Vec<String> {
         self.open_facts.iter().cloned().collect()
+    }
+
+    pub(in super::super) fn inline_dispatch_selectors(&self) -> &BTreeMap<(u8, u16), BTreeSet<u8>> {
+        &self.inline_dispatch_selectors
+    }
+
+    pub(in super::super) fn inline_dispatch_entry_banks(
+        &self,
+    ) -> &BTreeMap<(u8, u16, u8), BTreeSet<u8>> {
+        &self.inline_dispatch_entry_banks
+    }
+
+    pub(in super::super) fn inline_dispatch_contexts(
+        &self,
+        bank: u8,
+        address: u16,
+    ) -> BTreeSet<(u8, u8)> {
+        self.inline_dispatch_entry_banks
+            .iter()
+            .filter_map(|(&(actual_bank, actual_address, selector), entry_banks)| {
+                (actual_bank == bank && actual_address == address).then_some(
+                    entry_banks
+                        .iter()
+                        .map(move |entry_bank| (selector, *entry_bank)),
+                )
+            })
+            .flatten()
+            .collect()
     }
 }
 
@@ -223,16 +255,67 @@ pub(super) fn bind_reset_bank_entries(
     source: &Rom,
     reset_root: u16,
     indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
-) -> Result<ResetBankEntries> {
+) -> Result<StatefulBankExecution> {
     ensure!(
         reset_root >= FIXED_CPU_START,
         "source reset vector does not enter the fixed PRG window"
     );
-    let mut pending = VecDeque::from([ResetTraceState::at(reset_root)]);
+    trace_bank_state_entries(
+        source,
+        VecDeque::from([ResetTraceState::at(reset_root)]),
+        &BTreeMap::new(),
+        indirect_write_destination_bounds,
+    )
+}
+
+pub(in super::super) fn trace_fixed_scheduler_contexts(
+    source: &Rom,
+    dispatch_address: u16,
+    return_address: u16,
+    entry_contexts: impl IntoIterator<Item = (u8, u8)>,
+    owned_inline_selector_domains: &BTreeMap<(u8, u16), BTreeSet<u8>>,
+    indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
+) -> Result<StatefulBankExecution> {
+    let entry_contexts = entry_contexts.into_iter().collect::<BTreeSet<_>>();
+    ensure!(
+        !entry_contexts.is_empty(),
+        "fixed scheduler trace has no selector and entry-bank contexts"
+    );
+    ensure!(
+        entry_contexts
+            .iter()
+            .all(|(_, bank)| *bank <= FIXED_PRG_BANK),
+        "fixed scheduler selector trace has an entry bank outside the MMC4 selector domain"
+    );
+    let mut pending = VecDeque::new();
+    for (selector, mapped_prg_bank) in entry_contexts {
+        let mut state = ResetTraceState::at(dispatch_address);
+        state.scheduler_state_25 = Some(selector);
+        state.prg_bank_shadow_29 = Some(mapped_prg_bank);
+        state.mapped_prg_bank = Some(mapped_prg_bank);
+        state.return_stack.push(ReturnFrame::Direct(return_address));
+        pending.push_back(state);
+    }
+    trace_bank_state_entries(
+        source,
+        pending,
+        owned_inline_selector_domains,
+        indirect_write_destination_bounds,
+    )
+}
+
+fn trace_bank_state_entries(
+    source: &Rom,
+    mut pending: VecDeque<ResetTraceState>,
+    owned_inline_selector_domains: &BTreeMap<(u8, u16), BTreeSet<u8>>,
+    indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
+) -> Result<StatefulBankExecution> {
     let mut visited = BTreeMap::<ResetTraceLocation, ResetTraceState>::new();
     let mut switchable_roots = BTreeSet::new();
     let mut reachable_instruction_starts = BTreeSet::new();
     let mut open_facts = BTreeSet::new();
+    let mut inline_dispatch_selectors = BTreeMap::<_, BTreeSet<_>>::new();
+    let mut inline_dispatch_entry_banks = BTreeMap::<_, BTreeSet<_>>::new();
 
     while let Some(mut state) = pending.pop_front() {
         let location = state.location();
@@ -329,32 +412,63 @@ pub(super) fn bind_reset_bank_entries(
                 target,
                 return_address: _,
             } if target == INLINE_POINTER_DISPATCH_ADDRESS => {
-                let Some(selector) = state.accumulator else {
+                let selectors = match state.accumulator {
+                    Some(selector) => BTreeSet::from([selector]),
+                    None => {
+                        let Some(selectors) =
+                            owned_inline_selector_domains.get(&(physical_bank, state.address))
+                        else {
+                            open_facts.insert(format!(
+                                "inline_dispatch@{physical_bank:02X}:{:04X}:selector_unknown",
+                                state.address,
+                            ));
+                            continue;
+                        };
+                        ensure!(
+                            !selectors.is_empty(),
+                            "owned inline dispatch at {physical_bank:02X}:${:04X} has an empty selector domain",
+                            state.address,
+                        );
+                        selectors.clone()
+                    }
+                };
+                let Some(mapped_prg_bank) = state.mapped_prg_bank else {
                     open_facts.insert(format!(
-                        "inline_dispatch@{physical_bank:02X}:{:04X}:selector_unknown",
+                        "inline_dispatch@{physical_bank:02X}:{:04X}:entry_bank_unknown",
                         state.address,
                     ));
                     continue;
                 };
-                let binding = bind_inline_pointer_dispatch(
-                    source,
-                    physical_bank,
-                    state.address,
-                    [selector],
-                    "reset-rooted fixed scheduler dispatch",
-                )?;
-                let target = *binding
-                    .targets_in_selector_order()
-                    .first()
-                    .context("single reset-rooted inline selector did not bind a target")?;
-                state.set_accumulator(Some(selector.wrapping_mul(2)));
-                route_direct_target(
-                    state,
-                    target,
-                    &mut pending,
-                    &mut switchable_roots,
-                    &mut open_facts,
-                );
+                for selector in selectors {
+                    inline_dispatch_selectors
+                        .entry((physical_bank, state.address))
+                        .or_default()
+                        .insert(selector);
+                    inline_dispatch_entry_banks
+                        .entry((physical_bank, state.address, selector))
+                        .or_default()
+                        .insert(mapped_prg_bank);
+                    let binding = bind_inline_pointer_dispatch(
+                        source,
+                        physical_bank,
+                        state.address,
+                        [selector],
+                        "stateful bank execution inline dispatch",
+                    )?;
+                    let target = *binding
+                        .targets_in_selector_order()
+                        .first()
+                        .context("single stateful inline selector did not bind a target")?;
+                    let mut selected = state.clone();
+                    selected.set_accumulator(Some(selector.wrapping_mul(2)));
+                    route_direct_target(
+                        selected,
+                        target,
+                        &mut pending,
+                        &mut switchable_roots,
+                        &mut open_facts,
+                    );
+                }
             }
             Rp2a03DirectControlFlow::Call {
                 target,
@@ -421,10 +535,12 @@ pub(super) fn bind_reset_bank_entries(
         }
     }
 
-    Ok(ResetBankEntries {
+    Ok(StatefulBankExecution {
         switchable_roots,
         reachable_instruction_starts,
         open_facts,
+        inline_dispatch_selectors,
+        inline_dispatch_entry_banks,
     })
 }
 
@@ -949,7 +1065,9 @@ fn branch_condition(mnemonic: Mnemonic, state: &ResetTraceState) -> Option<bool>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rom::HEADER_SIZE;
+    use crate::{
+        mapper165::inline_pointer_dispatch::INLINE_POINTER_DISPATCH_CODE, rom::HEADER_SIZE,
+    };
 
     fn synthetic_destination_bounds(
         site: (u8, u16, u8),
@@ -1123,6 +1241,64 @@ mod tests {
             !trace
                 .reachable_instruction_starts()
                 .contains(&(FIXED_PRG_BANK, 0xC110))
+        );
+    }
+
+    #[test]
+    fn scheduler_state_is_part_of_the_trace_location() {
+        let mut state_zero = ResetTraceState::at(0xC100);
+        state_zero.mapped_prg_bank = Some(0x06);
+        state_zero.scheduler_state_25 = Some(0x00);
+        let mut state_five = state_zero.clone();
+        state_five.scheduler_state_25 = Some(0x05);
+
+        assert_ne!(state_zero.location(), state_five.location());
+    }
+
+    #[test]
+    fn owned_inline_domain_records_each_selector_in_the_actual_entry_bank() {
+        let source = synthetic_source(
+            &[
+                (
+                    0xC100,
+                    &[0xAD, 0x00, 0x04, 0x20, 0x4C, 0xC3, 0x10, 0xC1, 0x20, 0xC1],
+                ),
+                (0xC110, &[0x60]),
+                (0xC120, &[0x60]),
+                (0xC130, &[0x60]),
+                (
+                    INLINE_POINTER_DISPATCH_ADDRESS,
+                    &INLINE_POINTER_DISPATCH_CODE,
+                ),
+            ],
+            0xC100,
+        );
+        let owned_domains =
+            BTreeMap::from([((FIXED_PRG_BANK, 0xC103), BTreeSet::from([0x00, 0x01]))]);
+
+        let trace = trace_fixed_scheduler_contexts(
+            &source,
+            0xC100,
+            0xC130,
+            [(0x05, 0x06)],
+            &owned_domains,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            trace.inline_dispatch_contexts(FIXED_PRG_BANK, 0xC103),
+            BTreeSet::from([(0x00, 0x06), (0x01, 0x06)])
+        );
+        assert!(
+            trace
+                .reachable_instruction_starts()
+                .contains(&(FIXED_PRG_BANK, 0xC110))
+        );
+        assert!(
+            trace
+                .reachable_instruction_starts()
+                .contains(&(FIXED_PRG_BANK, 0xC120))
         );
     }
 }

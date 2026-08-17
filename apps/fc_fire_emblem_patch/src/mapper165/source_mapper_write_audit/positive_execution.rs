@@ -10,9 +10,11 @@ use crate::{
 
 use super::{FIXED_PRG_BANK, source_mapped_location};
 
+mod fixed_scheduler;
 mod fixed_vectors;
 mod state_accesses;
 
+use fixed_scheduler::bind_fixed_scheduler_execution;
 use fixed_vectors::bind_fixed_vector_execution;
 pub(super) use state_accesses::PositiveStateAccess;
 use state_accesses::bind_positive_state_accesses;
@@ -20,6 +22,7 @@ use state_accesses::bind_positive_state_accesses;
 const BATTLE_PHASE_GRAPH: &str = "battle_phase_catalog";
 const DIALOGUE_INTERRUPT_AUDIO_GRAPH: &str = "main_dialogue_nmi_and_audio_positive_graph";
 const FIXED_HARDWARE_VECTOR_GRAPH: &str = "fixed_hardware_vector_direct_graph";
+const FIXED_SCHEDULER_EXECUTION_GRAPH: &str = "fixed_scheduler_state_execution_graph";
 const RESET_STATEFUL_EXECUTION_GRAPH: &str = "reset_stateful_execution_graph";
 const TITLE_STATE_EXECUTION_GRAPH: &str = "title_state_execution_graph";
 
@@ -32,6 +35,17 @@ pub(super) struct SourcePositiveExecutionGraph {
     hardware_vector_root_count: usize,
     fixed_vector_instruction_count: usize,
     reset_stateful_execution_instruction_count: usize,
+    fixed_scheduler_source_bound_producer_instruction_count: usize,
+    fixed_scheduler_positive_execution_instruction_count: usize,
+    fixed_scheduler_table_selector_count: usize,
+    fixed_scheduler_table_handler_count: usize,
+    fixed_scheduler_positive_handler_root_count: usize,
+    fixed_scheduler_reset_entry_context_count: usize,
+    fixed_scheduler_positive_entry_context_count: usize,
+    fixed_scheduler_known_produced_states: Vec<String>,
+    fixed_scheduler_positive_states: Vec<String>,
+    fixed_scheduler_bound_switchable_roots: Vec<String>,
+    fixed_scheduler_open_control_facts: Vec<String>,
     fixed_vector_bound_switchable_roots: Vec<String>,
     fixed_vector_open_control_edges: Vec<String>,
     reset_bound_switchable_roots: Vec<String>,
@@ -73,6 +87,50 @@ impl SourcePositiveExecutionGraph {
 
     pub(super) fn reset_stateful_execution_instruction_count(&self) -> usize {
         self.reset_stateful_execution_instruction_count
+    }
+
+    pub(super) fn fixed_scheduler_source_bound_producer_instruction_count(&self) -> usize {
+        self.fixed_scheduler_source_bound_producer_instruction_count
+    }
+
+    pub(super) fn fixed_scheduler_positive_execution_instruction_count(&self) -> usize {
+        self.fixed_scheduler_positive_execution_instruction_count
+    }
+
+    pub(super) fn fixed_scheduler_table_selector_count(&self) -> usize {
+        self.fixed_scheduler_table_selector_count
+    }
+
+    pub(super) fn fixed_scheduler_table_handler_count(&self) -> usize {
+        self.fixed_scheduler_table_handler_count
+    }
+
+    pub(super) fn fixed_scheduler_positive_handler_root_count(&self) -> usize {
+        self.fixed_scheduler_positive_handler_root_count
+    }
+
+    pub(super) fn fixed_scheduler_reset_entry_context_count(&self) -> usize {
+        self.fixed_scheduler_reset_entry_context_count
+    }
+
+    pub(super) fn fixed_scheduler_positive_entry_context_count(&self) -> usize {
+        self.fixed_scheduler_positive_entry_context_count
+    }
+
+    pub(super) fn fixed_scheduler_known_produced_states(&self) -> &[String] {
+        &self.fixed_scheduler_known_produced_states
+    }
+
+    pub(super) fn fixed_scheduler_positive_states(&self) -> &[String] {
+        &self.fixed_scheduler_positive_states
+    }
+
+    pub(super) fn fixed_scheduler_bound_switchable_roots(&self) -> &[String] {
+        &self.fixed_scheduler_bound_switchable_roots
+    }
+
+    pub(super) fn fixed_scheduler_open_control_facts(&self) -> &[String] {
+        &self.fixed_scheduler_open_control_facts
     }
 
     pub(super) fn fixed_vector_bound_switchable_roots(&self) -> &[String] {
@@ -131,6 +189,16 @@ pub(super) fn bind_source_positive_execution_graph(
         crate::full_translation_install::bind_dialogue_interrupt_audio_mapper_write_slice(source)?;
     let title_state: TitleStateExecution = bind_title_state_execution(source)?;
     let fixed_vectors = bind_fixed_vector_execution(source, &battle_indirect_bounds)?;
+    let fixed_scheduler_entry_contexts = fixed_vectors.reset_inline_dispatch_contexts(
+        FIXED_PRG_BANK,
+        fixed_scheduler::FIXED_SCHEDULER_DISPATCH_CALL,
+    );
+    let fixed_scheduler = bind_fixed_scheduler_execution(
+        source,
+        &title_state,
+        &fixed_scheduler_entry_contexts,
+        &battle_indirect_bounds,
+    )?;
     ensure!(
         fixed_vectors
             .bound_switchable_roots()
@@ -155,6 +223,10 @@ pub(super) fn bind_source_positive_execution_graph(
         (
             RESET_STATEFUL_EXECUTION_GRAPH,
             fixed_vectors.reset_reachable_instruction_starts().iter(),
+        ),
+        (
+            FIXED_SCHEDULER_EXECUTION_GRAPH,
+            fixed_scheduler.reachable_instruction_starts().iter(),
         ),
         (
             TITLE_STATE_EXECUTION_GRAPH,
@@ -201,6 +273,14 @@ pub(super) fn bind_source_positive_execution_graph(
         "reset trace no longer exposes the title state selector handoff exactly once"
     );
     reset_open_control_facts.retain(|fact| fact != &owned_unknown_selector);
+    let fixed_scheduler_unknown_selector = format!(
+        "inline_dispatch@0F:{:04X}:selector_unknown",
+        fixed_scheduler.inline_dispatch().0
+    );
+    ensure!(
+        !reset_open_control_facts.contains(&fixed_scheduler_unknown_selector),
+        "reset-rooted execution lost the fixed scheduler state before its owned dispatcher"
+    );
     let mut reset_bound_switchable_roots = fixed_vectors.reset_bound_switchable_roots().clone();
     reset_bound_switchable_roots.extend(
         title_state
@@ -218,6 +298,46 @@ pub(super) fn bind_source_positive_execution_graph(
         reset_stateful_execution_instruction_count: fixed_vectors
             .reset_reachable_instruction_starts()
             .len(),
+        fixed_scheduler_source_bound_producer_instruction_count: fixed_scheduler
+            .source_bound_producer_instruction_starts()
+            .len(),
+        fixed_scheduler_positive_execution_instruction_count: fixed_scheduler
+            .reachable_instruction_starts()
+            .len(),
+        fixed_scheduler_table_selector_count: fixed_scheduler.table_selector_domain().len(),
+        fixed_scheduler_table_handler_count: fixed_scheduler
+            .selector_targets()
+            .values()
+            .collect::<BTreeSet<_>>()
+            .len(),
+        fixed_scheduler_positive_handler_root_count: fixed_scheduler
+            .positive_selector_domain()
+            .iter()
+            .filter_map(|selector| fixed_scheduler.selector_targets().get(selector))
+            .collect::<BTreeSet<_>>()
+            .len(),
+        fixed_scheduler_reset_entry_context_count: fixed_scheduler.reset_entry_contexts().len(),
+        fixed_scheduler_positive_entry_context_count: fixed_scheduler
+            .positive_entry_contexts()
+            .len(),
+        fixed_scheduler_known_produced_states: fixed_scheduler
+            .known_produced_states()
+            .iter()
+            .map(|state| format!("0x{state:02X}"))
+            .collect(),
+        fixed_scheduler_positive_states: fixed_scheduler
+            .positive_selector_domain()
+            .iter()
+            .map(|state| format!("0x{state:02X}"))
+            .collect(),
+        fixed_scheduler_bound_switchable_roots: fixed_scheduler
+            .bound_switchable_roots()
+            .iter()
+            .map(|(bank, address)| format!("{bank:02X}:${address:04X}"))
+            .collect(),
+        fixed_scheduler_open_control_facts: fixed_scheduler
+            .open_control_fact_descriptions()
+            .to_vec(),
         fixed_vector_bound_switchable_roots: fixed_vectors.bound_switchable_root_descriptions(),
         fixed_vector_open_control_edges: fixed_vectors.open_control_edge_descriptions(),
         reset_bound_switchable_roots: reset_bound_switchable_roots

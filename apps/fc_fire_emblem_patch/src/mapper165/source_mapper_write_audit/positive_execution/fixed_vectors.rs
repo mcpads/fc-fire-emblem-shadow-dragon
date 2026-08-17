@@ -25,8 +25,10 @@ const RESET_RAM_CLEAR_CODE: [u8; 18] = [
     0x10, 0xF7,
 ];
 
-mod reset_bank_entries;
+pub(super) mod reset_bank_entries;
 mod special_bank_call;
+
+pub(super) use reset_bank_entries::trace_fixed_scheduler_contexts;
 
 use reset_bank_entries::bind_reset_bank_entries;
 use special_bank_call::bind_audio_bank_call;
@@ -55,6 +57,7 @@ pub(super) struct FixedVectorExecution {
     reset_bound_switchable_roots: BTreeSet<(u8, u16)>,
     reset_open_control_facts: Vec<String>,
     reset_reachable_instruction_starts: BTreeSet<(u8, u16)>,
+    reset_inline_dispatch_entry_banks: BTreeMap<(u8, u16, u8), BTreeSet<u8>>,
     indirect_write_sites_below_mapper_space: BTreeSet<(u8, u16, u8)>,
 }
 
@@ -125,6 +128,24 @@ impl FixedVectorExecution {
 
     pub(super) fn reset_reachable_instruction_starts(&self) -> &BTreeSet<(u8, u16)> {
         &self.reset_reachable_instruction_starts
+    }
+
+    pub(super) fn reset_inline_dispatch_contexts(
+        &self,
+        bank: u8,
+        address: u16,
+    ) -> BTreeSet<(u8, u8)> {
+        self.reset_inline_dispatch_entry_banks
+            .iter()
+            .filter_map(|(&(actual_bank, actual_address, selector), entry_banks)| {
+                (actual_bank == bank && actual_address == address).then_some(
+                    entry_banks
+                        .iter()
+                        .map(move |entry_bank| (selector, *entry_bank)),
+                )
+            })
+            .flatten()
+            .collect()
     }
 
     pub(super) fn indirect_write_sites_below_mapper_space(&self) -> &BTreeSet<(u8, u16, u8)> {
@@ -254,6 +275,7 @@ pub(super) fn bind_fixed_vector_execution(
         reset_reachable_instruction_starts: reset_bank_entries
             .reachable_instruction_starts()
             .clone(),
+        reset_inline_dispatch_entry_banks: reset_bank_entries.inline_dispatch_entry_banks().clone(),
         indirect_write_sites_below_mapper_space,
     })
 }
