@@ -39,10 +39,10 @@ pub(crate) use carried_ui_domains::{
     CarriedUiDomainInputs, CarriedUiDomainPreservation, FinalConsumerRouteRegion,
     FinalRosterConsumerRoute, inspect_carried_ui_domains,
 };
-#[cfg(test)]
-pub(crate) use final_font_page_forwarders::BoundFrontEndFontPageSelector;
+pub(crate) use final_font_page_forwarders::BoundFontPageSelector;
 pub(crate) use final_font_page_forwarders::{
-    bind_front_end_font_page_selector, build_front_end_font_page_forwarder,
+    bind_front_end_font_page_selector, bind_unit_name_font_page_selector,
+    build_front_end_font_page_forwarder, build_unit_name_font_page_forwarder,
 };
 pub(crate) use front_end_page::bind_installed_front_end_mapper_register;
 pub(crate) mod hangul_page_probe;

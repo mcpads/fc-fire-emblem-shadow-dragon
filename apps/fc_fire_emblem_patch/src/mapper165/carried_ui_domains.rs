@@ -26,7 +26,8 @@ use super::{
     battle_composition_loader_probe::{
         CUMULATIVE_RUNTIME_LAYOUT, cumulative_battle_central_right_fd_selector,
     },
-    bind_front_end_font_page_selector, build_front_end_font_page_forwarder,
+    bind_front_end_font_page_selector, bind_unit_name_font_page_selector,
+    build_front_end_font_page_forwarder, build_unit_name_font_page_forwarder,
     class_profile_page::{
         PROFILE_PAGE_SELECTOR_ADDRESS, TITLE_COMPOSER_HOOK_ADDRESS, build_profile_page_selector,
         build_title_composer_hook,
@@ -64,10 +65,7 @@ use super::{
         SCREEN_ROLE as SHOP_DIALOGUE_SCREEN_ROLE,
         build_page_selector as build_shop_dialogue_page_selector,
     },
-    unit_name_page::{
-        PAGE_ROUTINE_ADDRESS as UNIT_NAME_PAGE_ROUTINE_ADDRESS,
-        build_page_selector as build_unit_name_page_selector,
-    },
+    unit_name_page::PAGE_ROUTINE_ADDRESS as UNIT_NAME_PAGE_ROUTINE_ADDRESS,
 };
 
 const EXPECTED_REPORT_SCHEMA: u8 = 2;
@@ -630,6 +628,13 @@ fn inspect_front_end(
         "cumulative front-end selector and reported page disagree"
     );
     let final_forwarder = build_front_end_font_page_forwarder(&installed_selector)?;
+    let installed_unit_selector = bind_unit_name_font_page_selector(inputs.cumulative)?;
+    ensure!(
+        installed_unit_selector.mapper_register
+            == report.playable_unit_names.unit_ui_font_mapper_register,
+        "cumulative unit-name selector and reported page disagree"
+    );
+    let final_unit_forwarder = build_unit_name_font_page_forwarder(&installed_unit_selector)?;
     let shop_dialogue_mapper_register = report
         .main_dialogue
         .lifetimes
@@ -646,13 +651,11 @@ fn inspect_front_end(
             inputs.cumulative,
             inputs.integrated,
         )?,
-        bind_expected_region(
-            "front_end_upstream_unit_name_selector",
+        bind_replaced_region(
+            "front_end_upstream_unit_name_forwarder",
             active_fixed_file_offset(inputs.cumulative, UNIT_NAME_PAGE_ROUTINE_ADDRESS)?,
-            &build_unit_name_page_selector(
-                report.playable_unit_names.unit_ui_font_mapper_register,
-                SHOP_DIALOGUE_PAGE_ROUTINE_ADDRESS,
-            )?,
+            &installed_unit_selector.expected_bytes,
+            &final_unit_forwarder,
             inputs.cumulative,
             inputs.integrated,
         )?,
@@ -683,7 +686,7 @@ fn inspect_front_end(
         font_regions,
         consumer_regions,
         vec![
-            "0F:F700:unit_name_page_fallback_to_shop_dialogue",
+            "0F:F700:unit_name_page_forwarder_to_shop_dialogue",
             "0F:F748:shop_dialogue_page_fallback_to_front_end",
             "0F:FC60:front_end_page_forwarder",
             "0F:F386:translated_chr_page_writer",

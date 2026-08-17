@@ -1008,8 +1008,8 @@ fn install_font_page_selector_forwarders(
     plan: &FontPageSelectorForwarderPlan,
 ) -> Result<()> {
     ensure!(
-        plan.write_count() == 1,
-        "screen residency must currently replace exactly the migrated front-end selector"
+        plan.write_count() == 2,
+        "screen residency must replace exactly the migrated unit-name and front-end selectors"
     );
     for write in plan.writes() {
         ensure!(

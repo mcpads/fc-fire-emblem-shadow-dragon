@@ -20,18 +20,28 @@ use super::{
         PAGE_ROUTINE_ADDRESS as FRONT_END_SELECTOR_ADDRESS,
         PAGE_ROUTINE_END as FRONT_END_SELECTOR_END, build_page_selector,
     },
+    roster_page::{
+        PAGE_REGISTERS as ROSTER_PAGE_REGISTERS, PAGE_ROUTINE_ADDRESS as ROSTER_SELECTOR_ADDRESS,
+        PAGE_ROUTINE_END as ROSTER_SELECTOR_END,
+        build_page_routine_with_fallback as build_roster_selector,
+    },
     shop_dialogue_page::{
         PAGE_ROUTINE_ADDRESS as SHOP_SELECTOR_ADDRESS, PAGE_ROUTINE_END as SHOP_SELECTOR_END,
         build_page_selector as build_shop_selector,
+    },
+    unit_name_page::{
+        PAGE_ROUTINE_ADDRESS as UNIT_SELECTOR_ADDRESS, PAGE_ROUTINE_END as UNIT_SELECTOR_END,
+        build_page_selector as build_unit_selector,
     },
 };
 
 const FIXED_BANK_BYTE_COUNT: usize = 16 * 1024;
 const JMP_ABSOLUTE: u8 = 0x4C;
 const SHOP_FALLBACK_JUMP_ADDRESS: u16 = SHOP_SELECTOR_END - 3;
+const ROSTER_FALLBACK_JUMP_ADDRESS: u16 = ROSTER_SELECTOR_END - 3;
 
 #[derive(Debug)]
-pub(crate) struct BoundFrontEndFontPageSelector {
+pub(crate) struct BoundFontPageSelector {
     pub(crate) cpu_address: u16,
     pub(crate) cpu_end_exclusive: u16,
     pub(crate) fallback_target: u16,
@@ -45,9 +55,7 @@ pub(crate) struct BoundFrontEndFontPageSelector {
 /// 물리 PRG의 예전 고정 뱅크 사본이나 CHR 자료에서 우연히 보이는 피연산자는 실행
 /// 소유권이 아니다. 최종 CPU `$C000..$FFFF` 창에 실제로 고정되는 마지막 16 KiB만
 /// 센서스하며, 그 안에서는 무분류 직접 진입을 하나도 허용하지 않는다.
-pub(crate) fn bind_front_end_font_page_selector(
-    candidate: &Rom,
-) -> Result<BoundFrontEndFontPageSelector> {
+pub(crate) fn bind_front_end_font_page_selector(candidate: &Rom) -> Result<BoundFontPageSelector> {
     ensure!(
         candidate.mapper() == 165,
         "front-end selector candidate is not mapper 165"
@@ -98,7 +106,7 @@ pub(crate) fn bind_front_end_font_page_selector(
         "front-end font-page selector direct-entry census changed: {direct_transfers:?}"
     );
 
-    Ok(BoundFrontEndFontPageSelector {
+    Ok(BoundFontPageSelector {
         cpu_address: FRONT_END_SELECTOR_ADDRESS,
         cpu_end_exclusive: FRONT_END_SELECTOR_END,
         fallback_target: DIALOGUE_SELECTOR_ADDRESS,
@@ -108,8 +116,90 @@ pub(crate) fn bind_front_end_font_page_selector(
     })
 }
 
+/// 누적 유닛 요약·상태 선택기와 그 유일한 활성 고정 뱅크 진입을 묶는다.
+/// 전임 명단 선택기의 전체 생성 바이트도 함께 확인해 `$FBD1`이 우연한 피연산자
+/// 일치가 아니라 실제 fallback임을 고정한다.
+pub(crate) fn bind_unit_name_font_page_selector(candidate: &Rom) -> Result<BoundFontPageSelector> {
+    ensure!(
+        candidate.mapper() == 165,
+        "unit-name selector candidate is not mapper 165"
+    );
+    let fixed = active_fixed_bank(candidate)?;
+    let selector = fixed_slice(
+        fixed,
+        UNIT_SELECTOR_ADDRESS,
+        usize::from(UNIT_SELECTOR_END - UNIT_SELECTOR_ADDRESS),
+    )?;
+    let mapper_register = bind_generated_selector_register(selector, |register| {
+        build_unit_selector(register, SHOP_SELECTOR_ADDRESS)
+    })?;
+    ensure!(
+        usize::from(mapper_register / 4)
+            < candidate.chr().len() / crate::font_slots::FONT_PAGE_SIZE,
+        "unit-name selector names a CHR page outside the candidate"
+    );
+    decode_rp2a03_sequence(
+        selector,
+        UNIT_SELECTOR_ADDRESS,
+        "installed cumulative unit-name font-page selector",
+    )?;
+
+    let roster_selector = fixed_slice(
+        fixed,
+        ROSTER_SELECTOR_ADDRESS,
+        usize::from(ROSTER_SELECTOR_END - ROSTER_SELECTOR_ADDRESS),
+    )?;
+    let expected_roster_selector = build_roster_selector(
+        ROSTER_PAGE_REGISTERS[0],
+        ROSTER_PAGE_REGISTERS[1],
+        UNIT_SELECTOR_ADDRESS,
+    )?;
+    ensure!(
+        roster_selector == expected_roster_selector,
+        "installed cumulative roster selector no longer falls through to the unit-name selector"
+    );
+    decode_rp2a03_sequence(
+        roster_selector,
+        ROSTER_SELECTOR_ADDRESS,
+        "installed cumulative roster font-page selector",
+    )?;
+
+    let direct_transfers = direct_transfer_sites(fixed, UNIT_SELECTOR_ADDRESS, UNIT_SELECTOR_END);
+    ensure!(
+        direct_transfers
+            == vec![(
+                ROSTER_FALLBACK_JUMP_ADDRESS,
+                JMP_ABSOLUTE,
+                UNIT_SELECTOR_ADDRESS,
+            )],
+        "unit-name font-page selector direct-entry census changed: {direct_transfers:?}"
+    );
+
+    Ok(BoundFontPageSelector {
+        cpu_address: UNIT_SELECTOR_ADDRESS,
+        cpu_end_exclusive: UNIT_SELECTOR_END,
+        fallback_target: SHOP_SELECTOR_ADDRESS,
+        mapper_register,
+        direct_predecessor_address: ROSTER_FALLBACK_JUMP_ADDRESS,
+        expected_bytes: selector.to_vec(),
+    })
+}
+
 pub(crate) fn build_front_end_font_page_forwarder(
-    selector: &BoundFrontEndFontPageSelector,
+    selector: &BoundFontPageSelector,
+) -> Result<Vec<u8>> {
+    build_font_page_forwarder(selector, "front-end")
+}
+
+pub(crate) fn build_unit_name_font_page_forwarder(
+    selector: &BoundFontPageSelector,
+) -> Result<Vec<u8>> {
+    build_font_page_forwarder(selector, "unit-name")
+}
+
+fn build_font_page_forwarder(
+    selector: &BoundFontPageSelector,
+    screen_role: &str,
 ) -> Result<Vec<u8>> {
     let mut bytes = assemble_at(
         selector.cpu_address,
@@ -118,17 +208,17 @@ pub(crate) fn build_front_end_font_page_forwarder(
     let capacity = usize::from(selector.cpu_end_exclusive - selector.cpu_address);
     ensure!(
         selector.expected_bytes.len() == capacity && bytes.len() <= capacity,
-        "front-end selector forwarder does not own the complete source selector span"
+        "{screen_role} selector forwarder does not own the complete source selector span"
     );
     bytes.resize(capacity, 0xEA);
     decode_rp2a03_sequence(
         &bytes,
         selector.cpu_address,
-        "central-policy front-end font-page fallback forwarder",
+        "central-policy font-page fallback forwarder",
     )?;
     ensure!(
         bytes != selector.expected_bytes,
-        "front-end selector was already replaced before final integration"
+        "{screen_role} selector was already replaced before final integration"
     );
     Ok(bytes)
 }
@@ -203,6 +293,19 @@ mod tests {
         let shop_offset =
             crate::test_support::synthetic_fixed_bank_file_offset(SHOP_SELECTOR_ADDRESS);
         bytes[shop_offset..shop_offset + shop.len()].copy_from_slice(&shop);
+        let unit = build_unit_selector(0xB0, SHOP_SELECTOR_ADDRESS).unwrap();
+        let unit_offset =
+            crate::test_support::synthetic_fixed_bank_file_offset(UNIT_SELECTOR_ADDRESS);
+        bytes[unit_offset..unit_offset + unit.len()].copy_from_slice(&unit);
+        let roster = build_roster_selector(
+            ROSTER_PAGE_REGISTERS[0],
+            ROSTER_PAGE_REGISTERS[1],
+            UNIT_SELECTOR_ADDRESS,
+        )
+        .unwrap();
+        let roster_offset =
+            crate::test_support::synthetic_fixed_bank_file_offset(ROSTER_SELECTOR_ADDRESS);
+        bytes[roster_offset..roster_offset + roster.len()].copy_from_slice(&roster);
         Rom::parse(bytes).unwrap()
     }
 
@@ -262,5 +365,30 @@ mod tests {
                 .windows(3)
                 .any(|bytes| bytes == [0x8D, 0x01, 0x80])
         );
+    }
+
+    #[test]
+    fn binds_and_forwards_the_complete_unit_name_selector() {
+        let selector = bind_unit_name_font_page_selector(&installed_candidate()).unwrap();
+        let forwarder = build_unit_name_font_page_forwarder(&selector).unwrap();
+
+        assert_eq!(selector.cpu_address, UNIT_SELECTOR_ADDRESS);
+        assert_eq!(selector.cpu_end_exclusive, UNIT_SELECTOR_END);
+        assert_eq!(selector.fallback_target, SHOP_SELECTOR_ADDRESS);
+        assert_eq!(selector.mapper_register, 0xB0);
+        assert_eq!(
+            selector.direct_predecessor_address,
+            ROSTER_FALLBACK_JUMP_ADDRESS
+        );
+        assert_eq!(
+            &forwarder[..3],
+            &[
+                JMP_ABSOLUTE,
+                SHOP_SELECTOR_ADDRESS as u8,
+                (SHOP_SELECTOR_ADDRESS >> 8) as u8,
+            ]
+        );
+        assert!(forwarder[3..].iter().all(|byte| *byte == 0xEA));
+        assert_eq!(forwarder.len(), selector.expected_bytes.len());
     }
 }
