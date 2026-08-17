@@ -12,8 +12,13 @@ use clap::Args;
 use crate::{full_translation_install, mapper165, translation_coverage};
 
 mod artifact_output;
+mod dispatch;
 
 use artifact_output::write_full_translation_artifacts;
+
+pub(super) fn execute(command: crate::Command) -> Result<()> {
+    dispatch::execute(command)
+}
 
 #[derive(Debug, Args)]
 pub(crate) struct AnalyzeTranslationCoverageCommand {
