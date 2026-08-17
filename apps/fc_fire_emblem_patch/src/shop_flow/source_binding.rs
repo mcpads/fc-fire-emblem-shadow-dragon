@@ -3,11 +3,16 @@ use super::*;
 #[derive(Debug)]
 pub(crate) struct SharedMenuControllerSource {
     dispatch_call: u16,
+    state_address: u16,
 }
 
 impl SharedMenuControllerSource {
     pub(crate) fn dispatch_call(&self) -> u16 {
         self.dispatch_call
+    }
+
+    pub(crate) fn state_address(&self) -> u16 {
+        self.state_address
     }
 }
 
@@ -28,6 +33,7 @@ pub(crate) fn bind_shared_menu_controller_source(rom: &Rom) -> Result<SharedMenu
 
     Ok(SharedMenuControllerSource {
         dispatch_call: 0x9254,
+        state_address: MENU_CONTROLLER_STATE_ADDRESS,
     })
 }
 

@@ -21,11 +21,16 @@ const SAVE_COMPLETE_DIALOGUE_DISPATCH_CALL: u16 = 0xB36C;
 
 pub(super) struct SourceScreenStateDispatches {
     selector_domains: BTreeMap<(u8, u16), BTreeSet<u8>>,
+    selector_memory_addresses: BTreeMap<(u8, u16), u16>,
 }
 
 impl SourceScreenStateDispatches {
     pub(super) fn selector_domains(&self) -> &BTreeMap<(u8, u16), BTreeSet<u8>> {
         &self.selector_domains
+    }
+
+    pub(super) fn selector_memory_addresses(&self) -> &BTreeMap<(u8, u16), u16> {
+        &self.selector_memory_addresses
     }
 }
 
@@ -34,6 +39,7 @@ pub(super) fn bind_source_screen_state_dispatches(
 ) -> Result<SourceScreenStateDispatches> {
     source.verify_supported_japanese()?;
     let mut selector_domains = BTreeMap::new();
+    let mut selector_memory_addresses = BTreeMap::new();
 
     let caller_handoffs = bind_caller_handoff_state_dispatch_sources(source)?;
     for (bank, call, role) in [
@@ -100,6 +106,13 @@ pub(super) fn bind_source_screen_state_dispatches(
         secondary_domain,
         "map-dialogue secondary outer-state dispatch",
     )?;
+    insert_selector_memory_address(
+        &mut selector_memory_addresses,
+        MAP_DIALOGUE_BANK,
+        MAP_DIALOGUE_SECONDARY_DISPATCH_CALL,
+        0x05DB,
+        "map-dialogue secondary outer-state dispatch",
+    )?;
 
     let outer_screen = bind_outer_screen_state_dispatch_source(source)?;
     insert_domain(
@@ -107,6 +120,13 @@ pub(super) fn bind_source_screen_state_dispatches(
         outer_screen.prg_bank(),
         outer_screen.call_address(),
         outer_screen.selector_domain().clone(),
+        "gameplay outer-screen dispatch",
+    )?;
+    insert_selector_memory_address(
+        &mut selector_memory_addresses,
+        outer_screen.prg_bank(),
+        outer_screen.call_address(),
+        outer_screen.selector_address(),
         "gameplay outer-screen dispatch",
     )?;
 
@@ -125,7 +145,24 @@ pub(super) fn bind_source_screen_state_dispatches(
         "composite direct producers escape the source-bound handler table"
     );
 
-    Ok(SourceScreenStateDispatches { selector_domains })
+    Ok(SourceScreenStateDispatches {
+        selector_domains,
+        selector_memory_addresses,
+    })
+}
+
+fn insert_selector_memory_address(
+    addresses: &mut BTreeMap<(u8, u16), u16>,
+    bank: u8,
+    call: u16,
+    selector_address: u16,
+    role: &str,
+) -> Result<()> {
+    ensure!(
+        addresses.insert((bank, call), selector_address).is_none(),
+        "{role} duplicates a selector-memory binding at {bank:02X}:${call:04X}"
+    );
+    Ok(())
 }
 
 fn insert_domain(

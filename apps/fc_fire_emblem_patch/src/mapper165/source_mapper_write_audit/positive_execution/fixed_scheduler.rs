@@ -158,6 +158,7 @@ pub(super) fn bind_fixed_scheduler_execution(
     title_state: &TitleStateExecution,
     shared_menu: &SharedMenuExecutionSource,
     screen_state_selector_domains: &BTreeMap<(u8, u16), BTreeSet<u8>>,
+    screen_state_selector_memory_addresses: &BTreeMap<(u8, u16), u16>,
     entry_contexts: &BTreeSet<(u8, u8)>,
     indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
 ) -> Result<FixedSchedulerExecution> {
@@ -258,22 +259,30 @@ pub(super) fn bind_fixed_scheduler_execution(
             (0x0B, shared_menu.dispatch_call()),
             InlineDispatchSelectorBounds::from_source_producers(
                 shared_menu.active_request_states().clone(),
-            ),
+            )
+            .with_selector_memory_address(shared_menu.selector_memory_address()),
         ),
     ]);
     for (&site, selectors) in screen_state_selector_domains {
+        let mut bounds = InlineDispatchSelectorBounds::from_handler_table(selectors.clone());
+        if let Some(selector_address) = screen_state_selector_memory_addresses.get(&site) {
+            bounds = bounds.with_selector_memory_address(*selector_address);
+        }
         ensure!(
             inline_dispatch_selector_bounds
-                .insert(
-                    site,
-                    InlineDispatchSelectorBounds::from_handler_table(selectors.clone()),
-                )
+                .insert(site, bounds)
                 .is_none(),
             "screen-state inline dispatch duplicates existing selector bounds at {:02X}:${:04X}",
             site.0,
             site.1,
         );
     }
+    ensure!(
+        screen_state_selector_memory_addresses
+            .keys()
+            .all(|site| screen_state_selector_domains.contains_key(site)),
+        "a screen-state selector-memory binding has no owner-bound handler domain"
+    );
 
     let handler_trace = trace_fixed_scheduler_contexts(
         source,

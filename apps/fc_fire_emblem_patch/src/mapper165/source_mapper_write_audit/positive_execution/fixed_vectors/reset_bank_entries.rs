@@ -63,6 +63,7 @@ const PENDING_STATE_ESCAPE_ACTIVE_INSTRUCTION_OFFSETS: [u16; 6] = [5, 7, 9, 10, 
 pub(in super::super) struct InlineDispatchSelectorBounds {
     admitted_selectors: BTreeSet<u8>,
     source_bound_produced_selectors: Option<BTreeSet<u8>>,
+    selector_memory_address: Option<u16>,
 }
 
 impl InlineDispatchSelectorBounds {
@@ -70,6 +71,7 @@ impl InlineDispatchSelectorBounds {
         Self {
             admitted_selectors: selectors.clone(),
             source_bound_produced_selectors: Some(selectors),
+            selector_memory_address: None,
         }
     }
 
@@ -77,7 +79,13 @@ impl InlineDispatchSelectorBounds {
         Self {
             admitted_selectors: selectors,
             source_bound_produced_selectors: None,
+            selector_memory_address: None,
         }
+    }
+
+    pub(in super::super) fn with_selector_memory_address(mut self, address: u16) -> Self {
+        self.selector_memory_address = Some(address);
+        self
     }
 
     fn admitted_selectors(&self) -> &BTreeSet<u8> {
@@ -86,6 +94,10 @@ impl InlineDispatchSelectorBounds {
 
     fn source_bound_produced_selectors(&self) -> Option<&BTreeSet<u8>> {
         self.source_bound_produced_selectors.as_ref()
+    }
+
+    fn selector_memory_address(&self) -> Option<u16> {
+        self.selector_memory_address
     }
 }
 
@@ -783,6 +795,17 @@ fn trace_bank_state_entries(
                         .first()
                         .context("single stateful inline selector did not bind a target")?;
                     let mut selected = state.clone();
+                    if let Some(selector_address) = inline_dispatch_selector_bounds
+                        .get(&(physical_bank, state.address))
+                        .and_then(InlineDispatchSelectorBounds::selector_memory_address)
+                    {
+                        ensure!(
+                            ResetTraceState::tracks_memory_address(selector_address),
+                            "inline dispatch at {physical_bank:02X}:${:04X} refines an untracked selector-memory address ${selector_address:04X}",
+                            state.address,
+                        );
+                        selected.write_memory(selector_address, Some(selector));
+                    }
                     selected.set_accumulator(Some(selector.wrapping_mul(2)));
                     route_direct_target(
                         selected,
@@ -2403,6 +2426,61 @@ mod tests {
             trace
                 .reachable_instruction_starts()
                 .contains(&(0x0F, 0xC130))
+        );
+        assert!(trace.open_fact_descriptions().is_empty());
+    }
+
+    #[test]
+    fn memory_backed_dispatch_refines_each_selected_handler_state() {
+        let source = synthetic_source(
+            &[
+                (
+                    0xC100,
+                    &[
+                        0xA9, 0x06, // LDA #$06
+                        0x8D, 0x00, 0xA0, // STA $A000
+                        0xAD, 0x00, 0x04, // LDA $0400; unknown branch input
+                        0xF0, 0x07, // BEQ $C111
+                        0xA9, 0x00, // LDA #$00
+                        0x85, 0x24, // STA $24
+                        0x4C, 0x15, 0xC1, // JMP $C115
+                        0xA9, 0x01, // LDA #$01
+                        0x85, 0x24, // STA $24
+                        0xA5, 0x24, // LDA $24
+                        0x20, 0x4C, 0xC3, // JSR $C34C
+                        0x30, 0xC1, 0x40, 0xC1, // inline target table
+                    ],
+                ),
+                (0xC130, &[0xE6, 0x24, 0x60]),
+                (0xC140, &[0xE6, 0x24, 0x60]),
+                (
+                    INLINE_POINTER_DISPATCH_ADDRESS,
+                    &INLINE_POINTER_DISPATCH_CODE,
+                ),
+            ],
+            0xC100,
+        );
+        let trace = trace_with_inline_selector_bounds(
+            &source,
+            0xC100,
+            BTreeMap::from([(
+                (FIXED_PRG_BANK, 0xC117),
+                InlineDispatchSelectorBounds::from_handler_table(BTreeSet::from([0x00, 0x01]))
+                    .with_selector_memory_address(OUTER_SCREEN_STATE),
+            )]),
+        );
+
+        assert_eq!(
+            trace
+                .control_state_write_values()
+                .get(&(FIXED_PRG_BANK, 0xC130, OUTER_SCREEN_STATE)),
+            Some(&Some(BTreeSet::from([0x01])))
+        );
+        assert_eq!(
+            trace
+                .control_state_write_values()
+                .get(&(FIXED_PRG_BANK, 0xC140, OUTER_SCREEN_STATE)),
+            Some(&Some(BTreeSet::from([0x02])))
         );
         assert!(trace.open_fact_descriptions().is_empty());
     }

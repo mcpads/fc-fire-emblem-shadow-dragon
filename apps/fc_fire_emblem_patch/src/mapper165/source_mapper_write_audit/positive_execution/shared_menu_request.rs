@@ -41,6 +41,7 @@ const MENU_CACHE_POINTER_TABLE: u16 = 0x992D;
 
 pub(super) struct SharedMenuExecutionSource {
     dispatch_call: u16,
+    selector_memory_address: u16,
     active_request_states: BTreeSet<u8>,
     indirect_write_destinations: BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
 }
@@ -48,6 +49,10 @@ pub(super) struct SharedMenuExecutionSource {
 impl SharedMenuExecutionSource {
     pub(super) fn dispatch_call(&self) -> u16 {
         self.dispatch_call
+    }
+
+    pub(super) fn selector_memory_address(&self) -> u16 {
+        self.selector_memory_address
     }
 
     pub(super) fn active_request_states(&self) -> &BTreeSet<u8> {
@@ -148,6 +153,7 @@ pub(super) fn bind_shared_menu_execution_source(
     )?;
     Ok(SharedMenuExecutionSource {
         dispatch_call: shared_menu.dispatch_call(),
+        selector_memory_address: shared_menu.state_address(),
         // State zero is idle. State six is a helper called by the active handlers rather than a
         // pending request published through $E65C. The source regions and landmarks above bind
         // the request lifecycle that reaches states one through five.

@@ -236,6 +236,7 @@ pub(super) fn bind_source_positive_execution_graph(
         &title_state,
         &shared_menu,
         screen_state_dispatches.selector_domains(),
+        screen_state_dispatches.selector_memory_addresses(),
         &fixed_scheduler_entry_contexts,
         &source_bound_indirect_destinations,
     )?;

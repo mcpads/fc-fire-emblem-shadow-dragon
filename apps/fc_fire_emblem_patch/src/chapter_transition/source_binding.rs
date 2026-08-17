@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 pub(crate) struct OuterScreenStateDispatchSource {
     prg_bank: u8,
     call_address: u16,
+    selector_address: u16,
     selector_domain: BTreeSet<u8>,
 }
 
@@ -19,6 +20,10 @@ impl OuterScreenStateDispatchSource {
 
     pub(crate) fn selector_domain(&self) -> &BTreeSet<u8> {
         &self.selector_domain
+    }
+
+    pub(crate) fn selector_address(&self) -> u16 {
+        self.selector_address
     }
 }
 
@@ -73,6 +78,7 @@ pub(crate) fn bind_outer_screen_state_dispatch_source(
     Ok(OuterScreenStateDispatchSource {
         prg_bank,
         call_address,
+        selector_address: 0x0024,
         selector_domain: (0..selector_count).collect(),
     })
 }
