@@ -301,8 +301,8 @@ impl ResetTraceMemory {
 pub(super) struct ResetTraceState {
     pub(super) address: u16,
     pub(super) accumulator: ByteValueSet,
-    pub(super) index_x: Option<u8>,
-    pub(super) index_y: Option<u8>,
+    pub(super) index_x: ByteValueSet,
+    pub(super) index_y: ByteValueSet,
     pub(super) zero: Option<bool>,
     pub(super) negative: Option<bool>,
     pub(super) carry: Option<bool>,
@@ -327,8 +327,8 @@ impl ResetTraceState {
         Self {
             address,
             accumulator: ByteValueSet::Unknown,
-            index_x: None,
-            index_y: None,
+            index_x: ByteValueSet::Unknown,
+            index_y: ByteValueSet::Unknown,
             zero: None,
             negative: None,
             carry: None,
@@ -349,24 +349,29 @@ impl ResetTraceState {
     }
 
     pub(super) fn set_index_x(&mut self, value: Option<u8>) {
-        self.set_zero_negative(value);
-        self.index_x = value;
+        self.set_index_x_values(ByteValueSet::from_optional(value));
+    }
+
+    pub(super) fn set_index_x_values(&mut self, values: ByteValueSet) {
+        self.zero = values.uniform(|value| value == 0);
+        self.negative = values.uniform(|value| value & 0x80 != 0);
+        self.index_x = values;
     }
 
     pub(super) fn set_index_y(&mut self, value: Option<u8>) {
-        self.set_zero_negative(value);
-        self.index_y = value;
+        self.set_index_y_values(ByteValueSet::from_optional(value));
     }
 
-    pub(super) fn set_zero_negative(&mut self, value: Option<u8>) {
-        self.zero = value.map(|value| value == 0);
-        self.negative = value.map(|value| value & 0x80 != 0);
+    pub(super) fn set_index_y_values(&mut self, values: ByteValueSet) {
+        self.zero = values.uniform(|value| value == 0);
+        self.negative = values.uniform(|value| value & 0x80 != 0);
+        self.index_y = values;
     }
 
     pub(super) fn invalidate_registers_and_flags(&mut self) {
         self.accumulator = ByteValueSet::Unknown;
-        self.index_x = None;
-        self.index_y = None;
+        self.index_x = ByteValueSet::Unknown;
+        self.index_y = ByteValueSet::Unknown;
         self.zero = None;
         self.negative = None;
         self.carry = None;
@@ -420,8 +425,8 @@ impl ResetTraceState {
         debug_assert_eq!(self.identity(), other.identity());
         let mut joined = self.clone();
         joined.accumulator = self.accumulator.union(&other.accumulator);
-        joined.index_x = join_value(self.index_x, other.index_x);
-        joined.index_y = join_value(self.index_y, other.index_y);
+        joined.index_x = self.index_x.union(&other.index_x);
+        joined.index_y = self.index_y.union(&other.index_y);
         joined.zero = join_value(self.zero, other.zero);
         joined.negative = join_value(self.negative, other.negative);
         joined.carry = join_value(self.carry, other.carry);

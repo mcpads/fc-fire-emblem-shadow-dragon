@@ -2086,46 +2086,46 @@ fn apply_data_effect(
             state.set_accumulator_values(state.read_memory_values(u16::from(address)));
         }
         (Mnemonic::Ldx, AddressingMode::ZeroPage, Operand::Byte(address)) => {
-            state.set_index_x(state.read_memory(u16::from(address)));
+            state.set_index_x_values(state.read_memory_values(u16::from(address)));
         }
         (Mnemonic::Ldy, AddressingMode::ZeroPage, Operand::Byte(address)) => {
-            state.set_index_y(state.read_memory(u16::from(address)));
+            state.set_index_y_values(state.read_memory_values(u16::from(address)));
         }
         (Mnemonic::Lda, AddressingMode::Absolute, Operand::Word(address)) => {
             state.set_accumulator_values(state.read_memory_values(address));
         }
         (Mnemonic::Ldx, AddressingMode::Absolute, Operand::Word(address)) => {
-            state.set_index_x(state.read_memory(address));
+            state.set_index_x_values(state.read_memory_values(address));
         }
         (Mnemonic::Ldy, AddressingMode::Absolute, Operand::Word(address)) => {
-            state.set_index_y(state.read_memory(address));
+            state.set_index_y_values(state.read_memory_values(address));
         }
         (Mnemonic::Sta, AddressingMode::ZeroPage, Operand::Byte(address)) => {
             state.write_memory_values(u16::from(address), state.accumulator.clone());
         }
         (Mnemonic::Stx, AddressingMode::ZeroPage, Operand::Byte(address)) => {
-            state.write_memory(u16::from(address), state.index_x);
+            state.write_memory_values(u16::from(address), state.index_x.clone());
         }
         (Mnemonic::Sty, AddressingMode::ZeroPage, Operand::Byte(address)) => {
-            state.write_memory(u16::from(address), state.index_y);
+            state.write_memory_values(u16::from(address), state.index_y.clone());
         }
         (Mnemonic::Sta, AddressingMode::Absolute, Operand::Word(0xA000..=0xAFFF)) => {
             state.mapped_prg_bank = state.accumulator.singleton().map(|value| value & 0x0F);
         }
         (Mnemonic::Stx, AddressingMode::Absolute, Operand::Word(0xA000..=0xAFFF)) => {
-            state.mapped_prg_bank = state.index_x.map(|value| value & 0x0F);
+            state.mapped_prg_bank = state.index_x.singleton().map(|value| value & 0x0F);
         }
         (Mnemonic::Sty, AddressingMode::Absolute, Operand::Word(0xA000..=0xAFFF)) => {
-            state.mapped_prg_bank = state.index_y.map(|value| value & 0x0F);
+            state.mapped_prg_bank = state.index_y.singleton().map(|value| value & 0x0F);
         }
         (Mnemonic::Sta, AddressingMode::Absolute, Operand::Word(address)) => {
             state.write_memory_values(address, state.accumulator.clone());
         }
         (Mnemonic::Stx, AddressingMode::Absolute, Operand::Word(address)) => {
-            state.write_memory(address, state.index_x);
+            state.write_memory_values(address, state.index_x.clone());
         }
         (Mnemonic::Sty, AddressingMode::Absolute, Operand::Word(address)) => {
-            state.write_memory(address, state.index_y);
+            state.write_memory_values(address, state.index_y.clone());
         }
         (
             Mnemonic::Sta,
@@ -2147,7 +2147,7 @@ fn apply_data_effect(
                 physical_bank,
                 base,
                 mode,
-                state.index_x.map(ByteValueSet::known).unwrap_or_default(),
+                state.index_x.clone(),
                 absolute_indexed_write_bounds,
             )?;
         }
@@ -2156,7 +2156,7 @@ fn apply_data_effect(
             if let (Some(low), Some(high), Some(index_y)) = (
                 state.read_memory(u16::from(pointer)),
                 state.read_memory(u16::from(pointer.wrapping_add(1))),
-                state.index_y,
+                state.index_y.singleton(),
             ) {
                 let base = u16::from_le_bytes([low, high]);
                 let target = base.wrapping_add(u16::from(index_y));
@@ -2199,28 +2199,28 @@ fn apply_data_effect(
             }
         }
         (Mnemonic::Tax, AddressingMode::Implied, Operand::None) => {
-            state.set_index_x(state.accumulator.singleton());
+            state.set_index_x_values(state.accumulator.clone());
         }
         (Mnemonic::Tay, AddressingMode::Implied, Operand::None) => {
-            state.set_index_y(state.accumulator.singleton());
+            state.set_index_y_values(state.accumulator.clone());
         }
         (Mnemonic::Txa, AddressingMode::Implied, Operand::None) => {
-            state.set_accumulator(state.index_x);
+            state.set_accumulator_values(state.index_x.clone());
         }
         (Mnemonic::Tya, AddressingMode::Implied, Operand::None) => {
-            state.set_accumulator(state.index_y);
+            state.set_accumulator_values(state.index_y.clone());
         }
         (Mnemonic::Inx, AddressingMode::Implied, Operand::None) => {
-            state.set_index_x(state.index_x.map(|value| value.wrapping_add(1)));
+            state.set_index_x_values(state.index_x.map(|value| value.wrapping_add(1)));
         }
         (Mnemonic::Dex, AddressingMode::Implied, Operand::None) => {
-            state.set_index_x(state.index_x.map(|value| value.wrapping_sub(1)));
+            state.set_index_x_values(state.index_x.map(|value| value.wrapping_sub(1)));
         }
         (Mnemonic::Iny, AddressingMode::Implied, Operand::None) => {
-            state.set_index_y(state.index_y.map(|value| value.wrapping_add(1)));
+            state.set_index_y_values(state.index_y.map(|value| value.wrapping_add(1)));
         }
         (Mnemonic::Dey, AddressingMode::Implied, Operand::None) => {
-            state.set_index_y(state.index_y.map(|value| value.wrapping_sub(1)));
+            state.set_index_y_values(state.index_y.map(|value| value.wrapping_sub(1)));
         }
         (Mnemonic::Inc, AddressingMode::ZeroPage, Operand::Byte(address)) => {
             let values = state
@@ -2287,13 +2287,13 @@ fn apply_data_effect(
             state.set_accumulator_values(state.accumulator.map(|value| value ^ mask));
         }
         (Mnemonic::Cmp, AddressingMode::Immediate, Operand::Byte(value)) => {
-            compare_accumulator(state.accumulator.clone(), value, state);
+            compare_register(state.accumulator.clone(), value, state);
         }
         (Mnemonic::Cpx, AddressingMode::Immediate, Operand::Byte(value)) => {
-            compare(state.index_x, value, state);
+            compare_register(state.index_x.clone(), value, state);
         }
         (Mnemonic::Cpy, AddressingMode::Immediate, Operand::Byte(value)) => {
-            compare(state.index_y, value, state);
+            compare_register(state.index_y.clone(), value, state);
         }
         (Mnemonic::Clc, AddressingMode::Implied, Operand::None) => state.carry = Some(false),
         (Mnemonic::Sec, AddressingMode::Implied, Operand::None) => state.carry = Some(true),
@@ -2366,7 +2366,7 @@ fn apply_absolute_indexed_read_modify_write(
     mnemonic: Mnemonic,
     absolute_indexed_write_bounds: &BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds>,
 ) -> Result<()> {
-    match state.index_x {
+    match state.index_x.singleton() {
         Some(index) => {
             let target = base.wrapping_add(u16::from(index));
             validate_absolute_indexed_target(
@@ -2419,8 +2419,8 @@ fn apply_absolute_indexed_read_modify_write(
 
 fn absolute_index_value(state: &ResetTraceState, mode: AddressingMode) -> Result<Option<u8>> {
     match mode {
-        AddressingMode::AbsoluteX => Ok(state.index_x),
-        AddressingMode::AbsoluteY => Ok(state.index_y),
+        AddressingMode::AbsoluteX => Ok(state.index_x.singleton()),
+        AddressingMode::AbsoluteY => Ok(state.index_y.singleton()),
         _ => anyhow::bail!("absolute-indexed write helper received {mode:?}"),
     }
 }
@@ -2475,13 +2475,7 @@ fn validate_absolute_indexed_target(
     Ok(())
 }
 
-fn compare(register: Option<u8>, operand: u8, state: &mut ResetTraceState) {
-    state.zero = register.map(|value| value == operand);
-    state.carry = register.map(|value| value >= operand);
-    state.negative = register.map(|value| value.wrapping_sub(operand) & 0x80 != 0);
-}
-
-fn compare_accumulator(register: ByteValueSet, operand: u8, state: &mut ResetTraceState) {
+fn compare_register(register: ByteValueSet, operand: u8, state: &mut ResetTraceState) {
     state.zero = register.uniform(|value| value == operand);
     state.carry = register.uniform(|value| value >= operand);
     state.negative = register.uniform(|value| value.wrapping_sub(operand) & 0x80 != 0);
@@ -2591,6 +2585,51 @@ mod tests {
             .merge_handler_table_owner(&BTreeSet::from([0x00, 0x01]), Some(0x05DB))
             .unwrap_err();
         assert!(error.to_string().contains("selector memory address"));
+    }
+
+    #[test]
+    fn joined_index_register_values_preserve_the_prg_bank_domain() {
+        let source = synthetic_source(
+            &[
+                (
+                    0xC100,
+                    &[
+                        0xAD, 0x00, 0x04, // LDA $0400; unknown branch input
+                        0xC9, 0x0E, // CMP #$0E
+                        0x90, 0x05, // BCC $C10C
+                        0xA0, 0x09, // LDY #$09
+                        0x4C, 0x0E, 0xC1, // JMP $C10E
+                        0xA0, 0x02, // LDY #$02
+                        0x84, 0x01, // STY $01
+                        0xA5, 0x01, // LDA $01
+                        0x20, 0xA6, 0xC9, // JSR $C9A6
+                        0x60, // RTS
+                    ],
+                ),
+                (
+                    SELECT_PRG_BANK_AND_SAVE_ENTRY,
+                    &SELECT_PRG_BANK_AND_SAVE_CODE,
+                ),
+            ],
+            0xC100,
+        );
+
+        let trace = trace_with_inline_selector_bounds(&source, 0xC100, BTreeMap::new());
+
+        assert_eq!(
+            trace.control_state_write_values().get(&(
+                FIXED_PRG_BANK,
+                SELECT_PRG_BANK_AND_SAVE_ENTRY,
+                PRG_BANK_SHADOW,
+            )),
+            Some(&Some(BTreeSet::from([0x02, 0x09])))
+        );
+        assert!(
+            trace
+                .open_fact_descriptions()
+                .iter()
+                .all(|fact| !fact.contains("selected_bank_unknown"))
+        );
     }
 
     #[test]
