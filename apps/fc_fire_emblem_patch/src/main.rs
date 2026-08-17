@@ -4,6 +4,7 @@ mod chapter_victory;
 mod choice_labels;
 mod chr_inventory;
 mod class_profile;
+mod command_line;
 mod dialogue_assets;
 mod dialogue_inventory;
 mod epilogue_variant_evidence;
@@ -57,6 +58,10 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use command_line::{
+    AnalyzeTranslationCoverageCommand, BuildCumulativePatchCommand,
+    PlanFullTranslationInstallationCommand,
+};
 
 #[derive(Debug, Parser)]
 #[command(about = "Build and verify the FE1 Japanese-to-Korean patch")]
@@ -255,117 +260,9 @@ enum Command {
         report: PathBuf,
     },
     /// Connect every Japanese-bearing screen to translation input and current installation status.
-    AnalyzeTranslationCoverage {
-        source: PathBuf,
-        #[arg(long, default_value = "private/dialogue/main-workspace.json")]
-        main_dialogue_workspace: PathBuf,
-        #[arg(long, default_value = "private/dialogue/battle-workspace.json")]
-        battle_dialogue_workspace: PathBuf,
-        #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
-        fixed_text_workspace: PathBuf,
-        #[arg(long, default_value = "assets/translation/options.ko.json")]
-        options_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/roster.ko.json")]
-        roster_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/front-end-menu.ko.json")]
-        front_end_menu_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/unit-names.ko.json")]
-        unit_name_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/class-profiles.ko.json")]
-        class_profile_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/chapter-titles.ko.json")]
-        chapter_title_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/choice-labels.ko.json")]
-        choice_label_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/map-menu.ko.json")]
-        map_menu_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/title-logo.ko.json")]
-        title_graphics_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/unit-ui-labels.ko.json")]
-        unit_ui_label_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/item-action-labels.ko.json")]
-        item_action_label_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/fixed-menu-labels.ko.json")]
-        fixed_menu_label_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/transition-labels.ko.json")]
-        transition_label_localization: PathBuf,
-        #[arg(
-            long,
-            default_value = "evidence/private/chapter-save-lifetimes/continue-prompt-manifest.json"
-        )]
-        chapter_save_continue_prompt_manifest: PathBuf,
-        #[arg(long, default_value = "assets/translation/location-names.ko.json")]
-        location_name_localization: PathBuf,
-        #[arg(long, default_value = "out/fire-emblem-fe1-korean-patch.nes")]
-        current_build_output: PathBuf,
-        #[arg(long, default_value = "out/kr-patch-build.json")]
-        current_build_report: PathBuf,
-        /// Exact final ROM emitted by the global installation planner.
-        #[arg(long, default_value = "out/fire-emblem-fe1-korean-integrated.nes")]
-        integrated_build_output: PathBuf,
-        /// Report emitted alongside the exact final integrated ROM.
-        #[arg(long, default_value = "out/full-translation-installation.json")]
-        integrated_build_report: PathBuf,
-        #[arg(long, default_value = "out/main-dialogue-glyph-workset.json")]
-        main_dialogue_glyph_workset_report: PathBuf,
-        #[arg(long, default_value = "out/battle-surface-constraints.json")]
-        battle_surface_constraints_report: PathBuf,
-        #[arg(long, default_value = "out/unit-ui-text.json")]
-        unit_ui_text_report: PathBuf,
-        #[arg(long, default_value = "out/translation-coverage.json")]
-        report: PathBuf,
-    },
+    AnalyzeTranslationCoverage(AnalyzeTranslationCoverageCommand),
     /// Plan every translation domain together and optionally emit the gated integrated ROM.
-    PlanFullTranslationInstallation {
-        source: PathBuf,
-        #[arg(long, alias = "transport-probe")]
-        output: Option<PathBuf>,
-        #[arg(long, default_value = "private/dialogue/main-workspace.json")]
-        main_dialogue_workspace: PathBuf,
-        #[arg(long, default_value = "private/dialogue/battle-workspace.json")]
-        battle_dialogue_workspace: PathBuf,
-        #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
-        fixed_text_workspace: PathBuf,
-        #[arg(long, default_value = "assets/translation/options.ko.json")]
-        options_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/roster.ko.json")]
-        roster_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/front-end-menu.ko.json")]
-        front_end_menu_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/class-profiles.ko.json")]
-        class_profile_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/title-logo.ko.json")]
-        title_graphics_localization: PathBuf,
-        #[arg(long, default_value = "out/title-logo.asset")]
-        title_logo_asset: PathBuf,
-        #[arg(long, default_value = "assets/translation/unit-names.ko.json")]
-        unit_name_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/chapter-titles.ko.json")]
-        chapter_title_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/choice-labels.ko.json")]
-        choice_label_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/map-menu.ko.json")]
-        map_menu_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/unit-ui-labels.ko.json")]
-        unit_ui_label_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/item-action-labels.ko.json")]
-        item_action_label_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/fixed-menu-labels.ko.json")]
-        fixed_menu_label_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/transition-labels.ko.json")]
-        transition_label_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/location-names.ko.json")]
-        location_name_localization: PathBuf,
-        #[arg(long, default_value = "out/fire-emblem-fe1-korean-patch.nes")]
-        current_candidate: PathBuf,
-        #[arg(long, default_value = "out/kr-patch-build.json")]
-        current_build_report: PathBuf,
-        /// Bind private cold-route observations to the exact integrated image.
-        #[arg(long)]
-        final_runtime_evidence: Option<PathBuf>,
-        #[arg(long, default_value = "out/full-translation-installation.json")]
-        report: PathBuf,
-    },
+    PlanFullTranslationInstallation(PlanFullTranslationInstallationCommand),
     /// Bind chapter-clear, save, title, and chapter-intro screen lifetimes and producers.
     AnalyzeChapterTransitions {
         source: PathBuf,
@@ -594,105 +491,7 @@ enum Command {
         report: PathBuf,
     },
     /// Build the cumulative mapper 165 Korean patch lineage from the supported source.
-    BuildKrPatch {
-        source: PathBuf,
-        #[arg(long, default_value = "assets/translation/options.ko.json")]
-        options_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/roster.ko.json")]
-        roster_localization: PathBuf,
-        #[arg(
-            long,
-            default_value = "evidence/private/hangul-page-context/options-lifetime-manifest.json"
-        )]
-        options_screen_evidence: PathBuf,
-        #[arg(long, default_value = "private/dialogue/main-workspace.json")]
-        main_dialogue_workspace: PathBuf,
-        #[arg(long, default_value = "assets/translation/chapter-titles.ko.json")]
-        chapter_title_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/front-end-menu.ko.json")]
-        front_end_menu_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/unit-names.ko.json")]
-        unit_name_localization: PathBuf,
-        #[arg(long, default_value = "assets/translation/class-profiles.ko.json")]
-        class_profile_localization: PathBuf,
-        #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
-        fixed_text_workspace: PathBuf,
-        #[arg(long, default_value = "private/dialogue/battle-workspace.json")]
-        battle_dialogue_workspace: PathBuf,
-        #[arg(
-            long,
-            default_value = "evidence/private/temporal-surfaces/manifest.json"
-        )]
-        battle_temporal_manifest: PathBuf,
-        #[arg(long, default_value = "assets/translation/choice-labels.ko.json")]
-        choice_label_localization: PathBuf,
-        #[arg(
-            long,
-            default_value = "evidence/private/dialogue-lifetime/chapter-1-intro-screen.json"
-        )]
-        chapter_one_intro_evidence: PathBuf,
-        #[arg(
-            long,
-            default_value = "evidence/private/cumulative-chapter2/chapter-2-intro-screen.json"
-        )]
-        chapter_two_intro_evidence: PathBuf,
-        #[arg(long, default_value = "evidence/private/front-end-menu/manifest.json")]
-        front_end_menu_evidence: PathBuf,
-        #[arg(
-            long,
-            default_value = "evidence/private/unit-status-contract/unit-name-manifest.json"
-        )]
-        unit_name_evidence: PathBuf,
-        #[arg(long, default_value = "evidence/private/class-profile-manifest.json")]
-        class_profile_evidence: PathBuf,
-        #[arg(
-            long,
-            default_value = "evidence/private/class-profile-installed/manifest.json"
-        )]
-        class_profile_runtime_evidence: PathBuf,
-        #[arg(long, default_value = "private/runtime/shop-dialogue-screen.json")]
-        shop_dialogue_evidence: PathBuf,
-        #[arg(
-            long,
-            default_value = "evidence/private/shop-dialogue-installed/manifest.json"
-        )]
-        shop_dialogue_runtime_evidence: PathBuf,
-        #[arg(
-            long,
-            default_value = "evidence/private/shop-shared-text-installed/manifest.json"
-        )]
-        weapon_shop_shared_text_runtime_evidence: PathBuf,
-        #[arg(
-            long,
-            default_value = "evidence/private/chapter7-maximum-lifetime/manifest.json"
-        )]
-        maximum_dialogue_evidence: PathBuf,
-        #[arg(
-            long,
-            default_value = "evidence/private/chapter7-maximum-installed/page-boundaries.json"
-        )]
-        maximum_dialogue_page_boundaries: PathBuf,
-        #[arg(long)]
-        maximum_dialogue_runtime_evidence: Option<PathBuf>,
-        #[arg(long, default_value = "assets/translation/title-logo.ko.json")]
-        title_graphics_localization: PathBuf,
-        #[arg(long, default_value = "out/title-logo.asset")]
-        title_logo_asset: PathBuf,
-        #[arg(
-            long,
-            default_value = "evidence/private/title-logo-runtime-completion/manifest.json"
-        )]
-        title_logo_runtime_evidence: PathBuf,
-        /// Emit a development build while leaving exact-output runtime bindings unresolved.
-        #[arg(long, default_value_t = false)]
-        defer_runtime_evidence: bool,
-        #[arg(long, default_value = "out/cumulative-stages")]
-        stage_directory: PathBuf,
-        #[arg(long, default_value = "out/fire-emblem-fe1-korean-patch.nes")]
-        output: PathBuf,
-        #[arg(long, default_value = "out/kr-patch-build.json")]
-        report: PathBuf,
-    },
+    BuildKrPatch(BuildCumulativePatchCommand),
     /// Build one reviewed main-dialogue record as an end-to-end mapper 165 development probe.
     BuildMainDialogueSliceProbe {
         source: PathBuf,
@@ -1163,151 +962,8 @@ fn main() -> Result<()> {
                 summary.next_observation_gate_role
             );
         }
-        Command::AnalyzeTranslationCoverage {
-            source,
-            main_dialogue_workspace,
-            battle_dialogue_workspace,
-            fixed_text_workspace,
-            options_localization,
-            roster_localization,
-            front_end_menu_localization,
-            unit_name_localization,
-            class_profile_localization,
-            chapter_title_localization,
-            choice_label_localization,
-            map_menu_localization,
-            title_graphics_localization,
-            unit_ui_label_localization,
-            item_action_label_localization,
-            fixed_menu_label_localization,
-            transition_label_localization,
-            chapter_save_continue_prompt_manifest,
-            location_name_localization,
-            current_build_output,
-            current_build_report,
-            integrated_build_output,
-            integrated_build_report,
-            main_dialogue_glyph_workset_report,
-            battle_surface_constraints_report,
-            unit_ui_text_report,
-            report,
-        } => {
-            let summary = translation_coverage::analyze_translation_coverage(
-                translation_coverage::TranslationCoverageInputs {
-                    source_path: &source,
-                    main_dialogue_workspace_path: &main_dialogue_workspace,
-                    battle_dialogue_workspace_path: &battle_dialogue_workspace,
-                    fixed_text_workspace_path: &fixed_text_workspace,
-                    options_localization_path: &options_localization,
-                    roster_localization_path: &roster_localization,
-                    front_end_menu_localization_path: &front_end_menu_localization,
-                    unit_name_localization_path: &unit_name_localization,
-                    class_profile_localization_path: &class_profile_localization,
-                    chapter_title_localization_path: &chapter_title_localization,
-                    choice_label_localization_path: &choice_label_localization,
-                    map_menu_localization_path: &map_menu_localization,
-                    title_graphics_localization_path: &title_graphics_localization,
-                    unit_ui_label_localization_path: &unit_ui_label_localization,
-                    item_action_label_localization_path: &item_action_label_localization,
-                    fixed_menu_label_localization_path: &fixed_menu_label_localization,
-                    transition_label_localization_path: &transition_label_localization,
-                    chapter_save_continue_prompt_manifest_path:
-                        &chapter_save_continue_prompt_manifest,
-                    location_name_localization_path: &location_name_localization,
-                    current_build_output_path: &current_build_output,
-                    current_build_report_path: &current_build_report,
-                    integrated_build_output_path: &integrated_build_output,
-                    integrated_build_report_path: &integrated_build_report,
-                    main_dialogue_glyph_workset_report_path: &main_dialogue_glyph_workset_report,
-                    battle_surface_constraints_report_path: &battle_surface_constraints_report,
-                    unit_ui_text_report_path: &unit_ui_text_report,
-                    report_path: &report,
-                },
-            )?;
-            println!("wrote {}", report.display());
-            println!("report SHA-1: {}", summary.report_sha1);
-            println!(
-                "translation coverage: {} Japanese-bearing screens, {} domains, {} unresolved source domains, {} source-bound consumer evidence domains, {} known-routes-only domains, {} complete consumer censuses, {} incomplete consumer censuses, {} domains installed for all declared consumers, {} domains runtime-bound for all declared consumers",
-                summary.japanese_bearing_screen_count,
-                summary.domain_count,
-                summary.unresolved_source_domain_count,
-                summary.source_bound_consumer_evidence_domain_count,
-                summary.known_routes_only_domain_count,
-                summary.complete_consumer_census_domain_count,
-                summary.incomplete_consumer_census_domain_count,
-                summary.all_declared_consumers_installed_domain_count,
-                summary.all_declared_consumers_runtime_bound_domain_count
-            );
-        }
-        Command::PlanFullTranslationInstallation {
-            source,
-            output,
-            main_dialogue_workspace,
-            battle_dialogue_workspace,
-            fixed_text_workspace,
-            options_localization,
-            roster_localization,
-            front_end_menu_localization,
-            class_profile_localization,
-            title_graphics_localization,
-            title_logo_asset,
-            unit_name_localization,
-            chapter_title_localization,
-            choice_label_localization,
-            map_menu_localization,
-            unit_ui_label_localization,
-            item_action_label_localization,
-            fixed_menu_label_localization,
-            transition_label_localization,
-            location_name_localization,
-            current_candidate,
-            current_build_report,
-            final_runtime_evidence,
-            report,
-        } => {
-            let summary = full_translation_install::plan_full_translation_installation(
-                full_translation_install::FullTranslationInstallInputs {
-                    source_path: &source,
-                    main_dialogue_workspace_path: &main_dialogue_workspace,
-                    battle_dialogue_workspace_path: &battle_dialogue_workspace,
-                    fixed_text_workspace_path: &fixed_text_workspace,
-                    options_localization_path: &options_localization,
-                    roster_localization_path: &roster_localization,
-                    front_end_menu_localization_path: &front_end_menu_localization,
-                    class_profile_localization_path: &class_profile_localization,
-                    title_graphics_localization_path: &title_graphics_localization,
-                    title_logo_asset_path: &title_logo_asset,
-                    unit_name_localization_path: &unit_name_localization,
-                    chapter_title_localization_path: &chapter_title_localization,
-                    choice_label_localization_path: &choice_label_localization,
-                    map_menu_localization_path: &map_menu_localization,
-                    unit_ui_label_localization_path: &unit_ui_label_localization,
-                    item_action_label_localization_path: &item_action_label_localization,
-                    fixed_menu_label_localization_path: &fixed_menu_label_localization,
-                    transition_label_localization_path: &transition_label_localization,
-                    location_name_localization_path: &location_name_localization,
-                    current_candidate_path: &current_candidate,
-                    current_build_report_path: &current_build_report,
-                    final_runtime_evidence_path: final_runtime_evidence.as_deref(),
-                    report_path: &report,
-                    output_path: output.as_deref(),
-                },
-            )?;
-            println!("wrote {}", report.display());
-            println!("report SHA-1: {}", summary.report_sha1);
-            println!(
-                "full translation installation: {} declared installation domains, {} dialogue records, {} page worksets, {} glyphs with a {}-page static upper bound and maximum {}-slot page demand, {} pointer writes, {} planned bytes",
-                summary.declared_installation_domain_count,
-                summary.dialogue_record_count,
-                summary.dialogue_page_workset_count,
-                summary.dialogue_glyph_count,
-                summary.dialogue_static_page_upper_bound_count,
-                summary.dialogue_maximum_page_slot_demand,
-                summary.dialogue_pointer_write_count,
-                summary.dialogue_planned_storage_byte_count,
-            );
-            println!("integrated image SHA-1: {}", summary.integrated_image_sha1);
-        }
+        Command::AnalyzeTranslationCoverage(command) => command.execute()?,
+        Command::PlanFullTranslationInstallation(command) => command.execute()?,
         Command::AnalyzeChapterTransitions { source, report } => {
             let summary = chapter_transition::analyze_chapter_transitions(&source, &report)?;
             println!("wrote {}", report.display());
@@ -1766,95 +1422,7 @@ fn main() -> Result<()> {
             println!("roster page pack SHA-1: {}", summary.roster_page_pack_sha1);
             println!("tracked ROM writes: {}", summary.tracked_write_count);
         }
-        Command::BuildKrPatch {
-            source,
-            options_localization,
-            roster_localization,
-            options_screen_evidence,
-            main_dialogue_workspace,
-            chapter_title_localization,
-            front_end_menu_localization,
-            unit_name_localization,
-            class_profile_localization,
-            fixed_text_workspace,
-            battle_dialogue_workspace,
-            battle_temporal_manifest,
-            choice_label_localization,
-            chapter_one_intro_evidence,
-            chapter_two_intro_evidence,
-            front_end_menu_evidence,
-            unit_name_evidence,
-            class_profile_evidence,
-            class_profile_runtime_evidence,
-            shop_dialogue_evidence,
-            shop_dialogue_runtime_evidence,
-            weapon_shop_shared_text_runtime_evidence,
-            maximum_dialogue_evidence,
-            maximum_dialogue_page_boundaries,
-            maximum_dialogue_runtime_evidence,
-            title_graphics_localization,
-            title_logo_asset,
-            title_logo_runtime_evidence,
-            defer_runtime_evidence,
-            stage_directory,
-            output,
-            report,
-        } => {
-            let summary = mapper165::cumulative_patch::build_cumulative_patch(
-                mapper165::cumulative_patch::CumulativePatchInputs {
-                    source_path: &source,
-                    options_localization_path: &options_localization,
-                    roster_localization_path: &roster_localization,
-                    options_screen_evidence_path: &options_screen_evidence,
-                    main_dialogue_workspace_path: &main_dialogue_workspace,
-                    chapter_title_localization_path: &chapter_title_localization,
-                    front_end_menu_localization_path: &front_end_menu_localization,
-                    unit_name_localization_path: &unit_name_localization,
-                    class_profile_localization_path: &class_profile_localization,
-                    fixed_text_workspace_path: &fixed_text_workspace,
-                    battle_dialogue_workspace_path: &battle_dialogue_workspace,
-                    battle_temporal_manifest_path: &battle_temporal_manifest,
-                    choice_label_localization_path: &choice_label_localization,
-                    chapter_one_intro_evidence_path: &chapter_one_intro_evidence,
-                    chapter_two_intro_evidence_path: &chapter_two_intro_evidence,
-                    front_end_menu_evidence_path: &front_end_menu_evidence,
-                    unit_name_evidence_path: &unit_name_evidence,
-                    class_profile_evidence_path: &class_profile_evidence,
-                    class_profile_runtime_evidence_path: (!defer_runtime_evidence)
-                        .then_some(class_profile_runtime_evidence.as_path()),
-                    shop_dialogue_evidence_path: &shop_dialogue_evidence,
-                    shop_dialogue_runtime_evidence_path: (!defer_runtime_evidence)
-                        .then_some(shop_dialogue_runtime_evidence.as_path()),
-                    weapon_shop_shared_text_runtime_evidence_path: (!defer_runtime_evidence)
-                        .then_some(weapon_shop_shared_text_runtime_evidence.as_path()),
-                    maximum_dialogue_evidence_path: &maximum_dialogue_evidence,
-                    maximum_dialogue_page_boundary_path: &maximum_dialogue_page_boundaries,
-                    maximum_dialogue_runtime_evidence_path: (!defer_runtime_evidence)
-                        .then_some(maximum_dialogue_runtime_evidence.as_deref())
-                        .flatten(),
-                    title_graphics_localization_path: &title_graphics_localization,
-                    title_logo_asset_path: &title_logo_asset,
-                    title_logo_runtime_evidence_path: (!defer_runtime_evidence)
-                        .then_some(title_logo_runtime_evidence.as_path()),
-                    stage_directory: &stage_directory,
-                    output_path: &output,
-                    report_path: &report,
-                },
-            )?;
-            println!("wrote {}", output.display());
-            println!("output SHA-1: {}", summary.output_sha1);
-            println!("wrote {}", report.display());
-            println!("report SHA-1: {}", summary.report_sha1);
-            println!(
-                "cumulative patch: {} stages, {} installed chapter titles, {} installed dialogue records, {} installed translated lines, {} installed glyph slots, {} tracked writes",
-                summary.stage_count,
-                summary.installed_chapter_title_count,
-                summary.installed_dialogue_record_count,
-                summary.installed_dialogue_line_count,
-                summary.installed_glyph_slot_count,
-                summary.tracked_write_count
-            );
-        }
+        Command::BuildKrPatch(command) => command.execute()?,
         Command::BuildMainDialogueSliceProbe {
             source,
             workspace,
