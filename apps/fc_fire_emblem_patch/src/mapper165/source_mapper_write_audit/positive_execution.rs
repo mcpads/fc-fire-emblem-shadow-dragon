@@ -17,6 +17,7 @@ mod fixed_vectors;
 mod screen_state_dispatches;
 mod shared_menu_request;
 mod state_accesses;
+mod unit_record_writers;
 
 use chapter_map_loader::{CHAPTER_MAP_INDIRECT_WRITE_SITE, bind_chapter_map_loader_destination};
 use control_state::{ObservedControlStateWrites, merge_observed_control_state_writes};
@@ -26,6 +27,7 @@ use screen_state_dispatches::bind_source_screen_state_dispatches;
 use shared_menu_request::bind_shared_menu_execution_source;
 pub(super) use state_accesses::PositiveStateAccess;
 use state_accesses::bind_positive_state_accesses;
+use unit_record_writers::bind_unit_record_write_destinations;
 
 const BATTLE_PHASE_GRAPH: &str = "battle_phase_catalog";
 const DIALOGUE_INTERRUPT_AUDIO_GRAPH: &str = "main_dialogue_nmi_and_audio_positive_graph";
@@ -208,6 +210,16 @@ pub(super) fn bind_source_positive_execution_graph(
                 .insert(site, destination.clone())
                 .is_none(),
             "shared-menu writer overlaps an existing indirect-write destination owner at {:02X}:${:04X}",
+            site.0,
+            site.1,
+        );
+    }
+    for (site, destination) in bind_unit_record_write_destinations(source)? {
+        ensure!(
+            source_bound_indirect_destinations
+                .insert(site, destination)
+                .is_none(),
+            "unit-record writer overlaps an existing indirect-write destination owner at {:02X}:${:04X}",
             site.0,
             site.1,
         );

@@ -234,7 +234,7 @@ pub(super) fn bind_fixed_scheduler_execution(
     let mut inline_dispatch_selector_bounds = BTreeMap::from([
         (
             (FIXED_PRG_BANK, FIXED_SCHEDULER_DISPATCH_CALL),
-            InlineDispatchSelectorBounds::from_source_producers(positive_selector_domain.clone()),
+            InlineDispatchSelectorBounds::from_handler_table(table_selector_domain.clone()),
         ),
         (
             (0x0D, title_state.dispatch_call()),
