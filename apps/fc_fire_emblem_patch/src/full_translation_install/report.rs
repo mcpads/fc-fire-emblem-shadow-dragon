@@ -2,6 +2,15 @@ use serde::Serialize;
 
 use super::*;
 
+mod projection;
+
+pub(super) use projection::{
+    DialogueCodebookReportInputs, DialogueRuntimeCompositionReportInputs,
+    InstallationGateReportInputs, project_chapter_intro_residency, project_dialogue_codebook,
+    project_dialogue_page_pool, project_dialogue_runtime_composition, project_dialogue_storage,
+    project_installation_gates,
+};
+
 #[derive(Serialize)]
 pub(super) struct FullTranslationInstallReport {
     pub(super) schema: u8,
