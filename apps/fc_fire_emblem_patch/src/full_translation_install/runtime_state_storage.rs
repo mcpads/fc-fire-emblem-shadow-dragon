@@ -14,6 +14,7 @@ use crate::{
 };
 
 mod access_trace;
+mod audio_execution;
 mod concurrent_access;
 mod source_contract;
 
@@ -171,14 +172,27 @@ pub(crate) fn bind_dialogue_interrupt_audio_mapper_write_slice(
     let main_dialogue_trace =
         trace_main_dialogue_accesses(source, &main_dialogue_runtime_handler_roots())?;
     let source_accesses = bind_runtime_state_source_accesses(source, &main_dialogue_trace)?;
+    let concurrent_accesses =
+        bind_concurrent_runtime_accesses(source, source_accesses.queue_bound_proven())?;
     let mut starts = main_dialogue_trace.visited;
-    starts.extend(access_trace::trace_fixed_interrupt_accesses(source, &[0xC163])?.visited);
-    starts.extend(access_trace::trace_switchable_accesses(source, 0x0E, &[0x8000])?.visited);
+    starts.extend(
+        concurrent_accesses
+            .reachable_instruction_starts()
+            .iter()
+            .copied(),
+    );
+    let mut indirect_write_sites_below_mapper_space = source_accesses
+        .indirect_write_sites_below_mapper_space()
+        .clone();
+    indirect_write_sites_below_mapper_space.extend(
+        concurrent_accesses
+            .indirect_write_sites_below_mapper_space()
+            .iter()
+            .copied(),
+    );
     Ok(DialogueInterruptAudioMapperWriteSlice {
         reachable_instruction_starts: starts,
-        indirect_write_sites_below_mapper_space: source_accesses
-            .indirect_write_sites_below_mapper_space()
-            .clone(),
+        indirect_write_sites_below_mapper_space,
     })
 }
 

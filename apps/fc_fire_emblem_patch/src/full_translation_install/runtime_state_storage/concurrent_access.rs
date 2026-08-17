@@ -16,9 +16,10 @@ use source_contract::{ConcurrentComputedAccessContract, bind_concurrent_computed
 
 use super::{
     CANDIDATE_START,
-    access_trace::{
-        AccessDirection, RuntimeAccessTrace, trace_fixed_interrupt_accesses,
-        trace_switchable_accesses,
+    access_trace::{AccessDirection, RuntimeAccessTrace, trace_fixed_interrupt_accesses},
+    audio_execution::{
+        SOURCE_AUDIO_BANK, SOURCE_AUDIO_ENTRY, SourceAudioIndirectDispatch,
+        trace_source_audio_execution,
     },
 };
 
@@ -27,8 +28,6 @@ const FIXED_BANK: u8 = 0x0F;
 const SOURCE_NMI_VECTOR_ADDRESS: u16 = 0xFFFA;
 const SOURCE_NMI_ENTRY: u16 = 0xC163;
 const SOURCE_AUDIO_DISPATCH: u16 = 0xC1FB;
-const SOURCE_AUDIO_ENTRY: u16 = 0x8000;
-const SOURCE_AUDIO_BANK: u8 = 0x0E;
 const SOURCE_AUDIO_DISPATCH_CODE: [u8; 8] = [0xA9, 0x0E, 0x8D, 0x00, 0xA0, 0x20, 0x00, 0x80];
 
 #[derive(Serialize)]
@@ -43,16 +42,29 @@ pub(super) struct ConcurrentRuntimeAccessContract {
     source_audio_dispatch_sha1: String,
     source_audio_bank_hex: String,
     source_audio_entry_hex: String,
+    source_audio_indirect_dispatch: SourceAudioIndirectDispatch,
     source_audio: ConcurrentTraceReport,
     computed_access_contract: ConcurrentComputedAccessContract,
     battle_remap_pair_table_cpu_range_hex: String,
     proven_runtime_range_begins_after_battle_pair_table: bool,
     every_concurrent_writer_excludes_candidate: bool,
+    #[serde(skip)]
+    reachable_instruction_starts: BTreeSet<(u8, u16)>,
+    #[serde(skip)]
+    indirect_write_sites_below_mapper_space: BTreeSet<(u8, u16, u8)>,
 }
 
 impl ConcurrentRuntimeAccessContract {
     pub(super) fn every_concurrent_writer_excludes_candidate(&self) -> bool {
         self.every_concurrent_writer_excludes_candidate
+    }
+
+    pub(super) fn reachable_instruction_starts(&self) -> &BTreeSet<(u8, u16)> {
+        &self.reachable_instruction_starts
+    }
+
+    pub(super) fn indirect_write_sites_below_mapper_space(&self) -> &BTreeSet<(u8, u16, u8)> {
+        &self.indirect_write_sites_below_mapper_space
     }
 }
 
@@ -60,6 +72,7 @@ impl ConcurrentRuntimeAccessContract {
 struct ConcurrentTraceReport {
     reachable_instruction_count: usize,
     reachable_instruction_catalog_sha1: String,
+    indirect_control_site_count: usize,
     direct_overlap_count: usize,
     indexed_potential_overlap_count: usize,
     indirect_read_site_count: usize,
@@ -102,7 +115,8 @@ pub(super) fn bind_concurrent_runtime_accesses(
         "source NMI audio-bank dispatch",
     )?;
 
-    let source_audio = trace_switchable_accesses(source, SOURCE_AUDIO_BANK, &[SOURCE_AUDIO_ENTRY])?;
+    let source_audio_execution = trace_source_audio_execution(source)?;
+    let source_audio = source_audio_execution.trace;
     ensure!(
         source_audio.switchable_boundaries.is_empty(),
         "source audio trace escaped its selected switchable bank"
@@ -127,6 +141,14 @@ pub(super) fn bind_concurrent_runtime_accesses(
         every_concurrent_writer_excludes_candidate,
         "a source NMI, source audio, or mapper-165 battle writer can reach the runtime-state candidate"
     );
+    let reachable_instruction_starts = source_nmi
+        .visited
+        .union(&source_audio.visited)
+        .copied()
+        .collect();
+    let indirect_write_sites_below_mapper_space = computed_access_contract
+        .indirect_write_sites_below_mapper_space()
+        .clone();
 
     Ok(ConcurrentRuntimeAccessContract {
         strategy: "trace the fixed NMI and its source-bound bank-0E audio callee, prove every computed read range by producer role, then compose the existing mapper-165 battle-state reservation",
@@ -146,6 +168,7 @@ pub(super) fn bind_concurrent_runtime_accesses(
         source_audio_dispatch_sha1: sha1_hex(audio_dispatch),
         source_audio_bank_hex: format!("0x{SOURCE_AUDIO_BANK:02X}"),
         source_audio_entry_hex: format!("0x{SOURCE_AUDIO_ENTRY:04X}"),
+        source_audio_indirect_dispatch: source_audio_execution.indirect_dispatch,
         source_audio: source_audio_report,
         computed_access_contract,
         battle_remap_pair_table_cpu_range_hex: format!(
@@ -153,6 +176,8 @@ pub(super) fn bind_concurrent_runtime_accesses(
         ),
         proven_runtime_range_begins_after_battle_pair_table,
         every_concurrent_writer_excludes_candidate,
+        reachable_instruction_starts,
+        indirect_write_sites_below_mapper_space,
     })
 }
 
@@ -170,6 +195,7 @@ fn report_trace(trace: &RuntimeAccessTrace) -> ConcurrentTraceReport {
     ConcurrentTraceReport {
         reachable_instruction_count: trace.visited.len(),
         reachable_instruction_catalog_sha1: sha1_hex(&catalog),
+        indirect_control_site_count: trace.indirect_control_sites.len(),
         direct_overlap_count: trace.direct_overlaps.len(),
         indexed_potential_overlap_count: trace.indexed_potential_overlaps.len(),
         indirect_read_site_count: trace.indirect_sites.len() - indirect_write_site_count,

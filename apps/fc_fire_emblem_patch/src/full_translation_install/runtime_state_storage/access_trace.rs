@@ -21,6 +21,7 @@ pub(super) struct RuntimeAccessTrace {
     pub(super) direct_overlaps: BTreeSet<AccessSite>,
     pub(super) indexed_potential_overlaps: BTreeSet<AccessSite>,
     pub(super) indirect_sites: BTreeSet<AccessSite>,
+    pub(super) indirect_control_sites: BTreeSet<(u8, u16)>,
     pub(super) switchable_boundaries: BTreeSet<u16>,
 }
 
@@ -85,6 +86,7 @@ fn trace_accesses(
     let mut direct_overlaps = BTreeSet::new();
     let mut indexed_potential_overlaps = BTreeSet::new();
     let mut indirect_sites = BTreeSet::new();
+    let mut indirect_control_sites = BTreeSet::new();
     let mut switchable_boundaries = BTreeSet::new();
 
     while let Some((switchable_bank, address)) = pending.pop() {
@@ -199,7 +201,11 @@ fn trace_accesses(
                 pending.extend(fallthrough.map(|next| (switchable_bank, next)));
             }
             Rp2a03DirectControlFlow::Jump { target } => {
-                pending.extend(target.map(|target| (switchable_bank, target)));
+                if let Some(target) = target {
+                    pending.push((switchable_bank, target));
+                } else {
+                    indirect_control_sites.insert((actual_bank, address));
+                }
             }
             Rp2a03DirectControlFlow::Call {
                 target,
@@ -221,6 +227,7 @@ fn trace_accesses(
         direct_overlaps,
         indexed_potential_overlaps,
         indirect_sites,
+        indirect_control_sites,
         switchable_boundaries,
     })
 }
@@ -248,4 +255,32 @@ fn source_instruction_bytes(source: &Rom, bank: u8, address: u16) -> Result<&[u8
         .data()
         .get(offset..offset + 3)
         .context("runtime access instruction is outside source ROM")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn synthetic_source_with_audio_entry(bytes_at_entry: &[u8]) -> Rom {
+        let mut bytes = vec![0x60; HEADER_SIZE + 16 * PRG_BANK_SIZE];
+        bytes[..HEADER_SIZE].fill(0);
+        bytes[..4].copy_from_slice(b"NES\x1A");
+        bytes[4] = 16;
+        let entry = HEADER_SIZE + 0x0E * PRG_BANK_SIZE;
+        bytes[entry..entry + bytes_at_entry.len()].copy_from_slice(bytes_at_entry);
+        Rom::parse(bytes).unwrap()
+    }
+
+    #[test]
+    fn indirect_jump_is_reported_instead_of_silently_ending_the_trace() {
+        let source = synthetic_source_with_audio_entry(&[0x6C, 0xF4, 0x00]);
+
+        let trace = trace_switchable_accesses(&source, 0x0E, &[0x8000]).unwrap();
+
+        assert_eq!(trace.visited, BTreeSet::from([(0x0E, 0x8000)]));
+        assert_eq!(
+            trace.indirect_control_sites,
+            BTreeSet::from([(0x0E, 0x8000)])
+        );
+    }
 }

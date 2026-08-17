@@ -6,6 +6,7 @@ use serde::Serialize;
 use crate::{
     rom::{HEADER_SIZE, Rom},
     sha1_hex,
+    typed_source::decode_rp2a03_sequence,
 };
 
 use super::super::{
@@ -24,14 +25,21 @@ pub(super) struct ConcurrentComputedAccessContract {
     pointer_roles: Vec<ConcurrentPointerRole>,
     pointer_role_count: usize,
     bank_directory_domain: BankDirectoryDomain,
+    audio_lookup_pointer_domain: AudioLookupPointerDomain,
     every_nmi_indirect_site_classified_once: bool,
     every_audio_indirect_site_classified_once: bool,
     every_computed_access_excludes_candidate: bool,
+    #[serde(skip)]
+    indirect_write_sites_below_mapper_space: BTreeSet<(u8, u16, u8)>,
 }
 
 impl ConcurrentComputedAccessContract {
     pub(super) fn every_computed_access_excludes_candidate(&self) -> bool {
         self.every_computed_access_excludes_candidate
+    }
+
+    pub(super) fn indirect_write_sites_below_mapper_space(&self) -> &BTreeSet<(u8, u16, u8)> {
+        &self.indirect_write_sites_below_mapper_space
     }
 }
 
@@ -60,6 +68,18 @@ struct BankDirectoryDomain {
 }
 
 #[derive(Serialize)]
+struct AudioLookupPointerDomain {
+    lookup_reader_cpu_range_hex: &'static str,
+    call_site_count: usize,
+    call_sites_hex: Vec<String>,
+    pointer_bases_hex: Vec<String>,
+    index_domain_hex: &'static str,
+    minimum_effective_address_hex: String,
+    maximum_effective_address_hex: String,
+    candidate_excluded: bool,
+}
+
+#[derive(Serialize)]
 struct SourceRegionBinding {
     role: &'static str,
     prg_bank_hex: String,
@@ -73,6 +93,16 @@ const fn read(bank: u8, address: u16, pointer: u16) -> AccessSite {
         bank,
         address,
         access: AccessDirection::Read,
+        form: AccessForm::IndirectIndexedY,
+        operand: pointer,
+    }
+}
+
+const fn write(bank: u8, address: u16, pointer: u16) -> AccessSite {
+    AccessSite {
+        bank,
+        address,
+        access: AccessDirection::Write,
         form: AccessForm::IndirectIndexedY,
         operand: pointer,
     }
@@ -126,6 +156,32 @@ const AUDIO_RECORD_SITES: [AccessSite; 14] = [
     read(0x0E, 0x8821, 0xF2),
     read(0x0E, 0x8826, 0xF2),
 ];
+const AUDIO_APU_TEMPLATE_READ_SITES: [AccessSite; 1] = [read(0x0E, 0x87F4, 0xF4)];
+const AUDIO_APU_REGISTER_WRITE_SITES: [AccessSite; 1] = [write(0x0E, 0x87F6, 0xF2)];
+const AUDIO_LOOKUP_READ_SITES: [AccessSite; 1] = [read(0x0E, 0x8C1F, 0xF2)];
+const AUDIO_APU_REGISTER_COPY_CODE: [u8; 39] = [
+    0xA9, 0x00, 0xF0, 0x0A, 0xA9, 0x08, 0xD0, 0x06, 0xA9, 0x0C, 0xD0, 0x02, 0xA9, 0x04, 0x85, 0xF2,
+    0xA9, 0x40, 0x85, 0xF3, 0x84, 0xF4, 0xA9, 0x89, 0x85, 0xF5, 0xA0, 0x00, 0xB1, 0xF4, 0x91, 0xF2,
+    0xC8, 0x98, 0xC9, 0x04, 0xD0, 0xF6, 0x60,
+];
+const AUDIO_LOOKUP_READER_CODE: [u8; 14] = [
+    0x86, 0xF2, 0x84, 0xF3, 0xAE, 0x55, 0x06, 0x8A, 0x4A, 0xA8, 0xB1, 0xF2, 0x85, 0xF6,
+];
+const AUDIO_LOOKUP_CALLS: [(u16, u16); 13] = [
+    (0x8B43, 0x8C6C),
+    (0x8B81, 0x8C3C),
+    (0x8BEC, 0x8DE4),
+    (0x8C08, 0x8E2F),
+    (0x8CD5, 0x8DFF),
+    (0x8CF7, 0x8DFF),
+    (0x8D44, 0x8E17),
+    (0x8D71, 0x8DC9),
+    (0x8DBA, 0x8C3C),
+    (0x904A, 0x8E8F),
+    (0x906A, 0x8E8F),
+    (0x939E, 0x8C9C),
+    (0x9404, 0x8CBC),
+];
 
 pub(super) fn bind_concurrent_computed_accesses(
     source: &Rom,
@@ -147,11 +203,16 @@ pub(super) fn bind_concurrent_computed_accesses(
         AUDIO_EVENT_STREAM_SITES.as_slice(),
         AUDIO_CHANNEL_STREAM_SITES.as_slice(),
         AUDIO_RECORD_SITES.as_slice(),
+        AUDIO_APU_TEMPLATE_READ_SITES.as_slice(),
+        AUDIO_APU_REGISTER_WRITE_SITES.as_slice(),
+        AUDIO_LOOKUP_READ_SITES.as_slice(),
     ];
     ensure_exact_partition("source NMI", &source_nmi.indirect_sites, &nmi_roles)?;
     ensure_exact_partition("source audio", &source_audio.indirect_sites, &audio_roles)?;
 
     let bank_directory_domain = bind_bank_directory_domain(source)?;
+    bind_audio_apu_register_copy(source)?;
+    let audio_lookup_pointer_domain = bind_audio_lookup_pointer_domain(source)?;
     let pointer_roles = vec![
         role(
             "bank_local_nmi_transfer_directory",
@@ -207,6 +268,33 @@ pub(super) fn bind_concurrent_computed_accesses(
             &["0x8000..0xBFFF"],
             true,
         ),
+        role(
+            "audio_apu_register_templates",
+            "bank 0E audio",
+            "0xF4/0xF5",
+            "the source-bound register-copy routine fixes the high byte to 0x89 and copies four bytes from a caller-selected low-byte base",
+            &AUDIO_APU_TEMPLATE_READ_SITES,
+            &["0x8900..0x8A02"],
+            true,
+        ),
+        role(
+            "audio_apu_register_writes",
+            "bank 0E audio",
+            "0xF2/0xF3",
+            "four source entry points select low byte 0x00, 0x04, 0x08, or 0x0C, fix the high byte to 0x40, and copy exactly four bytes",
+            &AUDIO_APU_REGISTER_WRITE_SITES,
+            &["0x4000..0x400F"],
+            true,
+        ),
+        role(
+            "audio_indexed_lookup_tables",
+            "bank 0E audio",
+            "0xF2/0xF3",
+            "thirteen typed callers load an immediate bank-0E table base before the shared reader derives a 0x00..0x7F index from 0x0655",
+            &AUDIO_LOOKUP_READ_SITES,
+            &["0x8C3C..0x8F0E"],
+            audio_lookup_pointer_domain.candidate_excluded,
+        ),
     ];
     let every_computed_access_excludes_candidate =
         pointer_roles.iter().all(|role| role.candidate_excluded);
@@ -239,13 +327,101 @@ pub(super) fn bind_concurrent_computed_accesses(
                 PRG_BANK_SIZE,
                 "complete source audio code and data domain",
             )?,
+            bind_source_region(
+                source,
+                0x0E,
+                0x87D8,
+                AUDIO_APU_REGISTER_COPY_CODE.len(),
+                "audio source-template to APU-register copy routine",
+            )?,
+            bind_source_region(
+                source,
+                0x0E,
+                0x8C15,
+                AUDIO_LOOKUP_READER_CODE.len(),
+                "audio indexed lookup reader",
+            )?,
         ],
         pointer_role_count: pointer_roles.len(),
         pointer_roles,
         bank_directory_domain,
+        audio_lookup_pointer_domain,
         every_nmi_indirect_site_classified_once: true,
         every_audio_indirect_site_classified_once: true,
         every_computed_access_excludes_candidate,
+        indirect_write_sites_below_mapper_space: BTreeSet::from([(0x0E, 0x87F6, 0xF2)]),
+    })
+}
+
+fn bind_audio_apu_register_copy(source: &Rom) -> Result<()> {
+    let bytes = source_bytes(source, 0x0E, 0x87D8, AUDIO_APU_REGISTER_COPY_CODE.len())?;
+    ensure!(
+        bytes == AUDIO_APU_REGISTER_COPY_CODE,
+        "source audio APU-register copy routine changed"
+    );
+    decode_rp2a03_sequence(bytes, 0x87D8, "source audio APU-register copy")?;
+    Ok(())
+}
+
+fn bind_audio_lookup_pointer_domain(source: &Rom) -> Result<AudioLookupPointerDomain> {
+    let reader = source_bytes(source, 0x0E, 0x8C15, AUDIO_LOOKUP_READER_CODE.len())?;
+    ensure!(
+        reader == AUDIO_LOOKUP_READER_CODE,
+        "source audio indexed lookup reader changed"
+    );
+    decode_rp2a03_sequence(reader, 0x8C15, "source audio indexed lookup reader")?;
+
+    let mut pointer_bases = BTreeSet::new();
+    for (call_site, pointer_base) in AUDIO_LOOKUP_CALLS {
+        let sequence_start = call_site - 4;
+        let expected = [
+            0xA2,
+            pointer_base as u8,
+            0xA0,
+            (pointer_base >> 8) as u8,
+            0x20,
+            0x15,
+            0x8C,
+        ];
+        let actual = source_bytes(source, 0x0E, sequence_start, expected.len())?;
+        ensure!(
+            actual == expected,
+            "source audio indexed lookup caller 0x{call_site:04X} changed"
+        );
+        decode_rp2a03_sequence(actual, sequence_start, "source audio indexed lookup caller")?;
+        pointer_bases.insert(pointer_base);
+    }
+
+    let minimum = *pointer_bases
+        .first()
+        .context("source audio indexed lookup pointer set is empty")?;
+    let maximum = pointer_bases
+        .last()
+        .copied()
+        .context("source audio indexed lookup pointer set is empty")?
+        .checked_add(0x7F)
+        .context("source audio indexed lookup domain overflow")?;
+    let candidate_excluded = maximum < CANDIDATE_START || minimum > CANDIDATE_END;
+    ensure!(
+        candidate_excluded,
+        "source audio indexed lookup domain reaches the dialogue runtime state"
+    );
+
+    Ok(AudioLookupPointerDomain {
+        lookup_reader_cpu_range_hex: "0x8C15..0x8C23",
+        call_site_count: AUDIO_LOOKUP_CALLS.len(),
+        call_sites_hex: AUDIO_LOOKUP_CALLS
+            .iter()
+            .map(|(site, _)| format!("0x{site:04X}"))
+            .collect(),
+        pointer_bases_hex: pointer_bases
+            .iter()
+            .map(|base| format!("0x{base:04X}"))
+            .collect(),
+        index_domain_hex: "0x00..0x7F",
+        minimum_effective_address_hex: format!("0x{minimum:04X}"),
+        maximum_effective_address_hex: format!("0x{maximum:04X}"),
+        candidate_excluded,
     })
 }
 
@@ -341,10 +517,36 @@ fn role(
         address_basis,
         sites: sites
             .iter()
-            .map(|site| format!("{:02X}:{:04X}:read", site.bank, site.address))
+            .map(|site| {
+                let direction = match site.access {
+                    AccessDirection::Read => "read",
+                    AccessDirection::Write => "write",
+                };
+                format!("{:02X}:{:04X}:{direction}", site.bank, site.address)
+            })
             .collect(),
         possible_cpu_ranges_hex: possible_cpu_ranges_hex.to_vec(),
         candidate_excluded,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn computed_access_role_reports_write_direction() {
+        let role = role(
+            "audio_apu_register_writes",
+            "bank 0E audio",
+            "0xF2/0xF3",
+            "test",
+            &AUDIO_APU_REGISTER_WRITE_SITES,
+            &["0x4000..0x400F"],
+            true,
+        );
+
+        assert_eq!(role.sites, vec!["0E:87F6:write"]);
     }
 }
 
