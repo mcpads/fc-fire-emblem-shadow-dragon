@@ -10,12 +10,13 @@ pub(super) const PRG_BANK_SHADOW: u16 = 0x0029;
 pub(super) const MAIN_STATE: u16 = 0x0084;
 pub(super) const TITLE_STATE: u16 = 0x057A;
 pub(super) const TITLE_ANIMATION_STATE: u16 = 0x0587;
+pub(super) const PENDING_SHARED_MENU_REQUEST_STATE: u16 = 0x05CC;
 pub(super) const MAP_DIALOGUE_OUTER_STATE: u16 = 0x05DB;
 pub(super) const SHARED_MENU_STATE: u16 = 0x05DE;
 pub(super) const COMPOSITE_SCREEN_STATE: u16 = 0x05E8;
 pub(super) const DIALOGUE_OR_SOUND_STATE: u16 = 0x05EE;
 
-pub(super) const POSITIVE_CONTROL_STATES: [PositiveControlState; 10] = [
+pub(super) const POSITIVE_CONTROL_STATES: [PositiveControlState; 11] = [
     PositiveControlState {
         address: OUTER_SCREEN_STATE,
         role: "outer_screen_state_24",
@@ -39,6 +40,10 @@ pub(super) const POSITIVE_CONTROL_STATES: [PositiveControlState; 10] = [
     PositiveControlState {
         address: TITLE_ANIMATION_STATE,
         role: "title_animation_state_0587",
+    },
+    PositiveControlState {
+        address: PENDING_SHARED_MENU_REQUEST_STATE,
+        role: "pending_shared_menu_request_state_05CC",
     },
     PositiveControlState {
         address: MAP_DIALOGUE_OUTER_STATE,

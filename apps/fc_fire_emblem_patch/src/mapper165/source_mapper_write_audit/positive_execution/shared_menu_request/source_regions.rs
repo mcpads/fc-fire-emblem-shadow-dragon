@@ -208,7 +208,7 @@ pub(super) fn source_bytes(
         usize::from(address - 0xC000)
     } else {
         ensure!(
-            bank < FIXED_PRG_BANK && address >= 0x8000,
+            bank <= FIXED_PRG_BANK && address >= 0x8000,
             "switchable shared-menu source region is outside source PRG space"
         );
         usize::from(address - 0x8000)

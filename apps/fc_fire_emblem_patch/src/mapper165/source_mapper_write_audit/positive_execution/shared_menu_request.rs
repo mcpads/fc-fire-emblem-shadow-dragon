@@ -11,12 +11,14 @@ use crate::{
 };
 
 mod dimension_bounds;
+mod pending_state;
 mod source_regions;
 
 use dimension_bounds::{
     MENU_CACHE_BASES, bind_menu_dimension_producers, cache_destination_ranges,
     row_marker_destination_range,
 };
+use pending_state::bind_pending_request_state;
 use source_regions::{bind_request_state_landmarks, bind_source_regions, source_bytes};
 
 const MENU_RECORD_BASES: [u16; 5] = [0x7EB0, 0x7EB6, 0x7EBC, 0x7EC2, 0x7EC8];
@@ -41,8 +43,8 @@ const MENU_CACHE_POINTER_TABLE: u16 = 0x992D;
 
 pub(super) struct SharedMenuExecutionSource {
     dispatch_call: u16,
-    selector_memory_address: u16,
     active_request_states: BTreeSet<u8>,
+    coherent_dispatch_memory_addresses: BTreeSet<u16>,
     indirect_write_destinations: BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
 }
 
@@ -51,12 +53,12 @@ impl SharedMenuExecutionSource {
         self.dispatch_call
     }
 
-    pub(super) fn selector_memory_address(&self) -> u16 {
-        self.selector_memory_address
-    }
-
     pub(super) fn active_request_states(&self) -> &BTreeSet<u8> {
         &self.active_request_states
+    }
+
+    pub(super) fn coherent_dispatch_memory_addresses(&self) -> &BTreeSet<u16> {
+        &self.coherent_dispatch_memory_addresses
     }
 
     pub(super) fn indirect_write_destinations(
@@ -76,6 +78,7 @@ pub(super) fn bind_shared_menu_execution_source(
     );
     bind_source_regions(source)?;
     bind_request_state_landmarks(source)?;
+    let pending_request = bind_pending_request_state(source, shared_menu)?;
     let dimension_bounds = bind_menu_dimension_producers(source)?;
 
     let pointer_table = source_bytes(source, 0x0B, MENU_RECORD_POINTER_TABLE, 10)?;
@@ -153,11 +156,10 @@ pub(super) fn bind_shared_menu_execution_source(
     )?;
     Ok(SharedMenuExecutionSource {
         dispatch_call: shared_menu.dispatch_call(),
-        selector_memory_address: shared_menu.state_address(),
-        // State zero is idle. State six is a helper called by the active handlers rather than a
-        // pending request published through $E65C. The source regions and landmarks above bind
-        // the request lifecycle that reaches states one through five.
-        active_request_states: (1..=5).collect(),
+        active_request_states: pending_request.active_states().clone(),
+        coherent_dispatch_memory_addresses: pending_request
+            .coherent_dispatch_memory_addresses()
+            .clone(),
         indirect_write_destinations: bounds,
     })
 }

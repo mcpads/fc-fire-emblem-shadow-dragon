@@ -22,9 +22,10 @@ use crate::{
 #[cfg(test)]
 use super::super::control_state::{MAP_DIALOGUE_OUTER_STATE, OUTER_SCREEN_STATE};
 use super::super::control_state::{
-    ObservedControlStateWrites, PRG_BANK_SHADOW, merge_observed_control_state_writes,
-    positive_control_state,
+    ObservedControlStateWrites, PENDING_SHARED_MENU_REQUEST_STATE, PRG_BANK_SHADOW,
+    merge_observed_control_state_writes, positive_control_state,
 };
+use super::super::indexed_write_destinations::AbsoluteIndexedWriteDestinationBounds;
 use super::{FIXED_CPU_START, FIXED_PRG_BANK, RESET_RAM_CLEAR_CODE, RESET_RAM_CLEAR_START};
 
 mod call_effects;
@@ -63,7 +64,7 @@ const PENDING_STATE_ESCAPE_ACTIVE_INSTRUCTION_OFFSETS: [u16; 6] = [5, 7, 9, 10, 
 pub(in super::super) struct InlineDispatchSelectorBounds {
     admitted_selectors: BTreeSet<u8>,
     source_bound_produced_selectors: Option<BTreeSet<u8>>,
-    selector_memory_address: Option<u16>,
+    selector_memory_addresses: BTreeSet<u16>,
 }
 
 impl InlineDispatchSelectorBounds {
@@ -71,7 +72,7 @@ impl InlineDispatchSelectorBounds {
         Self {
             admitted_selectors: selectors.clone(),
             source_bound_produced_selectors: Some(selectors),
-            selector_memory_address: None,
+            selector_memory_addresses: BTreeSet::new(),
         }
     }
 
@@ -79,12 +80,20 @@ impl InlineDispatchSelectorBounds {
         Self {
             admitted_selectors: selectors,
             source_bound_produced_selectors: None,
-            selector_memory_address: None,
+            selector_memory_addresses: BTreeSet::new(),
         }
     }
 
     pub(in super::super) fn with_selector_memory_address(mut self, address: u16) -> Self {
-        self.selector_memory_address = Some(address);
+        self.selector_memory_addresses.insert(address);
+        self
+    }
+
+    pub(in super::super) fn with_selector_memory_addresses(
+        mut self,
+        addresses: impl IntoIterator<Item = u16>,
+    ) -> Self {
+        self.selector_memory_addresses.extend(addresses);
         self
     }
 
@@ -96,8 +105,8 @@ impl InlineDispatchSelectorBounds {
         self.source_bound_produced_selectors.as_ref()
     }
 
-    fn selector_memory_address(&self) -> Option<u16> {
-        self.selector_memory_address
+    fn selector_memory_addresses(&self) -> &BTreeSet<u16> {
+        &self.selector_memory_addresses
     }
 }
 
@@ -308,6 +317,7 @@ pub(super) fn bind_reset_bank_entries(
         &BTreeSet::new(),
         &BTreeMap::new(),
         indirect_write_destination_bounds,
+        &BTreeMap::new(),
     )
     .context("trace reset-rooted source execution")
 }
@@ -320,6 +330,7 @@ pub(in super::super) fn trace_fixed_scheduler_contexts(
     entry_contexts: impl IntoIterator<Item = (u8, u8)>,
     inline_dispatch_selector_bounds: &BTreeMap<(u8, u16), InlineDispatchSelectorBounds>,
     indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
+    absolute_indexed_write_bounds: &BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds>,
 ) -> Result<StatefulBankExecution> {
     let entry_contexts = entry_contexts.into_iter().collect::<BTreeSet<_>>();
     ensure!(
@@ -406,6 +417,7 @@ pub(in super::super) fn trace_fixed_scheduler_contexts(
             &targets,
             inline_dispatch_selector_bounds,
             indirect_write_destination_bounds,
+            absolute_indexed_write_bounds,
         )?;
         for successor in &epoch.fixed_scheduler_entry_states {
             let key = (successor.selector, successor.mapped_prg_bank);
@@ -435,6 +447,7 @@ fn trace_fixed_scheduler_entry_state(
     targets: &BTreeMap<u8, u16>,
     inline_dispatch_selector_bounds: &BTreeMap<(u8, u16), InlineDispatchSelectorBounds>,
     indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
+    absolute_indexed_write_bounds: &BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds>,
 ) -> Result<StatefulBankExecution> {
     let FixedSchedulerEntryState {
         selector,
@@ -483,6 +496,7 @@ fn trace_fixed_scheduler_entry_state(
         &BTreeSet::from([(FIXED_PRG_BANK, dispatch_call_address)]),
         inline_dispatch_selector_bounds,
         indirect_write_destination_bounds,
+        absolute_indexed_write_bounds,
     )
     .context("trace one fixed-scheduler source epoch")?;
     execution.reachable_instruction_starts.extend([
@@ -514,6 +528,7 @@ fn trace_bank_state_entries(
     terminal_inline_dispatches: &BTreeSet<(u8, u16)>,
     inline_dispatch_selector_bounds: &BTreeMap<(u8, u16), InlineDispatchSelectorBounds>,
     indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
+    absolute_indexed_write_bounds: &BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds>,
 ) -> Result<StatefulBankExecution> {
     let mut visited = BTreeMap::<ResetTraceIdentity, ResetTraceState>::new();
     let mut switchable_roots = BTreeSet::new();
@@ -636,6 +651,7 @@ fn trace_bank_state_entries(
             &mut state,
             physical_bank,
             indirect_write_destination_bounds,
+            absolute_indexed_write_bounds,
             &mut open_facts,
         )? {
             record_indirect_write_observation(
@@ -729,6 +745,16 @@ fn trace_bank_state_entries(
                 if let Some(bounds) =
                     inline_dispatch_selector_bounds.get(&(physical_bank, state.address))
                 {
+                    if let Some(produced) = bounds.source_bound_produced_selectors() {
+                        selectors.retain(|selector| produced.contains(selector));
+                        if selectors.is_empty() {
+                            open_facts.insert(format!(
+                                "inline_dispatch@{physical_bank:02X}:{:04X}:observed_selector_domain_disjoint_from_source_producers",
+                                state.address,
+                            ));
+                            continue;
+                        }
+                    }
                     let outside_owned = selectors
                         .iter()
                         .copied()
@@ -795,16 +821,18 @@ fn trace_bank_state_entries(
                         .first()
                         .context("single stateful inline selector did not bind a target")?;
                     let mut selected = state.clone();
-                    if let Some(selector_address) = inline_dispatch_selector_bounds
+                    if let Some(selector_addresses) = inline_dispatch_selector_bounds
                         .get(&(physical_bank, state.address))
-                        .and_then(InlineDispatchSelectorBounds::selector_memory_address)
+                        .map(InlineDispatchSelectorBounds::selector_memory_addresses)
                     {
-                        ensure!(
-                            ResetTraceState::tracks_memory_address(selector_address),
-                            "inline dispatch at {physical_bank:02X}:${:04X} refines an untracked selector-memory address ${selector_address:04X}",
-                            state.address,
-                        );
-                        selected.write_memory(selector_address, Some(selector));
+                        for &selector_address in selector_addresses {
+                            ensure!(
+                                ResetTraceState::tracks_memory_address(selector_address),
+                                "inline dispatch at {physical_bank:02X}:${:04X} refines an untracked selector-memory address ${selector_address:04X}",
+                                state.address,
+                            );
+                            selected.write_memory(selector_address, Some(selector));
+                        }
                     }
                     selected.set_accumulator(Some(selector.wrapping_mul(2)));
                     route_direct_target(
@@ -1153,7 +1181,7 @@ fn summarize_pending_state_escape(
         reachable_instruction_starts.insert((FIXED_PRG_BANK, PENDING_STATE_ESCAPE_ENTRY + offset));
     }
 
-    let request_values = state.read_memory_values(0x05CC);
+    let request_values = state.read_memory_values(PENDING_SHARED_MENU_REQUEST_STATE);
     if request_values.restrict(|value| value == 0).is_some() {
         reachable_instruction_starts.insert((FIXED_PRG_BANK, PENDING_STATE_ESCAPE_NORMAL_RETURN));
         let mut normal_return = state.clone();
@@ -1725,6 +1753,7 @@ fn apply_data_effect(
     state: &mut ResetTraceState,
     physical_bank: u8,
     indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
+    absolute_indexed_write_bounds: &BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds>,
     open_facts: &mut BTreeSet<String>,
 ) -> Result<Option<IndirectWriteObservation>> {
     let mut indirect_write_observation = None;
@@ -1784,6 +1813,30 @@ fn apply_data_effect(
         }
         (Mnemonic::Sty, AddressingMode::Absolute, Operand::Word(address)) => {
             state.write_memory(address, state.index_y);
+        }
+        (
+            Mnemonic::Sta,
+            AddressingMode::AbsoluteX | AddressingMode::AbsoluteY,
+            Operand::Word(base),
+        ) => {
+            apply_absolute_indexed_store(
+                state,
+                physical_bank,
+                base,
+                mode,
+                state.accumulator.clone(),
+                absolute_indexed_write_bounds,
+            )?;
+        }
+        (Mnemonic::Stx, AddressingMode::AbsoluteY, Operand::Word(base)) => {
+            apply_absolute_indexed_store(
+                state,
+                physical_bank,
+                base,
+                mode,
+                state.index_x.map(ByteValueSet::known).unwrap_or_default(),
+                absolute_indexed_write_bounds,
+            )?;
         }
         (Mnemonic::Sta, AddressingMode::ZeroPageIndirectIndexedY, Operand::Byte(pointer)) => {
             let site = (physical_bank, state.address, pointer);
@@ -1888,6 +1941,24 @@ fn apply_data_effect(
             state.zero = values.uniform(|value| value == 0);
             state.negative = values.uniform(|value| value & 0x80 != 0);
         }
+        (
+            Mnemonic::Asl
+            | Mnemonic::Lsr
+            | Mnemonic::Rol
+            | Mnemonic::Ror
+            | Mnemonic::Inc
+            | Mnemonic::Dec,
+            AddressingMode::AbsoluteX,
+            Operand::Word(base),
+        ) => {
+            apply_absolute_indexed_read_modify_write(
+                state,
+                physical_bank,
+                base,
+                instruction.mnemonic(),
+                absolute_indexed_write_bounds,
+            )?;
+        }
         (Mnemonic::Asl, AddressingMode::Accumulator, Operand::None) => {
             let values = state.accumulator.clone();
             state.carry = values.uniform(|value| value & 0x80 != 0);
@@ -1942,6 +2013,155 @@ fn apply_data_effect(
     Ok(indirect_write_observation)
 }
 
+fn apply_absolute_indexed_store(
+    state: &mut ResetTraceState,
+    physical_bank: u8,
+    base: u16,
+    mode: AddressingMode,
+    value: ByteValueSet,
+    absolute_indexed_write_bounds: &BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds>,
+) -> Result<()> {
+    let index = absolute_index_value(state, mode)?;
+    match index {
+        Some(index) => {
+            let target = base.wrapping_add(u16::from(index));
+            validate_absolute_indexed_target(
+                physical_bank,
+                state.address,
+                target,
+                absolute_indexed_write_bounds,
+            )?;
+            state.write_memory_values(target, value.clone());
+            if (0xA000..=0xAFFF).contains(&target) {
+                state.mapped_prg_bank = value.singleton().map(|value| value & 0x0F);
+            }
+        }
+        None => clear_unknown_absolute_indexed_destination(
+            state,
+            physical_bank,
+            base,
+            absolute_indexed_write_bounds,
+        ),
+    }
+    Ok(())
+}
+
+fn apply_absolute_indexed_read_modify_write(
+    state: &mut ResetTraceState,
+    physical_bank: u8,
+    base: u16,
+    mnemonic: Mnemonic,
+    absolute_indexed_write_bounds: &BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds>,
+) -> Result<()> {
+    match state.index_x {
+        Some(index) => {
+            let target = base.wrapping_add(u16::from(index));
+            validate_absolute_indexed_target(
+                physical_bank,
+                state.address,
+                target,
+                absolute_indexed_write_bounds,
+            )?;
+            let previous = state.read_memory_values(target);
+            let result = match mnemonic {
+                Mnemonic::Asl => {
+                    state.carry = previous.uniform(|value| value & 0x80 != 0);
+                    previous.map(|value| value.wrapping_shl(1))
+                }
+                Mnemonic::Lsr => {
+                    state.carry = previous.uniform(|value| value & 0x01 != 0);
+                    previous.map(|value| value >> 1)
+                }
+                Mnemonic::Rol => {
+                    let carry_in = state.carry;
+                    state.carry = previous.uniform(|value| value & 0x80 != 0);
+                    carry_in.map_or_else(ByteValueSet::default, |carry| {
+                        previous.map(|value| value.wrapping_shl(1) | u8::from(carry))
+                    })
+                }
+                Mnemonic::Ror => {
+                    let carry_in = state.carry;
+                    state.carry = previous.uniform(|value| value & 0x01 != 0);
+                    carry_in.map_or_else(ByteValueSet::default, |carry| {
+                        previous.map(|value| (value >> 1) | (u8::from(carry) << 7))
+                    })
+                }
+                Mnemonic::Inc => previous.map(|value| value.wrapping_add(1)),
+                Mnemonic::Dec => previous.map(|value| value.wrapping_sub(1)),
+                _ => unreachable!("absolute-indexed RMW helper received a non-RMW mnemonic"),
+            };
+            state.write_memory_values(target, result.clone());
+            state.zero = result.uniform(|value| value == 0);
+            state.negative = result.uniform(|value| value & 0x80 != 0);
+        }
+        None => clear_unknown_absolute_indexed_destination(
+            state,
+            physical_bank,
+            base,
+            absolute_indexed_write_bounds,
+        ),
+    }
+    Ok(())
+}
+
+fn absolute_index_value(state: &ResetTraceState, mode: AddressingMode) -> Result<Option<u8>> {
+    match mode {
+        AddressingMode::AbsoluteX => Ok(state.index_x),
+        AddressingMode::AbsoluteY => Ok(state.index_y),
+        _ => anyhow::bail!("absolute-indexed write helper received {mode:?}"),
+    }
+}
+
+fn clear_unknown_absolute_indexed_destination(
+    state: &mut ResetTraceState,
+    physical_bank: u8,
+    base: u16,
+    absolute_indexed_write_bounds: &BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds>,
+) {
+    let end = base.wrapping_add(u16::from(u8::MAX));
+    let conservative_destination_ranges = if end >= base {
+        vec![base..=end]
+    } else {
+        vec![base..=u16::MAX, 0..=end]
+    };
+    let source_bound = absolute_indexed_write_bounds.get(&(physical_bank, state.address));
+    let destination_ranges = source_bound
+        .map(AbsoluteIndexedWriteDestinationBounds::destination_ranges)
+        .unwrap_or(&conservative_destination_ranges);
+    let affects_tracked_state = (0..=u8::MAX)
+        .any(|index| ResetTraceState::tracks_memory_address(base.wrapping_add(u16::from(index))));
+    let affects_prg_bank = destination_ranges
+        .iter()
+        .any(|range| range.start() <= &0xAFFF && range.end() >= &0xA000);
+    if !affects_tracked_state && !affects_prg_bank {
+        return;
+    }
+    state.clear_memory_in_ranges(&destination_ranges);
+    if affects_prg_bank {
+        state.mapped_prg_bank = None;
+    }
+}
+
+fn validate_absolute_indexed_target(
+    physical_bank: u8,
+    cpu_address: u16,
+    target: u16,
+    absolute_indexed_write_bounds: &BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds>,
+) -> Result<()> {
+    let Some(bounds) = absolute_indexed_write_bounds.get(&(physical_bank, cpu_address)) else {
+        return Ok(());
+    };
+    ensure!(
+        bounds
+            .destination_ranges()
+            .iter()
+            .any(|range| range.contains(&target)),
+        "{} at {physical_bank:02X}:${cpu_address:04X} reached ${target:04X} outside its source-bound destination ranges",
+        bounds.role(),
+    );
+    Ok(())
+}
+
 fn compare(register: Option<u8>, operand: u8, state: &mut ResetTraceState) {
     state.zero = register.map(|value| value == operand);
     state.carry = register.map(|value| value >= operand);
@@ -1987,6 +2207,19 @@ mod tests {
         )])
     }
 
+    fn synthetic_absolute_indexed_destination_bounds(
+        site: (u8, u16),
+        destination_ranges: Vec<std::ops::RangeInclusive<u16>>,
+    ) -> BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds> {
+        BTreeMap::from([(
+            site,
+            AbsoluteIndexedWriteDestinationBounds::for_synthetic_test(
+                "synthetic absolute-indexed write",
+                destination_ranges,
+            ),
+        )])
+    }
+
     fn synthetic_source(fixed_program: &[(u16, &[u8])], reset_root: u16) -> Rom {
         let mut bytes = vec![0x60; HEADER_SIZE + 16 * 16 * 1024];
         bytes[..HEADER_SIZE].fill(0);
@@ -2018,6 +2251,7 @@ mod tests {
             &BTreeSet::new(),
             &BTreeSet::new(),
             &bounds,
+            &BTreeMap::new(),
             &BTreeMap::new(),
         )
         .unwrap()
@@ -2110,6 +2344,7 @@ mod tests {
             &mut state,
             FIXED_PRG_BANK,
             &bounds,
+            &BTreeMap::new(),
             &mut open_facts,
         )
         .unwrap();
@@ -2136,6 +2371,78 @@ mod tests {
     }
 
     #[test]
+    fn unknown_absolute_index_clears_every_tracked_state_in_its_possible_range() {
+        let instruction = decode_bytes(&[0x9D, 0x50, 0x05]).unwrap();
+        let mut state = ResetTraceState::at(0xC100, ActivationId(0));
+        state.set_accumulator(Some(0x7A));
+        state.write_memory(PENDING_SHARED_MENU_REQUEST_STATE, Some(0x03));
+        let mut open_facts = BTreeSet::new();
+
+        apply_data_effect(
+            &instruction,
+            &mut state,
+            FIXED_PRG_BANK,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &mut open_facts,
+        )
+        .unwrap();
+
+        assert_eq!(state.read_memory(PENDING_SHARED_MENU_REQUEST_STATE), None);
+        assert!(open_facts.is_empty());
+    }
+
+    #[test]
+    fn source_bound_absolute_index_range_preserves_disjoint_control_state() {
+        let instruction = decode_bytes(&[0x9D, 0x50, 0x05]).unwrap();
+        let mut state = ResetTraceState::at(0xC100, ActivationId(0));
+        state.set_accumulator(Some(0x7A));
+        state.write_memory(PENDING_SHARED_MENU_REQUEST_STATE, Some(0x03));
+        let bounds = synthetic_absolute_indexed_destination_bounds(
+            (FIXED_PRG_BANK, 0xC100),
+            vec![0x0550..=0x05B4],
+        );
+        let mut open_facts = BTreeSet::new();
+
+        apply_data_effect(
+            &instruction,
+            &mut state,
+            FIXED_PRG_BANK,
+            &BTreeMap::new(),
+            &bounds,
+            &mut open_facts,
+        )
+        .unwrap();
+
+        assert_eq!(
+            state.read_memory(PENDING_SHARED_MENU_REQUEST_STATE),
+            Some(0x03)
+        );
+        assert!(open_facts.is_empty());
+    }
+
+    #[test]
+    fn unknown_absolute_indexed_rmw_clears_every_tracked_state_in_its_possible_range() {
+        let instruction = decode_bytes(&[0x1E, 0x50, 0x05]).unwrap();
+        let mut state = ResetTraceState::at(0xC100, ActivationId(0));
+        state.write_memory(PENDING_SHARED_MENU_REQUEST_STATE, Some(0x03));
+        let mut open_facts = BTreeSet::new();
+
+        apply_data_effect(
+            &instruction,
+            &mut state,
+            FIXED_PRG_BANK,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &mut open_facts,
+        )
+        .unwrap();
+
+        assert_eq!(state.read_memory(PENDING_SHARED_MENU_REQUEST_STATE), None);
+        assert!(open_facts.is_empty());
+    }
+
+    #[test]
     fn unbound_unknown_indirect_write_remains_open_and_clobbers_bank_state() {
         let instruction = decode_bytes(&[0x91, 0x02]).unwrap();
         let mut state = ResetTraceState::at(0xC100, ActivationId(0));
@@ -2149,6 +2456,7 @@ mod tests {
             &instruction,
             &mut state,
             FIXED_PRG_BANK,
+            &BTreeMap::new(),
             &BTreeMap::new(),
             &mut open_facts,
         )
@@ -2451,8 +2759,8 @@ mod tests {
                         0x30, 0xC1, 0x40, 0xC1, // inline target table
                     ],
                 ),
-                (0xC130, &[0xE6, 0x24, 0x60]),
-                (0xC140, &[0xE6, 0x24, 0x60]),
+                (0xC130, &[0xE6, 0x24, 0xEE, 0xCC, 0x05, 0x60]),
+                (0xC140, &[0xE6, 0x24, 0xEE, 0xCC, 0x05, 0x60]),
                 (
                     INLINE_POINTER_DISPATCH_ADDRESS,
                     &INLINE_POINTER_DISPATCH_CODE,
@@ -2466,7 +2774,10 @@ mod tests {
             BTreeMap::from([(
                 (FIXED_PRG_BANK, 0xC117),
                 InlineDispatchSelectorBounds::from_handler_table(BTreeSet::from([0x00, 0x01]))
-                    .with_selector_memory_address(OUTER_SCREEN_STATE),
+                    .with_selector_memory_addresses([
+                        OUTER_SCREEN_STATE,
+                        PENDING_SHARED_MENU_REQUEST_STATE,
+                    ]),
             )]),
         );
 
@@ -2480,6 +2791,22 @@ mod tests {
             trace
                 .control_state_write_values()
                 .get(&(FIXED_PRG_BANK, 0xC140, OUTER_SCREEN_STATE)),
+            Some(&Some(BTreeSet::from([0x02])))
+        );
+        assert_eq!(
+            trace.control_state_write_values().get(&(
+                FIXED_PRG_BANK,
+                0xC132,
+                PENDING_SHARED_MENU_REQUEST_STATE,
+            )),
+            Some(&Some(BTreeSet::from([0x01])))
+        );
+        assert_eq!(
+            trace.control_state_write_values().get(&(
+                FIXED_PRG_BANK,
+                0xC142,
+                PENDING_SHARED_MENU_REQUEST_STATE,
+            )),
             Some(&Some(BTreeSet::from([0x02])))
         );
         assert!(trace.open_fact_descriptions().is_empty());
@@ -2768,6 +3095,7 @@ mod tests {
             0xC100,
             [(0x00, 0x06)],
             &selector_bounds,
+            &BTreeMap::new(),
             &BTreeMap::new(),
         )
         .unwrap();

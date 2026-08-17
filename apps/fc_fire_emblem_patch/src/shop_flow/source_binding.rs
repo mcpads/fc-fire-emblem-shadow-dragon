@@ -4,6 +4,7 @@ use super::*;
 pub(crate) struct SharedMenuControllerSource {
     dispatch_call: u16,
     state_address: u16,
+    handler_targets: [u16; 7],
 }
 
 impl SharedMenuControllerSource {
@@ -13,6 +14,10 @@ impl SharedMenuControllerSource {
 
     pub(crate) fn state_address(&self) -> u16 {
         self.state_address
+    }
+
+    pub(crate) fn handler_target(&self, state: u8) -> Option<u16> {
+        self.handler_targets.get(usize::from(state)).copied()
     }
 }
 
@@ -34,6 +39,7 @@ pub(crate) fn bind_shared_menu_controller_source(rom: &Rom) -> Result<SharedMenu
     Ok(SharedMenuControllerSource {
         dispatch_call: 0x9254,
         state_address: MENU_CONTROLLER_STATE_ADDRESS,
+        handler_targets: MENU_CONTROLLER_HANDLERS,
     })
 }
 

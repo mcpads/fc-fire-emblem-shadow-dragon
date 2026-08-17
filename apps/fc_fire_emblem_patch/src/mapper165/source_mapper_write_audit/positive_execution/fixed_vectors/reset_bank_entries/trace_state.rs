@@ -2,8 +2,8 @@ use std::ops::RangeInclusive;
 
 use super::super::super::control_state::{
     COMPOSITE_SCREEN_STATE, DIALOGUE_OR_SOUND_STATE, FIXED_SCHEDULER_STATE, MAIN_STATE,
-    MAP_DIALOGUE_OUTER_STATE, OUTER_SCREEN_STATE, PRG_BANK_SHADOW, SHARED_MENU_STATE,
-    TITLE_ANIMATION_STATE, TITLE_STATE,
+    MAP_DIALOGUE_OUTER_STATE, OUTER_SCREEN_STATE, PENDING_SHARED_MENU_REQUEST_STATE,
+    PRG_BANK_SHADOW, SHARED_MENU_STATE, TITLE_ANIMATION_STATE, TITLE_STATE,
 };
 
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
@@ -165,7 +165,7 @@ impl ResetTraceMemory {
         TITLE_ANIMATION_STATE,
         0x05C6,
         0x05C7,
-        0x05CC,
+        PENDING_SHARED_MENU_REQUEST_STATE,
         MAP_DIALOGUE_OUTER_STATE,
         SHARED_MENU_STATE,
         COMPOSITE_SCREEN_STATE,
@@ -190,7 +190,7 @@ impl ResetTraceMemory {
             TITLE_ANIMATION_STATE => self.title_animation_state_0587.clone(),
             0x05C6 => self.temporary_sprite_prg_bank_05c6.clone(),
             0x05C7 => self.requested_prg_bank_05c7.clone(),
-            0x05CC => self.pending_state_request_05cc.clone(),
+            PENDING_SHARED_MENU_REQUEST_STATE => self.pending_state_request_05cc.clone(),
             MAP_DIALOGUE_OUTER_STATE => self.outer_state_05db.clone(),
             SHARED_MENU_STATE => self.menu_state_05de.clone(),
             COMPOSITE_SCREEN_STATE => self.composite_state_05e8.clone(),
@@ -217,7 +217,7 @@ impl ResetTraceMemory {
             TITLE_ANIMATION_STATE => self.title_animation_state_0587 = value,
             0x05C6 => self.temporary_sprite_prg_bank_05c6 = value,
             0x05C7 => self.requested_prg_bank_05c7 = value,
-            0x05CC => self.pending_state_request_05cc = value,
+            PENDING_SHARED_MENU_REQUEST_STATE => self.pending_state_request_05cc = value,
             MAP_DIALOGUE_OUTER_STATE => self.outer_state_05db = value,
             SHARED_MENU_STATE => self.menu_state_05de = value,
             COMPOSITE_SCREEN_STATE => self.composite_state_05e8 = value,

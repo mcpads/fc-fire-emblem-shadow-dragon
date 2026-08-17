@@ -14,6 +14,7 @@ mod chapter_map_loader;
 mod control_state;
 mod fixed_scheduler;
 mod fixed_vectors;
+mod indexed_write_destinations;
 mod screen_state_dispatches;
 mod shared_menu_request;
 mod state_accesses;
@@ -23,6 +24,7 @@ use chapter_map_loader::{CHAPTER_MAP_INDIRECT_WRITE_SITE, bind_chapter_map_loade
 use control_state::{ObservedControlStateWrites, merge_observed_control_state_writes};
 use fixed_scheduler::bind_fixed_scheduler_execution;
 use fixed_vectors::bind_fixed_vector_execution;
+use indexed_write_destinations::bind_pending_request_disjoint_indexed_writes;
 use screen_state_dispatches::bind_source_screen_state_dispatches;
 use shared_menu_request::bind_shared_menu_execution_source;
 pub(super) use state_accesses::PositiveStateAccess;
@@ -204,6 +206,7 @@ pub(super) fn bind_source_positive_execution_graph(
     let shared_menu_controller = crate::shop_flow::bind_shared_menu_controller_source(source)?;
     let shared_menu = bind_shared_menu_execution_source(source, &shared_menu_controller)?;
     let screen_state_dispatches = bind_source_screen_state_dispatches(source)?;
+    let absolute_indexed_write_bounds = bind_pending_request_disjoint_indexed_writes(source)?;
     for (&site, destination) in shared_menu.indirect_write_destinations() {
         ensure!(
             source_bound_indirect_destinations
@@ -239,6 +242,7 @@ pub(super) fn bind_source_positive_execution_graph(
         screen_state_dispatches.selector_memory_addresses(),
         &fixed_scheduler_entry_contexts,
         &source_bound_indirect_destinations,
+        &absolute_indexed_write_bounds,
     )?;
     ensure!(
         fixed_vectors

@@ -14,9 +14,12 @@ use crate::{
     typed_source::decode_rp2a03_sequence,
 };
 
-use super::control_state::ObservedControlStateWrites;
-use super::fixed_vectors::{InlineDispatchSelectorBounds, trace_fixed_scheduler_contexts};
-use super::shared_menu_request::SharedMenuExecutionSource;
+use super::{
+    control_state::ObservedControlStateWrites,
+    fixed_vectors::{InlineDispatchSelectorBounds, trace_fixed_scheduler_contexts},
+    indexed_write_destinations::AbsoluteIndexedWriteDestinationBounds,
+    shared_menu_request::SharedMenuExecutionSource,
+};
 
 const SOURCE_PRG_BANK_BYTE_COUNT: usize = 16 * 1024;
 const FIXED_PRG_BANK: u8 = 0x0F;
@@ -161,6 +164,7 @@ pub(super) fn bind_fixed_scheduler_execution(
     screen_state_selector_memory_addresses: &BTreeMap<(u8, u16), u16>,
     entry_contexts: &BTreeSet<(u8, u8)>,
     indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
+    absolute_indexed_write_bounds: &BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds>,
 ) -> Result<FixedSchedulerExecution> {
     source.verify_supported_japanese()?;
     let table_selector_domain = (0..FIXED_SCHEDULER_STATE_COUNT).collect::<BTreeSet<_>>();
@@ -260,7 +264,12 @@ pub(super) fn bind_fixed_scheduler_execution(
             InlineDispatchSelectorBounds::from_source_producers(
                 shared_menu.active_request_states().clone(),
             )
-            .with_selector_memory_address(shared_menu.selector_memory_address()),
+            .with_selector_memory_addresses(
+                shared_menu
+                    .coherent_dispatch_memory_addresses()
+                    .iter()
+                    .copied(),
+            ),
         ),
     ]);
     for (&site, selectors) in screen_state_selector_domains {
@@ -292,6 +301,7 @@ pub(super) fn bind_fixed_scheduler_execution(
         positive_entry_contexts.iter().copied(),
         &inline_dispatch_selector_bounds,
         indirect_write_destination_bounds,
+        absolute_indexed_write_bounds,
     )?;
     let observed_scheduler_contexts =
         handler_trace.inline_dispatch_contexts(FIXED_PRG_BANK, FIXED_SCHEDULER_DISPATCH_CALL);
