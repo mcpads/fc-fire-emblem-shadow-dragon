@@ -80,11 +80,7 @@ pub(super) fn build_routines(
                 Instruction::Rts,
             ],
         )?,
-        build_chr_routine(
-            "PPU $0000 FD CHR bank selection",
-            SELECT_LEFT_FD_CHR_BANK_ADDRESS,
-            0,
-        )?,
+        build_left_fd_chr_bank_selection_routine()?,
         assemble_routine(
             "selected MMC3 register writer",
             SELECT_REGISTER_ROUTINE_ADDRESS,
@@ -235,6 +231,14 @@ fn build_chr_routine(
             Instruction::Plp,
             Instruction::Rts,
         ],
+    )
+}
+
+pub(super) fn build_left_fd_chr_bank_selection_routine() -> Result<AssembledRoutine> {
+    build_chr_routine(
+        "PPU $0000 FD CHR bank selection",
+        SELECT_LEFT_FD_CHR_BANK_ADDRESS,
+        0,
     )
 }
 

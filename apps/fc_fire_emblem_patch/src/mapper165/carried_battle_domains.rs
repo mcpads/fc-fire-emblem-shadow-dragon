@@ -8,6 +8,8 @@
 //! once, and verifies the cumulative runtime after the two intentional global
 //! integration replacements have been applied.
 
+mod chr_supply;
+
 use std::{collections::BTreeSet, fs, path::Path};
 
 use anyhow::{Context, Result, ensure};
@@ -40,6 +42,7 @@ use super::{
         SAFE_ABSTRACT_COLORS_PRG_OFFSET, SOURCE_PAGE_PRG_OFFSET, rasterize_atlas,
     },
 };
+use chr_supply::{BattleChrSupplyPlan, bind_battle_chr_supply};
 
 const EXPECTED_CUMULATIVE_REPORT_SCHEMA: u8 = 2;
 const FIXED_BANK_BYTE_COUNT: usize = 0x4000;
@@ -82,6 +85,7 @@ pub(crate) struct CarriedBattleDomainPreservation {
     shared_font_regions: Vec<FinalRegionBinding>,
     shared_consumer_regions: Vec<FinalRegionBinding>,
     shared_consumer_route_binding_ids: Vec<&'static str>,
+    shared_sprite_chr_supply: BattleChrSupplyPlan,
     all_translation_inputs_rebound: bool,
     all_storage_regions_rebound: bool,
     shared_font_supply_rebound: bool,
@@ -256,6 +260,8 @@ pub(crate) fn inspect_carried_battle_domains(
         &codebook,
     )?;
     let shared_consumer_regions = bind_shared_consumer_route(&inputs)?;
+    let shared_sprite_chr_supply =
+        bind_battle_chr_supply(inputs.source, inputs.cumulative, inputs.integrated)?;
     let shared_consumer_route_binding_ids = vec![
         "04:800F:guard_final_battle_dialogue_cache",
         "04:BF40:refresh_battle_dialogue_cache",
@@ -332,6 +338,7 @@ pub(crate) fn inspect_carried_battle_domains(
         shared_font_regions,
         shared_consumer_regions,
         shared_consumer_route_binding_ids,
+        shared_sprite_chr_supply,
         all_translation_inputs_rebound: true,
         all_storage_regions_rebound: true,
         shared_font_supply_rebound: true,

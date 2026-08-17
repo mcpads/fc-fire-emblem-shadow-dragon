@@ -177,7 +177,7 @@ pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) output_path: Option<&'a Path>,
 }
 
-pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 27;
+pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 28;
 
 pub(crate) struct FullTranslationInstallSummary {
     pub(crate) report_sha1: String,

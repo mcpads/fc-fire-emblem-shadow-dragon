@@ -341,6 +341,24 @@ pub(super) fn immediate_left_fd_writer_addresses() -> BTreeSet<u16> {
         .collect()
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct ImmediateLeftFdWriterSpec {
+    pub(super) role: &'static str,
+    pub(super) writer_address: u16,
+    pub(super) source_page: u8,
+}
+
+pub(super) fn immediate_left_fd_writer_specs() -> Vec<ImmediateLeftFdWriterSpec> {
+    IMMEDIATE_LEFT_FD_WRITERS
+        .iter()
+        .map(|writer| ImmediateLeftFdWriterSpec {
+            role: writer.role,
+            writer_address: writer.writer_address,
+            source_page: writer.source_page,
+        })
+        .collect()
+}
+
 fn verify_same_accumulator_group(source_rom: &Rom, group: &SameAccumulatorGroup) -> Result<()> {
     let instructions = group
         .registers
