@@ -1,7 +1,8 @@
 //! 최종 패치 파이프라인의 명령행 인자와 파일 입출력 어댑터다.
 //!
 //! 이 모듈은 경로와 플래그를 도메인 입력 구조로 옮기고 결과를 출력할 뿐이다.
-//! 원천 결속, 페이지 선택, ROM 쓰기와 합격 판정은 각 Rust 라이브러리가 소유한다.
+//! 원천 결속, 페이지 선택, ROM 바이트 생성과 합격 판정은 각 Rust 라이브러리가
+//! 소유하고, 이 모듈은 검증된 바이트의 경로 충돌 검사·쓰기·read-back만 맡는다.
 
 use std::path::PathBuf;
 
@@ -9,6 +10,10 @@ use anyhow::Result;
 use clap::Args;
 
 use crate::{full_translation_install, mapper165, translation_coverage};
+
+mod artifact_output;
+
+use artifact_output::write_full_translation_artifacts;
 
 #[derive(Debug, Args)]
 pub(crate) struct AnalyzeTranslationCoverageCommand {
@@ -178,7 +183,7 @@ pub(crate) struct PlanFullTranslationInstallationCommand {
 
 impl PlanFullTranslationInstallationCommand {
     pub(crate) fn execute(self) -> Result<()> {
-        let summary = full_translation_install::plan_full_translation_installation(
+        let artifacts = full_translation_install::plan_full_translation_installation(
             full_translation_install::FullTranslationInstallInputs {
                 source_path: &self.source,
                 main_dialogue_workspace_path: &self.main_dialogue_workspace,
@@ -202,10 +207,18 @@ impl PlanFullTranslationInstallationCommand {
                 current_candidate_path: &self.current_candidate,
                 current_build_report_path: &self.current_build_report,
                 final_runtime_evidence_path: self.final_runtime_evidence.as_deref(),
-                report_path: &self.report,
-                output_path: self.output.as_deref(),
+                output_will_be_emitted: self.output.is_some(),
             },
         )?;
+        write_full_translation_artifacts(
+            self.output.as_deref(),
+            &self.report,
+            &self.source,
+            &self.current_candidate,
+            &artifacts.integrated_image,
+            &artifacts.report_bytes,
+        )?;
+        let summary = artifacts.summary;
         println!("wrote {}", self.report.display());
         println!("report SHA-1: {}", summary.report_sha1);
         println!(

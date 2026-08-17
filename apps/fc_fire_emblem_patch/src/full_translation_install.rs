@@ -1,6 +1,5 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs,
     path::Path,
 };
 
@@ -176,9 +175,8 @@ pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) current_candidate_path: &'a Path,
     pub(crate) current_build_report_path: &'a Path,
     pub(crate) final_runtime_evidence_path: Option<&'a Path>,
-    pub(crate) report_path: &'a Path,
-    /// 선언된 설치 계획의 기술 게이트를 통과한 통합 이미지를 명시적으로 쓸 자리다.
-    pub(crate) output_path: Option<&'a Path>,
+    /// CLI가 검증된 통합 이미지를 실제 파일로 내보낼 예정인지 보고서에 반영한다.
+    pub(crate) output_will_be_emitted: bool,
 }
 
 pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 29;
@@ -196,9 +194,15 @@ pub(crate) struct FullTranslationInstallSummary {
     pub(crate) integrated_image_sha1: String,
 }
 
+pub(crate) struct FullTranslationInstallArtifacts {
+    pub(crate) summary: FullTranslationInstallSummary,
+    pub(crate) integrated_image: Vec<u8>,
+    pub(crate) report_bytes: Vec<u8>,
+}
+
 pub(crate) fn plan_full_translation_installation(
     inputs: FullTranslationInstallInputs<'_>,
-) -> Result<FullTranslationInstallSummary> {
+) -> Result<FullTranslationInstallArtifacts> {
     let rom = Rom::from_path(inputs.source_path)?;
     rom.verify_supported_japanese()?;
     let fixed_string_consumers = inspect_fixed_string_consumers(&rom)?;
@@ -786,7 +790,7 @@ pub(crate) fn plan_full_translation_installation(
             consumer_installation: &consumer_installation,
             required_domains: &REQUIRED_DOMAINS,
             all_required_dialogue_runtime_hook_roles_assembled,
-            output_will_be_emitted: inputs.output_path.is_some(),
+            output_will_be_emitted: inputs.output_will_be_emitted,
         })?;
     let integrated_rom =
         Rom::parse(installed_image.clone()).context("parse integrated translation image")?;
@@ -877,7 +881,7 @@ pub(crate) fn plan_full_translation_installation(
     } else if translation_input_complete
         && runtime_state_storage.source_reservation_selection_complete()
         && all_declared_consumers_statically_accounted
-        && inputs.output_path.is_some()
+        && inputs.output_will_be_emitted
     {
         "bind representative and worst-case declared consumer paths to the exact emitted artifact before returning to the separate whole-game census"
     } else if translation_input_complete
@@ -894,18 +898,7 @@ pub(crate) fn plan_full_translation_installation(
     } else {
         "author Korean for every untranslated Japanese line before recalculating glyph lifetimes; do not emit or run a partial ROM"
     };
-    let rom_emitted = if let Some(path) = inputs.output_path {
-        write_integrated_output(
-            path,
-            inputs.source_path,
-            inputs.current_candidate_path,
-            inputs.report_path,
-            &installed_image,
-        )?;
-        true
-    } else {
-        false
-    };
+    let rom_emitted = inputs.output_will_be_emitted;
     let report = FullTranslationInstallReport {
         schema: FULL_TRANSLATION_REPORT_SCHEMA,
         source_sha1: EXPECTED_SOURCE_SHA1,
@@ -1175,66 +1168,21 @@ pub(crate) fn plan_full_translation_installation(
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize full translation install plan")?;
     report_bytes.push(b'\n');
-    if let Some(parent) = inputs.report_path.parent() {
-        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
-    }
-    fs::write(inputs.report_path, &report_bytes)
-        .with_context(|| format!("write {}", inputs.report_path.display()))?;
 
-    Ok(FullTranslationInstallSummary {
-        report_sha1: sha1_hex(&report_bytes),
-        declared_installation_domain_count: REQUIRED_DOMAIN_COUNT,
-        dialogue_record_count: dialogue.record_ids.len(),
-        dialogue_page_workset_count: display.page_worksets.len(),
-        dialogue_glyph_count: codebook.glyph_count,
-        dialogue_maximum_page_slot_demand: codebook.maximum_page_slot_demand,
-        dialogue_static_page_upper_bound_count: codebook.page_assignments.len(),
-        dialogue_pointer_write_count: encoded_display.pointer_writes.len(),
-        dialogue_planned_storage_byte_count: planned_storage_byte_count,
-        integrated_image_sha1,
+    Ok(FullTranslationInstallArtifacts {
+        summary: FullTranslationInstallSummary {
+            report_sha1: sha1_hex(&report_bytes),
+            declared_installation_domain_count: REQUIRED_DOMAIN_COUNT,
+            dialogue_record_count: dialogue.record_ids.len(),
+            dialogue_page_workset_count: display.page_worksets.len(),
+            dialogue_glyph_count: codebook.glyph_count,
+            dialogue_maximum_page_slot_demand: codebook.maximum_page_slot_demand,
+            dialogue_static_page_upper_bound_count: codebook.page_assignments.len(),
+            dialogue_pointer_write_count: encoded_display.pointer_writes.len(),
+            dialogue_planned_storage_byte_count: planned_storage_byte_count,
+            integrated_image_sha1,
+        },
+        integrated_image: installed_image,
+        report_bytes,
     })
-}
-
-fn write_integrated_output(
-    output_path: &Path,
-    source_path: &Path,
-    current_candidate_path: &Path,
-    report_path: &Path,
-    installed_image: &[u8],
-) -> Result<()> {
-    let resolved_output = resolve_output_identity(output_path)?;
-    for protected_path in [source_path, current_candidate_path, report_path] {
-        let resolved_protected = resolve_output_identity(protected_path)?;
-        ensure!(
-            resolved_output != resolved_protected,
-            "integrated output must not overwrite protected input {}",
-            protected_path.display()
-        );
-    }
-
-    fs::write(output_path, installed_image)
-        .with_context(|| format!("write integrated output {}", output_path.display()))?;
-    let read_back = fs::read(output_path)
-        .with_context(|| format!("read integrated output {}", output_path.display()))?;
-    ensure!(
-        read_back == installed_image,
-        "integrated output read-back differs from the planned image"
-    );
-    Ok(())
-}
-
-fn resolve_output_identity(path: &Path) -> Result<std::path::PathBuf> {
-    if path.exists() {
-        return fs::canonicalize(path)
-            .with_context(|| format!("resolve existing path {}", path.display()));
-    }
-    let name = path
-        .file_name()
-        .context("output or report path has no file name")?;
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent)
-        .with_context(|| format!("create output directory {}", parent.display()))?;
-    Ok(fs::canonicalize(parent)
-        .with_context(|| format!("resolve output directory {}", parent.display()))?
-        .join(name))
 }
