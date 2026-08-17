@@ -3,6 +3,7 @@ mod main_dialogue_graph;
 mod main_dialogue_record;
 mod main_dialogue_state;
 mod main_dialogue_translation_view;
+mod menu_layout;
 mod report;
 mod source_binding;
 mod source_spec;
@@ -18,6 +19,9 @@ use main_dialogue_translation_view::{
 };
 pub(crate) use main_dialogue_translation_view::{
     inspect_main_dialogue_runtime_identities, inspect_main_dialogue_storage,
+};
+pub(crate) use menu_layout::{
+    MainDialogueMenuLayoutBounds, inspect_main_dialogue_menu_layout_bounds,
 };
 pub(crate) use report::*;
 use source_binding::{

@@ -20,6 +20,7 @@ pub use report::ShopFlowSummary;
 use report::*;
 use screen_roles::*;
 use source_binding::*;
+pub(crate) use source_binding::{SharedMenuControllerSource, bind_shared_menu_controller_source};
 use source_spec::*;
 
 pub fn analyze_shop_flow(source_path: &Path, report_path: &Path) -> Result<ShopFlowSummary> {

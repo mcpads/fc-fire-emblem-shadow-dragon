@@ -15,6 +15,7 @@ use crate::{
 };
 
 use super::fixed_vectors::trace_fixed_scheduler_contexts;
+use super::shared_menu_request::SharedMenuExecutionSource;
 
 const SOURCE_PRG_BANK_BYTE_COUNT: usize = 16 * 1024;
 const FIXED_PRG_BANK: u8 = 0x0F;
@@ -144,6 +145,7 @@ impl FixedSchedulerExecution {
 pub(super) fn bind_fixed_scheduler_execution(
     source: &Rom,
     title_state: &TitleStateExecution,
+    shared_menu: &SharedMenuExecutionSource,
     entry_contexts: &BTreeSet<(u8, u8)>,
     indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
 ) -> Result<FixedSchedulerExecution> {
@@ -233,6 +235,10 @@ pub(super) fn bind_fixed_scheduler_execution(
         (
             (MAP_INITIALIZATION_BANK, MAP_INITIALIZATION_DISPATCH_CALL),
             (0..MAP_INITIALIZATION_STATE_COUNT).collect(),
+        ),
+        (
+            (0x0B, shared_menu.dispatch_call()),
+            shared_menu.active_request_states().clone(),
         ),
     ]);
 

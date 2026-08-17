@@ -1,5 +1,36 @@
 use super::*;
 
+#[derive(Debug)]
+pub(crate) struct SharedMenuControllerSource {
+    dispatch_call: u16,
+}
+
+impl SharedMenuControllerSource {
+    pub(crate) fn dispatch_call(&self) -> u16 {
+        self.dispatch_call
+    }
+}
+
+pub(crate) fn bind_shared_menu_controller_source(rom: &Rom) -> Result<SharedMenuControllerSource> {
+    let menu_dispatch = switchable_slice(rom, 0x0B, 0x9251, 20)?;
+    ensure!(
+        menu_dispatch[..6] == [0xAD, 0xDE, 0x05, 0x20, 0x4C, 0xC3],
+        "shared menu-controller dispatcher changed"
+    );
+    let actual_menu_handlers = menu_dispatch[6..]
+        .chunks_exact(2)
+        .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
+        .collect::<Vec<_>>();
+    ensure!(
+        actual_menu_handlers == MENU_CONTROLLER_HANDLERS,
+        "shared menu-controller handler table changed"
+    );
+
+    Ok(SharedMenuControllerSource {
+        dispatch_call: 0x9254,
+    })
+}
+
 pub(super) fn validate_state_tables(rom: &Rom) -> Result<()> {
     let shop_dispatch = switchable_slice(rom, 0x06, 0x99AC, 32)?;
     ensure!(
@@ -15,19 +46,7 @@ pub(super) fn validate_state_tables(rom: &Rom) -> Result<()> {
         "shop outer-state handler table changed"
     );
 
-    let menu_dispatch = switchable_slice(rom, 0x0B, 0x9251, 20)?;
-    ensure!(
-        menu_dispatch[..6] == [0xAD, 0xDE, 0x05, 0x20, 0x4C, 0xC3],
-        "shared menu-controller dispatcher changed"
-    );
-    let actual_menu_handlers = menu_dispatch[6..]
-        .chunks_exact(2)
-        .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
-        .collect::<Vec<_>>();
-    ensure!(
-        actual_menu_handlers == MENU_CONTROLLER_HANDLERS,
-        "shared menu-controller handler table changed"
-    );
+    bind_shared_menu_controller_source(rom)?;
 
     ensure!(
         MENU_CONTROLLER_INDEX_ADDRESS == 0x05CE,
