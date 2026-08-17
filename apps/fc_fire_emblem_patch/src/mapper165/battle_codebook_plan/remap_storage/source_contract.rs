@@ -27,7 +27,7 @@ mod indirect_destinations;
 #[cfg(test)]
 use indirect_destinations::DESTINATION_CLASS_COUNT;
 use indirect_destinations::{
-    EXPECTED_INDIRECT_STORES, IndirectStoreDestinationClass,
+    IndirectStoreDestinationClass, battle_lifetime_reachable_indirect_store_sites,
     bind_indirect_store_destination_classes,
 };
 pub(in crate::mapper165) use indirect_destinations::{
@@ -97,9 +97,7 @@ pub(super) fn bind_battle_storage_source_contract(
             .all(|(_, _, base)| (0x0780..=0x0794).contains(base)),
         "battle lifetime gained an indexed pair-table overlap outside the bounded queue writers"
     );
-    let expected_indirect_stores = EXPECTED_INDIRECT_STORES
-        .into_iter()
-        .collect::<BTreeSet<_>>();
+    let expected_indirect_stores = battle_lifetime_reachable_indirect_store_sites();
     ensure!(
         trace.indirect_stores == expected_indirect_stores,
         "battle lifetime indirect-store catalog changed: expected {expected_indirect_stores:?}, found {:?}",
@@ -418,12 +416,12 @@ pub(super) fn test_model() -> BattleStorageSourceContract {
         indexed_remap_storage_overlap_instruction_count: 1,
         indexed_remap_storage_overlap_catalog_sha1: "indexed".to_owned(),
         direct_unindexed_remap_storage_access_count: 0,
-        indirect_store_instruction_count: EXPECTED_INDIRECT_STORES.len(),
+        indirect_store_instruction_count: battle_lifetime_reachable_indirect_store_sites().len(),
         indirect_store_catalog_sha1: "indirect".to_owned(),
         indirect_store_destination_class_count: DESTINATION_CLASS_COUNT,
         indirect_store_destination_classes: Vec::new(),
         bounded_queue_copy_indirect_store_count: 1,
-        non_queue_indirect_store_count: EXPECTED_INDIRECT_STORES.len() - 1,
+        non_queue_indirect_store_count: battle_lifetime_reachable_indirect_store_sites().len() - 1,
         battle_active_direct_read_count: 1,
         battle_active_direct_write_count: 5,
         battle_active_nonzero_reader_address_hex: "0x05:0x8000".to_owned(),

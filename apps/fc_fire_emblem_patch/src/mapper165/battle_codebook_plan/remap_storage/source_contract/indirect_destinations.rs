@@ -11,7 +11,7 @@ use crate::{rom::Rom, sha1_hex, typed_source::decode_rp2a03_sequence};
 use super::super::super::source_window::source_bytes;
 use super::{REMAP_STORAGE_END, REMAP_STORAGE_START};
 
-pub(super) const EXPECTED_INDIRECT_STORES: [(u8, u16, u8); 26] = [
+const SOURCE_BOUND_INDIRECT_STORE_SITES: [(u8, u16, u8); 26] = [
     (0x04, 0x80E1, 0x06),
     (0x04, 0x811C, 0x06),
     (0x04, 0x816B, 0x06),
@@ -63,6 +63,7 @@ struct DestinationRangeSpec {
 
 struct IndirectStoreClassSpec {
     role: &'static str,
+    reachable_during_battle_lifetime: bool,
     destination_basis: &'static str,
     sites: &'static [(u8, u16, u8)],
     source_regions: &'static [SourceRegionSpec],
@@ -101,6 +102,7 @@ const UNIT_CALCULATION_SITES: [(u8, u16, u8); 2] = [(0x0F, 0xCFF8, 0x08), (0x0F,
 const INDIRECT_STORE_CLASS_SPECS: [IndirectStoreClassSpec; 10] = [
     IndirectStoreClassSpec {
         role: "battle_dialogue_composition_buffers",
+        reachable_during_battle_lifetime: true,
         destination_basis: "selector table 04:$83E8 and forty-byte dialogue record bound",
         sites: &DIALOGUE_BUFFER_SITES,
         source_regions: &[
@@ -129,6 +131,7 @@ const INDIRECT_STORE_CLASS_SPECS: [IndirectStoreClassSpec; 10] = [
     },
     IndirectStoreClassSpec {
         role: "battle_comparison_cells",
+        reachable_during_battle_lifetime: true,
         destination_basis: "seven-entry destination table 05:$87E6 and one-byte store",
         sites: &COMPARISON_CELL_SITES,
         source_regions: &[
@@ -152,6 +155,7 @@ const INDIRECT_STORE_CLASS_SPECS: [IndirectStoreClassSpec; 10] = [
     },
     IndirectStoreClassSpec {
         role: "unit_status_field_transfer",
+        reachable_during_battle_lifetime: true,
         destination_basis: "destination table 05:$9135, four-byte copy, and second pass at +$10",
         sites: &UNIT_STATUS_TRANSFER_SITES,
         source_regions: &[
@@ -185,6 +189,7 @@ const INDIRECT_STORE_CLASS_SPECS: [IndirectStoreClassSpec; 10] = [
     },
     IndirectStoreClassSpec {
         role: "unit_slot_initializer",
+        reachable_during_battle_lifetime: true,
         destination_basis: "two-entry destination table 05:$9431 and four field stores",
         sites: &UNIT_SLOT_INITIALIZER_SITES,
         source_regions: &[
@@ -213,6 +218,7 @@ const INDIRECT_STORE_CLASS_SPECS: [IndirectStoreClassSpec; 10] = [
     },
     IndirectStoreClassSpec {
         role: "combatant_shadow_fields",
+        reachable_during_battle_lifetime: true,
         destination_basis: "three literal pairs in 05:$ADC8..$AE13 and four-byte copies",
         sites: &COMBATANT_SHADOW_SITES,
         source_regions: &[SourceRegionSpec {
@@ -229,6 +235,7 @@ const INDIRECT_STORE_CLASS_SPECS: [IndirectStoreClassSpec; 10] = [
     },
     IndirectStoreClassSpec {
         role: "bounded_battle_copy",
+        reachable_during_battle_lifetime: true,
         destination_basis: "three callers: two $0781 queue copies of 32 or 37 bytes and one forty-byte $79xx dialogue copy",
         sites: &GENERIC_COPY_SITES,
         source_regions: &[
@@ -288,6 +295,7 @@ const INDIRECT_STORE_CLASS_SPECS: [IndirectStoreClassSpec; 10] = [
     },
     IndirectStoreClassSpec {
         role: "battle_state_zero_fill",
+        reachable_during_battle_lifetime: true,
         destination_basis: "literal $0329 destination and $0151-byte count ending at $0479",
         sites: &BATTLE_ZERO_FILL_SITES,
         source_regions: &[
@@ -324,6 +332,7 @@ const INDIRECT_STORE_CLASS_SPECS: [IndirectStoreClassSpec; 10] = [
     },
     IndirectStoreClassSpec {
         role: "fixed_glyph_flags",
+        reachable_during_battle_lifetime: true,
         destination_basis: "all four reachable callers load literal pointer $041E before fixed-bank routine",
         sites: &FIXED_GLYPH_FLAG_SITES,
         source_regions: &[SourceRegionSpec {
@@ -345,6 +354,7 @@ const INDIRECT_STORE_CLASS_SPECS: [IndirectStoreClassSpec; 10] = [
     },
     IndirectStoreClassSpec {
         role: "unit_ui_number_cells",
+        reachable_during_battle_lifetime: false,
         destination_basis: "0B:$8F0E/$8F23 form pointer $0451+X for two or three cells before the fixed-bank writer",
         sites: &UNIT_UI_NUMBER_CELL_SITES,
         source_regions: &[
@@ -381,6 +391,7 @@ const INDIRECT_STORE_CLASS_SPECS: [IndirectStoreClassSpec; 10] = [
     },
     IndirectStoreClassSpec {
         role: "unit_calculation_fields",
+        reachable_during_battle_lifetime: true,
         destination_basis: "fixed pointer loader 0F:$D04E, seven-entry $D077 table, and index bound six",
         sites: &UNIT_CALCULATION_SITES,
         source_regions: &[SourceRegionSpec {
@@ -404,6 +415,18 @@ const INDIRECT_STORE_CLASS_SPECS: [IndirectStoreClassSpec; 10] = [
 
 #[cfg(test)]
 pub(super) const DESTINATION_CLASS_COUNT: usize = INDIRECT_STORE_CLASS_SPECS.len();
+
+pub(super) fn battle_lifetime_reachable_indirect_store_sites() -> BTreeSet<(u8, u16, u8)> {
+    INDIRECT_STORE_CLASS_SPECS
+        .iter()
+        .filter(|spec| spec.reachable_during_battle_lifetime)
+        .flat_map(|spec| spec.sites.iter().copied())
+        .collect()
+}
+
+fn source_bound_indirect_store_sites() -> BTreeSet<(u8, u16, u8)> {
+    SOURCE_BOUND_INDIRECT_STORE_SITES.into_iter().collect()
+}
 
 #[derive(Clone, Debug, Serialize)]
 struct IndirectStoreDestinationRange {
@@ -480,9 +503,7 @@ pub(super) fn bind_indirect_store_destination_classes(
         .iter()
         .flat_map(|spec| spec.sites.iter().copied())
         .collect::<BTreeSet<_>>();
-    let expected_sites = EXPECTED_INDIRECT_STORES
-        .into_iter()
-        .collect::<BTreeSet<_>>();
+    let expected_sites = source_bound_indirect_store_sites();
     ensure!(
         declared_sites == expected_sites,
         "indirect-store destination classes do not partition the exact site catalog"
@@ -588,8 +609,7 @@ pub(in crate::mapper165) fn bind_indirect_write_destination_bounds(
         }
     }
     ensure!(
-        bounds.keys().copied().collect::<BTreeSet<_>>()
-            == EXPECTED_INDIRECT_STORES.into_iter().collect(),
+        bounds.keys().copied().collect::<BTreeSet<_>>() == source_bound_indirect_store_sites(),
         "indirect-write destination bounds do not cover the exact site catalog"
     );
     Ok(bounds)
@@ -659,18 +679,31 @@ mod tests {
             .iter()
             .flat_map(|spec| spec.sites.iter().copied())
             .collect::<BTreeSet<_>>();
-        assert_eq!(
-            classified,
-            EXPECTED_INDIRECT_STORES
-                .into_iter()
-                .collect::<BTreeSet<_>>()
-        );
+        assert_eq!(classified, source_bound_indirect_store_sites());
         assert!(INDIRECT_STORE_CLASS_SPECS.iter().all(|spec| {
             spec.destination_ranges.iter().all(|range| {
                 range.start <= range.end
                     && (range.end < REMAP_STORAGE_START || range.start > REMAP_STORAGE_END)
             })
         }));
+    }
+
+    #[test]
+    fn unit_ui_number_writers_are_source_bound_without_becoming_battle_lifetime_roots() {
+        let source_bound = source_bound_indirect_store_sites();
+        let battle_lifetime = battle_lifetime_reachable_indirect_store_sites();
+
+        assert!(battle_lifetime.is_subset(&source_bound));
+        assert!(
+            UNIT_UI_NUMBER_CELL_SITES
+                .iter()
+                .all(|site| source_bound.contains(site))
+        );
+        assert!(
+            UNIT_UI_NUMBER_CELL_SITES
+                .iter()
+                .all(|site| !battle_lifetime.contains(site))
+        );
     }
 
     #[test]
