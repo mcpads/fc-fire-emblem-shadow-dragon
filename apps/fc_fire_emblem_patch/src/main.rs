@@ -1,4 +1,5 @@
 mod battle_text_workset;
+mod chapter_map_source;
 mod chapter_transition;
 mod chapter_victory;
 mod choice_labels;

@@ -1,17 +1,17 @@
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
-use crate::{rom::HEADER_SIZE, sha1_hex};
+use crate::{
+    chapter_map_source::{
+        EARLY_CHAPTER_MAP_BANK, EARLY_CHAPTER_MAP_COUNT, EARLY_CHAPTER_MAP_POINTER_TABLE,
+        bind_chapter_map_source_records,
+    },
+    rom::HEADER_SIZE,
+    sha1_hex,
+};
 
-const PRG_BANK_SIZE: usize = 16 * 1024;
-const CHAPTER_MAP_BANK: u8 = 0x02;
-const CHAPTER_MAP_POINTER_TABLE_ADDRESS: u16 = 0x8000;
-const CHAPTER_MAP_POINTER_COUNT: usize = 13;
+const CHAPTER_ELEVEN_NUMBER: u8 = 11;
 const CHAPTER_ELEVEN_INDEX: usize = 10;
-const CHAPTER_ELEVEN_MAP_ADDRESS: u16 = 0x9C42;
-const CHAPTER_ELEVEN_HEADER: [u8; 4] = [0x18, 0x1F, 0x0A, 0x00];
-const CHAPTER_ELEVEN_ROW_COUNT: usize = 25;
-const CHAPTER_ELEVEN_COLUMN_COUNT: usize = 32;
 const CASTLE_TILE_CODE: u8 = 0x4B;
 const CASTLE_LABEL_INDEX: u8 = 0x38;
 
@@ -54,64 +54,34 @@ struct MapLocation {
 }
 
 pub(super) fn bind_chapter_eleven_map(prg: &[u8]) -> Result<ChapterMapBinding> {
-    let table_offset = map_prg_offset(CHAPTER_MAP_POINTER_TABLE_ADDRESS)?;
-    let table_end = table_offset + CHAPTER_MAP_POINTER_COUNT * 2;
-    let table = prg
-        .get(table_offset..table_end)
-        .context("chapter map pointer table is outside PRG")?;
-    let pointers = table
-        .chunks_exact(2)
-        .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
-        .collect::<Vec<_>>();
+    let maps = bind_chapter_map_source_records(prg)?;
+    let map = *maps
+        .get(CHAPTER_ELEVEN_INDEX)
+        .context("chapter-eleven map is absent")?;
     ensure!(
-        pointers.len() == CHAPTER_MAP_POINTER_COUNT,
-        "chapter map pointer count changed"
+        map.chapter_number() == CHAPTER_ELEVEN_NUMBER && map.prg_bank() == EARLY_CHAPTER_MAP_BANK,
+        "chapter-eleven map identity changed"
     );
-    ensure!(
-        pointers[CHAPTER_ELEVEN_INDEX] == CHAPTER_ELEVEN_MAP_ADDRESS,
-        "chapter-eleven map pointer changed"
-    );
-
-    let map_offset = map_prg_offset(CHAPTER_ELEVEN_MAP_ADDRESS)?;
-    let header = prg
-        .get(map_offset..map_offset + CHAPTER_ELEVEN_HEADER.len())
-        .context("chapter-eleven map header is outside PRG")?;
-    ensure!(
-        header == CHAPTER_ELEVEN_HEADER,
-        "chapter-eleven map header changed"
-    );
-    let row_count = usize::from(header[0]) + 1;
-    let column_count = usize::from(header[1]) + 1;
-    ensure!(
-        row_count == CHAPTER_ELEVEN_ROW_COUNT,
-        "chapter-eleven row count changed"
-    );
-    ensure!(
-        column_count == CHAPTER_ELEVEN_COLUMN_COUNT,
-        "chapter-eleven column count changed"
-    );
-    let payload_start = map_offset + CHAPTER_ELEVEN_HEADER.len();
-    let payload_len = row_count
-        .checked_mul(column_count)
-        .context("chapter-eleven map dimensions overflow")?;
-    let payload = prg
-        .get(payload_start..payload_start + payload_len)
-        .context("chapter-eleven map payload is outside PRG")?;
-    let victory_tiles = bind_victory_tiles(payload, column_count)?;
+    let storage = map.storage_bytes(prg)?;
+    let payload = storage
+        .get(4..)
+        .context("chapter-eleven map payload is absent")?;
+    let victory_tiles = bind_victory_tiles(payload, map.column_count())?;
+    let header = map.header();
 
     Ok(ChapterMapBinding {
-        chapter_number_one_based: 11,
+        chapter_number_one_based: CHAPTER_ELEVEN_NUMBER,
         chapter_index_zero_based: CHAPTER_ELEVEN_INDEX as u8,
-        pointer_table: map_location(CHAPTER_MAP_POINTER_TABLE_ADDRESS),
-        pointer_count: pointers.len(),
-        map_pointer: CHAPTER_ELEVEN_MAP_ADDRESS,
-        map_pointer_hex: format!("0x{CHAPTER_ELEVEN_MAP_ADDRESS:04X}"),
-        map_file_offset: HEADER_SIZE + map_offset,
-        map_file_offset_hex: format!("0x{:05X}", HEADER_SIZE + map_offset),
+        pointer_table: map_location(EARLY_CHAPTER_MAP_BANK, EARLY_CHAPTER_MAP_POINTER_TABLE),
+        pointer_count: EARLY_CHAPTER_MAP_COUNT,
+        map_pointer: map.cpu_address(),
+        map_pointer_hex: format!("0x{:04X}", map.cpu_address()),
+        map_file_offset: HEADER_SIZE + map.prg_offset(),
+        map_file_offset_hex: format!("0x{:05X}", HEADER_SIZE + map.prg_offset()),
         maximum_row_index: header[0],
         maximum_column_index: header[1],
-        row_count,
-        column_count,
+        row_count: map.row_count(),
+        column_count: map.column_count(),
         map_payload_sha1: sha1_hex(payload),
         victory_tiles,
     })
@@ -145,18 +115,10 @@ fn bind_victory_tiles(payload: &[u8], column_count: usize) -> Result<Vec<MapTile
     Ok(tiles)
 }
 
-fn map_prg_offset(cpu_address: u16) -> Result<usize> {
-    ensure!(
-        (0x8000..0xC000).contains(&cpu_address),
-        "chapter map address is outside 0x8000..0xBFFF"
-    );
-    Ok(usize::from(CHAPTER_MAP_BANK) * PRG_BANK_SIZE + usize::from(cpu_address - 0x8000))
-}
-
-fn map_location(cpu_address: u16) -> MapLocation {
+fn map_location(prg_bank: u8, cpu_address: u16) -> MapLocation {
     MapLocation {
-        prg_bank: CHAPTER_MAP_BANK,
-        prg_bank_hex: format!("0x{CHAPTER_MAP_BANK:02X}"),
+        prg_bank,
+        prg_bank_hex: format!("0x{prg_bank:02X}"),
         cpu_address,
         cpu_address_hex: format!("0x{cpu_address:04X}"),
     }
@@ -165,23 +127,13 @@ fn map_location(cpu_address: u16) -> MapLocation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rom::PRG_SIZE;
+    use crate::{chapter_map_source::install_chapter_map_source_fixture, rom::PRG_SIZE};
 
     fn fixture_prg() -> Vec<u8> {
         let mut prg = vec![0; PRG_SIZE];
-        let pointer_table_offset = map_prg_offset(CHAPTER_MAP_POINTER_TABLE_ADDRESS).unwrap();
-        for index in 0..CHAPTER_MAP_POINTER_COUNT {
-            let pointer = if index == CHAPTER_ELEVEN_INDEX {
-                CHAPTER_ELEVEN_MAP_ADDRESS
-            } else {
-                0x9000 + index as u16 * 0x10
-            };
-            prg[pointer_table_offset + index * 2..pointer_table_offset + index * 2 + 2]
-                .copy_from_slice(&pointer.to_le_bytes());
-        }
-        let map_offset = map_prg_offset(CHAPTER_ELEVEN_MAP_ADDRESS).unwrap();
-        prg[map_offset..map_offset + 4].copy_from_slice(&CHAPTER_ELEVEN_HEADER);
-        let payload_start = map_offset + 4;
+        install_chapter_map_source_fixture(&mut prg);
+        let map = bind_chapter_map_source_records(&prg).unwrap()[CHAPTER_ELEVEN_INDEX];
+        let payload_start = map.prg_offset() + 4;
         prg[payload_start + 8 * 32 + 5] = CASTLE_TILE_CODE;
         prg[payload_start + 8 * 32 + 6] = CASTLE_TILE_CODE;
         prg
@@ -205,7 +157,8 @@ mod tests {
     #[test]
     fn fails_closed_when_a_victory_tile_moves() {
         let mut prg = fixture_prg();
-        let map_offset = map_prg_offset(CHAPTER_ELEVEN_MAP_ADDRESS).unwrap() + 4;
+        let map_offset =
+            bind_chapter_map_source_records(&prg).unwrap()[CHAPTER_ELEVEN_INDEX].prg_offset() + 4;
         prg[map_offset + 8 * 32 + 5] = 0;
         prg[map_offset + 8 * 32 + 7] = CASTLE_TILE_CODE;
         assert!(
