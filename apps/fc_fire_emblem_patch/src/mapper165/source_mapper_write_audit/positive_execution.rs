@@ -22,7 +22,8 @@ pub(super) struct SourcePositiveExecutionGraph {
     hardware_vector_slot_count: usize,
     hardware_vector_root_count: usize,
     fixed_vector_instruction_count: usize,
-    fixed_vector_open_control_edge_count: usize,
+    fixed_vector_bound_switchable_roots: Vec<String>,
+    fixed_vector_open_control_edges: Vec<String>,
 }
 
 impl SourcePositiveExecutionGraph {
@@ -54,8 +55,12 @@ impl SourcePositiveExecutionGraph {
         self.fixed_vector_instruction_count
     }
 
-    pub(super) fn fixed_vector_open_control_edge_count(&self) -> usize {
-        self.fixed_vector_open_control_edge_count
+    pub(super) fn fixed_vector_bound_switchable_roots(&self) -> &[String] {
+        &self.fixed_vector_bound_switchable_roots
+    }
+
+    pub(super) fn fixed_vector_open_control_edges(&self) -> &[String] {
+        &self.fixed_vector_open_control_edges
     }
 
     pub(super) fn mapped_instruction_starts(&self) -> Result<BTreeSet<MappedPrgLocation>> {
@@ -79,6 +84,15 @@ pub(super) fn bind_source_positive_execution_graph(
     let dialogue_interrupt_audio =
         crate::full_translation_install::bind_dialogue_interrupt_audio_mapper_write_slice(source)?;
     let fixed_vectors = bind_fixed_vector_execution(source)?;
+    ensure!(
+        fixed_vectors
+            .bound_switchable_roots()
+            .iter()
+            .all(|root| dialogue_interrupt_audio
+                .reachable_instruction_starts
+                .contains(root)),
+        "a fixed-vector switchable root is not owned by the existing dialogue, interrupt, and audio execution graph"
+    );
 
     let mut instruction_roles = BTreeMap::<_, BTreeSet<_>>::new();
     for (role, starts) in [
@@ -121,7 +135,8 @@ pub(super) fn bind_source_positive_execution_graph(
         hardware_vector_slot_count: fixed_vectors.vector_slot_count(),
         hardware_vector_root_count: fixed_vectors.unique_vector_root_count(),
         fixed_vector_instruction_count: fixed_vectors.reachable_instruction_starts().len(),
-        fixed_vector_open_control_edge_count: fixed_vectors.open_control_edges().len(),
+        fixed_vector_bound_switchable_roots: fixed_vectors.bound_switchable_root_descriptions(),
+        fixed_vector_open_control_edges: fixed_vectors.open_control_edge_descriptions(),
     })
 }
 

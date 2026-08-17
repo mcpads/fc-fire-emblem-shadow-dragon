@@ -46,7 +46,8 @@ pub(super) struct SourceMapperWriteAudit {
     hardware_vector_slot_count: usize,
     hardware_vector_root_count: usize,
     fixed_vector_execution_instruction_count: usize,
-    fixed_vector_open_control_edge_count: usize,
+    fixed_vector_bound_switchable_roots: Vec<String>,
+    fixed_vector_open_control_edges: Vec<String>,
     positive_execution_instruction_count: usize,
     rooted_instruction_interior_candidate_count: usize,
     rooted_start_interior_conflict_count: usize,
@@ -213,8 +214,12 @@ pub(super) fn audit_source_mapper_writes(source: &Rom) -> Result<SourceMapperWri
         hardware_vector_root_count: positive_execution.hardware_vector_root_count(),
         fixed_vector_execution_instruction_count: positive_execution
             .fixed_vector_instruction_count(),
-        fixed_vector_open_control_edge_count: positive_execution
-            .fixed_vector_open_control_edge_count(),
+        fixed_vector_bound_switchable_roots: positive_execution
+            .fixed_vector_bound_switchable_roots()
+            .to_vec(),
+        fixed_vector_open_control_edges: positive_execution
+            .fixed_vector_open_control_edges()
+            .to_vec(),
         positive_execution_instruction_count: rooted_instructions.instruction_count(),
         rooted_instruction_interior_candidate_count: partition.rooted_instruction_interiors.len(),
         rooted_start_interior_conflict_count: rooted_instructions.start_interior_conflicts().len(),

@@ -243,7 +243,7 @@ pub fn build_mapper165_parity_probe(
     let relocated_source_chr_sha1 = sha1_hex(&output_rom.chr()[OUTPUT_CHR_PADDING_SIZE..]);
     let output_chr_sha1 = sha1_hex(output_rom.chr());
     let report = Mapper165ParityReport {
-        schema: 6,
+        schema: 7,
         source_sha1: EXPECTED_SOURCE_SHA1,
         output_sha1: output_sha1.clone(),
         source_mapper: source_rom.mapper(),

@@ -21,6 +21,10 @@ const RESET_RAM_CLEAR_CODE: [u8; 18] = [
     0x10, 0xF7,
 ];
 
+mod special_bank_call;
+
+use special_bank_call::bind_audio_bank_call;
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(super) enum FixedVectorOpenControlEdge {
     SwitchableTarget { instruction: u16, target: u16 },
@@ -33,6 +37,7 @@ pub(super) struct FixedVectorExecution {
     vector_bindings: Vec<(u16, u16)>,
     reachable_instruction_starts: BTreeSet<(u8, u16)>,
     open_control_edges: BTreeSet<FixedVectorOpenControlEdge>,
+    bound_switchable_roots: BTreeSet<(u8, u16)>,
     indirect_write_sites_below_mapper_space: BTreeSet<(u8, u16, u8)>,
 }
 
@@ -53,8 +58,41 @@ impl FixedVectorExecution {
         &self.reachable_instruction_starts
     }
 
+    #[cfg(test)]
     pub(super) fn open_control_edges(&self) -> &BTreeSet<FixedVectorOpenControlEdge> {
         &self.open_control_edges
+    }
+
+    pub(super) fn open_control_edge_descriptions(&self) -> Vec<String> {
+        self.open_control_edges
+            .iter()
+            .map(|edge| match edge {
+                FixedVectorOpenControlEdge::SwitchableTarget {
+                    instruction,
+                    target,
+                } => format!("switchable_target@0F:{instruction:04X}->${target:04X}"),
+                FixedVectorOpenControlEdge::IndirectTarget { instruction } => {
+                    format!("indirect_target@0F:{instruction:04X}")
+                }
+                FixedVectorOpenControlEdge::InlinePointerDispatch {
+                    instruction,
+                    table_start,
+                } => format!(
+                    "inline_pointer_dispatch@0F:{instruction:04X}[table=${table_start:04X}]"
+                ),
+            })
+            .collect()
+    }
+
+    pub(super) fn bound_switchable_roots(&self) -> &BTreeSet<(u8, u16)> {
+        &self.bound_switchable_roots
+    }
+
+    pub(super) fn bound_switchable_root_descriptions(&self) -> Vec<String> {
+        self.bound_switchable_roots
+            .iter()
+            .map(|(bank, address)| format!("{bank:02X}:${address:04X}"))
+            .collect()
     }
 
     pub(super) fn indirect_write_sites_below_mapper_space(&self) -> &BTreeSet<(u8, u16, u8)> {
@@ -153,6 +191,7 @@ pub(super) fn bind_fixed_vector_execution(source: &Rom) -> Result<FixedVectorExe
         }
     }
 
+    let bound_switchable_roots = bind_audio_bank_call(source, &mut open_control_edges)?;
     let indirect_write_sites_below_mapper_space =
         if reachable_instruction_starts.contains(&(FIXED_PRG_BANK, RESET_RAM_CLEAR_WRITER)) {
             BTreeSet::from([bind_reset_ram_clear(source)?])
@@ -164,6 +203,7 @@ pub(super) fn bind_fixed_vector_execution(source: &Rom) -> Result<FixedVectorExe
         vector_bindings,
         reachable_instruction_starts,
         open_control_edges,
+        bound_switchable_roots,
         indirect_write_sites_below_mapper_space,
     })
 }
@@ -249,6 +289,7 @@ mod tests {
             &BTreeSet::from([(FIXED_PRG_BANK, 0xC100)])
         );
         assert!(execution.open_control_edges().is_empty());
+        assert!(execution.bound_switchable_roots().is_empty());
         assert!(
             execution
                 .indirect_write_sites_below_mapper_space()
@@ -323,6 +364,51 @@ mod tests {
         let error = bind_fixed_vector_execution(&source).unwrap_err();
 
         assert!(error.to_string().contains("unbound switchable or RAM"));
+    }
+
+    #[test]
+    fn fixed_audio_call_resolves_to_the_existing_bank_0e_entry() {
+        let source = synthetic_source(
+            &[(
+                special_bank_call::SOURCE_AUDIO_BANK_CALL_START,
+                &special_bank_call::SOURCE_AUDIO_BANK_CALL_CODE,
+            )],
+            special_bank_call::SOURCE_AUDIO_BANK_CALL_START,
+        );
+
+        let execution = bind_fixed_vector_execution(&source).unwrap();
+
+        assert_eq!(
+            execution.bound_switchable_roots(),
+            &BTreeSet::from([(
+                special_bank_call::SOURCE_AUDIO_BANK,
+                special_bank_call::SOURCE_AUDIO_ENTRY,
+            )])
+        );
+        assert!(!execution.open_control_edges().contains(
+            &FixedVectorOpenControlEdge::SwitchableTarget {
+                instruction: special_bank_call::SOURCE_AUDIO_CALL_SITE,
+                target: special_bank_call::SOURCE_AUDIO_ENTRY,
+            }
+        ));
+    }
+
+    #[test]
+    fn fixed_audio_call_rejects_a_changed_bank_selector() {
+        let mut changed = special_bank_call::SOURCE_AUDIO_BANK_CALL_CODE;
+        changed[1] = 0x0F;
+        let source = synthetic_source(
+            &[(special_bank_call::SOURCE_AUDIO_BANK_CALL_START, &changed)],
+            special_bank_call::SOURCE_AUDIO_BANK_CALL_START,
+        );
+
+        let error = bind_fixed_vector_execution(&source).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("audio bank-call sequence changed")
+        );
     }
 
     #[test]
