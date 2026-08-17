@@ -7,6 +7,13 @@ const SOURCE_PRG_BANK_BYTE_COUNT: usize = 16 * 1024;
 const FIXED_PRG_BANK: u8 = 0x0F;
 const RUNTIME_ROW_POINTER_TABLE: u16 = 0xED3D;
 const RUNTIME_ROW_POINTER_TABLE_SHA1: &str = "bbbdd2a6b72e5eeab51a8606d8f4f59309a19305";
+const MAP_LAYER_ROW_POINTER_TABLE: u16 = 0xED01;
+const MAP_LAYER_ROW_POINTER_TABLE_SHA1: &str = "a5e8e50d82f281dc2307e403458e7c7c8f2a279e";
+const MAP_LAYER_ROW_POINTERS: [u16; 30] = [
+    0x7730, 0x7750, 0x7770, 0x7790, 0x77B0, 0x77D0, 0x77F0, 0x7810, 0x7830, 0x7850, 0x7870, 0x7890,
+    0x78B0, 0x78D0, 0x78F0, 0x7910, 0x7930, 0x7950, 0x7970, 0x7990, 0x79B0, 0x79D0, 0x79F0, 0x7A10,
+    0x7A30, 0x7A50, 0x7A70, 0x7A90, 0x7AB0, 0x7AD0,
+];
 const RUNTIME_ROW_POINTERS: [u16; 32] = [
     0x72AF, 0x72CF, 0x72EF, 0x730F, 0x732F, 0x734F, 0x736F, 0x738F, 0x73AF, 0x73CF, 0x73EF, 0x740F,
     0x742F, 0x744F, 0x746F, 0x748F, 0x74AF, 0x74CF, 0x74EF, 0x750F, 0x752F, 0x754F, 0x756F, 0x758F,
@@ -15,6 +22,7 @@ const RUNTIME_ROW_POINTERS: [u16; 32] = [
 
 pub(super) struct UnitRecordWriterSource {
     pub(super) runtime_row_pointers: Vec<u16>,
+    pub(super) map_layer_row_pointers: Vec<u16>,
 }
 
 struct TypedRegion {
@@ -96,6 +104,16 @@ impl SourceInstruction {
         )
     }
 
+    const fn absolute_indexed_x(bank: u8, address: u16, mnemonic: Mnemonic, operand: u16) -> Self {
+        Self::new(
+            bank,
+            address,
+            mnemonic,
+            AddressingMode::AbsoluteX,
+            Operand::Word(operand),
+        )
+    }
+
     const fn accumulator(bank: u8, address: u16, mnemonic: Mnemonic) -> Self {
         Self::new(
             bank,
@@ -171,10 +189,73 @@ const TYPED_REGIONS: &[TypedRegion] = &[
     ),
     TypedRegion::new(
         0x06,
+        0x8641,
+        0x867B,
+        "ac179f0a79493f851c7e97ff95808a1a5864741f",
+        "mark the first and identity-matched allied unit records as acted",
+    ),
+    TypedRegion::new(
+        0x06,
         0x8890,
         0x8923,
         "7c0f561b42bac866c92379e598c9c37eff3f614a",
         "update selected allied unit action bytes",
+    ),
+    TypedRegion::new(
+        0x06,
+        0xA1D8,
+        0xA228,
+        "f92ca0902dd36c12c992be1e6aab80893aed8890",
+        "refresh allied unit occupancy and action bytes",
+    ),
+    TypedRegion::new(
+        0x06,
+        0xA228,
+        0xA253,
+        "403389cb48c7e9db0d9bdb91d30da34690edb17c",
+        "advance allied records and decrement the turn counter",
+    ),
+    TypedRegion::new(
+        0x06,
+        0xA253,
+        0xA2B9,
+        "34e7a759024f5a1aee66edda58a0bd8c03ffb41f",
+        "rebuild an inactive allied unit record",
+    ),
+    TypedRegion::new(
+        0x06,
+        0xA91B,
+        0xA937,
+        "7db79ea87b3c4ee6a60453487782565a2342030f",
+        "select a runtime occupancy cell from unit coordinates",
+    ),
+    TypedRegion::new(
+        0x06,
+        0xAD33,
+        0xAD48,
+        "290b1a2ea7bf6ed094238b5931db21373f46a983",
+        "derive the runtime occupancy byte from one unit record",
+    ),
+    TypedRegion::new(
+        0x06,
+        0xB878,
+        0xB8B3,
+        "a9d213984dd75427b1f3d769063fcdf510bedc77",
+        "publish selected unit fields into runtime map occupancy",
+    ),
+    TypedRegion::new(
+        0x06,
+        0xBB27,
+        0xBB58,
+        "2f5cd7035ed5df47f2377a5e305b110930ed917b",
+        "clear source-bound map-layer rows",
+    ),
+    TypedRegion::new(
+        0x06,
+        0xBD48,
+        0xBD5F,
+        "94288f8f90d4b1a3b7397b766381898d28f3ff9e",
+        "select one source-bound map-layer row",
     ),
     TypedRegion::new(
         0x08,
@@ -228,6 +309,17 @@ const SOURCE_INSTRUCTIONS: &[SourceInstruction] = &[
     SourceInstruction::immediate(FIXED_PRG_BANK, 0xF159, Mnemonic::Ldy, 0x12),
     SourceInstruction::immediate(FIXED_PRG_BANK, 0xF169, Mnemonic::Ldx, 0x00),
     SourceInstruction::immediate(FIXED_PRG_BANK, 0xF16E, Mnemonic::Cpx, 0x36),
+    SourceInstruction::absolute(0x06, 0x8641, Mnemonic::Jsr, 0xF111),
+    SourceInstruction::immediate(0x06, 0x8644, Mnemonic::Ldy, 0x12),
+    SourceInstruction::immediate(0x06, 0x8646, Mnemonic::Lda, 0x01),
+    SourceInstruction::indirect_indexed_y(0x06, 0x8648, Mnemonic::Sta, 0x00),
+    SourceInstruction::absolute(0x06, 0x865D, Mnemonic::Jsr, 0xF111),
+    SourceInstruction::absolute(0x06, 0x8660, Mnemonic::Ldx, 0x05EA),
+    SourceInstruction::absolute_indexed_x(0x06, 0x8663, Mnemonic::Lda, 0x7730),
+    SourceInstruction::absolute(0x06, 0x8666, Mnemonic::Jsr, 0xF09E),
+    SourceInstruction::immediate(0x06, 0x8669, Mnemonic::Ldy, 0x12),
+    SourceInstruction::immediate(0x06, 0x866B, Mnemonic::Lda, 0x01),
+    SourceInstruction::indirect_indexed_y(0x06, 0x866D, Mnemonic::Sta, 0x00),
     SourceInstruction::immediate(0x02, 0xAA0C, Mnemonic::Lda, 0x90),
     SourceInstruction::immediate(0x02, 0xAA10, Mnemonic::Lda, 0x6A),
     SourceInstruction::absolute(0x02, 0xAA14, Mnemonic::Jsr, 0xF151),
@@ -253,6 +345,29 @@ const SOURCE_INSTRUCTIONS: &[SourceInstruction] = &[
     SourceInstruction::accumulator(0x06, 0x88EF, Mnemonic::Asl),
     SourceInstruction::immediate(0x06, 0x88F0, Mnemonic::Ldy, 0x00),
     SourceInstruction::indirect_indexed_y(0x06, 0x88F2, Mnemonic::Sta, 0x00),
+    SourceInstruction::absolute(0x06, 0xA1FD, Mnemonic::Jsr, 0xA91B),
+    SourceInstruction::absolute(0x06, 0xA200, Mnemonic::Jsr, 0xAD33),
+    SourceInstruction::indirect_indexed_y(0x06, 0xA205, Mnemonic::Sta, 0x00),
+    SourceInstruction::indirect_indexed_y(0x06, 0xA20B, Mnemonic::Sta, 0x74),
+    SourceInstruction::immediate(0x06, 0xA234, Mnemonic::Lda, 0x90),
+    SourceInstruction::zero_page(0x06, 0xA236, Mnemonic::Sta, 0x74),
+    SourceInstruction::immediate(0x06, 0xA238, Mnemonic::Lda, 0x6A),
+    SourceInstruction::zero_page(0x06, 0xA23A, Mnemonic::Sta, 0x75),
+    SourceInstruction::immediate(0x06, 0xA23C, Mnemonic::Ldy, 0x0F),
+    SourceInstruction::indirect_indexed_y(0x06, 0xA247, Mnemonic::Sta, 0x74),
+    SourceInstruction::absolute(0x06, 0xA26D, Mnemonic::Jsr, 0xF167),
+    SourceInstruction::indirect_indexed_y(0x06, 0xA27C, Mnemonic::Sta, 0x00),
+    SourceInstruction::indirect_indexed_y(0x06, 0xA2A7, Mnemonic::Sta, 0x00),
+    SourceInstruction::absolute(0x06, 0xB87B, Mnemonic::Jsr, 0xA91B),
+    SourceInstruction::indirect_indexed_y(0x06, 0xB884, Mnemonic::Sta, 0x00),
+    SourceInstruction::absolute(0x06, 0xB8A0, Mnemonic::Jsr, 0xAD33),
+    SourceInstruction::indirect_indexed_y(0x06, 0xB8A5, Mnemonic::Sta, 0x00),
+    SourceInstruction::absolute(0x06, 0xBB2B, Mnemonic::Jsr, 0xBD48),
+    SourceInstruction::indirect_indexed_y(0x06, 0xBB48, Mnemonic::Sta, 0x6C),
+    SourceInstruction::absolute_indexed_x(0x06, 0xBD50, Mnemonic::Lda, 0xED01),
+    SourceInstruction::zero_page(0x06, 0xBD53, Mnemonic::Sta, 0x6C),
+    SourceInstruction::absolute_indexed_x(0x06, 0xBD55, Mnemonic::Lda, 0xED02),
+    SourceInstruction::zero_page(0x06, 0xBD58, Mnemonic::Sta, 0x6D),
     SourceInstruction::immediate(0x08, 0xBA93, Mnemonic::Ldy, 0x00),
     SourceInstruction::immediate(0x08, 0xBA97, Mnemonic::Ldy, 0x10),
     SourceInstruction::indirect_indexed_y(0x08, 0xBA99, Mnemonic::Sta, 0x74),
@@ -324,8 +439,27 @@ pub(super) fn bind_unit_record_writer_source(source: &Rom) -> Result<UnitRecordW
         runtime_row_pointers == RUNTIME_ROW_POINTERS,
         "runtime row pointer values changed"
     );
+    let map_layer_table = source_bytes(
+        source,
+        FIXED_PRG_BANK,
+        MAP_LAYER_ROW_POINTER_TABLE,
+        u16::try_from(MAP_LAYER_ROW_POINTERS.len() * 2)?,
+    )?;
+    ensure!(
+        sha1_hex(map_layer_table) == MAP_LAYER_ROW_POINTER_TABLE_SHA1,
+        "map-layer row pointer table changed"
+    );
+    let map_layer_row_pointers = map_layer_table
+        .chunks_exact(2)
+        .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
+        .collect::<Vec<_>>();
+    ensure!(
+        map_layer_row_pointers == MAP_LAYER_ROW_POINTERS,
+        "map-layer row pointer values changed"
+    );
     Ok(UnitRecordWriterSource {
         runtime_row_pointers,
+        map_layer_row_pointers,
     })
 }
 

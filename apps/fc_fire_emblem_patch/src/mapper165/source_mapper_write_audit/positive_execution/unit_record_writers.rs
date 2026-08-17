@@ -15,6 +15,7 @@ const RECORD_SCAN_CAPACITY: usize = 0x36;
 const RECORD_BYTE_ZERO_OFFSET: u16 = 0x00;
 const ACTION_BYTE_OFFSET: u16 = 0x12;
 const COPIED_CLASS_OFFSET: u16 = 0x06;
+const TURN_COUNTER_OFFSET: u16 = 0x0F;
 const DERIVED_MAP_X_OFFSET: u16 = 0x10;
 const DERIVED_MAP_Y_OFFSET: u16 = 0x11;
 const SHIFTED_RECORD_IDENTITY_OFFSET: u16 = 0x36;
@@ -22,6 +23,8 @@ const SHIFTED_RECORD_FIELD_OFFSET: u16 = 0x47;
 
 const FIRST_ACTION_WRITER: (u8, u16, u8) = (0x06, 0x88C9, 0x00);
 const SECOND_ACTION_WRITER: (u8, u16, u8) = (0x06, 0x88D9, 0x74);
+const FIRST_ALLIED_ACTION_WRITER: (u8, u16, u8) = (0x06, 0x8648, 0x00);
+const MATCHED_ALLIED_ACTION_WRITER: (u8, u16, u8) = (0x06, 0x866D, 0x00);
 const SHIFTED_RECORD_FIELD_WRITER: (u8, u16, u8) = (0x02, 0xAA55, 0x65);
 const SHIFTED_RECORD_IDENTITY_WRITER: (u8, u16, u8) = (0x02, 0xAA5B, 0x65);
 const DERIVED_MAP_X_WRITER: (u8, u16, u8) = (0x08, 0xBA99, 0x74);
@@ -31,16 +34,48 @@ const COPIED_CLASS_WRITER: (u8, u16, u8) = (0x08, 0xBB71, 0x74);
 const SELECTED_ALLIED_CLASS_WRITER: (u8, u16, u8) = (0x06, 0x88E9, 0x74);
 const SELECTED_ALLIED_BYTE_ZERO_WRITER: (u8, u16, u8) = (0x06, 0x88F2, 0x00);
 const MAP_OCCUPANCY_WRITER: (u8, u16, u8) = (0x08, 0xBB7D, 0x00);
+const MAP_OCCUPANCY_REFRESH_WRITER: (u8, u16, u8) = (0x06, 0xA205, 0x00);
+const ALLIED_TURN_COUNTER_WRITER: (u8, u16, u8) = (0x06, 0xA247, 0x74);
+const ALLIED_RECORD_REBUILD_WRITER: (u8, u16, u8) = (0x06, 0xA27C, 0x00);
+const MAP_LAYER_CLEAR_WRITER: (u8, u16, u8) = (0x06, 0xBB48, 0x6C);
+const ALLIED_ACTION_CLEAR_WRITER: (u8, u16, u8) = (0x06, 0xA20B, 0x74);
+const ALLIED_RECORD_BYTE_ZERO_REBUILD_WRITER: (u8, u16, u8) = (0x06, 0xA2A7, 0x00);
+const SELECTED_UNIT_MAP_CLASS_WRITER: (u8, u16, u8) = (0x06, 0xB884, 0x00);
+const SELECTED_UNIT_MAP_OCCUPANCY_WRITER: (u8, u16, u8) = (0x06, 0xB8A5, 0x00);
+const UNIT_RECORD_WRITER_SITES: &[(u8, u16, u8)] = &[
+    FIRST_ALLIED_ACTION_WRITER,
+    MATCHED_ALLIED_ACTION_WRITER,
+    FIRST_ACTION_WRITER,
+    SECOND_ACTION_WRITER,
+    SHIFTED_RECORD_FIELD_WRITER,
+    SHIFTED_RECORD_IDENTITY_WRITER,
+    DERIVED_MAP_X_WRITER,
+    DERIVED_MAP_Y_WRITER,
+    UNIT_RECORD_COPY_WRITER,
+    COPIED_CLASS_WRITER,
+    SELECTED_ALLIED_CLASS_WRITER,
+    SELECTED_ALLIED_BYTE_ZERO_WRITER,
+    MAP_OCCUPANCY_WRITER,
+    MAP_OCCUPANCY_REFRESH_WRITER,
+    ALLIED_TURN_COUNTER_WRITER,
+    ALLIED_RECORD_REBUILD_WRITER,
+    MAP_LAYER_CLEAR_WRITER,
+    ALLIED_ACTION_CLEAR_WRITER,
+    ALLIED_RECORD_BYTE_ZERO_REBUILD_WRITER,
+    SELECTED_UNIT_MAP_CLASS_WRITER,
+    SELECTED_UNIT_MAP_OCCUPANCY_WRITER,
+];
 
 pub(super) fn bind_unit_record_write_destinations(
     source: &Rom,
 ) -> Result<BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>> {
     let source = bind_unit_record_writer_source(source)?;
-    unit_record_write_destinations(&source.runtime_row_pointers)
+    unit_record_write_destinations(&source.runtime_row_pointers, &source.map_layer_row_pointers)
 }
 
 fn unit_record_write_destinations(
     runtime_row_pointers: &[u16],
+    map_layer_row_pointers: &[u16],
 ) -> Result<BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>> {
     let action_targets = record_field_destination_ranges(
         ALLIED_RECORD_BASE,
@@ -83,8 +118,30 @@ fn unit_record_write_destinations(
         RECORD_BYTE_ZERO_OFFSET,
     )?;
     let map_occupancy_targets = indexed_pointer_destination_ranges(runtime_row_pointers, 0xFF)?;
+    let allied_turn_counter_targets = record_field_destination_ranges(
+        ALLIED_RECORD_BASE,
+        RECORD_SCAN_CAPACITY,
+        TURN_COUNTER_OFFSET,
+    )?;
+    let allied_record_rebuild_targets = vec![record_copy_destination_range(
+        ALLIED_RECORD_BASE,
+        RECORD_SCAN_CAPACITY,
+    )?];
+    let map_layer_targets = indexed_pointer_destination_ranges(map_layer_row_pointers, 0x1F)?;
 
     let mut destinations = BTreeMap::new();
+    insert_destination(
+        &mut destinations,
+        FIRST_ALLIED_ACTION_WRITER,
+        "action byte of the first allied unit record",
+        vec![ALLIED_RECORD_BASE + ACTION_BYTE_OFFSET..=ALLIED_RECORD_BASE + ACTION_BYTE_OFFSET],
+    )?;
+    insert_destination(
+        &mut destinations,
+        MATCHED_ALLIED_ACTION_WRITER,
+        "action byte of the allied unit record matched by identity",
+        action_targets.clone(),
+    )?;
     for site in [FIRST_ACTION_WRITER, SECOND_ACTION_WRITER] {
         insert_destination(
             &mut destinations,
@@ -139,7 +196,7 @@ fn unit_record_write_destinations(
         &mut destinations,
         SELECTED_ALLIED_BYTE_ZERO_WRITER,
         "byte zero of the selected allied unit record derived from byte one",
-        selected_allied_byte_zero_targets,
+        selected_allied_byte_zero_targets.clone(),
     )?;
     insert_destination(
         &mut destinations,
@@ -147,9 +204,60 @@ fn unit_record_write_destinations(
         "runtime map occupancy cell selected from unit coordinates",
         map_occupancy_targets,
     )?;
+    insert_destination(
+        &mut destinations,
+        MAP_OCCUPANCY_REFRESH_WRITER,
+        "runtime map occupancy cell selected from allied unit coordinates",
+        indexed_pointer_destination_ranges(runtime_row_pointers, 0xFF)?,
+    )?;
+    insert_destination(
+        &mut destinations,
+        ALLIED_TURN_COUNTER_WRITER,
+        "turn counter field of one allied unit record",
+        allied_turn_counter_targets,
+    )?;
+    insert_destination(
+        &mut destinations,
+        ALLIED_RECORD_REBUILD_WRITER,
+        "inactive allied unit record selected by identity",
+        allied_record_rebuild_targets,
+    )?;
+    insert_destination(
+        &mut destinations,
+        MAP_LAYER_CLEAR_WRITER,
+        "one source-bound 32-byte map-layer row",
+        map_layer_targets,
+    )?;
+    insert_destination(
+        &mut destinations,
+        ALLIED_ACTION_CLEAR_WRITER,
+        "action byte of one allied unit record removed from map occupancy",
+        action_targets,
+    )?;
+    insert_destination(
+        &mut destinations,
+        ALLIED_RECORD_BYTE_ZERO_REBUILD_WRITER,
+        "byte zero of an inactive allied unit record selected by identity",
+        selected_allied_byte_zero_targets,
+    )?;
+    for site in [
+        SELECTED_UNIT_MAP_CLASS_WRITER,
+        SELECTED_UNIT_MAP_OCCUPANCY_WRITER,
+    ] {
+        insert_destination(
+            &mut destinations,
+            site,
+            "runtime map occupancy cell selected from unit coordinates",
+            indexed_pointer_destination_ranges(runtime_row_pointers, 0xFF)?,
+        )?;
+    }
     ensure!(
-        destinations.len() == 11,
-        "unit-record destination owner no longer covers exactly eleven indirect writers"
+        destinations
+            .keys()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>()
+            == UNIT_RECORD_WRITER_SITES.iter().copied().collect(),
+        "unit-record destination owner omitted or invented an indirect writer site"
     );
     Ok(destinations)
 }
@@ -269,24 +377,24 @@ mod tests {
 
     #[test]
     fn unit_record_destination_owner_covers_every_bound_writer() {
-        let destinations = unit_record_write_destinations(&runtime_row_pointers()).unwrap();
+        let destinations = unit_record_write_destinations(
+            &runtime_row_pointers(),
+            &(0..30).map(|row| 0x7730 + row * 0x20).collect::<Vec<_>>(),
+        )
+        .unwrap();
         assert_eq!(
             destinations.keys().copied().collect::<BTreeSet<_>>(),
-            [
-                FIRST_ACTION_WRITER,
-                SECOND_ACTION_WRITER,
-                SHIFTED_RECORD_FIELD_WRITER,
-                SHIFTED_RECORD_IDENTITY_WRITER,
-                DERIVED_MAP_X_WRITER,
-                DERIVED_MAP_Y_WRITER,
-                UNIT_RECORD_COPY_WRITER,
-                COPIED_CLASS_WRITER,
-                SELECTED_ALLIED_CLASS_WRITER,
-                SELECTED_ALLIED_BYTE_ZERO_WRITER,
-                MAP_OCCUPANCY_WRITER,
-            ]
-            .into_iter()
-            .collect()
+            UNIT_RECORD_WRITER_SITES.iter().copied().collect()
+        );
+        assert_eq!(
+            destinations[&FIRST_ALLIED_ACTION_WRITER].destination_ranges(),
+            &[0x6AA2..=0x6AA2]
+        );
+        assert_eq!(
+            destinations[&MATCHED_ALLIED_ACTION_WRITER]
+                .destination_ranges()
+                .len(),
+            RECORD_SCAN_CAPACITY
         );
         assert!(destinations.values().all(|destination| {
             destination
@@ -356,6 +464,15 @@ mod tests {
         assert_eq!(
             indexed_pointer_destination_ranges(&runtime_row_pointers(), 0xFF).unwrap(),
             vec![0x72AF..=0x774E, 0x7AF0..=0x7C0F]
+        );
+    }
+
+    #[test]
+    fn map_layer_rows_cover_exactly_thirty_contiguous_32_byte_rows() {
+        let pointers = (0..30).map(|row| 0x7730 + row * 0x20).collect::<Vec<_>>();
+        assert_eq!(
+            indexed_pointer_destination_ranges(&pointers, 0x1F).unwrap(),
+            vec![0x7730..=0x7AEF]
         );
     }
 
