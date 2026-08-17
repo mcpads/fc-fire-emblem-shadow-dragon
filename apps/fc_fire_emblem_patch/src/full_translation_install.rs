@@ -118,7 +118,8 @@ use runtime_material::{
 pub(crate) use runtime_state_storage::bind_dialogue_interrupt_audio_mapper_write_slice;
 use runtime_state_storage::{DialogueRuntimeStateStoragePlan, plan_dialogue_runtime_state_storage};
 use screen_font_residency::{
-    ScreenFontResidencyInputs, ScreenFontResidencyPlan, plan_screen_font_residency,
+    DialogueSurfaceInputs, ScreenFontResidencyInputs, ScreenFontResidencyPlan,
+    finalize_screen_font_residency, plan_screen_font_residency,
 };
 use transition_residency::{bind_transition_lifetime_worksets, plan_transition_residency};
 
@@ -176,7 +177,7 @@ pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) output_path: Option<&'a Path>,
 }
 
-pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 26;
+pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 27;
 
 pub(crate) struct FullTranslationInstallSummary {
     pub(crate) report_sha1: String,
@@ -637,7 +638,7 @@ pub(crate) fn plan_full_translation_installation(
         unit_ui: &unit_ui,
         item_actions: &item_actions,
     })?;
-    let screen_font_residency = plan_screen_font_residency(ScreenFontResidencyInputs {
+    let screen_font_residency_draft = plan_screen_font_residency(ScreenFontResidencyInputs {
         front_end_menu_route: front_end_mapper_route,
         map_menu_route: consumer_codebook.mapper_route_for("map_menu")?,
         consumer_catalog: &consumer_catalog,
@@ -656,7 +657,7 @@ pub(crate) fn plan_full_translation_installation(
     })?;
     let front_end_result_residency = plan_front_end_result_residency(
         &display,
-        &screen_font_residency,
+        &screen_font_residency_draft,
         front_end_result_menu_residency,
         &choice_residency.augmented_worksets,
     )?;
@@ -666,6 +667,17 @@ pub(crate) fn plan_full_translation_installation(
         &front_end_result_residency.augmented_worksets,
     )?;
     let codebook = plan_glyph_workset_page_upper_bound(&transition_residency.augmented_worksets)?;
+    let screen_font_residency = finalize_screen_font_residency(
+        screen_font_residency_draft,
+        DialogueSurfaceInputs {
+            dynamic_inputs: &dynamic_inputs.augmented_worksets,
+            chapter_intro: &chapter_intro_residency.augmented_worksets,
+            choice_and_front_end_menu: &choice_residency.augmented_worksets,
+            front_end_result: &front_end_result_residency.augmented_worksets,
+            transition_lifetime: &transition_residency.augmented_worksets,
+            codebook: &codebook,
+        },
+    )?;
     let dynamic_page_codes = bind_dynamic_string_page_codes(&dynamic_inputs, &codebook)?;
     ensure!(
         codebook.workset_count == display.page_worksets.len()

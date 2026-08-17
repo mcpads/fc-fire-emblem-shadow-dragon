@@ -4,6 +4,7 @@
 //! 원천 합성 상태와 가시 표면을 합쳐 화면별 경로를 고르고, 런타임 코드는 그 결과를
 //! 그대로 방출한다. 이전 화면이 남긴 `$07FD`를 암묵적인 입력으로 쓰지 않는다.
 
+mod dialogue_surfaces;
 mod surface_requirements;
 mod transition_surfaces;
 
@@ -26,6 +27,8 @@ use crate::{
 };
 
 use super::{consumer_catalog::ConsumerCatalogPlan, consumer_codebook::ConsumerCodebookPlan};
+pub(super) use dialogue_surfaces::DialogueSurfaceInputs;
+use dialogue_surfaces::{DialogueSurfacePlan, plan_dialogue_surfaces};
 use surface_requirements::{
     ScreenFontSurfaceInputs, ScreenFontSurfacePlan, plan_screen_font_surfaces,
 };
@@ -252,7 +255,7 @@ pub(super) struct ScreenFontResidencyInputs<'a> {
 }
 
 #[derive(Serialize)]
-pub(super) struct ScreenFontResidencyPlan {
+pub(super) struct ScreenFontResidencyDraft {
     schema: u8,
     strategy: &'static str,
     composite_state_policy_count: usize,
@@ -275,19 +278,28 @@ pub(super) struct ScreenFontResidencyPlan {
     record_action_summary_glyph_codes: BTreeMap<char, u8>,
 }
 
-impl ScreenFontResidencyPlan {
-    pub(in crate::full_translation_install) fn routes(&self) -> ScreenFontPageRoutes {
-        self.routes
-    }
-
+impl ScreenFontResidencyDraft {
     pub(super) fn record_action_summary_glyph_codes(&self) -> &BTreeMap<char, u8> {
         &self.record_action_summary_glyph_codes
     }
 }
 
+#[derive(Serialize)]
+pub(super) struct ScreenFontResidencyPlan {
+    #[serde(flatten)]
+    draft: ScreenFontResidencyDraft,
+    dialogue_surfaces: DialogueSurfacePlan,
+}
+
+impl ScreenFontResidencyPlan {
+    pub(in crate::full_translation_install) fn routes(&self) -> ScreenFontPageRoutes {
+        self.draft.routes
+    }
+}
+
 pub(super) fn plan_screen_font_residency(
     inputs: ScreenFontResidencyInputs<'_>,
-) -> Result<ScreenFontResidencyPlan> {
+) -> Result<ScreenFontResidencyDraft> {
     validate_composite_state_policies()?;
     ensure!(
         !inputs.installed_front_end_glyph_codes.is_empty(),
@@ -365,8 +377,8 @@ pub(super) fn plan_screen_font_residency(
         .collect::<BTreeSet<_>>()
         .len();
 
-    Ok(ScreenFontResidencyPlan {
-        schema: 2,
+    Ok(ScreenFontResidencyDraft {
+        schema: 3,
         strategy: "derive every composite-screen font policy from one residency plan; publish static pages at entry, let unit-or-enemy-name appenders select name-dependent pages, and select the protagonist catalog page explicitly for the front-end record-action lifetime",
         composite_state_policy_count: COMPOSITE_FONT_RESIDENCY_POLICIES.len(),
         static_state_route_count: COMPOSITE_FONT_RESIDENCY_POLICIES
@@ -390,6 +402,17 @@ pub(super) fn plan_screen_font_residency(
         transition_surfaces,
         routes,
         record_action_summary_glyph_codes,
+    })
+}
+
+pub(super) fn finalize_screen_font_residency(
+    draft: ScreenFontResidencyDraft,
+    dialogue_inputs: DialogueSurfaceInputs<'_>,
+) -> Result<ScreenFontResidencyPlan> {
+    let dialogue_surfaces = plan_dialogue_surfaces(dialogue_inputs)?;
+    Ok(ScreenFontResidencyPlan {
+        draft,
+        dialogue_surfaces,
     })
 }
 

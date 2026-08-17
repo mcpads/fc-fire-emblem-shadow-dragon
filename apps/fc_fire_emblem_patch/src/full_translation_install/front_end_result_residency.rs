@@ -22,7 +22,7 @@ use super::{
     resident_glyph_assignment::assignment_sha1,
     screen_font_residency::{
         FRONT_END_SAVE_SUMMARY_CLASS_SOURCE_INDEX, FRONT_END_SAVE_SUMMARY_UNIT_SOURCE_INDEX,
-        ScreenFontResidencyPlan,
+        ScreenFontResidencyDraft,
     },
 };
 
@@ -106,7 +106,7 @@ pub(super) fn plan_front_end_result_menu_residency(
 
 pub(super) fn plan_front_end_result_residency(
     display: &MainDialogueDisplayPlan,
-    screen_font_residency: &ScreenFontResidencyPlan,
+    screen_font_residency: &ScreenFontResidencyDraft,
     menu: FrontEndResultMenuResidency,
     dialogue_worksets: &[GlyphWorkset],
 ) -> Result<FrontEndResultResidencyPlan> {
