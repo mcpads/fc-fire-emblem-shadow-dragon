@@ -6,11 +6,7 @@
 use std::collections::BTreeSet;
 
 use anyhow::{Context, Result, ensure};
-use retro_rp2a03::{
-    AddressingMode, Location, MemoryAddress, Mnemonic, Operand, Rp2A03, decode_bytes,
-};
 use serde::Serialize;
-use typed_isa_core::{AccessKind, StaticSemantics};
 
 use super::{
     consumer_catalog::ConsumerCatalogRuntimeLayout,
@@ -21,13 +17,12 @@ use crate::{
     mapper165::{
         FinalBattleConsumerRoute, FinalBattleConsumerRouteRegion, FinalConsumerRouteRegion,
         FinalRosterConsumerRoute,
-        executable_mapper_writes::{Mapper165Register, decode_mapper165_write},
     },
     rom::Rom,
-    rp2a03::{Instruction, assemble_at},
-    typed_source::{Rp2a03DirectControlFlow, decode_rp2a03_sequence, rp2a03_direct_control_flow},
+    typed_source::decode_rp2a03_sequence,
 };
 
+mod assembly;
 mod chr_ram_ownership;
 pub(in crate::full_translation_install) mod chr_selector;
 pub(in crate::full_translation_install) mod chr_source_state;
@@ -38,11 +33,16 @@ mod dynamic_producer;
 mod fixed_cfg_cycles;
 mod font_page_route;
 pub(in crate::full_translation_install) mod lifecycle;
+mod mapper_write_verification;
 pub(in crate::full_translation_install) mod resolve_request;
 mod resolved_page_publication;
 mod speaker_prefix;
 pub(super) mod trampoline;
 pub(in crate::full_translation_install) mod transport;
+
+pub(in crate::full_translation_install) use assembly::RuntimeRoutine;
+use assembly::{ensure_disjoint, next_address, worst_case_cycles, worst_case_cycles_with_calls};
+use mapper_write_verification::verify_planned_mapper_select_writes;
 
 /// 대사 런타임이 원본 제어 흐름에 끼어드는 각 자리의 의미다.
 ///
@@ -769,264 +769,6 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     Ok(plan)
 }
 
-fn verify_planned_mapper_select_writes(plan: &DialogueRuntimeCodePlan) -> Result<()> {
-    for routine in plan.code_routines.iter().chain(&plan.fixed_routines) {
-        verify_generated_executable_mapper_select_pairs(
-            routine.role,
-            routine.address,
-            &routine.bytes,
-        )?;
-    }
-    for reclaimed in &plan.reclaimed_fixed_routines {
-        ensure!(
-            reclaimed.executable_byte_count <= reclaimed.routine.bytes.len(),
-            "{} executable extent exceeds its overwrite extent",
-            reclaimed.routine.role
-        );
-        ensure!(
-            reclaimed.routine.bytes[reclaimed.executable_byte_count..]
-                .iter()
-                .all(|byte| *byte == 0xFF),
-            "{} reclaimed-cave padding is not exact $FF",
-            reclaimed.routine.role
-        );
-        verify_generated_executable_mapper_select_pairs(
-            reclaimed.routine.role,
-            reclaimed.routine.address,
-            &reclaimed.routine.bytes[..reclaimed.executable_byte_count],
-        )?;
-    }
-    for hook in &plan.hooks {
-        let address = match hook.site {
-            DialogueRuntimeHookSite::Fixed(address)
-            | DialogueRuntimeHookSite::Switchable { address, .. } => address,
-        };
-        verify_generated_executable_mapper_select_pairs(hook.write_role, address, &hook.bytes)?;
-    }
-    Ok(())
-}
-
-/// Verifies the typed, generated plan's direct mapper165 writes. This is intentionally not the
-/// global ExecutableImage denominator: runtime-computed indirect addresses remain a separate
-/// fail-closed admission gate. Direct aliases and absolute-indexed ranges are handled here.
-fn verify_generated_executable_mapper_select_pairs(
-    role: &str,
-    origin: u16,
-    bytes: &[u8],
-) -> Result<()> {
-    let mut offset = 0;
-    let mut decoded = Vec::new();
-    while offset < bytes.len() {
-        let address = origin
-            .checked_add(u16::try_from(offset)?)
-            .context("generated executable address overflow")?;
-        let instruction = decode_bytes(&bytes[offset..])
-            .with_context(|| format!("decode generated executable {role} at +{offset:04X}"))?;
-        ensure!(
-            instruction.opcode_is_documented(),
-            "generated executable {role} contains an undocumented opcode at +{offset:04X}"
-        );
-        let semantics = Rp2A03::semantics(&instruction, &address)
-            .expect("RP2A03 static semantics are infallible");
-        let mut direct_value_write = false;
-        for access in semantics.location_accesses {
-            if access.kind != AccessKind::Write {
-                continue;
-            }
-            let Location::Memory(memory) = access.location else {
-                continue;
-            };
-            match memory {
-                MemoryAddress::Direct(target) => match decode_mapper165_write(target) {
-                    Some(Mapper165Register::BankSelect) => anyhow::bail!(
-                        "generated executable {role} directly writes mapper-select alias ${target:04X} at +{offset:04X}"
-                    ),
-                    Some(Mapper165Register::BankData) => direct_value_write = true,
-                    Some(register) => anyhow::bail!(
-                        "generated executable {role} directly writes unexpected mapper165 {register:?} alias ${target:04X} at +{offset:04X}"
-                    ),
-                    None => {}
-                },
-                MemoryAddress::Effective {
-                    mode: AddressingMode::AbsoluteX | AddressingMode::AbsoluteY,
-                    operand: Operand::Word(base),
-                } => {
-                    ensure!(
-                        !(0..=u8::MAX).any(|index| {
-                            decode_mapper165_write(base.wrapping_add(u16::from(index))).is_some()
-                        }),
-                        "generated executable {role} has an absolute-indexed write whose effective range can enter mapper165 ports at +{offset:04X}"
-                    );
-                }
-                // Zero-page indexed writes wrap inside page zero and cannot reach mapper I/O.
-                MemoryAddress::Effective {
-                    mode: AddressingMode::ZeroPageX | AddressingMode::ZeroPageY,
-                    ..
-                }
-                | MemoryAddress::Stack => {}
-                // Indirect effective addresses need a whole-CFG pointer-range proof. They are not
-                // silently classified as safe by this bounded direct-write verifier.
-                MemoryAddress::Effective {
-                    mode:
-                        AddressingMode::ZeroPageIndexedIndirectX
-                        | AddressingMode::ZeroPageIndirectIndexedY,
-                    ..
-                }
-                | MemoryAddress::Pointer { .. }
-                | MemoryAddress::InterruptVector => {}
-                MemoryAddress::Effective { mode, .. } => anyhow::bail!(
-                    "generated executable {role} has an unhandled effective write mode {mode:?} at +{offset:04X}"
-                ),
-            }
-        }
-        decoded.push((address, instruction, direct_value_write));
-        offset += instruction.encoded_len();
-    }
-
-    let mut bypass_targets = BTreeSet::new();
-    for (address, instruction, _) in &decoded {
-        match rp2a03_direct_control_flow(instruction, *address)? {
-            Rp2a03DirectControlFlow::Branch { target, .. }
-            | Rp2a03DirectControlFlow::Jump {
-                target: Some(target),
-            }
-            | Rp2a03DirectControlFlow::Call { target, .. } => {
-                bypass_targets.insert(target);
-            }
-            Rp2a03DirectControlFlow::Jump { target: None } => anyhow::bail!(
-                "generated executable {role} contains an indirect jump whose mapper-pair entry effects are unresolved at ${address:04X}"
-            ),
-            _ => {}
-        }
-    }
-    for (value_index, (value_address, _, direct_value_write)) in decoded.iter().enumerate() {
-        if !*direct_value_write {
-            continue;
-        }
-        let mut selector = None;
-        for selector_index in (0..value_index).rev() {
-            let (address, preceding, _) = decoded[selector_index];
-            if preceding.mnemonic() == Mnemonic::Jsr
-                && preceding.operand()
-                    == Operand::Word(
-                        crate::mapper165::selector_safety::SELECT_REGISTER_ROUTINE_ADDRESS,
-                    )
-            {
-                selector = Some((selector_index, address));
-                break;
-            }
-            if !matches!(
-                rp2a03_direct_control_flow(&preceding, address)?,
-                Rp2a03DirectControlFlow::FallThrough { .. }
-            ) {
-                break;
-            }
-        }
-        let (selector_index, selector_address) = selector.with_context(|| {
-            format!(
-                "generated executable {role} writes canonical mapper-value address $8001 at ${value_address:04X} without a same-block common selector call"
-            )
-        })?;
-        let after_selector = decoded
-            .get(selector_index + 1)
-            .map(|(address, _, _)| *address)
-            .unwrap_or(*value_address);
-        ensure!(
-            !bypass_targets
-                .range(after_selector..=*value_address)
-                .next()
-                .is_some(),
-            "generated executable {role} can branch between common selector call ${selector_address:04X} and mapper-value write ${value_address:04X}"
-        );
-    }
-    Ok(())
-}
-
-/// ROM의 한 자리에 놓이는 실행 코드 조각이다.
-#[derive(Debug)]
-pub(in crate::full_translation_install) struct RuntimeRoutine {
-    pub(in crate::full_translation_install) role: &'static str,
-    pub(in crate::full_translation_install) address: u16,
-    pub(in crate::full_translation_install) bytes: Vec<u8>,
-}
-
-/// 같은 동굴에 놓이는 조각들이 서로 겹치거나 동굴을 넘지 않아야 한다.
-/// 겹치면 조용히 잘못된 코드가 실행되고, 넘으면 원본 자료를 덮는다.
-pub(super) fn ensure_disjoint(routines: &[&RuntimeRoutine], cave_end: u16) -> Result<()> {
-    let mut ordered: Vec<&RuntimeRoutine> = routines.to_vec();
-    ordered.sort_by_key(|routine| routine.address);
-    for pair in ordered.windows(2) {
-        ensure!(
-            usize::from(pair[0].address) + pair[0].bytes.len() <= usize::from(pair[1].address),
-            "{} ends at {:04X} and overlaps {} at {:04X}",
-            pair[0].role,
-            usize::from(pair[0].address) + pair[0].bytes.len(),
-            pair[1].role,
-            pair[1].address
-        );
-    }
-    if let Some(last) = ordered.last() {
-        ensure!(
-            usize::from(last.address) + last.bytes.len() <= usize::from(cave_end),
-            "{} ends at {:04X} and reaches past the reserved cave end {cave_end:04X}",
-            last.role,
-            usize::from(last.address) + last.bytes.len()
-        );
-    }
-    Ok(())
-}
-
-/// 명령 목록을 이어 붙였을 때 다음 명령이 놓일 주소다. 분기 대상을 되메울 때 쓴다.
-fn next_address(origin: u16, instructions: &[Instruction]) -> Result<u16> {
-    let length = assemble_at(origin, instructions)
-        .context("cannot measure a dialogue runtime routine")?
-        .len();
-    u16::try_from(usize::from(origin) + length)
-        .context("dialogue runtime routine crosses the CPU address space")
-}
-
-/// 명령 목록이 최악의 경우 쓰는 사이클이다.
-///
-/// `JSR`는 명령 자체의 6사이클만 세고 불려 가는 코드의 비용은 세지 않는다. 그래서
-/// 호출이 섞인 목록을 그냥 더하면 예산이 조용히 과소평가된다. vblank 예산에서
-/// 과소평가는 실기 손상이므로, 이 함수는 호출을 만나면 그 자리에서 거부한다.
-///
-/// 호출이 필요한 코드는 `worst_case_cycles_with_calls`로 불린 곳의 실측 비용을 함께
-/// 넘겨야 한다. «얼마인지 모르는 것을 6이라고 세지 않는다»가 규칙이다.
-fn worst_case_cycles(instructions: &[Instruction]) -> Result<u32> {
-    worst_case_cycles_with_calls(instructions, &[])
-}
-
-/// 불려 가는 코드의 최악 사이클을 주소별로 함께 받는다.
-fn worst_case_cycles_with_calls(
-    instructions: &[Instruction],
-    callee_cycles: &[(u16, u32)],
-) -> Result<u32> {
-    let mut total = 0;
-    for instruction in instructions {
-        total += u32::from(instruction.worst_case_cycles());
-        if let Instruction::JsrAbsolute(target) = instruction {
-            let cost = (*target
-                == crate::mapper165::selector_safety::SELECT_REGISTER_ROUTINE_ADDRESS)
-                .then_some(crate::mapper165::selector_safety::SELECT_REGISTER_CALLEE_CYCLES)
-                .or_else(|| {
-                    callee_cycles
-                        .iter()
-                        .find(|(address, _)| address == target)
-                        .map(|(_, cost)| *cost)
-                })
-                .with_context(|| {
-                    format!(
-                        "a cycle budget counted JSR {target:04X} as six cycles; \
-                         the cost of the called code is unknown and must be measured"
-                    )
-                })?;
-            total += cost;
-        }
-    }
-    Ok(total)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1036,146 +778,5 @@ mod tests {
         assert_eq!(SOURCE_MEASURED_VBLANK_REMAINDER, 1_704);
         assert_eq!(SELECTOR_STACK_ENTRY_OVERHEAD, 12);
         assert_eq!(MAPPER_VBLANK_REMAINDER, 1_692);
-    }
-
-    #[test]
-    fn overlapping_routines_are_refused() {
-        let first = RuntimeRoutine {
-            role: "first",
-            address: 0xF400,
-            bytes: vec![0; 16],
-        };
-        let second = RuntimeRoutine {
-            role: "second",
-            address: 0xF408,
-            bytes: vec![0; 4],
-        };
-
-        let error = ensure_disjoint(&[&first, &second], 0xF4B0).unwrap_err();
-
-        assert!(error.to_string().contains("overlaps"));
-    }
-
-    #[test]
-    fn a_routine_past_the_cave_end_is_refused() {
-        let only = RuntimeRoutine {
-            role: "only",
-            address: 0xF4A0,
-            bytes: vec![0; 32],
-        };
-
-        let error = ensure_disjoint(&[&only], 0xF4B0).unwrap_err();
-
-        assert!(error.to_string().contains("past the reserved cave end"));
-    }
-
-    #[test]
-    fn generated_code_cannot_bypass_the_common_selector_writer() {
-        let direct = assemble_at(
-            0xA000,
-            &[
-                Instruction::LdaImmediate(6),
-                Instruction::StaAbsolute(0x8000),
-                Instruction::Rts,
-            ],
-        )
-        .unwrap();
-        let error =
-            verify_generated_executable_mapper_select_pairs("direct selector", 0xA000, &direct)
-                .unwrap_err();
-
-        assert!(error.to_string().contains("mapper-select alias"));
-    }
-
-    #[test]
-    fn generated_code_cannot_write_an_unowned_mapper_register_alias() {
-        let direct = assemble_at(
-            0xA000,
-            &[
-                Instruction::LdaImmediate(0),
-                Instruction::StaAbsolute(0xBFFE),
-                Instruction::Rts,
-            ],
-        )
-        .unwrap();
-
-        let error = verify_generated_executable_mapper_select_pairs(
-            "direct mirroring alias",
-            0xA000,
-            &direct,
-        )
-        .unwrap_err();
-
-        assert!(error.to_string().contains("Mirroring alias $BFFE"));
-    }
-
-    #[test]
-    fn generated_value_writes_require_a_same_block_selector_call() {
-        let unpaired = assemble_at(
-            0xA000,
-            &[
-                Instruction::LdaImmediate(0x20),
-                Instruction::StaAbsolute(0x8001),
-                Instruction::Rts,
-            ],
-        )
-        .unwrap();
-        assert!(
-            verify_generated_executable_mapper_select_pairs("unpaired value", 0xA000, &unpaired)
-                .unwrap_err()
-                .to_string()
-                .contains("without a same-block common selector call")
-        );
-
-        let paired = assemble_at(
-            0xA000,
-            &[
-                Instruction::LdaImmediate(6),
-                crate::mapper165::selector_safety::select_register_instruction(),
-                Instruction::LdaImmediate(0x20),
-                Instruction::StaAbsolute(0x8001),
-                Instruction::Rts,
-            ],
-        )
-        .unwrap();
-        verify_generated_executable_mapper_select_pairs("paired value", 0xA000, &paired).unwrap();
-    }
-
-    #[test]
-    fn generated_branches_cannot_enter_between_a_selector_and_its_value() {
-        let bytes = assemble_at(
-            0xA000,
-            &[
-                Instruction::BeqAbsolute(0xA009),
-                Instruction::LdaImmediate(6),
-                crate::mapper165::selector_safety::select_register_instruction(),
-                Instruction::LdaImmediate(0x20),
-                Instruction::StaAbsolute(0x8001),
-                Instruction::Rts,
-            ],
-        )
-        .unwrap();
-        let error =
-            verify_generated_executable_mapper_select_pairs("branch-bypass value", 0xA000, &bytes)
-                .unwrap_err();
-
-        assert!(error.to_string().contains("can branch between"));
-    }
-
-    #[test]
-    fn generated_absolute_indexed_writes_cannot_reach_mapper_aliases() {
-        let bytes = assemble_at(
-            0xA000,
-            &[Instruction::StaAbsoluteX(0x7F80), Instruction::Rts],
-        )
-        .unwrap();
-        let error = verify_generated_executable_mapper_select_pairs(
-            "indexed mapper candidate",
-            0xA000,
-            &bytes,
-        )
-        .unwrap_err();
-
-        assert!(error.to_string().contains("absolute-indexed write"));
     }
 }
