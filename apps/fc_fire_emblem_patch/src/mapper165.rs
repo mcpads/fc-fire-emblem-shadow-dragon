@@ -51,6 +51,7 @@ pub(crate) use font_page_fallback_graph::{
 };
 pub(crate) use front_end_page::bind_installed_front_end_mapper_register;
 pub(crate) mod hangul_page_probe;
+pub(crate) mod inline_pointer_dispatch;
 mod maximum_dialogue_boundary;
 mod maximum_dialogue_page;
 pub(crate) mod maximum_dialogue_rebinding;
@@ -243,7 +244,7 @@ pub fn build_mapper165_parity_probe(
     let relocated_source_chr_sha1 = sha1_hex(&output_rom.chr()[OUTPUT_CHR_PADDING_SIZE..]);
     let output_chr_sha1 = sha1_hex(output_rom.chr());
     let report = Mapper165ParityReport {
-        schema: 7,
+        schema: 8,
         source_sha1: EXPECTED_SOURCE_SHA1,
         output_sha1: output_sha1.clone(),
         source_mapper: source_rom.mapper(),

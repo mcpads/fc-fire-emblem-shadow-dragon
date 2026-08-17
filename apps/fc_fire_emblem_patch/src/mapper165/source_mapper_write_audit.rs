@@ -205,7 +205,7 @@ pub(super) fn audit_source_mapper_writes(source: &Rom) -> Result<SourceMapperWri
         .count();
     Ok(SourceMapperWriteAudit {
         candidate_scope: "every byte offset in every declared source MMC4 PRG projection, decoded with RP2A03 StaticSemantics against all MMC4 register aliases",
-        closure_claim: "partial: the physical-page and projection denominator is complete; the three hardware vector slots and positive battle, main-dialogue, NMI, and audio instruction spans classify only their exact instruction interiors; switchable, indirect, and inline-dispatch edges remain explicitly open, while source-structural writer declarations do not by themselves establish reachability; counts and the candidate digest are diagnostic outputs rather than closure proofs; the whole-program executable-root ledger is incomplete and every remaining possible start stays unresolved",
+        closure_claim: "partial: the physical-page and projection denominator is complete; the three hardware vector slots and positive battle, main-dialogue, NMI, and audio instruction spans classify only their exact instruction interiors; dynamic switchable-bank and selector-domain inline-dispatch edges remain explicitly open, while source-structural writer declarations do not by themselves establish reachability; counts and the candidate digest are diagnostic outputs rather than closure proofs; the whole-program executable-root ledger is incomplete and every remaining possible start stays unresolved",
         physical_prg_page_count: pages.len(),
         mapped_projection_count: projections.len(),
         mapper_write_candidate_count: scan.candidates.len(),

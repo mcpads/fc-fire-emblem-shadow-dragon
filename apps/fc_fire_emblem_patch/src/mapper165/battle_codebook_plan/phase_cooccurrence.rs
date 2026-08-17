@@ -14,8 +14,9 @@ use super::{
     background_payloads::BATTLE_BANK_PUBLISH_SITES,
     source_window::{prg_bank, source_bytes},
 };
-
-const INLINE_POINTER_DISPATCH_ADDRESS: u16 = 0xC34C;
+use crate::mapper165::inline_pointer_dispatch::{
+    INLINE_POINTER_DISPATCH_ADDRESS, bind_inline_pointer_dispatch,
+};
 
 pub(super) const PRIMARY_PHASE_POINTERS: [u16; 32] = [
     0x82C7, 0x8830, 0x8C5D, 0x8830, 0x8C5D, 0x881C, 0x8827, 0x8CD3, 0x9304, 0x82F1, 0x8505, 0x8522,
@@ -286,13 +287,26 @@ fn bind_nested_dispatchers(rom: &Rom) -> Result<()> {
             "{} dispatcher changed",
             spec.role
         );
-        let table = source_bytes(rom, spec.bank, spec.table_address, spec.pointers.len() * 2)?;
-        let pointers = table
-            .chunks_exact(2)
-            .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
-            .collect::<Vec<_>>();
+        let selector_count = u8::try_from(spec.pointers.len())
+            .context("battle inline dispatcher selector count exceeds one byte")?;
+        let call_address = spec
+            .table_address
+            .checked_sub(3)
+            .context("battle inline dispatcher table precedes its call")?;
+        let binding = bind_inline_pointer_dispatch(
+            rom,
+            spec.bank,
+            call_address,
+            0..selector_count,
+            spec.role,
+        )?;
         ensure!(
-            pointers == spec.pointers,
+            binding.table_start() == spec.table_address,
+            "{} pointer table no longer begins immediately after its dispatcher call",
+            spec.role
+        );
+        ensure!(
+            binding.targets_in_selector_order() == spec.pointers,
             "{} pointer table changed",
             spec.role
         );

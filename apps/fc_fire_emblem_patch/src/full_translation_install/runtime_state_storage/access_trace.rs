@@ -5,6 +5,7 @@ use retro_rp2a03::{AddressingMode, Location, MemoryAddress, Operand, Rp2A03, dec
 use typed_isa_core::{AccessKind, StaticSemantics};
 
 use crate::{
+    mapper165::inline_pointer_dispatch::INLINE_POINTER_DISPATCH_ADDRESS,
     rom::{HEADER_SIZE, Rom},
     typed_source::{Rp2a03DirectControlFlow, rp2a03_direct_control_flow},
 };
@@ -14,8 +15,6 @@ use super::{CANDIDATE_END, CANDIDATE_START};
 const PRG_BANK_SIZE: usize = 16 * 1024;
 const FIXED_BANK: u8 = 0x0F;
 const MAIN_DIALOGUE_BANK: u8 = 0x0A;
-const INLINE_POINTER_DISPATCH_ADDRESS: u16 = 0xC34C;
-
 pub(super) struct RuntimeAccessTrace {
     pub(super) visited: BTreeSet<(u8, u16)>,
     pub(super) direct_overlaps: BTreeSet<AccessSite>,

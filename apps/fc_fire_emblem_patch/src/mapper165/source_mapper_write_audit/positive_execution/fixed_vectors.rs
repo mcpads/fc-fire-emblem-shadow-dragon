@@ -4,6 +4,10 @@ use anyhow::{Context, Result, ensure};
 use retro_rp2a03::decode_bytes;
 
 use crate::{
+    mapper165::inline_pointer_dispatch::{
+        INLINE_POINTER_DISPATCH_ADDRESS, INLINE_POINTER_TARGET_JUMP_ADDRESS,
+        bind_inline_pointer_dispatch,
+    },
     rom::Rom,
     typed_source::{Rp2a03DirectControlFlow, decode_rp2a03_sequence, rp2a03_direct_control_flow},
 };
@@ -11,7 +15,6 @@ use crate::{
 const SOURCE_PRG_BANK_BYTE_COUNT: usize = 16 * 1024;
 const FIXED_PRG_BANK: u8 = 0x0F;
 const FIXED_CPU_START: u16 = 0xC000;
-const INLINE_POINTER_DISPATCH_ADDRESS: u16 = 0xC34C;
 const HARDWARE_VECTOR_SLOTS: [u16; 3] = [0xFFFA, 0xFFFC, 0xFFFE];
 const RESET_RAM_CLEAR_START: u16 = 0xC095;
 const RESET_RAM_CLEAR_WRITER: u16 = 0xC09E;
@@ -29,7 +32,14 @@ use special_bank_call::bind_audio_bank_call;
 pub(super) enum FixedVectorOpenControlEdge {
     SwitchableTarget { instruction: u16, target: u16 },
     IndirectTarget { instruction: u16 },
-    InlinePointerDispatch { instruction: u16, table_start: u16 },
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct UnresolvedInlinePointerDispatch {
+    instruction: u16,
+    table_start: u16,
+    selector_count: usize,
+    distinct_target_count: usize,
 }
 
 #[derive(Debug)]
@@ -37,6 +47,7 @@ pub(super) struct FixedVectorExecution {
     vector_bindings: Vec<(u16, u16)>,
     reachable_instruction_starts: BTreeSet<(u8, u16)>,
     open_control_edges: BTreeSet<FixedVectorOpenControlEdge>,
+    unresolved_inline_pointer_dispatches: Vec<UnresolvedInlinePointerDispatch>,
     bound_switchable_roots: BTreeSet<(u8, u16)>,
     indirect_write_sites_below_mapper_space: BTreeSet<(u8, u16, u8)>,
 }
@@ -74,13 +85,16 @@ impl FixedVectorExecution {
                 FixedVectorOpenControlEdge::IndirectTarget { instruction } => {
                     format!("indirect_target@0F:{instruction:04X}")
                 }
-                FixedVectorOpenControlEdge::InlinePointerDispatch {
-                    instruction,
-                    table_start,
-                } => format!(
-                    "inline_pointer_dispatch@0F:{instruction:04X}[table=${table_start:04X}]"
-                ),
             })
+            .chain(self.unresolved_inline_pointer_dispatches.iter().map(|dispatch| {
+                format!(
+                    "inline_pointer_dispatch@0F:{:04X}[table=${:04X},selector_domain=all_u8,selectors={},distinct_targets={}]",
+                    dispatch.instruction,
+                    dispatch.table_start,
+                    dispatch.selector_count,
+                    dispatch.distinct_target_count,
+                )
+            }))
             .collect()
     }
 
@@ -120,6 +134,7 @@ pub(super) fn bind_fixed_vector_execution(source: &Rom) -> Result<FixedVectorExe
         .collect::<Vec<_>>();
     let mut reachable_instruction_starts = BTreeSet::new();
     let mut open_control_edges = BTreeSet::new();
+    let mut inline_pointer_calls = BTreeSet::new();
     while let Some(address) = pending.pop() {
         ensure!(
             address >= FIXED_CPU_START,
@@ -168,10 +183,7 @@ pub(super) fn bind_fixed_vector_execution(source: &Rom) -> Result<FixedVectorExe
                 return_address,
             } if target == INLINE_POINTER_DISPATCH_ADDRESS => {
                 pending.push(target);
-                open_control_edges.insert(FixedVectorOpenControlEdge::InlinePointerDispatch {
-                    instruction: address,
-                    table_start: return_address,
-                });
+                inline_pointer_calls.insert((address, return_address));
             }
             Rp2a03DirectControlFlow::Call {
                 target,
@@ -191,6 +203,11 @@ pub(super) fn bind_fixed_vector_execution(source: &Rom) -> Result<FixedVectorExe
         }
     }
 
+    let unresolved_inline_pointer_dispatches = bind_open_inline_pointer_dispatches(
+        source,
+        &inline_pointer_calls,
+        &mut open_control_edges,
+    )?;
     let bound_switchable_roots = bind_audio_bank_call(source, &mut open_control_edges)?;
     let indirect_write_sites_below_mapper_space =
         if reachable_instruction_starts.contains(&(FIXED_PRG_BANK, RESET_RAM_CLEAR_WRITER)) {
@@ -203,9 +220,48 @@ pub(super) fn bind_fixed_vector_execution(source: &Rom) -> Result<FixedVectorExe
         vector_bindings,
         reachable_instruction_starts,
         open_control_edges,
+        unresolved_inline_pointer_dispatches,
         bound_switchable_roots,
         indirect_write_sites_below_mapper_space,
     })
+}
+
+fn bind_open_inline_pointer_dispatches(
+    source: &Rom,
+    calls: &BTreeSet<(u16, u16)>,
+    open_control_edges: &mut BTreeSet<FixedVectorOpenControlEdge>,
+) -> Result<Vec<UnresolvedInlinePointerDispatch>> {
+    if calls.is_empty() {
+        return Ok(Vec::new());
+    }
+    ensure!(
+        open_control_edges.remove(&FixedVectorOpenControlEdge::IndirectTarget {
+            instruction: INLINE_POINTER_TARGET_JUMP_ADDRESS,
+        }),
+        "source inline pointer dispatcher no longer reaches its indirect tail jump"
+    );
+    calls
+        .iter()
+        .map(|&(instruction, table_start)| {
+            let binding = bind_inline_pointer_dispatch(
+                source,
+                FIXED_PRG_BANK,
+                instruction,
+                u8::MIN..=u8::MAX,
+                "fixed scheduler inline pointer dispatch",
+            )?;
+            ensure!(
+                binding.call_address() == instruction && binding.table_start() == table_start,
+                "fixed scheduler inline dispatcher call or table boundary changed"
+            );
+            Ok(UnresolvedInlinePointerDispatch {
+                instruction,
+                table_start,
+                selector_count: binding.selector_count(),
+                distinct_target_count: binding.distinct_targets().len(),
+            })
+        })
+        .collect()
 }
 
 fn bind_reset_ram_clear(source: &Rom) -> Result<(u8, u16, u8)> {
@@ -256,6 +312,7 @@ fn fixed_source_bytes(source: &Rom, address: u16, byte_count: usize) -> Result<&
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mapper165::inline_pointer_dispatch::INLINE_POINTER_DISPATCH_CODE;
     use crate::rom::HEADER_SIZE;
 
     fn synthetic_source(fixed_writes: &[(u16, &[u8])], vector_target: u16) -> Rom {
@@ -337,7 +394,10 @@ mod tests {
             &[
                 (0xC100, &[0x20, 0x4C, 0xC3]),
                 (0xC103, &[0x8D, 0x00, 0xA0]),
-                (INLINE_POINTER_DISPATCH_ADDRESS, &[0x6C, 0x0C, 0x00]),
+                (
+                    INLINE_POINTER_DISPATCH_ADDRESS,
+                    &INLINE_POINTER_DISPATCH_CODE,
+                ),
             ],
             0xC100,
         );
@@ -349,12 +409,24 @@ mod tests {
                 .reachable_instruction_starts()
                 .contains(&(FIXED_PRG_BANK, 0xC103))
         );
-        assert!(execution.open_control_edges().contains(
-            &FixedVectorOpenControlEdge::InlinePointerDispatch {
-                instruction: 0xC100,
-                table_start: 0xC103,
+        assert!(!execution.open_control_edges().contains(
+            &FixedVectorOpenControlEdge::IndirectTarget {
+                instruction: INLINE_POINTER_TARGET_JUMP_ADDRESS,
             }
         ));
+        assert_eq!(execution.unresolved_inline_pointer_dispatches.len(), 1);
+        assert_eq!(
+            execution.unresolved_inline_pointer_dispatches[0].instruction,
+            0xC100
+        );
+        assert_eq!(
+            execution.unresolved_inline_pointer_dispatches[0].table_start,
+            0xC103
+        );
+        assert_eq!(
+            execution.unresolved_inline_pointer_dispatches[0].selector_count,
+            usize::from(u8::MAX) + 1
+        );
     }
 
     #[test]

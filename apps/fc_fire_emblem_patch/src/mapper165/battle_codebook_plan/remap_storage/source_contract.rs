@@ -5,6 +5,7 @@ use retro_rp2a03::{AddressingMode, Mnemonic, Operand, decode_bytes};
 use serde::Serialize;
 
 use crate::{
+    mapper165::inline_pointer_dispatch::INLINE_POINTER_DISPATCH_ADDRESS,
     rom::Rom,
     runtime_storage_layout::{BATTLE_DIALOGUE_CACHE_KEY_ADDRESS, BATTLE_REMAP_PAIR_TABLE_START},
     sha1_hex,
@@ -31,7 +32,6 @@ use indirect_destinations::{
     bind_indirect_store_destination_classes,
 };
 
-const INLINE_POINTER_DISPATCH_ADDRESS: u16 = 0xC34C;
 const COMMON_TEXT_QUEUE_READY_ADDRESS: u16 = 0xE5C7;
 const QUEUE_READY_ZERO_PAGE_ADDRESS: u8 = 0x21;
 // The battle-owned pair table begins here. The enclosing source-access proof remains
