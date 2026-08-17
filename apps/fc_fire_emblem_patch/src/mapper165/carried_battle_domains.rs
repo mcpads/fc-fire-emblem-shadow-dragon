@@ -5,8 +5,8 @@
 //! unrelated carried byte ranges would miss exactly the kind of cross-patch
 //! conflict that the integrated build is meant to reject.  This inspector
 //! therefore recomputes every translated payload, binds the shared material
-//! once, and verifies the cumulative runtime after the two intentional global
-//! integration replacements have been applied.
+//! once, and verifies the cumulative runtime outside explicitly owned
+//! cross-domain replacement spans.
 
 mod chr_supply;
 
@@ -40,6 +40,10 @@ use super::{
         GLYPH_ATLAS_PRG_OFFSET, PHYSICAL_CODE_TABLE_PRG_OFFSET,
         PROTECTED_ABSTRACT_COLORS_PRG_OFFSET, RECIPE_BLOB_PRG_OFFSET,
         SAFE_ABSTRACT_COLORS_PRG_OFFSET, SOURCE_PAGE_PRG_OFFSET, rasterize_atlas,
+    },
+    front_end_page::{
+        PAGE_ROUTINE_ADDRESS as FRONT_END_SELECTOR_ADDRESS,
+        PAGE_ROUTINE_END as FRONT_END_SELECTOR_END,
     },
 };
 use chr_supply::{BattleChrSupplyPlan, bind_battle_chr_supply};
@@ -535,7 +539,9 @@ fn bind_shared_consumer_route(
     let fixed_end = CUMULATIVE_RUNTIME_LAYOUT.fixed_cave_end;
     ensure!(
         fixed_start < route.composition_call_address
-            && route.composition_call_address + 3 < central_start
+            && route.composition_call_address + 3 < FRONT_END_SELECTOR_ADDRESS
+            && FRONT_END_SELECTOR_ADDRESS < FRONT_END_SELECTOR_END
+            && FRONT_END_SELECTOR_END < central_start
             && central_start < fixed_end,
         "battle runtime replacement addresses no longer partition the fixed runtime"
     );
@@ -547,6 +553,12 @@ fn bind_shared_consumer_route(
         central_end <= fixed_end,
         "integrated battle central selector exceeds its cave"
     );
+    let [before_front_end, after_front_end] = bind_preserved_battle_runtime_around_front_end(
+        route.composition_call_address + 3,
+        central_start,
+        inputs.cumulative,
+        inputs.integrated,
+    )?;
 
     let mut regions = vec![
         bind_preserved_region(
@@ -562,13 +574,8 @@ fn bind_shared_consumer_route(
             &route.composition_call_bytes,
             inputs.integrated,
         )?,
-        bind_preserved_region(
-            "battle_fixed_runtime_after_ownership_call",
-            active_fixed_file_offset(inputs.cumulative, route.composition_call_address + 3)?,
-            usize::from(central_start - (route.composition_call_address + 3)),
-            inputs.cumulative,
-            inputs.integrated,
-        )?,
+        before_front_end,
+        after_front_end,
         bind_final_expected_region(
             "battle_integrated_fallback_selector",
             active_fixed_file_offset(inputs.integrated, central_start)?,
@@ -633,6 +640,36 @@ fn bind_shared_consumer_route(
         )?);
     }
     Ok(regions)
+}
+
+fn bind_preserved_battle_runtime_around_front_end(
+    runtime_start: u16,
+    runtime_end: u16,
+    cumulative: &Rom,
+    integrated: &Rom,
+) -> Result<[FinalRegionBinding; 2]> {
+    ensure!(
+        runtime_start < FRONT_END_SELECTOR_ADDRESS
+            && FRONT_END_SELECTOR_ADDRESS < FRONT_END_SELECTOR_END
+            && FRONT_END_SELECTOR_END < runtime_end,
+        "front-end selector no longer partitions the carried battle runtime"
+    );
+    Ok([
+        bind_preserved_region(
+            "battle_fixed_runtime_after_ownership_call_before_front_end_selector",
+            active_fixed_file_offset(cumulative, runtime_start)?,
+            usize::from(FRONT_END_SELECTOR_ADDRESS - runtime_start),
+            cumulative,
+            integrated,
+        )?,
+        bind_preserved_region(
+            "battle_fixed_runtime_after_front_end_selector",
+            active_fixed_file_offset(cumulative, FRONT_END_SELECTOR_END)?,
+            usize::from(runtime_end - FRONT_END_SELECTOR_END),
+            cumulative,
+            integrated,
+        )?,
+    ])
 }
 
 fn complete_domain(
@@ -763,6 +800,38 @@ mod tests {
         assert!(
             bind_final_expected_region("battle route", offset, &[0x20, 0x10, 0xF0], &integrated,)
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn battle_preservation_allows_only_the_owned_front_end_replacement_span() {
+        let cumulative_bytes = crate::test_support::synthetic_mapper165_rom_bytes(0);
+        let cumulative = Rom::parse(cumulative_bytes.clone()).unwrap();
+        let front_end_offset =
+            active_fixed_file_offset(&cumulative, FRONT_END_SELECTOR_ADDRESS).unwrap();
+
+        let mut replaced_bytes = cumulative_bytes.clone();
+        replaced_bytes[front_end_offset] ^= 1;
+        let replaced = Rom::parse(replaced_bytes).unwrap();
+        bind_preserved_battle_runtime_around_front_end(
+            0xFC4C,
+            CUMULATIVE_RUNTIME_LAYOUT.battle_central_right_fd_selector,
+            &cumulative,
+            &replaced,
+        )
+        .unwrap();
+
+        let mut leaked_bytes = cumulative_bytes;
+        leaked_bytes[front_end_offset - 1] ^= 1;
+        let leaked = Rom::parse(leaked_bytes).unwrap();
+        assert!(
+            bind_preserved_battle_runtime_around_front_end(
+                0xFC4C,
+                CUMULATIVE_RUNTIME_LAYOUT.battle_central_right_fd_selector,
+                &cumulative,
+                &leaked,
+            )
+            .is_err()
         );
     }
 

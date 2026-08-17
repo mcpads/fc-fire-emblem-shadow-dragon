@@ -28,6 +28,7 @@ pub(crate) mod dialogue_probe_font;
 pub(crate) mod dialogue_slice_probe;
 pub(crate) mod direct_chr_pairs;
 pub(crate) mod executable_mapper_writes;
+mod final_font_page_forwarders;
 pub(crate) mod font_pair_projection;
 mod front_end_page;
 pub(crate) use carried_battle_domains::{
@@ -37,6 +38,11 @@ pub(crate) use carried_battle_domains::{
 pub(crate) use carried_ui_domains::{
     CarriedUiDomainInputs, CarriedUiDomainPreservation, FinalConsumerRouteRegion,
     FinalRosterConsumerRoute, inspect_carried_ui_domains,
+};
+#[cfg(test)]
+pub(crate) use final_font_page_forwarders::BoundFrontEndFontPageSelector;
+pub(crate) use final_font_page_forwarders::{
+    bind_front_end_font_page_selector, build_front_end_font_page_forwarder,
 };
 pub(crate) use front_end_page::bind_installed_front_end_mapper_register;
 pub(crate) mod hangul_page_probe;

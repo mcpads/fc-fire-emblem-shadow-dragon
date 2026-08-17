@@ -177,7 +177,7 @@ pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) output_path: Option<&'a Path>,
 }
 
-pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 28;
+pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 29;
 
 pub(crate) struct FullTranslationInstallSummary {
     pub(crate) report_sha1: String,
@@ -677,6 +677,7 @@ pub(crate) fn plan_full_translation_installation(
             transition_lifetime: &transition_residency.augmented_worksets,
             codebook: &codebook,
         },
+        &current_candidate,
     )?;
     let dynamic_page_codes = bind_dynamic_string_page_codes(&dynamic_inputs, &codebook)?;
     ensure!(
@@ -1022,6 +1023,7 @@ pub(crate) fn plan_full_translation_installation(
             fixed_ui_projection: &fixed_ui_projection,
             chapter_save_projection: &chapter_save_projection,
             ending_record_projection: &ending_record_projection,
+            font_page_selector_forwarders: screen_font_residency.selector_forwarders(),
             consumer_installation: &consumer_installation,
             required_domains: &REQUIRED_DOMAINS,
             all_required_dialogue_runtime_hook_roles_assembled,

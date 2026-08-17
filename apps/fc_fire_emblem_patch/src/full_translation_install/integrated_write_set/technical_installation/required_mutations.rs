@@ -302,6 +302,18 @@ pub(in crate::full_translation_install::integrated_write_set) fn plan_required_m
             &write.replacement,
         ));
     }
+    for write in inputs.font_page_selector_forwarders.writes() {
+        ensure!(
+            write.file_offset == fixed_file_offset(inputs.candidate, write.cpu_address)?,
+            "font-page selector forwarder file and CPU addresses disagree"
+        );
+        required.push(MutationIdentity::exact(
+            write.role,
+            write.file_offset,
+            &write.expected,
+            &write.replacement,
+        ));
+    }
     let recipes = inputs.cross_domain_material.dialogue_page_recipes();
     let expected = mutation_expected_slice(
         inputs.candidate.data(),

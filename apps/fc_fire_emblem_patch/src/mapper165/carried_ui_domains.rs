@@ -26,19 +26,15 @@ use super::{
     battle_composition_loader_probe::{
         CUMULATIVE_RUNTIME_LAYOUT, cumulative_battle_central_right_fd_selector,
     },
+    bind_front_end_font_page_selector, build_front_end_font_page_forwarder,
     class_profile_page::{
         PROFILE_PAGE_SELECTOR_ADDRESS, TITLE_COMPOSER_HOOK_ADDRESS, build_profile_page_selector,
         build_title_composer_hook,
     },
-    cumulative_patch::DIALOGUE_SELECTOR_ADDRESS,
     dialogue_probe_font::assignment_sha1,
     encode_chr_page_register,
     font_pair_projection::{WRITE_TRANSLATED_CHR_PAGE_ADDRESS, build_translated_chr_page_writer},
-    front_end_page::{
-        PAGE_ROUTINE_ADDRESS as FRONT_END_PAGE_ROUTINE_ADDRESS,
-        bind_installed_front_end_mapper_register,
-        build_page_selector as build_front_end_page_selector,
-    },
+    front_end_page::PAGE_ROUTINE_ADDRESS as FRONT_END_PAGE_ROUTINE_ADDRESS,
     maximum_dialogue_runtime::{
         INITIAL_PAGE_SELECTOR_ADDRESS, bind_installed_initial_page_selector,
     },
@@ -628,11 +624,12 @@ fn inspect_front_end(
         inputs.integrated,
         Some(&report.front_end_menu.font_page_pack_sha1),
     )?];
-    let installed_register = bind_installed_front_end_mapper_register(inputs.integrated)?;
+    let installed_selector = bind_front_end_font_page_selector(inputs.cumulative)?;
     ensure!(
-        installed_register == report.front_end_menu.font_mapper_register,
-        "integrated front-end selector and reported page disagree"
+        installed_selector.mapper_register == report.front_end_menu.font_mapper_register,
+        "cumulative front-end selector and reported page disagree"
     );
+    let final_forwarder = build_front_end_font_page_forwarder(&installed_selector)?;
     let shop_dialogue_mapper_register = report
         .main_dialogue
         .lifetimes
@@ -641,10 +638,11 @@ fn inspect_front_end(
         .map(|lifetime| lifetime.font_mapper_register)
         .context("cumulative report lost the weapon-shop dialogue lifetime")?;
     let consumer_regions = vec![
-        bind_expected_region(
-            "front_end_page_selector",
+        bind_replaced_region(
+            "front_end_page_forwarder",
             active_fixed_file_offset(inputs.cumulative, FRONT_END_PAGE_ROUTINE_ADDRESS)?,
-            &build_front_end_page_selector(installed_register, DIALOGUE_SELECTOR_ADDRESS)?,
+            &installed_selector.expected_bytes,
+            &final_forwarder,
             inputs.cumulative,
             inputs.integrated,
         )?,
@@ -687,7 +685,7 @@ fn inspect_front_end(
         vec![
             "0F:F700:unit_name_page_fallback_to_shop_dialogue",
             "0F:F748:shop_dialogue_page_fallback_to_front_end",
-            "0F:FC60:front_end_page_selector",
+            "0F:FC60:front_end_page_forwarder",
             "0F:F386:translated_chr_page_writer",
         ],
     ))
@@ -987,6 +985,40 @@ fn bind_final_expected_region(
         file_offset_hex: format!("0x{offset:06X}"),
         byte_count: expected.len(),
         sha1: sha1_hex(actual),
+        final_bytes_match_binding: true,
+    })
+}
+
+fn bind_replaced_region(
+    role: &'static str,
+    offset: usize,
+    expected_before: &[u8],
+    expected_after: &[u8],
+    cumulative: &Rom,
+    integrated: &Rom,
+) -> Result<FinalRegionBinding> {
+    ensure!(
+        !expected_before.is_empty() && expected_before.len() == expected_after.len(),
+        "{role} replacement extent changed"
+    );
+    let before = cumulative
+        .data()
+        .get(offset..offset + expected_before.len())
+        .with_context(|| format!("cumulative {role} is outside the artifact"))?;
+    let after = integrated
+        .data()
+        .get(offset..offset + expected_after.len())
+        .with_context(|| format!("integrated {role} is outside the artifact"))?;
+    ensure!(
+        before == expected_before && after == expected_after && before != after,
+        "integrated {role} does not replace its exact cumulative source"
+    );
+    Ok(FinalRegionBinding {
+        role,
+        binding_kind: "integrated_route_replacement",
+        file_offset_hex: format!("0x{offset:06X}"),
+        byte_count: expected_after.len(),
+        sha1: sha1_hex(after),
         final_bytes_match_binding: true,
     })
 }

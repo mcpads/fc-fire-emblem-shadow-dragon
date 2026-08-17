@@ -23,6 +23,7 @@ use super::{
     fixed_ui_projection::FixedUiProjectionPlan,
     installation_layout::main_dialogue_runtime_material_file_offset,
     runtime_code::{DialogueRuntimeCodePlan, DialogueRuntimeHookRole, DialogueRuntimeHookSite},
+    screen_font_residency::FontPageSelectorForwarderPlan,
 };
 use crate::dialogue_inventory::switchable_cpu_to_file_offset;
 
@@ -47,6 +48,7 @@ pub(super) struct IntegratedWriteSetInputs<'a> {
     pub(super) fixed_ui_projection: &'a FixedUiProjectionPlan,
     pub(super) chapter_save_projection: &'a ChapterSaveProjectionPlan,
     pub(super) ending_record_projection: &'a EndingRecordProjectionPlan,
+    pub(super) font_page_selector_forwarders: &'a FontPageSelectorForwarderPlan,
     pub(super) consumer_installation: &'a ConsumerInstallationPlan,
     pub(super) required_domains: &'a [&'static str],
     pub(super) all_required_dialogue_runtime_hook_roles_assembled: bool,
@@ -94,6 +96,7 @@ pub(super) struct IntegratedWriteSetPlan {
     fixed_ui_projection_write_count: usize,
     chapter_save_projection_write_count: usize,
     ending_record_projection_write_count: usize,
+    font_page_selector_forwarder_write_count: usize,
     installed_cold_request_presentation_matches_plan: bool,
     installed_static_consumer_font_pages_match_plan: bool,
     installed_catalog_consumer_font_pages_match_plan: bool,
@@ -286,6 +289,11 @@ pub(super) fn plan_integrated_write_set(
     install_fixed_ui_projection(&mut image, inputs.fixed_ui_projection)?;
     install_chapter_save_projection(&mut image, inputs.chapter_save_projection)?;
     install_ending_record_projection(&mut image, inputs.ending_record_projection)?;
+    install_font_page_selector_forwarders(
+        &mut image,
+        inputs.candidate,
+        inputs.font_page_selector_forwarders,
+    )?;
 
     let expected_write_count_before_cross_domain = image.writes().len();
     install_cross_domain_material(&mut image, inputs.candidate, inputs.cross_domain_material)?;
@@ -321,6 +329,11 @@ pub(super) fn plan_integrated_write_set(
     verify_installed_fixed_ui_projection(&output, inputs.fixed_ui_projection)?;
     verify_installed_chapter_save_projection(&output, inputs.chapter_save_projection)?;
     verify_installed_ending_record_projection(&output, inputs.ending_record_projection)?;
+    verify_installed_font_page_selector_forwarders(
+        &output,
+        inputs.candidate,
+        inputs.font_page_selector_forwarders,
+    )?;
     let runtime_state_initializer = verify_runtime_state_initializer_installation(
         &required_mutations,
         &actual_mutations,
@@ -355,6 +368,7 @@ pub(super) fn plan_integrated_write_set(
         inputs.fixed_ui_projection,
         inputs.chapter_save_projection,
         inputs.ending_record_projection,
+        inputs.font_page_selector_forwarders,
         inputs.consumer_installation,
     )?;
     let declared_domain_with_expected_writes_count = domains
@@ -434,6 +448,9 @@ pub(super) fn plan_integrated_write_set(
             fixed_ui_projection_write_count: inputs.fixed_ui_projection.write_count(),
             chapter_save_projection_write_count: inputs.chapter_save_projection.write_count(),
             ending_record_projection_write_count: inputs.ending_record_projection.write_count(),
+            font_page_selector_forwarder_write_count: inputs
+                .font_page_selector_forwarders
+                .write_count(),
             installed_cold_request_presentation_matches_plan: true,
             installed_static_consumer_font_pages_match_plan: true,
             installed_catalog_consumer_font_pages_match_plan: true,
@@ -985,6 +1002,47 @@ fn install_ending_record_projection(
     Ok(())
 }
 
+fn install_font_page_selector_forwarders(
+    image: &mut IntegratedImage,
+    candidate: &Rom,
+    plan: &FontPageSelectorForwarderPlan,
+) -> Result<()> {
+    ensure!(
+        plan.write_count() == 1,
+        "screen residency must currently replace exactly the migrated front-end selector"
+    );
+    for write in plan.writes() {
+        ensure!(
+            write.file_offset == fixed_file_offset(candidate, write.cpu_address)?,
+            "font-page selector forwarder file and CPU addresses disagree"
+        );
+        image.write_expected(
+            write.role,
+            write.file_offset,
+            &write.expected,
+            &write.replacement,
+        )?;
+    }
+    Ok(())
+}
+
+fn verify_installed_font_page_selector_forwarders(
+    installed: &[u8],
+    candidate: &Rom,
+    plan: &FontPageSelectorForwarderPlan,
+) -> Result<()> {
+    for write in plan.writes() {
+        ensure!(
+            write.file_offset == fixed_file_offset(candidate, write.cpu_address)?
+                && installed.get(write.file_offset..write.file_offset + write.replacement.len())
+                    == Some(write.replacement.as_slice()),
+            "installed font-page selector forwarder does not match {}",
+            write.role
+        );
+    }
+    Ok(())
+}
+
 fn verify_installed_ending_record_projection(
     installed: &[u8],
     plan: &EndingRecordProjectionPlan,
@@ -1008,6 +1066,7 @@ fn domain_contributions(
     fixed_ui_projection: &FixedUiProjectionPlan,
     chapter_save_projection: &ChapterSaveProjectionPlan,
     ending_record_projection: &EndingRecordProjectionPlan,
+    font_page_selector_forwarders: &FontPageSelectorForwarderPlan,
     consumer_installation: &ConsumerInstallationPlan,
 ) -> Result<Vec<DomainWriteContribution>> {
     ensure!(
@@ -1043,6 +1102,8 @@ fn domain_contributions(
             let fixed_ui_write_count = fixed_ui_projection.write_count_for_domain(id);
             let chapter_save_write_count = chapter_save_projection.write_count_for_domain(id);
             let ending_record_write_count = ending_record_projection.write_count_for_domain(id);
+            let selector_forwarder_write_count =
+                font_page_selector_forwarders.write_count_for_domain(id);
             let all_declared_consumers_statically_accounted =
                 consumer_installation.domain_has_all_declared_consumers_statically_accounted(id);
             DomainWriteContribution {
@@ -1054,6 +1115,7 @@ fn domain_contributions(
                     || fixed_ui_write_count != 0
                     || chapter_save_write_count != 0
                     || ending_record_write_count != 0
+                    || selector_forwarder_write_count != 0
                     || all_declared_consumers_statically_accounted,
                 runtime_material_writes_contributed: dialogue || material,
                 font_supply_writes_contributed: true,
@@ -1067,6 +1129,7 @@ fn domain_contributions(
                     + fixed_ui_write_count
                     + chapter_save_write_count
                     + ending_record_write_count
+                    + selector_forwarder_write_count
                     + if dialogue {
                         expected_dialogue_write_count
                     } else if chapter_titles {

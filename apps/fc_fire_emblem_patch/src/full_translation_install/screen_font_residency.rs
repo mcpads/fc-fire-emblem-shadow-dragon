@@ -5,6 +5,7 @@
 //! 그대로 방출한다. 이전 화면이 남긴 `$07FD`를 암묵적인 입력으로 쓰지 않는다.
 
 mod dialogue_surfaces;
+mod selector_forwarders;
 mod surface_requirements;
 mod transition_surfaces;
 
@@ -21,6 +22,7 @@ use crate::{
         SAVE_SLOT_SELECTION_COMPOSITE_STATE, START_MENU_COMPOSITE_STATE,
     },
     mapper165::font_pair_projection::{TRANSLATED_FE_PAGE_FLAG, mapper_register_from_route},
+    rom::Rom,
     semantic_translation::SemanticTranslationPlan,
     text_inventory::FixedTextPlan,
     unit_names::UnitNamePlan,
@@ -29,6 +31,8 @@ use crate::{
 use super::{consumer_catalog::ConsumerCatalogPlan, consumer_codebook::ConsumerCodebookPlan};
 pub(super) use dialogue_surfaces::DialogueSurfaceInputs;
 use dialogue_surfaces::{DialogueSurfacePlan, plan_dialogue_surfaces};
+pub(in crate::full_translation_install) use selector_forwarders::FontPageSelectorForwarderPlan;
+use selector_forwarders::plan_font_page_selector_forwarders;
 use surface_requirements::{
     ScreenFontSurfaceInputs, ScreenFontSurfacePlan, plan_screen_font_surfaces,
 };
@@ -289,11 +293,18 @@ pub(super) struct ScreenFontResidencyPlan {
     #[serde(flatten)]
     draft: ScreenFontResidencyDraft,
     dialogue_surfaces: DialogueSurfacePlan,
+    selector_forwarders: FontPageSelectorForwarderPlan,
 }
 
 impl ScreenFontResidencyPlan {
     pub(in crate::full_translation_install) fn routes(&self) -> ScreenFontPageRoutes {
         self.draft.routes
+    }
+
+    pub(in crate::full_translation_install) fn selector_forwarders(
+        &self,
+    ) -> &FontPageSelectorForwarderPlan {
+        &self.selector_forwarders
     }
 }
 
@@ -408,11 +419,14 @@ pub(super) fn plan_screen_font_residency(
 pub(super) fn finalize_screen_font_residency(
     draft: ScreenFontResidencyDraft,
     dialogue_inputs: DialogueSurfaceInputs<'_>,
+    candidate: &Rom,
 ) -> Result<ScreenFontResidencyPlan> {
     let dialogue_surfaces = plan_dialogue_surfaces(dialogue_inputs)?;
+    let selector_forwarders = plan_font_page_selector_forwarders(candidate, draft.routes)?;
     Ok(ScreenFontResidencyPlan {
         draft,
         dialogue_surfaces,
+        selector_forwarders,
     })
 }
 
