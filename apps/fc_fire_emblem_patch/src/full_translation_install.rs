@@ -5,7 +5,6 @@ use std::{
 };
 
 use anyhow::{Context, Result, ensure};
-use serde::Serialize;
 
 use crate::{
     chapter_transition::{plan_chapter_titles, plan_transition_labels},
@@ -58,6 +57,7 @@ mod front_end_result_residency;
 mod installation_layout;
 mod integrated_write_set;
 mod main_dialogue_route_population;
+mod report;
 mod resident_glyph_assignment;
 mod runtime_bank_contract;
 mod runtime_code;
@@ -106,6 +106,10 @@ use integrated_write_set::{
 };
 use main_dialogue_route_population::{
     MainDialogueRoutePopulationPlan, plan_main_dialogue_route_population,
+};
+use report::{
+    ChapterIntroResidency, DialogueCodebook, DialoguePagePool, DialogueRuntimeComposition,
+    DialogueStorage, FullTranslationInstallReport, InstallationGates, TranslationInputs,
 };
 use runtime_code::{plan_dialogue_runtime_code, resolve_request::MaterialLayout};
 use runtime_control_flow::{
@@ -190,251 +194,6 @@ pub(crate) struct FullTranslationInstallSummary {
     pub(crate) dialogue_pointer_write_count: usize,
     pub(crate) dialogue_planned_storage_byte_count: usize,
     pub(crate) integrated_image_sha1: String,
-}
-
-#[derive(Serialize)]
-struct FullTranslationInstallReport {
-    schema: u8,
-    source_sha1: &'static str,
-    strategy: &'static str,
-    declared_installation_domain_count: usize,
-    declared_installation_domains: [&'static str; REQUIRED_DOMAIN_COUNT],
-    translation_inputs: TranslationInputs,
-    fixed_string_consumers: FixedStringConsumerCensus,
-    fixed_string_ownership: FixedStringOwnershipReport,
-    dialogue_codebook: DialogueCodebook,
-    chapter_intro_residency: ChapterIntroResidency,
-    choice_residency: ChoiceResidencyPlan,
-    screen_font_residency: ScreenFontResidencyPlan,
-    front_end_result_residency: FrontEndResultResidencyPlan,
-    chapter_save_projection: ChapterSaveProjectionPlan,
-    ending_record_projection: EndingRecordProjectionPlan,
-    dialogue_page_pool: DialoguePagePool,
-    cross_domain_material: cross_domain_material::CrossDomainMaterialPlan,
-    consumer_codebook: ConsumerCodebookPlan,
-    consumer_catalog: ConsumerCatalogPlan,
-    fixed_ui_projection: FixedUiProjectionPlan,
-    installation_layout: InstallationLayoutPlan,
-    integrated_write_set: IntegratedWriteSetPlan,
-    dialogue_runtime_control_flow_static_contract: DialogueRuntimeControlFlowPlan,
-    dialogue_runtime_state_storage_source_reservation: DialogueRuntimeStateStoragePlan,
-    dialogue_runtime_composition: DialogueRuntimeComposition,
-    main_dialogue_route_population: MainDialogueRoutePopulationPlan,
-    consumer_installation: ConsumerInstallationPlan,
-    carried_ui_domain_preservation: CarriedUiDomainPreservation,
-    carried_battle_domain_preservation: CarriedBattleDomainPreservation,
-    final_artifact_runtime_evidence: FinalArtifactRuntimeEvidence,
-    dialogue_storage: DialogueStorage,
-    installation_gates: InstallationGates,
-    rom_emitted: bool,
-    dynamic_verification_started: bool,
-    next_gate: &'static str,
-}
-
-#[derive(Serialize)]
-struct TranslationInputs {
-    main_dialogue_record_count: usize,
-    fixed_text_physical_entry_count: usize,
-    front_end_menu_label_count: usize,
-    playable_unit_name_count: usize,
-    chapter_title_count: usize,
-    choice_label_count: usize,
-    map_menu_label_count: usize,
-    unit_ui_label_count: usize,
-    item_action_label_count: usize,
-    fixed_menu_label_count: usize,
-    transition_label_count: usize,
-    location_name_count: usize,
-    translation_input_complete: bool,
-    review_complete: bool,
-}
-
-#[derive(Serialize)]
-struct DialogueCodebook {
-    canonical_record_count: usize,
-    page_workset_count: usize,
-    unique_workset_count: usize,
-    literal_glyph_count: usize,
-    unique_glyph_count: usize,
-    active_slot_count: usize,
-    maximum_workset_slot_demand: usize,
-    maximum_page_slot_demand: usize,
-    greedy_page_count: usize,
-    packing_strategy: &'static str,
-    constraint_solver_version: Option<String>,
-    constraint_solver_timeout_seconds: Option<u64>,
-    packing_sha1: String,
-    page_assignment_sha1: String,
-    static_page_upper_bound_count: usize,
-    static_page_pack_sha1: String,
-    static_page_pack_preserves_every_workset_code: bool,
-    canonical_records_connected: bool,
-    page_local_bundle_encoding_connected: bool,
-    glyph_characters_encoded_into_installed_runtime_atlas: bool,
-    transition_stable_lifetime_count: usize,
-    multi_record_transition_stable_lifetime_count: usize,
-    maximum_transition_stable_lifetime_record_count: usize,
-    maximum_transition_stable_lifetime_workset_count: usize,
-    maximum_transition_stable_lifetime_slot_demand: usize,
-    every_resident_transition_uses_one_codebook: bool,
-}
-
-#[derive(Serialize)]
-struct ChapterIntroResidency {
-    chapter_context_count: usize,
-    resident_workset_count: usize,
-    title_glyph_count: usize,
-    fixed_code_count: usize,
-    encoded_title_count: usize,
-    maximum_augmented_workset_slot_demand: usize,
-    fixed_assignment_sha1: String,
-    every_title_glyph_has_one_stable_code: bool,
-    title_storage_connected: bool,
-}
-
-#[derive(Serialize)]
-struct DialoguePagePool {
-    current_candidate_sha1: String,
-    current_chr_page_count: usize,
-    first_installable_physical_page: u8,
-    superseded_maximum_dialogue_page_count: usize,
-    appendable_page_count: usize,
-    available_page_count: usize,
-    cold_request_presentation_page_count: usize,
-    remaining_available_page_count: usize,
-    prebuilt_font_page_upper_bound: usize,
-    prebuilt_upper_bound_fits_available_pages: bool,
-    exact_available_page_fit_decided: bool,
-    mapper_capacity_bound: bool,
-    current_candidate_bound: bool,
-}
-
-#[derive(Serialize)]
-struct DialogueRuntimeComposition {
-    strategy_selected: bool,
-    glyph_atlas_tile_count: usize,
-    dialogue_codebook_glyph_count: usize,
-    additional_cross_domain_glyph_count: usize,
-    glyph_atlas_covers_every_required_domain_glyph: bool,
-    stored_bytes_per_glyph: usize,
-    composed_bytes_per_glyph: usize,
-    glyph_atlas_byte_count: usize,
-    glyph_atlas_prg_8k_page_count: usize,
-    glyph_atlas_sha1: String,
-    generated_high_bitplane_is_zero: bool,
-    four_by_four_block_count: usize,
-    four_by_four_block_index_bit_count: usize,
-    four_by_four_block_atlas_byte_count: usize,
-    static_page_group_count: usize,
-    page_recipe_reference_byte_count: usize,
-    page_recipe_block_byte_count: usize,
-    page_recipe_blocks_sha1: String,
-    page_recipe_reference_offset: usize,
-    record_recipe_directory_offset: usize,
-    static_page_group_overlay_reference_count: usize,
-    maximum_static_page_group_overlay_tile_count: usize,
-    visible_page_recipe_count: usize,
-    visible_page_recipe_reference_count: usize,
-    visible_page_overlay_reference_count: usize,
-    maximum_visible_page_overlay_tile_count: usize,
-    cold_page_restore_frame_count: usize,
-    maximum_cold_page_preparation_frame_count: usize,
-    maximum_resident_page_overlay_frame_count: usize,
-    maximum_visible_page_rebuild_ppu_write_count: usize,
-    sequential_page_transition_count: usize,
-    distinct_visible_page_recipe_transition_count: usize,
-    unchanged_visible_page_recipe_transition_count: usize,
-    resident_group_transition_count: usize,
-    resident_group_change_count: usize,
-    resident_group_reuse_count: usize,
-    maximum_delta_tile_count: usize,
-    maximum_delta_ppu_write_count: usize,
-    total_delta_ppu_write_count: usize,
-    rebuild_every_visible_page_ppu_write_count: usize,
-    initial_rebuild_then_delta_ppu_write_count: usize,
-    direct_visible_page_recipe_byte_count: usize,
-    bitpacked_visible_page_recipe_byte_count: usize,
-    bitmap_and_atlas_index_visible_page_recipe_byte_count: usize,
-    direct_delta_recipe_byte_count: usize,
-    bitpacked_delta_recipe_byte_count: usize,
-    visible_page_recipe_strategy_selected: bool,
-    script_scan_covers_dynamic_strings: bool,
-    dynamic_string_control_count: usize,
-    dynamic_string_page_count: usize,
-    dynamic_string_selector_count: usize,
-    dynamic_string_domain_count: usize,
-    translated_dynamic_page_count: usize,
-    preserved_numeric_page_count: usize,
-    translated_dynamic_glyph_count: usize,
-    combined_dialogue_glyph_count: usize,
-    maximum_possible_domain_glyph_count: usize,
-    maximum_augmented_workset_slot_demand: usize,
-    maximum_rendered_target_glyph_upper_bound: usize,
-    mixed_dynamic_domain_page_count: usize,
-    dynamic_string_domains_classified: bool,
-    dynamic_augmented_worksets_fit: bool,
-    canonical_dynamic_code_count: usize,
-    translated_dynamic_page_group_count: usize,
-    dynamic_page_code_identity_entry_count: usize,
-    dynamic_page_code_material_byte_count: usize,
-    dynamic_page_code_strategy: &'static str,
-    dynamic_page_code_material_sha1: String,
-    canonical_dynamic_codes_are_page_physical_codes: bool,
-    page_selectors_use_plain_group_indices: bool,
-    every_translated_dynamic_page_directly_consumable: bool,
-    dynamic_string_producers_bound: bool,
-    dynamic_string_producers: DynamicInputProducerPlan,
-    dynamic_producer_encoding: DynamicProducerEncodingPlan,
-    dense_group_lookup_byte_count: usize,
-    record_recipe_directory_byte_count: usize,
-    scan_material_byte_count: usize,
-    scan_material_sha1: String,
-    scan_material_serialized: bool,
-    atlas_and_scan_material_byte_count: usize,
-    dialogue_runtime_identity: DialogueRuntimeIdentityPlan,
-    atlas_scan_and_identity_byte_count: usize,
-    runtime_material_layout_and_assembly: DialogueRuntimeMaterialPlan,
-    runtime_page_scan_bound_to_assembled_control_flow: bool,
-    current_battle_glyph_atlas_tile_count: usize,
-    current_battle_maximum_ppu_write_count: usize,
-    current_battle_runtime_routine_byte_count: usize,
-    current_battle_runtime_bound_to_build: bool,
-    battle_compositor_is_directly_reusable: bool,
-    main_dialogue_page_identity_material_serialized: bool,
-    main_dialogue_page_identity_bound_to_assembled_control_flow: bool,
-    main_dialogue_transition_hook_planned: bool,
-}
-
-#[derive(Serialize)]
-struct DialogueStorage {
-    region_count: usize,
-    record_count: usize,
-    pointer_write_count: usize,
-    source_owned_storage_byte_count: usize,
-    planned_storage_byte_count: usize,
-    remaining_storage_byte_count: usize,
-    every_pointer_within_source_owned_regions: bool,
-}
-
-#[derive(Serialize)]
-struct InstallationGates {
-    all_translation_inputs_loaded: bool,
-    all_dialogue_records_encoded: bool,
-    all_visible_dialogue_text_encoded: bool,
-    all_dialogue_pointers_planned: bool,
-    all_dialogue_page_code_assignments_found: bool,
-    all_dialogue_page_worksets_packed: bool,
-    all_resident_dialogue_transitions_use_one_codebook: bool,
-    all_chapter_titles_encoded_with_resident_codes: bool,
-    all_chapter_title_storage_writes_planned: bool,
-    cold_request_presentation_page_planned: bool,
-    cold_request_presentation_write_planned: bool,
-    dialogue_runtime_composition_planned: bool,
-    all_declared_consumer_writes_planned: bool,
-    all_carried_ui_domains_reinspected: bool,
-    all_carried_battle_domains_reinspected: bool,
-    declared_plan_technical_installation_complete: bool,
-    declared_consumer_runtime_observation_complete: bool,
 }
 
 pub(crate) fn plan_full_translation_installation(
