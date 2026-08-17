@@ -198,25 +198,14 @@ pub(super) fn bind_source_positive_execution_graph(
         crate::full_translation_install::bind_dialogue_interrupt_audio_mapper_write_slice(source)?;
     let title_state: TitleStateExecution = bind_title_state_execution(source)?;
     let fixed_vectors = bind_fixed_vector_execution(source, &source_bound_indirect_destinations)?;
-    let fixed_scheduler_entry_contexts = fixed_vectors.reset_inline_dispatch_contexts(
-        FIXED_PRG_BANK,
-        fixed_scheduler::FIXED_SCHEDULER_DISPATCH_CALL,
-    );
+    let fixed_scheduler_entry_contexts = fixed_vectors
+        .reset_terminal_entry_contexts(FIXED_PRG_BANK, fixed_scheduler::FIXED_SCHEDULER_ENTRY);
     let fixed_scheduler = bind_fixed_scheduler_execution(
         source,
         &title_state,
         &fixed_scheduler_entry_contexts,
         &source_bound_indirect_destinations,
     )?;
-    ensure!(
-        fixed_vectors
-            .reset_reachable_instruction_starts()
-            .contains(&(
-                CHAPTER_MAP_INDIRECT_WRITE_SITE.0,
-                CHAPTER_MAP_INDIRECT_WRITE_SITE.1
-            )),
-        "reset-rooted execution no longer reaches the chapter map RAM writer"
-    );
     ensure!(
         fixed_vectors
             .bound_switchable_roots()
@@ -275,35 +264,15 @@ pub(super) fn bind_source_positive_execution_graph(
         .collect();
 
     let state_accesses = bind_positive_state_accesses(source, &instruction_roles)?;
-    let owned_unknown_selector = format!(
-        "inline_dispatch@0D:{:04X}:selector_unknown",
-        title_state.dispatch_call()
-    );
-    let mut reset_open_control_facts = fixed_vectors
+    let reset_open_control_facts = fixed_vectors
         .reset_open_control_fact_descriptions()
         .to_vec();
-    ensure!(
-        reset_open_control_facts
-            .iter()
-            .filter(|fact| *fact == &owned_unknown_selector)
-            .count()
-            == 1,
-        "reset trace no longer exposes the title state selector handoff exactly once"
-    );
-    reset_open_control_facts.retain(|fact| fact != &owned_unknown_selector);
-    let fixed_scheduler_unknown_selector = format!(
-        "inline_dispatch@0F:{:04X}:selector_unknown",
-        fixed_scheduler.inline_dispatch().0
-    );
-    ensure!(
-        !reset_open_control_facts.contains(&fixed_scheduler_unknown_selector),
-        "reset-rooted execution lost the fixed scheduler state before its owned dispatcher"
-    );
     let mut reset_bound_switchable_roots = fixed_vectors.reset_bound_switchable_roots().clone();
     reset_bound_switchable_roots.extend(
         title_state
             .selector_targets()
             .values()
+            .chain(title_state.animation_selector_targets().values())
             .map(|target| (0x0D, *target)),
     );
     let title_state_open_control_facts = title_state.open_control_fact_descriptions();

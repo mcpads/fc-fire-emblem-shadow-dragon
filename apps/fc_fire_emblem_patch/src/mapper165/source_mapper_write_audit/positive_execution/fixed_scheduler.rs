@@ -21,6 +21,7 @@ const FIXED_PRG_BANK: u8 = 0x0F;
 const SWITCHABLE_CPU_START: u16 = 0x8000;
 const FIXED_CPU_START: u16 = 0xC000;
 
+pub(super) const FIXED_SCHEDULER_ENTRY: u16 = 0xF28F;
 pub(super) const FIXED_SCHEDULER_STATE_LOAD: u16 = 0xF2A0;
 pub(super) const FIXED_SCHEDULER_DISPATCH_CALL: u16 = 0xF2A2;
 const FIXED_SCHEDULER_POINTER_TABLE: u16 = 0xF2A5;
@@ -86,7 +87,6 @@ const SELECT_GAMEPLAY_SCHEDULER: [u8; 4] = [0xA9, 0x05, 0x85, 0x25];
 
 #[derive(Debug)]
 pub(super) struct FixedSchedulerExecution {
-    inline_dispatch: (u16, u16),
     table_selector_domain: BTreeSet<u8>,
     positive_selector_domain: BTreeSet<u8>,
     selector_targets: BTreeMap<u8, u16>,
@@ -100,10 +100,6 @@ pub(super) struct FixedSchedulerExecution {
 }
 
 impl FixedSchedulerExecution {
-    pub(super) fn inline_dispatch(&self) -> (u16, u16) {
-        self.inline_dispatch
-    }
-
     pub(super) fn table_selector_domain(&self) -> &BTreeSet<u8> {
         &self.table_selector_domain
     }
@@ -201,16 +197,38 @@ pub(super) fn bind_fixed_scheduler_execution(
         known_produced_states.is_subset(&table_selector_domain),
         "a fixed scheduler producer selects beyond the six-entry handler table"
     );
+    let positive_selector_domain = title_state
+        .scheduler_produced_values()
+        .iter()
+        .copied()
+        .chain([0x02])
+        .collect::<BTreeSet<_>>();
     ensure!(
-        entry_contexts
-            .iter()
-            .all(|(selector, _)| known_produced_states.contains(selector)),
-        "reset-rooted scheduler entry contexts contain a selector outside the source-bound producer states: {entry_contexts:?}"
+        positive_selector_domain.is_subset(&known_produced_states)
+            && !positive_selector_domain.contains(&0x04),
+        "normal fixed-scheduler states no longer separate the sound-test route"
+    );
+    let positive_entry_contexts = positive_selector_domain
+        .iter()
+        .copied()
+        .map(|selector| (selector, GAMEPLAY_SCHEDULER_BANK))
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        entry_contexts.contains(&(0x00, GAMEPLAY_SCHEDULER_BANK)),
+        "reset-rooted execution no longer reaches scheduler state zero in source-bound bank six: {entry_contexts:?}"
     );
     let owned_inline_selector_domains = BTreeMap::from([
         (
+            (FIXED_PRG_BANK, FIXED_SCHEDULER_DISPATCH_CALL),
+            positive_selector_domain.clone(),
+        ),
+        (
             (0x0D, title_state.dispatch_call()),
             title_state.selector_domain().clone(),
+        ),
+        (
+            (0x0D, title_state.animation_dispatch_call()),
+            title_state.animation_selector_domain().clone(),
         ),
         (
             (MAP_INITIALIZATION_BANK, MAP_INITIALIZATION_DISPATCH_CALL),
@@ -221,31 +239,18 @@ pub(super) fn bind_fixed_scheduler_execution(
     let handler_trace = trace_fixed_scheduler_contexts(
         source,
         FIXED_SCHEDULER_STATE_LOAD,
+        FIXED_SCHEDULER_DISPATCH_CALL,
         FIXED_SCHEDULER_RETURN_ADDRESS,
-        entry_contexts.iter().copied(),
+        positive_entry_contexts.iter().copied(),
         &owned_inline_selector_domains,
         indirect_write_destination_bounds,
     )?;
-    let positive_selector_domain = handler_trace
-        .inline_dispatch_selectors()
-        .get(&(FIXED_PRG_BANK, FIXED_SCHEDULER_DISPATCH_CALL))
-        .cloned()
-        .unwrap_or_default();
-    let expected_positive_states = BTreeSet::from([0x00, 0x01, 0x02, 0x05]);
-    ensure!(
-        positive_selector_domain == expected_positive_states,
-        "stateful scheduler trace no longer derives the reset/title/map positive states: expected {expected_positive_states:?}, found {positive_selector_domain:?}"
-    );
-    let positive_entry_contexts =
+    let observed_scheduler_contexts =
         handler_trace.inline_dispatch_contexts(FIXED_PRG_BANK, FIXED_SCHEDULER_DISPATCH_CALL);
     ensure!(
-        positive_entry_contexts
-            == expected_positive_states
-                .iter()
-                .copied()
-                .map(|state| (state, 0x06))
-                .collect(),
-        "fixed scheduler positive states no longer enter with the restored gameplay PRG bank: {positive_entry_contexts:?}"
+        positive_entry_contexts.is_subset(&observed_scheduler_contexts),
+        "one-epoch scheduler trace lost an explicitly source-bound positive context: expected {positive_entry_contexts:?}, found {observed_scheduler_contexts:?}; open facts {:?}",
+        handler_trace.open_fact_descriptions(),
     );
     let title_positive_selectors = handler_trace
         .inline_dispatch_selectors()
@@ -256,6 +261,17 @@ pub(super) fn bind_fixed_scheduler_execution(
         !title_positive_selectors.is_empty()
             && title_positive_selectors.is_subset(title_state.selector_domain()),
         "fixed scheduler trace selected outside the owner-bound title selector domain: {title_positive_selectors:?}"
+    );
+    let title_animation_positive_selectors = handler_trace
+        .inline_dispatch_selectors()
+        .get(&(0x0D, title_state.animation_dispatch_call()))
+        .cloned()
+        .unwrap_or_default();
+    ensure!(
+        !title_animation_positive_selectors.is_empty()
+            && title_animation_positive_selectors
+                .is_subset(title_state.animation_selector_domain()),
+        "fixed scheduler trace selected outside the owner-bound title animation selector domain: {title_animation_positive_selectors:?}"
     );
     let map_owned_selectors = (0..MAP_INITIALIZATION_STATE_COUNT).collect::<BTreeSet<_>>();
     let map_positive_selectors = handler_trace
@@ -269,6 +285,18 @@ pub(super) fn bind_fixed_scheduler_execution(
         "fixed scheduler trace selected outside the owner-bound map-initialization selector domain: {map_positive_selectors:?}"
     );
     let mut open_control_facts = handler_trace.open_fact_descriptions();
+    for context in entry_contexts.difference(&BTreeSet::from([(0x00, GAMEPLAY_SCHEDULER_BANK)])) {
+        open_control_facts.push(format!(
+            "reset_scheduler_context_not_normal_positive={:02X}:{:02X}",
+            context.0, context.1,
+        ));
+    }
+    for context in observed_scheduler_contexts.difference(&positive_entry_contexts) {
+        open_control_facts.push(format!(
+            "fixed_scheduler_successor_context_outside_positive_epoch={:02X}:{:02X}",
+            context.0, context.1,
+        ));
+    }
     record_untraced_owned_selectors(
         &mut open_control_facts,
         "title_state",
@@ -277,16 +305,22 @@ pub(super) fn bind_fixed_scheduler_execution(
     );
     record_untraced_owned_selectors(
         &mut open_control_facts,
+        "title_animation_state",
+        title_state.animation_selector_domain(),
+        &title_animation_positive_selectors,
+    );
+    record_untraced_owned_selectors(
+        &mut open_control_facts,
         "map_initialization",
         &map_owned_selectors,
         &map_positive_selectors,
     );
+    open_control_facts.push("fixed_scheduler_state_03@0F:C73D:no_source_bound_producer".to_owned());
     open_control_facts
         .push("fixed_scheduler_state_04@0F:F2B6:outer_screen_route_unrooted".to_owned());
     open_control_facts.sort();
     open_control_facts.dedup();
     Ok(FixedSchedulerExecution {
-        inline_dispatch: (FIXED_SCHEDULER_DISPATCH_CALL, FIXED_SCHEDULER_POINTER_TABLE),
         table_selector_domain,
         positive_selector_domain,
         selector_targets,

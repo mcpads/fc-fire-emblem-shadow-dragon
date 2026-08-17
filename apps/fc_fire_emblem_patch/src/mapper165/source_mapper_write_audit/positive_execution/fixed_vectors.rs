@@ -57,7 +57,7 @@ pub(super) struct FixedVectorExecution {
     reset_bound_switchable_roots: BTreeSet<(u8, u16)>,
     reset_open_control_facts: Vec<String>,
     reset_reachable_instruction_starts: BTreeSet<(u8, u16)>,
-    reset_inline_dispatch_entry_banks: BTreeMap<(u8, u16, u8), BTreeSet<u8>>,
+    reset_terminal_entry_contexts: BTreeMap<(u8, u16), BTreeSet<(u8, u8)>>,
     indirect_write_sites_below_mapper_space: BTreeSet<(u8, u16, u8)>,
 }
 
@@ -130,22 +130,15 @@ impl FixedVectorExecution {
         &self.reset_reachable_instruction_starts
     }
 
-    pub(super) fn reset_inline_dispatch_contexts(
+    pub(super) fn reset_terminal_entry_contexts(
         &self,
         bank: u8,
         address: u16,
     ) -> BTreeSet<(u8, u8)> {
-        self.reset_inline_dispatch_entry_banks
-            .iter()
-            .filter_map(|(&(actual_bank, actual_address, selector), entry_banks)| {
-                (actual_bank == bank && actual_address == address).then_some(
-                    entry_banks
-                        .iter()
-                        .map(move |entry_bank| (selector, *entry_bank)),
-                )
-            })
-            .flatten()
-            .collect()
+        self.reset_terminal_entry_contexts
+            .get(&(bank, address))
+            .cloned()
+            .unwrap_or_default()
     }
 
     pub(super) fn indirect_write_sites_below_mapper_space(&self) -> &BTreeSet<(u8, u16, u8)> {
@@ -255,8 +248,15 @@ pub(super) fn bind_fixed_vector_execution(
         .iter()
         .find_map(|(slot, target)| (*slot == 0xFFFC).then_some(*target))
         .context("source reset vector slot is missing")?;
-    let reset_bank_entries =
-        bind_reset_bank_entries(source, reset_root, indirect_write_destination_bounds)?;
+    let reset_bank_entries = bind_reset_bank_entries(
+        source,
+        reset_root,
+        &BTreeSet::from([(
+            FIXED_PRG_BANK,
+            super::fixed_scheduler::FIXED_SCHEDULER_ENTRY,
+        )]),
+        indirect_write_destination_bounds,
+    )?;
     let indirect_write_sites_below_mapper_space =
         if reachable_instruction_starts.contains(&(FIXED_PRG_BANK, RESET_RAM_CLEAR_WRITER)) {
             BTreeSet::from([bind_reset_ram_clear(source)?])
@@ -275,7 +275,16 @@ pub(super) fn bind_fixed_vector_execution(
         reset_reachable_instruction_starts: reset_bank_entries
             .reachable_instruction_starts()
             .clone(),
-        reset_inline_dispatch_entry_banks: reset_bank_entries.inline_dispatch_entry_banks().clone(),
+        reset_terminal_entry_contexts: BTreeMap::from([(
+            (
+                FIXED_PRG_BANK,
+                super::fixed_scheduler::FIXED_SCHEDULER_ENTRY,
+            ),
+            reset_bank_entries.terminal_entry_contexts(
+                FIXED_PRG_BANK,
+                super::fixed_scheduler::FIXED_SCHEDULER_ENTRY,
+            ),
+        )]),
         indirect_write_sites_below_mapper_space,
     })
 }

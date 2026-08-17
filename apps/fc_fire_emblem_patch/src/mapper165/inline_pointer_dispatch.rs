@@ -16,6 +16,11 @@ pub(super) const INLINE_POINTER_DISPATCH_CODE: [u8; 30] = [
     0xC8, 0xB1, 0x0C, 0x85, 0x0D, 0x86, 0x0C, 0xA6, 0x0E, 0xA4, 0x0F, 0x6C, 0x0C, 0x00,
 ];
 
+#[cfg(test)]
+pub(crate) fn source_inline_pointer_dispatch_bytes() -> &'static [u8] {
+    &INLINE_POINTER_DISPATCH_CODE
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct InlinePointerDispatchBinding {
     call_address: u16,

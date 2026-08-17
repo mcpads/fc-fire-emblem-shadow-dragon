@@ -12,6 +12,10 @@ use crate::{
     typed_source::{Rp2a03DirectControlFlow, decode_rp2a03_sequence, rp2a03_direct_control_flow},
 };
 
+mod animation_state;
+
+use animation_state::{TitleAnimationStateExecution, bind_title_animation_state_execution};
+
 const SOURCE_PRG_BANK: u8 = 0x0D;
 const FIXED_PRG_BANK: u8 = 0x0F;
 const SOURCE_PRG_BANK_BYTE_COUNT: usize = 16 * 1024;
@@ -49,6 +53,9 @@ pub(crate) struct TitleStateExecution {
     dispatch_call: u16,
     selector_domain: BTreeSet<u8>,
     selector_targets: BTreeMap<u8, u16>,
+    animation_dispatch_call: u16,
+    animation_selector_domain: BTreeSet<u8>,
+    animation_selector_targets: BTreeMap<u8, u16>,
     scheduler_produced_values: BTreeSet<u8>,
     reachable_instruction_starts: BTreeSet<(u8, u16)>,
     open_control_facts: BTreeSet<String>,
@@ -65,6 +72,18 @@ impl TitleStateExecution {
 
     pub(crate) fn selector_targets(&self) -> &BTreeMap<u8, u16> {
         &self.selector_targets
+    }
+
+    pub(crate) fn animation_dispatch_call(&self) -> u16 {
+        self.animation_dispatch_call
+    }
+
+    pub(crate) fn animation_selector_domain(&self) -> &BTreeSet<u8> {
+        &self.animation_selector_domain
+    }
+
+    pub(crate) fn animation_selector_targets(&self) -> &BTreeMap<u8, u16> {
+        &self.animation_selector_targets
     }
 
     pub(crate) fn scheduler_produced_values(&self) -> &BTreeSet<u8> {
@@ -185,7 +204,23 @@ pub(crate) fn bind_title_state_execution(source: &Rom) -> Result<TitleStateExecu
         "the terminal title phase no longer re-enters the phase-index reset handler"
     );
 
-    let trace = trace_title_handler_graph(source, selector_targets.values().copied())?;
+    let animation: TitleAnimationStateExecution = bind_title_animation_state_execution(source)?;
+    let owned_inline_selector_domains = BTreeMap::from([(
+        (SOURCE_PRG_BANK, animation.dispatch_call()),
+        animation.selector_domain().clone(),
+    )]);
+    let trace = trace_title_handler_graph(
+        source,
+        selector_targets.values().copied(),
+        &owned_inline_selector_domains,
+    )?;
+    ensure!(
+        animation
+            .documented_direct_writer_starts()
+            .iter()
+            .all(|location| trace.reachable_instruction_starts.contains(location)),
+        "title animation producer census contains a writer outside the rooted title graph"
+    );
     let exit_writer = source_cpu_bytes(
         source,
         SOURCE_PRG_BANK,
@@ -211,6 +246,9 @@ pub(crate) fn bind_title_state_execution(source: &Rom) -> Result<TitleStateExecu
         dispatch_call: TITLE_STATE_DISPATCH_CALL,
         selector_domain,
         selector_targets,
+        animation_dispatch_call: animation.dispatch_call(),
+        animation_selector_domain: animation.selector_domain().clone(),
+        animation_selector_targets: animation.selector_targets().clone(),
         scheduler_produced_values: BTreeSet::from([0x00, 0x01, 0x05]),
         reachable_instruction_starts: trace.reachable_instruction_starts,
         open_control_facts: trace.open_control_facts,
@@ -258,6 +296,7 @@ struct TitleHandlerTrace {
 fn trace_title_handler_graph(
     source: &Rom,
     roots: impl IntoIterator<Item = u16>,
+    owned_inline_selector_domains: &BTreeMap<(u8, u16), BTreeSet<u8>>,
 ) -> Result<TitleHandlerTrace> {
     let mut pending = roots.into_iter().collect::<Vec<_>>();
     let mut reachable_instruction_starts = BTreeSet::new();
@@ -325,9 +364,32 @@ fn trace_title_handler_graph(
                 target,
                 return_address: _,
             } if target == INLINE_POINTER_DISPATCH_ADDRESS => {
-                open_control_facts.insert(format!(
-                    "title_handler_inline_dispatch@{bank:02X}:{address:04X}"
-                ));
+                let Some(selectors) = owned_inline_selector_domains.get(&(bank, address)) else {
+                    open_control_facts.insert(format!(
+                        "title_handler_inline_dispatch@{bank:02X}:{address:04X}"
+                    ));
+                    continue;
+                };
+                ensure!(
+                    !selectors.is_empty(),
+                    "title handler inline dispatch at {bank:02X}:${address:04X} has an empty owner domain"
+                );
+                let dispatch = bind_inline_pointer_dispatch(
+                    source,
+                    bank,
+                    address,
+                    selectors.iter().copied(),
+                    "title handler owned inline dispatch",
+                )?;
+                for target in dispatch.targets_in_selector_order() {
+                    enqueue_title_target(
+                        target,
+                        &mut pending,
+                        &mut fixed_roots,
+                        &mut open_control_facts,
+                        address,
+                    );
+                }
                 // `$C34C` consumes this JSR frame and does not return to the inline data.
             }
             Rp2a03DirectControlFlow::Call {
@@ -437,7 +499,9 @@ fn source_cpu_bytes(source: &Rom, bank: u8, address: u16, byte_count: usize) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rom::HEADER_SIZE;
+    use crate::{
+        mapper165::inline_pointer_dispatch::source_inline_pointer_dispatch_bytes, rom::HEADER_SIZE,
+    };
 
     fn synthetic_title_code(address: u16, bytes_at_address: &[u8]) -> Rom {
         let mut bytes = vec![0x60; HEADER_SIZE + 16 * SOURCE_PRG_BANK_BYTE_COUNT];
@@ -449,6 +513,10 @@ mod tests {
             + usize::from(SOURCE_PRG_BANK) * SOURCE_PRG_BANK_BYTE_COUNT
             + usize::from(address - SWITCHABLE_CPU_START);
         bytes[offset..offset + bytes_at_address.len()].copy_from_slice(bytes_at_address);
+        let fixed_start = HEADER_SIZE + 15 * SOURCE_PRG_BANK_BYTE_COUNT;
+        let helper = fixed_start + usize::from(INLINE_POINTER_DISPATCH_ADDRESS - FIXED_CPU_START);
+        let dispatcher = source_inline_pointer_dispatch_bytes();
+        bytes[helper..helper + dispatcher.len()].copy_from_slice(dispatcher);
         Rom::parse(bytes).unwrap()
     }
 
@@ -477,7 +545,7 @@ mod tests {
     fn nested_inline_dispatch_stays_open_without_decoding_its_pointer_table_as_code() {
         let source = synthetic_title_code(0xA000, &[0x20, 0x4C, 0xC3, 0x02, 0x80]);
 
-        let trace = trace_title_handler_graph(&source, [0xA000]).unwrap();
+        let trace = trace_title_handler_graph(&source, [0xA000], &BTreeMap::new()).unwrap();
 
         assert!(
             trace
@@ -491,12 +559,27 @@ mod tests {
     fn an_unbound_indirect_jump_remains_an_open_control_fact() {
         let source = synthetic_title_code(0xA000, &[0x6C, 0x00, 0x00]);
 
-        let trace = trace_title_handler_graph(&source, [0xA000]).unwrap();
+        let trace = trace_title_handler_graph(&source, [0xA000], &BTreeMap::new()).unwrap();
 
         assert!(
             trace
                 .open_control_facts
                 .contains("title_handler_indirect_jump@0D:A000")
         );
+    }
+
+    #[test]
+    fn owned_nested_dispatch_roots_each_selected_handler_without_decoding_inline_data() {
+        let mut bytes = vec![0x60; 0x23];
+        bytes[..7].copy_from_slice(&[0x20, 0x4C, 0xC3, 0x10, 0xA0, 0x20, 0xA0]);
+        let source = synthetic_title_code(0xA000, &bytes);
+        let owned = BTreeMap::from([((0x0D, 0xA000), BTreeSet::from([0x00, 0x01]))]);
+
+        let trace = trace_title_handler_graph(&source, [0xA000], &owned).unwrap();
+
+        assert!(trace.open_control_facts.is_empty());
+        assert!(trace.reachable_instruction_starts.contains(&(0x0D, 0xA010)));
+        assert!(trace.reachable_instruction_starts.contains(&(0x0D, 0xA020)));
+        assert!(!trace.reachable_instruction_starts.contains(&(0x0D, 0xA003)));
     }
 }
