@@ -1,3 +1,7 @@
+use std::collections::{BTreeMap, BTreeSet};
+
+use crate::chapter_transition::ENDING_RECORD_PHASE_ADDRESS;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct PositiveControlState {
     pub(super) address: u16,
@@ -16,7 +20,7 @@ pub(super) const SHARED_MENU_STATE: u16 = 0x05DE;
 pub(super) const COMPOSITE_SCREEN_STATE: u16 = 0x05E8;
 pub(super) const DIALOGUE_OR_SOUND_STATE: u16 = 0x05EE;
 
-pub(super) const POSITIVE_CONTROL_STATES: [PositiveControlState; 11] = [
+pub(super) const POSITIVE_CONTROL_STATES: [PositiveControlState; 12] = [
     PositiveControlState {
         address: OUTER_SCREEN_STATE,
         role: "outer_screen_state_24",
@@ -61,6 +65,10 @@ pub(super) const POSITIVE_CONTROL_STATES: [PositiveControlState; 11] = [
         address: DIALOGUE_OR_SOUND_STATE,
         role: "dialogue_or_sound_state_05EE",
     },
+    PositiveControlState {
+        address: ENDING_RECORD_PHASE_ADDRESS,
+        role: "ending_sequence_phase_7731",
+    },
 ];
 
 pub(super) type ObservedControlStateWrites = BTreeMap<(u8, u16, u16), Option<BTreeSet<u8>>>;
@@ -89,6 +97,19 @@ pub(super) fn merge_observed_control_state_writes(
             })
             .or_insert_with(|| values.clone());
     }
+}
+
+pub(super) fn known_control_state_write_values(
+    observations: &ObservedControlStateWrites,
+    address: u16,
+) -> BTreeSet<u8> {
+    observations
+        .iter()
+        .filter_map(|(&(_, _, target), values)| {
+            (target == address).then_some(values.as_ref()).flatten()
+        })
+        .flat_map(|values| values.iter().copied())
+        .collect()
 }
 
 #[cfg(test)]
@@ -124,5 +145,21 @@ mod tests {
 
         assert_eq!(merged.get(&site), Some(&None));
     }
+
+    #[test]
+    fn known_values_are_collected_without_inventing_values_for_unknown_writes() {
+        let observations = ObservedControlStateWrites::from([
+            (
+                (0x0F, 0xC100, OUTER_SCREEN_STATE),
+                Some(BTreeSet::from([0x00, 0x01])),
+            ),
+            ((0x06, 0x8400, OUTER_SCREEN_STATE), None),
+            ((0x06, 0x8500, MAIN_STATE), Some(BTreeSet::from([0x02]))),
+        ]);
+
+        assert_eq!(
+            known_control_state_write_values(&observations, OUTER_SCREEN_STATE),
+            BTreeSet::from([0x00, 0x01])
+        );
+    }
 }
-use std::collections::{BTreeMap, BTreeSet};

@@ -1,5 +1,13 @@
 use std::ops::RangeInclusive;
 
+use crate::chapter_transition::{
+    ENDING_CHARACTER_ANIMATION_STATE_ADDRESS, ENDING_RECORD_PHASE_ADDRESS,
+    ENDING_SEQUENCE_INNER_STATE_ADDRESS,
+};
+use crate::dialogue_inventory::{
+    MAIN_DIALOGUE_CALLER_HANDOFF_FLAG_ADDRESS, MAIN_DIALOGUE_COMPLETION_FLAG_ADDRESS,
+};
+
 use super::super::super::control_state::{
     COMPOSITE_SCREEN_STATE, DIALOGUE_OR_SOUND_STATE, FIXED_SCHEDULER_STATE, MAIN_STATE,
     MAP_DIALOGUE_OUTER_STATE, OUTER_SCREEN_STATE, PENDING_SHARED_MENU_REQUEST_STATE,
@@ -145,10 +153,15 @@ struct ResetTraceMemory {
     menu_state_05de: ByteValueSet,
     composite_state_05e8: ByteValueSet,
     dialogue_or_sound_state_05ee: ByteValueSet,
+    ending_record_phase_7731: ByteValueSet,
+    ending_inner_state_7733: ByteValueSet,
+    ending_character_animation_state_775d: ByteValueSet,
+    main_dialogue_completion_flag_7803: ByteValueSet,
+    main_dialogue_caller_handoff_flag_7809: ByteValueSet,
 }
 
 impl ResetTraceMemory {
-    const ADDRESSES: [u16; 21] = [
+    const ADDRESSES: [u16; 26] = [
         0x0000,
         0x0001,
         0x0008,
@@ -170,6 +183,11 @@ impl ResetTraceMemory {
         SHARED_MENU_STATE,
         COMPOSITE_SCREEN_STATE,
         DIALOGUE_OR_SOUND_STATE,
+        ENDING_RECORD_PHASE_ADDRESS,
+        ENDING_SEQUENCE_INNER_STATE_ADDRESS,
+        ENDING_CHARACTER_ANIMATION_STATE_ADDRESS,
+        MAIN_DIALOGUE_COMPLETION_FLAG_ADDRESS,
+        MAIN_DIALOGUE_CALLER_HANDOFF_FLAG_ADDRESS,
     ];
 
     fn read(&self, address: u16) -> ByteValueSet {
@@ -195,6 +213,17 @@ impl ResetTraceMemory {
             SHARED_MENU_STATE => self.menu_state_05de.clone(),
             COMPOSITE_SCREEN_STATE => self.composite_state_05e8.clone(),
             DIALOGUE_OR_SOUND_STATE => self.dialogue_or_sound_state_05ee.clone(),
+            ENDING_RECORD_PHASE_ADDRESS => self.ending_record_phase_7731.clone(),
+            ENDING_SEQUENCE_INNER_STATE_ADDRESS => self.ending_inner_state_7733.clone(),
+            ENDING_CHARACTER_ANIMATION_STATE_ADDRESS => {
+                self.ending_character_animation_state_775d.clone()
+            }
+            MAIN_DIALOGUE_COMPLETION_FLAG_ADDRESS => {
+                self.main_dialogue_completion_flag_7803.clone()
+            }
+            MAIN_DIALOGUE_CALLER_HANDOFF_FLAG_ADDRESS => {
+                self.main_dialogue_caller_handoff_flag_7809.clone()
+            }
             _ => ByteValueSet::Unknown,
         }
     }
@@ -222,6 +251,17 @@ impl ResetTraceMemory {
             SHARED_MENU_STATE => self.menu_state_05de = value,
             COMPOSITE_SCREEN_STATE => self.composite_state_05e8 = value,
             DIALOGUE_OR_SOUND_STATE => self.dialogue_or_sound_state_05ee = value,
+            ENDING_RECORD_PHASE_ADDRESS => self.ending_record_phase_7731 = value,
+            ENDING_SEQUENCE_INNER_STATE_ADDRESS => self.ending_inner_state_7733 = value,
+            ENDING_CHARACTER_ANIMATION_STATE_ADDRESS => {
+                self.ending_character_animation_state_775d = value
+            }
+            MAIN_DIALOGUE_COMPLETION_FLAG_ADDRESS => {
+                self.main_dialogue_completion_flag_7803 = value
+            }
+            MAIN_DIALOGUE_CALLER_HANDOFF_FLAG_ADDRESS => {
+                self.main_dialogue_caller_handoff_flag_7809 = value
+            }
             _ => {}
         }
     }

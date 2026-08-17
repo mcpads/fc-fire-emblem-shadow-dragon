@@ -1,9 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use anyhow::{Context, Result, ensure};
 use retro_rp2a03::decode_bytes;
 
 use crate::{
+    chapter_transition::bind_ending_sequence_phase_dispatch_source,
     mapper165::{
         battle_codebook_plan::IndirectWriteDestinationBounds,
         inline_pointer_dispatch::bind_inline_pointer_dispatch,
@@ -15,7 +16,9 @@ use crate::{
 };
 
 use super::{
-    control_state::ObservedControlStateWrites,
+    control_state::{
+        OUTER_SCREEN_STATE, ObservedControlStateWrites, known_control_state_write_values,
+    },
     fixed_vectors::{InlineDispatchSelectorBounds, trace_fixed_scheduler_contexts},
     indexed_write_destinations::AbsoluteIndexedWriteDestinationBounds,
     shared_menu_request::SharedMenuExecutionSource,
@@ -98,6 +101,7 @@ pub(super) struct FixedSchedulerExecution {
     reset_entry_contexts: BTreeSet<(u8, u8)>,
     positive_entry_contexts: BTreeSet<(u8, u8)>,
     known_produced_states: BTreeSet<u8>,
+    outer_screen_produced_selectors: BTreeSet<u8>,
     source_bound_producer_instruction_starts: BTreeSet<(u8, u16)>,
     reachable_instruction_starts: BTreeSet<(u8, u16)>,
     bound_switchable_roots: BTreeSet<(u8, u16)>,
@@ -131,6 +135,10 @@ impl FixedSchedulerExecution {
         &self.known_produced_states
     }
 
+    pub(super) fn outer_screen_produced_selectors(&self) -> &BTreeSet<u8> {
+        &self.outer_screen_produced_selectors
+    }
+
     pub(super) fn source_bound_producer_instruction_starts(&self) -> &BTreeSet<(u8, u16)> {
         &self.source_bound_producer_instruction_starts
     }
@@ -162,6 +170,8 @@ pub(super) fn bind_fixed_scheduler_execution(
     shared_menu: &SharedMenuExecutionSource,
     screen_state_selector_domains: &BTreeMap<(u8, u16), BTreeSet<u8>>,
     screen_state_selector_memory_addresses: &BTreeMap<(u8, u16), u16>,
+    outer_screen_state_seed_selectors: &BTreeSet<u8>,
+    ending_sequence_produced_selectors: &BTreeSet<u8>,
     entry_contexts: &BTreeSet<(u8, u8)>,
     indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
     absolute_indexed_write_bounds: &BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds>,
@@ -188,6 +198,12 @@ pub(super) fn bind_fixed_scheduler_execution(
         .copied()
         .zip(dispatch.targets_in_selector_order())
         .collect::<BTreeMap<_, _>>();
+    let ending_sequence = bind_ending_sequence_phase_dispatch_source(source)?;
+    ensure!(
+        !ending_sequence_produced_selectors.is_empty()
+            && ending_sequence_produced_selectors.is_subset(ending_sequence.admitted_selectors()),
+        "ending sequence producer closure left its owner-bound phase table"
+    );
 
     ensure!(
         title_state.scheduler_produced_values() == &BTreeSet::from([0x00, 0x01, 0x05]),
@@ -220,12 +236,12 @@ pub(super) fn bind_fixed_scheduler_execution(
         .scheduler_produced_values()
         .iter()
         .copied()
-        .chain([0x02])
+        .chain([0x02, 0x04])
         .collect::<BTreeSet<_>>();
     ensure!(
         positive_selector_domain.is_subset(&known_produced_states)
-            && !positive_selector_domain.contains(&0x04),
-        "normal fixed-scheduler states no longer separate the sound-test route"
+            && positive_selector_domain.contains(&0x04),
+        "positive fixed-scheduler states no longer include the source-produced outer-screen route"
     );
     let positive_entry_contexts = positive_selector_domain
         .iter()
@@ -236,7 +252,7 @@ pub(super) fn bind_fixed_scheduler_execution(
         entry_contexts.contains(&(0x00, GAMEPLAY_SCHEDULER_BANK)),
         "reset-rooted execution no longer reaches scheduler state zero in source-bound bank six: {entry_contexts:?}"
     );
-    let mut inline_dispatch_selector_bounds = BTreeMap::from([
+    let base_inline_dispatch_selector_bounds = BTreeMap::from([
         (
             (FIXED_PRG_BANK, FIXED_SCHEDULER_DISPATCH_CALL),
             InlineDispatchSelectorBounds::from_handler_table(table_selector_domain.clone()),
@@ -271,38 +287,140 @@ pub(super) fn bind_fixed_scheduler_execution(
                     .copied(),
             ),
         ),
+        (
+            (ending_sequence.prg_bank(), ending_sequence.dispatch_call()),
+            InlineDispatchSelectorBounds::from_source_producers(
+                ending_sequence_produced_selectors.clone(),
+            )
+            .with_selector_memory_address(ending_sequence.selector_address()),
+        ),
+        (
+            (
+                ending_sequence.prg_bank(),
+                ending_sequence.inner_dispatch_call(),
+            ),
+            InlineDispatchSelectorBounds::from_source_producers(
+                ending_sequence.inner_produced_selectors().clone(),
+            )
+            .with_selector_memory_address(ending_sequence.inner_selector_address()),
+        ),
     ]);
-    for (&site, selectors) in screen_state_selector_domains {
-        let mut bounds = InlineDispatchSelectorBounds::from_handler_table(selectors.clone());
-        if let Some(selector_address) = screen_state_selector_memory_addresses.get(&site) {
-            bounds = bounds.with_selector_memory_address(*selector_address);
-        }
-        ensure!(
-            inline_dispatch_selector_bounds
-                .insert(site, bounds)
-                .is_none(),
-            "screen-state inline dispatch duplicates existing selector bounds at {:02X}:${:04X}",
-            site.0,
-            site.1,
-        );
-    }
+    let downstream_terminal_inline_dispatches =
+        BTreeSet::from([(ending_sequence.prg_bank(), ending_sequence.dispatch_call())]);
     ensure!(
         screen_state_selector_memory_addresses
             .keys()
             .all(|site| screen_state_selector_domains.contains_key(site)),
         "a screen-state selector-memory binding has no owner-bound handler domain"
     );
+    let outer_screen_sites = screen_state_selector_memory_addresses
+        .iter()
+        .filter_map(|(&site, &address)| (address == OUTER_SCREEN_STATE).then_some(site))
+        .collect::<Vec<_>>();
+    ensure!(
+        outer_screen_sites.len() == 1,
+        "expected exactly one owner-bound outer-screen dispatch, found {}",
+        outer_screen_sites.len()
+    );
+    let outer_screen_site = outer_screen_sites[0];
+    let outer_screen_handler_domain = screen_state_selector_domains
+        .get(&outer_screen_site)
+        .context("outer-screen dispatch has no owner-bound handler domain")?;
+    ensure!(
+        !outer_screen_state_seed_selectors.is_empty()
+            && outer_screen_state_seed_selectors.is_subset(outer_screen_handler_domain),
+        "outer-screen producer closure has no valid source-bound seed"
+    );
 
-    let handler_trace = trace_fixed_scheduler_contexts(
+    let non_outer_entry_contexts = positive_entry_contexts
+        .iter()
+        .copied()
+        .filter(|(selector, _)| *selector != 0x04)
+        .collect::<BTreeSet<_>>();
+    let mut non_outer_bounds = base_inline_dispatch_selector_bounds.clone();
+    for (&site, selectors) in screen_state_selector_domains {
+        let mut bounds = InlineDispatchSelectorBounds::from_handler_table(selectors.clone());
+        if let Some(selector_address) = screen_state_selector_memory_addresses.get(&site) {
+            bounds = bounds.with_selector_memory_address(*selector_address);
+        }
+        ensure!(
+            non_outer_bounds.insert(site, bounds).is_none(),
+            "screen-state inline dispatch duplicates existing selector bounds at {:02X}:${:04X}",
+            site.0,
+            site.1,
+        );
+    }
+    let mut handler_trace = trace_fixed_scheduler_contexts(
         source,
         FIXED_SCHEDULER_STATE_LOAD,
         FIXED_SCHEDULER_DISPATCH_CALL,
         FIXED_SCHEDULER_RETURN_ADDRESS,
-        positive_entry_contexts.iter().copied(),
-        &inline_dispatch_selector_bounds,
+        non_outer_entry_contexts,
+        &BTreeMap::new(),
+        &downstream_terminal_inline_dispatches,
+        &non_outer_bounds,
         indirect_write_destination_bounds,
         absolute_indexed_write_bounds,
     )?;
+
+    let outer_entry_context = (0x04, GAMEPLAY_SCHEDULER_BANK);
+    let mut outer_screen_produced_selectors = outer_screen_state_seed_selectors.clone();
+    let mut pending_outer_selectors = outer_screen_state_seed_selectors
+        .iter()
+        .copied()
+        .collect::<VecDeque<_>>();
+    let mut traced_outer_selectors = BTreeSet::new();
+    while let Some(selector) = pending_outer_selectors.pop_front() {
+        if !traced_outer_selectors.insert(selector) {
+            continue;
+        }
+        let mut inline_dispatch_selector_bounds = base_inline_dispatch_selector_bounds.clone();
+        for (&site, selectors) in screen_state_selector_domains {
+            let mut bounds = InlineDispatchSelectorBounds::from_handler_table(selectors.clone());
+            if let Some(selector_address) = screen_state_selector_memory_addresses.get(&site) {
+                bounds = bounds.with_selector_memory_address(*selector_address);
+            }
+            ensure!(
+                inline_dispatch_selector_bounds
+                    .insert(site, bounds)
+                    .is_none(),
+                "screen-state inline dispatch duplicates existing selector bounds at {:02X}:${:04X}",
+                site.0,
+                site.1,
+            );
+        }
+
+        let selector_trace = trace_fixed_scheduler_contexts(
+            source,
+            FIXED_SCHEDULER_STATE_LOAD,
+            FIXED_SCHEDULER_DISPATCH_CALL,
+            FIXED_SCHEDULER_RETURN_ADDRESS,
+            [outer_entry_context],
+            &BTreeMap::from([(OUTER_SCREEN_STATE, selector)]),
+            &downstream_terminal_inline_dispatches,
+            &inline_dispatch_selector_bounds,
+            indirect_write_destination_bounds,
+            absolute_indexed_write_bounds,
+        )?;
+        let observed = known_control_state_write_values(
+            selector_trace.control_state_write_values(),
+            OUTER_SCREEN_STATE,
+        );
+        ensure!(
+            observed.is_subset(outer_screen_handler_domain),
+            "outer-screen execution produced a selector beyond its owner-bound handler table: {observed:02X?}"
+        );
+        for produced in observed {
+            if outer_screen_produced_selectors.insert(produced) {
+                pending_outer_selectors.push_back(produced);
+            }
+        }
+        handler_trace.merge(selector_trace);
+    }
+    ensure!(
+        traced_outer_selectors == outer_screen_produced_selectors,
+        "outer-screen producer worklist did not trace every discovered selector"
+    );
     let observed_scheduler_contexts =
         handler_trace.inline_dispatch_contexts(FIXED_PRG_BANK, FIXED_SCHEDULER_DISPATCH_CALL);
     ensure!(
@@ -373,9 +491,13 @@ pub(super) fn bind_fixed_scheduler_execution(
         &map_owned_selectors,
         &map_positive_selectors,
     );
+    record_untraced_owned_selectors(
+        &mut open_control_facts,
+        "outer_screen_state",
+        outer_screen_handler_domain,
+        &outer_screen_produced_selectors,
+    );
     open_control_facts.push("fixed_scheduler_state_03@0F:C73D:no_source_bound_producer".to_owned());
-    open_control_facts
-        .push("fixed_scheduler_state_04@0F:F2B6:outer_screen_route_unrooted".to_owned());
     open_control_facts.sort();
     open_control_facts.dedup();
     Ok(FixedSchedulerExecution {
@@ -385,6 +507,7 @@ pub(super) fn bind_fixed_scheduler_execution(
         reset_entry_contexts: entry_contexts.clone(),
         positive_entry_contexts,
         known_produced_states,
+        outer_screen_produced_selectors,
         source_bound_producer_instruction_starts,
         reachable_instruction_starts: handler_trace.reachable_instruction_starts().clone(),
         bound_switchable_roots: handler_trace.switchable_roots().clone(),

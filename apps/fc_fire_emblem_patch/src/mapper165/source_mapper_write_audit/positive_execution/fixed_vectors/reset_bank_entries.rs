@@ -259,7 +259,7 @@ impl StatefulBankExecution {
         &self.control_state_write_values
     }
 
-    fn merge(&mut self, other: Self) {
+    pub(in super::super) fn merge(&mut self, other: Self) {
         self.switchable_roots.extend(other.switchable_roots);
         self.reachable_instruction_starts
             .extend(other.reachable_instruction_starts);
@@ -315,6 +315,7 @@ pub(super) fn bind_reset_bank_entries(
         ReturnFlow::default(),
         terminal_entries,
         &BTreeSet::new(),
+        None,
         &BTreeMap::new(),
         indirect_write_destination_bounds,
         &BTreeMap::new(),
@@ -328,6 +329,8 @@ pub(in super::super) fn trace_fixed_scheduler_contexts(
     dispatch_call_address: u16,
     return_address: u16,
     entry_contexts: impl IntoIterator<Item = (u8, u8)>,
+    initial_memory_values: &BTreeMap<u16, u8>,
+    terminal_inline_dispatches: &BTreeSet<(u8, u16)>,
     inline_dispatch_selector_bounds: &BTreeMap<(u8, u16), InlineDispatchSelectorBounds>,
     indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
     absolute_indexed_write_bounds: &BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds>,
@@ -346,6 +349,12 @@ pub(in super::super) fn trace_fixed_scheduler_contexts(
     ensure!(
         dispatch_call_address == state_load_address.wrapping_add(2),
         "fixed scheduler state load and inline dispatch are no longer adjacent"
+    );
+    ensure!(
+        initial_memory_values
+            .keys()
+            .all(|address| ResetTraceState::tracks_memory_address(*address)),
+        "fixed scheduler trace received an initial value for an untracked memory address"
     );
     ensure!(
         source_instruction_bytes(source, FIXED_PRG_BANK, state_load_address, 2)? == [0xA5, 0x25],
@@ -381,6 +390,9 @@ pub(in super::super) fn trace_fixed_scheduler_contexts(
     for (selector, mapped_prg_bank) in entry_contexts.iter().copied() {
         let mut state = ResetTraceState::at(dispatch_call_address, ActivationId(0));
         state.write_memory(0x0025, Some(selector));
+        for (&address, &value) in initial_memory_values {
+            state.write_memory(address, Some(value));
+        }
         state.write_prg_bank_shadows(Some(mapped_prg_bank));
         state.mapped_prg_bank = Some(mapped_prg_bank);
         state.invalidate_registers_and_flags();
@@ -404,21 +416,26 @@ pub(in super::super) fn trace_fixed_scheduler_contexts(
             .get(&(selector, mapped_prg_bank))
             .cloned()
             .context("fixed scheduler worklist lost an entry state")?;
-        let epoch = trace_fixed_scheduler_entry_state(
+        let mut epoch = trace_fixed_scheduler_entry_state(
             source,
-            state_load_address,
+            FIXED_PRG_BANK,
             dispatch_call_address,
             return_address,
+            0x0025,
             FixedSchedulerEntryState {
                 selector,
                 mapped_prg_bank,
                 state,
             },
             &targets,
+            terminal_inline_dispatches,
             inline_dispatch_selector_bounds,
             indirect_write_destination_bounds,
             absolute_indexed_write_bounds,
         )?;
+        epoch
+            .reachable_instruction_starts
+            .insert((FIXED_PRG_BANK, state_load_address));
         for successor in &epoch.fixed_scheduler_entry_states {
             let key = (successor.selector, successor.mapped_prg_bank);
             if let Some(previous) = entry_states.get(&key) {
@@ -438,13 +455,232 @@ pub(in super::super) fn trace_fixed_scheduler_contexts(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn trace_fixed_scheduler_entry_state(
+pub(in super::super) fn trace_source_bound_inline_state_handler(
     source: &Rom,
+    dispatch_bank: u8,
     state_load_address: u16,
     dispatch_call_address: u16,
     return_address: u16,
+    selector_memory_address: u16,
+    selector: u8,
+    mapped_prg_bank: u8,
+    initial_memory_values: &BTreeMap<u16, u8>,
+    inline_dispatch_selector_bounds: &BTreeMap<(u8, u16), InlineDispatchSelectorBounds>,
+    indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
+    absolute_indexed_write_bounds: &BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds>,
+) -> Result<StatefulBankExecution> {
+    ensure!(
+        dispatch_bank <= FIXED_PRG_BANK && mapped_prg_bank <= FIXED_PRG_BANK,
+        "source-bound inline state handler has a bank outside the MMC4 domain"
+    );
+    ensure!(
+        dispatch_bank == FIXED_PRG_BANK || dispatch_bank == mapped_prg_bank,
+        "switchable inline state handler is not mapped in its owning physical bank"
+    );
+    ensure!(
+        initial_memory_values
+            .keys()
+            .all(|address| ResetTraceState::tracks_memory_address(*address)),
+        "source-bound inline state handler received an untracked initial memory address"
+    );
+    let bounds = inline_dispatch_selector_bounds
+        .get(&(dispatch_bank, dispatch_call_address))
+        .context("source-bound inline state handler has no owner-bound selector domain")?;
+    ensure!(
+        bounds.admitted_selectors().contains(&selector),
+        "source-bound inline state selector left its owner-bound handler table"
+    );
+    let dispatch = bind_inline_pointer_dispatch(
+        source,
+        dispatch_bank,
+        dispatch_call_address,
+        [selector],
+        "source-bound inline state handler",
+    )?;
+    let target = *dispatch
+        .targets_in_selector_order()
+        .first()
+        .context("source-bound inline state selector has no target")?;
+    let mut state = ResetTraceState::at(dispatch_call_address, ActivationId(0));
+    for (&address, &value) in initial_memory_values {
+        state.write_memory(address, Some(value));
+    }
+    state.write_memory(selector_memory_address, Some(selector));
+    state.write_prg_bank_shadows(Some(mapped_prg_bank));
+    state.mapped_prg_bank = Some(mapped_prg_bank);
+    state.invalidate_registers_and_flags();
+    let mut execution = trace_fixed_scheduler_entry_state(
+        source,
+        dispatch_bank,
+        dispatch_call_address,
+        return_address,
+        selector_memory_address,
+        FixedSchedulerEntryState {
+            selector,
+            mapped_prg_bank,
+            state,
+        },
+        &BTreeMap::from([(selector, target)]),
+        &BTreeSet::new(),
+        inline_dispatch_selector_bounds,
+        indirect_write_destination_bounds,
+        absolute_indexed_write_bounds,
+    )?;
+    execution
+        .reachable_instruction_starts
+        .insert((dispatch_bank, state_load_address));
+    Ok(execution)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(in super::super) fn trace_source_bound_inline_state_continuation(
+    source: &Rom,
+    dispatch_bank: u8,
+    state_load_address: u16,
+    dispatch_call_address: u16,
+    return_address: u16,
+    selector_memory_address: u16,
+    selector: u8,
+    mapped_prg_bank: u8,
+    handler_address: u16,
+    continuation_address: u16,
+    prefix_instruction_starts: &BTreeSet<u16>,
+    initial_memory_values: &BTreeMap<u16, u8>,
+    inline_dispatch_selector_bounds: &BTreeMap<(u8, u16), InlineDispatchSelectorBounds>,
+    indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
+    absolute_indexed_write_bounds: &BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds>,
+) -> Result<StatefulBankExecution> {
+    ensure!(
+        dispatch_bank <= FIXED_PRG_BANK && mapped_prg_bank <= FIXED_PRG_BANK,
+        "source-bound continuation has a bank outside the MMC4 domain"
+    );
+    ensure!(
+        dispatch_bank == FIXED_PRG_BANK || dispatch_bank == mapped_prg_bank,
+        "switchable source-bound continuation is not mapped in its owning physical bank"
+    );
+    ensure!(
+        initial_memory_values
+            .keys()
+            .all(|address| ResetTraceState::tracks_memory_address(*address)),
+        "source-bound continuation received an untracked initial memory address"
+    );
+    ensure!(
+        !prefix_instruction_starts.is_empty()
+            && prefix_instruction_starts.contains(&handler_address)
+            && prefix_instruction_starts
+                .iter()
+                .all(|address| *address >= handler_address && *address < continuation_address),
+        "source-bound continuation prefix does not cover exactly the pre-continuation handler"
+    );
+    let bounds = inline_dispatch_selector_bounds
+        .get(&(dispatch_bank, dispatch_call_address))
+        .context("source-bound continuation has no owner-bound selector domain")?;
+    ensure!(
+        bounds.admitted_selectors().contains(&selector),
+        "source-bound continuation selector left its owner-bound handler table"
+    );
+    let dispatch = bind_inline_pointer_dispatch(
+        source,
+        dispatch_bank,
+        dispatch_call_address,
+        [selector],
+        "source-bound asynchronous handler continuation",
+    )?;
+    ensure!(
+        dispatch.targets_in_selector_order() == [handler_address],
+        "source-bound continuation no longer belongs to the selected handler"
+    );
+
+    let return_bank = if return_address >= FIXED_CPU_START {
+        FIXED_PRG_BANK
+    } else {
+        dispatch_bank
+    };
+    let target_bank = if handler_address >= FIXED_CPU_START {
+        FIXED_PRG_BANK
+    } else {
+        dispatch_bank
+    };
+    let mut activations = ActivationArena::default();
+    let parent_activation = activations.root(return_bank, return_address);
+    let handler_activation = activations.called(
+        target_bank,
+        handler_address,
+        dispatch_bank,
+        dispatch_call_address,
+        parent_activation,
+    );
+    let mut return_flow = ReturnFlow::default();
+    return_flow
+        .continuations
+        .entry(handler_activation)
+        .or_default()
+        .insert(ReturnContinuation {
+            parent: parent_activation,
+            frame: ReturnFrame::Direct(return_address),
+        });
+    let mut state = ResetTraceState::at(continuation_address, handler_activation);
+    for (&address, &value) in initial_memory_values {
+        state.write_memory(address, Some(value));
+    }
+    state.write_memory(selector_memory_address, Some(selector));
+    state.write_prg_bank_shadows(Some(mapped_prg_bank));
+    state.mapped_prg_bank = Some(mapped_prg_bank);
+    state.invalidate_registers_and_flags();
+
+    let mut execution = trace_bank_state_entries(
+        source,
+        VecDeque::from([state]),
+        activations,
+        return_flow,
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+        None,
+        inline_dispatch_selector_bounds,
+        indirect_write_destination_bounds,
+        absolute_indexed_write_bounds,
+    )
+    .context("trace source-bound asynchronous handler continuation")?;
+    execution
+        .reachable_instruction_starts
+        .insert((dispatch_bank, state_load_address));
+    execution
+        .reachable_instruction_starts
+        .insert((dispatch_bank, dispatch_call_address));
+    execution.reachable_instruction_starts.extend(
+        prefix_instruction_starts
+            .iter()
+            .copied()
+            .map(|address| (dispatch_bank, address)),
+    );
+    execution
+        .inline_dispatch_selectors
+        .entry((dispatch_bank, dispatch_call_address))
+        .or_default()
+        .insert(selector);
+    execution
+        .inline_dispatch_entry_banks
+        .entry((dispatch_bank, dispatch_call_address, selector))
+        .or_default()
+        .insert(mapped_prg_bank);
+    if handler_address < FIXED_CPU_START {
+        execution
+            .switchable_roots
+            .insert((dispatch_bank, handler_address));
+    }
+    Ok(execution)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn trace_fixed_scheduler_entry_state(
+    source: &Rom,
+    dispatch_bank: u8,
+    dispatch_call_address: u16,
+    return_address: u16,
+    selector_memory_address: u16,
     entry: FixedSchedulerEntryState,
     targets: &BTreeMap<u8, u16>,
+    additional_terminal_inline_dispatches: &BTreeSet<(u8, u16)>,
     inline_dispatch_selector_bounds: &BTreeMap<(u8, u16), InlineDispatchSelectorBounds>,
     indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
     absolute_indexed_write_bounds: &BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds>,
@@ -458,17 +694,24 @@ fn trace_fixed_scheduler_entry_state(
         .get(&selector)
         .context("fixed scheduler successor state left its owner-bound handler table")?;
     let mut activations = ActivationArena::default();
-    let parent_activation = activations.root(FIXED_PRG_BANK, return_address);
+    let return_bank = if return_address >= FIXED_CPU_START {
+        FIXED_PRG_BANK
+    } else {
+        dispatch_bank
+    };
+    let parent_activation = activations.root(return_bank, return_address);
     let mut return_flow = ReturnFlow::default();
     let target_bank = if target >= FIXED_CPU_START {
         FIXED_PRG_BANK
+    } else if dispatch_bank < FIXED_PRG_BANK {
+        dispatch_bank
     } else {
         mapped_prg_bank
     };
     let handler_activation = activations.called(
         target_bank,
         target,
-        FIXED_PRG_BANK,
+        dispatch_bank,
         dispatch_call_address,
         parent_activation,
     );
@@ -483,34 +726,39 @@ fn trace_fixed_scheduler_entry_state(
     state.address = target;
     state.activation = handler_activation;
     state.invalidate_registers_and_flags();
-    state.write_memory(0x0025, Some(selector));
+    state.write_memory(selector_memory_address, Some(selector));
     state.write_prg_bank_shadows(Some(mapped_prg_bank));
     state.mapped_prg_bank = Some(mapped_prg_bank);
     state.set_accumulator(Some(selector.wrapping_mul(2)));
+    let terminal_inline_dispatches = additional_terminal_inline_dispatches
+        .iter()
+        .copied()
+        .chain([(dispatch_bank, dispatch_call_address)])
+        .collect::<BTreeSet<_>>();
     let mut execution = trace_bank_state_entries(
         source,
         VecDeque::from([state]),
         activations,
         return_flow,
         &BTreeSet::new(),
-        &BTreeSet::from([(FIXED_PRG_BANK, dispatch_call_address)]),
+        &terminal_inline_dispatches,
+        Some((dispatch_bank, dispatch_call_address)),
         inline_dispatch_selector_bounds,
         indirect_write_destination_bounds,
         absolute_indexed_write_bounds,
     )
     .context("trace one fixed-scheduler source epoch")?;
-    execution.reachable_instruction_starts.extend([
-        (FIXED_PRG_BANK, state_load_address),
-        (FIXED_PRG_BANK, dispatch_call_address),
-    ]);
+    execution
+        .reachable_instruction_starts
+        .insert((dispatch_bank, dispatch_call_address));
     execution
         .inline_dispatch_selectors
-        .entry((FIXED_PRG_BANK, dispatch_call_address))
+        .entry((dispatch_bank, dispatch_call_address))
         .or_default()
         .insert(selector);
     execution
         .inline_dispatch_entry_banks
-        .entry((FIXED_PRG_BANK, dispatch_call_address, selector))
+        .entry((dispatch_bank, dispatch_call_address, selector))
         .or_default()
         .insert(mapped_prg_bank);
     if target < FIXED_CPU_START {
@@ -526,6 +774,7 @@ fn trace_bank_state_entries(
     mut return_flow: ReturnFlow,
     terminal_entries: &BTreeSet<(u8, u16)>,
     terminal_inline_dispatches: &BTreeSet<(u8, u16)>,
+    scheduler_reentry_inline_dispatch: Option<(u8, u16)>,
     inline_dispatch_selector_bounds: &BTreeMap<(u8, u16), InlineDispatchSelectorBounds>,
     indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
     absolute_indexed_write_bounds: &BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds>,
@@ -795,18 +1044,21 @@ fn trace_bank_state_entries(
                         .or_default()
                         .insert(mapped_prg_bank);
                     if terminal_inline_dispatches.contains(&(physical_bank, state.address)) {
-                        let mut next_entry = state.clone();
-                        next_entry.address = state.address;
-                        next_entry.activation = ActivationId(0);
-                        next_entry.invalidate_registers_and_flags();
-                        next_entry.write_memory(0x0025, Some(selector));
-                        next_entry.write_prg_bank_shadows(Some(mapped_prg_bank));
-                        next_entry.mapped_prg_bank = Some(mapped_prg_bank);
-                        fixed_scheduler_entry_states.insert(FixedSchedulerEntryState {
-                            selector,
-                            mapped_prg_bank,
-                            state: next_entry,
-                        });
+                        if scheduler_reentry_inline_dispatch == Some((physical_bank, state.address))
+                        {
+                            let mut next_entry = state.clone();
+                            next_entry.address = state.address;
+                            next_entry.activation = ActivationId(0);
+                            next_entry.invalidate_registers_and_flags();
+                            next_entry.write_memory(0x0025, Some(selector));
+                            next_entry.write_prg_bank_shadows(Some(mapped_prg_bank));
+                            next_entry.mapped_prg_bank = Some(mapped_prg_bank);
+                            fixed_scheduler_entry_states.insert(FixedSchedulerEntryState {
+                                selector,
+                                mapped_prg_bank,
+                                state: next_entry,
+                            });
+                        }
                         continue;
                     }
                     let binding = bind_inline_pointer_dispatch(
@@ -2191,6 +2443,8 @@ fn branch_condition(mnemonic: Mnemonic, state: &ResetTraceState) -> Option<bool>
 mod tests {
     use super::*;
     use crate::{
+        chapter_transition::ENDING_RECORD_PHASE_ADDRESS,
+        dialogue_inventory::MAIN_DIALOGUE_COMPLETION_FLAG_ADDRESS,
         mapper165::inline_pointer_dispatch::INLINE_POINTER_DISPATCH_CODE, rom::HEADER_SIZE,
     };
 
@@ -2250,6 +2504,7 @@ mod tests {
             ReturnFlow::default(),
             &BTreeSet::new(),
             &BTreeSet::new(),
+            None,
             &bounds,
             &BTreeMap::new(),
             &BTreeMap::new(),
@@ -2813,6 +3068,98 @@ mod tests {
     }
 
     #[test]
+    fn source_bound_async_continuation_preserves_wait_and_completion_behavior() {
+        const DISPATCH_CALL: u16 = 0xC102;
+        const HANDLER: u16 = 0xC120;
+        const CONTINUATION: u16 = 0xC125;
+        const PROGRESS_FLAG: u16 = MAIN_DIALOGUE_COMPLETION_FLAG_ADDRESS;
+        let source = synthetic_source(
+            &[
+                (
+                    0xC100,
+                    &[
+                        0xA5, 0x25, // LDA $25
+                        0x20, 0x4C, 0xC3, // JSR $C34C
+                        0x20, 0xC1, // selector-zero target
+                    ],
+                ),
+                (
+                    HANDLER,
+                    &[
+                        0xA9, 0x00, // source-owned async setup
+                        0x20, 0x00, 0xC2, // summarized external call
+                        0xAD, 0x03, 0x78, // LDA progress flag
+                        0xF0, 0x03, // pending skips the phase increment
+                        0xEE, 0x31, 0x77, // completed advances the phase
+                        0x60,
+                    ],
+                ),
+                (0xC140, &[0x60]),
+                (
+                    INLINE_POINTER_DISPATCH_ADDRESS,
+                    &INLINE_POINTER_DISPATCH_CODE,
+                ),
+            ],
+            0xC140,
+        );
+        let bounds = BTreeMap::from([(
+            (FIXED_PRG_BANK, DISPATCH_CALL),
+            InlineDispatchSelectorBounds::from_handler_table(BTreeSet::from([0x00]))
+                .with_selector_memory_address(OUTER_SCREEN_STATE),
+        )]);
+        let trace = |progress_value| {
+            trace_source_bound_inline_state_continuation(
+                &source,
+                FIXED_PRG_BANK,
+                0xC100,
+                DISPATCH_CALL,
+                0xC140,
+                OUTER_SCREEN_STATE,
+                0x00,
+                FIXED_PRG_BANK,
+                HANDLER,
+                CONTINUATION,
+                &BTreeSet::from([HANDLER, HANDLER + 2]),
+                &BTreeMap::from([
+                    (ENDING_RECORD_PHASE_ADDRESS, 0x15),
+                    (PROGRESS_FLAG, progress_value),
+                ]),
+                &bounds,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .unwrap()
+        };
+
+        let pending = trace(0);
+        let completed = trace(1);
+
+        assert!(
+            pending
+                .control_state_write_values()
+                .get(&(FIXED_PRG_BANK, 0xC12A, ENDING_RECORD_PHASE_ADDRESS))
+                .is_none()
+        );
+        assert_eq!(
+            completed.control_state_write_values().get(&(
+                FIXED_PRG_BANK,
+                0xC12A,
+                ENDING_RECORD_PHASE_ADDRESS
+            )),
+            Some(&Some(BTreeSet::from([0x16])))
+        );
+        assert!(
+            completed
+                .reachable_instruction_starts()
+                .is_superset(&BTreeSet::from([
+                    (FIXED_PRG_BANK, HANDLER),
+                    (FIXED_PRG_BANK, HANDLER + 2),
+                    (FIXED_PRG_BANK, CONTINUATION),
+                ]))
+        );
+    }
+
+    #[test]
     fn shared_callee_returns_only_to_its_call_site_context() {
         let source = synthetic_source(
             &[
@@ -3094,6 +3441,8 @@ mod tests {
             0xC102,
             0xC100,
             [(0x00, 0x06)],
+            &BTreeMap::new(),
+            &BTreeSet::new(),
             &selector_bounds,
             &BTreeMap::new(),
             &BTreeMap::new(),

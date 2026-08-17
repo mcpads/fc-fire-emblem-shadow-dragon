@@ -1,4 +1,10 @@
-use super::SourceRegionSpec;
+use std::collections::BTreeSet;
+
+use anyhow::{Result, ensure};
+
+use crate::rom::Rom;
+
+use super::{SourceRegionSpec, bind_source_region};
 
 const ENDING_SEQUENCE_HANDLER_POINTER_BYTES: &[u8] = &[0xC6, 0x9E];
 const RUN_ENDING_SEQUENCE_BYTES: &[u8] =
@@ -18,6 +24,7 @@ const UPDATE_ENDING_SEQUENCE_TEMPORAL_STATE_BYTES: &[u8] = &[
     0x00, 0x8D, 0x33, 0x77, 0x60,
 ];
 const DISPATCH_ENDING_SEQUENCE_PHASE_BYTES: &[u8] = &[0xAD, 0x31, 0x77, 0x20, 0x4C, 0xC3];
+pub(crate) const ENDING_SEQUENCE_INNER_STATE_ADDRESS: u16 = 0x7733;
 pub(super) const ENDING_SEQUENCE_PHASE_POINTERS_BYTES: &[u8] = &[
     0xA5, 0xA3, 0xE0, 0xA3, 0xED, 0x9F, 0x54, 0xA0, 0xE9, 0xA0, 0xFA, 0x9F, 0x11, 0xA0, 0x2D, 0xA0,
     0x54, 0xA0, 0x71, 0xA0, 0x64, 0x9F, 0x83, 0x9F, 0x54, 0xA0, 0x57, 0x9F, 0x23, 0xA1, 0x65, 0xA1,
@@ -112,3 +119,96 @@ pub(super) const SOURCE_REGIONS: &[SourceRegionSpec] = &[
         "137f18180b51a86fac7a1f0c6eb9fa4269ec2504",
     ),
 ];
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct EndingSequencePhaseDispatchSource {
+    prg_bank: u8,
+    dispatch_call: u16,
+    selector_address: u16,
+    admitted_selectors: BTreeSet<u8>,
+    inner_dispatch_call: u16,
+    inner_selector_address: u16,
+    inner_produced_selectors: BTreeSet<u8>,
+}
+
+impl EndingSequencePhaseDispatchSource {
+    pub(crate) fn prg_bank(&self) -> u8 {
+        self.prg_bank
+    }
+
+    pub(crate) fn dispatch_call(&self) -> u16 {
+        self.dispatch_call
+    }
+
+    pub(crate) fn selector_address(&self) -> u16 {
+        self.selector_address
+    }
+
+    pub(crate) fn admitted_selectors(&self) -> &BTreeSet<u8> {
+        &self.admitted_selectors
+    }
+
+    pub(crate) fn inner_dispatch_call(&self) -> u16 {
+        self.inner_dispatch_call
+    }
+
+    pub(crate) fn inner_selector_address(&self) -> u16 {
+        self.inner_selector_address
+    }
+
+    pub(crate) fn inner_produced_selectors(&self) -> &BTreeSet<u8> {
+        &self.inner_produced_selectors
+    }
+}
+
+pub(crate) fn bind_ending_sequence_phase_dispatch_source(
+    source: &Rom,
+) -> Result<EndingSequencePhaseDispatchSource> {
+    for role in [
+        "update_ending_sequence_temporal_state",
+        "dispatch_ending_sequence_phase",
+        "ending_sequence_phase_pointers",
+        "dispatch_ending_scroll_inner_state",
+        "ending_scroll_inner_state_pointers",
+    ] {
+        let spec = SOURCE_REGIONS
+            .iter()
+            .find(|spec| spec.role == role)
+            .copied()
+            .expect("ending state-machine source region is declared");
+        bind_source_region(source, spec)?;
+    }
+
+    ensure!(
+        ENDING_SEQUENCE_PHASE_POINTERS_BYTES.len() % 2 == 0,
+        "ending phase pointer table has a partial pointer"
+    );
+    let phase_count = u8::try_from(ENDING_SEQUENCE_PHASE_POINTERS_BYTES.len() / 2)?;
+    ensure!(
+        phase_count == 0x1E,
+        "ending phase handler domain no longer has thirty selectors"
+    );
+    let inner_produced_selectors = BTreeSet::from([0x00, 0x01, 0x02]);
+    for producer in [
+        [0xA9, 0x01, 0x8D, 0x33, 0x77].as_slice(),
+        [0xEE, 0x33, 0x77].as_slice(),
+        [0xA9, 0x00, 0x8D, 0x33, 0x77].as_slice(),
+    ] {
+        ensure!(
+            UPDATE_ENDING_SEQUENCE_TEMPORAL_STATE_BYTES
+                .windows(producer.len())
+                .any(|window| window == producer),
+            "ending inner-state producer changed"
+        );
+    }
+
+    Ok(EndingSequencePhaseDispatchSource {
+        prg_bank: 0x04,
+        dispatch_call: 0x9F18,
+        selector_address: 0x7731,
+        admitted_selectors: (0..phase_count).collect(),
+        inner_dispatch_call: 0xA3E3,
+        inner_selector_address: ENDING_SEQUENCE_INNER_STATE_ADDRESS,
+        inner_produced_selectors,
+    })
+}

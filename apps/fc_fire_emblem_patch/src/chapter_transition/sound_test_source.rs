@@ -1,4 +1,8 @@
-use super::SourceRegionSpec;
+use anyhow::{Result, ensure};
+
+use crate::rom::Rom;
+
+use super::{SourceRegionSpec, bind_source_region};
 
 const MONITOR_SOUND_TEST_UNLOCK_BYTES: &[u8] = &[
     0xA9, 0x03, 0x85, 0x44, 0xA9, 0x0A, 0x20, 0xFA, 0xC9, 0xA5, 0x14, 0xF0, 0x17, 0xAE, 0x5B, 0x77,
@@ -40,6 +44,10 @@ const SOUND_EVENT_BIT_BYTES: &[u8] = &[0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40,
 const PREPARE_ENDING_SEQUENCE_BYTES: &[u8] = &[
     0xA9, 0x77, 0x85, 0x01, 0xA9, 0x30, 0x85, 0x00, 0xA9, 0x00, 0x85, 0x03, 0xA9, 0x2F, 0x85, 0x02,
     0xA9, 0x00, 0x8D, 0xCE, 0x05, 0x20, 0x25, 0xC2, 0xEE, 0xEE, 0x05, 0x60,
+];
+const BOUNDED_FILL_BYTES: &[u8] = &[
+    0xA0, 0x00, 0xA6, 0x02, 0xF0, 0x02, 0xE6, 0x03, 0x91, 0x00, 0xC8, 0xD0, 0x02, 0xE6, 0x01, 0xC6,
+    0x02, 0xD0, 0xF5, 0xC6, 0x03, 0xD0, 0xF1, 0x60,
 ];
 const RUN_ENDING_SEQUENCE_LOOP_BYTES: &[u8] = &[
     0x20, 0x88, 0xC2, 0xA9, 0x00, 0x85, 0x37, 0xA9, 0x04, 0x85, 0x44, 0x20, 0xFA, 0xC9, 0x20, 0x36,
@@ -106,6 +114,7 @@ pub(super) const SOURCE_REGIONS: &[SourceRegionSpec] = &[
         0x9CF0,
         PREPARE_ENDING_SEQUENCE_BYTES,
     ),
+    SourceRegionSpec::code("bounded_fill", 0x0F, 0xC225, BOUNDED_FILL_BYTES),
     SourceRegionSpec::code(
         "run_ending_sequence_loop",
         0x0B,
@@ -137,3 +146,59 @@ pub(super) const SOURCE_REGIONS: &[SourceRegionSpec] = &[
         BATTLE_ANIMATION_TEST_PHASE_POINTERS_BYTES,
     ),
 ];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct EndingSequencePhaseSeed {
+    selector_address: u16,
+    selector: u8,
+}
+
+impl EndingSequencePhaseSeed {
+    pub(crate) fn selector_address(self) -> u16 {
+        self.selector_address
+    }
+
+    pub(crate) fn selector(self) -> u8 {
+        self.selector
+    }
+}
+
+pub(crate) fn bind_ending_sequence_phase_seed(source: &Rom) -> Result<EndingSequencePhaseSeed> {
+    let prepare = SOURCE_REGIONS
+        .iter()
+        .find(|spec| spec.role == "prepare_ending_sequence")
+        .copied()
+        .expect("ending preparation source region is declared");
+    let fill = SOURCE_REGIONS
+        .iter()
+        .find(|spec| spec.role == "bounded_fill")
+        .copied()
+        .expect("bounded fill source region is declared");
+    bind_source_region(source, prepare)?;
+    bind_source_region(source, fill)?;
+
+    const ZEROED_START: u16 = 0x7730;
+    const ZEROED_BYTE_COUNT: u16 = 0x002F;
+    const PHASE_ADDRESS: u16 = 0x7731;
+    ensure!(
+        PREPARE_ENDING_SEQUENCE_BYTES.starts_with(&[
+            0xA9, 0x77, 0x85, 0x01, // pointer high = $77
+            0xA9, 0x30, 0x85, 0x00, // pointer low = $30
+            0xA9, 0x00, 0x85, 0x03, // byte count high = 0
+            0xA9, 0x2F, 0x85, 0x02, // byte count low = $2F
+            0xA9, 0x00, // fill value = 0
+            0x8D, 0xCE, 0x05, // unrelated state clear
+            0x20, 0x25, 0xC2, // bounded fill
+        ]),
+        "ending preparation no longer initializes the bounded zero-fill inputs"
+    );
+    let zeroed_end = ZEROED_START + ZEROED_BYTE_COUNT - 1;
+    ensure!(
+        (ZEROED_START..=zeroed_end).contains(&PHASE_ADDRESS),
+        "ending phase selector left the source-bound zero-fill range"
+    );
+    Ok(EndingSequencePhaseSeed {
+        selector_address: PHASE_ADDRESS,
+        selector: 0,
+    })
+}

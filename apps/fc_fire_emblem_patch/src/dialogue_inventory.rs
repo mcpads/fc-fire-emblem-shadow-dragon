@@ -29,6 +29,9 @@ use source_binding::{
 };
 pub(crate) use source_binding::{switchable_cpu_to_file_offset, switchable_file_to_cpu};
 use source_spec::*;
+pub(crate) use source_spec::{
+    MAIN_DIALOGUE_CALLER_HANDOFF_FLAG_ADDRESS, MAIN_DIALOGUE_COMPLETION_FLAG_ADDRESS,
+};
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -127,6 +130,101 @@ pub(crate) fn main_dialogue_transition_chain_record_ids(
 
 pub(crate) const fn main_dialogue_runtime_handler_roots() -> [u16; 18] {
     MAIN_DIALOGUE_STATE_HANDLERS
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct MainDialogueProgressSource {
+    caller_prg_bank: u8,
+    caller_handler_address: u16,
+    caller_observer_address: u16,
+    dialogue_prg_bank: u8,
+    dialogue_dispatcher_address: u16,
+    completion_flag_address: u16,
+    caller_handoff_flag_address: u16,
+    pending_value: u8,
+    asserted_value: u8,
+}
+
+impl MainDialogueProgressSource {
+    pub(crate) fn caller_prg_bank(self) -> u8 {
+        self.caller_prg_bank
+    }
+
+    pub(crate) fn caller_handler_address(self) -> u16 {
+        self.caller_handler_address
+    }
+
+    pub(crate) fn caller_observer_address(self) -> u16 {
+        self.caller_observer_address
+    }
+
+    pub(crate) fn dialogue_prg_bank(self) -> u8 {
+        self.dialogue_prg_bank
+    }
+
+    pub(crate) fn dialogue_dispatcher_address(self) -> u16 {
+        self.dialogue_dispatcher_address
+    }
+
+    pub(crate) fn completion_flag_address(self) -> u16 {
+        self.completion_flag_address
+    }
+
+    pub(crate) fn caller_handoff_flag_address(self) -> u16 {
+        self.caller_handoff_flag_address
+    }
+
+    pub(crate) fn pending_value(self) -> u8 {
+        self.pending_value
+    }
+
+    pub(crate) fn asserted_value(self) -> u8 {
+        self.asserted_value
+    }
+}
+
+/// Binds the main-dialogue progress signals and one exact caller observer. The returned values
+/// describe the engine-owned zero-to-one signal transition; they do not claim that every caller
+/// or every dialogue route is reachable.
+pub(crate) fn bind_main_dialogue_progress_source(
+    rom: &Rom,
+    caller_prg_bank: u8,
+    caller_handler_address: u16,
+) -> Result<MainDialogueProgressSource> {
+    rom.verify_supported_japanese()?;
+    build_main_dialogue_state_machine(rom.data())?;
+
+    let observers = CALLER_HANDOFF_OBSERVER_SPECS
+        .iter()
+        .copied()
+        .filter(|observer| {
+            observer.prg_bank == caller_prg_bank
+                && observer.handler_cpu_address == caller_handler_address
+        })
+        .collect::<Vec<_>>();
+    ensure!(
+        observers.len() == 1,
+        "main-dialogue progress source expected one caller observer at bank {caller_prg_bank:02X}:${caller_handler_address:04X}, found {}",
+        observers.len(),
+    );
+    let observer = observers[0];
+    let dispatch_bindings = build_caller_handoff_dispatch_bindings(rom.data(), observer)?;
+    ensure!(
+        !dispatch_bindings.is_empty(),
+        "main-dialogue caller observer has no owner-bound state dispatcher"
+    );
+
+    Ok(MainDialogueProgressSource {
+        caller_prg_bank,
+        caller_handler_address,
+        caller_observer_address: observer.cpu_address,
+        dialogue_prg_bank: MAIN_DIALOGUE_PRG_BANK,
+        dialogue_dispatcher_address: MAIN_DIALOGUE_DISPATCHER_CPU_ADDRESS,
+        completion_flag_address: MAIN_DIALOGUE_COMPLETION_FLAG_ADDRESS,
+        caller_handoff_flag_address: MAIN_DIALOGUE_CALLER_HANDOFF_FLAG_ADDRESS,
+        pending_value: 0,
+        asserted_value: 1,
+    })
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

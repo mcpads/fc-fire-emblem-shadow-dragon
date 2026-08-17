@@ -12,6 +12,7 @@ use super::{FIXED_PRG_BANK, source_mapped_location};
 
 mod chapter_map_loader;
 mod control_state;
+mod ending_sequence;
 mod fixed_scheduler;
 mod fixed_vectors;
 mod indexed_write_destinations;
@@ -21,7 +22,11 @@ mod state_accesses;
 mod unit_record_writers;
 
 use chapter_map_loader::{CHAPTER_MAP_INDIRECT_WRITE_SITE, bind_chapter_map_loader_destination};
-use control_state::{ObservedControlStateWrites, merge_observed_control_state_writes};
+use control_state::{
+    OUTER_SCREEN_STATE, ObservedControlStateWrites, known_control_state_write_values,
+    merge_observed_control_state_writes,
+};
+use ending_sequence::bind_ending_sequence_positive_execution;
 use fixed_scheduler::bind_fixed_scheduler_execution;
 use fixed_vectors::bind_fixed_vector_execution;
 use indexed_write_destinations::bind_pending_request_disjoint_indexed_writes;
@@ -33,6 +38,7 @@ use unit_record_writers::bind_unit_record_write_destinations;
 
 const BATTLE_PHASE_GRAPH: &str = "battle_phase_catalog";
 const DIALOGUE_INTERRUPT_AUDIO_GRAPH: &str = "main_dialogue_nmi_and_audio_positive_graph";
+const ENDING_SEQUENCE_GRAPH: &str = "ending_sequence_phase_positive_graph";
 const FIXED_HARDWARE_VECTOR_GRAPH: &str = "fixed_hardware_vector_direct_graph";
 const FIXED_SCHEDULER_EXECUTION_GRAPH: &str = "fixed_scheduler_state_execution_graph";
 const RESET_STATEFUL_EXECUTION_GRAPH: &str = "reset_stateful_execution_graph";
@@ -47,6 +53,8 @@ pub(super) struct SourcePositiveExecutionGraph {
     hardware_vector_root_count: usize,
     fixed_vector_instruction_count: usize,
     reset_stateful_execution_instruction_count: usize,
+    ending_sequence_produced_selectors: Vec<String>,
+    ending_sequence_open_control_facts: Vec<String>,
     fixed_scheduler_source_bound_producer_instruction_count: usize,
     fixed_scheduler_positive_execution_instruction_count: usize,
     fixed_scheduler_table_selector_count: usize,
@@ -55,6 +63,7 @@ pub(super) struct SourcePositiveExecutionGraph {
     fixed_scheduler_reset_entry_context_count: usize,
     fixed_scheduler_positive_entry_context_count: usize,
     fixed_scheduler_known_produced_states: Vec<String>,
+    fixed_scheduler_outer_screen_produced_selectors: Vec<String>,
     fixed_scheduler_positive_states: Vec<String>,
     fixed_scheduler_bound_switchable_roots: Vec<String>,
     fixed_scheduler_open_control_facts: Vec<String>,
@@ -101,6 +110,14 @@ impl SourcePositiveExecutionGraph {
         self.reset_stateful_execution_instruction_count
     }
 
+    pub(super) fn ending_sequence_produced_selectors(&self) -> &[String] {
+        &self.ending_sequence_produced_selectors
+    }
+
+    pub(super) fn ending_sequence_open_control_facts(&self) -> &[String] {
+        &self.ending_sequence_open_control_facts
+    }
+
     pub(super) fn fixed_scheduler_source_bound_producer_instruction_count(&self) -> usize {
         self.fixed_scheduler_source_bound_producer_instruction_count
     }
@@ -131,6 +148,10 @@ impl SourcePositiveExecutionGraph {
 
     pub(super) fn fixed_scheduler_known_produced_states(&self) -> &[String] {
         &self.fixed_scheduler_known_produced_states
+    }
+
+    pub(super) fn fixed_scheduler_outer_screen_produced_selectors(&self) -> &[String] {
+        &self.fixed_scheduler_outer_screen_produced_selectors
     }
 
     pub(super) fn fixed_scheduler_positive_states(&self) -> &[String] {
@@ -232,14 +253,25 @@ pub(super) fn bind_source_positive_execution_graph(
         .copied()
         .collect::<BTreeSet<_>>();
     let fixed_vectors = bind_fixed_vector_execution(source, &source_bound_indirect_destinations)?;
+    let ending_sequence = bind_ending_sequence_positive_execution(
+        source,
+        &source_bound_indirect_destinations,
+        &absolute_indexed_write_bounds,
+    )?;
     let fixed_scheduler_entry_contexts = fixed_vectors
         .reset_terminal_entry_contexts(FIXED_PRG_BANK, fixed_scheduler::FIXED_SCHEDULER_ENTRY);
+    let outer_screen_state_seed_selectors = known_control_state_write_values(
+        fixed_vectors.reset_control_state_write_values(),
+        OUTER_SCREEN_STATE,
+    );
     let fixed_scheduler = bind_fixed_scheduler_execution(
         source,
         &title_state,
         &shared_menu,
         screen_state_dispatches.selector_domains(),
         screen_state_dispatches.selector_memory_addresses(),
+        &outer_screen_state_seed_selectors,
+        ending_sequence.produced_selectors(),
         &fixed_scheduler_entry_contexts,
         &source_bound_indirect_destinations,
         &absolute_indexed_write_bounds,
@@ -260,6 +292,10 @@ pub(super) fn bind_source_positive_execution_graph(
         (
             DIALOGUE_INTERRUPT_AUDIO_GRAPH,
             dialogue_interrupt_audio.reachable_instruction_starts.iter(),
+        ),
+        (
+            ENDING_SEQUENCE_GRAPH,
+            ending_sequence.reachable_instruction_starts().iter(),
         ),
         (
             FIXED_HARDWARE_VECTOR_GRAPH,
@@ -298,6 +334,7 @@ pub(super) fn bind_source_positive_execution_graph(
                 .iter(),
         )
         .chain(fixed_vectors.indirect_write_sites_below_mapper_space())
+        .chain(ending_sequence.indirect_write_sites_below_mapper_space())
         .chain(fixed_scheduler.indirect_write_sites_below_mapper_space())
         .copied()
         .collect();
@@ -306,6 +343,10 @@ pub(super) fn bind_source_positive_execution_graph(
     merge_observed_control_state_writes(
         &mut observed_control_state_writes,
         fixed_vectors.reset_control_state_write_values(),
+    );
+    merge_observed_control_state_writes(
+        &mut observed_control_state_writes,
+        ending_sequence.control_state_write_values(),
     );
     merge_observed_control_state_writes(
         &mut observed_control_state_writes,
@@ -334,6 +375,14 @@ pub(super) fn bind_source_positive_execution_graph(
         reset_stateful_execution_instruction_count: fixed_vectors
             .reset_reachable_instruction_starts()
             .len(),
+        ending_sequence_produced_selectors: ending_sequence
+            .produced_selectors()
+            .iter()
+            .map(|selector| format!("0x{selector:02X}"))
+            .collect(),
+        ending_sequence_open_control_facts: ending_sequence
+            .open_control_fact_descriptions()
+            .to_vec(),
         fixed_scheduler_source_bound_producer_instruction_count: fixed_scheduler
             .source_bound_producer_instruction_starts()
             .len(),
@@ -360,6 +409,11 @@ pub(super) fn bind_source_positive_execution_graph(
             .known_produced_states()
             .iter()
             .map(|state| format!("0x{state:02X}"))
+            .collect(),
+        fixed_scheduler_outer_screen_produced_selectors: fixed_scheduler
+            .outer_screen_produced_selectors()
+            .iter()
+            .map(|selector| format!("0x{selector:02X}"))
             .collect(),
         fixed_scheduler_positive_states: fixed_scheduler
             .positive_selector_domain()

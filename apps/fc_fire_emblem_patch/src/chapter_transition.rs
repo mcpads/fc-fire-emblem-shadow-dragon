@@ -31,18 +31,23 @@ use crate::{
 };
 
 pub(crate) use ending_epilogue::{
-    ENDING_CHARACTER_EPILOGUE_FONT_RESIDENCY_PHASE_MASK, ENDING_CHARACTER_EPILOGUE_SELECTOR_PHASE,
-    ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE_START,
+    ENDING_CHARACTER_ANIMATION_STATE_ADDRESS, ENDING_CHARACTER_EPILOGUE_FONT_RESIDENCY_PHASE_MASK,
+    ENDING_CHARACTER_EPILOGUE_SELECTOR_PHASE, ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE_START,
+    bind_ending_character_animation_dispatch_source, bind_ending_dialogue_progress_boundaries,
 };
 pub(crate) use ending_scroll::{
     ENDING_RECORD_PHASE_ADDRESS, EndingChapterRecordStorageSource, EndingChapterRowStorageSource,
     bind_ending_chapter_record_lifetime_source, bind_ending_chapter_record_storage_source,
+};
+pub(crate) use ending_source::{
+    ENDING_SEQUENCE_INNER_STATE_ADDRESS, bind_ending_sequence_phase_dispatch_source,
 };
 use report::*;
 use runtime_routes::*;
 pub(crate) use save_dialogue::bind_save_complete_dialogue_records;
 use save_routes::*;
 use sound_test_routes::*;
+pub(crate) use sound_test_source::bind_ending_sequence_phase_seed;
 use source_binding::*;
 pub(crate) use source_binding::{
     bind_chapter_intro_lifetime_contexts, bind_outer_screen_state_dispatch_source,

@@ -7,6 +7,8 @@ pub(super) const MAIN_DIALOGUE_PRG_BANK: u8 = 0x0A;
 pub(super) const MAIN_DIALOGUE_STATE_ADDRESS: u16 = 0x77F7;
 pub(super) const MAIN_DIALOGUE_DISPATCHER_CPU_ADDRESS: u16 = 0x8000;
 pub(super) const MAIN_DIALOGUE_HANDLER_TABLE_CPU_ADDRESS: u16 = 0x8006;
+pub(crate) const MAIN_DIALOGUE_COMPLETION_FLAG_ADDRESS: u16 = 0x7803;
+pub(crate) const MAIN_DIALOGUE_CALLER_HANDOFF_FLAG_ADDRESS: u16 = 0x7809;
 pub(super) const OPTIONAL_E5_PREFIX_CODE: u8 = 0xE5;
 pub(super) const OPTIONAL_E8_PREFIX_CODE: u8 = 0xE8;
 pub(super) const OPTIONAL_PREFIX_BYTE_COUNT: usize = 6;
@@ -51,7 +53,16 @@ pub(super) struct CodeRegionSpec {
     pub(super) bytes: &'static [u8],
 }
 
-pub(super) const MAIN_DIALOGUE_STATE_CODE_REGIONS: [CodeRegionSpec; 8] = [
+pub(super) const MAIN_DIALOGUE_STATE_CODE_REGIONS: [CodeRegionSpec; 10] = [
+    CodeRegionSpec {
+        role: "initialize_dialogue_progress_signals",
+        cpu_address: 0x8032,
+        bytes: &[
+            0xA9, 0x00, 0x8D, 0x02, 0x78, 0x8D, 0x03, 0x78, 0x8D, 0x04, 0x78, 0x8D, 0x05, 0x78,
+            0x8D, 0x06, 0x78, 0x8D, 0x0B, 0x78, 0x8D, 0xF8, 0x77, 0x8D, 0x08, 0x78, 0x8D, 0x09,
+            0x78,
+        ],
+    },
     CodeRegionSpec {
         role: "inspect_and_consume_optional_E5_prefix",
         cpu_address: 0x80A2,
@@ -110,6 +121,14 @@ pub(super) const MAIN_DIALOGUE_STATE_CODE_REGIONS: [CodeRegionSpec; 8] = [
         bytes: &[
             0xAD, 0x08, 0x78, 0xF0, 0x0C, 0xA9, 0x01, 0x8D, 0x31, 0x78, 0xEE, 0x09, 0x78, 0xA9,
             0x11, 0xD0, 0x18,
+        ],
+    },
+    CodeRegionSpec {
+        role: "raise_dialogue_completion_signal_and_stop",
+        cpu_address: 0x8621,
+        bytes: &[
+            0x20, 0xAE, 0xC9, 0x20, 0xB6, 0xC9, 0xA9, 0x01, 0x85, 0x22, 0xEE, 0x03, 0x78, 0xA9,
+            0x00, 0x8D, 0xF7, 0x77, 0x60,
         ],
     },
     CodeRegionSpec {
