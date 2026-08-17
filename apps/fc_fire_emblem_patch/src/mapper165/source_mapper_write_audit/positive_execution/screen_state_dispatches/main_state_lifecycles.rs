@@ -7,6 +7,10 @@ use crate::{
     typed_source::decode_rp2a03_sequence,
 };
 
+mod chapter_save;
+
+use chapter_save::bind_chapter_save_main_state_lifecycles;
+
 const SOURCE_PRG_BANK_BYTE_COUNT: usize = 16 * 1024;
 const FIXED_PRG_BANK: u8 = 0x0F;
 const OUTER_SCREEN_BANK: u8 = 0x06;
@@ -226,6 +230,7 @@ pub(super) fn bind_outer_screen_main_state_lifecycles(
         handler_domain,
         produced_selectors: None,
     });
+    lifecycles.extend(bind_chapter_save_main_state_lifecycles(source)?);
     Ok(lifecycles)
 }
 

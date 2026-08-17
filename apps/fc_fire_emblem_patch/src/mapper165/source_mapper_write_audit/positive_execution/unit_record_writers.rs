@@ -4,9 +4,11 @@ use anyhow::{Context, Result, ensure};
 
 use crate::{mapper165::battle_codebook_plan::IndirectWriteDestinationBounds, rom::Rom};
 
+mod chapter_save;
 mod gameplay_paths;
 mod source_regions;
 
+use chapter_save::bind_chapter_save_path_destinations;
 use gameplay_paths::bind_gameplay_path_destinations;
 use source_regions::bind_unit_record_writer_source;
 
@@ -84,6 +86,14 @@ pub(super) fn bind_unit_record_write_destinations(
         ensure!(
             destinations.insert(site, destination).is_none(),
             "gameplay unit-record writer overlaps an existing destination owner at {:02X}:${:04X}",
+            site.0,
+            site.1,
+        );
+    }
+    for (site, destination) in bind_chapter_save_path_destinations(source)? {
+        ensure!(
+            destinations.insert(site, destination).is_none(),
+            "chapter-save unit-record writer overlaps an existing destination owner at {:02X}:${:04X}",
             site.0,
             site.1,
         );
