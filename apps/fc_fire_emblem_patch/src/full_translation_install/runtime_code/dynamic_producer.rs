@@ -12,7 +12,7 @@ use anyhow::{Context, Result, ensure};
 
 use super::{
     DialogueRuntimeHook, DialogueRuntimeHookRole, DialogueRuntimeHookSite, RuntimeRoutine,
-    ensure_disjoint, next_address, resolve_request::MaterialLayout,
+    ensure_routines_fit_cave, next_address, resolve_request::MaterialLayout,
 };
 use crate::{
     dialogue_inventory::switchable_cpu_to_file_offset,
@@ -156,7 +156,11 @@ pub(super) fn build_dynamic_producer_runtime(
         address: bridge_address,
         bytes: build_fixed_bridge(bridge_address, code_routine.address, code_page)?,
     });
-    ensure_disjoint(&fixed_routines.iter().collect::<Vec<_>>(), FIXED_BRIDGE_END)?;
+    ensure_routines_fit_cave(
+        &fixed_routines.iter().collect::<Vec<_>>(),
+        FIXED_BRIDGE_ORIGIN,
+        FIXED_BRIDGE_END,
+    )?;
 
     let hooks = HOOK_SITES
         .into_iter()

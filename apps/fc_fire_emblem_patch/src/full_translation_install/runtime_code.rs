@@ -41,7 +41,9 @@ pub(super) mod trampoline;
 pub(in crate::full_translation_install) mod transport;
 
 pub(in crate::full_translation_install) use assembly::RuntimeRoutine;
-use assembly::{ensure_disjoint, next_address, worst_case_cycles, worst_case_cycles_with_calls};
+use assembly::{
+    ensure_routines_fit_cave, next_address, worst_case_cycles, worst_case_cycles_with_calls,
+};
 use mapper_write_verification::verify_planned_mapper_select_writes;
 
 /// 대사 런타임이 원본 제어 흐름에 끼어드는 각 자리의 의미다.
@@ -493,12 +495,13 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         consumer_font_pages.front_end_record_action,
         consumer_catalog_layout,
     )?;
-    ensure_disjoint(
+    ensure_routines_fit_cave(
         &[
             &gate,
             &ending_font_lifetime.restore_source_pair,
             &ending_font_lifetime.enter_ending_record,
         ],
+        dispatcher_gate::RECLAIMED_GATE_CAVE_ORIGIN,
         dispatcher_gate::RECLAIMED_GATE_CAVE_END,
     )?;
     let mut fixed_support_bytes = gate.bytes;
@@ -572,23 +575,27 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     );
 
     let publisher_address = publisher.head.address;
-    ensure_disjoint(
+    ensure_routines_fit_cave(
         &[&trampoline_routine, &publisher.head],
+        trampoline::TRAMPOLINE_ORIGIN,
         trampoline::TRAMPOLINE_CAVE_END,
     )?;
-    ensure_disjoint(
+    ensure_routines_fit_cave(
         &[&publisher.tail],
+        dispatcher_gate::SOURCE_IDENTITY_PUBLISHER_TAIL_ORIGIN,
         dispatcher_gate::SOURCE_IDENTITY_PUBLISHER_TAIL_CAVE_END,
     )?;
-    ensure_disjoint(
+    ensure_routines_fit_cave(
         &[&ending_font_lifetime.exit_tail],
+        consumer_font_page::ending_lifetime::ENDING_FONT_EXIT_TAIL_ORIGIN,
         consumer_font_page::ending_lifetime::ENDING_FONT_EXIT_TAIL_CAVE_END,
     )?;
-    ensure_disjoint(
+    ensure_routines_fit_cave(
         &[&ending_font_lifetime.exit_head],
+        consumer_font_page::ending_lifetime::ENDING_FONT_EXIT_HEAD_ORIGIN,
         consumer_font_page::ending_lifetime::ENDING_FONT_EXIT_HEAD_END,
     )?;
-    ensure_disjoint(
+    ensure_routines_fit_cave(
         &[
             &font_page_routes.routine,
             &selector,
@@ -603,6 +610,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
             &consumer_font_page_close,
             &consumer_font_page_gameplay_handoff,
         ],
+        chr_selector::SELECTOR_CAVE_ORIGIN,
         chr_selector::SELECTOR_CAVE_END,
     )?;
     let mut fixed_routines = vec![

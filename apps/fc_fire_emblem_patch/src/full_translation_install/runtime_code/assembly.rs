@@ -12,11 +12,28 @@ pub(in crate::full_translation_install) struct RuntimeRoutine {
     pub(in crate::full_translation_install) bytes: Vec<u8>,
 }
 
-/// 같은 동굴에 놓이는 조각들이 서로 겹치거나 동굴을 넘지 않아야 한다.
-/// 겹치면 조용히 잘못된 코드가 실행되고, 넘으면 원본 자료를 덮는다.
-pub(super) fn ensure_disjoint(routines: &[&RuntimeRoutine], cave_end: u16) -> Result<()> {
+/// 같은 동굴에 놓이는 조각들이 동굴 안에 있고 서로 겹치지 않아야 한다.
+/// 범위 밖이면 원본 자료나 다른 실행 소유자를 덮고, 겹치면 조용히 잘못된 코드가
+/// 실행된다.
+pub(super) fn ensure_routines_fit_cave(
+    routines: &[&RuntimeRoutine],
+    cave_start: u16,
+    cave_end: u16,
+) -> Result<()> {
+    ensure!(
+        cave_start <= cave_end,
+        "reserved cave starts at {cave_start:04X} after its end {cave_end:04X}"
+    );
     let mut ordered: Vec<&RuntimeRoutine> = routines.to_vec();
     ordered.sort_by_key(|routine| routine.address);
+    if let Some(first) = ordered.first() {
+        ensure!(
+            first.address >= cave_start,
+            "{} starts at {:04X} before the reserved cave start {cave_start:04X}",
+            first.role,
+            first.address
+        );
+    }
     for pair in ordered.windows(2) {
         ensure!(
             usize::from(pair[0].address) + pair[0].bytes.len() <= usize::from(pair[1].address),
@@ -106,7 +123,7 @@ mod tests {
             bytes: vec![0; 4],
         };
 
-        let error = ensure_disjoint(&[&first, &second], 0xF4B0).unwrap_err();
+        let error = ensure_routines_fit_cave(&[&first, &second], 0xF400, 0xF4B0).unwrap_err();
 
         assert!(error.to_string().contains("overlaps"));
     }
@@ -119,8 +136,28 @@ mod tests {
             bytes: vec![0; 32],
         };
 
-        let error = ensure_disjoint(&[&only], 0xF4B0).unwrap_err();
+        let error = ensure_routines_fit_cave(&[&only], 0xF400, 0xF4B0).unwrap_err();
 
         assert!(error.to_string().contains("past the reserved cave end"));
+    }
+
+    #[test]
+    fn a_routine_before_the_cave_start_is_refused() {
+        let only = RuntimeRoutine {
+            role: "before",
+            address: 0xF3FF,
+            bytes: vec![0; 1],
+        };
+
+        let error = ensure_routines_fit_cave(&[&only], 0xF400, 0xF4B0).unwrap_err();
+
+        assert!(error.to_string().contains("before the reserved cave start"));
+    }
+
+    #[test]
+    fn an_inverted_cave_is_refused_even_when_empty() {
+        let error = ensure_routines_fit_cave(&[], 0xF4B0, 0xF400).unwrap_err();
+
+        assert!(error.to_string().contains("after its end"));
     }
 }

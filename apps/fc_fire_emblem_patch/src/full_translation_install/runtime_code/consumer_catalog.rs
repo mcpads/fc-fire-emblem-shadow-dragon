@@ -10,7 +10,7 @@ use anyhow::{Context, Result, ensure};
 
 use super::{
     DialogueRuntimeHook, DialogueRuntimeHookRole, DialogueRuntimeHookSite, RuntimeRoutine,
-    ensure_disjoint, next_address,
+    ensure_routines_fit_cave, next_address,
 };
 use crate::{
     dialogue_inventory::switchable_cpu_to_file_offset,
@@ -145,8 +145,9 @@ pub(super) fn build_consumer_catalog_runtime(
         next = routine_end(&routine)?;
         fixed_routines.push(routine);
     }
-    ensure_disjoint(
+    ensure_routines_fit_cave(
         &fixed_routines.iter().collect::<Vec<_>>(),
+        entry_stub_origin,
         ENTRY_STUB_CAVE_END,
     )?;
     fixed_routines.push(RuntimeRoutine {
@@ -154,11 +155,11 @@ pub(super) fn build_consumer_catalog_runtime(
         address: FIXED_BRIDGE_ORIGIN,
         bytes: build_fixed_bridge(FIXED_BRIDGE_ORIGIN, code_routine.address, code_page)?,
     });
-    ensure!(
-        routine_end(fixed_routines.last().expect("catalog bridge was appended"))?
-            <= FIXED_BRIDGE_END,
-        "consumer catalog bridge exceeds its fixed cave"
-    );
+    ensure_routines_fit_cave(
+        &[fixed_routines.last().expect("catalog bridge was appended")],
+        FIXED_BRIDGE_ORIGIN,
+        FIXED_BRIDGE_END,
+    )?;
 
     let hooks = HOOK_SITES
         .into_iter()
