@@ -54,6 +54,7 @@ mod final_runtime_evidence;
 mod fixed_ui_projection;
 mod front_end_result_residency;
 mod installation_layout;
+mod installation_readiness;
 mod integrated_write_set;
 mod main_dialogue_route_population;
 mod report;
@@ -100,6 +101,7 @@ use front_end_result_residency::{
     plan_front_end_result_residency,
 };
 use installation_layout::{InstallationLayoutPlan, plan_installation_layout};
+use installation_readiness::{InstallationReadiness, InstallationReadinessInputs};
 use integrated_write_set::{
     IntegratedWriteSetInputs, IntegratedWriteSetPlan, plan_integrated_write_set,
 };
@@ -868,38 +870,20 @@ pub(crate) fn plan_full_translation_installation(
     let dynamic_verification_started = final_artifact_runtime_evidence.verification_started();
     let declared_consumer_runtime_observation_complete =
         !consumer_installation.declared_consumer_runtime_replay_required();
-    let next_gate = if translation_input_complete
-        && runtime_state_storage.source_reservation_selection_complete()
-        && all_declared_consumers_statically_accounted
-        && declared_consumer_runtime_observation_complete
-    {
-        "return from the closed declared consumer replay to the separate whole-game consumer census and release regressions for the exact integrated artifact"
-    } else if translation_input_complete
-        && runtime_state_storage.source_reservation_selection_complete()
-        && all_declared_consumers_statically_accounted
-        && dynamic_verification_started
-    {
-        "continue representative and worst-case declared consumer-path replay on the exact integrated artifact"
-    } else if translation_input_complete
-        && runtime_state_storage.source_reservation_selection_complete()
-        && all_declared_consumers_statically_accounted
-        && inputs.output_will_be_emitted
-    {
-        "bind representative and worst-case declared consumer paths to the exact emitted artifact before returning to the separate whole-game census"
-    } else if translation_input_complete
-        && runtime_state_storage.source_reservation_selection_complete()
-        && all_declared_consumers_statically_accounted
-    {
-        "materialize the exact integrated ROM, then bind representative and worst-case declared consumer paths to that artifact before returning to the separate whole-game census"
-    } else if translation_input_complete
-        && runtime_state_storage.source_reservation_selection_complete()
-    {
-        "finish every remaining declared consumer storage projection against its already-planned font page; do not treat this declared plan as the whole-game census"
-    } else if translation_input_complete {
-        "close the exact volatile runtime-state storage selection against source access, queue, save/load, and battle lifetimes; do not emit or run a partial ROM"
-    } else {
-        "author Korean for every untranslated Japanese line before recalculating glyph lifetimes; do not emit or run a partial ROM"
-    };
+    let next_gate = InstallationReadiness::evaluate(InstallationReadinessInputs {
+        translation_input_complete,
+        runtime_state_storage_complete: runtime_state_storage
+            .source_reservation_selection_complete(),
+        all_declared_consumers_statically_accounted,
+        carried_domain_reinspection_complete: carried_ui_domains_complete
+            && carried_battle_domains_complete,
+        technical_installation_complete,
+        review_complete,
+        output_will_be_emitted: inputs.output_will_be_emitted,
+        dynamic_verification_started,
+        declared_consumer_runtime_observation_complete,
+    })?
+    .next_gate();
     let rom_emitted = inputs.output_will_be_emitted;
     let dialogue_runtime_composition_report =
         project_dialogue_runtime_composition(DialogueRuntimeCompositionReportInputs {
