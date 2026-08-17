@@ -97,6 +97,67 @@ impl InlineDispatchSelectorBounds {
         self
     }
 
+    pub(in super::super) fn merge_handler_table_owner(
+        &mut self,
+        selectors: &BTreeSet<u8>,
+        selector_memory_address: Option<u16>,
+    ) -> Result<()> {
+        ensure!(
+            !selectors.is_empty(),
+            "inline dispatch handler-table owner has an empty selector domain"
+        );
+        if let Some(produced) = &self.source_bound_produced_selectors {
+            ensure!(
+                produced.is_subset(selectors),
+                "source-produced inline dispatch selector escapes a second owner-bound handler table"
+            );
+        } else {
+            ensure!(
+                self.admitted_selectors == *selectors,
+                "two owners disagree about one inline dispatch handler-table domain"
+            );
+        }
+        self.admitted_selectors = selectors.clone();
+
+        if let Some(address) = selector_memory_address {
+            ensure!(
+                self.selector_memory_addresses.is_empty()
+                    || self.selector_memory_addresses.contains(&address),
+                "two owners disagree about one inline dispatch selector memory address"
+            );
+            self.selector_memory_addresses.insert(address);
+        }
+        Ok(())
+    }
+
+    pub(in super::super) fn merge_source_producer_owner(
+        &mut self,
+        selectors: &BTreeSet<u8>,
+        selector_memory_address: Option<u16>,
+    ) -> Result<()> {
+        ensure!(
+            !selectors.is_empty() && selectors.is_subset(&self.admitted_selectors),
+            "inline dispatch source producer is empty or escapes its owner-bound handler table"
+        );
+        if let Some(previous) = &self.source_bound_produced_selectors {
+            ensure!(
+                previous == selectors,
+                "two owners disagree about one inline dispatch source-producer domain"
+            );
+        } else {
+            self.source_bound_produced_selectors = Some(selectors.clone());
+        }
+        if let Some(address) = selector_memory_address {
+            ensure!(
+                self.selector_memory_addresses.is_empty()
+                    || self.selector_memory_addresses.contains(&address),
+                "two source-producer owners disagree about one inline dispatch selector memory address"
+            );
+            self.selector_memory_addresses.insert(address);
+        }
+        Ok(())
+    }
+
     fn admitted_selectors(&self) -> &BTreeSet<u8> {
         &self.admitted_selectors
     }
@@ -2488,6 +2549,87 @@ mod tests {
         let reset_vector = fixed + usize::from(0xFFFC - FIXED_CPU_START);
         bytes[reset_vector..reset_vector + 2].copy_from_slice(&reset_root.to_le_bytes());
         Rom::parse(bytes).unwrap()
+    }
+
+    #[test]
+    fn matching_handler_owner_preserves_the_tighter_source_producer_domain() {
+        let mut bounds =
+            InlineDispatchSelectorBounds::from_source_producers(BTreeSet::from([0x01, 0x02]))
+                .with_selector_memory_address(0x7731);
+
+        bounds
+            .merge_handler_table_owner(&BTreeSet::from([0x00, 0x01, 0x02]), Some(0x7731))
+            .unwrap();
+
+        assert_eq!(
+            bounds.admitted_selectors(),
+            &BTreeSet::from([0x00, 0x01, 0x02])
+        );
+        assert_eq!(
+            bounds.source_bound_produced_selectors(),
+            Some(&BTreeSet::from([0x01, 0x02]))
+        );
+        assert_eq!(
+            bounds.selector_memory_addresses(),
+            &BTreeSet::from([0x7731])
+        );
+    }
+
+    #[test]
+    fn conflicting_handler_owner_cannot_hide_a_source_producer_or_selector_address() {
+        let mut escaped =
+            InlineDispatchSelectorBounds::from_source_producers(BTreeSet::from([0x02]));
+        let error = escaped
+            .merge_handler_table_owner(&BTreeSet::from([0x00, 0x01]), None)
+            .unwrap_err();
+        assert!(error.to_string().contains("escapes"));
+
+        let mut moved =
+            InlineDispatchSelectorBounds::from_handler_table(BTreeSet::from([0x00, 0x01]))
+                .with_selector_memory_address(0x7731);
+        let error = moved
+            .merge_handler_table_owner(&BTreeSet::from([0x00, 0x01]), Some(0x05DB))
+            .unwrap_err();
+        assert!(error.to_string().contains("selector memory address"));
+    }
+
+    #[test]
+    fn source_producer_owner_refines_a_handler_domain_without_hiding_handlers() {
+        let mut bounds =
+            InlineDispatchSelectorBounds::from_handler_table(BTreeSet::from([0x00, 0x01, 0x02]))
+                .with_selector_memory_address(0x05DB);
+
+        bounds
+            .merge_source_producer_owner(&BTreeSet::from([0x00, 0x01]), Some(0x05DB))
+            .unwrap();
+
+        assert_eq!(
+            bounds.admitted_selectors(),
+            &BTreeSet::from([0x00, 0x01, 0x02])
+        );
+        assert_eq!(
+            bounds.source_bound_produced_selectors(),
+            Some(&BTreeSet::from([0x00, 0x01]))
+        );
+        assert_eq!(
+            bounds.selector_memory_addresses(),
+            &BTreeSet::from([0x05DB])
+        );
+
+        let mut escaped =
+            InlineDispatchSelectorBounds::from_handler_table(BTreeSet::from([0x00, 0x01]));
+        let error = escaped
+            .merge_source_producer_owner(&BTreeSet::from([0x02]), None)
+            .unwrap_err();
+        assert!(error.to_string().contains("escapes"));
+
+        let mut moved =
+            InlineDispatchSelectorBounds::from_handler_table(BTreeSet::from([0x00, 0x01]))
+                .with_selector_memory_address(0x05DB);
+        let error = moved
+            .merge_source_producer_owner(&BTreeSet::from([0x00]), Some(0x7731))
+            .unwrap_err();
+        assert!(error.to_string().contains("selector memory address"));
     }
 
     fn trace_with_inline_selector_bounds(

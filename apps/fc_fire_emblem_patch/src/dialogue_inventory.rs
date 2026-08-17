@@ -231,6 +231,7 @@ pub(crate) fn bind_main_dialogue_progress_source(
 pub(crate) struct CallerHandoffStateDispatchSource {
     prg_bank: u8,
     call_address: u16,
+    selector_address: u16,
     selector_domain: BTreeSet<u8>,
 }
 
@@ -241,6 +242,10 @@ impl CallerHandoffStateDispatchSource {
 
     pub(crate) fn call_address(&self) -> u16 {
         self.call_address
+    }
+
+    pub(crate) fn selector_address(&self) -> u16 {
+        self.selector_address
     }
 
     pub(crate) fn selector_domain(&self) -> &BTreeSet<u8> {
@@ -277,6 +282,7 @@ pub(crate) fn bind_caller_handoff_state_dispatch_sources(
             Ok(CallerHandoffStateDispatchSource {
                 prg_bank: spec.prg_bank,
                 call_address,
+                selector_address: spec.state_address,
                 selector_domain: (0..selector_count).collect(),
             })
         })

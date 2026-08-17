@@ -269,6 +269,7 @@ pub(super) fn bind_source_positive_execution_graph(
         &title_state,
         &shared_menu,
         screen_state_dispatches.selector_domains(),
+        screen_state_dispatches.source_producer_domains(),
         screen_state_dispatches.selector_memory_addresses(),
         &outer_screen_state_seed_selectors,
         ending_sequence.produced_selectors(),
