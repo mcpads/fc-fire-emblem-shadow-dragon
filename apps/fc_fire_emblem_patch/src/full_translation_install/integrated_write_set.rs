@@ -1040,6 +1040,7 @@ fn verify_installed_font_page_selector_forwarders(
             write.role
         );
     }
+    plan.verify_retained_dynamic_selectors(installed, candidate)?;
     Ok(())
 }
 

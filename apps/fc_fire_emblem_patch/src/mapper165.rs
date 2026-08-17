@@ -21,6 +21,7 @@ pub(crate) mod battle_text_cache_probe;
 pub(crate) mod battle_text_runtime_base;
 mod carried_battle_domains;
 mod carried_ui_domains;
+mod chapter_page_selector;
 mod class_profile_page;
 pub(crate) mod cumulative_patch;
 mod dialogue_lifetime_page;
@@ -29,6 +30,7 @@ pub(crate) mod dialogue_slice_probe;
 pub(crate) mod direct_chr_pairs;
 pub(crate) mod executable_mapper_writes;
 mod final_font_page_forwarders;
+mod font_page_fallback_graph;
 pub(crate) mod font_pair_projection;
 mod front_end_page;
 pub(crate) use carried_battle_domains::{
@@ -43,6 +45,9 @@ pub(crate) use final_font_page_forwarders::BoundFontPageSelector;
 pub(crate) use final_font_page_forwarders::{
     bind_front_end_font_page_selector, bind_unit_name_font_page_selector,
     build_front_end_font_page_forwarder, build_unit_name_font_page_forwarder,
+};
+pub(crate) use font_page_fallback_graph::{
+    BoundFontPageFallbackGraph, FontPageFallbackNodeRole, bind_cumulative_font_page_fallback_graph,
 };
 pub(crate) use front_end_page::bind_installed_front_end_mapper_register;
 pub(crate) mod hangul_page_probe;

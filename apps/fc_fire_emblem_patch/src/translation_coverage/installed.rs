@@ -7,7 +7,10 @@ use std::{
 use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 
-use crate::{rom::EXPECTED_SOURCE_SHA1, sha1_hex};
+use crate::{
+    mapper165::cumulative_patch::REPORT_SCHEMA as CUMULATIVE_REPORT_SCHEMA,
+    rom::EXPECTED_SOURCE_SHA1, sha1_hex,
+};
 
 use super::{
     report::DomainInstallation,
@@ -253,7 +256,7 @@ pub(crate) fn inspect_current_installation(
     let report: CurrentBuildReport = serde_json::from_slice(&report_bytes)
         .with_context(|| format!("parse current build report {}", build_report_path.display()))?;
     ensure!(
-        report.schema == 2 && report.source_sha1 == EXPECTED_SOURCE_SHA1,
+        report.schema == CUMULATIVE_REPORT_SCHEMA && report.source_sha1 == EXPECTED_SOURCE_SHA1,
         "current build report is not bound to the supported source"
     );
     let output_bytes = fs::read(build_output_path)
@@ -945,7 +948,7 @@ mod tests {
     #[test]
     fn cumulative_battle_stage_projects_each_domain_without_claiming_ending_or_runtime() {
         let mut report: CurrentBuildReport = serde_json::from_value(serde_json::json!({
-            "schema": 2,
+            "schema": CUMULATIVE_REPORT_SCHEMA,
             "source_sha1": EXPECTED_SOURCE_SHA1,
             "output_sha1": "output-sha1",
             "stages": [

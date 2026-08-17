@@ -9,8 +9,9 @@ use crate::{
         SAVE_SLOT_SELECTION_COMPOSITE_STATE, START_MENU_COMPOSITE_STATE,
     },
     mapper165::{
-        bind_front_end_font_page_selector, bind_unit_name_font_page_selector,
-        build_front_end_font_page_forwarder, build_unit_name_font_page_forwarder,
+        BoundFontPageFallbackGraph, FontPageFallbackNodeRole,
+        bind_cumulative_font_page_fallback_graph, build_front_end_font_page_forwarder,
+        build_unit_name_font_page_forwarder,
     },
     rom::{HEADER_SIZE, Rom},
 };
@@ -39,12 +40,17 @@ pub(in crate::full_translation_install) struct FontPageSelectorForwarderPlan {
     centrally_owned_translation_domain_count: usize,
     direct_predecessor_count: usize,
     installed_forwarder_byte_count: usize,
+    retained_dynamic_selector_count: usize,
+    integrated_runtime_rebound_selector_count: usize,
     central_policy_owns_every_removed_decision: bool,
     source_selector_structure_bound: bool,
     direct_entry_census_bound: bool,
+    source_fallback_graph: FontPageFallbackGraphMigrationReport,
     selectors: Vec<FontPageSelectorForwarderReport>,
     #[serde(skip)]
     writes: Vec<FontPageSelectorExpectedWrite>,
+    #[serde(skip)]
+    bound_source_graph: BoundFontPageFallbackGraph,
 }
 
 #[derive(Serialize)]
@@ -57,6 +63,39 @@ struct FontPageSelectorForwarderReport {
     forward_target_cpu_address_hex: String,
     direct_predecessor_cpu_address_hex: String,
     installed_forwarder_byte_count: usize,
+}
+
+#[derive(Serialize)]
+struct FontPageFallbackGraphMigrationReport {
+    schema: u8,
+    source_node_count: usize,
+    source_route_count: usize,
+    source_direct_entry_candidate_count: usize,
+    source_conditional_entry_count: usize,
+    source_terminal_fallback_count: usize,
+    central_policy_forwarder_count: usize,
+    retained_dynamic_selector_count: usize,
+    integrated_runtime_rebound_selector_count: usize,
+    source_graph_is_branching: bool,
+    nodes: Vec<FontPageFallbackNodeMigrationReport>,
+    routes: Vec<FontPageFallbackRouteMigrationReport>,
+}
+
+#[derive(Serialize)]
+struct FontPageFallbackNodeMigrationReport {
+    role: &'static str,
+    source_cpu_range_hex: String,
+    source_mapper_registers_hex: Vec<String>,
+    final_owner: &'static str,
+}
+
+#[derive(Serialize)]
+struct FontPageFallbackRouteMigrationReport {
+    source_role: &'static str,
+    source_cpu_address_hex: String,
+    transfer_kind: &'static str,
+    target_role: &'static str,
+    target_cpu_address_hex: String,
 }
 
 impl FontPageSelectorForwarderPlan {
@@ -77,6 +116,41 @@ impl FontPageSelectorForwarderPlan {
             .filter(|write| write.domains.contains(&domain))
             .count()
     }
+
+    pub(in crate::full_translation_install) fn verify_retained_dynamic_selectors(
+        &self,
+        installed: &[u8],
+        candidate: &Rom,
+    ) -> Result<()> {
+        let retained = self
+            .bound_source_graph
+            .nodes
+            .iter()
+            .filter(|node| {
+                matches!(
+                    node.role,
+                    FontPageFallbackNodeRole::OptionsMenu
+                        | FontPageFallbackNodeRole::UnitRoster
+                        | FontPageFallbackNodeRole::WeaponShopDialogue
+                        | FontPageFallbackNodeRole::ChapterIntroDialogue
+                )
+            })
+            .collect::<Vec<_>>();
+        ensure!(
+            retained.len() == 4,
+            "final font-page plan lost a retained dynamic selector"
+        );
+        for node in retained {
+            let offset = active_fixed_file_offset(candidate, node.cpu_address)?;
+            ensure!(
+                installed.get(offset..offset + node.expected_bytes.len())
+                    == Some(node.expected_bytes.as_slice()),
+                "final installation changed retained {} selector bytes",
+                node.role.id()
+            );
+        }
+        Ok(())
+    }
 }
 
 pub(in crate::full_translation_install) struct FontPageSelectorExpectedWrite {
@@ -95,10 +169,11 @@ pub(super) fn plan_font_page_selector_forwarders(
     routes.validate()?;
     bind_front_end_central_ownership(routes)?;
     bind_unit_name_central_ownership(routes)?;
-    let unit_selector = bind_unit_name_font_page_selector(candidate)?;
-    let unit_replacement = build_unit_name_font_page_forwarder(&unit_selector)?;
-    let front_end_selector = bind_front_end_font_page_selector(candidate)?;
-    let front_end_replacement = build_front_end_font_page_forwarder(&front_end_selector)?;
+    let bound_source_graph = bind_cumulative_font_page_fallback_graph(candidate)?;
+    let unit_selector = bound_source_graph.unit_name_selector();
+    let unit_replacement = build_unit_name_font_page_forwarder(unit_selector)?;
+    let front_end_selector = bound_source_graph.front_end_selector();
+    let front_end_replacement = build_front_end_font_page_forwarder(front_end_selector)?;
     ensure!(
         unit_selector.cpu_end_exclusive <= front_end_selector.cpu_address,
         "migrated unit-name and front-end selector spans overlap"
@@ -110,16 +185,19 @@ pub(super) fn plan_font_page_selector_forwarders(
         .collect::<std::collections::BTreeSet<_>>();
 
     Ok(FontPageSelectorForwarderPlan {
-        schema: 2,
-        strategy: "replace a cumulative screen selector only after the central residency policy owns every state it used to decide; retain the next unowned selector as an explicit full-span forwarder target",
+        schema: 3,
+        strategy: "bind the complete branching cumulative fallback graph before replacing a screen selector; centralize only decisions fully owned by the screen residency plan, preserve dynamic options, roster, shop, and chapter-dialogue selectors, and leave battle/maximum-dialogue rebinding to the integrated runtime owner",
         centralized_selector_count: 2,
         centrally_owned_composite_state_count: FRONT_END_FONT_STATES.len() + 2,
         centrally_owned_translation_domain_count: unique_domains.len(),
         direct_predecessor_count: 2,
         installed_forwarder_byte_count: unit_replacement.len() + front_end_replacement.len(),
+        retained_dynamic_selector_count: 4,
+        integrated_runtime_rebound_selector_count: 2,
         central_policy_owns_every_removed_decision: true,
         source_selector_structure_bound: true,
         direct_entry_census_bound: true,
+        source_fallback_graph: fallback_graph_migration_report(&bound_source_graph),
         selectors: vec![
             forwarder_report(
                 "unit_summary_and_status",
@@ -142,7 +220,7 @@ pub(super) fn plan_font_page_selector_forwarders(
                 role: "replace the cumulative unit-name font selector with a central-policy fallback forwarder",
                 file_offset: active_fixed_file_offset(candidate, unit_selector.cpu_address)?,
                 cpu_address: unit_selector.cpu_address,
-                expected: unit_selector.expected_bytes,
+                expected: unit_selector.expected_bytes.clone(),
                 replacement: unit_replacement,
             },
             FontPageSelectorExpectedWrite {
@@ -150,11 +228,87 @@ pub(super) fn plan_font_page_selector_forwarders(
                 role: "replace the cumulative front-end font selector with a central-policy fallback forwarder",
                 file_offset: active_fixed_file_offset(candidate, front_end_selector.cpu_address)?,
                 cpu_address: front_end_selector.cpu_address,
-                expected: front_end_selector.expected_bytes,
+                expected: front_end_selector.expected_bytes.clone(),
                 replacement: front_end_replacement,
             },
         ],
+        bound_source_graph,
     })
+}
+
+fn fallback_graph_migration_report(
+    graph: &BoundFontPageFallbackGraph,
+) -> FontPageFallbackGraphMigrationReport {
+    let nodes = graph
+        .nodes
+        .iter()
+        .map(|node| FontPageFallbackNodeMigrationReport {
+            role: node.role.id(),
+            source_cpu_range_hex: format!(
+                "0x{:04X}..0x{:04X}",
+                node.cpu_address, node.cpu_end_exclusive
+            ),
+            source_mapper_registers_hex: node
+                .mapper_registers
+                .iter()
+                .map(|register| format!("0x{register:02X}"))
+                .collect(),
+            final_owner: final_selector_owner(node.role),
+        })
+        .collect::<Vec<_>>();
+    FontPageFallbackGraphMigrationReport {
+        schema: 1,
+        source_node_count: nodes.len(),
+        source_route_count: graph.routes.len(),
+        source_direct_entry_candidate_count: graph.direct_entry_candidate_count,
+        source_conditional_entry_count: graph.conditional_entry_count,
+        source_terminal_fallback_count: graph.terminal_fallback_count,
+        central_policy_forwarder_count: nodes
+            .iter()
+            .filter(|node| node.final_owner == "central_screen_residency_forwarder")
+            .count(),
+        retained_dynamic_selector_count: nodes
+            .iter()
+            .filter(|node| node.final_owner == "retained_dynamic_selector")
+            .count(),
+        integrated_runtime_rebound_selector_count: nodes
+            .iter()
+            .filter(|node| node.final_owner == "integrated_runtime_rebound")
+            .count(),
+        source_graph_is_branching: graph
+            .routes
+            .iter()
+            .filter(|route| route.target_role == FontPageFallbackNodeRole::UnitRoster.id())
+            .count()
+            == 2,
+        nodes,
+        routes: graph
+            .routes
+            .iter()
+            .map(|route| FontPageFallbackRouteMigrationReport {
+                source_role: route.source_role,
+                source_cpu_address_hex: format!("0x{:04X}", route.source_cpu_address),
+                transfer_kind: route.transfer_kind.id(),
+                target_role: route.target_role,
+                target_cpu_address_hex: format!("0x{:04X}", route.target_cpu_address),
+            })
+            .collect(),
+    }
+}
+
+fn final_selector_owner(role: FontPageFallbackNodeRole) -> &'static str {
+    match role {
+        FontPageFallbackNodeRole::UnitSummaryAndStatus | FontPageFallbackNodeRole::FrontEndMenu => {
+            "central_screen_residency_forwarder"
+        }
+        FontPageFallbackNodeRole::OptionsMenu
+        | FontPageFallbackNodeRole::UnitRoster
+        | FontPageFallbackNodeRole::WeaponShopDialogue
+        | FontPageFallbackNodeRole::ChapterIntroDialogue => "retained_dynamic_selector",
+        FontPageFallbackNodeRole::BattleComposition | FontPageFallbackNodeRole::MaximumDialogue => {
+            "integrated_runtime_rebound"
+        }
+    }
 }
 
 fn forwarder_report(

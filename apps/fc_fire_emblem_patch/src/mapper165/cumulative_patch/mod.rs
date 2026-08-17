@@ -22,8 +22,8 @@ use crate::{
 };
 
 use super::{
-    OUTPUT_MAPPER, SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
-    battle_composition_loader_probe::CUMULATIVE_RUNTIME_LAYOUT,
+    BoundFontPageFallbackGraph, FontPageFallbackNodeRole, OUTPUT_MAPPER,
+    SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS, bind_cumulative_font_page_fallback_graph,
     dialogue_lifetime_page::{SCREEN_ROLE, build_page_routine_at, plan_dialogue_lifetime_page},
     dialogue_probe_font::assignment_sha1,
     hangul_page_probe::build_mapper165_hangul_page_probe,
@@ -39,7 +39,6 @@ use super::{
         build_page_routine_with_fallback as build_chained_roster_selector,
     },
     shop_dialogue_page::{
-        PAGE_ROUTINE_ADDRESS as SHOP_DIALOGUE_SELECTOR_ADDRESS,
         RECORD_IDS as SHOP_DIALOGUE_RECORD_IDS, SCREEN_ROLE as SHOP_DIALOGUE_SCREEN_ROLE,
     },
     weapon_shop_shared_text::ITEM_NAME_SOURCE_INDICES as WEAPON_SHOP_ITEM_NAME_SOURCE_INDICES,
@@ -47,7 +46,6 @@ use super::{
 };
 
 mod battle_stage;
-mod chapter_page_selector;
 mod class_profile_runtime;
 mod class_profile_stage;
 mod front_end_stage;
@@ -62,8 +60,8 @@ mod verify;
 mod weapon_shop_shared_text_runtime;
 mod weapon_shop_shared_text_stage;
 
+use super::chapter_page_selector::{ChapterPageSequence, build_chapter_page_selector};
 use battle_stage::{BattleStageInputs, install_battle_stage};
-use chapter_page_selector::{ChapterPageSequence, build_chapter_page_selector};
 use class_profile_runtime::verify_class_profile_runtime_evidence;
 use class_profile_stage::install_class_profile_stage;
 use front_end_stage::install_front_end_stage;
@@ -74,7 +72,8 @@ use report::{
     CumulativeDialogueLifetimeReport, CumulativeDialogueReport, CumulativeFrontEndMenuReport,
     CumulativeMaximumDialogueReport, CumulativeOptionsMenuReport, CumulativePatchReport,
     CumulativeStageReport, CumulativeTitleLogoReport, CumulativeUnitNameReport,
-    CumulativeWeaponShopSharedTextReport, SelectorChainReport,
+    CumulativeWeaponShopSharedTextReport, SelectorFallbackGraphReport, SelectorFallbackNodeReport,
+    SelectorFallbackRouteReport,
 };
 use shop_dialogue_runtime::verify_shop_dialogue_runtime_evidence;
 use shop_dialogue_stage::install_shop_dialogue_stage;
@@ -94,8 +93,9 @@ const SHOP_DIALOGUE_STAGE_ROM_NAME: &str = "weapon-shop-dialogue.nes";
 const SHOP_SHARED_TEXT_STAGE_ROM_NAME: &str = "weapon-shop-shared-text.nes";
 const MAXIMUM_DIALOGUE_STAGE_ROM_NAME: &str = "maximum-dialogue.nes";
 const TITLE_LOGO_STAGE_ROM_NAME: &str = "title-logo.nes";
+pub(crate) const REPORT_SCHEMA: u8 = 3;
 pub(super) const DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFBD4;
-const DIALOGUE_SELECTOR_CAVE_END: u16 = 0xFC20;
+pub(super) const DIALOGUE_SELECTOR_CAVE_END: u16 = 0xFC20;
 const CHAPTER_ONE_DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFBD8;
 const CHAPTER_ONE_INDEX: u8 = 0;
 const CHAPTER_TWO_INDEX: u8 = 1;
@@ -669,6 +669,7 @@ pub(crate) fn build_cumulative_patch(
     )?;
     let output = title_logo_stage.output.clone();
     let output_rom = Rom::parse(output.clone()).context("parse cumulative Korean patch")?;
+    let selector_fallback_graph = bind_cumulative_font_page_fallback_graph(&output_rom)?;
     let tracked_write_count = tracked_write_count
         + front_end_stage.tracked_write_count
         + unit_name_stage.tracked_write_count
@@ -865,7 +866,7 @@ pub(crate) fn build_cumulative_patch(
         },
     ];
     let report = CumulativePatchReport {
-        schema: 2,
+        schema: REPORT_SCHEMA,
         source_sha1: EXPECTED_SOURCE_SHA1,
         output_sha1: output_sha1.clone(),
         output_mapper: output_rom.mapper(),
@@ -1309,56 +1310,7 @@ pub(crate) fn build_cumulative_patch(
             runtime_bound_to_build: false,
             review_complete: false,
         },
-        selector_chain: vec![
-            SelectorChainReport {
-                role: "battle_composition",
-                cpu_address: format!(
-                    "0x{:04X}",
-                    CUMULATIVE_RUNTIME_LAYOUT.battle_central_right_fd_selector
-                ),
-                fallback_role: "maximum_dialogue",
-                admitted_chapter_indices: Vec::new(),
-            },
-            SelectorChainReport {
-                role: "maximum_dialogue",
-                cpu_address: format!(
-                    "0x{:04X}",
-                    super::maximum_dialogue_runtime::INITIAL_PAGE_SELECTOR_ADDRESS
-                ),
-                fallback_role: "unit_roster",
-                admitted_chapter_indices: Vec::new(),
-            },
-            SelectorChainReport {
-                role: "unit_roster",
-                cpu_address: format!("0x{ROSTER_SELECTOR_ADDRESS:04X}"),
-                fallback_role: "unit_summary_and_status",
-                admitted_chapter_indices: Vec::new(),
-            },
-            SelectorChainReport {
-                role: "unit_summary_and_status",
-                cpu_address: format!("0x{:04X}", super::unit_name_page::PAGE_ROUTINE_ADDRESS),
-                fallback_role: "weapon_shop_dialogue",
-                admitted_chapter_indices: Vec::new(),
-            },
-            SelectorChainReport {
-                role: "weapon_shop_dialogue",
-                cpu_address: format!("0x{SHOP_DIALOGUE_SELECTOR_ADDRESS:04X}"),
-                fallback_role: "front_end_menu",
-                admitted_chapter_indices: Vec::new(),
-            },
-            SelectorChainReport {
-                role: "front_end_menu",
-                cpu_address: format!("0x{:04X}", super::front_end_page::PAGE_ROUTINE_ADDRESS),
-                fallback_role: "chapter_intro_dialogue",
-                admitted_chapter_indices: Vec::new(),
-            },
-            SelectorChainReport {
-                role: "chapter_intro_dialogue",
-                cpu_address: format!("0x{DIALOGUE_SELECTOR_ADDRESS:04X}"),
-                fallback_role: "original_pair_aware_selector",
-                admitted_chapter_indices: vec![CHAPTER_ONE_INDEX, CHAPTER_TWO_INDEX],
-            },
-        ],
+        selector_fallback_graph: selector_fallback_graph_report(&selector_fallback_graph),
         original_chr_preserved: false,
         tracked_write_count,
         translation_input_complete: dialogue_workspace.translation_input_complete
@@ -1471,6 +1423,63 @@ fn dialogue_lifetime_report(
         runtime_sample_count: 0,
         runtime_unique_image_count: 0,
         runtime_bound_to_dialogue_stage_output: false,
+    }
+}
+
+fn selector_fallback_graph_report(
+    graph: &BoundFontPageFallbackGraph,
+) -> SelectorFallbackGraphReport {
+    let mut incoming_route_counts = std::collections::BTreeMap::<&str, usize>::new();
+    for route in &graph.routes {
+        *incoming_route_counts.entry(route.target_role).or_default() += 1;
+    }
+    SelectorFallbackGraphReport {
+        schema: 1,
+        node_count: graph.nodes.len(),
+        route_count: graph.routes.len(),
+        multi_entry_target_count: incoming_route_counts
+            .values()
+            .filter(|count| **count > 1)
+            .count(),
+        direct_entry_candidate_count: graph.direct_entry_candidate_count,
+        conditional_entry_count: graph.conditional_entry_count,
+        terminal_fallback_count: graph.terminal_fallback_count,
+        generated_selector_structure_bound: true,
+        active_fixed_direct_entry_candidates_partitioned: true,
+        nodes: graph
+            .nodes
+            .iter()
+            .map(|node| SelectorFallbackNodeReport {
+                role: node.role.id(),
+                cpu_range_hex: format!(
+                    "0x{:04X}..0x{:04X}",
+                    node.cpu_address, node.cpu_end_exclusive
+                ),
+                mapper_registers_hex: node
+                    .mapper_registers
+                    .iter()
+                    .map(|register| format!("0x{register:02X}"))
+                    .collect(),
+                admitted_chapter_indices: if node.role
+                    == FontPageFallbackNodeRole::ChapterIntroDialogue
+                {
+                    vec![CHAPTER_ONE_INDEX, CHAPTER_TWO_INDEX]
+                } else {
+                    Vec::new()
+                },
+            })
+            .collect(),
+        routes: graph
+            .routes
+            .iter()
+            .map(|route| SelectorFallbackRouteReport {
+                source_role: route.source_role,
+                source_cpu_address_hex: format!("0x{:04X}", route.source_cpu_address),
+                transfer_kind: route.transfer_kind.id(),
+                target_role: route.target_role,
+                target_cpu_address_hex: format!("0x{:04X}", route.target_cpu_address),
+            })
+            .collect(),
     }
 }
 

@@ -68,7 +68,6 @@ use super::{
     unit_name_page::PAGE_ROUTINE_ADDRESS as UNIT_NAME_PAGE_ROUTINE_ADDRESS,
 };
 
-const EXPECTED_REPORT_SCHEMA: u8 = 2;
 const CLASS_PROFILE_PRG_BANK: u8 = 0x0D;
 const CLASS_PROFILE_PHYSICAL_PAGES: [u8; 2] = [46, 47];
 const TITLE_ROUTE_PRG_BANK: u8 = 0x0D;
@@ -270,7 +269,7 @@ pub(crate) fn inspect_carried_ui_domains(
     let report: CumulativeReport = serde_json::from_slice(&report_bytes)
         .with_context(|| format!("parse {}", inputs.cumulative_report_path.display()))?;
     ensure!(
-        report.schema == EXPECTED_REPORT_SCHEMA
+        report.schema == super::cumulative_patch::REPORT_SCHEMA
             && report.source_sha1 == EXPECTED_SOURCE_SHA1
             && report.output_sha1 == sha1_hex(inputs.cumulative.data())
             && report.output_mapper == inputs.cumulative.mapper()

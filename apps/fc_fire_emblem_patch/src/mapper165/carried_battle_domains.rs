@@ -48,7 +48,6 @@ use super::{
 };
 use chr_supply::{BattleChrSupplyPlan, bind_battle_chr_supply};
 
-const EXPECTED_CUMULATIVE_REPORT_SCHEMA: u8 = 2;
 const FIXED_BANK_BYTE_COUNT: usize = 0x4000;
 const MATERIAL_RUNTIME_END_CPU_ADDRESS: u16 = 0x98A0;
 const MATERIAL_RUNTIME_START_CPU_ADDRESS: u16 = 0x95C0;
@@ -181,7 +180,7 @@ pub(crate) fn inspect_carried_battle_domains(
     let report: CumulativeReport = serde_json::from_slice(&report_bytes)
         .with_context(|| format!("parse {}", inputs.cumulative_report_path.display()))?;
     ensure!(
-        report.schema == EXPECTED_CUMULATIVE_REPORT_SCHEMA
+        report.schema == super::cumulative_patch::REPORT_SCHEMA
             && report.source_sha1 == EXPECTED_SOURCE_SHA1
             && report.output_sha1 == sha1_hex(inputs.cumulative.data())
             && report.output_mapper == inputs.cumulative.mapper()

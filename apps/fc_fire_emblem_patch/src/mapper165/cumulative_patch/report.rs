@@ -19,7 +19,7 @@ pub(super) struct CumulativePatchReport {
     pub(super) title_logo: CumulativeTitleLogoReport,
     pub(super) weapon_shop_shared_text: CumulativeWeaponShopSharedTextReport,
     pub(super) battle_text: CumulativeBattleTextReport,
-    pub(super) selector_chain: Vec<SelectorChainReport>,
+    pub(super) selector_fallback_graph: SelectorFallbackGraphReport,
     pub(super) original_chr_preserved: bool,
     pub(super) tracked_write_count: usize,
     pub(super) translation_input_complete: bool,
@@ -335,9 +335,33 @@ pub(super) struct CumulativeDialogueLifetimeReport {
 }
 
 #[derive(Debug, Serialize)]
-pub(super) struct SelectorChainReport {
+pub(super) struct SelectorFallbackGraphReport {
+    pub(super) schema: u8,
+    pub(super) node_count: usize,
+    pub(super) route_count: usize,
+    pub(super) multi_entry_target_count: usize,
+    pub(super) direct_entry_candidate_count: usize,
+    pub(super) conditional_entry_count: usize,
+    pub(super) terminal_fallback_count: usize,
+    pub(super) generated_selector_structure_bound: bool,
+    pub(super) active_fixed_direct_entry_candidates_partitioned: bool,
+    pub(super) nodes: Vec<SelectorFallbackNodeReport>,
+    pub(super) routes: Vec<SelectorFallbackRouteReport>,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct SelectorFallbackNodeReport {
     pub(super) role: &'static str,
-    pub(super) cpu_address: String,
-    pub(super) fallback_role: &'static str,
+    pub(super) cpu_range_hex: String,
+    pub(super) mapper_registers_hex: Vec<String>,
     pub(super) admitted_chapter_indices: Vec<u8>,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct SelectorFallbackRouteReport {
+    pub(super) source_role: &'static str,
+    pub(super) source_cpu_address_hex: String,
+    pub(super) transfer_kind: &'static str,
+    pub(super) target_role: &'static str,
+    pub(super) target_cpu_address_hex: String,
 }
