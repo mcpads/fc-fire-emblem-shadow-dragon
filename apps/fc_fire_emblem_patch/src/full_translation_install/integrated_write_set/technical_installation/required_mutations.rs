@@ -1,4 +1,6 @@
+use super::super::runtime_material::RUNTIME_MATERIAL_DATA_ROLE;
 use super::*;
+use crate::full_translation_install::installation_layout::main_dialogue_runtime_material_file_offset;
 
 pub(in crate::full_translation_install::integrated_write_set) fn plan_candidate_image_growth(
     inputs: &IntegratedWriteSetInputs<'_>,

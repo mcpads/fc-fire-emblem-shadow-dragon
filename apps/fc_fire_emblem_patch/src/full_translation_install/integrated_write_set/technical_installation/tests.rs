@@ -1,5 +1,6 @@
 use super::*;
 use crate::full_translation_install::runtime_code::RuntimeRoutine;
+use crate::rom::HEADER_SIZE;
 
 fn check_inputs<'a>(
     source: &'a [u8],
