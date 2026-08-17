@@ -4,8 +4,10 @@ use anyhow::{Context, Result, ensure};
 
 use crate::{mapper165::battle_codebook_plan::IndirectWriteDestinationBounds, rom::Rom};
 
+mod gameplay_paths;
 mod source_regions;
 
+use gameplay_paths::bind_gameplay_path_destinations;
 use source_regions::bind_unit_record_writer_source;
 
 const UNIT_RECORD_STRIDE: u16 = 0x1B;
@@ -69,8 +71,24 @@ const UNIT_RECORD_WRITER_SITES: &[(u8, u16, u8)] = &[
 pub(super) fn bind_unit_record_write_destinations(
     source: &Rom,
 ) -> Result<BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>> {
-    let source = bind_unit_record_writer_source(source)?;
-    unit_record_write_destinations(&source.runtime_row_pointers, &source.map_layer_row_pointers)
+    let source_binding = bind_unit_record_writer_source(source)?;
+    let mut destinations = unit_record_write_destinations(
+        &source_binding.runtime_row_pointers,
+        &source_binding.map_layer_row_pointers,
+    )?;
+    for (site, destination) in bind_gameplay_path_destinations(
+        source,
+        &source_binding.runtime_row_pointers,
+        &source_binding.map_layer_row_pointers,
+    )? {
+        ensure!(
+            destinations.insert(site, destination).is_none(),
+            "gameplay unit-record writer overlaps an existing destination owner at {:02X}:${:04X}",
+            site.0,
+            site.1,
+        );
+    }
+    Ok(destinations)
 }
 
 fn unit_record_write_destinations(

@@ -10,6 +10,7 @@ use crate::{
 
 use super::{FIXED_PRG_BANK, source_mapped_location};
 
+mod battle_runtime_writers;
 mod chapter_map_loader;
 mod control_state;
 mod ending_sequence;
@@ -248,6 +249,16 @@ pub(super) fn bind_source_positive_execution_graph(
             site.1,
         );
     }
+    for (site, destination) in bind_battle_runtime_write_destinations(source)? {
+        ensure!(
+            source_bound_indirect_destinations
+                .insert(site, destination)
+                .is_none(),
+            "battle-runtime writer overlaps an existing indirect-write destination owner at {:02X}:${:04X}",
+            site.0,
+            site.1,
+        );
+    }
     let source_bound_indirect_sites = source_bound_indirect_destinations
         .keys()
         .copied()
@@ -461,3 +472,4 @@ fn normalize_source_location(bank: u8, address: u16) -> Result<(u8, u16)> {
         address,
     ))
 }
+use battle_runtime_writers::bind_battle_runtime_write_destinations;
