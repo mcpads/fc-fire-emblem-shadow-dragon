@@ -11,11 +11,13 @@ use crate::{
 
 mod install;
 mod logo_asset;
+mod source_execution;
 
 pub(crate) use install::{
     InstalledTitleLogo, TITLE_RUNTIME_COMPLETION_STREAM_BYTE_COUNT, install_title_logo_asset,
 };
 pub(crate) use logo_asset::build_title_logo_asset;
+pub(crate) use source_execution::{TitleStateExecution, bind_title_state_execution};
 
 const PRG_BANK_SIZE: usize = 16 * 1024;
 const SOURCE_PRG_BANK: u8 = 0x0D;

@@ -2,7 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Result, ensure};
 
-use crate::{mapper165::executable_mapper_writes::MappedPrgLocation, rom::Rom};
+use crate::{
+    mapper165::executable_mapper_writes::MappedPrgLocation,
+    rom::Rom,
+    title_graphics::{TitleStateExecution, bind_title_state_execution},
+};
 
 use super::{FIXED_PRG_BANK, source_mapped_location};
 
@@ -17,6 +21,7 @@ const BATTLE_PHASE_GRAPH: &str = "battle_phase_catalog";
 const DIALOGUE_INTERRUPT_AUDIO_GRAPH: &str = "main_dialogue_nmi_and_audio_positive_graph";
 const FIXED_HARDWARE_VECTOR_GRAPH: &str = "fixed_hardware_vector_direct_graph";
 const RESET_STATEFUL_EXECUTION_GRAPH: &str = "reset_stateful_execution_graph";
+const TITLE_STATE_EXECUTION_GRAPH: &str = "title_state_execution_graph";
 
 /// Positive source execution slices already bound by their owning battle and dialogue contracts.
 /// This is deliberately not a complete executable-root ledger.
@@ -31,6 +36,9 @@ pub(super) struct SourcePositiveExecutionGraph {
     fixed_vector_open_control_edges: Vec<String>,
     reset_bound_switchable_roots: Vec<String>,
     reset_open_control_facts: Vec<String>,
+    title_state_selector_count: usize,
+    title_state_handler_root_count: usize,
+    title_state_open_control_facts: Vec<String>,
     state_accesses: Vec<PositiveStateAccess>,
 }
 
@@ -83,6 +91,18 @@ impl SourcePositiveExecutionGraph {
         &self.reset_open_control_facts
     }
 
+    pub(super) fn title_state_selector_count(&self) -> usize {
+        self.title_state_selector_count
+    }
+
+    pub(super) fn title_state_handler_root_count(&self) -> usize {
+        self.title_state_handler_root_count
+    }
+
+    pub(super) fn title_state_open_control_facts(&self) -> &[String] {
+        &self.title_state_open_control_facts
+    }
+
     pub(super) fn state_accesses(&self) -> &[PositiveStateAccess] {
         &self.state_accesses
     }
@@ -109,6 +129,7 @@ pub(super) fn bind_source_positive_execution_graph(
         .collect::<BTreeSet<_>>();
     let dialogue_interrupt_audio =
         crate::full_translation_install::bind_dialogue_interrupt_audio_mapper_write_slice(source)?;
+    let title_state: TitleStateExecution = bind_title_state_execution(source)?;
     let fixed_vectors = bind_fixed_vector_execution(source, &battle_indirect_bounds)?;
     ensure!(
         fixed_vectors
@@ -135,6 +156,10 @@ pub(super) fn bind_source_positive_execution_graph(
             RESET_STATEFUL_EXECUTION_GRAPH,
             fixed_vectors.reset_reachable_instruction_starts().iter(),
         ),
+        (
+            TITLE_STATE_EXECUTION_GRAPH,
+            title_state.reachable_instruction_starts().iter(),
+        ),
     ] {
         for &(bank, address) in starts {
             let location = normalize_source_location(bank, address)?;
@@ -160,6 +185,30 @@ pub(super) fn bind_source_positive_execution_graph(
         .collect();
 
     let state_accesses = bind_positive_state_accesses(source, &instruction_roles)?;
+    let owned_unknown_selector = format!(
+        "inline_dispatch@0D:{:04X}:selector_unknown",
+        title_state.dispatch_call()
+    );
+    let mut reset_open_control_facts = fixed_vectors
+        .reset_open_control_fact_descriptions()
+        .to_vec();
+    ensure!(
+        reset_open_control_facts
+            .iter()
+            .filter(|fact| *fact == &owned_unknown_selector)
+            .count()
+            == 1,
+        "reset trace no longer exposes the title state selector handoff exactly once"
+    );
+    reset_open_control_facts.retain(|fact| fact != &owned_unknown_selector);
+    let mut reset_bound_switchable_roots = fixed_vectors.reset_bound_switchable_roots().clone();
+    reset_bound_switchable_roots.extend(
+        title_state
+            .selector_targets()
+            .values()
+            .map(|target| (0x0D, *target)),
+    );
+    let title_state_open_control_facts = title_state.open_control_fact_descriptions();
     Ok(SourcePositiveExecutionGraph {
         instruction_roles,
         indirect_write_sites_below_mapper_space,
@@ -171,10 +220,18 @@ pub(super) fn bind_source_positive_execution_graph(
             .len(),
         fixed_vector_bound_switchable_roots: fixed_vectors.bound_switchable_root_descriptions(),
         fixed_vector_open_control_edges: fixed_vectors.open_control_edge_descriptions(),
-        reset_bound_switchable_roots: fixed_vectors.reset_bound_switchable_root_descriptions(),
-        reset_open_control_facts: fixed_vectors
-            .reset_open_control_fact_descriptions()
-            .to_vec(),
+        reset_bound_switchable_roots: reset_bound_switchable_roots
+            .iter()
+            .map(|(bank, address)| format!("{bank:02X}:${address:04X}"))
+            .collect(),
+        reset_open_control_facts,
+        title_state_selector_count: title_state.selector_domain().len(),
+        title_state_handler_root_count: title_state
+            .selector_targets()
+            .values()
+            .collect::<BTreeSet<_>>()
+            .len(),
+        title_state_open_control_facts,
         state_accesses,
     })
 }

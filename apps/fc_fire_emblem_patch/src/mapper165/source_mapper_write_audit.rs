@@ -51,6 +51,9 @@ pub(super) struct SourceMapperWriteAudit {
     fixed_vector_open_control_edges: Vec<String>,
     reset_bound_switchable_roots: Vec<String>,
     reset_open_control_facts: Vec<String>,
+    title_state_selector_count: usize,
+    title_state_handler_root_count: usize,
+    title_state_open_control_facts: Vec<String>,
     positive_state_accesses: Vec<positive_execution::PositiveStateAccess>,
     positive_execution_instruction_count: usize,
     rooted_instruction_interior_candidate_count: usize,
@@ -209,7 +212,7 @@ pub(super) fn audit_source_mapper_writes(source: &Rom) -> Result<SourceMapperWri
         .count();
     Ok(SourceMapperWriteAudit {
         candidate_scope: "every byte offset in every declared source MMC4 PRG projection, decoded with RP2A03 StaticSemantics against all MMC4 register aliases",
-        closure_claim: "partial: the physical-page and projection denominator is complete; the three hardware vector slots and positive battle, main-dialogue, NMI, and audio instruction spans classify only their exact instruction interiors; dynamic switchable-bank and selector-domain inline-dispatch edges remain explicitly open, while source-structural writer declarations do not by themselves establish reachability; counts and the candidate digest are diagnostic outputs rather than closure proofs; the whole-program executable-root ledger is incomplete and every remaining possible start stays unresolved",
+        closure_claim: "partial: the physical-page and projection denominator is complete; the three hardware vector slots and positive battle, main-dialogue, NMI, audio, and title-state instruction spans classify only their exact instruction interiors; the title phase schedule owns its bounded inline-dispatch domain, while the outer-screen and fixed-scheduler selector domains remain explicitly open; source-structural writer declarations do not by themselves establish reachability; counts and the candidate digest are diagnostic outputs rather than closure proofs; the whole-program executable-root ledger is incomplete and every remaining possible start stays unresolved",
         physical_prg_page_count: pages.len(),
         mapped_projection_count: projections.len(),
         mapper_write_candidate_count: scan.candidates.len(),
@@ -228,6 +231,11 @@ pub(super) fn audit_source_mapper_writes(source: &Rom) -> Result<SourceMapperWri
             .to_vec(),
         reset_bound_switchable_roots: positive_execution.reset_bound_switchable_roots().to_vec(),
         reset_open_control_facts: positive_execution.reset_open_control_facts().to_vec(),
+        title_state_selector_count: positive_execution.title_state_selector_count(),
+        title_state_handler_root_count: positive_execution.title_state_handler_root_count(),
+        title_state_open_control_facts: positive_execution
+            .title_state_open_control_facts()
+            .to_vec(),
         positive_state_accesses: positive_execution.state_accesses().to_vec(),
         positive_execution_instruction_count: rooted_instructions.instruction_count(),
         rooted_instruction_interior_candidate_count: partition.rooted_instruction_interiors.len(),

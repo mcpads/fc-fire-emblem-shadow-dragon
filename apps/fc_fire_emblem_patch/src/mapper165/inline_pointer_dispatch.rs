@@ -17,33 +17,33 @@ pub(super) const INLINE_POINTER_DISPATCH_CODE: [u8; 30] = [
 ];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct InlinePointerDispatchBinding {
+pub(crate) struct InlinePointerDispatchBinding {
     call_address: u16,
     table_start: u16,
     selector_targets: Vec<(u8, u16)>,
 }
 
 impl InlinePointerDispatchBinding {
-    pub(super) fn call_address(&self) -> u16 {
+    pub(crate) fn call_address(&self) -> u16 {
         self.call_address
     }
 
-    pub(super) fn table_start(&self) -> u16 {
+    pub(crate) fn table_start(&self) -> u16 {
         self.table_start
     }
 
-    pub(super) fn selector_count(&self) -> usize {
+    pub(crate) fn selector_count(&self) -> usize {
         self.selector_targets.len()
     }
 
-    pub(super) fn targets_in_selector_order(&self) -> Vec<u16> {
+    pub(crate) fn targets_in_selector_order(&self) -> Vec<u16> {
         self.selector_targets
             .iter()
             .map(|(_, target)| *target)
             .collect()
     }
 
-    pub(super) fn distinct_targets(&self) -> BTreeSet<u16> {
+    pub(crate) fn distinct_targets(&self) -> BTreeSet<u16> {
         self.selector_targets
             .iter()
             .map(|(_, target)| *target)
@@ -58,7 +58,7 @@ impl InlinePointerDispatchBinding {
 /// the call as a little-endian pointer table, restores X/Y, and tail-jumps through `$000C`.
 /// Selector arithmetic is intentionally evaluated as the original eight-bit `ASL; TAY; INY`
 /// sequence, including the selector-127 high-byte wrap back to the saved return address.
-pub(super) fn bind_inline_pointer_dispatch(
+pub(crate) fn bind_inline_pointer_dispatch(
     source: &Rom,
     caller_bank: u8,
     call_address: u16,

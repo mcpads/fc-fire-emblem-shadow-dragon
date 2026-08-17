@@ -115,11 +115,8 @@ impl FixedVectorExecution {
             .collect()
     }
 
-    pub(super) fn reset_bound_switchable_root_descriptions(&self) -> Vec<String> {
-        self.reset_bound_switchable_roots
-            .iter()
-            .map(|(bank, address)| format!("{bank:02X}:${address:04X}"))
-            .collect()
+    pub(super) fn reset_bound_switchable_roots(&self) -> &BTreeSet<(u8, u16)> {
+        &self.reset_bound_switchable_roots
     }
 
     pub(super) fn reset_open_control_fact_descriptions(&self) -> &[String] {
