@@ -67,12 +67,13 @@ pub(in crate::full_translation_install) enum ScreenFontPageRole {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::full_translation_install) enum ScreenFontResidencyPolicy {
     Static(ScreenFontPageRole),
-    UnitOrEnemyNameSelected,
+    UnitOrEnemyNamePublishedByAppender,
+    UnitOrEnemyNameRetainedFromSummary,
 }
 
 /// 번역 글꼴을 쓰는 원본 합성 상태의 전체 정책 집합이다. 고정 표면은 진입 즉시
-/// 페이지를 게시하고, 이름에 따라 페이지가 달라지는 요약·상태 화면은 이름 appender가
-/// 선택한 카탈로그 페이지를 게시한다.
+/// 페이지를 게시한다. 요약 화면은 이름 appender가 선택한 카탈로그 페이지를 게시하고,
+/// 상태 화면은 같은 화면 수명 안에서 요약이 게시한 페이지를 명시적으로 유지한다.
 pub(in crate::full_translation_install) const COMPOSITE_FONT_RESIDENCY_POLICIES: [(
     u8,
     ScreenFontResidencyPolicy,
@@ -127,11 +128,11 @@ pub(in crate::full_translation_install) const COMPOSITE_FONT_RESIDENCY_POLICIES:
     ),
     (
         UNIT_SUMMARY_COMPOSITE_STATE,
-        ScreenFontResidencyPolicy::UnitOrEnemyNameSelected,
+        ScreenFontResidencyPolicy::UnitOrEnemyNamePublishedByAppender,
     ),
     (
         UNIT_STATUS_COMPOSITE_STATE,
-        ScreenFontResidencyPolicy::UnitOrEnemyNameSelected,
+        ScreenFontResidencyPolicy::UnitOrEnemyNameRetainedFromSummary,
     ),
 ];
 
@@ -139,7 +140,9 @@ impl ScreenFontResidencyPolicy {
     pub(in crate::full_translation_install) fn static_page(self) -> Option<ScreenFontPageRole> {
         match self {
             Self::Static(page) => Some(page),
-            Self::UnitOrEnemyNameSelected => None,
+            Self::UnitOrEnemyNamePublishedByAppender | Self::UnitOrEnemyNameRetainedFromSummary => {
+                None
+            }
         }
     }
 }
@@ -153,16 +156,23 @@ fn validate_composite_state_policies() -> Result<()> {
         states.len() == COMPOSITE_FONT_RESIDENCY_POLICIES.len(),
         "screen font residency assigns more than one policy to a composite state"
     );
-    let dynamic_states = COMPOSITE_FONT_RESIDENCY_POLICIES
-        .iter()
-        .filter_map(|(state, policy)| {
-            (*policy == ScreenFontResidencyPolicy::UnitOrEnemyNameSelected).then_some(*state)
-        })
-        .collect::<BTreeSet<_>>();
     ensure!(
-        dynamic_states
-            == BTreeSet::from([UNIT_SUMMARY_COMPOSITE_STATE, UNIT_STATUS_COMPOSITE_STATE]),
-        "unit-name-selected screen font residency states changed"
+        COMPOSITE_FONT_RESIDENCY_POLICIES
+            .iter()
+            .find_map(|(state, policy)| {
+                (*state == UNIT_SUMMARY_COMPOSITE_STATE).then_some(*policy)
+            })
+            == Some(ScreenFontResidencyPolicy::UnitOrEnemyNamePublishedByAppender),
+        "unit-summary font residency no longer delegates page publication to its name appender"
+    );
+    ensure!(
+        COMPOSITE_FONT_RESIDENCY_POLICIES
+            .iter()
+            .find_map(|(state, policy)| {
+                (*state == UNIT_STATUS_COMPOSITE_STATE).then_some(*policy)
+            })
+            == Some(ScreenFontResidencyPolicy::UnitOrEnemyNameRetainedFromSummary),
+        "unit-status font residency no longer retains the page published by unit summary"
     );
     Ok(())
 }
@@ -264,7 +274,8 @@ pub(super) struct ScreenFontResidencyDraft {
     strategy: &'static str,
     composite_state_policy_count: usize,
     static_state_route_count: usize,
-    unit_or_enemy_name_selected_state_count: usize,
+    unit_or_enemy_name_published_state_count: usize,
+    unit_or_enemy_name_retained_state_count: usize,
     front_end_composite_state_count: usize,
     front_end_record_action_catalog_page_index: usize,
     front_end_record_action_mapper_route: u8,
@@ -389,16 +400,24 @@ pub(super) fn plan_screen_font_residency(
         .len();
 
     Ok(ScreenFontResidencyDraft {
-        schema: 3,
-        strategy: "derive every composite-screen font policy from one residency plan; publish static pages at entry, let unit-or-enemy-name appenders select name-dependent pages, and select the protagonist catalog page explicitly for the front-end record-action lifetime",
+        schema: 4,
+        strategy: "derive every composite-screen font policy from one residency plan; publish static pages at entry, let the unit-summary appender publish its name-dependent page, retain that page explicitly for unit status, and select the protagonist catalog page explicitly for the front-end record-action lifetime",
         composite_state_policy_count: COMPOSITE_FONT_RESIDENCY_POLICIES.len(),
         static_state_route_count: COMPOSITE_FONT_RESIDENCY_POLICIES
             .iter()
             .filter(|(_, policy)| policy.static_page().is_some())
             .count(),
-        unit_or_enemy_name_selected_state_count: COMPOSITE_FONT_RESIDENCY_POLICIES
+        unit_or_enemy_name_published_state_count: COMPOSITE_FONT_RESIDENCY_POLICIES
             .iter()
-            .filter(|(_, policy)| *policy == ScreenFontResidencyPolicy::UnitOrEnemyNameSelected)
+            .filter(|(_, policy)| {
+                *policy == ScreenFontResidencyPolicy::UnitOrEnemyNamePublishedByAppender
+            })
+            .count(),
+        unit_or_enemy_name_retained_state_count: COMPOSITE_FONT_RESIDENCY_POLICIES
+            .iter()
+            .filter(|(_, policy)| {
+                *policy == ScreenFontResidencyPolicy::UnitOrEnemyNameRetainedFromSummary
+            })
             .count(),
         front_end_composite_state_count: FRONT_END_FONT_STATES.len(),
         front_end_record_action_catalog_page_index: record_action_catalog_page_index,
@@ -513,18 +532,21 @@ mod tests {
     }
 
     #[test]
-    fn unit_summary_and_status_select_the_page_published_by_the_name_appender() {
+    fn unit_summary_publishes_and_unit_status_retains_one_name_page() {
         validate_composite_state_policies().unwrap();
-        let dynamic_states = COMPOSITE_FONT_RESIDENCY_POLICIES
-            .iter()
-            .filter_map(|(state, policy)| {
-                (*policy == ScreenFontResidencyPolicy::UnitOrEnemyNameSelected).then_some(*state)
-            })
-            .collect::<BTreeSet<_>>();
-
         assert_eq!(
-            dynamic_states,
-            BTreeSet::from([UNIT_SUMMARY_COMPOSITE_STATE, UNIT_STATUS_COMPOSITE_STATE])
+            COMPOSITE_FONT_RESIDENCY_POLICIES
+                .iter()
+                .find(|(state, _)| *state == UNIT_SUMMARY_COMPOSITE_STATE)
+                .map(|(_, policy)| *policy),
+            Some(ScreenFontResidencyPolicy::UnitOrEnemyNamePublishedByAppender)
+        );
+        assert_eq!(
+            COMPOSITE_FONT_RESIDENCY_POLICIES
+                .iter()
+                .find(|(state, _)| *state == UNIT_STATUS_COMPOSITE_STATE)
+                .map(|(_, policy)| *policy),
+            Some(ScreenFontResidencyPolicy::UnitOrEnemyNameRetainedFromSummary)
         );
     }
 

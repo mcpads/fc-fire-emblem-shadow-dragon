@@ -44,6 +44,7 @@ use crate::{
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
     typed_source::decode_rp2a03_sequence,
+    unit_ui_text::bind_unit_summary_status_page_inheritance_source,
 };
 
 const FIXED_BANK_BYTE_COUNT: usize = 16 * 1024;
@@ -146,6 +147,7 @@ const EXPECTED_FONT_PAGE_STATE_PRODUCERS: [CompositeStateProducer; 19] = [
 /// bank 0B에서 `$C9BE`를 직접 부르는 곳이 이 두 자리뿐이어야, 열기만 현재 UI
 /// 페이지를 적용하고 닫기는 원본 selector 사슬로 복귀한다는 분모가 닫힌다.
 pub(super) fn bind_consumer_font_page_lifetime(source: &Rom, candidate: &Rom) -> Result<()> {
+    bind_unit_summary_status_page_inheritance_source(source.data())?;
     bind_direct_composite_state_producers(source, candidate)?;
     bind_fixed_menu_font_page_appender_cave(source, candidate)?;
     for (image_role, rom) in [("source", source), ("candidate", candidate)] {
@@ -437,10 +439,10 @@ pub(super) fn build_fixed_menu_font_page_appender(
     })
 }
 
-/// 이번 합성에 필요한 고정 페이지를 게시한다. 요약·상태처럼 이름별 페이지가
-/// 필요한 화면은 0으로 시작하고, 합성 중 unit/enemy appender가 실제 페이지를
-/// 게시한다. 아이템·병종·동작 문자열은 모든 카탈로그 페이지에서 같은 코드를 쓰므로
-/// 기본 카탈로그 페이지를 게시한다.
+/// 이번 합성에 필요한 페이지 수명을 게시한다. 요약은 이전 route를 지운 뒤
+/// unit/enemy appender가 실제 페이지를 게시하게 하고, 상태는 요약이 게시한 route를
+/// 그대로 유지한다. 아이템·병종·동작 문자열은 모든 카탈로그 페이지에서 같은 코드를
+/// 쓰므로 기본 카탈로그 페이지를 게시한다.
 pub(super) fn build_composite_font_page_publisher(
     origin: u16,
     activation: u16,
@@ -461,6 +463,12 @@ pub(super) fn build_composite_font_page_publisher(
         instructions.push(Instruction::BeqAbsolute(origin));
         route_jumps.push((jump, page));
     }
+    instructions.push(Instruction::CmpImmediate(UNIT_SUMMARY_COMPOSITE_STATE));
+    let clear_for_summary_jump = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(origin));
+    instructions.push(Instruction::CmpImmediate(UNIT_STATUS_COMPOSITE_STATE));
+    let retain_for_status_jump = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(origin));
     // States $13 and $14 are adjacent and share the map-menu page. A final
     // unsigned range check represents both without growing two equality routes.
     instructions.extend([
@@ -470,10 +478,15 @@ pub(super) fn build_composite_font_page_publisher(
     ]);
     let map_summary_range_jump = instructions.len();
     instructions.push(Instruction::BccAbsolute(origin));
+    let clear_target = next_address(origin, &instructions)?;
+    instructions[clear_for_summary_jump] = Instruction::BeqAbsolute(clear_target);
     instructions.extend([
         Instruction::LdaImmediate(0),
         Instruction::StaAbsolute(CONSUMER_FONT_PAGE),
     ]);
+    instructions.push(Instruction::Rts);
+    let retain_target = next_address(origin, &instructions)?;
+    instructions[retain_for_status_jump] = Instruction::BeqAbsolute(retain_target);
     instructions.push(Instruction::Rts);
     for page in [
         ScreenFontPageRole::FrontEndMenu,
@@ -992,6 +1005,70 @@ mod tests {
         );
         assert_eq!(next_name.applied_route, Some(pages.catalog[0]));
         assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], pages.catalog[0]);
+    }
+
+    #[test]
+    fn unit_summary_clears_stale_residency_before_its_name_appender_publishes() {
+        let pages = pages();
+        let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
+        let publisher_origin = ORIGIN + u16::try_from(activation.bytes.len()).unwrap();
+        let publisher =
+            build_composite_font_page_publisher(publisher_origin, activation.address, pages)
+                .unwrap();
+        let mut memory: Box<[u8; 0x10000]> =
+            vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
+        memory[usize::from(CONSUMER_FONT_PAGE)] = pages.catalog[0];
+
+        let (memory, summary_entry) = run_routines(
+            memory,
+            &[&activation, &publisher],
+            publisher.address,
+            UNIT_SUMMARY_COMPOSITE_STATE,
+            0x24,
+        );
+        assert_eq!(summary_entry.applied_route, None);
+        assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], 0);
+
+        let (memory, name_appended) = run_routines(
+            memory,
+            &[&activation],
+            activation.address,
+            pages.catalog[1],
+            0x24,
+        );
+        assert_eq!(name_appended.applied_route, Some(pages.catalog[1]));
+        assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], pages.catalog[1]);
+    }
+
+    #[test]
+    fn unit_status_retains_the_page_published_by_unit_summary() {
+        let pages = pages();
+        let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
+        let publisher_origin = ORIGIN + u16::try_from(activation.bytes.len()).unwrap();
+        let publisher =
+            build_composite_font_page_publisher(publisher_origin, activation.address, pages)
+                .unwrap();
+
+        for retained_route in [0, pages.catalog[0], pages.catalog[1]] {
+            let mut memory: Box<[u8; 0x10000]> =
+                vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
+            memory[usize::from(CONSUMER_FONT_PAGE)] = retained_route;
+
+            let (memory, status_entry) = run_routines(
+                memory,
+                &[&activation, &publisher],
+                publisher.address,
+                UNIT_STATUS_COMPOSITE_STATE,
+                0xA5,
+            );
+
+            assert_eq!(
+                memory[usize::from(COMPOSITE_STATE)],
+                UNIT_STATUS_COMPOSITE_STATE
+            );
+            assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], retained_route);
+            assert_eq!(status_entry.applied_route, None);
+        }
     }
 
     #[test]

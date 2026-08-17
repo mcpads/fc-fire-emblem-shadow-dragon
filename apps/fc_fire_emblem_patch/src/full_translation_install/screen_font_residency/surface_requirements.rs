@@ -276,9 +276,18 @@ fn validate_requirement_policies() -> Result<()> {
             CatalogPageSelection::DefaultCatalog => {
                 ScreenFontResidencyPolicy::Static(ScreenFontPageRole::CatalogDefault)
             }
-            CatalogPageSelection::SelectedUnitOrEnemy => {
-                ScreenFontResidencyPolicy::UnitOrEnemyNameSelected
-            }
+            CatalogPageSelection::SelectedUnitOrEnemy => match requirement.state {
+                UNIT_SUMMARY_COMPOSITE_STATE => {
+                    ScreenFontResidencyPolicy::UnitOrEnemyNamePublishedByAppender
+                }
+                UNIT_STATUS_COMPOSITE_STATE => {
+                    ScreenFontResidencyPolicy::UnitOrEnemyNameRetainedFromSummary
+                }
+                state => anyhow::bail!(
+                    "catalog screen {} uses selected unit-or-enemy page in unsupported state {state:02X}",
+                    requirement.screen_role
+                ),
+            },
             CatalogPageSelection::ProtagonistRecordAction => {
                 ScreenFontResidencyPolicy::Static(ScreenFontPageRole::FrontEndRecordAction)
             }

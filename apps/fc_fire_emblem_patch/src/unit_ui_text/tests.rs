@@ -32,6 +32,7 @@ fn build_fixture_report(prg: &[u8]) -> Result<UnitUiTextReport> {
 
 #[test]
 fn binds_unit_ui_page_supply_and_inheritance_roles() {
+    bind_unit_summary_status_page_inheritance_source(&contract_source_fixture()).unwrap();
     let report = build_fixture_report(&contract_fixture()).unwrap();
 
     let states = report
@@ -63,6 +64,29 @@ fn binds_unit_ui_page_supply_and_inheritance_roles() {
     );
     assert_eq!(report.command_menu.static_label_count, 15);
     assert_eq!(report.command_menu.runtime_observed_label_count, 6);
+}
+
+#[test]
+fn unit_status_inheritance_rejects_a_changed_summary_name_producer() {
+    let mut source = contract_source_fixture();
+    let summary = region("compose_unit_summary_header");
+    let summary_offset =
+        HEADER_SIZE + banked_prg_offset(UNIT_UI_BANK, summary.cpu_address).unwrap();
+    let [unit_name_low, unit_name_high] = region("select_unit_name").cpu_address.to_le_bytes();
+    let unit_name_call = [0x20, unit_name_low, unit_name_high];
+    let call_offset = summary
+        .expected
+        .windows(3)
+        .position(|bytes| bytes == unit_name_call)
+        .unwrap();
+    source[summary_offset + call_offset + 1] ^= 1;
+
+    assert!(
+        bind_unit_summary_status_page_inheritance_source(&source)
+            .unwrap_err()
+            .to_string()
+            .contains("compose_unit_summary_header")
+    );
 }
 
 #[test]

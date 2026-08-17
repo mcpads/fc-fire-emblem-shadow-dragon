@@ -300,6 +300,36 @@ pub(crate) fn command_menu_label_ids() -> Vec<String> {
         .collect()
 }
 
+/// 요약이 이름 appender를 실행한 뒤 상태 화면이 같은 오른쪽 FD 페이지를 이어받는
+/// 원본 수명을 결속한다. 화면별 페이지를 고르지는 않으며, 중앙 상주 정책이
+/// `publish -> retain` 전이를 채택할 수 있는 원천 경계만 제공한다.
+pub(crate) fn bind_unit_summary_status_page_inheritance_source(source: &[u8]) -> Result<()> {
+    let prg = source
+        .get(HEADER_SIZE..HEADER_SIZE + PRG_SIZE)
+        .context("supported source does not contain the complete PRG region")?;
+    validate_code_regions(prg)?;
+
+    let [unit_name_low, unit_name_high] = region("select_unit_name").cpu_address.to_le_bytes();
+    let unit_name_call = [0x20, unit_name_low, unit_name_high];
+    let summary = code_region_source(prg, "compose_unit_summary_header")?;
+    ensure!(
+        summary
+            .windows(unit_name_call.len())
+            .filter(|window| *window == unit_name_call)
+            .count()
+            == 1,
+        "unit-summary composer no longer publishes exactly one unit-or-enemy name page"
+    );
+    let status = code_region_source(prg, "compose_unit_status_stats")?;
+    ensure!(
+        !status
+            .windows(unit_name_call.len())
+            .any(|window| window == unit_name_call),
+        "unit-status composer unexpectedly gained an independent name-page publication"
+    );
+    Ok(())
+}
+
 /// 유닛 UI 도메인의 고정 라벨 population과 세 화면 소비자를 실제 원천 생산자에
 /// 결속한다. 화면 목록은 전역 coverage 표에서 가져오지 않으며, 이 함수가 검증한
 /// composer와 상속 경로만 반환한다.
