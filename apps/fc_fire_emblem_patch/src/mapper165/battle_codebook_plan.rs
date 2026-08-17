@@ -48,7 +48,9 @@ use enemy_domain::{EnemyBattleDomain, EnemyBattleDomainBinding, bind_enemy_battl
 use item_domain::{BattleItemDomain, BattleItemDomainBinding, bind_battle_item_domain};
 pub(super) use physical_assignment::ScreenCodeConstraint;
 use physical_assignment::assign_physical_codes;
-pub(in crate::mapper165) use remap_storage::bind_indirect_write_sites_below_mapper_space;
+pub(in crate::mapper165) use remap_storage::{
+    IndirectWriteDestinationBounds, bind_indirect_write_destination_bounds,
+};
 use runtime_demand::{BattleRuntimeDemandPlan, ExactModeledRuntimeInput, plan_runtime_demand};
 use runtime_inputs::{BattleRuntimeInputBinding, bind_battle_runtime_inputs};
 pub(crate) use workset_pages::{

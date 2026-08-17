@@ -1,9 +1,10 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, ensure};
 use retro_rp2a03::decode_bytes;
 
 use crate::{
+    mapper165::battle_codebook_plan::IndirectWriteDestinationBounds,
     mapper165::inline_pointer_dispatch::{
         INLINE_POINTER_DISPATCH_ADDRESS, INLINE_POINTER_TARGET_JUMP_ADDRESS,
         bind_inline_pointer_dispatch,
@@ -24,8 +25,10 @@ const RESET_RAM_CLEAR_CODE: [u8; 18] = [
     0x10, 0xF7,
 ];
 
+mod reset_bank_entries;
 mod special_bank_call;
 
+use reset_bank_entries::bind_reset_bank_entries;
 use special_bank_call::bind_audio_bank_call;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -49,6 +52,9 @@ pub(super) struct FixedVectorExecution {
     open_control_edges: BTreeSet<FixedVectorOpenControlEdge>,
     unresolved_inline_pointer_dispatches: Vec<UnresolvedInlinePointerDispatch>,
     bound_switchable_roots: BTreeSet<(u8, u16)>,
+    reset_bound_switchable_roots: BTreeSet<(u8, u16)>,
+    reset_open_control_facts: Vec<String>,
+    reset_reachable_instruction_starts: BTreeSet<(u8, u16)>,
     indirect_write_sites_below_mapper_space: BTreeSet<(u8, u16, u8)>,
 }
 
@@ -109,12 +115,30 @@ impl FixedVectorExecution {
             .collect()
     }
 
+    pub(super) fn reset_bound_switchable_root_descriptions(&self) -> Vec<String> {
+        self.reset_bound_switchable_roots
+            .iter()
+            .map(|(bank, address)| format!("{bank:02X}:${address:04X}"))
+            .collect()
+    }
+
+    pub(super) fn reset_open_control_fact_descriptions(&self) -> &[String] {
+        &self.reset_open_control_facts
+    }
+
+    pub(super) fn reset_reachable_instruction_starts(&self) -> &BTreeSet<(u8, u16)> {
+        &self.reset_reachable_instruction_starts
+    }
+
     pub(super) fn indirect_write_sites_below_mapper_space(&self) -> &BTreeSet<(u8, u16, u8)> {
         &self.indirect_write_sites_below_mapper_space
     }
 }
 
-pub(super) fn bind_fixed_vector_execution(source: &Rom) -> Result<FixedVectorExecution> {
+pub(super) fn bind_fixed_vector_execution(
+    source: &Rom,
+    indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
+) -> Result<FixedVectorExecution> {
     let vector_bindings = HARDWARE_VECTOR_SLOTS
         .into_iter()
         .map(|slot| {
@@ -209,6 +233,12 @@ pub(super) fn bind_fixed_vector_execution(source: &Rom) -> Result<FixedVectorExe
         &mut open_control_edges,
     )?;
     let bound_switchable_roots = bind_audio_bank_call(source, &mut open_control_edges)?;
+    let reset_root = vector_bindings
+        .iter()
+        .find_map(|(slot, target)| (*slot == 0xFFFC).then_some(*target))
+        .context("source reset vector slot is missing")?;
+    let reset_bank_entries =
+        bind_reset_bank_entries(source, reset_root, indirect_write_destination_bounds)?;
     let indirect_write_sites_below_mapper_space =
         if reachable_instruction_starts.contains(&(FIXED_PRG_BANK, RESET_RAM_CLEAR_WRITER)) {
             BTreeSet::from([bind_reset_ram_clear(source)?])
@@ -222,6 +252,11 @@ pub(super) fn bind_fixed_vector_execution(source: &Rom) -> Result<FixedVectorExe
         open_control_edges,
         unresolved_inline_pointer_dispatches,
         bound_switchable_roots,
+        reset_bound_switchable_roots: reset_bank_entries.switchable_roots().clone(),
+        reset_open_control_facts: reset_bank_entries.open_fact_descriptions(),
+        reset_reachable_instruction_starts: reset_bank_entries
+            .reachable_instruction_starts()
+            .clone(),
         indirect_write_sites_below_mapper_space,
     })
 }
@@ -333,11 +368,15 @@ mod tests {
         Rom::parse(bytes).unwrap()
     }
 
+    fn bind_synthetic_fixed_vectors(source: &Rom) -> Result<FixedVectorExecution> {
+        bind_fixed_vector_execution(source, &BTreeMap::new())
+    }
+
     #[test]
     fn hardware_vector_slots_derive_their_shared_fixed_root() {
         let source = synthetic_source(&[(0xC100, &[0x60])], 0xC100);
 
-        let execution = bind_fixed_vector_execution(&source).unwrap();
+        let execution = bind_synthetic_fixed_vectors(&source).unwrap();
 
         assert_eq!(execution.vector_slot_count(), HARDWARE_VECTOR_SLOTS.len());
         assert_eq!(execution.unique_vector_root_count(), 1);
@@ -366,7 +405,7 @@ mod tests {
             0xC100,
         );
 
-        let execution = bind_fixed_vector_execution(&source).unwrap();
+        let execution = bind_synthetic_fixed_vectors(&source).unwrap();
 
         for address in [0xC100, 0xC103, 0xC106, 0xC110] {
             assert!(
@@ -402,7 +441,7 @@ mod tests {
             0xC100,
         );
 
-        let execution = bind_fixed_vector_execution(&source).unwrap();
+        let execution = bind_synthetic_fixed_vectors(&source).unwrap();
 
         assert!(
             !execution
@@ -433,7 +472,7 @@ mod tests {
     fn hardware_vector_outside_fixed_prg_fails_closed() {
         let source = synthetic_source(&[], 0x8000);
 
-        let error = bind_fixed_vector_execution(&source).unwrap_err();
+        let error = bind_synthetic_fixed_vectors(&source).unwrap_err();
 
         assert!(error.to_string().contains("unbound switchable or RAM"));
     }
@@ -448,7 +487,7 @@ mod tests {
             special_bank_call::SOURCE_AUDIO_BANK_CALL_START,
         );
 
-        let execution = bind_fixed_vector_execution(&source).unwrap();
+        let execution = bind_synthetic_fixed_vectors(&source).unwrap();
 
         assert_eq!(
             execution.bound_switchable_roots(),
@@ -474,7 +513,7 @@ mod tests {
             special_bank_call::SOURCE_AUDIO_BANK_CALL_START,
         );
 
-        let error = bind_fixed_vector_execution(&source).unwrap_err();
+        let error = bind_synthetic_fixed_vectors(&source).unwrap_err();
 
         assert!(
             error
@@ -490,7 +529,7 @@ mod tests {
             RESET_RAM_CLEAR_START,
         );
 
-        let execution = bind_fixed_vector_execution(&source).unwrap();
+        let execution = bind_synthetic_fixed_vectors(&source).unwrap();
 
         assert!(
             execution

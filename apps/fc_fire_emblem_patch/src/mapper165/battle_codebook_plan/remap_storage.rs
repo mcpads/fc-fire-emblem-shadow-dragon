@@ -16,7 +16,9 @@ use super::{
 
 mod source_contract;
 
-pub(in crate::mapper165) use source_contract::bind_indirect_write_sites_below_mapper_space;
+pub(in crate::mapper165) use source_contract::{
+    IndirectWriteDestinationBounds, bind_indirect_write_destination_bounds,
+};
 
 const PAIR_TABLE_BYTE_COUNT: usize = 16;
 const MAXIMUM_REMAP_PAIR_COUNT: usize = 8;

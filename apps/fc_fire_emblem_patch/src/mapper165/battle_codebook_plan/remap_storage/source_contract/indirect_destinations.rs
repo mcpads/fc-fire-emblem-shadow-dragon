@@ -1,4 +1,7 @@
-use std::collections::BTreeSet;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    ops::RangeInclusive,
+};
 
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
@@ -381,6 +384,33 @@ pub(super) struct IndirectStoreDestinationClass {
     pub(super) every_destination_range_outside_remap_storage: bool,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(in crate::mapper165) struct IndirectWriteDestinationBounds {
+    role: &'static str,
+    destination_ranges: Vec<RangeInclusive<u16>>,
+}
+
+impl IndirectWriteDestinationBounds {
+    pub(in crate::mapper165) fn role(&self) -> &'static str {
+        self.role
+    }
+
+    pub(in crate::mapper165) fn destination_ranges(&self) -> &[RangeInclusive<u16>] {
+        &self.destination_ranges
+    }
+
+    #[cfg(test)]
+    pub(in crate::mapper165) fn for_synthetic_test(
+        role: &'static str,
+        destination_ranges: Vec<RangeInclusive<u16>>,
+    ) -> Self {
+        Self {
+            role,
+            destination_ranges,
+        }
+    }
+}
+
 pub(super) fn bind_indirect_store_destination_classes(
     rom: &Rom,
 ) -> Result<Vec<IndirectStoreDestinationClass>> {
@@ -457,9 +487,9 @@ pub(super) fn bind_indirect_store_destination_classes(
         .collect()
 }
 
-pub(in crate::mapper165) fn bind_indirect_write_sites_below_mapper_space(
+pub(in crate::mapper165) fn bind_indirect_write_destination_bounds(
     rom: &Rom,
-) -> Result<BTreeSet<(u8, u16, u8)>> {
+) -> Result<BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>> {
     let classes = bind_indirect_store_destination_classes(rom)?;
     ensure!(
         classes.len() == INDIRECT_STORE_CLASS_SPECS.len(),
@@ -473,7 +503,34 @@ pub(in crate::mapper165) fn bind_indirect_write_sites_below_mapper_space(
         "a source-bound battle indirect write can reach mapper register space"
     );
 
-    Ok(EXPECTED_INDIRECT_STORES.into_iter().collect())
+    let mut bounds = BTreeMap::new();
+    for spec in &INDIRECT_STORE_CLASS_SPECS {
+        let destination_ranges = spec
+            .destination_ranges
+            .iter()
+            .map(|range| range.start..=range.end)
+            .collect::<Vec<_>>();
+        for &site in spec.sites {
+            ensure!(
+                bounds
+                    .insert(
+                        site,
+                        IndirectWriteDestinationBounds {
+                            role: spec.role,
+                            destination_ranges: destination_ranges.clone(),
+                        },
+                    )
+                    .is_none(),
+                "an indirect write site belongs to more than one destination class"
+            );
+        }
+    }
+    ensure!(
+        bounds.keys().copied().collect::<BTreeSet<_>>()
+            == EXPECTED_INDIRECT_STORES.into_iter().collect(),
+        "indirect-write destination bounds do not cover the exact site catalog"
+    );
+    Ok(bounds)
 }
 
 fn bind_indirect_destination_inputs(rom: &Rom) -> Result<()> {

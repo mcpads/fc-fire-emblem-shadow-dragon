@@ -10,6 +10,7 @@ use crate::{
     static_analysis::find_absolute_write_candidates,
     tracked::TrackedImage,
 };
+pub(crate) mod banked_call_dispatch;
 mod battle_cache_coverage;
 pub(crate) mod battle_cache_upload_probe;
 pub(crate) mod battle_codebook_plan;

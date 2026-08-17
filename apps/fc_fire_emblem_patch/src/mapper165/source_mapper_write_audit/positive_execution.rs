@@ -7,12 +7,16 @@ use crate::{mapper165::executable_mapper_writes::MappedPrgLocation, rom::Rom};
 use super::{FIXED_PRG_BANK, source_mapped_location};
 
 mod fixed_vectors;
+mod state_accesses;
 
 use fixed_vectors::bind_fixed_vector_execution;
+pub(super) use state_accesses::PositiveStateAccess;
+use state_accesses::bind_positive_state_accesses;
 
 const BATTLE_PHASE_GRAPH: &str = "battle_phase_catalog";
 const DIALOGUE_INTERRUPT_AUDIO_GRAPH: &str = "main_dialogue_nmi_and_audio_positive_graph";
 const FIXED_HARDWARE_VECTOR_GRAPH: &str = "fixed_hardware_vector_direct_graph";
+const RESET_STATEFUL_EXECUTION_GRAPH: &str = "reset_stateful_execution_graph";
 
 /// Positive source execution slices already bound by their owning battle and dialogue contracts.
 /// This is deliberately not a complete executable-root ledger.
@@ -22,8 +26,12 @@ pub(super) struct SourcePositiveExecutionGraph {
     hardware_vector_slot_count: usize,
     hardware_vector_root_count: usize,
     fixed_vector_instruction_count: usize,
+    reset_stateful_execution_instruction_count: usize,
     fixed_vector_bound_switchable_roots: Vec<String>,
     fixed_vector_open_control_edges: Vec<String>,
+    reset_bound_switchable_roots: Vec<String>,
+    reset_open_control_facts: Vec<String>,
+    state_accesses: Vec<PositiveStateAccess>,
 }
 
 impl SourcePositiveExecutionGraph {
@@ -55,12 +63,28 @@ impl SourcePositiveExecutionGraph {
         self.fixed_vector_instruction_count
     }
 
+    pub(super) fn reset_stateful_execution_instruction_count(&self) -> usize {
+        self.reset_stateful_execution_instruction_count
+    }
+
     pub(super) fn fixed_vector_bound_switchable_roots(&self) -> &[String] {
         &self.fixed_vector_bound_switchable_roots
     }
 
     pub(super) fn fixed_vector_open_control_edges(&self) -> &[String] {
         &self.fixed_vector_open_control_edges
+    }
+
+    pub(super) fn reset_bound_switchable_roots(&self) -> &[String] {
+        &self.reset_bound_switchable_roots
+    }
+
+    pub(super) fn reset_open_control_facts(&self) -> &[String] {
+        &self.reset_open_control_facts
+    }
+
+    pub(super) fn state_accesses(&self) -> &[PositiveStateAccess] {
+        &self.state_accesses
     }
 
     pub(super) fn mapped_instruction_starts(&self) -> Result<BTreeSet<MappedPrgLocation>> {
@@ -77,13 +101,15 @@ pub(super) fn bind_source_positive_execution_graph(
         crate::mapper165::battle_codebook_plan::phase_cooccurrence::battle_phase_reachable_instruction_starts(
             source,
         )?;
-    let battle_indirect =
-        crate::mapper165::battle_codebook_plan::bind_indirect_write_sites_below_mapper_space(
-            source,
-        )?;
+    let battle_indirect_bounds =
+        crate::mapper165::battle_codebook_plan::bind_indirect_write_destination_bounds(source)?;
+    let battle_indirect = battle_indirect_bounds
+        .keys()
+        .copied()
+        .collect::<BTreeSet<_>>();
     let dialogue_interrupt_audio =
         crate::full_translation_install::bind_dialogue_interrupt_audio_mapper_write_slice(source)?;
-    let fixed_vectors = bind_fixed_vector_execution(source)?;
+    let fixed_vectors = bind_fixed_vector_execution(source, &battle_indirect_bounds)?;
     ensure!(
         fixed_vectors
             .bound_switchable_roots()
@@ -104,6 +130,10 @@ pub(super) fn bind_source_positive_execution_graph(
         (
             FIXED_HARDWARE_VECTOR_GRAPH,
             fixed_vectors.reachable_instruction_starts().iter(),
+        ),
+        (
+            RESET_STATEFUL_EXECUTION_GRAPH,
+            fixed_vectors.reset_reachable_instruction_starts().iter(),
         ),
     ] {
         for &(bank, address) in starts {
@@ -129,14 +159,23 @@ pub(super) fn bind_source_positive_execution_graph(
         .copied()
         .collect();
 
+    let state_accesses = bind_positive_state_accesses(source, &instruction_roles)?;
     Ok(SourcePositiveExecutionGraph {
         instruction_roles,
         indirect_write_sites_below_mapper_space,
         hardware_vector_slot_count: fixed_vectors.vector_slot_count(),
         hardware_vector_root_count: fixed_vectors.unique_vector_root_count(),
         fixed_vector_instruction_count: fixed_vectors.reachable_instruction_starts().len(),
+        reset_stateful_execution_instruction_count: fixed_vectors
+            .reset_reachable_instruction_starts()
+            .len(),
         fixed_vector_bound_switchable_roots: fixed_vectors.bound_switchable_root_descriptions(),
         fixed_vector_open_control_edges: fixed_vectors.open_control_edge_descriptions(),
+        reset_bound_switchable_roots: fixed_vectors.reset_bound_switchable_root_descriptions(),
+        reset_open_control_facts: fixed_vectors
+            .reset_open_control_fact_descriptions()
+            .to_vec(),
+        state_accesses,
     })
 }
 
