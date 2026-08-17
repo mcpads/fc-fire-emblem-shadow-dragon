@@ -129,6 +129,62 @@ pub(crate) const fn main_dialogue_runtime_handler_roots() -> [u16; 18] {
     MAIN_DIALOGUE_STATE_HANDLERS
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct CallerHandoffStateDispatchSource {
+    prg_bank: u8,
+    call_address: u16,
+    selector_domain: BTreeSet<u8>,
+}
+
+impl CallerHandoffStateDispatchSource {
+    pub(crate) fn prg_bank(&self) -> u8 {
+        self.prg_bank
+    }
+
+    pub(crate) fn call_address(&self) -> u16 {
+        self.call_address
+    }
+
+    pub(crate) fn selector_domain(&self) -> &BTreeSet<u8> {
+        &self.selector_domain
+    }
+}
+
+/// Returns the exact caller-owned state domains for the dispatch tables that can resume a main
+/// dialogue handoff. The state-machine inspection binds every call prefix and every pointer slot
+/// before these domains are exposed to another execution analysis.
+pub(crate) fn bind_caller_handoff_state_dispatch_sources(
+    rom: &Rom,
+) -> Result<Vec<CallerHandoffStateDispatchSource>> {
+    rom.verify_supported_japanese()?;
+    build_main_dialogue_state_machine(rom.data())?;
+
+    CALLER_HANDOFF_DISPATCH_SPECS
+        .iter()
+        .map(|spec| {
+            let selector_count = u8::try_from(spec.handlers.len())
+                .context("caller-handoff selector count exceeds one byte")?;
+            ensure!(
+                selector_count != 0 && selector_count <= 0x80,
+                "caller-handoff selector domain is empty or aliases through eight-bit ASL"
+            );
+            let call_address = spec
+                .dispatcher_cpu_address
+                .checked_add(3)
+                .context("caller-handoff dispatch call address overflow")?;
+            ensure!(
+                spec.handler_table_cpu_address == call_address + 3,
+                "caller-handoff table no longer follows its dispatch call"
+            );
+            Ok(CallerHandoffStateDispatchSource {
+                prg_bank: spec.prg_bank,
+                call_address,
+                selector_domain: (0..selector_count).collect(),
+            })
+        })
+        .collect()
+}
+
 pub(crate) fn inspect_battle_dialogue_translation_records(
     source: &[u8],
 ) -> Result<Vec<BattleDialogueTranslationRecord>> {

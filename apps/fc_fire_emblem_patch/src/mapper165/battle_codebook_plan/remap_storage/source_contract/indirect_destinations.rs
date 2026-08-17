@@ -11,7 +11,7 @@ use crate::{rom::Rom, sha1_hex, typed_source::decode_rp2a03_sequence};
 use super::super::super::source_window::source_bytes;
 use super::{REMAP_STORAGE_END, REMAP_STORAGE_START};
 
-pub(super) const EXPECTED_INDIRECT_STORES: [(u8, u16, u8); 24] = [
+pub(super) const EXPECTED_INDIRECT_STORES: [(u8, u16, u8); 26] = [
     (0x04, 0x80E1, 0x06),
     (0x04, 0x811C, 0x06),
     (0x04, 0x816B, 0x06),
@@ -34,6 +34,8 @@ pub(super) const EXPECTED_INDIRECT_STORES: [(u8, u16, u8); 24] = [
     (0x0F, 0xC22D, 0x00),
     (0x0F, 0xC7D1, 0x08),
     (0x0F, 0xC7E0, 0x08),
+    (0x0F, 0xC803, 0x08),
+    (0x0F, 0xC812, 0x08),
     (0x0F, 0xCFF8, 0x08),
     (0x0F, 0xD110, 0x08),
 ];
@@ -93,9 +95,10 @@ const COMBATANT_SHADOW_SITES: [(u8, u16, u8); 2] = [(0x05, 0xAE09, 0x3E), (0x05,
 const GENERIC_COPY_SITES: [(u8, u16, u8); 1] = [(0x0F, 0xC213, 0x02)];
 const BATTLE_ZERO_FILL_SITES: [(u8, u16, u8); 1] = [(0x0F, 0xC22D, 0x00)];
 const FIXED_GLYPH_FLAG_SITES: [(u8, u16, u8); 2] = [(0x0F, 0xC7D1, 0x08), (0x0F, 0xC7E0, 0x08)];
+const UNIT_UI_NUMBER_CELL_SITES: [(u8, u16, u8); 2] = [(0x0F, 0xC803, 0x08), (0x0F, 0xC812, 0x08)];
 const UNIT_CALCULATION_SITES: [(u8, u16, u8); 2] = [(0x0F, 0xCFF8, 0x08), (0x0F, 0xD110, 0x08)];
 
-const INDIRECT_STORE_CLASS_SPECS: [IndirectStoreClassSpec; 9] = [
+const INDIRECT_STORE_CLASS_SPECS: [IndirectStoreClassSpec; 10] = [
     IndirectStoreClassSpec {
         role: "battle_dialogue_composition_buffers",
         destination_basis: "selector table 04:$83E8 and forty-byte dialogue record bound",
@@ -339,6 +342,42 @@ const INDIRECT_STORE_CLASS_SPECS: [IndirectStoreClassSpec; 9] = [
             end: 0x0422,
         }],
         expected_source_sha1: "825f8e40f4734f1570ad8bb1f74651ce75044035",
+    },
+    IndirectStoreClassSpec {
+        role: "unit_ui_number_cells",
+        destination_basis: "0B:$8F0E/$8F23 form pointer $0451+X for two or three cells before the fixed-bank writer",
+        sites: &UNIT_UI_NUMBER_CELL_SITES,
+        source_regions: &[
+            SourceRegionSpec {
+                bank: 0x0B,
+                address: 0x8F0E,
+                byte_count: 0x002B,
+            },
+            SourceRegionSpec {
+                bank: 0x0F,
+                address: 0xC7EA,
+                byte_count: 0x0031,
+            },
+        ],
+        typed_regions: &[
+            TypedRegionSpec {
+                bank: 0x0B,
+                address: 0x8F0E,
+                byte_count: 0x002B,
+                role: "unit UI number-cell pointer and length producers",
+            },
+            TypedRegionSpec {
+                bank: 0x0F,
+                address: 0xC7EA,
+                byte_count: 0x0031,
+                role: "unit UI number-cell fixed writer",
+            },
+        ],
+        destination_ranges: &[DestinationRangeSpec {
+            start: 0x0451,
+            end: 0x0552,
+        }],
+        expected_source_sha1: "b476b8702133427f43f51460ddd85738a09e3f37",
     },
     IndirectStoreClassSpec {
         role: "unit_calculation_fields",

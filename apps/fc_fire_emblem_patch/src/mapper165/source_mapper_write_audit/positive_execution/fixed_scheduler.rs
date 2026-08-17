@@ -14,7 +14,7 @@ use crate::{
     typed_source::decode_rp2a03_sequence,
 };
 
-use super::fixed_vectors::trace_fixed_scheduler_contexts;
+use super::fixed_vectors::{InlineDispatchSelectorBounds, trace_fixed_scheduler_contexts};
 use super::shared_menu_request::SharedMenuExecutionSource;
 
 const SOURCE_PRG_BANK_BYTE_COUNT: usize = 16 * 1024;
@@ -97,6 +97,7 @@ pub(super) struct FixedSchedulerExecution {
     source_bound_producer_instruction_starts: BTreeSet<(u8, u16)>,
     reachable_instruction_starts: BTreeSet<(u8, u16)>,
     bound_switchable_roots: BTreeSet<(u8, u16)>,
+    indirect_write_sites_below_mapper_space: BTreeSet<(u8, u16, u8)>,
     open_control_facts: Vec<String>,
 }
 
@@ -137,6 +138,10 @@ impl FixedSchedulerExecution {
         &self.bound_switchable_roots
     }
 
+    pub(super) fn indirect_write_sites_below_mapper_space(&self) -> &BTreeSet<(u8, u16, u8)> {
+        &self.indirect_write_sites_below_mapper_space
+    }
+
     pub(super) fn open_control_fact_descriptions(&self) -> &[String] {
         &self.open_control_facts
     }
@@ -146,6 +151,7 @@ pub(super) fn bind_fixed_scheduler_execution(
     source: &Rom,
     title_state: &TitleStateExecution,
     shared_menu: &SharedMenuExecutionSource,
+    screen_state_selector_domains: &BTreeMap<(u8, u16), BTreeSet<u8>>,
     entry_contexts: &BTreeSet<(u8, u8)>,
     indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
 ) -> Result<FixedSchedulerExecution> {
@@ -219,28 +225,49 @@ pub(super) fn bind_fixed_scheduler_execution(
         entry_contexts.contains(&(0x00, GAMEPLAY_SCHEDULER_BANK)),
         "reset-rooted execution no longer reaches scheduler state zero in source-bound bank six: {entry_contexts:?}"
     );
-    let owned_inline_selector_domains = BTreeMap::from([
+    let mut inline_dispatch_selector_bounds = BTreeMap::from([
         (
             (FIXED_PRG_BANK, FIXED_SCHEDULER_DISPATCH_CALL),
-            positive_selector_domain.clone(),
+            InlineDispatchSelectorBounds::from_source_producers(positive_selector_domain.clone()),
         ),
         (
             (0x0D, title_state.dispatch_call()),
-            title_state.selector_domain().clone(),
+            InlineDispatchSelectorBounds::from_source_producers(
+                title_state.selector_domain().clone(),
+            ),
         ),
         (
             (0x0D, title_state.animation_dispatch_call()),
-            title_state.animation_selector_domain().clone(),
+            InlineDispatchSelectorBounds::from_source_producers(
+                title_state.animation_selector_domain().clone(),
+            ),
         ),
         (
             (MAP_INITIALIZATION_BANK, MAP_INITIALIZATION_DISPATCH_CALL),
-            (0..MAP_INITIALIZATION_STATE_COUNT).collect(),
+            InlineDispatchSelectorBounds::from_source_producers(
+                (0..MAP_INITIALIZATION_STATE_COUNT).collect(),
+            ),
         ),
         (
             (0x0B, shared_menu.dispatch_call()),
-            shared_menu.active_request_states().clone(),
+            InlineDispatchSelectorBounds::from_source_producers(
+                shared_menu.active_request_states().clone(),
+            ),
         ),
     ]);
+    for (&site, selectors) in screen_state_selector_domains {
+        ensure!(
+            inline_dispatch_selector_bounds
+                .insert(
+                    site,
+                    InlineDispatchSelectorBounds::from_handler_table(selectors.clone()),
+                )
+                .is_none(),
+            "screen-state inline dispatch duplicates existing selector bounds at {:02X}:${:04X}",
+            site.0,
+            site.1,
+        );
+    }
 
     let handler_trace = trace_fixed_scheduler_contexts(
         source,
@@ -248,7 +275,7 @@ pub(super) fn bind_fixed_scheduler_execution(
         FIXED_SCHEDULER_DISPATCH_CALL,
         FIXED_SCHEDULER_RETURN_ADDRESS,
         positive_entry_contexts.iter().copied(),
-        &owned_inline_selector_domains,
+        &inline_dispatch_selector_bounds,
         indirect_write_destination_bounds,
     )?;
     let observed_scheduler_contexts =
@@ -336,6 +363,9 @@ pub(super) fn bind_fixed_scheduler_execution(
         source_bound_producer_instruction_starts,
         reachable_instruction_starts: handler_trace.reachable_instruction_starts().clone(),
         bound_switchable_roots: handler_trace.switchable_roots().clone(),
+        indirect_write_sites_below_mapper_space: handler_trace
+            .indirect_write_sites_below_mapper_space()
+            .clone(),
         open_control_facts,
     })
 }

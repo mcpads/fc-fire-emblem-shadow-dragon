@@ -50,6 +50,36 @@ const PENDING_STATE_ESCAPE_CODE: [u8; 18] = [
 const PENDING_STATE_ESCAPE_COMMON_INSTRUCTION_OFFSETS: [u16; 2] = [0, 3];
 const PENDING_STATE_ESCAPE_ACTIVE_INSTRUCTION_OFFSETS: [u16; 6] = [5, 7, 9, 10, 11, 14];
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(in super::super) struct InlineDispatchSelectorBounds {
+    admitted_selectors: BTreeSet<u8>,
+    source_bound_produced_selectors: Option<BTreeSet<u8>>,
+}
+
+impl InlineDispatchSelectorBounds {
+    pub(in super::super) fn from_source_producers(selectors: BTreeSet<u8>) -> Self {
+        Self {
+            admitted_selectors: selectors.clone(),
+            source_bound_produced_selectors: Some(selectors),
+        }
+    }
+
+    pub(in super::super) fn from_handler_table(selectors: BTreeSet<u8>) -> Self {
+        Self {
+            admitted_selectors: selectors,
+            source_bound_produced_selectors: None,
+        }
+    }
+
+    fn admitted_selectors(&self) -> &BTreeSet<u8> {
+        &self.admitted_selectors
+    }
+
+    fn source_bound_produced_selectors(&self) -> Option<&BTreeSet<u8>> {
+        self.source_bound_produced_selectors.as_ref()
+    }
+}
+
 #[derive(Default)]
 struct ReturnFlow {
     continuations: BTreeMap<ActivationId, BTreeSet<ReturnContinuation>>,
@@ -131,6 +161,7 @@ pub(in super::super) struct StatefulBankExecution {
     inline_dispatch_selectors: BTreeMap<(u8, u16), BTreeSet<u8>>,
     inline_dispatch_entry_banks: BTreeMap<(u8, u16, u8), BTreeSet<u8>>,
     terminal_entry_contexts: BTreeMap<(u8, u16), BTreeSet<(u8, u8)>>,
+    indirect_write_sites_below_mapper_space: BTreeSet<(u8, u16, u8)>,
 }
 
 impl StatefulBankExecution {
@@ -178,6 +209,12 @@ impl StatefulBankExecution {
             .cloned()
             .unwrap_or_default()
     }
+
+    pub(in super::super) fn indirect_write_sites_below_mapper_space(
+        &self,
+    ) -> &BTreeSet<(u8, u16, u8)> {
+        &self.indirect_write_sites_below_mapper_space
+    }
 }
 
 pub(super) fn bind_reset_bank_entries(
@@ -211,7 +248,7 @@ pub(in super::super) fn trace_fixed_scheduler_contexts(
     dispatch_call_address: u16,
     return_address: u16,
     entry_contexts: impl IntoIterator<Item = (u8, u8)>,
-    owned_inline_selector_domains: &BTreeMap<(u8, u16), BTreeSet<u8>>,
+    inline_dispatch_selector_bounds: &BTreeMap<(u8, u16), InlineDispatchSelectorBounds>,
     indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
 ) -> Result<StatefulBankExecution> {
     let entry_contexts = entry_contexts.into_iter().collect::<BTreeSet<_>>();
@@ -237,11 +274,11 @@ pub(in super::super) fn trace_fixed_scheduler_contexts(
         .iter()
         .map(|(selector, _)| *selector)
         .collect::<BTreeSet<_>>();
-    let owned_scheduler_domain = owned_inline_selector_domains
+    let scheduler_bounds = inline_dispatch_selector_bounds
         .get(&(FIXED_PRG_BANK, dispatch_call_address))
         .context("fixed scheduler inline dispatch has no owner-bound selector domain")?;
     ensure!(
-        selectors.is_subset(owned_scheduler_domain),
+        selectors.is_subset(scheduler_bounds.admitted_selectors()),
         "fixed scheduler positive contexts exceed the owner-bound selector domain"
     );
     let dispatch = bind_inline_pointer_dispatch(
@@ -297,7 +334,7 @@ pub(in super::super) fn trace_fixed_scheduler_contexts(
         return_flow,
         &BTreeSet::new(),
         &BTreeSet::from([(FIXED_PRG_BANK, dispatch_call_address)]),
-        owned_inline_selector_domains,
+        inline_dispatch_selector_bounds,
         indirect_write_destination_bounds,
     )
     .context("trace one fixed-scheduler source epoch")?;
@@ -332,7 +369,7 @@ fn trace_bank_state_entries(
     mut return_flow: ReturnFlow,
     terminal_entries: &BTreeSet<(u8, u16)>,
     terminal_inline_dispatches: &BTreeSet<(u8, u16)>,
-    owned_inline_selector_domains: &BTreeMap<(u8, u16), BTreeSet<u8>>,
+    inline_dispatch_selector_bounds: &BTreeMap<(u8, u16), InlineDispatchSelectorBounds>,
     indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
 ) -> Result<StatefulBankExecution> {
     let mut visited = BTreeMap::<ResetTraceIdentity, ResetTraceState>::new();
@@ -342,6 +379,7 @@ fn trace_bank_state_entries(
     let mut inline_dispatch_selectors = BTreeMap::<_, BTreeSet<_>>::new();
     let mut inline_dispatch_entry_banks = BTreeMap::<_, BTreeSet<_>>::new();
     let mut terminal_entry_contexts = BTreeMap::<_, BTreeSet<_>>::new();
+    let mut indirect_write_sites_below_mapper_space = BTreeMap::<_, bool>::new();
     let mut transparent_call_summaries =
         BTreeMap::<(u8, u16), Option<StateTransparentCallSummary>>::new();
 
@@ -447,13 +485,18 @@ fn trace_bank_state_entries(
             continue;
         }
         reachable_instruction_starts.insert((physical_bank, state.address));
-        apply_data_effect(
+        if let Some(observation) = apply_data_effect(
             &instruction,
             &mut state,
             physical_bank,
             indirect_write_destination_bounds,
             &mut open_facts,
-        )?;
+        )? {
+            record_indirect_write_observation(
+                &mut indirect_write_sites_below_mapper_space,
+                observation,
+            );
+        }
 
         match rp2a03_direct_control_flow(&instruction, state.address)? {
             Rp2a03DirectControlFlow::FallThrough { next } => {
@@ -505,8 +548,8 @@ fn trace_bank_state_entries(
                 let mut selectors = match state.accumulator.known_values() {
                     Some(selectors) => selectors,
                     None => {
-                        let Some(selectors) =
-                            owned_inline_selector_domains.get(&(physical_bank, state.address))
+                        let Some(bounds) =
+                            inline_dispatch_selector_bounds.get(&(physical_bank, state.address))
                         else {
                             open_facts.insert(format!(
                                 "inline_dispatch@{physical_bank:02X}:{:04X}:selector_unknown",
@@ -514,28 +557,36 @@ fn trace_bank_state_entries(
                             ));
                             continue;
                         };
+                        let Some(selectors) = bounds.source_bound_produced_selectors() else {
+                            open_facts.insert(format!(
+                                "inline_dispatch@{physical_bank:02X}:{:04X}:selector_producer_unknown[handler_table_count={}]",
+                                state.address,
+                                bounds.admitted_selectors().len(),
+                            ));
+                            continue;
+                        };
                         ensure!(
                             !selectors.is_empty(),
-                            "owned inline dispatch at {physical_bank:02X}:${:04X} has an empty selector domain",
+                            "source-produced inline dispatch at {physical_bank:02X}:${:04X} has an empty selector domain",
                             state.address,
                         );
                         selectors.iter().copied().collect()
                     }
                 };
-                if let Some(owned) =
-                    owned_inline_selector_domains.get(&(physical_bank, state.address))
+                if let Some(bounds) =
+                    inline_dispatch_selector_bounds.get(&(physical_bank, state.address))
                 {
                     let outside_owned = selectors
                         .iter()
                         .copied()
-                        .filter(|selector| !owned.contains(selector))
+                        .filter(|selector| !bounds.admitted_selectors().contains(selector))
                         .collect::<Vec<_>>();
                     if !outside_owned.is_empty() {
                         open_facts.insert(format!(
                             "inline_dispatch@{physical_bank:02X}:{:04X}:selectors_outside_owned_domain={outside_owned:02X?}",
                             state.address,
                         ));
-                        selectors.retain(|selector| owned.contains(selector));
+                        selectors.retain(|selector| bounds.admitted_selectors().contains(selector));
                     }
                 } else {
                     open_facts.insert(format!(
@@ -700,6 +751,10 @@ fn trace_bank_state_entries(
         inline_dispatch_selectors,
         inline_dispatch_entry_banks,
         terminal_entry_contexts,
+        indirect_write_sites_below_mapper_space: indirect_write_sites_below_mapper_space
+            .into_iter()
+            .filter_map(|(site, is_below_mapper_space)| is_below_mapper_space.then_some(site))
+            .collect(),
     })
 }
 
@@ -1411,13 +1466,32 @@ fn record_fixed_to_switchable_entry(
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct IndirectWriteObservation {
+    site: (u8, u16, u8),
+    is_below_mapper_space: bool,
+}
+
+fn record_indirect_write_observation(
+    observations: &mut BTreeMap<(u8, u16, u8), bool>,
+    observation: IndirectWriteObservation,
+) {
+    observations
+        .entry(observation.site)
+        .and_modify(|all_contexts_are_below_mapper_space| {
+            *all_contexts_are_below_mapper_space &= observation.is_below_mapper_space;
+        })
+        .or_insert(observation.is_below_mapper_space);
+}
+
 fn apply_data_effect(
     instruction: &retro_rp2a03::Instruction,
     state: &mut ResetTraceState,
     physical_bank: u8,
     indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
     open_facts: &mut BTreeSet<String>,
-) -> Result<()> {
+) -> Result<Option<IndirectWriteObservation>> {
+    let mut indirect_write_observation = None;
     let mode = instruction.addressing_mode();
     let operand = instruction.operand();
     match (instruction.mnemonic(), mode, operand) {
@@ -1476,6 +1550,7 @@ fn apply_data_effect(
             state.write_memory(address, state.index_y);
         }
         (Mnemonic::Sta, AddressingMode::ZeroPageIndirectIndexedY, Operand::Byte(pointer)) => {
+            let site = (physical_bank, state.address, pointer);
             if let (Some(low), Some(high), Some(index_y)) = (
                 state.read_memory(u16::from(pointer)),
                 state.read_memory(u16::from(pointer.wrapping_add(1))),
@@ -1487,6 +1562,10 @@ fn apply_data_effect(
                 if (0xA000..=0xAFFF).contains(&target) {
                     state.mapped_prg_bank = state.accumulator.singleton().map(|value| value & 0x0F);
                 }
+                indirect_write_observation = Some(IndirectWriteObservation {
+                    site,
+                    is_below_mapper_space: target < 0x8000,
+                });
             } else {
                 if let Some(bounds) =
                     indirect_write_destination_bounds.get(&(physical_bank, state.address, pointer))
@@ -1500,12 +1579,20 @@ fn apply_data_effect(
                         bounds.role(),
                     );
                     state.clear_memory_in_ranges(bounds.destination_ranges());
+                    indirect_write_observation = Some(IndirectWriteObservation {
+                        site,
+                        is_below_mapper_space: true,
+                    });
                 } else {
                     open_facts.insert(format!(
                         "effective_write@{physical_bank:02X}:{:04X}:indirect_target_unknown",
                         state.address,
                     ));
                     state.clear_memory_and_bank();
+                    indirect_write_observation = Some(IndirectWriteObservation {
+                        site,
+                        is_below_mapper_space: false,
+                    });
                 }
             }
         }
@@ -1616,7 +1703,7 @@ fn apply_data_effect(
         }
         _ => {}
     }
-    Ok(())
+    Ok(indirect_write_observation)
 }
 
 fn compare(register: Option<u8>, operand: u8, state: &mut ResetTraceState) {
@@ -1678,6 +1765,26 @@ mod tests {
         let reset_vector = fixed + usize::from(0xFFFC - FIXED_CPU_START);
         bytes[reset_vector..reset_vector + 2].copy_from_slice(&reset_root.to_le_bytes());
         Rom::parse(bytes).unwrap()
+    }
+
+    fn trace_with_inline_selector_bounds(
+        source: &Rom,
+        root: u16,
+        bounds: BTreeMap<(u8, u16), InlineDispatchSelectorBounds>,
+    ) -> StatefulBankExecution {
+        let mut activations = ActivationArena::default();
+        let root_activation = activations.root(FIXED_PRG_BANK, root);
+        trace_bank_state_entries(
+            source,
+            VecDeque::from([ResetTraceState::at(root, root_activation)]),
+            activations,
+            ReturnFlow::default(),
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+            &bounds,
+            &BTreeMap::new(),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -1762,7 +1869,7 @@ mod tests {
             synthetic_destination_bounds((FIXED_PRG_BANK, 0xC100, 0x02), vec![0x0025..=0x0025]);
         let mut open_facts = BTreeSet::new();
 
-        apply_data_effect(
+        let observation = apply_data_effect(
             &instruction,
             &mut state,
             FIXED_PRG_BANK,
@@ -1783,6 +1890,13 @@ mod tests {
         assert_eq!(state.read_memory(0x05EE), Some(0x09));
         assert_eq!(state.mapped_prg_bank, Some(0x06));
         assert!(open_facts.is_empty());
+        assert_eq!(
+            observation,
+            Some(IndirectWriteObservation {
+                site: (FIXED_PRG_BANK, 0xC100, 0x02),
+                is_below_mapper_space: true,
+            })
+        );
     }
 
     #[test]
@@ -1795,7 +1909,7 @@ mod tests {
         state.mapped_prg_bank = Some(0x06);
         let mut open_facts = BTreeSet::new();
 
-        apply_data_effect(
+        let observation = apply_data_effect(
             &instruction,
             &mut state,
             FIXED_PRG_BANK,
@@ -1813,6 +1927,61 @@ mod tests {
                 .iter()
                 .any(|fact| fact.contains("indirect_target_unknown"))
         );
+        assert_eq!(
+            observation,
+            Some(IndirectWriteObservation {
+                site: (FIXED_PRG_BANK, 0xC100, 0x02),
+                is_below_mapper_space: false,
+            })
+        );
+    }
+
+    #[test]
+    fn exact_indirect_ram_destination_is_admitted_by_the_stateful_trace() {
+        let source = synthetic_source(
+            &[(
+                0xC100,
+                &[
+                    0xA9, 0x51, 0x85, 0x08, // pointer low = $51
+                    0xA9, 0x04, 0x85, 0x09, // pointer high = $04
+                    0xA0, 0x02, // Y = 2
+                    0xA9, 0x00, 0x91, 0x08, // STA ($08),Y -> $0453
+                    0x60,
+                ],
+            )],
+            0xC100,
+        );
+
+        let trace =
+            bind_reset_bank_entries(&source, 0xC100, &BTreeSet::new(), &BTreeMap::new()).unwrap();
+
+        assert_eq!(
+            trace.indirect_write_sites_below_mapper_space(),
+            &BTreeSet::from([(FIXED_PRG_BANK, 0xC10C, 0x08)])
+        );
+        assert!(trace.open_fact_descriptions().is_empty());
+    }
+
+    #[test]
+    fn one_unresolved_context_disqualifies_an_indirect_write_site() {
+        let site = (FIXED_PRG_BANK, 0xC100, 0x08);
+        let mut observations = BTreeMap::new();
+        record_indirect_write_observation(
+            &mut observations,
+            IndirectWriteObservation {
+                site,
+                is_below_mapper_space: true,
+            },
+        );
+        record_indirect_write_observation(
+            &mut observations,
+            IndirectWriteObservation {
+                site,
+                is_below_mapper_space: false,
+            },
+        );
+
+        assert_eq!(observations, BTreeMap::from([(site, false)]));
     }
 
     #[test]
@@ -1921,6 +2090,108 @@ mod tests {
                 .reachable_instruction_starts()
                 .contains(&(0x0F, 0xC130))
         );
+    }
+
+    #[test]
+    fn handler_table_does_not_invent_an_unknown_selector_producer() {
+        let source = synthetic_source(
+            &[
+                (
+                    0xC100,
+                    &[
+                        0xA9, 0x06, // LDA #$06
+                        0x8D, 0x00, 0xA0, // STA $A000
+                        0xAD, 0x00, 0x04, // LDA $0400
+                        0x20, 0x4C, 0xC3, // JSR $C34C
+                        0x20, 0xC1, 0x30, 0xC1, // inline target table
+                    ],
+                ),
+                (0xC120, &[0x60]),
+                (0xC130, &[0x60]),
+                (
+                    INLINE_POINTER_DISPATCH_ADDRESS,
+                    &INLINE_POINTER_DISPATCH_CODE,
+                ),
+            ],
+            0xC100,
+        );
+        let trace = trace_with_inline_selector_bounds(
+            &source,
+            0xC100,
+            BTreeMap::from([(
+                (FIXED_PRG_BANK, 0xC108),
+                InlineDispatchSelectorBounds::from_handler_table(BTreeSet::from([0x00, 0x01])),
+            )]),
+        );
+
+        assert_eq!(
+            trace.inline_dispatch_contexts(FIXED_PRG_BANK, 0xC108),
+            BTreeSet::new()
+        );
+        assert!(trace.open_fact_descriptions().iter().any(|fact| {
+            fact == "inline_dispatch@0F:C108:selector_producer_unknown[handler_table_count=2]"
+        }));
+        assert!(
+            !trace
+                .reachable_instruction_starts()
+                .contains(&(0x0F, 0xC120))
+        );
+        assert!(
+            !trace
+                .reachable_instruction_starts()
+                .contains(&(0x0F, 0xC130))
+        );
+    }
+
+    #[test]
+    fn known_selector_can_use_a_source_bound_handler_table() {
+        let source = synthetic_source(
+            &[
+                (
+                    0xC100,
+                    &[
+                        0xA9, 0x06, // LDA #$06
+                        0x8D, 0x00, 0xA0, // STA $A000
+                        0xA9, 0x01, // LDA #$01
+                        0x20, 0x4C, 0xC3, // JSR $C34C
+                        0x20, 0xC1, 0x30, 0xC1, // inline target table
+                    ],
+                ),
+                (0xC120, &[0x60]),
+                (0xC130, &[0x60]),
+                (
+                    INLINE_POINTER_DISPATCH_ADDRESS,
+                    &INLINE_POINTER_DISPATCH_CODE,
+                ),
+            ],
+            0xC100,
+        );
+        let trace = trace_with_inline_selector_bounds(
+            &source,
+            0xC100,
+            BTreeMap::from([(
+                (FIXED_PRG_BANK, 0xC107),
+                InlineDispatchSelectorBounds::from_handler_table(BTreeSet::from([0x00, 0x01])),
+            )]),
+        );
+
+        assert_eq!(
+            trace
+                .inline_dispatch_selectors()
+                .get(&(FIXED_PRG_BANK, 0xC107)),
+            Some(&BTreeSet::from([0x01]))
+        );
+        assert!(
+            !trace
+                .reachable_instruction_starts()
+                .contains(&(0x0F, 0xC120))
+        );
+        assert!(
+            trace
+                .reachable_instruction_starts()
+                .contains(&(0x0F, 0xC130))
+        );
+        assert!(trace.open_fact_descriptions().is_empty());
     }
 
     #[test]
@@ -2178,8 +2449,10 @@ mod tests {
             ],
             0xC100,
         );
-        let owned_domains =
-            BTreeMap::from([((FIXED_PRG_BANK, 0xC102), BTreeSet::from([0x00, 0x01]))]);
+        let selector_bounds = BTreeMap::from([(
+            (FIXED_PRG_BANK, 0xC102),
+            InlineDispatchSelectorBounds::from_source_producers(BTreeSet::from([0x00, 0x01])),
+        )]);
 
         let trace = trace_fixed_scheduler_contexts(
             &source,
@@ -2187,7 +2460,7 @@ mod tests {
             0xC102,
             0xC100,
             [(0x00, 0x06)],
-            &owned_domains,
+            &selector_bounds,
             &BTreeMap::new(),
         )
         .unwrap();

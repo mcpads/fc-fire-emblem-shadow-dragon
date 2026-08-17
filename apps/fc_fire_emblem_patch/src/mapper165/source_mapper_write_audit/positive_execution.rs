@@ -13,12 +13,14 @@ use super::{FIXED_PRG_BANK, source_mapped_location};
 mod chapter_map_loader;
 mod fixed_scheduler;
 mod fixed_vectors;
+mod screen_state_dispatches;
 mod shared_menu_request;
 mod state_accesses;
 
 use chapter_map_loader::{CHAPTER_MAP_INDIRECT_WRITE_SITE, bind_chapter_map_loader_destination};
 use fixed_scheduler::bind_fixed_scheduler_execution;
 use fixed_vectors::bind_fixed_vector_execution;
+use screen_state_dispatches::bind_source_screen_state_dispatches;
 use shared_menu_request::bind_shared_menu_execution_source;
 pub(super) use state_accesses::PositiveStateAccess;
 use state_accesses::bind_positive_state_accesses;
@@ -197,6 +199,7 @@ pub(super) fn bind_source_positive_execution_graph(
     let title_state: TitleStateExecution = bind_title_state_execution(source)?;
     let shared_menu_controller = crate::shop_flow::bind_shared_menu_controller_source(source)?;
     let shared_menu = bind_shared_menu_execution_source(source, &shared_menu_controller)?;
+    let screen_state_dispatches = bind_source_screen_state_dispatches(source)?;
     for (&site, destination) in shared_menu.indirect_write_destinations() {
         ensure!(
             source_bound_indirect_destinations
@@ -218,6 +221,7 @@ pub(super) fn bind_source_positive_execution_graph(
         source,
         &title_state,
         &shared_menu,
+        screen_state_dispatches.selector_domains(),
         &fixed_scheduler_entry_contexts,
         &source_bound_indirect_destinations,
     )?;
@@ -275,6 +279,7 @@ pub(super) fn bind_source_positive_execution_graph(
                 .iter(),
         )
         .chain(fixed_vectors.indirect_write_sites_below_mapper_space())
+        .chain(fixed_scheduler.indirect_write_sites_below_mapper_space())
         .copied()
         .collect();
 

@@ -1,4 +1,81 @@
 use super::*;
+use std::collections::BTreeSet;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct OuterScreenStateDispatchSource {
+    prg_bank: u8,
+    call_address: u16,
+    selector_domain: BTreeSet<u8>,
+}
+
+impl OuterScreenStateDispatchSource {
+    pub(crate) fn prg_bank(&self) -> u8 {
+        self.prg_bank
+    }
+
+    pub(crate) fn call_address(&self) -> u16 {
+        self.call_address
+    }
+
+    pub(crate) fn selector_domain(&self) -> &BTreeSet<u8> {
+        &self.selector_domain
+    }
+}
+
+pub(crate) fn bind_outer_screen_state_dispatch_source(
+    rom: &Rom,
+) -> Result<OuterScreenStateDispatchSource> {
+    rom.verify_supported_japanese()?;
+    let prg_bank = 0x06;
+    let dispatcher_address = 0x8400;
+    let dispatcher_offset = source_file_offset(prg_bank, dispatcher_address)?;
+    let dispatcher_end = dispatcher_offset + DISPATCH_OUTER_SCREEN_STATE_BYTES.len();
+    let dispatcher = rom
+        .data()
+        .get(dispatcher_offset..dispatcher_end)
+        .context("outer-screen dispatcher is outside the source")?;
+    ensure!(
+        dispatcher == DISPATCH_OUTER_SCREEN_STATE_BYTES,
+        "outer-screen state dispatcher changed"
+    );
+    decode_rp2a03_sequence(
+        dispatcher,
+        dispatcher_address,
+        "dispatch outer screen state",
+    )?;
+
+    let call_address = dispatcher_address + 2;
+    let table_address = dispatcher_address
+        + u16::try_from(DISPATCH_OUTER_SCREEN_STATE_BYTES.len())
+            .context("outer-screen dispatcher length overflow")?;
+    let table_offset = source_file_offset(prg_bank, table_address)?;
+    let table_end = table_offset + OUTER_SCREEN_STATE_HANDLERS.len() * 2;
+    let handlers = rom
+        .data()
+        .get(table_offset..table_end)
+        .context("outer-screen handler table is outside the source")?
+        .chunks_exact(2)
+        .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
+        .collect::<Vec<_>>();
+    ensure!(
+        handlers == OUTER_SCREEN_STATE_HANDLERS,
+        "outer-screen state handler table changed"
+    );
+    ensure!(
+        OUTER_SCREEN_STATE_HANDLERS[0x0D].to_le_bytes() == OUTER_SCREEN_0D_HANDLER_POINTER_BYTES
+            && OUTER_SCREEN_STATE_HANDLERS[0x0E].to_le_bytes()
+                == OUTER_SCREEN_0E_HANDLER_POINTER_BYTES,
+        "chapter-transition outer-screen handler ownership changed"
+    );
+    let selector_count =
+        u8::try_from(handlers.len()).context("outer-screen selector count exceeds one byte")?;
+
+    Ok(OuterScreenStateDispatchSource {
+        prg_bank,
+        call_address,
+        selector_domain: (0..selector_count).collect(),
+    })
+}
 
 fn validated_chapter_intro_contexts(
     rom: &Rom,

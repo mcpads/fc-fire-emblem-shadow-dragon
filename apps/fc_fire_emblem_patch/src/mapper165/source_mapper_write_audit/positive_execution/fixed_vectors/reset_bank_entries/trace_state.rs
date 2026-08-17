@@ -121,6 +121,7 @@ struct ResetTraceMemory {
     pointer_low_00: ByteValueSet,
     pointer_high_01: ByteValueSet,
     saved_prg_bank_08: ByteValueSet,
+    pointer_high_09: ByteValueSet,
     title_animation_staging_0a: ByteValueSet,
     outer_screen_state_24: ByteValueSet,
     scheduler_state_25: ByteValueSet,
@@ -134,15 +135,16 @@ struct ResetTraceMemory {
     temporary_sprite_prg_bank_05c6: ByteValueSet,
     pending_state_request_05cc: ByteValueSet,
     requested_prg_bank_05c7: ByteValueSet,
+    outer_state_05db: ByteValueSet,
     menu_state_05de: ByteValueSet,
     composite_state_05e8: ByteValueSet,
     dialogue_or_sound_state_05ee: ByteValueSet,
 }
 
 impl ResetTraceMemory {
-    const ADDRESSES: [u16; 19] = [
-        0x0000, 0x0001, 0x0008, 0x000A, 0x0024, 0x0025, 0x0029, 0x0044, 0x0051, 0x0084, 0x053E,
-        0x057A, 0x0587, 0x05C6, 0x05C7, 0x05CC, 0x05DE, 0x05E8, 0x05EE,
+    const ADDRESSES: [u16; 21] = [
+        0x0000, 0x0001, 0x0008, 0x0009, 0x000A, 0x0024, 0x0025, 0x0029, 0x0044, 0x0051, 0x0084,
+        0x053E, 0x057A, 0x0587, 0x05C6, 0x05C7, 0x05CC, 0x05DB, 0x05DE, 0x05E8, 0x05EE,
     ];
 
     fn read(&self, address: u16) -> ByteValueSet {
@@ -150,6 +152,7 @@ impl ResetTraceMemory {
             0x0000 => self.pointer_low_00.clone(),
             0x0001 => self.pointer_high_01.clone(),
             0x0008 => self.saved_prg_bank_08.clone(),
+            0x0009 => self.pointer_high_09.clone(),
             0x000A => self.title_animation_staging_0a.clone(),
             0x0024 => self.outer_screen_state_24.clone(),
             0x0025 => self.scheduler_state_25.clone(),
@@ -163,6 +166,7 @@ impl ResetTraceMemory {
             0x05C6 => self.temporary_sprite_prg_bank_05c6.clone(),
             0x05C7 => self.requested_prg_bank_05c7.clone(),
             0x05CC => self.pending_state_request_05cc.clone(),
+            0x05DB => self.outer_state_05db.clone(),
             0x05DE => self.menu_state_05de.clone(),
             0x05E8 => self.composite_state_05e8.clone(),
             0x05EE => self.dialogue_or_sound_state_05ee.clone(),
@@ -175,6 +179,7 @@ impl ResetTraceMemory {
             0x0000 => self.pointer_low_00 = value,
             0x0001 => self.pointer_high_01 = value,
             0x0008 => self.saved_prg_bank_08 = value,
+            0x0009 => self.pointer_high_09 = value,
             0x000A => self.title_animation_staging_0a = value,
             0x0024 => self.outer_screen_state_24 = value,
             0x0025 => self.scheduler_state_25 = value,
@@ -188,6 +193,7 @@ impl ResetTraceMemory {
             0x05C6 => self.temporary_sprite_prg_bank_05c6 = value,
             0x05C7 => self.requested_prg_bank_05c7 = value,
             0x05CC => self.pending_state_request_05cc = value,
+            0x05DB => self.outer_state_05db = value,
             0x05DE => self.menu_state_05de = value,
             0x05E8 => self.composite_state_05e8 = value,
             0x05EE => self.dialogue_or_sound_state_05ee = value,

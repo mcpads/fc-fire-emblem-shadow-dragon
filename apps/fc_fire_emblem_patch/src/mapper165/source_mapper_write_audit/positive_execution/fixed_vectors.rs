@@ -28,7 +28,7 @@ const RESET_RAM_CLEAR_CODE: [u8; 18] = [
 pub(super) mod reset_bank_entries;
 mod special_bank_call;
 
-pub(super) use reset_bank_entries::trace_fixed_scheduler_contexts;
+pub(super) use reset_bank_entries::{InlineDispatchSelectorBounds, trace_fixed_scheduler_contexts};
 
 use reset_bank_entries::bind_reset_bank_entries;
 use special_bank_call::bind_audio_bank_call;

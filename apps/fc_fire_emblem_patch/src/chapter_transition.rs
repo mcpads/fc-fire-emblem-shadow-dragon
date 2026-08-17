@@ -43,8 +43,10 @@ use runtime_routes::*;
 pub(crate) use save_dialogue::bind_save_complete_dialogue_records;
 use save_routes::*;
 use sound_test_routes::*;
-pub(crate) use source_binding::bind_chapter_intro_lifetime_contexts;
 use source_binding::*;
+pub(crate) use source_binding::{
+    bind_chapter_intro_lifetime_contexts, bind_outer_screen_state_dispatch_source,
+};
 use source_spec::*;
 pub(crate) use source_spec::{
     SAVE_OFFER_FIXED_STRING_INDEX, SAVE_OFFER_LABEL_ADDRESS, SAVE_OFFER_LABEL_BYTES,

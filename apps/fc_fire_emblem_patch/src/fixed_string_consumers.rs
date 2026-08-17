@@ -106,6 +106,32 @@ pub(crate) struct CompositeStateProducer {
     pub(crate) state: u8,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct CompositeStateDispatchSource {
+    prg_bank: u8,
+    call_address: u16,
+    handler_selector_domain: BTreeSet<u8>,
+    direct_producer_selector_domain: BTreeSet<u8>,
+}
+
+impl CompositeStateDispatchSource {
+    pub(crate) fn prg_bank(&self) -> u8 {
+        self.prg_bank
+    }
+
+    pub(crate) fn call_address(&self) -> u16 {
+        self.call_address
+    }
+
+    pub(crate) fn handler_selector_domain(&self) -> &BTreeSet<u8> {
+        &self.handler_selector_domain
+    }
+
+    pub(crate) fn direct_producer_selector_domain(&self) -> &BTreeSet<u8> {
+        &self.direct_producer_selector_domain
+    }
+}
+
 impl CompositeStateProducer {
     pub(crate) const fn new(
         prg_bank: u8,
@@ -296,6 +322,50 @@ pub(crate) fn bind_direct_composite_state_producer_catalog(
         "direct composite-state producer catalog changed"
     );
     Ok(producers)
+}
+
+/// Binds both the common bank-0B handler-table domain and the states produced by its exact
+/// direct-entry catalog. The latter is deliberately not a complete producer denominator:
+/// states zero and one remain valid table entries even though the direct producer census does
+/// not produce them.
+pub(crate) fn bind_composite_state_dispatch_source(
+    rom: &Rom,
+) -> Result<CompositeStateDispatchSource> {
+    rom.verify_supported_japanese()?;
+    let bank = source_bank(rom, FIXED_STRING_BANK)?;
+    bind_composite_dispatch_table(bank)?;
+    let entry = bank_slice(bank, 0x8000, 6)?;
+    ensure!(
+        entry == [0xAD, 0xE8, 0x05, 0x20, 0x4C, 0xC3],
+        "composite-state dispatcher entry changed"
+    );
+    decode_rp2a03_sequence(entry, 0x8000, "dispatch one composite screen state")?;
+
+    let direct_producer_selector_domain = bind_direct_composite_state_producer_catalog(rom)?
+        .into_iter()
+        .map(|producer| producer.state)
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        !direct_producer_selector_domain.is_empty()
+            && direct_producer_selector_domain
+                .iter()
+                .all(|state| usize::from(*state) < COMPOSITE_STATE_COUNT),
+        "direct composite-state producer domain escapes the handler table"
+    );
+    let handler_selector_domain = (0..u8::try_from(COMPOSITE_STATE_COUNT)
+        .context("composite-state count exceeds u8")?)
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        direct_producer_selector_domain.is_subset(&handler_selector_domain),
+        "direct composite-state producers escape the bound handler domain"
+    );
+
+    Ok(CompositeStateDispatchSource {
+        prg_bank: FIXED_STRING_BANK,
+        call_address: 0x8003,
+        handler_selector_domain,
+        direct_producer_selector_domain,
+    })
 }
 
 pub(crate) fn scan_direct_composite_state_producers(
