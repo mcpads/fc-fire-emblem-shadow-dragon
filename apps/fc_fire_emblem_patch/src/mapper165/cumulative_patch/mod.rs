@@ -3,52 +3,33 @@ use std::{collections::BTreeSet, fs, path::Path};
 use anyhow::{Context, Result, ensure};
 
 use crate::{
-    chapter_transition::plan_chapter_titles,
-    choice_labels::plan_choice_labels,
-    class_profile::plan_class_profiles,
-    dialogue_assets::{
-        MainDialogueBundlePlan, MainDialogueSlicePlan, plan_main_dialogue_bundle,
-        plan_main_dialogue_slice, validate_main_dialogue_workspace,
-    },
+    dialogue_assets::{MainDialogueSlicePlan, plan_main_dialogue_slice},
     font_slots::{ACTIVE_HANGUL_SLOT_COUNT, FONT_PAGE_SIZE},
-    front_end_menu::{FRONT_END_RESULT_DIALOGUE_RECORD_IDS, plan_front_end_menu},
     mmc5_prg::{count_direct_transfers_to_range, fixed_bank_file_offset},
-    rom::{EXPECTED_SOURCE_SHA1, Rom},
+    rom::Rom,
     sha1_hex,
-    text_inventory::plan_fixed_text,
-    title_graphics::{install_title_logo_asset, plan_title_graphics},
+    title_graphics::install_title_logo_asset,
     tracked::TrackedImage,
-    unit_names::plan_unit_names,
 };
 
 use super::{
-    BoundFontPageFallbackGraph, FontPageFallbackNodeRole, OUTPUT_MAPPER,
-    SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS, bind_cumulative_font_page_fallback_graph,
+    OUTPUT_MAPPER, SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
+    bind_cumulative_font_page_fallback_graph,
     dialogue_lifetime_page::{SCREEN_ROLE, build_page_routine_at, plan_dialogue_lifetime_page},
-    dialogue_probe_font::assignment_sha1,
     hangul_page_probe::build_mapper165_hangul_page_probe,
-    maximum_dialogue_page::{
-        COMPLETED_PAGE_COUNT as MAXIMUM_DIALOGUE_PAGE_COUNT,
-        DISPLAY_LINES_PER_PAGE as MAXIMUM_DIALOGUE_LINES_PER_PAGE,
-        SCREEN_ROLE as MAXIMUM_DIALOGUE_SCREEN_ROLE,
-        TARGET_RECORD_ID as MAXIMUM_DIALOGUE_RECORD_ID,
-    },
     roster_page::{
         PAGE_REGISTERS as ROSTER_PAGE_REGISTERS, PAGE_ROUTINE_ADDRESS as ROSTER_SELECTOR_ADDRESS,
         build_page_routine as build_roster_selector,
         build_page_routine_with_fallback as build_chained_roster_selector,
     },
-    shop_dialogue_page::{
-        RECORD_IDS as SHOP_DIALOGUE_RECORD_IDS, SCREEN_ROLE as SHOP_DIALOGUE_SCREEN_ROLE,
-    },
     weapon_shop_shared_text::ITEM_NAME_SOURCE_INDICES as WEAPON_SHOP_ITEM_NAME_SOURCE_INDICES,
-    weapon_shop_shared_text::SCREEN_ROLE as WEAPON_SHOP_SHARED_TEXT_SCREEN_ROLE,
 };
 
 mod battle_stage;
 mod class_profile_runtime;
 mod class_profile_stage;
 mod front_end_stage;
+mod input_plan;
 mod maximum_dialogue_runtime_evidence;
 mod maximum_dialogue_stage;
 mod report;
@@ -65,16 +46,10 @@ use battle_stage::{BattleStageInputs, install_battle_stage};
 use class_profile_runtime::verify_class_profile_runtime_evidence;
 use class_profile_stage::install_class_profile_stage;
 use front_end_stage::install_front_end_stage;
+use input_plan::{CumulativeInputPlan, prepare_cumulative_inputs};
 use maximum_dialogue_runtime_evidence::verify_maximum_dialogue_runtime_evidence;
 use maximum_dialogue_stage::{MaximumDialogueStageInputs, install_maximum_dialogue_stage};
-use report::{
-    CumulativeBattleTextReport, CumulativeChapterTitleReport, CumulativeClassProfileReport,
-    CumulativeDialogueLifetimeReport, CumulativeDialogueReport, CumulativeFrontEndMenuReport,
-    CumulativeMaximumDialogueReport, CumulativeOptionsMenuReport, CumulativePatchReport,
-    CumulativeStageReport, CumulativeTitleLogoReport, CumulativeUnitNameReport,
-    CumulativeWeaponShopSharedTextReport, SelectorFallbackGraphReport, SelectorFallbackNodeReport,
-    SelectorFallbackRouteReport,
-};
+use report::{CumulativeReportInputs, assemble_cumulative_report};
 use shop_dialogue_runtime::verify_shop_dialogue_runtime_evidence;
 use shop_dialogue_stage::install_shop_dialogue_stage;
 use title_logo_runtime::load_title_logo_runtime_evidence;
@@ -167,88 +142,21 @@ pub(crate) struct CumulativePatchInputs<'a> {
 pub(crate) fn build_cumulative_patch(
     inputs: CumulativePatchInputs<'_>,
 ) -> Result<CumulativePatchSummary> {
-    let source_rom = Rom::from_path(inputs.source_path)?;
-    source_rom.verify_supported_japanese()?;
-    let dialogue_workspace =
-        validate_main_dialogue_workspace(inputs.source_path, inputs.main_dialogue_workspace_path)?;
-    ensure!(
-        dialogue_workspace.translation_input_complete,
-        "cumulative build requires complete Japanese-to-Korean dialogue input"
-    );
-    let chapter_title_plan =
-        plan_chapter_titles(&source_rom, inputs.chapter_title_localization_path)?;
-    ensure!(
-        chapter_title_plan.translated_entry_count == chapter_title_plan.entry_count,
-        "cumulative build requires complete Japanese-to-Korean chapter-title input"
-    );
-    let title_graphics_plan =
-        plan_title_graphics(&source_rom, inputs.title_graphics_localization_path)?;
-    ensure!(
-        title_graphics_plan.translated_surface_count == 1,
-        "cumulative build requires one translated Korean title-logo surface"
-    );
-    let front_end_menu_plan =
-        plan_front_end_menu(&source_rom, inputs.front_end_menu_localization_path)?;
-    ensure!(
-        front_end_menu_plan.entries.len() == 7,
-        "cumulative front-end menu scope no longer has seven entries"
-    );
-    let front_end_result_dialogue_plan = plan_main_dialogue_bundle(
-        &source_rom,
-        inputs.main_dialogue_workspace_path,
-        &FRONT_END_RESULT_DIALOGUE_RECORD_IDS,
-    )?;
-    ensure!(
-        front_end_result_dialogue_plan.workspace_sha1 == dialogue_workspace.workspace_sha1
-            && front_end_result_dialogue_plan
-                .record_ids
-                .iter()
-                .map(String::as_str)
-                .eq(FRONT_END_RESULT_DIALOGUE_RECORD_IDS),
-        "front-end result dialogue plan no longer matches its validated workspace population"
-    );
-    let front_end_result_preserved_codes = front_end_result_dialogue_plan
-        .page_worksets
-        .iter()
-        .flat_map(|page| page.preserved_target_active_codes.iter().copied())
-        .collect::<BTreeSet<_>>();
-    ensure!(
-        !front_end_result_preserved_codes.is_empty(),
-        "front-end result dialogue pages have no protected active codes"
-    );
-    let unit_name_plan = plan_unit_names(&source_rom, inputs.unit_name_localization_path)?;
-    let class_profile_plan =
-        plan_class_profiles(&source_rom, inputs.class_profile_localization_path)?;
-    let fixed_text_plan = plan_fixed_text(&source_rom, inputs.fixed_text_workspace_path)?;
-    let choice_label_plan = plan_choice_labels(&source_rom, inputs.choice_label_localization_path)?;
-    let shop_dialogue_plan = plan_main_dialogue_bundle(
-        &source_rom,
-        inputs.main_dialogue_workspace_path,
-        &SHOP_DIALOGUE_RECORD_IDS,
-    )?;
-    ensure!(
-        shop_dialogue_plan.workspace_sha1 == dialogue_workspace.workspace_sha1,
-        "weapon-shop dialogue plans no longer match the validated workspace"
-    );
-    ensure!(
-        shop_dialogue_plan
-            .record_ids
-            .iter()
-            .map(String::as_str)
-            .eq(SHOP_DIALOGUE_RECORD_IDS),
-        "weapon-shop dialogue plan order changed"
-    );
-    let maximum_dialogue_plan = plan_main_dialogue_slice(
-        &source_rom,
-        inputs.main_dialogue_workspace_path,
-        MAXIMUM_DIALOGUE_RECORD_ID,
-    )?;
-    ensure!(
-        maximum_dialogue_plan.workspace_sha1 == dialogue_workspace.workspace_sha1
-            && maximum_dialogue_plan.transition_chain_record_count == 1,
-        "maximum dialogue plan no longer matches its validated single-record lifetime"
-    );
-
+    let input_plan = prepare_cumulative_inputs(&inputs)?;
+    let CumulativeInputPlan {
+        ref source_rom,
+        ref dialogue_workspace,
+        ref chapter_title_plan,
+        ref front_end_menu_plan,
+        ref front_end_result_preserved_codes,
+        ref unit_name_plan,
+        ref class_profile_plan,
+        ref fixed_text_plan,
+        ref choice_label_plan,
+        ref shop_dialogue_plan,
+        ref maximum_dialogue_plan,
+        ..
+    } = input_plan;
     let ui_stage_rom_path = inputs.stage_directory.join(UI_STAGE_ROM_NAME);
     let ui_stage_report_path = inputs.stage_directory.join(UI_STAGE_REPORT_NAME);
     let ui_stage = build_mapper165_hangul_page_probe(
@@ -808,559 +716,46 @@ pub(crate) fn build_cumulative_patch(
         "weapon-shop shared-text output hash changed before battle installation"
     );
     let chapter_two_output_sha1 = sha1_hex(&chapter_two_output);
-    let stages = vec![
-        CumulativeStageReport {
-            role: "mapper165_options_and_roster",
-            output_sha1: ui_stage.output_sha1,
-            report_sha1: Some(ui_stage.report_sha1),
-        },
-        CumulativeStageReport {
-            role: "chapter_1_intro_title_and_dialogue_transition_chain",
-            output_sha1: chapter_one_output_sha1,
-            report_sha1: None,
-        },
-        CumulativeStageReport {
-            role: "chapter_2_intro_title_and_dialogue",
-            output_sha1: chapter_two_output_sha1,
-            report_sha1: None,
-        },
-        CumulativeStageReport {
-            role: "front_end_menu",
-            output_sha1: front_end_stage.output_sha1.clone(),
-            report_sha1: None,
-        },
-        CumulativeStageReport {
-            role: "playable_unit_names_for_roster_and_unit_ui",
-            output_sha1: unit_name_stage.output_sha1.clone(),
-            report_sha1: None,
-        },
-        CumulativeStageReport {
-            role: "automatic_class_profile_titles_and_descriptions",
-            output_sha1: class_profile_stage.output_sha1.clone(),
-            report_sha1: None,
-        },
-        CumulativeStageReport {
-            role: "weapon_shop_dialogue_branches",
-            output_sha1: shop_dialogue_stage.output_sha1.clone(),
-            report_sha1: None,
-        },
-        CumulativeStageReport {
-            role: "weapon_shop_shared_item_names_and_choice_labels",
-            output_sha1: weapon_shop_shared_text_stage.output_sha1.clone(),
-            report_sha1: None,
-        },
-        CumulativeStageReport {
-            role: "battle_text_and_dynamic_composition",
-            output_sha1: battle_stage.output_sha1.clone(),
-            report_sha1: Some(battle_stage.loader_report_sha1.clone()),
-        },
-        CumulativeStageReport {
-            role: "chapter_7_maximum_dialogue_page_reload",
-            output_sha1: maximum_dialogue_stage.output_sha1.clone(),
-            report_sha1: None,
-        },
-        CumulativeStageReport {
-            role: "source_bound_korean_title_logo",
-            output_sha1: title_logo_stage.output_sha1.clone(),
-            report_sha1: None,
-        },
-    ];
-    let report = CumulativePatchReport {
-        schema: REPORT_SCHEMA,
-        source_sha1: EXPECTED_SOURCE_SHA1,
+    let report = assemble_cumulative_report(CumulativeReportInputs {
+        input_plan: &input_plan,
         output_sha1: output_sha1.clone(),
-        output_mapper: output_rom.mapper(),
-        prg_size: output_rom.prg().len(),
-        chr_size: output_rom.chr().len(),
-        stage_count: stages.len(),
-        stages,
-        chapter_titles: CumulativeChapterTitleReport {
-            workspace_sha1: chapter_title_plan.workspace_sha1.clone(),
-            workspace_entry_count: chapter_title_plan.entry_count,
-            translated_entry_count: chapter_title_plan.translated_entry_count,
-            installed_entry_count: 2,
-            installed_chapter_indices: vec![CHAPTER_ONE_INDEX, CHAPTER_TWO_INDEX],
-            installed_source_storage_byte_count: chapter_one_title.source_storage_byte_count
-                + chapter_two_title.source_storage_byte_count,
-            installed_output_storage_byte_count: chapter_one_encoded_title.len()
-                + chapter_two_encoded_title.len(),
-            original_digits_preserved: true,
-            intro_title_table_installed: true,
-            ending_scroll_duplicate_installed: false,
-            review_complete: chapter_title_plan.review_complete,
-        },
-        main_dialogue: CumulativeDialogueReport {
-            workspace_sha1: chapter_one_plans[0].workspace_sha1.clone(),
-            workspace_record_count: dialogue_workspace.record_count,
-            workspace_filled_line_count: dialogue_workspace.filled_line_count,
-            installed_record_count: installed_main_dialogue_record_count,
-            installed_translated_line_count: translated_line_count,
-            installed_shared_page_glyph_slot_count: installed_dialogue_glyph_slot_count,
-            source_storage_byte_count,
-            planned_storage_byte_count,
-            remaining_storage_byte_count: source_storage_byte_count - planned_storage_byte_count,
-            lifetimes: vec![
-                dialogue_lifetime_report(
-                    SCREEN_ROLE,
-                    CHAPTER_ONE_INDEX,
-                    &chapter_one_plans,
-                    &chapter_one_encoded_records,
-                    &chapter_one_page,
-                ),
-                dialogue_lifetime_report(
-                    CHAPTER_TWO_SCREEN_ROLE,
-                    CHAPTER_TWO_INDEX,
-                    &chapter_two_plans,
-                    &chapter_two_encoded_records,
-                    &chapter_two_page,
-                ),
-                shop_dialogue_lifetime_report(
-                    &shop_dialogue_plan,
-                    &shop_dialogue_stage.page,
-                    shop_dialogue_runtime.as_ref(),
-                ),
-            ],
-            maximum_page_reloaded_lifetime: CumulativeMaximumDialogueReport {
-                screen_role: MAXIMUM_DIALOGUE_SCREEN_ROLE,
-                target_record_id: maximum_dialogue_plan.record_id.clone(),
-                workspace_sha1: maximum_dialogue_plan.workspace_sha1.clone(),
-                record_page_boundary_topology_sha1: maximum_dialogue_stage
-                    .page
-                    .record_page_boundary_topology_sha1
-                    .clone(),
-                screen_evidence_manifest_sha1: maximum_dialogue_stage
-                    .page
-                    .evidence_manifest_sha1
-                    .clone(),
-                page_boundary_manifest_sha1: maximum_dialogue_stage
-                    .page
-                    .page_boundary_manifest_sha1
-                    .clone(),
-                page_boundary_observation_output_sha1: maximum_dialogue_stage
-                    .page
-                    .boundary_observation_output_sha1
-                    .clone(),
-                installed_translated_line_count: maximum_dialogue_plan.translated_line_count,
-                source_storage_byte_count: maximum_dialogue_plan.source_storage_byte_count,
-                planned_storage_byte_count: maximum_dialogue_stage.page.encoded_record.len(),
-                remaining_storage_byte_count: maximum_dialogue_plan.source_storage_byte_count
-                    - maximum_dialogue_stage.page.encoded_record.len(),
-                completed_page_count: MAXIMUM_DIALOGUE_PAGE_COUNT,
-                display_lines_per_page: MAXIMUM_DIALOGUE_LINES_PER_PAGE,
-                font_group_count: maximum_dialogue_stage.page.assignments.len(),
-                page_group_indices: maximum_dialogue_stage.page.page_groups.clone(),
-                group_page_counts: maximum_dialogue_stage.page.group_page_counts.clone(),
-                group_unique_glyph_counts: maximum_dialogue_stage
-                    .page
-                    .group_unique_glyph_counts
-                    .clone(),
-                glyph_assignment_sha1s: maximum_dialogue_stage
-                    .page
-                    .assignments
-                    .iter()
-                    .map(assignment_sha1)
-                    .collect(),
-                preserved_screen_active_code_count: maximum_dialogue_stage
-                    .page
-                    .preserved_screen_active_code_count,
-                preserved_source_active_code_count: maximum_dialogue_stage
-                    .page
-                    .preserved_source_active_code_count,
-                preserved_active_code_count: maximum_dialogue_stage
-                    .page
-                    .preserved_active_code_count,
-                temporal_sample_count: maximum_dialogue_stage.page.temporal_sample_count,
-                unique_nametable_count: maximum_dialogue_stage.page.unique_nametable_count,
-                font_physical_pages: maximum_dialogue_stage.page.physical_chr_pages.clone(),
-                font_mapper_registers: maximum_dialogue_stage.page.mapper_registers.clone(),
-                font_page_sha1s: maximum_dialogue_stage.page.font_page_sha1s.clone(),
-                font_page_pack_sha1: sha1_hex(&maximum_dialogue_stage.page.page_pack),
-                completed_page_pointers_hex: maximum_dialogue_stage
-                    .page
-                    .completed_page_pointers
-                    .iter()
-                    .map(|pointer| format!("0x{pointer:04X}"))
-                    .collect(),
-                group_transition_pointers_hex: maximum_dialogue_stage
-                    .page
-                    .group_transition_pointers
-                    .iter()
-                    .map(|pointer| format!("0x{pointer:04X}"))
-                    .collect(),
-                initial_selector_byte_count: maximum_dialogue_stage.initial_selector_byte_count,
-                font_group_selector_byte_count: maximum_dialogue_stage
-                    .font_group_selector_byte_count,
-                completed_page_transition_byte_count: maximum_dialogue_stage
-                    .completed_page_transition_byte_count,
-                completed_page_reload_installed: true,
-                final_page_exit_bypasses_reload: true,
-                original_english_and_digits_preserved: true,
-                runtime_evidence_manifest_sha1: maximum_dialogue_runtime
-                    .as_ref()
-                    .map(|runtime| runtime.manifest_sha1.clone()),
-                runtime_sample_count: maximum_dialogue_runtime
-                    .as_ref()
-                    .map_or(0, |runtime| runtime.sample_count),
-                runtime_page_count: maximum_dialogue_runtime
-                    .as_ref()
-                    .map_or(0, |runtime| runtime.page_count),
-                runtime_unique_nametable_count: maximum_dialogue_runtime
-                    .as_ref()
-                    .map_or(0, |runtime| runtime.unique_nametable_count),
-                runtime_temporal_screen_count: maximum_dialogue_runtime
-                    .as_ref()
-                    .map_or(0, |runtime| runtime.temporal_screen_count),
-                runtime_pages_with_visual_phase_change: maximum_dialogue_runtime
-                    .as_ref()
-                    .map_or(0, |runtime| runtime.pages_with_visual_phase_change),
-                runtime_visual_review_passed: maximum_dialogue_runtime
-                    .as_ref()
-                    .is_some_and(|runtime| runtime.visual_review_passed),
-                initial_selector_runtime_bound_to_build: maximum_dialogue_runtime
-                    .as_ref()
-                    .is_some_and(|runtime| runtime.initial_selector_observed),
-                page_reload_runtime_bound_to_build: maximum_dialogue_runtime
-                    .as_ref()
-                    .is_some_and(|runtime| runtime.page_reload_bound_to_build),
-                final_exit_runtime_bound_to_build: maximum_dialogue_runtime
-                    .as_ref()
-                    .is_some_and(|runtime| runtime.final_exit_bound_to_build),
-                runtime_bound_to_build: maximum_dialogue_runtime.as_ref().is_some_and(|runtime| {
-                    runtime.initial_selector_observed
-                        && runtime.page_reload_bound_to_build
-                        && runtime.final_exit_bound_to_build
-                }),
-            },
-        },
-        options_menu: CumulativeOptionsMenuReport {
-            installed_entry_count: 3,
-            screen_evidence_manifest_sha1: ui_stage.options_screen_evidence_manifest_sha1.clone(),
-            temporal_sample_count: ui_stage.options_temporal_sample_count,
-            unique_nametable_count: ui_stage.options_unique_nametable_count,
-            observed_row_states: ui_stage.options_observed_row_states.clone(),
-            target_glyph_count: ui_stage.options_target_glyph_count,
-            visible_active_code_count: ui_stage.options_visible_active_code_count,
-            preserved_active_code_count: ui_stage.options_preserved_active_code_count,
-            total_slot_demand: ui_stage.options_total_slot_demand,
-            capacity_bound_to_build: true,
-        },
-        front_end_menu: CumulativeFrontEndMenuReport {
-            workspace_sha1: front_end_menu_plan.workspace_sha1.clone(),
-            workspace_entry_count: front_end_menu_plan.entries.len(),
-            installed_entry_count: front_end_menu_plan.entries.len(),
-            installed_source_storage_byte_count: front_end_menu_plan
-                .entries
-                .iter()
-                .map(|entry| entry.source_storage_byte_count)
-                .sum(),
-            installed_output_storage_byte_count: front_end_stage
-                .encoded_entries
-                .iter()
-                .map(Vec::len)
-                .sum(),
-            original_english_and_digits_preserved: true,
-            screen_evidence_manifest_sha1: front_end_stage.page.manifest_sha1.clone(),
-            temporal_sample_count: front_end_stage.page.temporal_sample_count,
-            unique_nametable_count: front_end_stage.page.unique_nametable_count,
-            unique_glyph_count: front_end_stage.page.assignments.len(),
-            glyph_assignment_sha1: assignment_sha1(&front_end_stage.page.assignments),
-            preserved_screen_active_code_count: front_end_stage
-                .page
-                .preserved_screen_active_code_count,
-            preserved_source_active_code_count: front_end_stage
-                .page
-                .preserved_source_active_code_count,
-            preserved_result_dialogue_active_code_count: front_end_stage
-                .page
-                .preserved_result_dialogue_active_code_count,
-            preserved_active_code_count: front_end_stage.page.preserved_active_code_count,
-            font_physical_page: front_end_stage.page.physical_chr_page,
-            font_mapper_register: front_end_stage.page.mapper_register,
-            font_page_sha1: front_end_stage.page.page_sha1.clone(),
-            font_page_pack_sha1: sha1_hex(&front_end_stage.page.page_pack),
-            central_fe_companion_refresh_routed: true,
-            no_save_source_lifetime_bound: true,
-            save_slot_selection_source_lifetime_bound: true,
-            runtime_variants_bound_to_build: false,
-            review_complete: front_end_menu_plan.review_complete,
-        },
-        playable_unit_names: CumulativeUnitNameReport {
-            workspace_sha1: unit_name_plan.workspace_sha1.clone(),
-            workspace_entry_count: unit_name_plan.entries.len(),
-            unique_glyph_count: unit_name_plan.unique_glyphs().len(),
-            roster_page_target_glyph_count: unit_name_stage.page.roster_assignments.len(),
-            roster_page_preserved_active_code_count: unit_name_stage
-                .page
-                .preserved_roster_code_count,
-            roster_page_total_slot_demand,
-            roster_projection_byte_count: unit_name_stage.tables.roster.pointer_table.len()
-                + unit_name_stage.tables.roster.strings.len(),
-            unit_ui_projection_byte_count: unit_name_stage.tables.unit_ui.pointer_table.len()
-                + unit_name_stage.tables.unit_ui.strings.len(),
-            roster_assignment_sha1: assignment_sha1(&unit_name_stage.page.roster_assignments),
-            unit_ui_assignment_sha1: assignment_sha1(&unit_name_stage.page.unit_ui_assignments),
-            roster_page_pack_sha1: unit_name_stage.page.roster_page_pack_sha1.clone(),
-            unit_ui_page_pack_sha1: unit_name_stage.page.unit_ui_page_pack_sha1.clone(),
-            unit_ui_font_physical_page: unit_name_stage.page.unit_ui_physical_page,
-            unit_ui_font_mapper_register: unit_name_stage.page.unit_ui_mapper_register,
-            screen_evidence_manifest_sha1: unit_name_stage.page.evidence_manifest_sha1.clone(),
-            temporal_sample_count: unit_name_stage.page.temporal_sample_count,
-            unique_nametable_count: unit_name_stage.page.unique_nametable_count,
-            preserved_unit_ui_code_count: unit_name_stage.page.preserved_unit_ui_code_count,
-            roster_projection_installed: true,
-            unit_summary_projection_installed: true,
-            source_battle_table_preserved: false,
-            source_ending_table_preserved: true,
-            roster_capacity_bound_to_build: true,
-            runtime_bound_to_build: false,
-            review_complete: unit_name_plan.review_complete,
-        },
-        automatic_class_profiles: CumulativeClassProfileReport {
-            workspace_sha1: class_profile_plan.workspace_sha1.clone(),
-            workspace_entry_count: class_profile_plan.entries.len(),
-            installed_entry_count: class_profile_plan.entries.len(),
-            installed_description_line_count: class_profile_plan.description_line_count(),
-            installed_source_storage_byte_count: class_profile_plan
-                .entries
-                .iter()
-                .map(|entry| {
-                    entry.title_source_storage_byte_count
-                        + entry.description_source_storage_byte_count
-                })
-                .sum(),
-            installed_output_storage_byte_count: class_profile_stage
-                .encoded_titles
-                .iter()
-                .chain(&class_profile_stage.encoded_descriptions)
-                .map(Vec::len)
-                .sum(),
-            total_unique_glyph_count: class_profile_plan.unique_glyphs().len(),
-            page_unique_glyph_counts: [
-                class_profile_stage.page.assignments[0].len(),
-                class_profile_stage.page.assignments[1].len(),
-            ],
-            glyph_assignment_sha1s: [
-                assignment_sha1(&class_profile_stage.page.assignments[0]),
-                assignment_sha1(&class_profile_stage.page.assignments[1]),
-            ],
-            font_physical_pages: class_profile_stage.page.physical_pages,
-            font_mapper_registers: class_profile_stage.page.mapper_registers,
-            font_page_sha1s: class_profile_stage.page.page_sha1s.clone(),
-            font_page_pack_sha1: sha1_hex(&class_profile_stage.page.page_pack),
-            screen_evidence_manifest_sha1: class_profile_stage.page.evidence_manifest_sha1.clone(),
-            temporal_sample_count: class_profile_stage.page.temporal_sample_count,
-            unique_image_count: class_profile_stage.page.unique_image_count,
-            runtime_evidence_manifest_sha1: class_profile_runtime
-                .as_ref()
-                .map_or_else(String::new, |runtime| runtime.manifest_sha1.clone()),
-            runtime_sample_count: class_profile_runtime
-                .as_ref()
-                .map_or(0, |runtime| runtime.sample_count),
-            runtime_unique_image_count: class_profile_runtime
-                .as_ref()
-                .map_or(0, |runtime| runtime.unique_image_count),
-            visible_code_count: class_profile_stage.page.visible_code_count,
-            preserved_active_code_count: class_profile_stage.page.preserved_active_code_count,
-            original_english_digits_and_ui_preserved: true,
-            profile_index_page_selector_installed: true,
-            runtime_bound_to_build: class_profile_runtime.is_some(),
-            review_complete: class_profile_plan.review_complete,
-        },
-        title_logo: CumulativeTitleLogoReport {
-            workspace_sha1: title_graphics_plan.workspace_sha1.clone(),
-            asset_sha1: title_logo_stage.asset_sha1.clone(),
-            source_owned_tile_count: title_logo_stage.source_owned_tile_count,
-            installed_unique_tile_count: title_logo_stage.installed_unique_tile_count,
-            installed_tilemap_cell_count: title_logo_stage.installed_tilemap_cell_count,
-            physical_chr_page: title_logo_stage.physical_chr_page,
-            installed_chr_page_sha1: title_logo_stage.installed_chr_page_sha1.clone(),
-            installed_stream_sha1: title_logo_stage.installed_stream_sha1.clone(),
-            installed_runtime_cleared_top_strip_cell_count: title_logo_stage
-                .installed_runtime_cleared_top_strip_cell_count,
-            installed_runtime_reasserted_logo_cell_count: title_logo_stage
-                .installed_runtime_reasserted_logo_cell_count,
-            installed_runtime_completion_stream_sha1: title_logo_stage
-                .installed_runtime_completion_stream_sha1
-                .clone(),
-            preserved_title_stream_bytes_unchanged: title_logo_stage
-                .preserved_title_stream_bytes_unchanged,
-            preserved_runtime_completion_control_bytes_unchanged: title_logo_stage
-                .preserved_runtime_completion_control_bytes_unchanged,
-            unassigned_title_chr_patterns_unchanged: title_logo_stage
-                .unassigned_title_chr_patterns_unchanged,
-            source_sword_sprite_tm_and_copyright_assets_unchanged: true,
-            runtime_evidence_manifest_sha1: title_logo_runtime
-                .as_ref()
-                .map_or_else(String::new, |runtime| runtime.manifest_sha1.clone()),
-            runtime_sample_count: title_logo_runtime
-                .as_ref()
-                .map_or(0, |runtime| runtime.sample_count),
-            runtime_unique_image_count: title_logo_runtime
-                .as_ref()
-                .map_or(0, |runtime| runtime.unique_image_count),
-            runtime_bound_to_build: title_logo_runtime.is_some(),
-            review_complete: title_graphics_plan.review_complete,
-        },
-        weapon_shop_shared_text: CumulativeWeaponShopSharedTextReport {
-            screen_role: WEAPON_SHOP_SHARED_TEXT_SCREEN_ROLE,
-            fixed_text_workspace_sha1: weapon_shop_shared_text_stage
-                .plan
-                .fixed_text_workspace_sha1
-                .clone(),
-            choice_label_workspace_sha1: weapon_shop_shared_text_stage
-                .plan
-                .choice_label_workspace_sha1
-                .clone(),
-            installed_item_name_count: weapon_shop_shared_text_stage
-                .plan
-                .projection
-                .item_name_count,
-            installed_choice_label_count: choice_label_plan.entries.len(),
-            projected_item_pointer_count: weapon_shop_shared_text_stage
-                .plan
-                .projection
-                .item_pointer_table
-                .len()
-                / 2,
-            item_string_byte_count: weapon_shop_shared_text_stage
-                .plan
-                .projection
-                .item_string_byte_count,
-            choice_string_byte_count: weapon_shop_shared_text_stage
-                .plan
-                .projection
-                .choice_string_byte_count,
-            shared_page_unique_glyph_count: weapon_shop_shared_text_stage
-                .plan
-                .page
-                .assignments
-                .len(),
-            shared_page_preserved_active_code_count: weapon_shop_shared_text_stage
-                .plan
-                .page
-                .preserved_active_code_count,
-            shared_page_total_slot_demand: weapon_shop_shared_page_total_slot_demand,
-            added_glyph_count: weapon_shop_shared_text_stage.plan.page.assignments.len()
-                - shop_dialogue_stage.page.assignments.len(),
-            glyph_assignment_sha1: assignment_sha1(
-                &weapon_shop_shared_text_stage.plan.page.assignments,
-            ),
-            font_physical_page: weapon_shop_shared_text_stage.plan.page.physical_chr_page,
-            font_mapper_register: weapon_shop_shared_text_stage.plan.page.mapper_register,
-            font_page_sha1: weapon_shop_shared_text_stage.plan.page.page_sha1.clone(),
-            font_page_pack_sha1: sha1_hex(&weapon_shop_shared_text_stage.plan.page.page_pack),
-            item_list_pointer_selector_installed: true,
-            selected_item_pointer_selector_installed: true,
-            choice_pointer_selector_installed: true,
-            unconverted_consumers_fallback_to_source_tables: true,
-            capacity_bound_screen_roles: WEAPON_SHOP_CAPACITY_BOUND_SCREEN_ROLES.to_vec(),
-            runtime_evidence_manifest_sha1: weapon_shop_shared_text_runtime
-                .as_ref()
-                .map_or_else(String::new, |runtime| runtime.manifest_sha1.clone()),
-            runtime_evidence_output_sha1: weapon_shop_shared_text_runtime
-                .as_ref()
-                .map_or_else(String::new, |runtime| runtime.output_sha1.clone()),
-            runtime_sample_count: weapon_shop_shared_text_runtime
-                .as_ref()
-                .map_or(0, |runtime| runtime.sample_count),
-            runtime_unique_image_count: weapon_shop_shared_text_runtime
-                .as_ref()
-                .map_or(0, |runtime| runtime.unique_image_count),
-            runtime_bound_dialogue_screen_roles: weapon_shop_shared_text_runtime
-                .as_ref()
-                .map_or_else(Vec::new, |runtime| runtime.dialogue_screen_roles.clone()),
-            runtime_bound_item_name_screen_roles: weapon_shop_shared_text_runtime
-                .as_ref()
-                .map_or_else(Vec::new, |runtime| runtime.item_name_screen_roles.clone()),
-            runtime_bound_choice_label_screen_roles: weapon_shop_shared_text_runtime
-                .as_ref()
-                .map_or_else(Vec::new, |runtime| {
-                    runtime.choice_label_screen_roles.clone()
-                }),
-            runtime_bound_to_stage_output: weapon_shop_shared_text_runtime.is_some(),
-            runtime_carried_forward_by_verified_writes: weapon_shop_shared_text_runtime.is_some(),
-            review_complete: weapon_shop_shared_text_stage.plan.review_complete,
-        },
-        battle_text: CumulativeBattleTextReport {
-            fixed_text_workspace_sha1: battle_stage.fixed_workspace_sha1.clone(),
-            dialogue_workspace_sha1: battle_stage.dialogue_workspace_sha1.clone(),
-            temporal_manifest_sha1: battle_stage.temporal_manifest_sha1.clone(),
-            runtime_base_report_sha1: battle_stage.runtime_base_report_sha1.clone(),
-            loader_report_sha1: battle_stage.loader_report_sha1.clone(),
-            installed_fixed_entry_count: battle_stage.fixed_entry_count,
-            installed_unit_name_count: battle_stage.unit_name_count,
-            installed_enemy_name_count: battle_stage.enemy_name_count,
-            installed_class_name_count: battle_stage.class_name_count,
-            installed_item_name_count: battle_stage.item_name_count,
-            installed_terrain_name_count: battle_stage.terrain_name_count,
-            installed_battle_message_template_count: battle_stage.battle_message_template_count,
-            installed_battle_forecast_label_count: battle_stage.battle_forecast_label_count,
-            weapon_shop_item_names_subset_of_battle_catalog: true,
-            installed_dialogue_record_count: battle_stage.dialogue_record_count,
-            installed_translated_line_count: battle_stage.dialogue_translated_line_count,
-            stable_color_count: battle_stage.stable_color_count,
-            glyph_atlas_tile_count: battle_stage.glyph_atlas_tile_count,
-            observed_runtime_tuple_count: battle_stage.observed_runtime_tuple_count,
-            maximum_observed_overlay_count: battle_stage.maximum_observed_overlay_count,
-            maximum_observed_ppu_write_count: battle_stage.maximum_observed_ppu_write_count,
-            runtime_routine_byte_count: battle_stage.runtime_routine_byte_count,
-            text_diff_range_count: battle_stage.text_diff_range_count,
-            cumulative_selector_ranges_preserved: true,
-            original_english_digits_and_graphics_preserved: true,
-            runtime_bound_to_build: false,
-            review_complete: false,
-        },
-        selector_fallback_graph: selector_fallback_graph_report(&selector_fallback_graph),
-        original_chr_preserved: false,
+        output_rom: &output_rom,
+        ui_stage: &ui_stage,
+        chapter_one_output_sha1,
+        chapter_two_output_sha1,
+        chapter_one_plans: &chapter_one_plans,
+        chapter_two_plans: &chapter_two_plans,
+        chapter_one_title: &chapter_one_title,
+        chapter_two_title: &chapter_two_title,
+        chapter_one_encoded_records: &chapter_one_encoded_records,
+        chapter_two_encoded_records: &chapter_two_encoded_records,
+        chapter_one_encoded_title: &chapter_one_encoded_title,
+        chapter_two_encoded_title: &chapter_two_encoded_title,
+        chapter_one_page: &chapter_one_page,
+        chapter_two_page: &chapter_two_page,
+        front_end_stage: &front_end_stage,
+        unit_name_stage: &unit_name_stage,
+        class_profile_stage: &class_profile_stage,
+        shop_dialogue_stage: &shop_dialogue_stage,
+        weapon_shop_shared_text_stage: &weapon_shop_shared_text_stage,
+        battle_stage: &battle_stage,
+        maximum_dialogue_stage: &maximum_dialogue_stage,
+        title_logo_stage: &title_logo_stage,
+        maximum_dialogue_runtime: &maximum_dialogue_runtime,
+        title_logo_runtime: &title_logo_runtime,
+        shop_dialogue_runtime: &shop_dialogue_runtime,
+        class_profile_runtime: &class_profile_runtime,
+        weapon_shop_shared_text_runtime: &weapon_shop_shared_text_runtime,
+        selector_fallback_graph: &selector_fallback_graph,
         tracked_write_count,
-        translation_input_complete: dialogue_workspace.translation_input_complete
-            && chapter_title_plan.translated_entry_count == chapter_title_plan.entry_count
-            && front_end_menu_plan.entries.len() == 7
-            && unit_name_plan.entries.len() == 53
-            && class_profile_plan.entries.len() == 22
-            && weapon_shop_shared_text_stage
-                .plan
-                .projection
-                .item_name_count
-                == 6
-            && choice_label_plan.entries.len() == 2
-            && battle_stage.dialogue_record_count == 28
-            && title_graphics_plan.translated_surface_count == 1,
-        review_complete: dialogue_workspace.review_complete
-            && chapter_title_plan.review_complete
-            && front_end_menu_plan.review_complete
-            && unit_name_plan.review_complete
-            && class_profile_plan.review_complete
-            && weapon_shop_shared_text_stage.plan.review_complete
-            && title_graphics_plan.review_complete,
-        runtime_verified: false,
-        unresolved: vec![
-            "The translated Chapter 1 and Chapter 2 title bars need cold-route runtime regression together with every installed dialogue page and natural map restoration.",
-            "Private observations passed the installed no-save and valid-save front-end variants, but installed runtime evidence is not yet build-bound and the suspend-data variant is unverified.",
-            "Playable-unit names are installed for roster, map unit-summary/status, and battle consumers; ending consumers remain Japanese backlog until their own font lifetimes are installed.",
-            "The translated playable-unit name pages still need build-bound cold runtime evidence across roster, unit summary, unit status, and their exit paths.",
-            if weapon_shop_shared_text_runtime.is_some() {
-                "The installed weapon-shop shared page is capacity-bound to all nine screen roles at 150/210 slots. The decline route is runtime-bound to the eighth-stage output through item selection, choices, continue prompt, item-list return, exit message, and map restoration; the final cumulative output, purchase, and every preflight branch still need exact-output runtime evidence."
-            } else {
-                "The installed weapon-shop shared page is capacity-bound to all nine screen roles, but exact-output runtime evidence was explicitly deferred for this development build. Every shop route remains dynamically unbound to this artifact."
-            },
-            "Battle text and the dynamic composition loader are installed in this cumulative lineage, but the new cumulative output still needs cold-route battle and prior-screen regression evidence.",
-            if maximum_dialogue_runtime.is_some() {
-                "The source-bound fifteen-page maximum dialogue has exact-output evidence for its state-bridged Chapter 7 seize entry, initial selector, all page font reloads, irregular temporal samples, and the final NEXT STORY exit; cold-route prior-screen continuity remains open."
-            } else {
-                "The source-bound fifteen-page maximum dialogue is installed, but exact-output runtime evidence was not supplied for this development build. Initial selection, page reloads, final exit, and cold-route prior-screen continuity remain dynamically unbound."
-            },
-            if title_logo_runtime.is_some() {
-                "The source-bound Korean title logo is exact-output-bound through its initial and completed blink phases, preserved sword, two-cell TM, copyright line, and automatic profile exit. The later defeat-route title return and human visual approval remain open."
-            } else {
-                "The source-bound Korean title logo is installed, but exact-output runtime evidence was explicitly deferred for this development build. Initial and completed blink phases, the later defeat-route title return, and human visual approval remain open."
-            },
-            "The remaining main-dialogue screen lifetimes and translated non-dialogue surfaces are not yet installed in this cumulative lineage.",
-            "The ending scroll owns a separate physical copy of all chapter titles; that duplicate consumer is not installed by this intro-title stage.",
-            "Human translation review is incomplete, so this output is a development build rather than a release candidate.",
-        ],
-        release_eligible: false,
-    };
+        translated_line_count,
+        source_storage_byte_count,
+        planned_storage_byte_count,
+        installed_main_dialogue_record_count,
+        installed_dialogue_glyph_slot_count,
+        weapon_shop_shared_page_total_slot_demand,
+        roster_page_total_slot_demand,
+    });
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize cumulative Korean patch report")?;
     report_bytes.push(b'\n');
@@ -1380,140 +775,6 @@ pub(crate) fn build_cumulative_patch(
         installed_glyph_slot_count,
         tracked_write_count,
     })
-}
-
-fn dialogue_lifetime_report(
-    screen_role: &'static str,
-    chapter_index: u8,
-    plans: &[MainDialogueSlicePlan],
-    encoded_records: &[Vec<u8>],
-    page: &super::dialogue_lifetime_page::DialogueLifetimePagePlan,
-) -> CumulativeDialogueLifetimeReport {
-    let installed_translated_line_count = plans
-        .iter()
-        .map(|plan| plan.translated_line_count)
-        .sum::<usize>();
-    let source_storage_byte_count = plans
-        .iter()
-        .map(|plan| plan.source_storage_byte_count)
-        .sum::<usize>();
-    let planned_storage_byte_count = encoded_records.iter().map(Vec::len).sum::<usize>();
-
-    CumulativeDialogueLifetimeReport {
-        screen_role,
-        chapter_index,
-        screen_evidence_manifest_sha1: page.manifest_sha1.clone(),
-        installed_record_count: plans.len(),
-        installed_translated_line_count,
-        source_storage_byte_count,
-        planned_storage_byte_count,
-        remaining_storage_byte_count: source_storage_byte_count - planned_storage_byte_count,
-        unique_glyph_count: page.assignments.len(),
-        glyph_assignment_sha1: assignment_sha1(&page.assignments),
-        preserved_screen_active_code_count: page.preserved_screen_active_code_count,
-        preserved_source_active_code_count: page.preserved_source_active_code_count,
-        preserved_active_code_count: page.preserved_active_code_count,
-        temporal_sample_count: page.temporal_sample_count,
-        unique_nametable_count: page.unique_nametable_count,
-        font_physical_page: page.physical_chr_page,
-        font_mapper_register: page.mapper_register,
-        font_page_sha1: page.page_sha1.clone(),
-        font_page_pack_sha1: sha1_hex(&page.page_pack),
-        runtime_evidence_manifest_sha1: None,
-        runtime_sample_count: 0,
-        runtime_unique_image_count: 0,
-        runtime_bound_to_dialogue_stage_output: false,
-    }
-}
-
-fn selector_fallback_graph_report(
-    graph: &BoundFontPageFallbackGraph,
-) -> SelectorFallbackGraphReport {
-    let mut incoming_route_counts = std::collections::BTreeMap::<&str, usize>::new();
-    for route in &graph.routes {
-        *incoming_route_counts.entry(route.target_role).or_default() += 1;
-    }
-    SelectorFallbackGraphReport {
-        schema: 1,
-        node_count: graph.nodes.len(),
-        route_count: graph.routes.len(),
-        multi_entry_target_count: incoming_route_counts
-            .values()
-            .filter(|count| **count > 1)
-            .count(),
-        direct_entry_candidate_count: graph.direct_entry_candidate_count,
-        conditional_entry_count: graph.conditional_entry_count,
-        terminal_fallback_count: graph.terminal_fallback_count,
-        generated_selector_structure_bound: true,
-        active_fixed_direct_entry_candidates_partitioned: true,
-        nodes: graph
-            .nodes
-            .iter()
-            .map(|node| SelectorFallbackNodeReport {
-                role: node.role.id(),
-                cpu_range_hex: format!(
-                    "0x{:04X}..0x{:04X}",
-                    node.cpu_address, node.cpu_end_exclusive
-                ),
-                mapper_registers_hex: node
-                    .mapper_registers
-                    .iter()
-                    .map(|register| format!("0x{register:02X}"))
-                    .collect(),
-                admitted_chapter_indices: if node.role
-                    == FontPageFallbackNodeRole::ChapterIntroDialogue
-                {
-                    vec![CHAPTER_ONE_INDEX, CHAPTER_TWO_INDEX]
-                } else {
-                    Vec::new()
-                },
-            })
-            .collect(),
-        routes: graph
-            .routes
-            .iter()
-            .map(|route| SelectorFallbackRouteReport {
-                source_role: route.source_role,
-                source_cpu_address_hex: format!("0x{:04X}", route.source_cpu_address),
-                transfer_kind: route.transfer_kind.id(),
-                target_role: route.target_role,
-                target_cpu_address_hex: format!("0x{:04X}", route.target_cpu_address),
-            })
-            .collect(),
-    }
-}
-
-fn shop_dialogue_lifetime_report(
-    plan: &MainDialogueBundlePlan,
-    page: &super::shop_dialogue_page::ShopDialoguePagePlan,
-    runtime: Option<&shop_dialogue_runtime::ShopDialogueRuntimeEvidence>,
-) -> CumulativeDialogueLifetimeReport {
-    CumulativeDialogueLifetimeReport {
-        screen_role: SHOP_DIALOGUE_SCREEN_ROLE,
-        chapter_index: CHAPTER_ONE_INDEX,
-        screen_evidence_manifest_sha1: page.manifest_sha1.clone(),
-        installed_record_count: plan.record_ids.len(),
-        installed_translated_line_count: plan.translated_line_count,
-        source_storage_byte_count: plan.source_record_storage_byte_count,
-        planned_storage_byte_count: plan.planned_record_storage_byte_count,
-        remaining_storage_byte_count: plan.source_record_storage_byte_count
-            - plan.planned_record_storage_byte_count,
-        unique_glyph_count: page.assignments.len(),
-        glyph_assignment_sha1: assignment_sha1(&page.assignments),
-        preserved_screen_active_code_count: page.preserved_screen_active_code_count,
-        preserved_source_active_code_count: page.preserved_source_active_code_count,
-        preserved_active_code_count: page.preserved_active_code_count,
-        temporal_sample_count: page.sample_count,
-        unique_nametable_count: page.unique_nametable_count,
-        font_physical_page: page.physical_chr_page,
-        font_mapper_register: page.mapper_register,
-        font_page_sha1: page.page_sha1.clone(),
-        font_page_pack_sha1: sha1_hex(&page.page_pack),
-        runtime_evidence_manifest_sha1: runtime.map(|runtime| runtime.manifest_sha1.clone()),
-        runtime_sample_count: runtime.map_or(0, |runtime| runtime.sample_count),
-        runtime_unique_image_count: runtime.map_or(0, |runtime| runtime.unique_image_count),
-        runtime_bound_to_dialogue_stage_output: runtime.is_some(),
-    }
 }
 
 fn write_file(path: &Path, data: &[u8]) -> Result<()> {

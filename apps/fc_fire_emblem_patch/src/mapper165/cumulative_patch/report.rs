@@ -1,5 +1,9 @@
 use serde::Serialize;
 
+mod assembly;
+
+pub(super) use assembly::{CumulativeReportInputs, assemble_cumulative_report};
+
 #[derive(Debug, Serialize)]
 pub(super) struct CumulativePatchReport {
     pub(super) schema: u8,

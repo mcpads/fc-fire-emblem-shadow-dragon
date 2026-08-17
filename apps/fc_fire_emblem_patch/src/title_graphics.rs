@@ -12,7 +12,9 @@ use crate::{
 mod install;
 mod logo_asset;
 
-pub(crate) use install::{TITLE_RUNTIME_COMPLETION_STREAM_BYTE_COUNT, install_title_logo_asset};
+pub(crate) use install::{
+    InstalledTitleLogo, TITLE_RUNTIME_COMPLETION_STREAM_BYTE_COUNT, install_title_logo_asset,
+};
 pub(crate) use logo_asset::build_title_logo_asset;
 
 const PRG_BANK_SIZE: usize = 16 * 1024;
