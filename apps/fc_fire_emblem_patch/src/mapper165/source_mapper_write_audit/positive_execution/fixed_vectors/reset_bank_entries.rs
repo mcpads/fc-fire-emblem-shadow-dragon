@@ -19,12 +19,12 @@ use crate::{
     typed_source::{Rp2a03DirectControlFlow, rp2a03_direct_control_flow},
 };
 
-#[cfg(test)]
-use super::super::control_state::{MAP_DIALOGUE_OUTER_STATE, OUTER_SCREEN_STATE};
 use super::super::control_state::{
-    ObservedControlStateWrites, PENDING_SHARED_MENU_REQUEST_STATE, PRG_BANK_SHADOW,
-    merge_observed_control_state_writes, positive_control_state,
+    FIXED_SCHEDULER_DISPATCH_GATE, ObservedControlStateWrites, PENDING_SHARED_MENU_REQUEST_STATE,
+    PRG_BANK_SHADOW, merge_observed_control_state_writes, positive_control_state,
 };
+#[cfg(test)]
+use super::super::control_state::{MAIN_STATE, MAP_DIALOGUE_OUTER_STATE, OUTER_SCREEN_STATE};
 use super::super::indexed_write_destinations::AbsoluteIndexedWriteDestinationBounds;
 use super::{FIXED_CPU_START, FIXED_PRG_BANK, RESET_RAM_CLEAR_CODE, RESET_RAM_CLEAR_START};
 
@@ -34,7 +34,7 @@ mod trace_state;
 use call_effects::{StateTransparentCallSummary, inspect_state_transparent_call};
 use trace_state::{
     ActivationId, ByteValueSet, ResetTraceIdentity, ResetTraceState, ReturnContinuation,
-    ReturnFrame,
+    ReturnFrame, TrackedByteLocation,
 };
 
 const MAXIMUM_RESET_TRACE_STATES: usize = 50_000;
@@ -451,6 +451,7 @@ pub(in super::super) fn trace_fixed_scheduler_contexts(
     for (selector, mapped_prg_bank) in entry_contexts.iter().copied() {
         let mut state = ResetTraceState::at(dispatch_call_address, ActivationId(0));
         state.write_memory(0x0025, Some(selector));
+        state.write_memory_values(FIXED_SCHEDULER_DISPATCH_GATE, ByteValueSet::nonzero());
         for (&address, &value) in initial_memory_values {
             state.write_memory(address, Some(value));
         }
@@ -989,13 +990,17 @@ fn trace_bank_state_entries(
                 let condition = branch_condition(instruction.mnemonic(), &state);
                 if condition != Some(false) {
                     let mut taken = state.clone();
-                    taken.address = target;
-                    pending.push_back(taken);
+                    if refine_branch_state(instruction.mnemonic(), true, &mut taken) {
+                        taken.address = target;
+                        pending.push_back(taken);
+                    }
                 }
                 if condition != Some(true) {
                     if let Some(fallthrough) = fallthrough {
-                        state.address = fallthrough;
-                        pending.push_back(state);
+                        if refine_branch_state(instruction.mnemonic(), false, &mut state) {
+                            state.address = fallthrough;
+                            pending.push_back(state);
+                        }
                     }
                 }
             }
@@ -1607,6 +1612,7 @@ fn summarize_reset_ram_clear(
     state.set_index_y(Some(0));
     state.zero = Some(false);
     state.negative = Some(true);
+    state.clear_zero_source();
     state.address = RESET_RAM_CLEAR_START + u16::try_from(RESET_RAM_CLEAR_CODE.len())?;
     Ok(())
 }
@@ -2229,6 +2235,7 @@ fn apply_data_effect(
             state.write_memory_values(u16::from(address), values.clone());
             state.zero = values.uniform(|value| value == 0);
             state.negative = values.uniform(|value| value & 0x80 != 0);
+            state.set_zero_source_for_memory(u16::from(address), 0);
         }
         (Mnemonic::Dec, AddressingMode::ZeroPage, Operand::Byte(address)) => {
             let values = state
@@ -2237,6 +2244,7 @@ fn apply_data_effect(
             state.write_memory_values(u16::from(address), values.clone());
             state.zero = values.uniform(|value| value == 0);
             state.negative = values.uniform(|value| value & 0x80 != 0);
+            state.set_zero_source_for_memory(u16::from(address), 0);
         }
         (Mnemonic::Inc, AddressingMode::Absolute, Operand::Word(address)) => {
             let values = state
@@ -2245,6 +2253,7 @@ fn apply_data_effect(
             state.write_memory_values(address, values.clone());
             state.zero = values.uniform(|value| value == 0);
             state.negative = values.uniform(|value| value & 0x80 != 0);
+            state.set_zero_source_for_memory(address, 0);
         }
         (Mnemonic::Dec, AddressingMode::Absolute, Operand::Word(address)) => {
             let values = state
@@ -2253,6 +2262,7 @@ fn apply_data_effect(
             state.write_memory_values(address, values.clone());
             state.zero = values.uniform(|value| value == 0);
             state.negative = values.uniform(|value| value & 0x80 != 0);
+            state.set_zero_source_for_memory(address, 0);
         }
         (
             Mnemonic::Asl
@@ -2287,13 +2297,28 @@ fn apply_data_effect(
             state.set_accumulator_values(state.accumulator.map(|value| value ^ mask));
         }
         (Mnemonic::Cmp, AddressingMode::Immediate, Operand::Byte(value)) => {
-            compare_register(state.accumulator.clone(), value, state);
+            compare_register(
+                state.accumulator.clone(),
+                TrackedByteLocation::Accumulator,
+                value,
+                state,
+            );
         }
         (Mnemonic::Cpx, AddressingMode::Immediate, Operand::Byte(value)) => {
-            compare_register(state.index_x.clone(), value, state);
+            compare_register(
+                state.index_x.clone(),
+                TrackedByteLocation::IndexX,
+                value,
+                state,
+            );
         }
         (Mnemonic::Cpy, AddressingMode::Immediate, Operand::Byte(value)) => {
-            compare_register(state.index_y.clone(), value, state);
+            compare_register(
+                state.index_y.clone(),
+                TrackedByteLocation::IndexY,
+                value,
+                state,
+            );
         }
         (Mnemonic::Clc, AddressingMode::Implied, Operand::None) => state.carry = Some(false),
         (Mnemonic::Sec, AddressingMode::Implied, Operand::None) => state.carry = Some(true),
@@ -2320,6 +2345,7 @@ fn apply_data_effect(
             state.zero = None;
             state.negative = None;
             state.carry = None;
+            state.clear_zero_source();
         }
         _ => {}
     }
@@ -2406,13 +2432,20 @@ fn apply_absolute_indexed_read_modify_write(
             state.write_memory_values(target, result.clone());
             state.zero = result.uniform(|value| value == 0);
             state.negative = result.uniform(|value| value & 0x80 != 0);
+            state.set_zero_source_for_memory(target, 0);
         }
-        None => clear_unknown_absolute_indexed_destination(
-            state,
-            physical_bank,
-            base,
-            absolute_indexed_write_bounds,
-        ),
+        None => {
+            clear_unknown_absolute_indexed_destination(
+                state,
+                physical_bank,
+                base,
+                absolute_indexed_write_bounds,
+            );
+            state.zero = None;
+            state.negative = None;
+            state.carry = None;
+            state.clear_zero_source();
+        }
     }
     Ok(())
 }
@@ -2475,10 +2508,28 @@ fn validate_absolute_indexed_target(
     Ok(())
 }
 
-fn compare_register(register: ByteValueSet, operand: u8, state: &mut ResetTraceState) {
+fn compare_register(
+    register: ByteValueSet,
+    location: TrackedByteLocation,
+    operand: u8,
+    state: &mut ResetTraceState,
+) {
     state.zero = register.uniform(|value| value == operand);
     state.carry = register.uniform(|value| value >= operand);
     state.negative = register.uniform(|value| value.wrapping_sub(operand) & 0x80 != 0);
+    state.set_zero_source_for_register(location, operand);
+}
+
+fn refine_branch_state(
+    mnemonic: Mnemonic,
+    branch_taken: bool,
+    state: &mut ResetTraceState,
+) -> bool {
+    match mnemonic {
+        Mnemonic::Beq => state.refine_zero_flag(branch_taken),
+        Mnemonic::Bne => state.refine_zero_flag(!branch_taken),
+        _ => true,
+    }
 }
 
 fn branch_condition(mnemonic: Mnemonic, state: &ResetTraceState) -> Option<bool> {
@@ -2629,6 +2680,33 @@ mod tests {
                 .open_fact_descriptions()
                 .iter()
                 .all(|fact| !fact.contains("selected_bank_unknown"))
+        );
+    }
+
+    #[test]
+    fn equality_branch_refines_a_loaded_value_before_a_control_state_write() {
+        let source = synthetic_source(
+            &[(
+                0xC100,
+                &[
+                    0xAD, 0x00, 0x04, // LDA $0400; unknown byte
+                    0xF0, 0x05, // BEQ $C10A
+                    0xA9, 0x21, // LDA #$21
+                    0x4C, 0x0C, 0xC1, // JMP $C10C
+                    0x85, 0x84, // STA $84; equality path writes zero
+                    0x00, // BRK
+                ],
+            )],
+            0xC100,
+        );
+
+        let trace = trace_with_inline_selector_bounds(&source, 0xC100, BTreeMap::new());
+
+        assert_eq!(
+            trace
+                .control_state_write_values()
+                .get(&(FIXED_PRG_BANK, 0xC10A, MAIN_STATE,)),
+            Some(&Some(BTreeSet::from([0x00])))
         );
     }
 
@@ -3657,6 +3735,90 @@ mod tests {
                 MAP_DIALOGUE_OUTER_STATE,
             )),
             Some(&Some(BTreeSet::from([0x03])))
+        );
+    }
+
+    #[test]
+    fn scheduler_gate_zero_runs_the_mapped_screen_without_dispatching_the_next_state() {
+        let source = synthetic_source(
+            &[
+                (
+                    0xC140,
+                    &[
+                        0x20, 0x80, 0xC1, // JSR $C180
+                        0x00, // BRK
+                    ],
+                ),
+                (
+                    0xC180,
+                    &[
+                        0xA5, 0x23, // LDA $23
+                        0xF0, 0x03, // BEQ $C187
+                        0x4C, 0x90, 0xC1, // JMP $C190
+                        0x4C, 0x00, 0x84, // JMP $8400
+                    ],
+                ),
+                (
+                    0xC190,
+                    &[
+                        0xA5, 0x25, // LDA $25
+                        0x20, 0x4C, 0xC3, // JSR $C34C
+                        0xA0, 0xC1, 0xB0, 0xC1, // inline target table
+                    ],
+                ),
+                (
+                    0xC1A0,
+                    &[
+                        0xA9, 0x00, // LDA #$00
+                        0x85, 0x23, // STA $23; enter mapped-screen mode
+                        0xA9, 0x01, // LDA #$01
+                        0x85, 0x25, // STA $25; deferred next scheduler state
+                        0x60, // RTS
+                    ],
+                ),
+                (
+                    0xC1B0,
+                    &[
+                        0xA9, 0x7F, // LDA #$7F
+                        0x85, 0x24, // STA $24
+                        0x60, // RTS
+                    ],
+                ),
+                (
+                    INLINE_POINTER_DISPATCH_ADDRESS,
+                    &INLINE_POINTER_DISPATCH_CODE,
+                ),
+            ],
+            0xC190,
+        );
+        let selector_bounds = BTreeMap::from([(
+            (FIXED_PRG_BANK, 0xC192),
+            InlineDispatchSelectorBounds::from_source_producers(BTreeSet::from([0x00, 0x01])),
+        )]);
+
+        let trace = trace_fixed_scheduler_contexts(
+            &source,
+            0xC190,
+            0xC192,
+            0xC140,
+            [(0x00, 0x06)],
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &selector_bounds,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            trace.inline_dispatch_contexts(FIXED_PRG_BANK, 0xC192),
+            BTreeSet::from([(0x00, 0x06)])
+        );
+        assert!(trace.switchable_roots().contains(&(0x06, 0x8400)));
+        assert!(
+            !trace
+                .reachable_instruction_starts()
+                .contains(&(FIXED_PRG_BANK, 0xC1B0))
         );
     }
 }

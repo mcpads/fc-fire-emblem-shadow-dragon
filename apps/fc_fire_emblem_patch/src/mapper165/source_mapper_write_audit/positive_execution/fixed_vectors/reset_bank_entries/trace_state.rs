@@ -9,9 +9,10 @@ use crate::dialogue_inventory::{
 };
 
 use super::super::super::control_state::{
-    COMPOSITE_SCREEN_STATE, DIALOGUE_OR_SOUND_STATE, FIXED_SCHEDULER_STATE, MAIN_STATE,
-    MAP_DIALOGUE_OUTER_STATE, OUTER_SCREEN_STATE, PENDING_SHARED_MENU_REQUEST_STATE,
-    PRG_BANK_SHADOW, SHARED_MENU_STATE, TITLE_ANIMATION_STATE, TITLE_STATE,
+    COMPOSITE_SCREEN_STATE, DIALOGUE_OR_SOUND_STATE, FIXED_SCHEDULER_DISPATCH_GATE,
+    FIXED_SCHEDULER_STATE, MAIN_STATE, MAP_DIALOGUE_OUTER_STATE, OUTER_SCREEN_STATE,
+    PENDING_SHARED_MENU_REQUEST_STATE, PRG_BANK_SHADOW, SHARED_MENU_STATE, TITLE_ANIMATION_STATE,
+    TITLE_STATE,
 };
 
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
@@ -23,6 +24,20 @@ pub(super) enum ByteValueSet {
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(super) struct ByteDomain([u64; 4]);
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(super) enum TrackedByteLocation {
+    Accumulator,
+    IndexX,
+    IndexY,
+    Memory(u16),
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(super) struct ZeroFlagValueSource {
+    location: TrackedByteLocation,
+    matching_value: u8,
+}
 
 impl ByteDomain {
     fn singleton(value: u8) -> Self {
@@ -51,6 +66,12 @@ impl ByteDomain {
 impl ByteValueSet {
     pub(super) fn known(value: u8) -> Self {
         Self::Known(ByteDomain::singleton(value))
+    }
+
+    pub(super) fn nonzero() -> Self {
+        let mut words = [u64::MAX; 4];
+        words[0] &= !1;
+        Self::Known(ByteDomain(words))
     }
 
     fn from_optional(value: Option<u8>) -> Self {
@@ -137,6 +158,7 @@ struct ResetTraceMemory {
     saved_prg_bank_08: ByteValueSet,
     pointer_high_09: ByteValueSet,
     title_animation_staging_0a: ByteValueSet,
+    fixed_scheduler_dispatch_gate_23: ByteValueSet,
     outer_screen_state_24: ByteValueSet,
     scheduler_state_25: ByteValueSet,
     primary_prg_bank_shadow_29: ByteValueSet,
@@ -161,12 +183,13 @@ struct ResetTraceMemory {
 }
 
 impl ResetTraceMemory {
-    const ADDRESSES: [u16; 26] = [
+    const ADDRESSES: [u16; 27] = [
         0x0000,
         0x0001,
         0x0008,
         0x0009,
         0x000A,
+        FIXED_SCHEDULER_DISPATCH_GATE,
         OUTER_SCREEN_STATE,
         FIXED_SCHEDULER_STATE,
         PRG_BANK_SHADOW,
@@ -197,6 +220,7 @@ impl ResetTraceMemory {
             0x0008 => self.saved_prg_bank_08.clone(),
             0x0009 => self.pointer_high_09.clone(),
             0x000A => self.title_animation_staging_0a.clone(),
+            FIXED_SCHEDULER_DISPATCH_GATE => self.fixed_scheduler_dispatch_gate_23.clone(),
             OUTER_SCREEN_STATE => self.outer_screen_state_24.clone(),
             FIXED_SCHEDULER_STATE => self.scheduler_state_25.clone(),
             PRG_BANK_SHADOW => self.primary_prg_bank_shadow_29.clone(),
@@ -235,6 +259,7 @@ impl ResetTraceMemory {
             0x0008 => self.saved_prg_bank_08 = value,
             0x0009 => self.pointer_high_09 = value,
             0x000A => self.title_animation_staging_0a = value,
+            FIXED_SCHEDULER_DISPATCH_GATE => self.fixed_scheduler_dispatch_gate_23 = value,
             OUTER_SCREEN_STATE => self.outer_screen_state_24 = value,
             FIXED_SCHEDULER_STATE => self.scheduler_state_25 = value,
             PRG_BANK_SHADOW => self.primary_prg_bank_shadow_29 = value,
@@ -306,6 +331,7 @@ pub(super) struct ResetTraceState {
     pub(super) zero: Option<bool>,
     pub(super) negative: Option<bool>,
     pub(super) carry: Option<bool>,
+    pub(super) zero_source: Option<ZeroFlagValueSource>,
     memory: ResetTraceMemory,
     pub(super) mapped_prg_bank: Option<u8>,
     pub(super) activation: ActivationId,
@@ -332,6 +358,7 @@ impl ResetTraceState {
             zero: None,
             negative: None,
             carry: None,
+            zero_source: None,
             memory: ResetTraceMemory::default(),
             mapped_prg_bank: None,
             activation,
@@ -346,6 +373,10 @@ impl ResetTraceState {
         self.zero = values.uniform(|value| value == 0);
         self.negative = values.uniform(|value| value & 0x80 != 0);
         self.accumulator = values;
+        self.zero_source = Some(ZeroFlagValueSource {
+            location: TrackedByteLocation::Accumulator,
+            matching_value: 0,
+        });
     }
 
     pub(super) fn set_index_x(&mut self, value: Option<u8>) {
@@ -356,6 +387,10 @@ impl ResetTraceState {
         self.zero = values.uniform(|value| value == 0);
         self.negative = values.uniform(|value| value & 0x80 != 0);
         self.index_x = values;
+        self.zero_source = Some(ZeroFlagValueSource {
+            location: TrackedByteLocation::IndexX,
+            matching_value: 0,
+        });
     }
 
     pub(super) fn set_index_y(&mut self, value: Option<u8>) {
@@ -366,6 +401,10 @@ impl ResetTraceState {
         self.zero = values.uniform(|value| value == 0);
         self.negative = values.uniform(|value| value & 0x80 != 0);
         self.index_y = values;
+        self.zero_source = Some(ZeroFlagValueSource {
+            location: TrackedByteLocation::IndexY,
+            matching_value: 0,
+        });
     }
 
     pub(super) fn invalidate_registers_and_flags(&mut self) {
@@ -375,6 +414,7 @@ impl ResetTraceState {
         self.zero = None;
         self.negative = None;
         self.carry = None;
+        self.zero_source = None;
     }
 
     pub(super) fn read_memory(&self, address: u16) -> Option<u8> {
@@ -392,6 +432,56 @@ impl ResetTraceState {
 
     pub(super) fn write_memory_values(&mut self, address: u16, values: ByteValueSet) {
         self.memory.write(address, values);
+    }
+
+    pub(super) fn set_zero_source_for_memory(&mut self, address: u16, matching_value: u8) {
+        self.zero_source = Some(ZeroFlagValueSource {
+            location: TrackedByteLocation::Memory(address),
+            matching_value,
+        });
+    }
+
+    pub(super) fn set_zero_source_for_register(
+        &mut self,
+        location: TrackedByteLocation,
+        matching_value: u8,
+    ) {
+        debug_assert!(!matches!(location, TrackedByteLocation::Memory(_)));
+        self.zero_source = Some(ZeroFlagValueSource {
+            location,
+            matching_value,
+        });
+    }
+
+    pub(super) fn clear_zero_source(&mut self) {
+        self.zero_source = None;
+    }
+
+    pub(super) fn refine_zero_flag(&mut self, expected_zero: bool) -> bool {
+        self.zero = Some(expected_zero);
+        let Some(source) = self.zero_source.clone() else {
+            return true;
+        };
+        let matching_value = source.matching_value;
+        let predicate = |value| (value == matching_value) == expected_zero;
+        let values = match source.location {
+            TrackedByteLocation::Accumulator => self.accumulator.restrict(predicate),
+            TrackedByteLocation::IndexX => self.index_x.restrict(predicate),
+            TrackedByteLocation::IndexY => self.index_y.restrict(predicate),
+            TrackedByteLocation::Memory(address) => {
+                self.read_memory_values(address).restrict(predicate)
+            }
+        };
+        let Some(values) = values else {
+            return false;
+        };
+        match source.location {
+            TrackedByteLocation::Accumulator => self.accumulator = values,
+            TrackedByteLocation::IndexX => self.index_x = values,
+            TrackedByteLocation::IndexY => self.index_y = values,
+            TrackedByteLocation::Memory(address) => self.write_memory_values(address, values),
+        }
+        true
     }
 
     pub(super) fn write_prg_bank_shadows(&mut self, value: Option<u8>) {
@@ -430,6 +520,9 @@ impl ResetTraceState {
         joined.zero = join_value(self.zero, other.zero);
         joined.negative = join_value(self.negative, other.negative);
         joined.carry = join_value(self.carry, other.carry);
+        joined.zero_source = (self.zero_source == other.zero_source)
+            .then(|| self.zero_source.clone())
+            .flatten();
         joined.memory = self.memory.union(&other.memory);
         joined
     }

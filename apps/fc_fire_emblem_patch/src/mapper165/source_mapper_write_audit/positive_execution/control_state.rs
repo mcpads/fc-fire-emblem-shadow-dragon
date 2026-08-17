@@ -8,6 +8,7 @@ pub(super) struct PositiveControlState {
     pub(super) role: &'static str,
 }
 
+pub(super) const FIXED_SCHEDULER_DISPATCH_GATE: u16 = 0x0023;
 pub(super) const OUTER_SCREEN_STATE: u16 = 0x0024;
 pub(super) const FIXED_SCHEDULER_STATE: u16 = 0x0025;
 pub(super) const PRG_BANK_SHADOW: u16 = 0x0029;
@@ -20,7 +21,11 @@ pub(super) const SHARED_MENU_STATE: u16 = 0x05DE;
 pub(super) const COMPOSITE_SCREEN_STATE: u16 = 0x05E8;
 pub(super) const DIALOGUE_OR_SOUND_STATE: u16 = 0x05EE;
 
-pub(super) const POSITIVE_CONTROL_STATES: [PositiveControlState; 12] = [
+pub(super) const POSITIVE_CONTROL_STATES: [PositiveControlState; 13] = [
+    PositiveControlState {
+        address: FIXED_SCHEDULER_DISPATCH_GATE,
+        role: "fixed_scheduler_dispatch_gate_23",
+    },
     PositiveControlState {
         address: OUTER_SCREEN_STATE,
         role: "outer_screen_state_24",

@@ -57,6 +57,7 @@ pub(crate) struct TitleStateExecution {
     animation_selector_domain: BTreeSet<u8>,
     animation_selector_targets: BTreeMap<u8, u16>,
     scheduler_produced_values: BTreeSet<u8>,
+    scheduler_dispatch_entry_values: BTreeSet<u8>,
     reachable_instruction_starts: BTreeSet<(u8, u16)>,
     open_control_facts: BTreeSet<String>,
 }
@@ -88,6 +89,10 @@ impl TitleStateExecution {
 
     pub(crate) fn scheduler_produced_values(&self) -> &BTreeSet<u8> {
         &self.scheduler_produced_values
+    }
+
+    pub(crate) fn scheduler_dispatch_entry_values(&self) -> &BTreeSet<u8> {
+        &self.scheduler_dispatch_entry_values
     }
 
     pub(crate) fn reachable_instruction_starts(&self) -> &BTreeSet<(u8, u16)> {
@@ -250,6 +255,7 @@ pub(crate) fn bind_title_state_execution(source: &Rom) -> Result<TitleStateExecu
         animation_selector_domain: animation.selector_domain().clone(),
         animation_selector_targets: animation.selector_targets().clone(),
         scheduler_produced_values: BTreeSet::from([0x00, 0x01, 0x05]),
+        scheduler_dispatch_entry_values: BTreeSet::from([0x00, 0x01]),
         reachable_instruction_starts: trace.reachable_instruction_starts,
         open_control_facts: trace.open_control_facts,
     })

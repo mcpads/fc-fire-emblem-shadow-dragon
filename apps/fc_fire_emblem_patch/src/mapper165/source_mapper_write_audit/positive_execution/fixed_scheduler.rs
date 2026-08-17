@@ -35,6 +35,13 @@ pub(super) const FIXED_SCHEDULER_DISPATCH_CALL: u16 = 0xF2A2;
 const FIXED_SCHEDULER_POINTER_TABLE: u16 = 0xF2A5;
 const FIXED_SCHEDULER_CALL_SITE: u16 = 0xC148;
 const FIXED_SCHEDULER_CALL: [u8; 3] = [0x20, 0x8F, 0xF2];
+const FIXED_SCHEDULER_GATE_BRANCH: u16 = 0xF293;
+const FIXED_SCHEDULER_GATE_BRANCH_BYTES: [u8; 10] = [
+    0xA5, 0x23, // LDA $23
+    0xF0, 0x03, // BEQ $F29A: run the mapped screen when the gate is zero
+    0x4C, 0x9D, 0xF2, // JMP $F29D: prepare the scheduler dispatch
+    0x4C, 0x00, 0x84, // JMP $8400: run the mapped screen
+];
 const FIXED_SCHEDULER_RETURN_ADDRESS: u16 = 0xC14B;
 const FIXED_SCHEDULER_STATE_COUNT: u8 = 6;
 const FIXED_SCHEDULER_TARGETS: [u16; FIXED_SCHEDULER_STATE_COUNT as usize] =
@@ -210,6 +217,10 @@ pub(super) fn bind_fixed_scheduler_execution(
         title_state.scheduler_produced_values() == &BTreeSet::from([0x00, 0x01, 0x05]),
         "title scheduler producers no longer select reset, map initialization, and gameplay states"
     );
+    ensure!(
+        title_state.scheduler_dispatch_entry_values() == &BTreeSet::from([0x00, 0x01]),
+        "title scheduler entry values no longer separate active dispatch from deferred gameplay"
+    );
     let mut source_bound_producer_instruction_starts = BTreeSet::new();
     bind_exact_sequence(
         source,
@@ -217,6 +228,14 @@ pub(super) fn bind_fixed_scheduler_execution(
         FIXED_SCHEDULER_CALL_SITE,
         &FIXED_SCHEDULER_CALL,
         "fixed scheduler NMI call",
+        &mut source_bound_producer_instruction_starts,
+    )?;
+    bind_exact_sequence(
+        source,
+        FIXED_PRG_BANK,
+        FIXED_SCHEDULER_GATE_BRANCH,
+        &FIXED_SCHEDULER_GATE_BRANCH_BYTES,
+        "fixed scheduler dispatch gate",
         &mut source_bound_producer_instruction_starts,
     )?;
     bind_map_initialization_transition(source, &mut source_bound_producer_instruction_starts)?;
@@ -234,7 +253,7 @@ pub(super) fn bind_fixed_scheduler_execution(
         "a fixed scheduler producer selects beyond the six-entry handler table"
     );
     let positive_selector_domain = title_state
-        .scheduler_produced_values()
+        .scheduler_dispatch_entry_values()
         .iter()
         .copied()
         .chain([0x02, 0x04])
