@@ -29,6 +29,8 @@ const FIXED_TRAMPOLINE_START: u16 = 0xF400;
 const FIXED_TRAMPOLINE_END: u16 = 0xF4B0;
 const SAMPLE_GROUP_SELECTOR_START: u16 = 0xF341;
 const SAMPLE_GROUP_SELECTOR_END: u16 = 0xF378;
+const SAMPLE_PAGE_RELOAD_START: u16 = 0xBDF2;
+const SAMPLE_PAGE_RELOAD_END: u16 = 0xBE14;
 const SAMPLE_INITIAL_SELECTOR_START: u16 = 0xF990;
 const SAMPLE_INITIAL_SELECTOR_END: u16 = 0xFA00;
 const CENTRAL_SELECTOR_FALLBACK: u16 = 0xFF40;
@@ -76,7 +78,8 @@ use super::runtime_material::{
 const RUNTIME_CODE_WINDOW_START: u16 = 0xA000;
 const BATTLE_SOURCE_PAGE_MMC3_PAGE: u8 = 0x21;
 const EXPECTED_COMPLETED_PAGE_SOURCE_SHA1: &str = "8c2a9f5a6e028a59409f9cc254add2b81f318b21";
-const EXPECTED_COMPLETED_PAGE_CANDIDATE_SHA1: &str = "965de5bfca83263ac587e5c7c316ed6324d95ca8";
+const EXPECTED_COMPLETED_PAGE_CANDIDATE_SHA1: &str = "1cb949f9ec4e524b9935e195b5eac7fae604a2d3";
+const EXPECTED_SAMPLE_PAGE_RELOAD_SHA1: &str = "7dd596b275d4ee7dc0424071840cbc1a286d3662";
 pub(in crate::full_translation_install) const EXPECTED_SAMPLE_INITIAL_SELECTOR_SHA1: &str =
     "67856cd2b7a26ef43649181f5e86ffe2741eb8b3";
 
@@ -208,6 +211,8 @@ struct RuntimeStateStorage {
 struct SupersededSampleRuntime {
     completed_page_hook_cpu_range_hex: &'static str,
     completed_page_hook_sha1: String,
+    bank_local_page_reload_cpu_range_hex: &'static str,
+    bank_local_page_reload_sha1: String,
     fixed_group_selector_cpu_range_hex: &'static str,
     fixed_group_selector_sha1: String,
     fixed_initial_selector_cpu_range_hex: &'static str,
@@ -329,6 +334,28 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         completed_candidate,
         0x85C9,
         "current sample completed-page hook",
+    )?;
+    let sample_page_reload_source = switchable_bytes(
+        inputs.source,
+        MAIN_DIALOGUE_BANK,
+        SAMPLE_PAGE_RELOAD_START,
+        usize::from(SAMPLE_PAGE_RELOAD_END - SAMPLE_PAGE_RELOAD_START),
+    )?;
+    let sample_page_reload = switchable_bytes(
+        inputs.candidate,
+        MAIN_DIALOGUE_BANK,
+        SAMPLE_PAGE_RELOAD_START,
+        usize::from(SAMPLE_PAGE_RELOAD_END - SAMPLE_PAGE_RELOAD_START),
+    )?;
+    ensure!(
+        sample_page_reload_source.iter().all(|byte| *byte == 0xFF)
+            && sha1_hex(sample_page_reload) == EXPECTED_SAMPLE_PAGE_RELOAD_SHA1,
+        "sample maximum-dialogue completed-page ownership selector changed"
+    );
+    decode_rp2a03_sequence(
+        sample_page_reload,
+        SAMPLE_PAGE_RELOAD_START,
+        "sample maximum-dialogue completed-page ownership selector",
     )?;
 
     ensure!(
@@ -580,11 +607,13 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         superseded_sample_runtime: SupersededSampleRuntime {
             completed_page_hook_cpu_range_hex: "0A:0x85C9..0x85E6",
             completed_page_hook_sha1: sha1_hex(completed_candidate),
+            bank_local_page_reload_cpu_range_hex: "0A:0xBDF2..0xBE14",
+            bank_local_page_reload_sha1: sha1_hex(sample_page_reload),
             fixed_group_selector_cpu_range_hex: "0xF341..0xF378",
             fixed_group_selector_sha1: sha1_hex(sample_group),
             fixed_initial_selector_cpu_range_hex: "0xF990..0xFA00",
             fixed_initial_selector_sha1: sha1_hex(sample_initial),
-            superseded_hook_count: 3,
+            superseded_hook_count: 4,
             must_be_replaced_in_integrated_write_set: true,
             appended_static_pages_are_reclaimable_not_authoritative: true,
         },

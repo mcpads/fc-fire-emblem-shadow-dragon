@@ -8,6 +8,8 @@ use crate::{
 
 pub(super) const FONT_GROUP_SELECTOR_ADDRESS: u16 = 0xF341;
 pub(super) const FONT_GROUP_SELECTOR_END: u16 = 0xF378;
+pub(super) const MAXIMUM_DIALOGUE_PAGE_RELOAD_ADDRESS: u16 = 0xBDF2;
+pub(super) const MAXIMUM_DIALOGUE_PAGE_RELOAD_END: u16 = 0xBE14;
 pub(super) const INITIAL_PAGE_SELECTOR_ADDRESS: u16 = 0xF990;
 pub(super) const INITIAL_PAGE_SELECTOR_CAVE_END: u16 = 0xFA00;
 pub(super) const MAIN_DIALOGUE_PRG_BANK: u8 = 0x0A;
@@ -22,6 +24,12 @@ const CURRENT_POINTER_LOW: u16 = 0x7812;
 const CURRENT_POINTER_HIGH: u16 = 0x7814;
 const DIALOGUE_STATE: u16 = 0x77F7;
 const CONTINUE_DECODE_STATE: u8 = 0x09;
+const MAXIMUM_DIALOGUE_RUNTIME_IDENTITY: [(u16, u8); 4] = [
+    (0x7674, 0x07),
+    (0x77F1, 0x18),
+    (0x77F2, 0x0C),
+    (0x77F4, 0xC0),
+];
 
 pub(super) fn build_font_group_selector(
     mapper_registers: [u8; 3],
@@ -115,7 +123,7 @@ pub(super) fn build_completed_page_continue_hook() -> Result<Vec<u8>> {
         Instruction::StaAbsolute(0x7804),
         Instruction::LdaAbsolute(0x780A),
         Instruction::BneAbsolute(COMPLETED_PAGE_CONTINUE_ADDRESS),
-        Instruction::JsrAbsolute(FONT_GROUP_SELECTOR_ADDRESS),
+        Instruction::JsrAbsolute(MAXIMUM_DIALOGUE_PAGE_RELOAD_ADDRESS),
         Instruction::BneAbsolute(COMPLETED_PAGE_CONTINUE_ADDRESS),
         Instruction::LdaImmediate(0x10),
         Instruction::BneAbsolute(COMPLETED_PAGE_CONTINUE_ADDRESS),
@@ -144,6 +152,47 @@ pub(super) fn build_completed_page_continue_hook() -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
+/// 공용 완료 페이지 훅에서 최대 대사 수명만 글꼴 그룹을 갱신한다.
+///
+/// 같은 `$85C9` 상태 전이는 모든 주 대사가 공유하므로 현재 포인터의 숫자 범위만으로
+/// 최대 대사를 판정할 수 없다. 원천 생산자가 결속한 장·entry·바깥 화면·directory
+/// selector가 모두 일치할 때만 고정 뱅크의 그룹 선택기로 이어진다. 다른 대사에서는
+/// 기존 CHR 페이지를 건드리지 않고 원본 continue 상태만 반환한다.
+pub(super) fn build_maximum_dialogue_page_reload() -> Result<Vec<u8>> {
+    let mut instructions = Vec::new();
+    let mut mismatch_branches = Vec::new();
+    for (address, expected) in MAXIMUM_DIALOGUE_RUNTIME_IDENTITY {
+        instructions.extend([
+            Instruction::LdaAbsolute(address),
+            Instruction::CmpImmediate(expected),
+            Instruction::BneAbsolute(MAXIMUM_DIALOGUE_PAGE_RELOAD_ADDRESS),
+        ]);
+        mismatch_branches.push(instructions.len() - 1);
+    }
+    instructions.push(Instruction::JmpAbsolute(FONT_GROUP_SELECTOR_ADDRESS));
+    let preserve_current_page = next_address(MAXIMUM_DIALOGUE_PAGE_RELOAD_ADDRESS, &instructions)?;
+    instructions.extend([
+        Instruction::LdaImmediate(CONTINUE_DECODE_STATE),
+        Instruction::Rts,
+    ]);
+    for branch in mismatch_branches {
+        instructions[branch] = Instruction::BneAbsolute(preserve_current_page);
+    }
+
+    let bytes = assemble_at(MAXIMUM_DIALOGUE_PAGE_RELOAD_ADDRESS, &instructions)?;
+    ensure!(
+        MAXIMUM_DIALOGUE_PAGE_RELOAD_ADDRESS as usize + bytes.len()
+            == MAXIMUM_DIALOGUE_PAGE_RELOAD_END as usize,
+        "maximum dialogue page reload changed its exact bank-local cave span"
+    );
+    decode_rp2a03_sequence(
+        &bytes,
+        MAXIMUM_DIALOGUE_PAGE_RELOAD_ADDRESS,
+        "maximum dialogue owned completed-page reload",
+    )?;
+    Ok(bytes)
+}
+
 pub(super) fn build_initial_page_selector(
     fallback_target: u16,
     initial_supply_pointer: u16,
@@ -165,15 +214,11 @@ pub(super) fn build_initial_page_selector(
         ]);
         mismatch_branches.push(instructions.len() - 1);
     }
-    for (address, expected) in [
-        (0x7674, 0x07),
-        (0x77F1, 0x18),
-        (0x77F2, 0x0C),
-        (0x77F4, 0xC0),
+    for (address, expected) in MAXIMUM_DIALOGUE_RUNTIME_IDENTITY.into_iter().chain([
         (0x77F7, 0x05),
         (CURRENT_POINTER_LOW, initial_supply_pointer as u8),
         (CURRENT_POINTER_HIGH, (initial_supply_pointer >> 8) as u8),
-    ] {
+    ]) {
         instructions.extend([
             Instruction::LdaAbsolute(address),
             Instruction::CmpImmediate(expected),
@@ -299,6 +344,174 @@ fn next_address(origin: u16, instructions: &[Instruction]) -> Result<u16> {
 mod tests {
     use super::*;
 
+    const STATUS_CARRY: u8 = 0x01;
+    const STATUS_ZERO: u8 = 0x02;
+
+    struct CompletedPageResult {
+        mapper_values: Vec<u8>,
+        dialogue_state: u8,
+    }
+
+    struct TestCpu {
+        memory: Box<[u8; 0x10000]>,
+        a: u8,
+        p: u8,
+        sp: u8,
+        pc: u16,
+        mapper_values: Vec<u8>,
+    }
+
+    impl TestCpu {
+        fn run_completed_page(
+            identity: [(u16, u8); 4],
+            pointer: u16,
+            first_completion_flag: u8,
+            second_completion_flag: u8,
+        ) -> CompletedPageResult {
+            let hook = build_completed_page_continue_hook().unwrap();
+            let reload = build_maximum_dialogue_page_reload().unwrap();
+            let group_selector =
+                build_font_group_selector([0xC8, 0xCC, 0xD0], [0x90C0, 0x9192]).unwrap();
+            let mut memory: Box<[u8; 0x10000]> =
+                vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
+            for (address, value) in identity {
+                memory[usize::from(address)] = value;
+            }
+            memory[usize::from(CURRENT_POINTER_LOW)] = pointer as u8;
+            memory[usize::from(CURRENT_POINTER_HIGH)] = (pointer >> 8) as u8;
+            memory[0x7802] = first_completion_flag;
+            memory[0x780A] = second_completion_flag;
+            Self::install(&mut memory, COMPLETED_PAGE_CONTINUE_ADDRESS, &hook);
+            Self::install(&mut memory, MAXIMUM_DIALOGUE_PAGE_RELOAD_ADDRESS, &reload);
+            Self::install(&mut memory, FONT_GROUP_SELECTOR_ADDRESS, &group_selector);
+
+            let mut cpu = Self {
+                memory,
+                a: 0,
+                p: 0,
+                sp: 0xFD,
+                pc: COMPLETED_PAGE_CONTINUE_ADDRESS,
+                mapper_values: Vec::new(),
+            };
+            let mut returned = false;
+            for _ in 0..256 {
+                match cpu.read_pc() {
+                    0x20 => {
+                        let target = cpu.read_word_pc();
+                        if target
+                            == crate::mapper165::selector_safety::SELECT_REGISTER_ROUTINE_ADDRESS
+                        {
+                            continue;
+                        }
+                        let return_address = cpu.pc.wrapping_sub(1);
+                        cpu.push((return_address >> 8) as u8);
+                        cpu.push(return_address as u8);
+                        cpu.pc = target;
+                    }
+                    0x48 => cpu.push(cpu.a),
+                    0x4C => cpu.pc = cpu.read_word_pc(),
+                    0x60 => {
+                        if cpu.sp == 0xFD {
+                            returned = true;
+                            break;
+                        }
+                        let low = cpu.pop();
+                        let high = cpu.pop();
+                        cpu.pc = u16::from_le_bytes([low, high]).wrapping_add(1);
+                    }
+                    0x68 => {
+                        cpu.a = cpu.pop();
+                        cpu.set_zero(cpu.a == 0);
+                    }
+                    0x8D => {
+                        let address = cpu.read_word_pc();
+                        cpu.memory[usize::from(address)] = cpu.a;
+                        if address == 0x8001 {
+                            cpu.mapper_values.push(cpu.a);
+                        }
+                    }
+                    0x90 => {
+                        let displacement = cpu.read_pc() as i8;
+                        if cpu.p & STATUS_CARRY == 0 {
+                            cpu.pc = cpu.pc.wrapping_add_signed(i16::from(displacement));
+                        }
+                    }
+                    0xA9 => {
+                        cpu.a = cpu.read_pc();
+                        cpu.set_zero(cpu.a == 0);
+                    }
+                    0xAD => {
+                        let address = cpu.read_word_pc();
+                        cpu.a = cpu.memory[usize::from(address)];
+                        cpu.set_zero(cpu.a == 0);
+                    }
+                    0xC9 => {
+                        let value = cpu.read_pc();
+                        cpu.set_zero(cpu.a == value);
+                        cpu.set_carry(cpu.a >= value);
+                    }
+                    0xD0 => {
+                        let displacement = cpu.read_pc() as i8;
+                        if cpu.p & STATUS_ZERO == 0 {
+                            cpu.pc = cpu.pc.wrapping_add_signed(i16::from(displacement));
+                        }
+                    }
+                    opcode => panic!(
+                        "maximum-dialogue completed-page test reached unsupported opcode {opcode:02X}"
+                    ),
+                }
+            }
+            assert!(returned, "completed-page test routine did not return");
+            CompletedPageResult {
+                mapper_values: cpu.mapper_values,
+                dialogue_state: cpu.memory[usize::from(DIALOGUE_STATE)],
+            }
+        }
+
+        fn install(memory: &mut [u8; 0x10000], address: u16, bytes: &[u8]) {
+            let start = usize::from(address);
+            memory[start..start + bytes.len()].copy_from_slice(bytes);
+        }
+
+        fn read_pc(&mut self) -> u8 {
+            let value = self.memory[usize::from(self.pc)];
+            self.pc = self.pc.wrapping_add(1);
+            value
+        }
+
+        fn read_word_pc(&mut self) -> u16 {
+            let low = self.read_pc();
+            let high = self.read_pc();
+            u16::from_le_bytes([low, high])
+        }
+
+        fn push(&mut self, value: u8) {
+            self.memory[0x100 + usize::from(self.sp)] = value;
+            self.sp = self.sp.wrapping_sub(1);
+        }
+
+        fn pop(&mut self) -> u8 {
+            self.sp = self.sp.wrapping_add(1);
+            self.memory[0x100 + usize::from(self.sp)]
+        }
+
+        fn set_zero(&mut self, set: bool) {
+            if set {
+                self.p |= STATUS_ZERO;
+            } else {
+                self.p &= !STATUS_ZERO;
+            }
+        }
+
+        fn set_carry(&mut self, set: bool) {
+            if set {
+                self.p |= STATUS_CARRY;
+            } else {
+                self.p &= !STATUS_CARRY;
+            }
+        }
+    }
+
     #[test]
     fn pointer_boundaries_select_the_next_page_font_group() {
         let transitions = [0x9120, 0x9250];
@@ -325,9 +538,57 @@ mod tests {
     }
 
     #[test]
+    fn chapter_one_completed_page_preserves_its_existing_font_page() {
+        let result = TestCpu::run_completed_page(
+            [
+                (0x7674, 0x01),
+                (0x77F1, 0x03),
+                (0x77F2, 0x08),
+                (0x77F4, 0x80),
+            ],
+            0xE3A0,
+            0,
+            0,
+        );
+
+        assert_eq!(result.dialogue_state, CONTINUE_DECODE_STATE);
+        assert!(result.mapper_values.is_empty());
+    }
+
+    #[test]
+    fn maximum_dialogue_identity_alone_selects_completed_page_font_groups() {
+        for (pointer, expected_mapper_value) in [(0x901C, 0xC8), (0x90F0, 0xCC), (0x91B3, 0xD0)] {
+            let result =
+                TestCpu::run_completed_page(MAXIMUM_DIALOGUE_RUNTIME_IDENTITY, pointer, 0, 0);
+            assert_eq!(result.dialogue_state, CONTINUE_DECODE_STATE);
+            assert_eq!(result.mapper_values, [expected_mapper_value]);
+        }
+
+        for index in 0..MAXIMUM_DIALOGUE_RUNTIME_IDENTITY.len() {
+            let mut identity = MAXIMUM_DIALOGUE_RUNTIME_IDENTITY;
+            identity[index].1 ^= 1;
+            let result = TestCpu::run_completed_page(identity, 0x91B3, 0, 0);
+            assert_eq!(result.dialogue_state, CONTINUE_DECODE_STATE);
+            assert!(result.mapper_values.is_empty());
+        }
+    }
+
+    #[test]
+    fn terminal_and_idle_completed_page_states_do_not_reload_fonts() {
+        let terminal = TestCpu::run_completed_page(MAXIMUM_DIALOGUE_RUNTIME_IDENTITY, 0x91B3, 1, 0);
+        assert_eq!(terminal.dialogue_state, 0x0F);
+        assert!(terminal.mapper_values.is_empty());
+
+        let idle = TestCpu::run_completed_page(MAXIMUM_DIALOGUE_RUNTIME_IDENTITY, 0x91B3, 0, 1);
+        assert_eq!(idle.dialogue_state, 0x10);
+        assert!(idle.mapper_values.is_empty());
+    }
+
+    #[test]
     fn runtime_routines_fit_their_independent_checked_caves() {
         let group_selector =
             build_font_group_selector([0xC8, 0xCC, 0xD0], [0x9120, 0x9250]).unwrap();
+        let page_reload = build_maximum_dialogue_page_reload().unwrap();
         let initial = build_initial_page_selector(0xFB80, 0x8FF1).unwrap();
 
         assert!(
@@ -337,6 +598,10 @@ mod tests {
         assert!(
             INITIAL_PAGE_SELECTOR_ADDRESS as usize + initial.len()
                 <= INITIAL_PAGE_SELECTOR_CAVE_END as usize
+        );
+        assert_eq!(
+            MAXIMUM_DIALOGUE_PAGE_RELOAD_ADDRESS as usize + page_reload.len(),
+            MAXIMUM_DIALOGUE_PAGE_RELOAD_END as usize
         );
         assert_eq!(
             &group_selector[group_selector.len() - 3..],

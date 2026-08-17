@@ -71,7 +71,7 @@ const COMPLETED_PAGE_SOURCE: [u8; COMPLETED_PAGE_SPAN] = [
 // 교체 구간 바로 앞의 분기가 마지막 RTS로 들어온다. 따라서 그 바이트는 훅만
 // 소유하는 죽은 패딩이 아니라 원본 처리기와 공유하는 종료점이다.
 const COMPLETED_PAGE_PREDECESSOR_SOURCE: [u8; 4] = [0xA5, 0x18, 0xF0, 0x1C];
-const EXPECTED_SAMPLE_COMPLETED_PAGE_SHA1: &str = "965de5bfca83263ac587e5c7c316ed6324d95ca8";
+const EXPECTED_SAMPLE_COMPLETED_PAGE_SHA1: &str = "1cb949f9ec4e524b9935e195b5eac7fae604a2d3";
 const E7_HANDOFF_SOURCE: [u8; 17] = [
     0xAD, 0x08, 0x78, 0xF0, 0x0C, 0xA9, 0x01, 0x8D, 0x31, 0x78, 0xEE, 0x09, 0x78, 0xA9, 0x11, 0xD0,
     0x18,

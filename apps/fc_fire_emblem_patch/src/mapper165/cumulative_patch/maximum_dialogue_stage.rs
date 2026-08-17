@@ -20,7 +20,9 @@ use super::super::{
         COMPLETED_PAGE_CONTINUE_ADDRESS, COMPLETED_PAGE_CONTINUE_SOURCE,
         FONT_GROUP_SELECTOR_ADDRESS, FONT_GROUP_SELECTOR_END, INITIAL_FONT_SUPPLY_POINTER_ADVANCE,
         INITIAL_PAGE_SELECTOR_ADDRESS, INITIAL_PAGE_SELECTOR_CAVE_END, MAIN_DIALOGUE_PRG_BANK,
+        MAXIMUM_DIALOGUE_PAGE_RELOAD_ADDRESS, MAXIMUM_DIALOGUE_PAGE_RELOAD_END,
         build_completed_page_continue_hook, build_font_group_selector, build_initial_page_selector,
+        build_maximum_dialogue_page_reload,
     },
 };
 use super::ROSTER_SELECTOR_ADDRESS;
@@ -72,6 +74,7 @@ pub(super) fn install_maximum_dialogue_stage(
         .map_err(|_| anyhow::anyhow!("maximum dialogue mapper register count changed"))?;
     let font_group_selector =
         build_font_group_selector(mapper_registers, page.group_transition_pointers)?;
+    let completed_page_reload = build_maximum_dialogue_page_reload()?;
     let completed_page_hook = build_completed_page_continue_hook()?;
     let initial_supply_pointer = inputs
         .record
@@ -132,6 +135,12 @@ pub(super) fn install_maximum_dialogue_stage(
         &initial_selector,
     )?;
     image.write_expected(
+        "scope completed-page font reload to the maximum dialogue lifetime",
+        switchable_bank_file_offset(MAIN_DIALOGUE_PRG_BANK, MAXIMUM_DIALOGUE_PAGE_RELOAD_ADDRESS)?,
+        &vec![0xFF; completed_page_reload.len()],
+        &completed_page_reload,
+    )?;
+    image.write_expected(
         "route non-battle central font supply through maximum dialogue selector",
         active_fixed_bank_file_offset(&prior_rom, central_fallback_address)?,
         &[
@@ -161,6 +170,7 @@ pub(super) fn install_maximum_dialogue_stage(
         &page,
         &font_group_selector,
         &initial_selector,
+        &completed_page_reload,
         &completed_page_hook,
         central_fallback_address,
     )?;
@@ -208,6 +218,30 @@ fn validate_caves(source_rom: &Rom, prior_rom: &Rom) -> Result<()> {
             "maximum dialogue {role} cumulative cave is already occupied"
         );
     }
+    let reload_start =
+        switchable_bank_file_offset(MAIN_DIALOGUE_PRG_BANK, MAXIMUM_DIALOGUE_PAGE_RELOAD_ADDRESS)?;
+    let reload_end =
+        switchable_bank_file_offset(MAIN_DIALOGUE_PRG_BANK, MAXIMUM_DIALOGUE_PAGE_RELOAD_END)?;
+    ensure!(
+        source_rom.data()[reload_start..reload_end]
+            .iter()
+            .all(|byte| *byte == 0xFF),
+        "maximum dialogue page-reload source cave is no longer all FF"
+    );
+    ensure!(
+        count_direct_transfers_to_range(
+            source_rom.prg(),
+            MAXIMUM_DIALOGUE_PAGE_RELOAD_ADDRESS,
+            MAXIMUM_DIALOGUE_PAGE_RELOAD_END,
+        )? == 0,
+        "maximum dialogue page-reload source cave gained a pre-existing direct transfer"
+    );
+    ensure!(
+        prior_rom.data()[reload_start..reload_end]
+            .iter()
+            .all(|byte| *byte == 0xFF),
+        "maximum dialogue page-reload cumulative cave is already occupied"
+    );
     Ok(())
 }
 
@@ -219,6 +253,7 @@ fn verify_output(
     page: &MaximumDialoguePagePlan,
     font_group_selector: &[u8],
     initial_selector: &[u8],
+    completed_page_reload: &[u8],
     completed_page_hook: &[u8],
     central_fallback_address: u16,
 ) -> Result<()> {
@@ -258,6 +293,13 @@ fn verify_output(
             "maximum dialogue {role} changed after installation"
         );
     }
+    let reload_offset =
+        switchable_bank_file_offset(MAIN_DIALOGUE_PRG_BANK, MAXIMUM_DIALOGUE_PAGE_RELOAD_ADDRESS)?;
+    ensure!(
+        output[reload_offset..reload_offset + completed_page_reload.len()]
+            == *completed_page_reload,
+        "maximum dialogue completed-page ownership selector changed after installation"
+    );
     let hook_offset =
         switchable_bank_file_offset(MAIN_DIALOGUE_PRG_BANK, COMPLETED_PAGE_CONTINUE_ADDRESS)?;
     ensure!(
