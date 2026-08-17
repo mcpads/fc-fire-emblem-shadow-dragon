@@ -6,6 +6,7 @@ use super::all_byte_candidates::{
     AllByteMapperWriteScan, CandidateDecodeVariant, MappedPrgLocation, MapperWriteCandidateId,
     ProjectionLedgerCompleteness,
 };
+use super::rooted_instruction_layout::RootedInstructionLayout;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct DeclaredExecutableStart {
@@ -24,6 +25,7 @@ pub(crate) struct ExactBoundData {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct MapperWriteCandidatePartition {
     pub(crate) declared_executable_starts: BTreeSet<MapperWriteCandidateId>,
+    pub(crate) rooted_instruction_interiors: BTreeSet<MapperWriteCandidateId>,
     pub(crate) exact_bound_data: BTreeSet<MapperWriteCandidateId>,
     pub(crate) unresolved: BTreeSet<MapperWriteCandidateId>,
     pub(crate) projection_ledger_complete: bool,
@@ -58,6 +60,7 @@ impl MapperWriteCandidatePartition {
 pub(crate) fn partition_mapper_write_candidates<R>(
     scan: &AllByteMapperWriteScan<R>,
     declared_starts: &[DeclaredExecutableStart],
+    rooted_instructions: &RootedInstructionLayout,
     bound_data: &[ExactBoundData],
 ) -> Result<MapperWriteCandidatePartition> {
     let candidates = scan
@@ -101,10 +104,16 @@ pub(crate) fn partition_mapper_write_candidates<R>(
     }
 
     let data_bytes = validate_bound_data(scan, bound_data)?;
-    reject_code_data_overlap(&candidates, &declared_by_id, &data_bytes)?;
+    reject_code_data_overlap(
+        &candidates,
+        &declared_by_id,
+        rooted_instructions,
+        &data_bytes,
+    )?;
 
     let mut partition = MapperWriteCandidatePartition {
         declared_executable_starts: BTreeSet::new(),
+        rooted_instruction_interiors: BTreeSet::new(),
         exact_bound_data: BTreeSet::new(),
         unresolved: BTreeSet::new(),
         projection_ledger_complete: scan.projection_ledger_completeness
@@ -115,9 +124,13 @@ pub(crate) fn partition_mapper_write_candidates<R>(
     };
     for (candidate_id, candidate) in &candidates {
         let declared = declared_by_id.contains_key(candidate_id);
+        let rooted_interior = rooted_instructions
+            .instruction_interiors()
+            .contains(candidate.start());
         let page_offset = physical_page_offset(scan, candidate.start())?;
         let data = data_bytes.contains(&(candidate.start().physical_page_8k, page_offset));
-        let category_count = usize::from(declared) + usize::from(data);
+        let category_count =
+            usize::from(declared) + usize::from(rooted_interior) + usize::from(data);
         ensure!(
             category_count <= 1,
             "mapper-write candidate {candidate_id:?} belongs to multiple ownership categories"
@@ -126,6 +139,10 @@ pub(crate) fn partition_mapper_write_candidates<R>(
             partition
                 .declared_executable_starts
                 .insert(candidate_id.clone());
+        } else if rooted_interior {
+            partition
+                .rooted_instruction_interiors
+                .insert(candidate_id.clone());
         } else if data {
             partition.exact_bound_data.insert(candidate_id.clone());
         } else {
@@ -133,6 +150,7 @@ pub(crate) fn partition_mapper_write_candidates<R>(
         }
     }
     let classified_count = partition.declared_executable_starts.len()
+        + partition.rooted_instruction_interiors.len()
         + partition.exact_bound_data.len()
         + partition.unresolved.len();
     ensure!(
@@ -197,6 +215,7 @@ fn reject_code_data_overlap<R>(
         &super::all_byte_candidates::MapperWriteCandidate<R>,
     >,
     declared: &BTreeMap<MapperWriteCandidateId, &str>,
+    rooted_instructions: &RootedInstructionLayout,
     data_bytes: &BTreeSet<(u16, u16)>,
 ) -> Result<()> {
     for candidate_id in declared.keys() {
@@ -210,6 +229,13 @@ fn reject_code_data_overlap<R>(
                 "declared executable candidate {candidate_id:?} overlaps exact-bound data"
             );
         }
+    }
+    for location in rooted_instructions.every_instruction_byte() {
+        let page_offset = usize::from(location.cpu_address & 0x1FFF) as u16;
+        ensure!(
+            !data_bytes.contains(&(location.physical_page_8k, page_offset)),
+            "rooted instruction byte {location:?} overlaps exact-bound data"
+        );
     }
     Ok(())
 }

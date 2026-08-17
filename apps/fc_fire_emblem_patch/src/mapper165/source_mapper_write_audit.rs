@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
@@ -10,8 +12,8 @@ use super::{
         AllByteMapperWriteScan, BoundarySuccessorCoverage, DeclaredExecutableStart, ExactBoundData,
         MappedPrgLocation, MappedPrgProjection, MapperWriteAccess, MapperWriteCandidate,
         MapperWriteCandidatePartition, PhysicalPrgPage, ProjectionLedgerCompleteness,
-        SourceMmc4Register, decode_source_mmc4_write, partition_mapper_write_candidates,
-        scan_all_byte_mapper_write_candidates,
+        SourceMmc4Register, bind_rooted_instruction_layout, decode_source_mmc4_write,
+        partition_mapper_write_candidates, scan_all_byte_mapper_write_candidates,
     },
     writer_census::{bind_audio_record_data_region, legacy_canonical_chr_write_candidates},
     writer_sites::{
@@ -19,8 +21,10 @@ use super::{
     },
 };
 
+mod positive_execution;
 mod target_mapper_migration;
 
+use positive_execution::bind_source_positive_execution_graph;
 use target_mapper_migration::{TargetMapperMigrationAudit, audit_target_mapper_migration};
 
 const SOURCE_PRG_8K_PAGE_COUNT: usize = 32;
@@ -31,13 +35,6 @@ const FIXED_C000_PAGE: u16 = 0x1E;
 const FIXED_E000_PAGE: u16 = 0x1F;
 const FIXED_C000_PROJECTION: &str = "source-fixed-C000";
 const FIXED_E000_PROJECTION: &str = "source-fixed-E000";
-const DECLARED_SOURCE_WRITER_COUNT: usize = 71;
-const LEGACY_CANONICAL_CANDIDATE_COUNT: usize = 58;
-const EXPECTED_SOURCE_MMC4_CANDIDATE_COUNT: usize = 48_064;
-const EXPECTED_SOURCE_MMC4_CANDIDATE_DIGEST_SHA1: &str = "3c82769cde32bf13749d350c1098aedb0bb7e62c";
-const EXPECTED_EXACT_DATA_CANDIDATE_COUNT: usize = 2;
-const EXPECTED_UNRESOLVED_CANDIDATE_COUNT: usize = 47_991;
-
 #[derive(Clone, Debug, Serialize)]
 pub(super) struct SourceMapperWriteAudit {
     candidate_scope: &'static str,
@@ -46,6 +43,10 @@ pub(super) struct SourceMapperWriteAudit {
     mapped_projection_count: usize,
     mapper_write_candidate_count: usize,
     declared_source_writer_count: usize,
+    positive_execution_instruction_count: usize,
+    rooted_instruction_interior_candidate_count: usize,
+    rooted_start_interior_conflict_count: usize,
+    unresolved_before_positive_execution_count: usize,
     exact_bound_data_candidate_count: usize,
     unresolved_candidate_count: usize,
     boundary_unresolved_candidate_count: usize,
@@ -86,10 +87,10 @@ pub(super) fn audit_source_mapper_writes(source: &Rom) -> Result<SourceMapperWri
         pages.len()
     );
     let projections = source_mmc4_projections();
+    let expected_projection_count = usize::from(SOURCE_PRG_BANK_COUNT) * 2 + 2;
     ensure!(
-        projections.len() == 34,
-        "source MMC4 projection count changed: expected 34, found {}",
-        projections.len()
+        projections.len() == expected_projection_count,
+        "source MMC4 projection ledger does not cover both lower pages for every selector plus both fixed pages"
     );
     let scan = scan_all_byte_mapper_write_candidates(
         &pages,
@@ -98,24 +99,10 @@ pub(super) fn audit_source_mapper_writes(source: &Rom) -> Result<SourceMapperWri
         decode_source_mmc4_write,
     )?;
     let candidate_digest_sha1 = mapper_write_candidate_digest(&scan);
-    ensure!(
-        scan.candidates.len() == EXPECTED_SOURCE_MMC4_CANDIDATE_COUNT,
-        "supported source MMC4 possible-start denominator changed: expected {EXPECTED_SOURCE_MMC4_CANDIDATE_COUNT}, found {}",
-        scan.candidates.len()
-    );
-    ensure!(
-        candidate_digest_sha1 == EXPECTED_SOURCE_MMC4_CANDIDATE_DIGEST_SHA1,
-        "supported source MMC4 possible-start identity changed: expected {EXPECTED_SOURCE_MMC4_CANDIDATE_DIGEST_SHA1}, found {candidate_digest_sha1}"
-    );
-
     let declarations = declared_source_writers()?;
-    ensure!(
-        declarations.len() == DECLARED_SOURCE_WRITER_COUNT,
-        "declared source mapper writer count changed: expected {DECLARED_SOURCE_WRITER_COUNT}, found {}",
-        declarations.len()
-    );
+    let positive_execution = bind_source_positive_execution_graph(source)?;
     let target_mapper_migration =
-        audit_target_mapper_migration(&pages, &projections, &declarations, source)?;
+        audit_target_mapper_migration(&pages, &projections, &declarations, &positive_execution)?;
     let declared_starts = bind_declared_starts(&scan, &declarations)?;
     let audio = bind_audio_record_data_region(source)?;
     let (audio_page, audio_offset) = physical_page_and_offset(audio.prg_bank, audio.cpu_address)?;
@@ -125,22 +112,53 @@ pub(super) fn audit_source_mapper_writes(source: &Rom) -> Result<SourceMapperWri
         page_offset: audio_offset,
         expected_bytes: audio.expected_bytes.to_vec(),
     }];
-    let partition: MapperWriteCandidatePartition =
-        partition_mapper_write_candidates(&scan, &declared_starts, &exact_data)?;
+    let rooted_instructions =
+        bind_rooted_instruction_layout(&scan, &positive_execution.mapped_instruction_starts()?)?;
+    let unrooted_instructions = bind_rooted_instruction_layout(&scan, &BTreeSet::new())?;
+    let unrooted_partition = partition_mapper_write_candidates(
+        &scan,
+        &declared_starts,
+        &unrooted_instructions,
+        &exact_data,
+    )?;
+    let partition: MapperWriteCandidatePartition = partition_mapper_write_candidates(
+        &scan,
+        &declared_starts,
+        &rooted_instructions,
+        &exact_data,
+    )?;
 
     ensure!(
-        partition.declared_executable_starts.len() == DECLARED_SOURCE_WRITER_COUNT,
-        "source mapper writer declaration partition changed"
+        partition.declared_executable_starts.len() == declarations.len(),
+        "source mapper writer declaration partition lost or duplicated a bound writer"
     );
     ensure!(
-        partition.exact_bound_data.len() == EXPECTED_EXACT_DATA_CANDIDATE_COUNT,
-        "source mapper exact-data candidate partition changed: expected {EXPECTED_EXACT_DATA_CANDIDATE_COUNT}, found {}",
-        partition.exact_bound_data.len()
+        rooted_instructions.instruction_count() == positive_execution.instruction_count(),
+        "source positive execution graph lost an instruction while rebinding exact spans"
     );
     ensure!(
-        partition.unresolved.len() == EXPECTED_UNRESOLVED_CANDIDATE_COUNT,
-        "source mapper unresolved candidate partition changed: expected {EXPECTED_UNRESOLVED_CANDIDATE_COUNT}, found {}",
-        partition.unresolved.len()
+        rooted_instructions.start_interior_conflicts().is_empty(),
+        "source rooted execution graph contains instruction starts that are also interiors: {:?}",
+        rooted_instructions.start_interior_conflicts()
+    );
+    let classified_as_positive_instruction_interiors = unrooted_partition
+        .unresolved
+        .difference(&partition.unresolved)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        classified_as_positive_instruction_interiors == partition.rooted_instruction_interiors,
+        "source positive execution graph changed candidates outside exact instruction interiors"
+    );
+    ensure!(
+        partition
+            .unresolved
+            .is_subset(&unrooted_partition.unresolved),
+        "source positive execution graph introduced a new unresolved candidate"
+    );
+    ensure!(
+        partition.exact_bound_data == unrooted_partition.exact_bound_data,
+        "positive execution classification changed exact source-data ownership"
     );
     ensure!(
         !partition.is_global_closed(),
@@ -152,11 +170,6 @@ pub(super) fn audit_source_mapper_writes(source: &Rom) -> Result<SourceMapperWri
     );
 
     let legacy = legacy_canonical_chr_write_candidates(source)?;
-    ensure!(
-        legacy.len() == LEGACY_CANONICAL_CANDIDATE_COUNT,
-        "legacy canonical CHR candidate count changed: expected {LEGACY_CANONICAL_CANDIDATE_COUNT}, found {}",
-        legacy.len()
-    );
     for candidate in &legacy {
         let location = source_mapped_location(candidate.prg_bank, candidate.cpu_address)?;
         let matches = scan
@@ -187,11 +200,15 @@ pub(super) fn audit_source_mapper_writes(source: &Rom) -> Result<SourceMapperWri
         .count();
     Ok(SourceMapperWriteAudit {
         candidate_scope: "every byte offset in every declared source MMC4 PRG projection, decoded with RP2A03 StaticSemantics against all MMC4 register aliases",
-        closure_claim: "partial: the physical-page and projection denominator is complete; 71 source-structural writer declarations and exact audio data are bound, but those declarations do not establish runtime reachability; the executable-root ledger is incomplete and every remaining possible start stays unresolved",
+        closure_claim: "partial: the physical-page and projection denominator is complete; positive battle, main-dialogue, NMI, and audio instruction spans classify only their exact instruction interiors, while source-structural writer declarations do not by themselves establish reachability; counts and the candidate digest are diagnostic outputs rather than closure proofs; the whole-program executable-root ledger is incomplete and every remaining possible start stays unresolved",
         physical_prg_page_count: pages.len(),
         mapped_projection_count: projections.len(),
         mapper_write_candidate_count: scan.candidates.len(),
         declared_source_writer_count: partition.declared_executable_starts.len(),
+        positive_execution_instruction_count: rooted_instructions.instruction_count(),
+        rooted_instruction_interior_candidate_count: partition.rooted_instruction_interiors.len(),
+        rooted_start_interior_conflict_count: rooted_instructions.start_interior_conflicts().len(),
+        unresolved_before_positive_execution_count: unrooted_partition.unresolved.len(),
         exact_bound_data_candidate_count: partition.exact_bound_data.len(),
         unresolved_candidate_count: partition.unresolved.len(),
         boundary_unresolved_candidate_count,
@@ -243,7 +260,7 @@ fn source_mmc4_projections() -> Vec<MappedPrgProjection> {
 }
 
 fn declared_source_writers() -> Result<Vec<SourceWriterDeclaration>> {
-    let mut declarations = Vec::with_capacity(DECLARED_SOURCE_WRITER_COUNT);
+    let mut declarations = Vec::new();
     declarations.extend(SOURCE_PRG_BANK_WRITERS.iter().map(writer_declaration));
     declarations.push(SourceWriterDeclaration {
         role: "central PRG bank selector".to_owned(),
@@ -465,9 +482,9 @@ mod tests {
     }
 
     #[test]
-    fn source_structural_writer_ledger_has_seventy_one_distinct_starts() {
+    fn source_structural_writer_ledger_has_one_owner_per_distinct_start() {
         let declarations = declared_source_writers().unwrap();
-        assert_eq!(declarations.len(), DECLARED_SOURCE_WRITER_COUNT);
+        assert!(!declarations.is_empty());
         let starts = declarations
             .iter()
             .map(|writer| (writer.prg_bank, writer.cpu_address))

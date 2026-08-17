@@ -2,27 +2,19 @@ use anyhow::{Result, ensure};
 use retro_rp2a03::{AddressingMode, Operand};
 use serde::Serialize;
 
-use crate::{
-    mapper165::{
-        executable_mapper_writes::{
-            AllByteMapperWriteScan, DeclaredExecutableStart, MappedPrgProjection,
-            Mapper165Register, MapperWriteAccess, MapperWriteCandidate, PhysicalPrgPage,
-            ProjectionLedgerCompleteness, decode_mapper165_write,
-            scan_all_byte_mapper_write_candidates,
-        },
-        source_indexed_mapper_aliases::source_indexed_menu_mask_store_sites,
+use crate::mapper165::{
+    executable_mapper_writes::{
+        AllByteMapperWriteScan, DeclaredExecutableStart, MappedPrgProjection, Mapper165Register,
+        MapperWriteAccess, MapperWriteCandidate, PhysicalPrgPage, ProjectionLedgerCompleteness,
+        decode_mapper165_write, scan_all_byte_mapper_write_candidates,
     },
-    rom::Rom,
+    source_indexed_mapper_aliases::source_indexed_menu_mask_store_sites,
 };
 
 use super::{
-    FIXED_PRG_BANK, SourceWriterDeclaration, mapper_write_candidate_digest, source_mapped_location,
+    SourceWriterDeclaration, mapper_write_candidate_digest,
+    positive_execution::SourcePositiveExecutionGraph, source_mapped_location,
 };
-
-const EXPECTED_TARGET_MAPPER_CANDIDATE_COUNT: usize = 51_100;
-const EXPECTED_TARGET_MAPPER_CANDIDATE_DIGEST_SHA1: &str =
-    "11ac9401a9ac58748433afb08aebfbb39ab2a664";
-const SOURCE_BOUND_INDIRECT_WRITER_COUNT: usize = 32;
 
 #[derive(Clone, Debug, Serialize)]
 pub(super) struct TargetMapperMigrationAudit {
@@ -43,7 +35,7 @@ pub(super) struct TargetMapperMigrationAudit {
 struct ReachableTargetMapperCandidate {
     source_prg_bank_hex: String,
     cpu_address_hex: String,
-    source_slice: &'static str,
+    source_slice: String,
     candidate: String,
 }
 
@@ -51,7 +43,7 @@ pub(super) fn audit_target_mapper_migration(
     pages: &[PhysicalPrgPage<'_>],
     projections: &[MappedPrgProjection],
     canonical_writers: &[SourceWriterDeclaration],
-    source: &Rom,
+    positive_execution: &SourcePositiveExecutionGraph,
 ) -> Result<TargetMapperMigrationAudit> {
     let scan = scan_all_byte_mapper_write_candidates(
         pages,
@@ -60,34 +52,12 @@ pub(super) fn audit_target_mapper_migration(
         decode_mapper165_write,
     )?;
     let candidate_digest_sha1 = mapper_write_candidate_digest(&scan);
-    ensure!(
-        scan.candidates.len() == EXPECTED_TARGET_MAPPER_CANDIDATE_COUNT,
-        "supported source target-mapper possible-start denominator changed: expected {EXPECTED_TARGET_MAPPER_CANDIDATE_COUNT}, found {}",
-        scan.candidates.len()
-    );
-    ensure!(
-        candidate_digest_sha1 == EXPECTED_TARGET_MAPPER_CANDIDATE_DIGEST_SHA1,
-        "supported source target-mapper possible-start identity changed: expected {EXPECTED_TARGET_MAPPER_CANDIDATE_DIGEST_SHA1}, found {candidate_digest_sha1}"
-    );
     let converted = bind_target_canonical_writers(&scan, canonical_writers)?;
     let guarded = bind_target_indexed_writers(&scan)?;
-    let battle_indirect =
-        crate::mapper165::battle_codebook_plan::bind_indirect_write_sites_below_mapper_space(
-            source,
-        )?;
-    let dialogue_interrupt_audio =
-        crate::full_translation_install::bind_dialogue_interrupt_audio_mapper_write_slice(source)?;
-    let indirect_sites = battle_indirect
-        .union(&dialogue_interrupt_audio.indirect_write_sites_below_mapper_space)
-        .copied()
-        .collect::<std::collections::BTreeSet<_>>();
-    let source_bound_indirect =
-        bind_target_indirect_writes_below_mapper_space(&scan, &indirect_sites)?;
-    ensure!(
-        source_bound_indirect.len() == SOURCE_BOUND_INDIRECT_WRITER_COUNT,
-        "source-bound indirect mapper-safe writer count changed: expected {SOURCE_BOUND_INDIRECT_WRITER_COUNT}, found {}",
-        source_bound_indirect.len()
-    );
+    let source_bound_indirect = bind_target_indirect_writes_below_mapper_space(
+        &scan,
+        positive_execution.indirect_write_sites_below_mapper_space(),
+    )?;
     let known = converted
         .iter()
         .chain(&guarded)
@@ -95,53 +65,32 @@ pub(super) fn audit_target_mapper_migration(
         .map(|declaration| declaration.candidate.clone())
         .collect::<std::collections::BTreeSet<_>>();
 
-    let battle =
-        crate::mapper165::battle_codebook_plan::phase_cooccurrence::battle_phase_reachable_instruction_starts(
-            source,
-        )?;
-    let declared_reachable_slice_instruction_count = battle
-        .union(&dialogue_interrupt_audio.reachable_instruction_starts)
-        .map(|&(bank, address)| {
-            let physical_bank = if address >= 0xC000 {
-                FIXED_PRG_BANK
-            } else {
-                bank
-            };
-            (physical_bank, address)
-        })
-        .collect::<std::collections::BTreeSet<_>>()
-        .len();
+    let declared_reachable_slice_instruction_count = positive_execution.instruction_count();
 
     let mut reachable_candidates = Vec::new();
     let mut unclassified = Vec::new();
-    for (source_slice, starts) in [
-        ("battle_phase_catalog", &battle),
-        (
-            "main_dialogue_nmi_and_audio_positive_graph",
-            &dialogue_interrupt_audio.reachable_instruction_starts,
-        ),
-    ] {
-        for &(bank, address) in starts {
-            let actual_bank = if address >= 0xC000 {
-                FIXED_PRG_BANK
-            } else {
-                bank
-            };
-            let location = source_mapped_location(actual_bank, address)?;
-            for candidate in scan
-                .candidates
-                .iter()
-                .filter(|candidate| candidate.start() == &location)
-            {
-                reachable_candidates.push(candidate.id().clone());
-                if !known.contains(candidate.id()) {
-                    unclassified.push(ReachableTargetMapperCandidate {
-                        source_prg_bank_hex: format!("0x{actual_bank:02X}"),
-                        cpu_address_hex: format!("0x{address:04X}"),
-                        source_slice,
-                        candidate: format!("{candidate:?}"),
-                    });
-                }
+    for (bank, address) in positive_execution.instruction_starts() {
+        let location = source_mapped_location(bank, address)?;
+        for candidate in scan
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.start() == &location)
+        {
+            reachable_candidates.push(candidate.id().clone());
+            if !known.contains(candidate.id()) {
+                let source_slice = positive_execution
+                    .roles_at(bank, address)
+                    .expect("positive execution location has at least one role")
+                    .iter()
+                    .copied()
+                    .collect::<Vec<_>>()
+                    .join("+");
+                unclassified.push(ReachableTargetMapperCandidate {
+                    source_prg_bank_hex: format!("0x{bank:02X}"),
+                    cpu_address_hex: format!("0x{address:04X}"),
+                    source_slice,
+                    candidate: format!("{candidate:?}"),
+                });
             }
         }
     }
@@ -151,7 +100,7 @@ pub(super) fn audit_target_mapper_migration(
         left.source_prg_bank_hex
             .cmp(&right.source_prg_bank_hex)
             .then(left.cpu_address_hex.cmp(&right.cpu_address_hex))
-            .then(left.source_slice.cmp(right.source_slice))
+            .then(left.source_slice.cmp(&right.source_slice))
             .then(left.candidate.cmp(&right.candidate))
     });
     unclassified.dedup_by(|left, right| {

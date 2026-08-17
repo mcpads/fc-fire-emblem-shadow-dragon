@@ -5,6 +5,7 @@ mod candidate_partition;
 mod hardware_decode;
 #[cfg(test)]
 mod mapped_program;
+mod rooted_instruction_layout;
 
 pub(crate) use all_byte_candidates::{
     AllByteMapperWriteScan, BoundarySuccessorCoverage, MappedPrgLocation, MappedPrgProjection,
@@ -30,6 +31,9 @@ pub(crate) use hardware_decode::{SourceMmc4Register, decode_source_mmc4_write};
 pub(crate) use mapped_program::{
     CodeLocation, DirectCodeBinding, ExecutableProgram, ExecutableRegion, SequentialCodeBoundary,
 };
+#[cfg(test)]
+pub(crate) use rooted_instruction_layout::RootedInstructionLayout;
+pub(crate) use rooted_instruction_layout::bind_rooted_instruction_layout;
 
 #[cfg(test)]
 mod tests;
