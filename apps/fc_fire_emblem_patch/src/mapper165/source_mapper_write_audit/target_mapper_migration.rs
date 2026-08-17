@@ -11,7 +11,8 @@ use crate::mapper165::{
         decode_mapper165_write, scan_all_byte_mapper_write_candidates,
     },
     source_indexed_mapper_aliases::{
-        source_indexed_menu_mask_store_sites, source_indexed_menu_selection_store_sites,
+        source_indexed_menu_mask_store_sites, source_indexed_menu_mask_y_store_sites,
+        source_indexed_menu_selection_store_sites,
     },
 };
 
@@ -220,16 +221,27 @@ fn bind_target_indexed_writers(
     scan: &AllByteMapperWriteScan<Mapper165Register>,
 ) -> Result<Vec<DeclaredExecutableStart>> {
     let mut declarations = Vec::new();
-    for (role, operand, sites) in [
+    for (role, opcode, mode, operand, sites) in [
         (
-            "menu-mask",
+            "menu-mask-x",
+            0x9D,
+            AddressingMode::AbsoluteX,
             0x7FEE,
             source_indexed_menu_mask_store_sites().to_vec(),
         ),
         (
-            "menu-selection",
+            "menu-selection-x",
+            0x9D,
+            AddressingMode::AbsoluteX,
             0x7FF3,
             source_indexed_menu_selection_store_sites().to_vec(),
+        ),
+        (
+            "menu-mask-y",
+            0x99,
+            AddressingMode::AbsoluteY,
+            0x7FEE,
+            source_indexed_menu_mask_y_store_sites().to_vec(),
         ),
     ] {
         for (bank, address) in sites {
@@ -241,14 +253,14 @@ fn bind_target_indexed_writers(
                     candidate.start() == &location
                         && matches!(
                             candidate,
-                            MapperWriteCandidate::Decoded { opcode: 0x9D, accesses, .. }
-                                if accesses.iter().any(|access| matches!(
+                            MapperWriteCandidate::Decoded { opcode: actual_opcode, accesses, .. }
+                                if *actual_opcode == opcode && accesses.iter().any(|access| matches!(
                                     access,
                                     MapperWriteAccess::Effective {
-                                        mode: AddressingMode::AbsoluteX,
+                                        mode: actual_mode,
                                         operand: Operand::Word(actual_operand),
                                         ..
-                                    } if *actual_operand == operand
+                                    } if *actual_mode == mode && *actual_operand == operand
                                 ))
                         )
                 })
