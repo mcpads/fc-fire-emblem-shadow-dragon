@@ -98,6 +98,36 @@ struct FontPageFallbackRouteMigrationReport {
     target_cpu_address_hex: String,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FinalFontPageSelectorOwner {
+    CentralScreenResidency,
+    RetainedDynamicSelector,
+    IntegratedRuntime,
+}
+
+impl FinalFontPageSelectorOwner {
+    const fn for_role(role: FontPageFallbackNodeRole) -> Self {
+        match role {
+            FontPageFallbackNodeRole::UnitSummaryAndStatus
+            | FontPageFallbackNodeRole::FrontEndMenu => Self::CentralScreenResidency,
+            FontPageFallbackNodeRole::OptionsMenu
+            | FontPageFallbackNodeRole::UnitRoster
+            | FontPageFallbackNodeRole::WeaponShopDialogue
+            | FontPageFallbackNodeRole::ChapterIntroDialogue => Self::RetainedDynamicSelector,
+            FontPageFallbackNodeRole::BattleComposition
+            | FontPageFallbackNodeRole::MaximumDialogue => Self::IntegratedRuntime,
+        }
+    }
+
+    const fn id(self) -> &'static str {
+        match self {
+            Self::CentralScreenResidency => "central_screen_residency_forwarder",
+            Self::RetainedDynamicSelector => "retained_dynamic_selector",
+            Self::IntegratedRuntime => "integrated_runtime_rebound",
+        }
+    }
+}
+
 impl FontPageSelectorForwarderPlan {
     pub(in crate::full_translation_install) fn writes(&self) -> &[FontPageSelectorExpectedWrite] {
         &self.writes
@@ -127,13 +157,8 @@ impl FontPageSelectorForwarderPlan {
             .nodes
             .iter()
             .filter(|node| {
-                matches!(
-                    node.role,
-                    FontPageFallbackNodeRole::OptionsMenu
-                        | FontPageFallbackNodeRole::UnitRoster
-                        | FontPageFallbackNodeRole::WeaponShopDialogue
-                        | FontPageFallbackNodeRole::ChapterIntroDialogue
-                )
+                FinalFontPageSelectorOwner::for_role(node.role)
+                    == FinalFontPageSelectorOwner::RetainedDynamicSelector
             })
             .collect::<Vec<_>>();
         ensure!(
@@ -183,21 +208,23 @@ pub(super) fn plan_font_page_selector_forwarders(
         .chain(UNIT_NAME_PAGE_DOMAINS)
         .copied()
         .collect::<std::collections::BTreeSet<_>>();
+    let source_fallback_graph = fallback_graph_migration_report(&bound_source_graph);
 
     Ok(FontPageSelectorForwarderPlan {
         schema: 3,
         strategy: "bind the complete branching cumulative fallback graph before replacing a screen selector; centralize only decisions fully owned by the screen residency plan, preserve dynamic options, roster, shop, and chapter-dialogue selectors, and leave battle/maximum-dialogue rebinding to the integrated runtime owner",
-        centralized_selector_count: 2,
+        centralized_selector_count: source_fallback_graph.central_policy_forwarder_count,
         centrally_owned_composite_state_count: FRONT_END_FONT_STATES.len() + 2,
         centrally_owned_translation_domain_count: unique_domains.len(),
         direct_predecessor_count: 2,
         installed_forwarder_byte_count: unit_replacement.len() + front_end_replacement.len(),
-        retained_dynamic_selector_count: 4,
-        integrated_runtime_rebound_selector_count: 2,
+        retained_dynamic_selector_count: source_fallback_graph.retained_dynamic_selector_count,
+        integrated_runtime_rebound_selector_count: source_fallback_graph
+            .integrated_runtime_rebound_selector_count,
         central_policy_owns_every_removed_decision: true,
         source_selector_structure_bound: true,
         direct_entry_census_bound: true,
-        source_fallback_graph: fallback_graph_migration_report(&bound_source_graph),
+        source_fallback_graph,
         selectors: vec![
             forwarder_report(
                 "unit_summary_and_status",
@@ -253,7 +280,7 @@ fn fallback_graph_migration_report(
                 .iter()
                 .map(|register| format!("0x{register:02X}"))
                 .collect(),
-            final_owner: final_selector_owner(node.role),
+            final_owner: FinalFontPageSelectorOwner::for_role(node.role).id(),
         })
         .collect::<Vec<_>>();
     FontPageFallbackGraphMigrationReport {
@@ -293,21 +320,6 @@ fn fallback_graph_migration_report(
                 target_cpu_address_hex: format!("0x{:04X}", route.target_cpu_address),
             })
             .collect(),
-    }
-}
-
-fn final_selector_owner(role: FontPageFallbackNodeRole) -> &'static str {
-    match role {
-        FontPageFallbackNodeRole::UnitSummaryAndStatus | FontPageFallbackNodeRole::FrontEndMenu => {
-            "central_screen_residency_forwarder"
-        }
-        FontPageFallbackNodeRole::OptionsMenu
-        | FontPageFallbackNodeRole::UnitRoster
-        | FontPageFallbackNodeRole::WeaponShopDialogue
-        | FontPageFallbackNodeRole::ChapterIntroDialogue => "retained_dynamic_selector",
-        FontPageFallbackNodeRole::BattleComposition | FontPageFallbackNodeRole::MaximumDialogue => {
-            "integrated_runtime_rebound"
-        }
     }
 }
 
@@ -456,6 +468,50 @@ mod tests {
     #[test]
     fn unit_summary_and_status_have_distinct_central_owners() {
         bind_unit_name_central_ownership(routes()).unwrap();
+    }
+
+    #[test]
+    fn every_fallback_node_has_one_explicit_final_owner() {
+        let roles = [
+            FontPageFallbackNodeRole::BattleComposition,
+            FontPageFallbackNodeRole::MaximumDialogue,
+            FontPageFallbackNodeRole::OptionsMenu,
+            FontPageFallbackNodeRole::UnitRoster,
+            FontPageFallbackNodeRole::UnitSummaryAndStatus,
+            FontPageFallbackNodeRole::WeaponShopDialogue,
+            FontPageFallbackNodeRole::FrontEndMenu,
+            FontPageFallbackNodeRole::ChapterIntroDialogue,
+        ];
+        let owned_by = |owner| {
+            roles
+                .into_iter()
+                .filter(|role| FinalFontPageSelectorOwner::for_role(*role) == owner)
+                .collect::<std::collections::BTreeSet<_>>()
+        };
+
+        assert_eq!(
+            owned_by(FinalFontPageSelectorOwner::CentralScreenResidency),
+            std::collections::BTreeSet::from([
+                FontPageFallbackNodeRole::UnitSummaryAndStatus,
+                FontPageFallbackNodeRole::FrontEndMenu,
+            ])
+        );
+        assert_eq!(
+            owned_by(FinalFontPageSelectorOwner::RetainedDynamicSelector),
+            std::collections::BTreeSet::from([
+                FontPageFallbackNodeRole::OptionsMenu,
+                FontPageFallbackNodeRole::UnitRoster,
+                FontPageFallbackNodeRole::WeaponShopDialogue,
+                FontPageFallbackNodeRole::ChapterIntroDialogue,
+            ])
+        );
+        assert_eq!(
+            owned_by(FinalFontPageSelectorOwner::IntegratedRuntime),
+            std::collections::BTreeSet::from([
+                FontPageFallbackNodeRole::BattleComposition,
+                FontPageFallbackNodeRole::MaximumDialogue,
+            ])
+        );
     }
 
     #[test]
