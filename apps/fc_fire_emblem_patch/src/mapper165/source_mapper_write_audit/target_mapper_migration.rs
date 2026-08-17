@@ -1,3 +1,5 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use anyhow::{Result, ensure};
 use retro_rp2a03::{AddressingMode, Operand};
 use serde::Serialize;
@@ -63,19 +65,22 @@ pub(super) fn audit_target_mapper_migration(
         .chain(&guarded)
         .chain(&source_bound_indirect)
         .map(|declaration| declaration.candidate.clone())
-        .collect::<std::collections::BTreeSet<_>>();
+        .collect::<BTreeSet<_>>();
 
     let declared_reachable_slice_instruction_count = positive_execution.instruction_count();
+    let mut candidates_by_start = BTreeMap::<_, Vec<_>>::new();
+    for candidate in &scan.candidates {
+        candidates_by_start
+            .entry(candidate.start().clone())
+            .or_default()
+            .push(candidate);
+    }
 
     let mut reachable_candidates = Vec::new();
     let mut unclassified = Vec::new();
     for (bank, address) in positive_execution.instruction_starts() {
         let location = source_mapped_location(bank, address)?;
-        for candidate in scan
-            .candidates
-            .iter()
-            .filter(|candidate| candidate.start() == &location)
-        {
+        for candidate in candidates_by_start.get(&location).into_iter().flatten() {
             reachable_candidates.push(candidate.id().clone());
             if !known.contains(candidate.id()) {
                 let source_slice = positive_execution
@@ -124,7 +129,7 @@ pub(super) fn audit_target_mapper_migration(
         declared_reachable_slice_candidate_count: reachable_candidates.len(),
         declared_reachable_slice_unclassified_candidate_count: unclassified.len(),
         declared_reachable_slice_unclassified_candidates: unclassified,
-        closure_claim: "partial: this root-independent denominator includes source writes that MMC4 ignored but mapper165 decodes; the positive battle, main-dialogue, NMI, and audio graphs are crossed against it, while missing execution roots and computed target bounds remain unresolved",
+        closure_claim: "partial: this root-independent denominator includes source writes that MMC4 ignored but mapper165 decodes; the fixed hardware-vector, battle, main-dialogue, NMI, and audio graphs are crossed against it, while switchable, indirect, inline-dispatch, and other missing execution roots plus computed target bounds remain unresolved",
     })
 }
 

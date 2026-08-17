@@ -43,6 +43,10 @@ pub(super) struct SourceMapperWriteAudit {
     mapped_projection_count: usize,
     mapper_write_candidate_count: usize,
     declared_source_writer_count: usize,
+    hardware_vector_slot_count: usize,
+    hardware_vector_root_count: usize,
+    fixed_vector_execution_instruction_count: usize,
+    fixed_vector_open_control_edge_count: usize,
     positive_execution_instruction_count: usize,
     rooted_instruction_interior_candidate_count: usize,
     rooted_start_interior_conflict_count: usize,
@@ -200,11 +204,17 @@ pub(super) fn audit_source_mapper_writes(source: &Rom) -> Result<SourceMapperWri
         .count();
     Ok(SourceMapperWriteAudit {
         candidate_scope: "every byte offset in every declared source MMC4 PRG projection, decoded with RP2A03 StaticSemantics against all MMC4 register aliases",
-        closure_claim: "partial: the physical-page and projection denominator is complete; positive battle, main-dialogue, NMI, and audio instruction spans classify only their exact instruction interiors, while source-structural writer declarations do not by themselves establish reachability; counts and the candidate digest are diagnostic outputs rather than closure proofs; the whole-program executable-root ledger is incomplete and every remaining possible start stays unresolved",
+        closure_claim: "partial: the physical-page and projection denominator is complete; the three hardware vector slots and positive battle, main-dialogue, NMI, and audio instruction spans classify only their exact instruction interiors; switchable, indirect, and inline-dispatch edges remain explicitly open, while source-structural writer declarations do not by themselves establish reachability; counts and the candidate digest are diagnostic outputs rather than closure proofs; the whole-program executable-root ledger is incomplete and every remaining possible start stays unresolved",
         physical_prg_page_count: pages.len(),
         mapped_projection_count: projections.len(),
         mapper_write_candidate_count: scan.candidates.len(),
         declared_source_writer_count: partition.declared_executable_starts.len(),
+        hardware_vector_slot_count: positive_execution.hardware_vector_slot_count(),
+        hardware_vector_root_count: positive_execution.hardware_vector_root_count(),
+        fixed_vector_execution_instruction_count: positive_execution
+            .fixed_vector_instruction_count(),
+        fixed_vector_open_control_edge_count: positive_execution
+            .fixed_vector_open_control_edge_count(),
         positive_execution_instruction_count: rooted_instructions.instruction_count(),
         rooted_instruction_interior_candidate_count: partition.rooted_instruction_interiors.len(),
         rooted_start_interior_conflict_count: rooted_instructions.start_interior_conflicts().len(),

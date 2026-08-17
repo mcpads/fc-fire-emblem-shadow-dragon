@@ -6,14 +6,23 @@ use crate::{mapper165::executable_mapper_writes::MappedPrgLocation, rom::Rom};
 
 use super::{FIXED_PRG_BANK, source_mapped_location};
 
+mod fixed_vectors;
+
+use fixed_vectors::bind_fixed_vector_execution;
+
 const BATTLE_PHASE_GRAPH: &str = "battle_phase_catalog";
 const DIALOGUE_INTERRUPT_AUDIO_GRAPH: &str = "main_dialogue_nmi_and_audio_positive_graph";
+const FIXED_HARDWARE_VECTOR_GRAPH: &str = "fixed_hardware_vector_direct_graph";
 
 /// Positive source execution slices already bound by their owning battle and dialogue contracts.
 /// This is deliberately not a complete executable-root ledger.
 pub(super) struct SourcePositiveExecutionGraph {
     instruction_roles: BTreeMap<(u8, u16), BTreeSet<&'static str>>,
     indirect_write_sites_below_mapper_space: BTreeSet<(u8, u16, u8)>,
+    hardware_vector_slot_count: usize,
+    hardware_vector_root_count: usize,
+    fixed_vector_instruction_count: usize,
+    fixed_vector_open_control_edge_count: usize,
 }
 
 impl SourcePositiveExecutionGraph {
@@ -31,6 +40,22 @@ impl SourcePositiveExecutionGraph {
 
     pub(super) fn indirect_write_sites_below_mapper_space(&self) -> &BTreeSet<(u8, u16, u8)> {
         &self.indirect_write_sites_below_mapper_space
+    }
+
+    pub(super) fn hardware_vector_slot_count(&self) -> usize {
+        self.hardware_vector_slot_count
+    }
+
+    pub(super) fn hardware_vector_root_count(&self) -> usize {
+        self.hardware_vector_root_count
+    }
+
+    pub(super) fn fixed_vector_instruction_count(&self) -> usize {
+        self.fixed_vector_instruction_count
+    }
+
+    pub(super) fn fixed_vector_open_control_edge_count(&self) -> usize {
+        self.fixed_vector_open_control_edge_count
     }
 
     pub(super) fn mapped_instruction_starts(&self) -> Result<BTreeSet<MappedPrgLocation>> {
@@ -53,13 +78,18 @@ pub(super) fn bind_source_positive_execution_graph(
         )?;
     let dialogue_interrupt_audio =
         crate::full_translation_install::bind_dialogue_interrupt_audio_mapper_write_slice(source)?;
+    let fixed_vectors = bind_fixed_vector_execution(source)?;
 
     let mut instruction_roles = BTreeMap::<_, BTreeSet<_>>::new();
     for (role, starts) in [
-        (BATTLE_PHASE_GRAPH, &battle),
+        (BATTLE_PHASE_GRAPH, battle.iter()),
         (
             DIALOGUE_INTERRUPT_AUDIO_GRAPH,
-            &dialogue_interrupt_audio.reachable_instruction_starts,
+            dialogue_interrupt_audio.reachable_instruction_starts.iter(),
+        ),
+        (
+            FIXED_HARDWARE_VECTOR_GRAPH,
+            fixed_vectors.reachable_instruction_starts().iter(),
         ),
     ] {
         for &(bank, address) in starts {
@@ -75,13 +105,23 @@ pub(super) fn bind_source_positive_execution_graph(
     // These source contracts already report the physical PRG bank used to bind each instruction.
     // Preserve that identity instead of reinterpreting it as the caller's switchable-bank context.
     let indirect_write_sites_below_mapper_space = battle_indirect
-        .union(&dialogue_interrupt_audio.indirect_write_sites_below_mapper_space)
+        .iter()
+        .chain(
+            dialogue_interrupt_audio
+                .indirect_write_sites_below_mapper_space
+                .iter(),
+        )
+        .chain(fixed_vectors.indirect_write_sites_below_mapper_space())
         .copied()
         .collect();
 
     Ok(SourcePositiveExecutionGraph {
         instruction_roles,
         indirect_write_sites_below_mapper_space,
+        hardware_vector_slot_count: fixed_vectors.vector_slot_count(),
+        hardware_vector_root_count: fixed_vectors.unique_vector_root_count(),
+        fixed_vector_instruction_count: fixed_vectors.reachable_instruction_starts().len(),
+        fixed_vector_open_control_edge_count: fixed_vectors.open_control_edges().len(),
     })
 }
 
