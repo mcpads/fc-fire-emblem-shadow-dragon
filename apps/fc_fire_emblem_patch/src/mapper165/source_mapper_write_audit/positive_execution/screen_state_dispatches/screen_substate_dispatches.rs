@@ -15,6 +15,9 @@ use super::super::{
     chapter_map_loader::BoundChapterMapDimensions,
     unit_record_writers::BoundUnitRecordAddressDomain,
 };
+use super::state_transition_evidence::{
+    StateWriteStep, TransitionPath, bind_state_transition_closure,
+};
 
 mod map_preparation;
 
@@ -46,7 +49,55 @@ struct StatefulDispatchSpec {
     table_end: u16,
     targets: &'static [u16],
     role: &'static str,
+    transitions: Option<&'static [TransitionPath]>,
 }
+
+const INC_8A82: StateWriteStep = StateWriteStep::increment(0x8A82);
+const INC_8A8A: StateWriteStep = StateWriteStep::increment(0x8A8A);
+const SET_00_8ACF: StateWriteStep = StateWriteStep::store_index_y_constant(0x8ACA, 0x8ACF, 0x00);
+const MAIN_STATE_TWO_TRANSITIONS: &[TransitionPath] = &[
+    TransitionPath::new(0, 0x8A76, &[INC_8A82]),
+    TransitionPath::new(1, 0x8A8A, &[INC_8A8A]),
+    TransitionPath::new(2, 0x8A92, &[SET_00_8ACF]),
+];
+
+const INC_A72F: StateWriteStep = StateWriteStep::increment(0xA72F);
+const INC_A733: StateWriteStep = StateWriteStep::increment(0xA733);
+const INC_9F95: StateWriteStep = StateWriteStep::increment(0x9F95);
+const DEC_A784: StateWriteStep = StateWriteStep::decrement(0xA784);
+const MAIN_STATE_FORTY_TWO_TRANSITIONS: &[TransitionPath] = &[
+    TransitionPath::new(0, 0xA733, &[INC_A733]),
+    TransitionPath::new(1, 0xA725, &[INC_A72F]),
+    TransitionPath::new(2, 0x9F1C, &[INC_9F95]),
+    TransitionPath::new(3, 0xA746, &[DEC_A784]),
+];
+
+const INC_B358: StateWriteStep = StateWriteStep::increment(0xB358);
+const SET_00_B37F: StateWriteStep =
+    StateWriteStep::store_accumulator_constant(0xB37B, 0xB37F, 0x00);
+const INC_B383: StateWriteStep = StateWriteStep::increment(0xB383);
+const INC_B397: StateWriteStep = StateWriteStep::increment(0xB397);
+const INC_B3AB: StateWriteStep = StateWriteStep::increment(0xB3AB);
+const SET_00_B3F1: StateWriteStep =
+    StateWriteStep::store_accumulator_constant(0xB3ED, 0xB3F1, 0x00);
+const MAIN_STATE_THIRTY_EIGHT_TRANSITIONS: &[TransitionPath] = &[
+    TransitionPath::new(0, 0xB358, &[INC_B358]),
+    TransitionPath::new(1, 0xB360, &[SET_00_B37F]),
+    TransitionPath::new(1, 0xB360, &[INC_B383]),
+    TransitionPath::new(1, 0xB360, &[INC_B397]),
+    TransitionPath::new(1, 0xB360, &[INC_B3AB]),
+    TransitionPath::new(2, 0xB3BF, &[SET_00_B3F1]),
+];
+
+const INC_B406: StateWriteStep = StateWriteStep::increment(0xB406);
+const INC_B40E: StateWriteStep = StateWriteStep::increment(0xB40E);
+const SET_00_B421: StateWriteStep =
+    StateWriteStep::store_accumulator_constant(0xB41D, 0xB421, 0x00);
+const MAIN_STATE_THIRTY_SIX_TRANSITIONS: &[TransitionPath] = &[
+    TransitionPath::new(0, 0xB406, &[INC_B406]),
+    TransitionPath::new(1, 0xB40E, &[INC_B40E]),
+    TransitionPath::new(2, 0xB416, &[SET_00_B421]),
+];
 
 const STATEFUL_DISPATCHES: [StatefulDispatchSpec; 4] = [
     StatefulDispatchSpec {
@@ -54,24 +105,28 @@ const STATEFUL_DISPATCHES: [StatefulDispatchSpec; 4] = [
         table_end: 0x8A76,
         targets: &MAIN_STATE_TWO_TARGETS,
         role: "main-state-two screen-substate dispatch",
+        transitions: Some(MAIN_STATE_TWO_TRANSITIONS),
     },
     StatefulDispatchSpec {
         call_address: 0xA71A,
         table_end: 0xA725,
         targets: &MAIN_STATE_FORTY_TWO_TARGETS,
         role: "main-state-forty-two screen-substate dispatch",
+        transitions: Some(MAIN_STATE_FORTY_TWO_TRANSITIONS),
     },
     StatefulDispatchSpec {
         call_address: 0xB34F,
         table_end: 0xB358,
         targets: &MAIN_STATE_THIRTY_EIGHT_TARGETS,
         role: "main-state-thirty-eight screen-substate dispatch",
+        transitions: Some(MAIN_STATE_THIRTY_EIGHT_TRANSITIONS),
     },
     StatefulDispatchSpec {
         call_address: 0xB3FD,
         table_end: 0xB406,
         targets: &MAIN_STATE_THIRTY_SIX_TARGETS,
         role: "main-state-thirty-six screen-substate dispatch",
+        transitions: Some(MAIN_STATE_THIRTY_SIX_TRANSITIONS),
     },
 ];
 
@@ -159,12 +214,34 @@ pub(super) fn bind_screen_substate_dispatches(
             "{} pointer table no longer ends at its first handler boundary",
             spec.role
         );
+        let source_bound_produced_selectors = spec
+            .transitions
+            .map(|transitions| {
+                bind_state_transition_closure(
+                    source,
+                    OUTER_SCREEN_BANK,
+                    MAP_DIALOGUE_STATE_ADDRESS,
+                    &handler_domain,
+                    |selector| spec.targets.get(usize::from(selector)).copied(),
+                    [0],
+                    transitions,
+                    spec.role,
+                )
+            })
+            .transpose()?;
+        ensure!(
+            source_bound_produced_selectors
+                .as_ref()
+                .is_none_or(|produced| produced == &handler_domain),
+            "{} producer closure left its handler table",
+            spec.role
+        );
         dispatches.push(ScreenSubstateDispatch {
             prg_bank: OUTER_SCREEN_BANK,
             call_address: spec.call_address,
             handler_domain,
             selector_memory_address: Some(MAP_DIALOGUE_STATE_ADDRESS),
-            source_bound_produced_selectors: None,
+            source_bound_produced_selectors,
             indirect_write_destinations: BTreeMap::new(),
             role: spec.role,
         });

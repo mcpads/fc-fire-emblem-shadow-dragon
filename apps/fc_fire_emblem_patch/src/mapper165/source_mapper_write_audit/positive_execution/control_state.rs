@@ -24,6 +24,9 @@ pub(super) const MAP_DIALOGUE_OUTER_STATE: u16 = 0x05DB;
 pub(super) const SHARED_MENU_STATE: u16 = 0x05DE;
 pub(super) const COMPOSITE_SCREEN_STATE: u16 = 0x05E8;
 pub(super) const DIALOGUE_OR_SOUND_STATE: u16 = 0x05EE;
+// This is a phase selector only inside the sound-test battle route. Gameplay also uses the same
+// address as a unit-row buffer cursor, so it must remain outside the global control-state catalog.
+pub(super) const BATTLE_ANIMATION_TEST_PHASE: u16 = 0x7730;
 
 pub(super) const POSITIVE_CONTROL_STATES: [PositiveControlState; 17] = [
     PositiveControlState {

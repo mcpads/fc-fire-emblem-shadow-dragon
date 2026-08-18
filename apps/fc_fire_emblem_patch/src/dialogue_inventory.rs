@@ -233,6 +233,7 @@ pub(crate) struct CallerHandoffStateDispatchSource {
     call_address: u16,
     selector_address: u16,
     selector_domain: BTreeSet<u8>,
+    handler_targets: Vec<u16>,
 }
 
 impl CallerHandoffStateDispatchSource {
@@ -250,6 +251,10 @@ impl CallerHandoffStateDispatchSource {
 
     pub(crate) fn selector_domain(&self) -> &BTreeSet<u8> {
         &self.selector_domain
+    }
+
+    pub(crate) fn handler_target(&self, selector: u8) -> Option<u16> {
+        self.handler_targets.get(usize::from(selector)).copied()
     }
 }
 
@@ -284,6 +289,7 @@ pub(crate) fn bind_caller_handoff_state_dispatch_sources(
                 call_address,
                 selector_address: spec.state_address,
                 selector_domain: (0..selector_count).collect(),
+                handler_targets: spec.handlers.to_vec(),
             })
         })
         .collect()

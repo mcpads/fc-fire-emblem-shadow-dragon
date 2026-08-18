@@ -10,10 +10,11 @@ use crate::dialogue_inventory::{
 };
 
 use super::super::super::control_state::{
-    COMPOSITE_SCREEN_STATE, DEFERRED_MAIN_STATE, DIALOGUE_OR_SOUND_STATE,
-    FIXED_SCHEDULER_DISPATCH_GATE, FIXED_SCHEDULER_STATE, MAIN_STATE, MAP_DIALOGUE_OUTER_STATE,
-    MAP_EVENT_STATE, MAP_PREPARATION_STATE, OUTER_SCREEN_STATE, PENDING_SHARED_MENU_REQUEST_STATE,
-    PRG_BANK_SHADOW, SHARED_MENU_STATE, TITLE_ANIMATION_STATE, TITLE_STATE, VICTORY_STAGE,
+    BATTLE_ANIMATION_TEST_PHASE, COMPOSITE_SCREEN_STATE, DEFERRED_MAIN_STATE,
+    DIALOGUE_OR_SOUND_STATE, FIXED_SCHEDULER_DISPATCH_GATE, FIXED_SCHEDULER_STATE, MAIN_STATE,
+    MAP_DIALOGUE_OUTER_STATE, MAP_EVENT_STATE, MAP_PREPARATION_STATE, OUTER_SCREEN_STATE,
+    PENDING_SHARED_MENU_REQUEST_STATE, PRG_BANK_SHADOW, SHARED_MENU_STATE, TITLE_ANIMATION_STATE,
+    TITLE_STATE, VICTORY_STAGE,
 };
 
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
@@ -179,6 +180,7 @@ struct ResetTraceMemory {
     menu_state_05de: ByteValueSet,
     composite_state_05e8: ByteValueSet,
     dialogue_or_sound_state_05ee: ByteValueSet,
+    battle_animation_test_phase_7730: ByteValueSet,
     ending_record_phase_7731: ByteValueSet,
     ending_inner_state_7733: ByteValueSet,
     ending_character_animation_state_775d: ByteValueSet,
@@ -187,7 +189,7 @@ struct ResetTraceMemory {
 }
 
 impl ResetTraceMemory {
-    const ADDRESSES: [u16; 30] = [
+    const ADDRESSES: [u16; 31] = [
         0x0000,
         0x0001,
         0x0008,
@@ -213,6 +215,7 @@ impl ResetTraceMemory {
         SHARED_MENU_STATE,
         COMPOSITE_SCREEN_STATE,
         DIALOGUE_OR_SOUND_STATE,
+        BATTLE_ANIMATION_TEST_PHASE,
         ENDING_RECORD_PHASE_ADDRESS,
         ENDING_SEQUENCE_INNER_STATE_ADDRESS,
         ENDING_CHARACTER_ANIMATION_STATE_ADDRESS,
@@ -247,6 +250,7 @@ impl ResetTraceMemory {
             SHARED_MENU_STATE => self.menu_state_05de.clone(),
             COMPOSITE_SCREEN_STATE => self.composite_state_05e8.clone(),
             DIALOGUE_OR_SOUND_STATE => self.dialogue_or_sound_state_05ee.clone(),
+            BATTLE_ANIMATION_TEST_PHASE => self.battle_animation_test_phase_7730.clone(),
             ENDING_RECORD_PHASE_ADDRESS => self.ending_record_phase_7731.clone(),
             ENDING_SEQUENCE_INNER_STATE_ADDRESS => self.ending_inner_state_7733.clone(),
             ENDING_CHARACTER_ANIMATION_STATE_ADDRESS => {
@@ -289,6 +293,7 @@ impl ResetTraceMemory {
             SHARED_MENU_STATE => self.menu_state_05de = value,
             COMPOSITE_SCREEN_STATE => self.composite_state_05e8 = value,
             DIALOGUE_OR_SOUND_STATE => self.dialogue_or_sound_state_05ee = value,
+            BATTLE_ANIMATION_TEST_PHASE => self.battle_animation_test_phase_7730 = value,
             ENDING_RECORD_PHASE_ADDRESS => self.ending_record_phase_7731 = value,
             ENDING_SEQUENCE_INNER_STATE_ADDRESS => self.ending_inner_state_7733 = value,
             ENDING_CHARACTER_ANIMATION_STATE_ADDRESS => {
