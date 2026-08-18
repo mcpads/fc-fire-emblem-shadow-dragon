@@ -31,7 +31,7 @@ use super::{FIXED_CPU_START, FIXED_PRG_BANK, RESET_RAM_CLEAR_CODE, RESET_RAM_CLE
 mod call_effects;
 mod trace_state;
 
-use call_effects::{StateTransparentCallSummary, inspect_state_transparent_call};
+use call_effects::{CallReturnEffect, TrackedStateCallSummary, inspect_tracked_state_call};
 use trace_state::{
     ActivationId, ByteValueSet, ResetTraceIdentity, ResetTraceState, ReturnContinuation,
     ReturnFrame, TrackedByteLocation,
@@ -851,8 +851,8 @@ fn trace_bank_state_entries(
     let mut fixed_scheduler_entry_states = BTreeSet::new();
     let mut indirect_write_sites_below_mapper_space = BTreeMap::<_, bool>::new();
     let mut control_state_write_values = BTreeMap::new();
-    let mut transparent_call_summaries =
-        BTreeMap::<(u8, u16), Option<StateTransparentCallSummary>>::new();
+    let mut tracked_state_call_summaries =
+        BTreeMap::<(u8, u16), Option<TrackedStateCallSummary>>::new();
 
     while let Some(mut state) = pending.pop_front() {
         let identity = state.identity();
@@ -1171,19 +1171,18 @@ fn trace_bank_state_entries(
                 } else {
                     state.mapped_prg_bank
                 };
-                let transparent_summary = match target_bank {
+                let tracked_state_summary = match target_bank {
                     Some(target_bank) => {
                         let key = (target_bank, target);
-                        if !transparent_call_summaries.contains_key(&key) {
-                            let summary =
-                                inspect_state_transparent_call(source, target_bank, target)?;
-                            transparent_call_summaries.insert(key, summary);
+                        if !tracked_state_call_summaries.contains_key(&key) {
+                            let summary = inspect_tracked_state_call(source, target_bank, target)?;
+                            tracked_state_call_summaries.insert(key, summary);
                         }
-                        transparent_call_summaries.get(&key).cloned().flatten()
+                        tracked_state_call_summaries.get(&key).cloned().flatten()
                     }
                     None => None,
                 };
-                if let Some(summary) = transparent_summary {
+                if let Some(summary) = tracked_state_summary {
                     record_fixed_to_switchable_entry(
                         &state,
                         target,
@@ -1192,9 +1191,25 @@ fn trace_bank_state_entries(
                     );
                     reachable_instruction_starts
                         .extend(summary.instruction_starts().iter().copied());
-                    state.invalidate_registers_and_flags();
-                    state.address = return_address;
-                    pending.push_back(state);
+                    if summary.return_effects().contains(&CallReturnEffect::Normal) {
+                        let mut normal_return = state.clone();
+                        normal_return.invalidate_registers_and_flags();
+                        normal_return.address = return_address;
+                        pending.push_back(normal_return);
+                    }
+                    if summary
+                        .return_effects()
+                        .contains(&CallReturnEffect::EscapeOneCaller)
+                    {
+                        state.invalidate_registers_and_flags();
+                        record_completed_return(
+                            state,
+                            &mut return_flow,
+                            &mut pending,
+                            &mut switchable_roots,
+                            &mut open_facts,
+                        );
+                    }
                 } else {
                     route_call_target(
                         state,
@@ -3415,6 +3430,52 @@ mod tests {
                     (FIXED_PRG_BANK, HANDLER + 2),
                     (FIXED_PRG_BANK, CONTINUATION),
                 ]))
+        );
+    }
+
+    #[test]
+    fn summarized_callee_preserves_normal_and_one_caller_escape_routes() {
+        let source = synthetic_source(
+            &[
+                (
+                    0xC100,
+                    &[
+                        0x20, 0x40, 0xC1, // JSR $C140
+                        0xA9, 0x02, // LDA #$02
+                        0x8D, 0x00, 0xA0, // STA $A000
+                        0x4C, 0x00, 0x84, // JMP $8400
+                    ],
+                ),
+                (
+                    0xC140,
+                    &[
+                        0x20, 0x80, 0xC1, // JSR $C180
+                        0xA9, 0x03, // LDA #$03
+                        0x8D, 0x00, 0xA0, // STA $A000
+                        0x4C, 0x00, 0x85, // JMP $8500
+                    ],
+                ),
+                (
+                    0xC180,
+                    &[
+                        0xAD, 0x00, 0x04, // LDA $0400
+                        0xF0, 0x03, // BEQ $C188
+                        0x68, // PLA: discard this callee's return low byte
+                        0x68, // PLA: discard this callee's return high byte
+                        0x60, // RTS: return from the caller at $C140
+                        0x60, // $C188: normal RTS
+                    ],
+                ),
+            ],
+            0xC100,
+        );
+
+        let trace =
+            bind_reset_bank_entries(&source, 0xC100, &BTreeSet::new(), &BTreeMap::new()).unwrap();
+
+        assert_eq!(
+            trace.switchable_roots(),
+            &BTreeSet::from([(0x02, 0x8400), (0x03, 0x8500)])
         );
     }
 
