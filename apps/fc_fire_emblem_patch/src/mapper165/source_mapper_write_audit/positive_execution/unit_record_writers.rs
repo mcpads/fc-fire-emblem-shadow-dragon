@@ -70,9 +70,92 @@ const UNIT_RECORD_WRITER_SITES: &[(u8, u16, u8)] = &[
     SELECTED_UNIT_MAP_OCCUPANCY_WRITER,
 ];
 
-pub(super) fn bind_unit_record_write_destinations(
-    source: &Rom,
-) -> Result<BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>> {
+pub(super) struct BoundUnitRecordAddressDomain {
+    runtime_row_pointers: Vec<u16>,
+    map_layer_row_pointers: Vec<u16>,
+}
+
+impl BoundUnitRecordAddressDomain {
+    pub(super) fn allied_field_destination_ranges(
+        &self,
+        field_offset: u16,
+    ) -> Result<Vec<RangeInclusive<u16>>> {
+        record_field_destination_ranges(ALLIED_RECORD_BASE, RECORD_SCAN_CAPACITY, field_offset)
+    }
+
+    pub(super) fn enemy_field_destination_ranges(
+        &self,
+        field_offset: u16,
+    ) -> Result<Vec<RangeInclusive<u16>>> {
+        record_field_destination_ranges(ENEMY_RECORD_BASE, RECORD_SCAN_CAPACITY, field_offset)
+    }
+
+    pub(super) fn enemy_field_destination_ranges_within(
+        &self,
+        record_count: usize,
+        field_offset: u16,
+    ) -> Result<Vec<RangeInclusive<u16>>> {
+        ensure!(
+            record_count <= RECORD_SCAN_CAPACITY,
+            "enemy unit-record subset exceeds the source-bound record capacity"
+        );
+        record_field_destination_ranges(ENEMY_RECORD_BASE, record_count, field_offset)
+    }
+
+    pub(super) fn enemy_record_copy_destination_range(
+        &self,
+        record_count: usize,
+    ) -> Result<RangeInclusive<u16>> {
+        ensure!(
+            record_count <= RECORD_SCAN_CAPACITY,
+            "enemy unit-record copy exceeds the source-bound record capacity"
+        );
+        record_copy_destination_range(ENEMY_RECORD_BASE, record_count)
+    }
+
+    pub(super) fn runtime_row_destination_ranges(
+        &self,
+        maximum_index: u8,
+    ) -> Result<Vec<RangeInclusive<u16>>> {
+        indexed_pointer_destination_ranges(&self.runtime_row_pointers, maximum_index)
+    }
+
+    pub(super) fn map_layer_row_destination_ranges(
+        &self,
+        row_count: usize,
+        maximum_index: u8,
+    ) -> Result<Vec<RangeInclusive<u16>>> {
+        ensure!(
+            row_count > 0 && row_count <= self.map_layer_row_pointers.len(),
+            "map-layer row subset escapes the source-bound pointer table"
+        );
+        indexed_pointer_destination_ranges(&self.map_layer_row_pointers[..row_count], maximum_index)
+    }
+
+    pub(super) fn all_map_layer_destination_ranges(
+        &self,
+        maximum_index: u8,
+    ) -> Result<Vec<RangeInclusive<u16>>> {
+        indexed_pointer_destination_ranges(&self.map_layer_row_pointers, maximum_index)
+    }
+}
+
+pub(super) struct UnitRecordWriteContract {
+    destinations: BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
+    address_domain: BoundUnitRecordAddressDomain,
+}
+
+impl UnitRecordWriteContract {
+    pub(super) fn destinations(&self) -> &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds> {
+        &self.destinations
+    }
+
+    pub(super) fn address_domain(&self) -> &BoundUnitRecordAddressDomain {
+        &self.address_domain
+    }
+}
+
+pub(super) fn bind_unit_record_write_destinations(source: &Rom) -> Result<UnitRecordWriteContract> {
     let source_binding = bind_unit_record_writer_source(source)?;
     let mut destinations = unit_record_write_destinations(
         &source_binding.runtime_row_pointers,
@@ -98,7 +181,13 @@ pub(super) fn bind_unit_record_write_destinations(
             site.1,
         );
     }
-    Ok(destinations)
+    Ok(UnitRecordWriteContract {
+        destinations,
+        address_domain: BoundUnitRecordAddressDomain {
+            runtime_row_pointers: source_binding.runtime_row_pointers,
+            map_layer_row_pointers: source_binding.map_layer_row_pointers,
+        },
+    })
 }
 
 fn unit_record_write_destinations(

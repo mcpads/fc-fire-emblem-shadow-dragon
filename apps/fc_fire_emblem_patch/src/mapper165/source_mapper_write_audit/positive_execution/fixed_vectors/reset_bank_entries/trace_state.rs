@@ -11,8 +11,8 @@ use crate::dialogue_inventory::{
 use super::super::super::control_state::{
     COMPOSITE_SCREEN_STATE, DEFERRED_MAIN_STATE, DIALOGUE_OR_SOUND_STATE,
     FIXED_SCHEDULER_DISPATCH_GATE, FIXED_SCHEDULER_STATE, MAIN_STATE, MAP_DIALOGUE_OUTER_STATE,
-    OUTER_SCREEN_STATE, PENDING_SHARED_MENU_REQUEST_STATE, PRG_BANK_SHADOW, SHARED_MENU_STATE,
-    TITLE_ANIMATION_STATE, TITLE_STATE,
+    MAP_PREPARATION_STATE, OUTER_SCREEN_STATE, PENDING_SHARED_MENU_REQUEST_STATE, PRG_BANK_SHADOW,
+    SHARED_MENU_STATE, TITLE_ANIMATION_STATE, TITLE_STATE,
 };
 
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
@@ -167,6 +167,7 @@ struct ResetTraceMemory {
     restored_prg_bank_shadow_51: ByteValueSet,
     main_state_84: ByteValueSet,
     victory_stage_053e: ByteValueSet,
+    map_preparation_state_053f: ByteValueSet,
     title_state_057a: ByteValueSet,
     title_animation_state_0587: ByteValueSet,
     temporary_sprite_prg_bank_05c6: ByteValueSet,
@@ -184,7 +185,7 @@ struct ResetTraceMemory {
 }
 
 impl ResetTraceMemory {
-    const ADDRESSES: [u16; 28] = [
+    const ADDRESSES: [u16; 29] = [
         0x0000,
         0x0001,
         0x0008,
@@ -199,6 +200,7 @@ impl ResetTraceMemory {
         0x0051,
         MAIN_STATE,
         0x053E,
+        MAP_PREPARATION_STATE,
         TITLE_STATE,
         TITLE_ANIMATION_STATE,
         0x05C6,
@@ -231,6 +233,7 @@ impl ResetTraceMemory {
             0x0051 => self.restored_prg_bank_shadow_51.clone(),
             MAIN_STATE => self.main_state_84.clone(),
             0x053E => self.victory_stage_053e.clone(),
+            MAP_PREPARATION_STATE => self.map_preparation_state_053f.clone(),
             TITLE_STATE => self.title_state_057a.clone(),
             TITLE_ANIMATION_STATE => self.title_animation_state_0587.clone(),
             0x05C6 => self.temporary_sprite_prg_bank_05c6.clone(),
@@ -271,6 +274,7 @@ impl ResetTraceMemory {
             0x0051 => self.restored_prg_bank_shadow_51 = value,
             MAIN_STATE => self.main_state_84 = value,
             0x053E => self.victory_stage_053e = value,
+            MAP_PREPARATION_STATE => self.map_preparation_state_053f = value,
             TITLE_STATE => self.title_state_057a = value,
             TITLE_ANIMATION_STATE => self.title_animation_state_0587 = value,
             0x05C6 => self.temporary_sprite_prg_bank_05c6 = value,

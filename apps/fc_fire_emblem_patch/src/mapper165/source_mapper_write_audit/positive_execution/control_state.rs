@@ -14,6 +14,7 @@ pub(super) const FIXED_SCHEDULER_STATE: u16 = 0x0025;
 pub(super) const DEFERRED_MAIN_STATE: u16 = 0x0026;
 pub(super) const PRG_BANK_SHADOW: u16 = 0x0029;
 pub(super) const MAIN_STATE: u16 = 0x0084;
+pub(super) const MAP_PREPARATION_STATE: u16 = 0x053F;
 pub(super) const TITLE_STATE: u16 = 0x057A;
 pub(super) const TITLE_ANIMATION_STATE: u16 = 0x0587;
 pub(super) const PENDING_SHARED_MENU_REQUEST_STATE: u16 = 0x05CC;
@@ -22,7 +23,7 @@ pub(super) const SHARED_MENU_STATE: u16 = 0x05DE;
 pub(super) const COMPOSITE_SCREEN_STATE: u16 = 0x05E8;
 pub(super) const DIALOGUE_OR_SOUND_STATE: u16 = 0x05EE;
 
-pub(super) const POSITIVE_CONTROL_STATES: [PositiveControlState; 14] = [
+pub(super) const POSITIVE_CONTROL_STATES: [PositiveControlState; 15] = [
     PositiveControlState {
         address: FIXED_SCHEDULER_DISPATCH_GATE,
         role: "fixed_scheduler_dispatch_gate_23",
@@ -46,6 +47,10 @@ pub(super) const POSITIVE_CONTROL_STATES: [PositiveControlState; 14] = [
     PositiveControlState {
         address: MAIN_STATE,
         role: "main_state_84",
+    },
+    PositiveControlState {
+        address: MAP_PREPARATION_STATE,
+        role: "map_preparation_state_053f",
     },
     PositiveControlState {
         address: TITLE_STATE,

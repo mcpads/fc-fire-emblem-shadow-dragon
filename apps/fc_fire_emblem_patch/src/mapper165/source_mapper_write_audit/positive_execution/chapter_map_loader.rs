@@ -30,9 +30,37 @@ pub(super) const CHAPTER_MAP_INDIRECT_WRITE_SITE: (u8, u16, u8) = (
     CHAPTER_MAP_DESTINATION_POINTER,
 );
 
-pub(super) fn bind_chapter_map_loader_destination(
-    source: &Rom,
-) -> Result<IndirectWriteDestinationBounds> {
+pub(super) struct BoundChapterMapDimensions {
+    maximum_row_index: u8,
+    maximum_column_index: u8,
+}
+
+impl BoundChapterMapDimensions {
+    pub(super) fn maximum_row_index(&self) -> u8 {
+        self.maximum_row_index
+    }
+
+    pub(super) fn maximum_column_index(&self) -> u8 {
+        self.maximum_column_index
+    }
+}
+
+pub(super) struct ChapterMapLoaderContract {
+    indirect_write_destination: IndirectWriteDestinationBounds,
+    dimensions: BoundChapterMapDimensions,
+}
+
+impl ChapterMapLoaderContract {
+    pub(super) fn indirect_write_destination(&self) -> &IndirectWriteDestinationBounds {
+        &self.indirect_write_destination
+    }
+
+    pub(super) fn dimensions(&self) -> &BoundChapterMapDimensions {
+        &self.dimensions
+    }
+}
+
+pub(super) fn bind_chapter_map_loader(source: &Rom) -> Result<ChapterMapLoaderContract> {
     bind_chapter_map_loader_code(source)?;
     let records = bind_chapter_map_source_records(source.prg())?;
     let destination_ranges = records
@@ -50,10 +78,30 @@ pub(super) fn bind_chapter_map_loader_destination(
             .all(|range| *range.start() == CHAPTER_MAP_DESTINATION_START),
         "chapter map loader destination base changed"
     );
-    IndirectWriteDestinationBounds::from_source_ranges(
-        "chapter_map_ram_image",
-        vec![CHAPTER_MAP_DESTINATION_START..=maximum_end],
-    )
+    let maximum_row_index = records
+        .iter()
+        .map(|record| record.row_count() - 1)
+        .max()
+        .context("chapter map source contains no row domain")?;
+    let maximum_column_index = records
+        .iter()
+        .map(|record| record.column_count() - 1)
+        .max()
+        .context("chapter map source contains no column domain")?;
+    ensure!(
+        maximum_row_index < CHAPTER_MAP_ROW_STRIDE && maximum_column_index < CHAPTER_MAP_ROW_STRIDE,
+        "chapter map dimensions escape the source 32-byte row layout"
+    );
+    Ok(ChapterMapLoaderContract {
+        indirect_write_destination: IndirectWriteDestinationBounds::from_source_ranges(
+            "chapter_map_ram_image",
+            vec![CHAPTER_MAP_DESTINATION_START..=maximum_end],
+        )?,
+        dimensions: BoundChapterMapDimensions {
+            maximum_row_index: u8::try_from(maximum_row_index)?,
+            maximum_column_index: u8::try_from(maximum_column_index)?,
+        },
+    })
 }
 
 fn chapter_map_destination_range(record: &ChapterMapSourceRecord) -> Result<RangeInclusive<u16>> {
@@ -168,6 +216,18 @@ fn bind_chapter_map_loader_code(source: &Rom) -> Result<()> {
             Mnemonic::Lda,
             AddressingMode::Immediate,
             Operand::Byte(0x72),
+        ),
+        (
+            0xD3BB,
+            Mnemonic::Sta,
+            AddressingMode::Absolute,
+            Operand::Word(0x7676),
+        ),
+        (
+            0xD3C5,
+            Mnemonic::Sta,
+            AddressingMode::Absolute,
+            Operand::Word(0x7677),
         ),
         (
             0xD3B5,

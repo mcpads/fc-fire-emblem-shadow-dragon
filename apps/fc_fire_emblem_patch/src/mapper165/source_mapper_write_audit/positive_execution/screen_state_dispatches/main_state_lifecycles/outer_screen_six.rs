@@ -4,10 +4,8 @@ use anyhow::{Context, Result, ensure};
 
 use crate::{rom::Rom, sha1_hex};
 
-use super::{
-    MAIN_STATE_ADDRESS, bind_exact_code, source_bytes,
-    transition_graph::{StateTransition, reachable_selectors},
-};
+use super::super::selector_transition_graph::{StateTransition, reachable_selectors};
+use super::{MAIN_STATE_ADDRESS, bind_exact_code, source_bytes};
 
 const DEFERRED_MAIN_STATE_ADDRESS: u16 = 0x0026;
 const ENTRY_SELECTOR: u8 = 0x08;

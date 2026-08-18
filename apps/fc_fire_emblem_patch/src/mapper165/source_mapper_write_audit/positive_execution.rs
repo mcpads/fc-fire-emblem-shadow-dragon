@@ -22,7 +22,7 @@ mod shared_menu_request;
 mod state_accesses;
 mod unit_record_writers;
 
-use chapter_map_loader::{CHAPTER_MAP_INDIRECT_WRITE_SITE, bind_chapter_map_loader_destination};
+use chapter_map_loader::{CHAPTER_MAP_INDIRECT_WRITE_SITE, bind_chapter_map_loader};
 use control_state::{
     DEFERRED_MAIN_STATE, MAIN_STATE, OUTER_SCREEN_STATE, ObservedControlStateWrites,
     describe_control_state_writes, known_control_state_write_values,
@@ -226,10 +226,13 @@ pub(super) fn bind_source_positive_execution_graph(
         )?;
     let mut source_bound_indirect_destinations =
         crate::mapper165::battle_codebook_plan::bind_indirect_write_destination_bounds(source)?;
-    let chapter_map_destination = bind_chapter_map_loader_destination(source)?;
+    let chapter_map = bind_chapter_map_loader(source)?;
     ensure!(
         source_bound_indirect_destinations
-            .insert(CHAPTER_MAP_INDIRECT_WRITE_SITE, chapter_map_destination)
+            .insert(
+                CHAPTER_MAP_INDIRECT_WRITE_SITE,
+                chapter_map.indirect_write_destination().clone(),
+            )
             .is_none(),
         "chapter map loader writer overlaps an existing indirect-write destination owner"
     );
@@ -238,7 +241,12 @@ pub(super) fn bind_source_positive_execution_graph(
     let title_state: TitleStateExecution = bind_title_state_execution(source)?;
     let shared_menu_controller = crate::shop_flow::bind_shared_menu_controller_source(source)?;
     let shared_menu = bind_shared_menu_execution_source(source, &shared_menu_controller)?;
-    let screen_state_dispatches = bind_source_screen_state_dispatches(source)?;
+    let unit_record_writes = bind_unit_record_write_destinations(source)?;
+    let screen_state_dispatches = bind_source_screen_state_dispatches(
+        source,
+        unit_record_writes.address_domain(),
+        chapter_map.dimensions(),
+    )?;
     let absolute_indexed_write_bounds = bind_pending_request_disjoint_indexed_writes(source)?;
     for (&site, destination) in shared_menu.indirect_write_destinations() {
         ensure!(
@@ -250,12 +258,22 @@ pub(super) fn bind_source_positive_execution_graph(
             site.1,
         );
     }
-    for (site, destination) in bind_unit_record_write_destinations(source)? {
+    for (&site, destination) in unit_record_writes.destinations() {
         ensure!(
             source_bound_indirect_destinations
-                .insert(site, destination)
+                .insert(site, destination.clone())
                 .is_none(),
             "unit-record writer overlaps an existing indirect-write destination owner at {:02X}:${:04X}",
+            site.0,
+            site.1,
+        );
+    }
+    for (&site, destination) in screen_state_dispatches.indirect_write_destinations() {
+        ensure!(
+            source_bound_indirect_destinations
+                .insert(site, destination.clone())
+                .is_none(),
+            "screen-state writer overlaps an existing indirect-write destination owner at {:02X}:${:04X}",
             site.0,
             site.1,
         );

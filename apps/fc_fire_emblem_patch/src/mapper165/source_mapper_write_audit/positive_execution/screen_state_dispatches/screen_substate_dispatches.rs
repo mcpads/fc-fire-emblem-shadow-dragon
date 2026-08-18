@@ -1,11 +1,24 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, ensure};
 
 use crate::{
-    mapper165::inline_pointer_dispatch::bind_inline_pointer_dispatch, rom::Rom,
+    mapper165::{
+        battle_codebook_plan::IndirectWriteDestinationBounds,
+        inline_pointer_dispatch::bind_inline_pointer_dispatch,
+    },
+    rom::Rom,
     typed_source::decode_rp2a03_sequence,
 };
+
+use super::super::{
+    chapter_map_loader::BoundChapterMapDimensions,
+    unit_record_writers::BoundUnitRecordAddressDomain,
+};
+
+mod map_preparation;
+
+use map_preparation::bind_map_preparation_lifecycle;
 
 const SOURCE_PRG_BANK_BYTE_COUNT: usize = 16 * 1024;
 const OUTER_SCREEN_BANK: u8 = 0x06;
@@ -63,14 +76,20 @@ const STATEFUL_DISPATCHES: [StatefulDispatchSpec; 4] = [
 ];
 
 pub(super) struct ScreenSubstateDispatch {
+    prg_bank: u8,
     call_address: u16,
     handler_domain: BTreeSet<u8>,
     selector_memory_address: Option<u16>,
     source_bound_produced_selectors: Option<BTreeSet<u8>>,
+    indirect_write_destinations: BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
     role: &'static str,
 }
 
 impl ScreenSubstateDispatch {
+    pub(super) fn prg_bank(&self) -> u8 {
+        self.prg_bank
+    }
+
     pub(super) fn call_address(&self) -> u16 {
         self.call_address
     }
@@ -87,14 +106,28 @@ impl ScreenSubstateDispatch {
         self.source_bound_produced_selectors.as_ref()
     }
 
+    pub(super) fn indirect_write_destinations(
+        &self,
+    ) -> &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds> {
+        &self.indirect_write_destinations
+    }
+
     pub(super) fn role(&self) -> &'static str {
         self.role
     }
 }
 
-pub(super) fn bind_screen_substate_dispatches(source: &Rom) -> Result<Vec<ScreenSubstateDispatch>> {
+pub(super) fn bind_screen_substate_dispatches(
+    source: &Rom,
+    unit_record_domain: &BoundUnitRecordAddressDomain,
+    chapter_map_dimensions: &BoundChapterMapDimensions,
+) -> Result<Vec<ScreenSubstateDispatch>> {
     source.verify_supported_japanese()?;
-    let mut dispatches = Vec::new();
+    let mut dispatches = vec![bind_map_preparation_lifecycle(
+        source,
+        unit_record_domain,
+        chapter_map_dimensions,
+    )?];
 
     for spec in STATEFUL_DISPATCHES {
         let prefix_start = spec
@@ -130,10 +163,12 @@ pub(super) fn bind_screen_substate_dispatches(source: &Rom) -> Result<Vec<Screen
             spec.role
         );
         dispatches.push(ScreenSubstateDispatch {
+            prg_bank: OUTER_SCREEN_BANK,
             call_address: spec.call_address,
             handler_domain,
             selector_memory_address: Some(MAP_DIALOGUE_STATE_ADDRESS),
             source_bound_produced_selectors: None,
+            indirect_write_destinations: BTreeMap::new(),
             role: spec.role,
         });
     }
@@ -166,10 +201,12 @@ pub(super) fn bind_screen_substate_dispatches(source: &Rom) -> Result<Vec<Screen
         "four-way controller-bit table boundary changed"
     );
     dispatches.push(ScreenSubstateDispatch {
+        prg_bank: OUTER_SCREEN_BANK,
         call_address: FOUR_WAY_CONTROLLER_DISPATCH_CALL,
         handler_domain: produced_selectors.clone(),
         selector_memory_address: None,
         source_bound_produced_selectors: Some(produced_selectors),
+        indirect_write_destinations: BTreeMap::new(),
         role: "four-way controller-bit dispatch",
     });
 

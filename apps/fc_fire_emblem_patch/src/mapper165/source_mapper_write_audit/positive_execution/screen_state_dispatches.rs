@@ -6,15 +6,24 @@ use crate::{
     chapter_transition::bind_outer_screen_state_dispatch_source,
     dialogue_inventory::bind_caller_handoff_state_dispatch_sources,
     fixed_string_consumers::bind_composite_state_dispatch_source,
-    mapper165::inline_pointer_dispatch::bind_inline_pointer_dispatch, rom::Rom, sha1_hex,
+    mapper165::{
+        battle_codebook_plan::IndirectWriteDestinationBounds,
+        inline_pointer_dispatch::bind_inline_pointer_dispatch,
+    },
+    rom::Rom,
+    sha1_hex,
     typed_source::decode_rp2a03_sequence,
 };
 
-use super::control_state::MAIN_STATE;
+use super::{
+    chapter_map_loader::BoundChapterMapDimensions, control_state::MAIN_STATE,
+    unit_record_writers::BoundUnitRecordAddressDomain,
+};
 
 mod main_state_lifecycles;
 mod map_dialogue_lifecycles;
 mod screen_substate_dispatches;
+mod selector_transition_graph;
 
 use main_state_lifecycles::bind_outer_screen_main_state_lifecycles;
 use map_dialogue_lifecycles::{MapDialogueLifecycle, bind_outer_screen_map_dialogue_lifecycle};
@@ -34,6 +43,7 @@ pub(super) struct SourceScreenStateDispatches {
     selector_domains: BTreeMap<(u8, u16), BTreeSet<u8>>,
     source_producer_domains: BTreeMap<(u8, u16), BTreeSet<u8>>,
     selector_memory_addresses: BTreeMap<(u8, u16), u16>,
+    indirect_write_destinations: BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
 }
 
 impl SourceScreenStateDispatches {
@@ -48,15 +58,24 @@ impl SourceScreenStateDispatches {
     pub(super) fn source_producer_domains(&self) -> &BTreeMap<(u8, u16), BTreeSet<u8>> {
         &self.source_producer_domains
     }
+
+    pub(super) fn indirect_write_destinations(
+        &self,
+    ) -> &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds> {
+        &self.indirect_write_destinations
+    }
 }
 
 pub(super) fn bind_source_screen_state_dispatches(
     source: &Rom,
+    unit_record_domain: &BoundUnitRecordAddressDomain,
+    chapter_map_dimensions: &BoundChapterMapDimensions,
 ) -> Result<SourceScreenStateDispatches> {
     source.verify_supported_japanese()?;
     let mut selector_domains = BTreeMap::new();
     let mut source_producer_domains = BTreeMap::new();
     let mut selector_memory_addresses = BTreeMap::new();
+    let mut indirect_write_destinations = BTreeMap::new();
 
     let caller_handoffs = bind_caller_handoff_state_dispatch_sources(source)?;
     let caller_handoff_keys = caller_handoffs
@@ -206,11 +225,14 @@ pub(super) fn bind_source_screen_state_dispatches(
         "outer-screen map-dialogue state dispatch",
     )?;
 
-    for dispatch in bind_screen_substate_dispatches(source)? {
+    for dispatch in
+        bind_screen_substate_dispatches(source, unit_record_domain, chapter_map_dimensions)?
+    {
+        let bank = dispatch.prg_bank();
         let call = dispatch.call_address();
         insert_domain(
             &mut selector_domains,
-            0x06,
+            bank,
             call,
             dispatch.handler_domain().clone(),
             dispatch.role(),
@@ -218,7 +240,7 @@ pub(super) fn bind_source_screen_state_dispatches(
         if let Some(produced) = dispatch.source_bound_produced_selectors() {
             insert_domain(
                 &mut source_producer_domains,
-                0x06,
+                bank,
                 call,
                 produced.clone(),
                 dispatch.role(),
@@ -227,11 +249,22 @@ pub(super) fn bind_source_screen_state_dispatches(
         if let Some(selector_address) = dispatch.selector_memory_address() {
             insert_selector_memory_address(
                 &mut selector_memory_addresses,
-                0x06,
+                bank,
                 call,
                 selector_address,
                 dispatch.role(),
             )?;
+        }
+        for (&site, destination) in dispatch.indirect_write_destinations() {
+            ensure!(
+                indirect_write_destinations
+                    .insert(site, destination.clone())
+                    .is_none(),
+                "{} duplicates indirect-write destination owner at {:02X}:${:04X}",
+                dispatch.role(),
+                site.0,
+                site.1,
+            );
         }
     }
 
@@ -288,6 +321,7 @@ pub(super) fn bind_source_screen_state_dispatches(
         selector_domains,
         source_producer_domains,
         selector_memory_addresses,
+        indirect_write_destinations,
     })
 }
 

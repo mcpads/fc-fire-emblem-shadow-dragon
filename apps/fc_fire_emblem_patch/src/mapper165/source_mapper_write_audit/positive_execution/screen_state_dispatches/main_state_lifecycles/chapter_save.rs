@@ -7,10 +7,10 @@ use crate::{
     typed_source::decode_rp2a03_sequence,
 };
 
+use super::super::selector_transition_graph::{StateTransition, reachable_selectors};
 use super::{
     MAIN_STATE_ADDRESS, NestedMainStateLifecycle, OUTER_SCREEN_BANK, OUTER_SCREEN_STATE_ADDRESS,
     bind_exact_code, scan_raw_direct_state_operands, source_bytes,
-    transition_graph::{StateTransition, reachable_selectors},
 };
 
 const SAVE_OFFER_DISPATCH_ENTRY: u16 = 0xB5AC;
