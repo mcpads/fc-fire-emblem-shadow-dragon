@@ -43,6 +43,7 @@ pub enum Instruction {
     CpxImmediate(u8),
     CpyImmediate(u8),
     IncAbsolute(u16),
+    IncAbsoluteX(u16),
     IncZeroPage(u8),
     DecAbsolute(u16),
     DecZeroPage(u8),
@@ -139,6 +140,7 @@ impl Instruction {
             | Self::StaAbsoluteX(_)
             | Self::StaAbsoluteY(_)
             | Self::IncAbsolute(_)
+            | Self::IncAbsoluteX(_)
             | Self::DecAbsolute(_)
             | Self::JmpAbsolute(_)
             | Self::JsrAbsolute(_) => 3,
@@ -212,6 +214,7 @@ impl Instruction {
             | Self::JsrAbsolute(_)
             | Self::Rts
             | Self::Rti => 6,
+            Self::IncAbsoluteX(_) => 7,
             // 분기는 성립하고 페이지도 넘는 경우를 최악으로 본다.
             Self::BeqAbsolute(_)
             | Self::BccAbsolute(_)
@@ -268,6 +271,7 @@ impl Instruction {
             Self::CpxImmediate(value) => immediate(Mnemonic::Cpx, value),
             Self::CpyImmediate(value) => immediate(Mnemonic::Cpy, value),
             Self::IncAbsolute(address) => absolute(Mnemonic::Inc, address),
+            Self::IncAbsoluteX(address) => absolute_x(Mnemonic::Inc, address),
             Self::IncZeroPage(address) => zero_page(Mnemonic::Inc, address),
             Self::DecAbsolute(address) => absolute(Mnemonic::Dec, address),
             Self::DecZeroPage(address) => zero_page(Mnemonic::Dec, address),

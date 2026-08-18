@@ -12,7 +12,7 @@ use crate::mapper165::{
     },
     source_indexed_mapper_aliases::{
         source_indexed_menu_mask_store_sites, source_indexed_menu_mask_y_store_sites,
-        source_indexed_menu_selection_store_sites,
+        source_indexed_menu_selection_increment_sites, source_indexed_menu_selection_store_sites,
     },
 };
 
@@ -242,6 +242,16 @@ fn bind_target_indexed_writers(
             AddressingMode::AbsoluteY,
             0x7FEE,
             source_indexed_menu_mask_y_store_sites().to_vec(),
+        ),
+        (
+            "menu-selection-increment-x",
+            0xFE,
+            AddressingMode::AbsoluteX,
+            0x7FF3,
+            source_indexed_menu_selection_increment_sites()
+                .into_iter()
+                .map(|(bank, address, _)| (bank, address))
+                .collect(),
         ),
     ] {
         for (bank, address) in sites {

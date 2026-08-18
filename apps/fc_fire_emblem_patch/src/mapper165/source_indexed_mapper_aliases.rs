@@ -11,6 +11,14 @@ use crate::{
 
 use super::unit_name_table;
 
+mod menu_selection_increment;
+
+pub(super) use menu_selection_increment::source_indexed_menu_selection_increment_sites;
+use menu_selection_increment::{
+    bind_guarded_menu_selection_increments, install_guarded_menu_selection_increments,
+    verify_installed_guarded_menu_selection_increments,
+};
+
 const MENU_MASK_COUNT_ADDRESS: u16 = 0x05CE;
 const MENU_MASK_BASE_ADDRESS: u16 = 0x7FEE;
 const MENU_SELECTION_BASE_ADDRESS: u16 = 0x7FF3;
@@ -150,6 +158,8 @@ pub(super) struct SourceIndexedMapperAliasSafety {
     source_prg_banks: [u8; 2],
     unguarded_indexed_store_site_count: usize,
     rewritten_indexed_store_site_count: usize,
+    unguarded_indexed_increment_site_count: usize,
+    rewritten_indexed_increment_site_count: usize,
     guarded_routines: Vec<GuardedRoutineEvidence>,
     safe_menu_mask_index_limit: u8,
     safe_menu_selection_index_limit: u8,
@@ -196,6 +206,7 @@ pub(super) fn bind_source_indexed_mapper_aliases(
         actual_mask_y_sites == expected_mask_y_sites,
         "source indexed menu-mask Y-store sites changed: expected {expected_mask_y_sites:?}, found {actual_mask_y_sites:?}"
     );
+    let indexed_increments = bind_guarded_menu_selection_increments(source)?;
 
     let map_sequence = unguarded_menu_mask_clear_sequence();
     for cpu_address in MAP_MENU_CLEAR_SEQUENCE_SITES {
@@ -243,6 +254,7 @@ pub(super) fn bind_source_indexed_mapper_aliases(
             source_direct_transfer_count,
         });
     }
+    guarded_routines.push(indexed_increments.guard_evidence);
 
     ensure!(
         all_index_and_status_values_preserve_source_effects(
@@ -256,8 +268,8 @@ pub(super) fn bind_source_indexed_mapper_aliases(
     );
 
     Ok(SourceIndexedMapperAliasSafety {
-        scope: "all exact source STA $7FEE,X, STA $7FF3,X, and STA $7FEE,Y sites in banks 06 and 0B, including the typed menu producers and their complete 0x00..0xFF effective-address domains",
-        closure_claim: "complete for every source occurrence of these three indexed store forms; other source indexed, indirect, or synthesized writes that can enter mapper165 registers remain in the global executable-write audit",
+        scope: "all exact source STA $7FEE,X, STA $7FF3,X, STA $7FEE,Y, and INC $7FF3,X sites in banks 06 and 0B, including typed producer or post-write tails and their complete 0x00..0xFF effective-address domains",
+        closure_claim: "complete for every source occurrence of these four indexed write forms; other source indexed, indirect, or synthesized writes that can enter mapper165 registers remain in the global executable-write audit",
         source_prg_banks: [MAP_MENU_PRG_BANK, FRONT_END_PRG_BANK],
         unguarded_indexed_store_site_count: actual_sites.len()
             + actual_selection_sites.len()
@@ -265,6 +277,9 @@ pub(super) fn bind_source_indexed_mapper_aliases(
         rewritten_indexed_store_site_count: INDEXED_MENU_MASK_STORE_SITES.len()
             + INDEXED_MENU_SELECTION_STORE_SITES.len()
             + INDEXED_MENU_MASK_Y_STORE_SITES.len(),
+        unguarded_indexed_increment_site_count: indexed_increments.source_site_count,
+        rewritten_indexed_increment_site_count: source_indexed_menu_selection_increment_sites()
+            .len(),
         guarded_routines,
         safe_menu_mask_index_limit: SAFE_MENU_MASK_INDEX_LIMIT,
         safe_menu_selection_index_limit: SAFE_MENU_SELECTION_INDEX_LIMIT,
@@ -316,6 +331,7 @@ pub(super) fn install_guarded_indexed_menu_stores(image: &mut TrackedImage) -> R
             )?;
         }
     }
+    install_guarded_menu_selection_increments(image)?;
     Ok(())
 }
 
@@ -330,6 +346,7 @@ pub(super) fn verify_installed_guarded_indexed_menu_stores(candidate: &Rom) -> R
             guard.address,
         );
     }
+    verify_installed_guarded_menu_selection_increments(candidate)?;
 
     for family in indexed_store_families() {
         for &(bank, cpu_address) in &family.sites {
