@@ -24,7 +24,8 @@ mod unit_record_writers;
 
 use chapter_map_loader::{CHAPTER_MAP_INDIRECT_WRITE_SITE, bind_chapter_map_loader_destination};
 use control_state::{
-    OUTER_SCREEN_STATE, ObservedControlStateWrites, known_control_state_write_values,
+    DEFERRED_MAIN_STATE, MAIN_STATE, OUTER_SCREEN_STATE, ObservedControlStateWrites,
+    describe_control_state_writes, known_control_state_write_values,
     merge_observed_control_state_writes,
 };
 use ending_sequence::bind_ending_sequence_positive_execution;
@@ -65,6 +66,8 @@ pub(super) struct SourcePositiveExecutionGraph {
     fixed_scheduler_positive_entry_context_count: usize,
     fixed_scheduler_known_produced_states: Vec<String>,
     fixed_scheduler_outer_screen_produced_selectors: Vec<String>,
+    fixed_scheduler_main_state_write_observations: Vec<String>,
+    fixed_scheduler_deferred_main_state_write_observations: Vec<String>,
     fixed_scheduler_positive_states: Vec<String>,
     fixed_scheduler_bound_switchable_roots: Vec<String>,
     fixed_scheduler_open_control_facts: Vec<String>,
@@ -153,6 +156,14 @@ impl SourcePositiveExecutionGraph {
 
     pub(super) fn fixed_scheduler_outer_screen_produced_selectors(&self) -> &[String] {
         &self.fixed_scheduler_outer_screen_produced_selectors
+    }
+
+    pub(super) fn fixed_scheduler_main_state_write_observations(&self) -> &[String] {
+        &self.fixed_scheduler_main_state_write_observations
+    }
+
+    pub(super) fn fixed_scheduler_deferred_main_state_write_observations(&self) -> &[String] {
+        &self.fixed_scheduler_deferred_main_state_write_observations
     }
 
     pub(super) fn fixed_scheduler_positive_states(&self) -> &[String] {
@@ -427,6 +438,14 @@ pub(super) fn bind_source_positive_execution_graph(
             .iter()
             .map(|selector| format!("0x{selector:02X}"))
             .collect(),
+        fixed_scheduler_main_state_write_observations: describe_control_state_writes(
+            fixed_scheduler.control_state_write_values(),
+            MAIN_STATE,
+        ),
+        fixed_scheduler_deferred_main_state_write_observations: describe_control_state_writes(
+            fixed_scheduler.control_state_write_values(),
+            DEFERRED_MAIN_STATE,
+        ),
         fixed_scheduler_positive_states: fixed_scheduler
             .positive_selector_domain()
             .iter()

@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::BTreeSet;
 
 use anyhow::{Result, ensure};
 
@@ -10,6 +10,7 @@ use crate::{
 use super::{
     MAIN_STATE_ADDRESS, NestedMainStateLifecycle, OUTER_SCREEN_BANK, OUTER_SCREEN_STATE_ADDRESS,
     bind_exact_code, scan_raw_direct_state_operands, source_bytes,
+    transition_graph::{StateTransition, reachable_selectors},
 };
 
 const SAVE_OFFER_DISPATCH_ENTRY: u16 = 0xB5AC;
@@ -176,6 +177,12 @@ struct MainStateTransition {
     encoding: TransitionEncoding,
 }
 
+impl MainStateTransition {
+    const fn edge(self) -> StateTransition {
+        StateTransition::new(self.from, self.to)
+    }
+}
+
 const SAVE_OFFER_TRANSITIONS: [MainStateTransition; 10] = [
     increment(0, 0xB673),
     increment(1, 0xB6C6),
@@ -268,8 +275,12 @@ pub(super) fn bind_chapter_save_main_state_lifecycles(
     for transition in SAVE_OFFER_TRANSITIONS {
         bind_transition(source, transition)?;
     }
-    let save_offer_produced_selectors =
-        reachable_selectors(&save_offer_handler_domain, [0], &SAVE_OFFER_TRANSITIONS)?;
+    let save_offer_produced_selectors = reachable_selectors(
+        "save-offer main state",
+        &save_offer_handler_domain,
+        [0],
+        SAVE_OFFER_TRANSITIONS.map(MainStateTransition::edge),
+    )?;
     ensure!(
         save_offer_produced_selectors == save_offer_handler_domain,
         "save-offer main-state producer closure no longer reaches its complete owned table"
@@ -295,9 +306,10 @@ pub(super) fn bind_chapter_save_main_state_lifecycles(
     }
     let save_complete_entry_selector = SAVE_COMPLETE_ENTRY_TRANSITION.to;
     let save_complete_produced_selectors = reachable_selectors(
+        "save-complete main state",
         &save_complete_handler_domain,
         [save_complete_entry_selector],
-        &SAVE_COMPLETE_TRANSITIONS,
+        SAVE_COMPLETE_TRANSITIONS.map(MainStateTransition::edge),
     )?;
     ensure!(
         save_complete_produced_selectors == BTreeSet::from([0x03, 0x04]),
@@ -358,38 +370,6 @@ fn bind_transition(source: &Rom, transition: MainStateTransition) -> Result<()> 
     Ok(())
 }
 
-fn reachable_selectors(
-    handler_domain: &BTreeSet<u8>,
-    initial: impl IntoIterator<Item = u8>,
-    transitions: &[MainStateTransition],
-) -> Result<BTreeSet<u8>> {
-    let initial = initial.into_iter().collect::<BTreeSet<_>>();
-    ensure!(
-        !initial.is_empty() && initial.is_subset(handler_domain),
-        "chapter-save main-state entry escapes its handler table"
-    );
-    ensure!(
-        transitions
-            .iter()
-            .all(|transition| handler_domain.contains(&transition.from)
-                && handler_domain.contains(&transition.to)),
-        "chapter-save main-state transition escapes its handler table"
-    );
-    let mut reached = initial.clone();
-    let mut pending = initial.into_iter().collect::<VecDeque<_>>();
-    while let Some(selector) = pending.pop_front() {
-        for target in transitions
-            .iter()
-            .filter_map(|transition| (transition.from == selector).then_some(transition.to))
-        {
-            if reached.insert(target) {
-                pending.push_back(target);
-            }
-        }
-    }
-    Ok(reached)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -398,7 +378,13 @@ mod tests {
     fn save_offer_state_machine_reaches_every_owned_handler() {
         let handlers = (0..u8::try_from(SAVE_OFFER_HANDLER_TARGETS.len()).unwrap()).collect();
         assert_eq!(
-            reachable_selectors(&handlers, [0], &SAVE_OFFER_TRANSITIONS).unwrap(),
+            reachable_selectors(
+                "save-offer main state",
+                &handlers,
+                [0],
+                SAVE_OFFER_TRANSITIONS.map(MainStateTransition::edge),
+            )
+            .unwrap(),
             handlers
         );
     }
@@ -408,23 +394,13 @@ mod tests {
         let handlers = (0..u8::try_from(SAVE_COMPLETE_HANDLER_TARGETS.len()).unwrap()).collect();
         assert_eq!(
             reachable_selectors(
+                "save-complete main state",
                 &handlers,
                 [SAVE_COMPLETE_ENTRY_TRANSITION.to],
-                &SAVE_COMPLETE_TRANSITIONS,
+                SAVE_COMPLETE_TRANSITIONS.map(MainStateTransition::edge),
             )
             .unwrap(),
             BTreeSet::from([0x03, 0x04])
         );
-    }
-
-    #[test]
-    fn selector_closure_rejects_a_transition_beyond_the_owned_table() {
-        let handlers = BTreeSet::from([0, 1]);
-        let escaped = [MainStateTransition {
-            from: 1,
-            to: 2,
-            encoding: TransitionEncoding::Increment { address: 0x9000 },
-        }];
-        assert!(reachable_selectors(&handlers, [0], &escaped).is_err());
     }
 }

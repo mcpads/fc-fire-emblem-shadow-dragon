@@ -8,8 +8,11 @@ use crate::{
 };
 
 mod chapter_save;
+mod outer_screen_six;
+mod transition_graph;
 
 use chapter_save::bind_chapter_save_main_state_lifecycles;
+use outer_screen_six::bind_outer_screen_six_main_state_producers;
 
 const SOURCE_PRG_BANK_BYTE_COUNT: usize = 16 * 1024;
 const FIXED_PRG_BANK: u8 = 0x0F;
@@ -225,10 +228,11 @@ pub(super) fn bind_outer_screen_main_state_lifecycles(
         dispatch.targets_in_selector_order() == OUTER_SCREEN_SIX_MAIN_STATE_TARGETS,
         "outer-screen state six main-state handlers changed"
     );
+    let produced_selectors = bind_outer_screen_six_main_state_producers(source, &handler_domain)?;
     lifecycles.push(NestedMainStateLifecycle {
         dispatch_call: OUTER_SCREEN_SIX_MAIN_STATE_DISPATCH_CALL,
         handler_domain,
-        produced_selectors: None,
+        produced_selectors: Some(produced_selectors),
     });
     lifecycles.extend(bind_chapter_save_main_state_lifecycles(source)?);
     Ok(lifecycles)

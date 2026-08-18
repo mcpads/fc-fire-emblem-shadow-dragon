@@ -58,6 +58,8 @@ pub(super) struct SourceMapperWriteAudit {
     fixed_scheduler_positive_entry_context_count: usize,
     fixed_scheduler_known_produced_states: Vec<String>,
     fixed_scheduler_outer_screen_produced_selectors: Vec<String>,
+    fixed_scheduler_main_state_write_observations: Vec<String>,
+    fixed_scheduler_deferred_main_state_write_observations: Vec<String>,
     fixed_scheduler_positive_states: Vec<String>,
     fixed_scheduler_bound_switchable_roots: Vec<String>,
     fixed_scheduler_open_control_facts: Vec<String>,
@@ -262,6 +264,12 @@ pub(super) fn audit_source_mapper_writes(source: &Rom) -> Result<SourceMapperWri
             .to_vec(),
         fixed_scheduler_outer_screen_produced_selectors: positive_execution
             .fixed_scheduler_outer_screen_produced_selectors()
+            .to_vec(),
+        fixed_scheduler_main_state_write_observations: positive_execution
+            .fixed_scheduler_main_state_write_observations()
+            .to_vec(),
+        fixed_scheduler_deferred_main_state_write_observations: positive_execution
+            .fixed_scheduler_deferred_main_state_write_observations()
             .to_vec(),
         fixed_scheduler_positive_states: positive_execution
             .fixed_scheduler_positive_states()

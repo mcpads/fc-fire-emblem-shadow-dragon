@@ -14,9 +14,11 @@ use super::control_state::MAIN_STATE;
 
 mod main_state_lifecycles;
 mod map_dialogue_lifecycles;
+mod screen_substate_dispatches;
 
 use main_state_lifecycles::bind_outer_screen_main_state_lifecycles;
 use map_dialogue_lifecycles::{MapDialogueLifecycle, bind_outer_screen_map_dialogue_lifecycle};
+use screen_substate_dispatches::bind_screen_substate_dispatches;
 
 const SOURCE_PRG_BANK_BYTE_COUNT: usize = 16 * 1024;
 const MAP_DIALOGUE_BANK: u8 = 0x02;
@@ -203,6 +205,35 @@ pub(super) fn bind_source_screen_state_dispatches(
         0x05DB,
         "outer-screen map-dialogue state dispatch",
     )?;
+
+    for dispatch in bind_screen_substate_dispatches(source)? {
+        let call = dispatch.call_address();
+        insert_domain(
+            &mut selector_domains,
+            0x06,
+            call,
+            dispatch.handler_domain().clone(),
+            dispatch.role(),
+        )?;
+        if let Some(produced) = dispatch.source_bound_produced_selectors() {
+            insert_domain(
+                &mut source_producer_domains,
+                0x06,
+                call,
+                produced.clone(),
+                dispatch.role(),
+            )?;
+        }
+        if let Some(selector_address) = dispatch.selector_memory_address() {
+            insert_selector_memory_address(
+                &mut selector_memory_addresses,
+                0x06,
+                call,
+                selector_address,
+                dispatch.role(),
+            )?;
+        }
+    }
 
     let gameplay_main_state_domain = (0..GAMEPLAY_MAIN_STATE_COUNT).collect::<BTreeSet<_>>();
     let gameplay_main_state = bind_inline_pointer_dispatch(

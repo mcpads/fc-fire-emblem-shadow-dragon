@@ -11,6 +11,7 @@ pub(super) struct PositiveControlState {
 pub(super) const FIXED_SCHEDULER_DISPATCH_GATE: u16 = 0x0023;
 pub(super) const OUTER_SCREEN_STATE: u16 = 0x0024;
 pub(super) const FIXED_SCHEDULER_STATE: u16 = 0x0025;
+pub(super) const DEFERRED_MAIN_STATE: u16 = 0x0026;
 pub(super) const PRG_BANK_SHADOW: u16 = 0x0029;
 pub(super) const MAIN_STATE: u16 = 0x0084;
 pub(super) const TITLE_STATE: u16 = 0x057A;
@@ -21,7 +22,7 @@ pub(super) const SHARED_MENU_STATE: u16 = 0x05DE;
 pub(super) const COMPOSITE_SCREEN_STATE: u16 = 0x05E8;
 pub(super) const DIALOGUE_OR_SOUND_STATE: u16 = 0x05EE;
 
-pub(super) const POSITIVE_CONTROL_STATES: [PositiveControlState; 13] = [
+pub(super) const POSITIVE_CONTROL_STATES: [PositiveControlState; 14] = [
     PositiveControlState {
         address: FIXED_SCHEDULER_DISPATCH_GATE,
         role: "fixed_scheduler_dispatch_gate_23",
@@ -33,6 +34,10 @@ pub(super) const POSITIVE_CONTROL_STATES: [PositiveControlState; 13] = [
     PositiveControlState {
         address: FIXED_SCHEDULER_STATE,
         role: "fixed_scheduler_state_25",
+    },
+    PositiveControlState {
+        address: DEFERRED_MAIN_STATE,
+        role: "deferred_main_state_26",
     },
     PositiveControlState {
         address: PRG_BANK_SHADOW,
@@ -117,6 +122,28 @@ pub(super) fn known_control_state_write_values(
         .collect()
 }
 
+pub(super) fn describe_control_state_writes(
+    observations: &ObservedControlStateWrites,
+    address: u16,
+) -> Vec<String> {
+    observations
+        .iter()
+        .filter_map(|(&(bank, instruction, target), values)| {
+            (target == address).then(|| match values {
+                Some(values) => format!(
+                    "{bank:02X}:${instruction:04X}=[{}]",
+                    values
+                        .iter()
+                        .map(|value| format!("{value:02X}"))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ),
+                None => format!("{bank:02X}:${instruction:04X}=unknown"),
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,6 +192,23 @@ mod tests {
         assert_eq!(
             known_control_state_write_values(&observations, OUTER_SCREEN_STATE),
             BTreeSet::from([0x00, 0x01])
+        );
+    }
+
+    #[test]
+    fn observed_write_descriptions_preserve_each_site_and_unknown_value_domain() {
+        let observations = ObservedControlStateWrites::from([
+            ((0x06, 0x9005, MAIN_STATE), Some(BTreeSet::from([0x0F]))),
+            ((0x0B, 0x9387, MAIN_STATE), None),
+            (
+                (0x06, 0x8500, OUTER_SCREEN_STATE),
+                Some(BTreeSet::from([0x02])),
+            ),
+        ]);
+
+        assert_eq!(
+            describe_control_state_writes(&observations, MAIN_STATE),
+            ["06:$9005=[0F]", "0B:$9387=unknown"]
         );
     }
 }

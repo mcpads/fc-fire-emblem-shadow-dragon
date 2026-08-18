@@ -9,10 +9,10 @@ use crate::dialogue_inventory::{
 };
 
 use super::super::super::control_state::{
-    COMPOSITE_SCREEN_STATE, DIALOGUE_OR_SOUND_STATE, FIXED_SCHEDULER_DISPATCH_GATE,
-    FIXED_SCHEDULER_STATE, MAIN_STATE, MAP_DIALOGUE_OUTER_STATE, OUTER_SCREEN_STATE,
-    PENDING_SHARED_MENU_REQUEST_STATE, PRG_BANK_SHADOW, SHARED_MENU_STATE, TITLE_ANIMATION_STATE,
-    TITLE_STATE,
+    COMPOSITE_SCREEN_STATE, DEFERRED_MAIN_STATE, DIALOGUE_OR_SOUND_STATE,
+    FIXED_SCHEDULER_DISPATCH_GATE, FIXED_SCHEDULER_STATE, MAIN_STATE, MAP_DIALOGUE_OUTER_STATE,
+    OUTER_SCREEN_STATE, PENDING_SHARED_MENU_REQUEST_STATE, PRG_BANK_SHADOW, SHARED_MENU_STATE,
+    TITLE_ANIMATION_STATE, TITLE_STATE,
 };
 
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
@@ -161,6 +161,7 @@ struct ResetTraceMemory {
     fixed_scheduler_dispatch_gate_23: ByteValueSet,
     outer_screen_state_24: ByteValueSet,
     scheduler_state_25: ByteValueSet,
+    deferred_main_state_26: ByteValueSet,
     primary_prg_bank_shadow_29: ByteValueSet,
     far_call_selector_44: ByteValueSet,
     restored_prg_bank_shadow_51: ByteValueSet,
@@ -183,7 +184,7 @@ struct ResetTraceMemory {
 }
 
 impl ResetTraceMemory {
-    const ADDRESSES: [u16; 27] = [
+    const ADDRESSES: [u16; 28] = [
         0x0000,
         0x0001,
         0x0008,
@@ -192,6 +193,7 @@ impl ResetTraceMemory {
         FIXED_SCHEDULER_DISPATCH_GATE,
         OUTER_SCREEN_STATE,
         FIXED_SCHEDULER_STATE,
+        DEFERRED_MAIN_STATE,
         PRG_BANK_SHADOW,
         0x0044,
         0x0051,
@@ -223,6 +225,7 @@ impl ResetTraceMemory {
             FIXED_SCHEDULER_DISPATCH_GATE => self.fixed_scheduler_dispatch_gate_23.clone(),
             OUTER_SCREEN_STATE => self.outer_screen_state_24.clone(),
             FIXED_SCHEDULER_STATE => self.scheduler_state_25.clone(),
+            DEFERRED_MAIN_STATE => self.deferred_main_state_26.clone(),
             PRG_BANK_SHADOW => self.primary_prg_bank_shadow_29.clone(),
             0x0044 => self.far_call_selector_44.clone(),
             0x0051 => self.restored_prg_bank_shadow_51.clone(),
@@ -262,6 +265,7 @@ impl ResetTraceMemory {
             FIXED_SCHEDULER_DISPATCH_GATE => self.fixed_scheduler_dispatch_gate_23 = value,
             OUTER_SCREEN_STATE => self.outer_screen_state_24 = value,
             FIXED_SCHEDULER_STATE => self.scheduler_state_25 = value,
+            DEFERRED_MAIN_STATE => self.deferred_main_state_26 = value,
             PRG_BANK_SHADOW => self.primary_prg_bank_shadow_29 = value,
             0x0044 => self.far_call_selector_44 = value,
             0x0051 => self.restored_prg_bank_shadow_51 = value,
