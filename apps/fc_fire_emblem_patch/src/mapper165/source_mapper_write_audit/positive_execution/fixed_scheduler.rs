@@ -485,25 +485,9 @@ pub(super) fn bind_fixed_scheduler_execution(
         discovered_outer_traces.push(selector_trace);
     }
     ensure!(
-        traced_outer_selectors == outer_screen_produced_selectors,
-        "outer-screen producer worklist did not trace every discovered selector"
-    );
-    ensure!(
         gameplay_main_state_seed_selectors == BTreeSet::from([0x00]),
         "outer-screen state nine no longer seeds gameplay main state zero: {gameplay_main_state_seed_selectors:02X?}"
     );
-    ensure!(
-        gameplay_deferred_main_state_domain == BTreeSet::from([0x00, 0x04, 0x0C, 0x13]),
-        "outer-screen execution changed the gameplay deferred-main-state domain: {gameplay_deferred_main_state_domain:02X?}"
-    );
-    owned_inline_dispatch_selector_bounds
-        .get_mut(&outer_screen_site)
-        .context("outer-screen dispatch disappeared before producer closure registration")?
-        .merge_source_producer_owner(&outer_screen_produced_selectors, Some(OUTER_SCREEN_STATE))?;
-    let mut handler_trace = non_outer_discovery_trace;
-    for selector_trace in discovered_outer_traces {
-        handler_trace.merge(selector_trace);
-    }
     let gameplay_main_state_site = (GAMEPLAY_SCHEDULER_BANK, GAMEPLAY_MAIN_STATE_DISPATCH_CALL);
     let gameplay_main_state_handler_domain = screen_state_selector_domains
         .get(&gameplay_main_state_site)
@@ -572,6 +556,74 @@ pub(super) fn bind_fixed_scheduler_execution(
         .get_mut(&gameplay_main_state_site)
         .context("gameplay main-state dispatch disappeared before producer registration")?
         .merge_source_producer_owner(&gameplay_main_state_produced_selectors, Some(MAIN_STATE))?;
+
+    let gameplay_outer_screen_selectors = known_control_state_write_values(
+        gameplay_main_state_trace.control_state_write_values(),
+        OUTER_SCREEN_STATE,
+    );
+    ensure!(
+        gameplay_outer_screen_selectors.is_subset(outer_screen_handler_domain),
+        "gameplay main-state execution produced an outer-screen selector beyond its owner-bound handler table: {gameplay_outer_screen_selectors:02X?}"
+    );
+    for produced in gameplay_outer_screen_selectors {
+        if outer_screen_produced_selectors.insert(produced) {
+            pending_outer_selectors.push_back(produced);
+        }
+    }
+    while let Some(selector) = pending_outer_selectors.pop_front() {
+        if !traced_outer_selectors.insert(selector) {
+            continue;
+        }
+        let selector_trace = trace_source_bound_inline_state_handler(
+            source,
+            outer_screen_site.0,
+            outer_screen_state_load,
+            outer_screen_site.1,
+            FIXED_SCHEDULER_RETURN_ADDRESS,
+            OUTER_SCREEN_STATE,
+            selector,
+            GAMEPLAY_SCHEDULER_BANK,
+            &BTreeMap::from([(OUTER_SCREEN_STATE, selector)]),
+            &owned_inline_dispatch_selector_bounds,
+            indirect_write_destination_bounds,
+            absolute_indexed_write_bounds,
+            &mut tracked_state_call_summaries,
+        )?;
+        let observed = known_control_state_write_values(
+            selector_trace.control_state_write_values(),
+            OUTER_SCREEN_STATE,
+        );
+        // These late chapter/save screens do not enter the gameplay outer-screen
+        // handler at state 0C. Their screen-local deferred values must therefore
+        // not be cross-joined into gameplay main-state entry contexts.
+        ensure!(
+            observed.is_subset(outer_screen_handler_domain),
+            "late outer-screen execution produced a selector beyond its owner-bound handler table: {observed:02X?}"
+        );
+        for produced in observed {
+            if outer_screen_produced_selectors.insert(produced) {
+                pending_outer_selectors.push_back(produced);
+            }
+        }
+        discovered_outer_traces.push(selector_trace);
+    }
+    ensure!(
+        traced_outer_selectors == outer_screen_produced_selectors,
+        "outer-screen producer worklist did not trace every discovered selector"
+    );
+    ensure!(
+        gameplay_deferred_main_state_domain == BTreeSet::from([0x00, 0x04, 0x0C, 0x13]),
+        "outer-screen execution changed the gameplay deferred-main-state domain: {gameplay_deferred_main_state_domain:02X?}"
+    );
+    owned_inline_dispatch_selector_bounds
+        .get_mut(&outer_screen_site)
+        .context("outer-screen dispatch disappeared before producer closure registration")?
+        .merge_source_producer_owner(&outer_screen_produced_selectors, Some(OUTER_SCREEN_STATE))?;
+
+    let mut handler_trace = non_outer_discovery_trace;
+    for selector_trace in discovered_outer_traces {
+        handler_trace.merge(selector_trace);
+    }
     handler_trace.merge(gameplay_main_state_trace);
     handler_trace.close_inline_dispatch_producer_upper_bound_fact(
         GAMEPLAY_SCHEDULER_BANK,

@@ -16,6 +16,7 @@ mod control_state;
 mod ending_sequence;
 mod fixed_scheduler;
 mod fixed_vectors;
+mod front_end_record_storage;
 mod indexed_write_destinations;
 mod screen_state_dispatches;
 mod shared_menu_request;
@@ -31,6 +32,7 @@ use control_state::{
 use ending_sequence::bind_ending_sequence_positive_execution;
 use fixed_scheduler::bind_fixed_scheduler_execution;
 use fixed_vectors::bind_fixed_vector_execution;
+use front_end_record_storage::bind_front_end_record_storage_destinations;
 use indexed_write_destinations::bind_pending_request_disjoint_indexed_writes;
 use screen_state_dispatches::bind_source_screen_state_dispatches;
 use shared_menu_request::bind_shared_menu_execution_source;
@@ -248,6 +250,16 @@ pub(super) fn bind_source_positive_execution_graph(
         chapter_map.dimensions(),
     )?;
     let absolute_indexed_write_bounds = bind_pending_request_disjoint_indexed_writes(source)?;
+    for (site, destination) in bind_front_end_record_storage_destinations(source)? {
+        ensure!(
+            source_bound_indirect_destinations
+                .insert(site, destination)
+                .is_none(),
+            "front-end record-storage writer overlaps an existing indirect-write destination owner at {:02X}:${:04X}",
+            site.0,
+            site.1,
+        );
+    }
     for (&site, destination) in shared_menu.indirect_write_destinations() {
         ensure!(
             source_bound_indirect_destinations

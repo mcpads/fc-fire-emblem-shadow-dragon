@@ -130,6 +130,12 @@ impl CompositeStateDispatchSource {
     pub(crate) fn direct_producer_selector_domain(&self) -> &BTreeSet<u8> {
         &self.direct_producer_selector_domain
     }
+
+    pub(crate) fn handler_target(&self, state: u8) -> Option<u16> {
+        self.handler_selector_domain
+            .contains(&state)
+            .then(|| EXPECTED_COMPOSITE_HANDLERS[usize::from(state)])
+    }
 }
 
 impl CompositeStateProducer {
