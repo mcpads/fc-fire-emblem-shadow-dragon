@@ -9,6 +9,22 @@ use super::{MAIN_STATE_ADDRESS, bind_exact_code, source_bytes};
 
 const DEFERRED_MAIN_STATE_ADDRESS: u16 = 0x0026;
 const ENTRY_SELECTOR: u8 = 0x08;
+const GAMEPLAY_DEFERRED_MAIN_STATE_SELECTORS: [u8; 4] = [0x00, 0x04, 0x0C, 0x13];
+
+pub(super) struct BoundOuterScreenSixMainStateProducers {
+    main_state_selectors: BTreeSet<u8>,
+    deferred_main_state_selectors: BTreeSet<u8>,
+}
+
+impl BoundOuterScreenSixMainStateProducers {
+    pub(super) fn main_state_selectors(&self) -> &BTreeSet<u8> {
+        &self.main_state_selectors
+    }
+
+    pub(super) fn deferred_main_state_selectors(&self) -> &BTreeSet<u8> {
+        &self.deferred_main_state_selectors
+    }
+}
 
 #[derive(Clone, Copy)]
 struct SourceRegion {
@@ -298,7 +314,7 @@ const EXPECTED_DIRECT_STATE_OPERANDS: [(u8, u16, u16, u8); 29] = [
 pub(super) fn bind_outer_screen_six_main_state_producers(
     source: &Rom,
     handler_domain: &BTreeSet<u8>,
-) -> Result<BTreeSet<u8>> {
+) -> Result<BoundOuterScreenSixMainStateProducers> {
     source.verify_supported_japanese()?;
     for region in SOURCE_REGIONS {
         let bytes = source_bytes(
@@ -336,7 +352,10 @@ pub(super) fn bind_outer_screen_six_main_state_producers(
         produced == *handler_domain,
         "outer-screen state-six transition graph no longer reaches every owned handler"
     );
-    Ok(produced)
+    Ok(BoundOuterScreenSixMainStateProducers {
+        main_state_selectors: produced,
+        deferred_main_state_selectors: BTreeSet::from(GAMEPLAY_DEFERRED_MAIN_STATE_SELECTORS),
+    })
 }
 
 fn scan_direct_state_operands(source: &Rom) -> Result<BTreeSet<(u8, u16, u16, u8)>> {

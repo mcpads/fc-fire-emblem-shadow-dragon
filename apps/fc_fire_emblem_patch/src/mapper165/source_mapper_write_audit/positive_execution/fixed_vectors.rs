@@ -30,8 +30,9 @@ mod special_bank_call;
 
 pub(super) use reset_bank_entries::{
     InlineDispatchSelectorBounds, StatefulBankExecution, TrackedStateCallSummaries,
-    trace_fixed_scheduler_contexts, trace_source_bound_inline_state_continuation,
-    trace_source_bound_inline_state_handler, trace_source_bound_inline_state_handler_batch,
+    trace_fixed_scheduler_contexts, trace_fixed_scheduler_inline_state_handler,
+    trace_source_bound_inline_state_continuation, trace_source_bound_inline_state_handler,
+    trace_source_bound_inline_state_handler_batch,
 };
 
 use super::control_state::ObservedControlStateWrites;

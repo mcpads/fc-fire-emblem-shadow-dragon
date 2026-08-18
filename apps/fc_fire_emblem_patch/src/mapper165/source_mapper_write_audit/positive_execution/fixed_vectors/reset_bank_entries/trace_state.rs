@@ -12,9 +12,9 @@ use crate::dialogue_inventory::{
 use super::super::super::control_state::{
     BATTLE_ANIMATION_TEST_PHASE, COMPOSITE_SCREEN_STATE, DEFERRED_MAIN_STATE,
     DIALOGUE_OR_SOUND_STATE, FIXED_SCHEDULER_DISPATCH_GATE, FIXED_SCHEDULER_STATE, MAIN_STATE,
-    MAP_DIALOGUE_OUTER_STATE, MAP_EVENT_STATE, MAP_PREPARATION_STATE, OUTER_SCREEN_STATE,
-    PENDING_SHARED_MENU_REQUEST_STATE, PRG_BANK_SHADOW, SHARED_MENU_STATE, TITLE_ANIMATION_STATE,
-    TITLE_STATE, VICTORY_STAGE,
+    MAP_DIALOGUE_OUTER_STATE, MAP_DIALOGUE_RESUME_STATE, MAP_EVENT_STATE, MAP_PREPARATION_STATE,
+    OUTER_SCREEN_STATE, PENDING_SHARED_MENU_REQUEST_STATE, PRG_BANK_SHADOW, SHARED_MENU_STATE,
+    TITLE_ANIMATION_STATE, TITLE_STATE, VICTORY_STAGE,
 };
 
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
@@ -177,6 +177,7 @@ struct ResetTraceMemory {
     pending_state_request_05cc: ByteValueSet,
     requested_prg_bank_05c7: ByteValueSet,
     outer_state_05db: ByteValueSet,
+    resume_state_05dc: ByteValueSet,
     menu_state_05de: ByteValueSet,
     composite_state_05e8: ByteValueSet,
     dialogue_or_sound_state_05ee: ByteValueSet,
@@ -189,7 +190,7 @@ struct ResetTraceMemory {
 }
 
 impl ResetTraceMemory {
-    const ADDRESSES: [u16; 31] = [
+    const ADDRESSES: [u16; 32] = [
         0x0000,
         0x0001,
         0x0008,
@@ -212,6 +213,7 @@ impl ResetTraceMemory {
         0x05C7,
         PENDING_SHARED_MENU_REQUEST_STATE,
         MAP_DIALOGUE_OUTER_STATE,
+        MAP_DIALOGUE_RESUME_STATE,
         SHARED_MENU_STATE,
         COMPOSITE_SCREEN_STATE,
         DIALOGUE_OR_SOUND_STATE,
@@ -247,6 +249,7 @@ impl ResetTraceMemory {
             0x05C7 => self.requested_prg_bank_05c7.clone(),
             PENDING_SHARED_MENU_REQUEST_STATE => self.pending_state_request_05cc.clone(),
             MAP_DIALOGUE_OUTER_STATE => self.outer_state_05db.clone(),
+            MAP_DIALOGUE_RESUME_STATE => self.resume_state_05dc.clone(),
             SHARED_MENU_STATE => self.menu_state_05de.clone(),
             COMPOSITE_SCREEN_STATE => self.composite_state_05e8.clone(),
             DIALOGUE_OR_SOUND_STATE => self.dialogue_or_sound_state_05ee.clone(),
@@ -290,6 +293,7 @@ impl ResetTraceMemory {
             0x05C7 => self.requested_prg_bank_05c7 = value,
             PENDING_SHARED_MENU_REQUEST_STATE => self.pending_state_request_05cc = value,
             MAP_DIALOGUE_OUTER_STATE => self.outer_state_05db = value,
+            MAP_DIALOGUE_RESUME_STATE => self.resume_state_05dc = value,
             SHARED_MENU_STATE => self.menu_state_05de = value,
             COMPOSITE_SCREEN_STATE => self.composite_state_05e8 = value,
             DIALOGUE_OR_SOUND_STATE => self.dialogue_or_sound_state_05ee = value,

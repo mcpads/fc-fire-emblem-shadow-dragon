@@ -21,7 +21,8 @@ use crate::{
 
 #[cfg(test)]
 use super::super::control_state::{
-    DEFERRED_MAIN_STATE, MAIN_STATE, MAP_DIALOGUE_OUTER_STATE, OUTER_SCREEN_STATE,
+    DEFERRED_MAIN_STATE, FIXED_SCHEDULER_STATE, MAIN_STATE, MAP_DIALOGUE_OUTER_STATE,
+    OUTER_SCREEN_STATE,
 };
 use super::super::control_state::{
     FIXED_SCHEDULER_DISPATCH_GATE, ObservedControlStateWrites, PENDING_SHARED_MENU_REQUEST_STATE,
@@ -166,7 +167,7 @@ impl InlineDispatchSelectorBounds {
         Ok(())
     }
 
-    fn admitted_selectors(&self) -> &BTreeSet<u8> {
+    pub(in super::super) fn admitted_selectors(&self) -> &BTreeSet<u8> {
         &self.admitted_selectors
     }
 
@@ -699,6 +700,84 @@ pub(in super::super) fn trace_source_bound_inline_state_handler(
     absolute_indexed_write_bounds: &BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds>,
     tracked_state_call_summaries: &mut TrackedStateCallSummaries,
 ) -> Result<StatefulBankExecution> {
+    trace_source_bound_inline_state_handler_with_initial_values(
+        source,
+        dispatch_bank,
+        state_load_address,
+        dispatch_call_address,
+        return_address,
+        selector_memory_address,
+        selector,
+        mapped_prg_bank,
+        &initial_memory_values
+            .iter()
+            .map(|(&address, &value)| (address, ByteValueSet::known(value)))
+            .collect(),
+        inline_dispatch_selector_bounds,
+        indirect_write_destination_bounds,
+        absolute_indexed_write_bounds,
+        tracked_state_call_summaries,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(in super::super) fn trace_fixed_scheduler_inline_state_handler(
+    source: &Rom,
+    dispatch_bank: u8,
+    state_load_address: u16,
+    dispatch_call_address: u16,
+    return_address: u16,
+    selector_memory_address: u16,
+    selector: u8,
+    mapped_prg_bank: u8,
+    initial_memory_values: &BTreeMap<u16, u8>,
+    inline_dispatch_selector_bounds: &BTreeMap<(u8, u16), InlineDispatchSelectorBounds>,
+    indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
+    absolute_indexed_write_bounds: &BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds>,
+    tracked_state_call_summaries: &mut TrackedStateCallSummaries,
+) -> Result<StatefulBankExecution> {
+    ensure!(
+        !initial_memory_values.contains_key(&FIXED_SCHEDULER_DISPATCH_GATE),
+        "fixed-scheduler handler received a conflicting exact dispatch-gate value"
+    );
+    let mut initial_value_sets = initial_memory_values
+        .iter()
+        .map(|(&address, &value)| (address, ByteValueSet::known(value)))
+        .collect::<BTreeMap<_, _>>();
+    initial_value_sets.insert(FIXED_SCHEDULER_DISPATCH_GATE, ByteValueSet::nonzero());
+    trace_source_bound_inline_state_handler_with_initial_values(
+        source,
+        dispatch_bank,
+        state_load_address,
+        dispatch_call_address,
+        return_address,
+        selector_memory_address,
+        selector,
+        mapped_prg_bank,
+        &initial_value_sets,
+        inline_dispatch_selector_bounds,
+        indirect_write_destination_bounds,
+        absolute_indexed_write_bounds,
+        tracked_state_call_summaries,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn trace_source_bound_inline_state_handler_with_initial_values(
+    source: &Rom,
+    dispatch_bank: u8,
+    state_load_address: u16,
+    dispatch_call_address: u16,
+    return_address: u16,
+    selector_memory_address: u16,
+    selector: u8,
+    mapped_prg_bank: u8,
+    initial_memory_values: &BTreeMap<u16, ByteValueSet>,
+    inline_dispatch_selector_bounds: &BTreeMap<(u8, u16), InlineDispatchSelectorBounds>,
+    indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
+    absolute_indexed_write_bounds: &BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds>,
+    tracked_state_call_summaries: &mut TrackedStateCallSummaries,
+) -> Result<StatefulBankExecution> {
     ensure!(
         dispatch_bank <= FIXED_PRG_BANK && mapped_prg_bank <= FIXED_PRG_BANK,
         "source-bound inline state handler has a bank outside the MMC4 domain"
@@ -732,8 +811,8 @@ pub(in super::super) fn trace_source_bound_inline_state_handler(
         .first()
         .context("source-bound inline state selector has no target")?;
     let mut state = ResetTraceState::at(dispatch_call_address, ActivationId(0));
-    for (&address, &value) in initial_memory_values {
-        state.write_memory(address, Some(value));
+    for (&address, value) in initial_memory_values {
+        state.write_memory_values(address, value.clone());
     }
     state.write_memory(selector_memory_address, Some(selector));
     state.write_prg_bank_shadows(Some(mapped_prg_bank));
@@ -4214,6 +4293,82 @@ mod tests {
             )),
             Some(&Some(BTreeSet::from([0x03])))
         );
+    }
+
+    #[test]
+    fn fixed_scheduler_handler_preserving_nonzero_gate_dispatches_the_next_state() {
+        const DISPATCH_CALL: u16 = 0xC192;
+        let source = synthetic_source(
+            &[
+                (
+                    0xC140,
+                    &[
+                        0x20, 0x80, 0xC1, // JSR $C180: enter the scheduler again
+                        0x00, // BRK
+                    ],
+                ),
+                (
+                    0xC180,
+                    &[
+                        0xA5, 0x23, // LDA $23
+                        0xF0, 0x03, // BEQ $C187
+                        0x4C, 0x90, 0xC1, // JMP $C190: dispatch the next state
+                        0x4C, 0x00, 0x84, // JMP $8400: mapped-screen mode
+                    ],
+                ),
+                (
+                    0xC190,
+                    &[
+                        0xA5, 0x25, // LDA $25
+                        0x20, 0x4C, 0xC3, // JSR $C34C
+                        0xA0, 0xC1, 0xB0, 0xC1, // inline target table
+                    ],
+                ),
+                (
+                    0xC1A0,
+                    &[
+                        0xA9, 0x01, // LDA #$01
+                        0x85, 0x25, // STA $25; select the next scheduler state
+                        0x60, // RTS; preserve the nonzero dispatch gate
+                    ],
+                ),
+                (0xC1B0, &[0x00]),
+                (
+                    INLINE_POINTER_DISPATCH_ADDRESS,
+                    &INLINE_POINTER_DISPATCH_CODE,
+                ),
+            ],
+            0xC190,
+        );
+        let selector_bounds = BTreeMap::from([(
+            (FIXED_PRG_BANK, DISPATCH_CALL),
+            InlineDispatchSelectorBounds::from_source_producers(BTreeSet::from([0x00, 0x01])),
+        )]);
+        let mut tracked_state_call_summaries = TrackedStateCallSummaries::default();
+
+        let trace = trace_fixed_scheduler_inline_state_handler(
+            &source,
+            FIXED_PRG_BANK,
+            0xC190,
+            DISPATCH_CALL,
+            0xC140,
+            FIXED_SCHEDULER_STATE,
+            0x00,
+            0x06,
+            &BTreeMap::new(),
+            &selector_bounds,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &mut tracked_state_call_summaries,
+        )
+        .unwrap();
+
+        assert_eq!(
+            trace.inline_dispatch_contexts(FIXED_PRG_BANK, DISPATCH_CALL),
+            BTreeSet::from([(0x00, 0x06), (0x01, 0x06)])
+        );
+        assert!(!trace.switchable_roots().contains(&(0x06, 0x8400)));
+        assert!(trace.open_fact_descriptions().is_empty());
     }
 
     #[test]

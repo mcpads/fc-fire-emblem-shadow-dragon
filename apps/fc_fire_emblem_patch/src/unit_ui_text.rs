@@ -22,7 +22,7 @@ mod target_glyphs;
 mod tests;
 mod workspace;
 
-pub(crate) use command_menu::COMMAND_LABEL_SPECS;
+pub(crate) use command_menu::{COMMAND_LABEL_SPECS, bind_map_facility_dispatch_source};
 use source_spec::*;
 pub(crate) use source_spec::{
     FixedLabelSpec, SUMMARY_AND_STATUS_LABEL_SPECS, composite_payload_display_cell_count,

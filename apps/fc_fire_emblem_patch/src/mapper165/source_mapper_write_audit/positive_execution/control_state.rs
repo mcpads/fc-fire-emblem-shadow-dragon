@@ -21,6 +21,7 @@ pub(super) const TITLE_STATE: u16 = 0x057A;
 pub(super) const TITLE_ANIMATION_STATE: u16 = 0x0587;
 pub(super) const PENDING_SHARED_MENU_REQUEST_STATE: u16 = 0x05CC;
 pub(super) const MAP_DIALOGUE_OUTER_STATE: u16 = 0x05DB;
+pub(super) const MAP_DIALOGUE_RESUME_STATE: u16 = 0x05DC;
 pub(super) const SHARED_MENU_STATE: u16 = 0x05DE;
 pub(super) const COMPOSITE_SCREEN_STATE: u16 = 0x05E8;
 pub(super) const DIALOGUE_OR_SOUND_STATE: u16 = 0x05EE;
@@ -28,7 +29,7 @@ pub(super) const DIALOGUE_OR_SOUND_STATE: u16 = 0x05EE;
 // address as a unit-row buffer cursor, so it must remain outside the global control-state catalog.
 pub(super) const BATTLE_ANIMATION_TEST_PHASE: u16 = 0x7730;
 
-pub(super) const POSITIVE_CONTROL_STATES: [PositiveControlState; 17] = [
+pub(super) const POSITIVE_CONTROL_STATES: [PositiveControlState; 18] = [
     PositiveControlState {
         address: FIXED_SCHEDULER_DISPATCH_GATE,
         role: "fixed_scheduler_dispatch_gate_23",
@@ -80,6 +81,10 @@ pub(super) const POSITIVE_CONTROL_STATES: [PositiveControlState; 17] = [
     PositiveControlState {
         address: MAP_DIALOGUE_OUTER_STATE,
         role: "map_dialogue_outer_state_05DB",
+    },
+    PositiveControlState {
+        address: MAP_DIALOGUE_RESUME_STATE,
+        role: "map_dialogue_resume_state_05DC",
     },
     PositiveControlState {
         address: SHARED_MENU_STATE,

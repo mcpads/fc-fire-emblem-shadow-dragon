@@ -49,6 +49,8 @@ pub(super) struct SourceScreenStateDispatches {
     source_producer_domains: BTreeMap<(u8, u16), BTreeSet<u8>>,
     selector_memory_addresses: BTreeMap<(u8, u16), u16>,
     indirect_write_destinations: BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
+    gameplay_main_state_seed_selectors: BTreeSet<u8>,
+    gameplay_deferred_main_state_selectors: BTreeSet<u8>,
 }
 
 impl SourceScreenStateDispatches {
@@ -68,6 +70,14 @@ impl SourceScreenStateDispatches {
         &self,
     ) -> &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds> {
         &self.indirect_write_destinations
+    }
+
+    pub(super) fn gameplay_main_state_seed_selectors(&self) -> &BTreeSet<u8> {
+        &self.gameplay_main_state_seed_selectors
+    }
+
+    pub(super) fn gameplay_deferred_main_state_selectors(&self) -> &BTreeSet<u8> {
+        &self.gameplay_deferred_main_state_selectors
     }
 }
 
@@ -227,7 +237,8 @@ pub(super) fn bind_source_screen_state_dispatches(
         "gameplay outer-screen dispatch",
     )?;
 
-    for lifecycle in bind_outer_screen_main_state_lifecycles(source)? {
+    let outer_screen_main_state_lifecycles = bind_outer_screen_main_state_lifecycles(source)?;
+    for lifecycle in outer_screen_main_state_lifecycles.dispatches() {
         let call = lifecycle.dispatch_call();
         insert_domain(
             &mut selector_domains,
@@ -378,6 +389,12 @@ pub(super) fn bind_source_screen_state_dispatches(
         source_producer_domains,
         selector_memory_addresses,
         indirect_write_destinations,
+        gameplay_main_state_seed_selectors: outer_screen_main_state_lifecycles
+            .gameplay_main_state_seed_selectors()
+            .clone(),
+        gameplay_deferred_main_state_selectors: outer_screen_main_state_lifecycles
+            .gameplay_deferred_main_state_selectors()
+            .clone(),
     })
 }
 

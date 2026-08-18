@@ -1,5 +1,16 @@
 use super::*;
 
+const RESTORED_PRG_BANK_SHADOW: u16 = 0x0051;
+const REQUIRED_MAPPER_CALL_STATE: [u16; 2] = [PRG_BANK_SHADOW, RESTORED_PRG_BANK_SHADOW];
+
+fn complete_preserved_call_state(requested: &BTreeSet<u16>) -> BTreeSet<u16> {
+    requested
+        .iter()
+        .copied()
+        .chain(REQUIRED_MAPPER_CALL_STATE)
+        .collect()
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(in super::super::super) fn trace_source_bound_inline_state_handler_batch(
     source: &Rom,
@@ -79,8 +90,9 @@ pub(in super::super::super) fn trace_source_bound_inline_state_handler_batch(
     let mut return_flow = ReturnFlow::default();
     let mut pending = VecDeque::new();
     let mut switchable_handler_roots = BTreeSet::new();
-    let mut state_transition_call_summaries =
-        TrackedStateCallSummaries::preserving_only(preserved_call_state_addresses.clone())?;
+    let mut state_transition_call_summaries = TrackedStateCallSummaries::preserving_only(
+        complete_preserved_call_state(preserved_call_state_addresses),
+    )?;
     for (selector, target) in targets {
         let target_bank = if target >= FIXED_CPU_START {
             FIXED_PRG_BANK
@@ -139,4 +151,26 @@ pub(in super::super::super) fn trace_source_bound_inline_state_handler_batch(
         .insert((dispatch_bank, state_load_address));
     execution.switchable_roots.extend(switchable_handler_roots);
     Ok(execution)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selected_control_state_summaries_retain_mapper_shadows_only_when_requested() {
+        let preserved = complete_preserved_call_state(&BTreeSet::from([MAIN_STATE]));
+        let summaries = TrackedStateCallSummaries::preserving_only(preserved).unwrap();
+        let mut state = ResetTraceState::at(0x8000, ActivationId(0));
+        state.write_prg_bank_shadows(Some(0x06));
+        state.write_memory(MAIN_STATE, Some(0x0C));
+        state.write_memory(OUTER_SCREEN_STATE, Some(0x09));
+
+        summaries.invalidate_unpreserved_state(&mut state);
+
+        assert_eq!(state.read_memory(PRG_BANK_SHADOW), Some(0x06));
+        assert_eq!(state.read_memory(RESTORED_PRG_BANK_SHADOW), Some(0x06));
+        assert_eq!(state.read_memory(MAIN_STATE), Some(0x0C));
+        assert_eq!(state.read_memory(OUTER_SCREEN_STATE), None);
+    }
 }

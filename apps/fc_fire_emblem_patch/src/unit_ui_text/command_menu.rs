@@ -1,8 +1,15 @@
-use anyhow::{Result, ensure};
+use std::collections::BTreeSet;
+
+use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use super::{CodeRegionReport, FixedLabelSpec, UNIT_UI_BANK, banked_prg_offset, fixed_label, hex};
-use crate::rom::HEADER_SIZE;
+use crate::{
+    chapter_map_source::bind_chapter_map_source_records,
+    mapper165::inline_pointer_dispatch::bind_inline_pointer_dispatch,
+    rom::{HEADER_SIZE, Rom},
+    typed_source::decode_rp2a03_sequence,
+};
 
 const COMPOSER_ADDRESS: u16 = 0x82E3;
 const COMPOSER_HEX: &str = concat!(
@@ -26,11 +33,19 @@ const TERRAIN_PREDICATE: [u8; 26] = [
     0xAC, 0x00, 0x05, 0x68, 0xD1, 0x00, 0xF0, 0x01, 0x18, 0x60,
 ];
 const FACILITY_SELECTOR_ADDRESS: u16 = 0xA291;
+const FACILITY_DISPATCH_CALL: u16 = 0xA2E2;
+const FACILITY_HANDLER_TABLE_ADDRESS: u16 = 0xA2E5;
+const FACILITY_HANDLER_TARGETS: [u16; 6] = [0xC73D, 0xA2F2, 0xA2F2, 0xA317, 0xC73D, 0xA2F2];
+const FACILITY_SELECTOR_CODE_END: u16 = FACILITY_HANDLER_TABLE_ADDRESS;
 const FACILITY_SELECTOR_HEX: &str = concat!(
     "A9008DD0778DDB05ADF4760AB052AC747688980AA8B9FFA48504B900A58505D023CD0105D019C8B104CD0005D011C8B104C905D019",
     "ADF5054A9004A905D00FA904208FC3A000B104C9F0D0D5F0128DD077204CC33DC7F2A2F2A217A33DC7F2A260",
 );
 const CHAPTER_FACILITY_POINTER_TABLE_ADDRESS: u16 = 0xA4FF;
+const CHAPTER_FACILITY_COUNT: usize = 25;
+const CHAPTER_FACILITY_RECORD_SIZE: usize = 4;
+const CHAPTER_FACILITY_RECORD_COUNT: usize = 94;
+const CHAPTER_FACILITY_RECORDS_END: u16 = 0xA6C2;
 const CHAPTER_ONE_FACILITY_POINTER: [u8; 2] = [0x31, 0xA5];
 const CHAPTER_ONE_FACILITY_RECORD_ADDRESS: u16 = 0xA531;
 const CHAPTER_ONE_WEAPON_SHOP_RECORD: [u8; 5] = [0x03, 0x1A, 0x01, 0x00, 0xF0];
@@ -130,6 +145,186 @@ pub(crate) const COMMAND_LABEL_SPECS: &[FixedLabelSpec] = &[
         &[0x1B, 0x21, 0x12, 0x19, 0x21, 0x0D, 0xED],
     ),
 ];
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct MapFacilityDispatchSource {
+    prg_bank: u8,
+    dispatch_call: u16,
+    handler_selectors: BTreeSet<u8>,
+    produced_selectors: BTreeSet<u8>,
+    producer_instruction_starts: BTreeSet<u16>,
+}
+
+impl MapFacilityDispatchSource {
+    pub(crate) fn prg_bank(&self) -> u8 {
+        self.prg_bank
+    }
+
+    pub(crate) fn dispatch_call(&self) -> u16 {
+        self.dispatch_call
+    }
+
+    pub(crate) fn handler_selectors(&self) -> &BTreeSet<u8> {
+        &self.handler_selectors
+    }
+
+    pub(crate) fn produced_selectors(&self) -> &BTreeSet<u8> {
+        &self.produced_selectors
+    }
+
+    pub(crate) fn producer_instruction_starts(&self) -> &BTreeSet<u16> {
+        &self.producer_instruction_starts
+    }
+}
+
+/// Binds the map-facility record directory to the selector used by the inline dispatch at
+/// `0B:$A2E2`. The record field supplies facility kinds 1 through 5; the selector code preserves
+/// kinds 1 through 4 and resolves kind 5 to the normal/secret-shop branches 4 and 5.
+pub(crate) fn bind_map_facility_dispatch_source(source: &Rom) -> Result<MapFacilityDispatchSource> {
+    source.verify_supported_japanese()?;
+    let chapter_maps = bind_chapter_map_source_records(source.prg())?;
+    ensure!(
+        chapter_maps.len() == CHAPTER_FACILITY_COUNT
+            && chapter_maps
+                .iter()
+                .enumerate()
+                .all(|(index, map)| usize::from(map.chapter_number()) == index + 1),
+        "map facility pointer directory no longer shares the one-based chapter-map population"
+    );
+    let selector = decode_hex(FACILITY_SELECTOR_HEX, "map facility selector")?;
+    validate_region(
+        source.prg(),
+        FACILITY_SELECTOR_ADDRESS,
+        &selector,
+        "map facility selector",
+    )?;
+    let executable_byte_count = usize::from(
+        FACILITY_SELECTOR_CODE_END
+            .checked_sub(FACILITY_SELECTOR_ADDRESS)
+            .context("map facility selector code range underflow")?,
+    );
+    decode_rp2a03_sequence(
+        selector
+            .get(..executable_byte_count)
+            .context("map facility selector code exceeds its bound source region")?,
+        FACILITY_SELECTOR_ADDRESS,
+        "map facility selector code",
+    )?;
+
+    let handler_selectors = (0_u8..FACILITY_HANDLER_TARGETS.len() as u8).collect::<BTreeSet<_>>();
+    let dispatch = bind_inline_pointer_dispatch(
+        source,
+        UNIT_UI_BANK as u8,
+        FACILITY_DISPATCH_CALL,
+        handler_selectors.iter().copied(),
+        "map facility kind dispatch",
+    )?;
+    ensure!(
+        dispatch.table_start() == FACILITY_HANDLER_TABLE_ADDRESS
+            && dispatch.targets_in_selector_order() == FACILITY_HANDLER_TARGETS,
+        "map facility handler table changed"
+    );
+
+    let records = parse_map_facility_records(source.prg())?;
+    ensure!(
+        records.record_count == CHAPTER_FACILITY_RECORD_COUNT
+            && records.end_address == CHAPTER_FACILITY_RECORDS_END,
+        "map facility record directory extent changed: records={}, end=${:04X}",
+        records.record_count,
+        records.end_address,
+    );
+    let produced_selectors = records.facility_types;
+    ensure!(
+        produced_selectors == BTreeSet::from([0x01, 0x02, 0x03, 0x04, 0x05])
+            && produced_selectors.is_subset(&handler_selectors),
+        "map facility record kinds no longer select the owned handler table: {produced_selectors:02X?}"
+    );
+
+    Ok(MapFacilityDispatchSource {
+        prg_bank: UNIT_UI_BANK as u8,
+        dispatch_call: FACILITY_DISPATCH_CALL,
+        handler_selectors,
+        produced_selectors,
+        producer_instruction_starts: BTreeSet::from([0xA2C0, 0xA2CC, 0xA2D0, 0xA2DF]),
+    })
+}
+
+#[derive(Debug)]
+struct MapFacilityRecords {
+    facility_types: BTreeSet<u8>,
+    record_count: usize,
+    end_address: u16,
+}
+
+fn parse_map_facility_records(prg: &[u8]) -> Result<MapFacilityRecords> {
+    let pointer_offset = banked_prg_offset(UNIT_UI_BANK, CHAPTER_FACILITY_POINTER_TABLE_ADDRESS)?;
+    let pointer_bytes = prg
+        .get(pointer_offset..pointer_offset + CHAPTER_FACILITY_COUNT * 2)
+        .context("map facility pointer directory is outside PRG")?;
+    let pointers = pointer_bytes
+        .chunks_exact(2)
+        .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
+        .collect::<Vec<_>>();
+    ensure!(
+        pointers.len() == CHAPTER_FACILITY_COUNT
+            && pointers.first() == Some(&CHAPTER_ONE_FACILITY_RECORD_ADDRESS)
+            && pointers.windows(2).all(|pair| pair[0] < pair[1]),
+        "map facility pointer directory changed"
+    );
+
+    let mut facility_types = BTreeSet::new();
+    let mut record_count = 0_usize;
+    let mut final_end = None;
+    for (chapter_index, &pointer) in pointers.iter().enumerate() {
+        let mut address = pointer;
+        let next_pointer = pointers.get(chapter_index + 1).copied();
+        loop {
+            let offset = banked_prg_offset(UNIT_UI_BANK, address)?;
+            let row = *prg
+                .get(offset)
+                .context("map facility list has no terminator")?;
+            if row == 0xF0 {
+                let end_address = address
+                    .checked_add(1)
+                    .context("map facility list end overflow")?;
+                if let Some(next_pointer) = next_pointer {
+                    ensure!(
+                        end_address == next_pointer,
+                        "map facility list does not end at the next chapter pointer"
+                    );
+                } else {
+                    final_end = Some(end_address);
+                }
+                break;
+            }
+            let record = prg
+                .get(offset..offset + CHAPTER_FACILITY_RECORD_SIZE)
+                .context("map facility record is truncated")?;
+            ensure!(
+                record[2] != 0 && record[2] < FACILITY_HANDLER_TARGETS.len() as u8,
+                "map facility record selects outside the handler table: 0x{:02X}",
+                record[2]
+            );
+            facility_types.insert(record[2]);
+            record_count += 1;
+            address = address
+                .checked_add(CHAPTER_FACILITY_RECORD_SIZE as u16)
+                .context("map facility record address overflow")?;
+            if let Some(next_pointer) = next_pointer {
+                ensure!(
+                    address < next_pointer,
+                    "map facility record crosses the next chapter pointer"
+                );
+            }
+        }
+    }
+
+    Ok(MapFacilityRecords {
+        facility_types,
+        record_count,
+        end_address: final_end.context("map facility directory has no final list")?,
+    })
+}
 
 #[derive(Debug, Serialize)]
 pub(super) struct CommandMenuReport {
@@ -548,6 +743,50 @@ mod tests {
         let mut prg = vec![0; PRG_SIZE];
         install_fixture(&mut prg);
         analyze(&prg).unwrap()
+    }
+
+    fn map_facility_record_fixture() -> Vec<u8> {
+        let mut prg = vec![0; PRG_SIZE];
+        let pointer_offset =
+            banked_prg_offset(UNIT_UI_BANK, CHAPTER_FACILITY_POINTER_TABLE_ADDRESS).unwrap();
+        let mut record_address = CHAPTER_ONE_FACILITY_RECORD_ADDRESS;
+        for chapter_index in 0..CHAPTER_FACILITY_COUNT {
+            let pointer = record_address.to_le_bytes();
+            let offset = pointer_offset + chapter_index * 2;
+            prg[offset..offset + 2].copy_from_slice(&pointer);
+
+            let record_offset = banked_prg_offset(UNIT_UI_BANK, record_address).unwrap();
+            let facility_type = u8::try_from(chapter_index % 5 + 1).unwrap();
+            prg[record_offset..record_offset + 5].copy_from_slice(&[
+                u8::try_from(chapter_index + 1).unwrap(),
+                0x01,
+                facility_type,
+                0x00,
+                0xF0,
+            ]);
+            record_address += 5;
+        }
+        prg
+    }
+
+    #[test]
+    fn facility_record_directory_derives_all_owned_dispatch_selectors() {
+        let records = parse_map_facility_records(&map_facility_record_fixture()).unwrap();
+        assert_eq!(
+            records.facility_types,
+            BTreeSet::from([0x01, 0x02, 0x03, 0x04, 0x05])
+        );
+        assert_eq!(records.record_count, CHAPTER_FACILITY_COUNT);
+    }
+
+    #[test]
+    fn facility_record_outside_handler_table_is_rejected() {
+        let mut prg = map_facility_record_fixture();
+        let first_record =
+            banked_prg_offset(UNIT_UI_BANK, CHAPTER_ONE_FACILITY_RECORD_ADDRESS).unwrap();
+        prg[first_record + 2] = 0x06;
+        let error = parse_map_facility_records(&prg).unwrap_err().to_string();
+        assert!(error.contains("selects outside the handler table"));
     }
 
     #[test]

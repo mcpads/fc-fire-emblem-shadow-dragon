@@ -324,6 +324,8 @@ pub(super) fn bind_source_positive_execution_graph(
         screen_state_dispatches.source_producer_domains(),
         screen_state_dispatches.selector_memory_addresses(),
         &outer_screen_state_seed_selectors,
+        screen_state_dispatches.gameplay_main_state_seed_selectors(),
+        screen_state_dispatches.gameplay_deferred_main_state_selectors(),
         ending_sequence.produced_selectors(),
         &fixed_scheduler_entry_contexts,
         &source_bound_indirect_destinations,
@@ -521,4 +523,5 @@ fn normalize_source_location(bank: u8, address: u16) -> Result<(u8, u16)> {
         address,
     ))
 }
+
 use battle_runtime_writers::bind_battle_runtime_write_destinations;

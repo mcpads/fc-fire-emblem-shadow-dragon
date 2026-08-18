@@ -31,12 +31,14 @@ const SECOND_LIFECYCLE_START: u16 = 0x850B;
 const SECOND_LIFECYCLE_END: u16 = 0x85BD;
 const SECOND_LIFECYCLE_SHA1: &str = "d50b34ff8767ff2d30381e51e3e5471af520b1ef";
 
+const ENTER_GAMEPLAY_AND_RESET_MAIN_STATE: (u16, &[u8]) = (
+    0x8447,
+    &[0xA9, 0x09, 0x85, 0x24, 0xA9, 0x00, 0x85, 0x84, 0xF0, 0x4B],
+);
+
 const STATE_TRANSITION_SEQUENCES: [(u16, &[u8]); 9] = [
     (0x8425, &[0x20, 0x8C, 0xB5, 0xE6, 0x24, 0x60]),
-    (
-        0x8447,
-        &[0xA9, 0x09, 0x85, 0x24, 0xA9, 0x00, 0x85, 0x84, 0xF0, 0x4B],
-    ),
+    ENTER_GAMEPLAY_AND_RESET_MAIN_STATE,
     (0x8497, &[0x20, 0x7D, 0xC7, 0xE6, 0x24, 0x60]),
     (0x84BF, &[0xE6, 0x84, 0xD0, 0x02, 0xE6, 0x24, 0x60]),
     (0x850B, &[0x20, 0x85, 0xD3, 0xE6, 0x24, 0x60]),
@@ -112,6 +114,26 @@ pub(super) struct NestedMainStateLifecycle {
     produced_selectors: Option<BTreeSet<u8>>,
 }
 
+pub(super) struct BoundOuterScreenMainStateLifecycles {
+    dispatches: Vec<NestedMainStateLifecycle>,
+    gameplay_main_state_seed_selectors: BTreeSet<u8>,
+    gameplay_deferred_main_state_selectors: BTreeSet<u8>,
+}
+
+impl BoundOuterScreenMainStateLifecycles {
+    pub(super) fn dispatches(&self) -> &[NestedMainStateLifecycle] {
+        &self.dispatches
+    }
+
+    pub(super) fn gameplay_main_state_seed_selectors(&self) -> &BTreeSet<u8> {
+        &self.gameplay_main_state_seed_selectors
+    }
+
+    pub(super) fn gameplay_deferred_main_state_selectors(&self) -> &BTreeSet<u8> {
+        &self.gameplay_deferred_main_state_selectors
+    }
+}
+
 impl NestedMainStateLifecycle {
     pub(super) fn dispatch_call(&self) -> u16 {
         self.dispatch_call
@@ -128,7 +150,7 @@ impl NestedMainStateLifecycle {
 
 pub(super) fn bind_outer_screen_main_state_lifecycles(
     source: &Rom,
-) -> Result<Vec<NestedMainStateLifecycle>> {
+) -> Result<BoundOuterScreenMainStateLifecycles> {
     source.verify_supported_japanese()?;
     bind_exact_code(
         source,
@@ -227,14 +249,28 @@ pub(super) fn bind_outer_screen_main_state_lifecycles(
         dispatch.targets_in_selector_order() == OUTER_SCREEN_SIX_MAIN_STATE_TARGETS,
         "outer-screen state six main-state handlers changed"
     );
-    let produced_selectors = bind_outer_screen_six_main_state_producers(source, &handler_domain)?;
+    let outer_screen_six = bind_outer_screen_six_main_state_producers(source, &handler_domain)?;
     lifecycles.push(NestedMainStateLifecycle {
         dispatch_call: OUTER_SCREEN_SIX_MAIN_STATE_DISPATCH_CALL,
         handler_domain,
-        produced_selectors: Some(produced_selectors),
+        produced_selectors: Some(outer_screen_six.main_state_selectors().clone()),
     });
     lifecycles.extend(bind_chapter_save_main_state_lifecycles(source)?);
-    Ok(lifecycles)
+    ensure!(
+        ENTER_GAMEPLAY_AND_RESET_MAIN_STATE.1[4] == 0xA9
+            && ENTER_GAMEPLAY_AND_RESET_MAIN_STATE.1[6..8]
+                == [0x85, u8::try_from(MAIN_STATE_ADDRESS)?],
+        "gameplay entry no longer loads and stores its nested main-state seed"
+    );
+    Ok(BoundOuterScreenMainStateLifecycles {
+        dispatches: lifecycles,
+        gameplay_main_state_seed_selectors: BTreeSet::from([
+            ENTER_GAMEPLAY_AND_RESET_MAIN_STATE.1[5]
+        ]),
+        gameplay_deferred_main_state_selectors: outer_screen_six
+            .deferred_main_state_selectors()
+            .clone(),
+    })
 }
 
 fn scan_raw_direct_state_operands(

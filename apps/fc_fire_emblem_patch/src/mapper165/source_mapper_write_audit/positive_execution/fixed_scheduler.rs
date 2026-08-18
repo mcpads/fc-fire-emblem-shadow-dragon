@@ -13,6 +13,7 @@ use crate::{
     sha1_hex,
     title_graphics::TitleStateExecution,
     typed_source::decode_rp2a03_sequence,
+    unit_ui_text::bind_map_facility_dispatch_source,
 };
 
 use super::{
@@ -22,7 +23,7 @@ use super::{
     },
     fixed_vectors::{
         InlineDispatchSelectorBounds, TrackedStateCallSummaries, trace_fixed_scheduler_contexts,
-        trace_source_bound_inline_state_handler, trace_source_bound_inline_state_handler_batch,
+        trace_fixed_scheduler_inline_state_handler, trace_source_bound_inline_state_handler_batch,
     },
     indexed_write_destinations::AbsoluteIndexedWriteDestinationBounds,
     screen_state_dispatches::GAMEPLAY_MAIN_STATE_DISPATCH_CALL,
@@ -37,6 +38,7 @@ const FIXED_CPU_START: u16 = 0xC000;
 pub(super) const FIXED_SCHEDULER_ENTRY: u16 = 0xF28F;
 pub(super) const FIXED_SCHEDULER_STATE_LOAD: u16 = 0xF2A0;
 pub(super) const FIXED_SCHEDULER_DISPATCH_CALL: u16 = 0xF2A2;
+const FIXED_SCHEDULER_STATE_ADDRESS: u16 = 0x0025;
 const FIXED_SCHEDULER_POINTER_TABLE: u16 = 0xF2A5;
 const FIXED_SCHEDULER_CALL_SITE: u16 = 0xC148;
 const FIXED_SCHEDULER_CALL: [u8; 3] = [0x20, 0x8F, 0xF2];
@@ -99,7 +101,6 @@ const SOUND_TEST_SCHEDULER_WRITER: u16 = 0xF2B4;
 const SOUND_TEST_SCHEDULER_WRITES: [u8; 4] = [0xA9, 0x04, 0x85, 0x25];
 
 const GAMEPLAY_SCHEDULER_BANK: u8 = 0x06;
-const GAMEPLAY_MAIN_STATE_SEED_OUTER_SCREEN_SELECTOR: u8 = 0x09;
 const GAMEPLAY_MAIN_STATE_ACTIVE_OUTER_SCREEN_SELECTOR: u8 = 0x0C;
 const GAMEPLAY_SCHEDULER_REGION: u16 = 0xB9F1;
 const GAMEPLAY_SCHEDULER_REGION_BYTE_COUNT: usize = 0x26;
@@ -186,6 +187,8 @@ pub(super) fn bind_fixed_scheduler_execution(
     screen_state_source_producer_domains: &BTreeMap<(u8, u16), BTreeSet<u8>>,
     screen_state_selector_memory_addresses: &BTreeMap<(u8, u16), u16>,
     outer_screen_state_seed_selectors: &BTreeSet<u8>,
+    gameplay_main_state_seed_selectors: &BTreeSet<u8>,
+    gameplay_deferred_main_state_selectors: &BTreeSet<u8>,
     ending_sequence_produced_selectors: &BTreeSet<u8>,
     entry_contexts: &BTreeSet<(u8, u8)>,
     indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
@@ -214,6 +217,7 @@ pub(super) fn bind_fixed_scheduler_execution(
         .zip(dispatch.targets_in_selector_order())
         .collect::<BTreeMap<_, _>>();
     let ending_sequence = bind_ending_sequence_phase_dispatch_source(source)?;
+    let map_facility_dispatch = bind_map_facility_dispatch_source(source)?;
     ensure!(
         !ending_sequence_produced_selectors.is_empty()
             && ending_sequence_produced_selectors.is_subset(ending_sequence.admitted_selectors()),
@@ -279,10 +283,34 @@ pub(super) fn bind_fixed_scheduler_execution(
         entry_contexts.contains(&(0x00, GAMEPLAY_SCHEDULER_BANK)),
         "reset-rooted execution no longer reaches scheduler state zero in source-bound bank six: {entry_contexts:?}"
     );
+    ensure!(
+        gameplay_main_state_seed_selectors == &BTreeSet::from([0x00]),
+        "gameplay entry no longer seeds nested main state zero: {gameplay_main_state_seed_selectors:02X?}"
+    );
+    ensure!(
+        gameplay_deferred_main_state_selectors == &BTreeSet::from([0x00, 0x04, 0x0C, 0x13]),
+        "gameplay deferred main-state producers changed: {gameplay_deferred_main_state_selectors:02X?}"
+    );
+    let mut fixed_scheduler_selector_bounds =
+        InlineDispatchSelectorBounds::from_handler_table(table_selector_domain.clone())
+            .with_selector_memory_address(FIXED_SCHEDULER_STATE_ADDRESS);
+    fixed_scheduler_selector_bounds
+        .merge_source_producer_owner(&known_produced_states, Some(FIXED_SCHEDULER_STATE_ADDRESS))?;
+    let mut map_facility_selector_bounds = InlineDispatchSelectorBounds::from_handler_table(
+        map_facility_dispatch.handler_selectors().clone(),
+    );
+    map_facility_selector_bounds
+        .merge_source_producer_owner(map_facility_dispatch.produced_selectors(), None)?;
+    source_bound_producer_instruction_starts.extend(
+        map_facility_dispatch
+            .producer_instruction_starts()
+            .iter()
+            .map(|&address| (map_facility_dispatch.prg_bank(), address)),
+    );
     let base_inline_dispatch_selector_bounds = BTreeMap::from([
         (
             (FIXED_PRG_BANK, FIXED_SCHEDULER_DISPATCH_CALL),
-            InlineDispatchSelectorBounds::from_handler_table(table_selector_domain.clone()),
+            fixed_scheduler_selector_bounds,
         ),
         (
             (0x0D, title_state.dispatch_call()),
@@ -313,6 +341,13 @@ pub(super) fn bind_fixed_scheduler_execution(
                     .iter()
                     .copied(),
             ),
+        ),
+        (
+            (
+                map_facility_dispatch.prg_bank(),
+                map_facility_dispatch.dispatch_call(),
+            ),
+            map_facility_selector_bounds,
         ),
         (
             (ending_sequence.prg_bank(), ending_sequence.dispatch_call()),
@@ -397,11 +432,15 @@ pub(super) fn bind_fixed_scheduler_execution(
         }
     }
 
-    let non_outer_entry_contexts = positive_entry_contexts
+    let non_outer_entry_contexts = entry_contexts
         .iter()
         .copied()
-        .filter(|(selector, _)| *selector != 0x04)
+        .filter(|(selector, _)| *selector != 0x04 && positive_selector_domain.contains(selector))
         .collect::<BTreeSet<_>>();
+    ensure!(
+        non_outer_entry_contexts == BTreeSet::from([(0x00, GAMEPLAY_SCHEDULER_BANK)]),
+        "normal fixed-scheduler closure no longer starts from the sole reset-rooted context: {non_outer_entry_contexts:02X?}"
+    );
     let mut tracked_state_call_summaries = TrackedStateCallSummaries::default();
     let non_outer_discovery_trace = trace_fixed_scheduler_contexts(
         source,
@@ -434,8 +473,7 @@ pub(super) fn bind_fixed_scheduler_execution(
         .collect::<VecDeque<_>>();
     let mut traced_outer_selectors = BTreeSet::new();
     let mut discovered_outer_traces = Vec::new();
-    let mut gameplay_main_state_seed_selectors = BTreeSet::new();
-    let mut gameplay_deferred_main_state_domain = BTreeSet::new();
+    let mut observed_deferred_main_state_domain = BTreeSet::new();
     let outer_screen_state_load = outer_screen_site
         .1
         .checked_sub(2)
@@ -444,7 +482,7 @@ pub(super) fn bind_fixed_scheduler_execution(
         if !traced_outer_selectors.insert(selector) {
             continue;
         }
-        let selector_trace = trace_source_bound_inline_state_handler(
+        let selector_trace = trace_fixed_scheduler_inline_state_handler(
             source,
             outer_screen_site.0,
             outer_screen_state_load,
@@ -463,13 +501,7 @@ pub(super) fn bind_fixed_scheduler_execution(
             selector_trace.control_state_write_values(),
             OUTER_SCREEN_STATE,
         );
-        if selector == GAMEPLAY_MAIN_STATE_SEED_OUTER_SCREEN_SELECTOR {
-            gameplay_main_state_seed_selectors.extend(known_control_state_write_values(
-                selector_trace.control_state_write_values(),
-                MAIN_STATE,
-            ));
-        }
-        gameplay_deferred_main_state_domain.extend(known_control_state_write_values(
+        observed_deferred_main_state_domain.extend(known_control_state_write_values(
             selector_trace.control_state_write_values(),
             DEFERRED_MAIN_STATE,
         ));
@@ -484,10 +516,6 @@ pub(super) fn bind_fixed_scheduler_execution(
         }
         discovered_outer_traces.push(selector_trace);
     }
-    ensure!(
-        gameplay_main_state_seed_selectors == BTreeSet::from([0x00]),
-        "outer-screen state nine no longer seeds gameplay main state zero: {gameplay_main_state_seed_selectors:02X?}"
-    );
     let gameplay_main_state_site = (GAMEPLAY_SCHEDULER_BANK, GAMEPLAY_MAIN_STATE_DISPATCH_CALL);
     let gameplay_main_state_handler_domain = screen_state_selector_domains
         .get(&gameplay_main_state_site)
@@ -500,7 +528,7 @@ pub(super) fn bind_fixed_scheduler_execution(
     let gameplay_main_state_load = GAMEPLAY_MAIN_STATE_DISPATCH_CALL
         .checked_sub(2)
         .context("gameplay main-state selector load underflows its dispatch call")?;
-    let gameplay_main_state_contexts = gameplay_deferred_main_state_domain
+    let gameplay_main_state_contexts = gameplay_deferred_main_state_selectors
         .iter()
         .copied()
         .map(|deferred_state| {
@@ -530,7 +558,7 @@ pub(super) fn bind_fixed_scheduler_execution(
         indirect_write_destination_bounds,
         absolute_indexed_write_bounds,
     )?;
-    let mut gameplay_main_state_produced_selectors = gameplay_main_state_seed_selectors;
+    let mut gameplay_main_state_produced_selectors = gameplay_main_state_seed_selectors.clone();
     let mut unresolved_gameplay_main_state_writers = Vec::new();
     for (&(bank, address, target), values) in gameplay_main_state_trace.control_state_write_values()
     {
@@ -574,7 +602,7 @@ pub(super) fn bind_fixed_scheduler_execution(
         if !traced_outer_selectors.insert(selector) {
             continue;
         }
-        let selector_trace = trace_source_bound_inline_state_handler(
+        let selector_trace = trace_fixed_scheduler_inline_state_handler(
             source,
             outer_screen_site.0,
             outer_screen_state_load,
@@ -611,9 +639,16 @@ pub(super) fn bind_fixed_scheduler_execution(
         traced_outer_selectors == outer_screen_produced_selectors,
         "outer-screen producer worklist did not trace every discovered selector"
     );
+    let gameplay_deferred_main_state_writers = discovered_outer_traces
+        .iter()
+        .flat_map(|trace| trace.control_state_write_values())
+        .filter_map(|(&site @ (_, _, target), values)| {
+            (target == DEFERRED_MAIN_STATE).then(|| (site, values.clone()))
+        })
+        .collect::<BTreeMap<_, _>>();
     ensure!(
-        gameplay_deferred_main_state_domain == BTreeSet::from([0x00, 0x04, 0x0C, 0x13]),
-        "outer-screen execution changed the gameplay deferred-main-state domain: {gameplay_deferred_main_state_domain:02X?}"
+        gameplay_deferred_main_state_selectors.is_subset(&observed_deferred_main_state_domain),
+        "outer-screen execution omitted a source-bound gameplay deferred-main-state producer: expected={gameplay_deferred_main_state_selectors:02X?}, observed={observed_deferred_main_state_domain:02X?}; writers={gameplay_deferred_main_state_writers:02X?}"
     );
     owned_inline_dispatch_selector_bounds
         .get_mut(&outer_screen_site)
