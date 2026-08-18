@@ -1,10 +1,7 @@
 use std::collections::BTreeSet;
 
 use anyhow::{Context, Result, ensure};
-use retro_rp2a03::{
-    AddressingMode, Location, MemoryAddress, Mnemonic, Operand, Rp2A03, decode_bytes,
-};
-use typed_isa_core::{AccessKind, StaticSemantics};
+use retro_rp2a03::{AddressingMode, Mnemonic, Operand, decode_bytes};
 
 use crate::{rom::Rom, sha1_hex, typed_source::decode_rp2a03_sequence};
 
@@ -18,6 +15,8 @@ use super::{
 };
 
 mod indirect_write_destinations;
+mod nested_dispatches;
+mod state_writer_census;
 
 use indirect_write_destinations::bind_indirect_write_destinations;
 #[cfg(test)]
@@ -25,9 +24,10 @@ use indirect_write_destinations::{
     DISPLAY_ROW_BASE, DISPLAY_ROW_POINTER_COUNT, DISPLAY_ROW_STRIDE,
     indexed_pointer_destination_ranges,
 };
+use nested_dispatches::bind_nested_map_preparation_dispatches;
+use state_writer_census::{DirectStateWriter, scan_direct_state_writers};
 
 const PRG_BANK_BYTE_COUNT: usize = 16 * 1024;
-const PRG_BANK_COUNT: usize = 16;
 const MAP_PREPARATION_BANK: u8 = 0x03;
 const FIXED_PRG_BANK: u8 = 0x0F;
 const MAP_PREPARATION_STATE_ADDRESS: u16 = 0x053F;
@@ -196,13 +196,6 @@ const fn region(start: u16, end: u16, sha1: &'static str, role: &'static str) ->
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-struct DirectStateWriter {
-    physical_prg_bank: u8,
-    cpu_address: u16,
-    opcode: u8,
-}
-
 const DIRECT_STATE_WRITERS: [DirectStateWriter; 7] = [
     writer(0x8022, 0xEE),
     writer(0x8029, 0xEE),
@@ -214,11 +207,7 @@ const DIRECT_STATE_WRITERS: [DirectStateWriter; 7] = [
 ];
 
 const fn writer(cpu_address: u16, opcode: u8) -> DirectStateWriter {
-    DirectStateWriter {
-        physical_prg_bank: MAP_PREPARATION_BANK,
-        cpu_address,
-        opcode,
-    }
+    DirectStateWriter::in_map_preparation_bank(cpu_address, opcode, MAP_PREPARATION_STATE_ADDRESS)
 }
 
 #[derive(Clone, Copy)]
@@ -388,7 +377,21 @@ const TRANSITIONS: [StateTransition; 7] = [
     StateTransition::new(6, 0),
 ];
 
-pub(super) fn bind_map_preparation_lifecycle(
+pub(super) fn bind_map_preparation_dispatches(
+    source: &Rom,
+    unit_record_domain: &BoundUnitRecordAddressDomain,
+    chapter_map_dimensions: &BoundChapterMapDimensions,
+) -> Result<Vec<ScreenSubstateDispatch>> {
+    let mut dispatches = vec![bind_map_preparation_lifecycle(
+        source,
+        unit_record_domain,
+        chapter_map_dimensions,
+    )?];
+    dispatches.extend(bind_nested_map_preparation_dispatches(source)?);
+    Ok(dispatches)
+}
+
+fn bind_map_preparation_lifecycle(
     source: &Rom,
     unit_record_domain: &BoundUnitRecordAddressDomain,
     chapter_map_dimensions: &BoundChapterMapDimensions,
@@ -429,7 +432,7 @@ pub(super) fn bind_map_preparation_lifecycle(
         "map-preparation state handlers changed"
     );
 
-    let direct_writers = scan_direct_state_writers(source.prg())?;
+    let direct_writers = scan_direct_state_writers(source.prg(), &[MAP_PREPARATION_STATE_ADDRESS])?;
     ensure!(
         direct_writers == BTreeSet::from(DIRECT_STATE_WRITERS),
         "map-preparation direct state-writer census changed: expected {:?}, found {direct_writers:?}",
@@ -502,92 +505,6 @@ fn bind_transition(source: &Rom, transition: StateTransition) -> Result<()> {
     Ok(())
 }
 
-fn scan_direct_state_writers(prg: &[u8]) -> Result<BTreeSet<DirectStateWriter>> {
-    ensure!(
-        prg.len() == PRG_BANK_COUNT * PRG_BANK_BYTE_COUNT,
-        "map-preparation writer census requires the supported 256 KiB PRG"
-    );
-    let fixed = &prg[(PRG_BANK_COUNT - 1) * PRG_BANK_BYTE_COUNT..];
-    let mut writers = BTreeSet::new();
-
-    for physical_bank in 0..PRG_BANK_COUNT {
-        let bank =
-            &prg[physical_bank * PRG_BANK_BYTE_COUNT..(physical_bank + 1) * PRG_BANK_BYTE_COUNT];
-        let cpu_start = if physical_bank == PRG_BANK_COUNT - 1 {
-            0xC000
-        } else {
-            0x8000
-        };
-        for (offset, window) in bank.windows(3).enumerate() {
-            record_direct_state_writer(
-                &mut writers,
-                u8::try_from(physical_bank)?,
-                cpu_start + u16::try_from(offset)?,
-                window,
-            )?;
-        }
-        if physical_bank < PRG_BANK_COUNT - 1 {
-            let bffe = [bank[0x3FFE], bank[0x3FFF], fixed[0]];
-            let bfff = [bank[0x3FFF], fixed[0], fixed[1]];
-            record_direct_state_writer(&mut writers, u8::try_from(physical_bank)?, 0xBFFE, &bffe)?;
-            record_direct_state_writer(&mut writers, u8::try_from(physical_bank)?, 0xBFFF, &bfff)?;
-        }
-    }
-
-    ensure!(
-        !completion_may_write_state(&[fixed[0x3FFE], fixed[0x3FFF]])
-            && !completion_may_write_state(&[fixed[0x3FFF]]),
-        "fixed-bank terminal instruction may write map-preparation state through runtime RAM operand bytes"
-    );
-    Ok(writers)
-}
-
-fn record_direct_state_writer(
-    writers: &mut BTreeSet<DirectStateWriter>,
-    physical_prg_bank: u8,
-    cpu_address: u16,
-    bytes: &[u8],
-) -> Result<()> {
-    let Ok(instruction) = decode_bytes(bytes) else {
-        return Ok(());
-    };
-    let semantics = Rp2A03::semantics(&instruction, &cpu_address)
-        .context("derive map-preparation writer semantics")?;
-    if semantics.location_accesses.into_iter().any(|access| {
-        access.kind == AccessKind::Write
-            && access.location
-                == Location::Memory(MemoryAddress::Direct(MAP_PREPARATION_STATE_ADDRESS))
-    }) {
-        writers.insert(DirectStateWriter {
-            physical_prg_bank,
-            cpu_address,
-            opcode: bytes[0],
-        });
-    }
-    Ok(())
-}
-
-fn completion_may_write_state(available: &[u8]) -> bool {
-    let mut bytes = available.to_vec();
-    bytes.extend_from_slice(
-        &MAP_PREPARATION_STATE_ADDRESS.to_le_bytes()[available.len().saturating_sub(1)..],
-    );
-    bytes.truncate(3);
-    if bytes.len() != 3 {
-        return true;
-    }
-    let Ok(instruction) = decode_bytes(&bytes) else {
-        return false;
-    };
-    Rp2A03::semantics(&instruction, &0_u16).is_ok_and(|semantics| {
-        semantics.location_accesses.into_iter().any(|access| {
-            access.kind == AccessKind::Write
-                && access.location
-                    == Location::Memory(MemoryAddress::Direct(MAP_PREPARATION_STATE_ADDRESS))
-        })
-    })
-}
-
 fn source_bytes(source: &Rom, address: u16, byte_count: usize) -> Result<&[u8]> {
     ensure!(
         (0x8000..0xC000).contains(&address)
@@ -635,44 +552,6 @@ mod tests {
             reachable_selectors("map preparation", &handlers, [0], TRANSITIONS).unwrap(),
             (0..=6).collect::<BTreeSet<_>>()
         );
-    }
-
-    #[test]
-    fn writer_census_uses_the_fixed_bank_at_switchable_boundaries() {
-        let mut prg = vec![0x02; PRG_BANK_COUNT * PRG_BANK_BYTE_COUNT];
-        let internal = 3 * PRG_BANK_BYTE_COUNT + 0x0100;
-        prg[internal..internal + 3].copy_from_slice(&[0xEE, 0x3F, 0x05]);
-
-        let false_adjacency = PRG_BANK_BYTE_COUNT - 1;
-        prg[false_adjacency] = 0xEE;
-        prg[PRG_BANK_BYTE_COUNT..PRG_BANK_BYTE_COUNT + 2].copy_from_slice(&[0x3F, 0x05]);
-
-        let mapped_boundary = 2 * PRG_BANK_BYTE_COUNT + 0x3FFE;
-        prg[mapped_boundary..mapped_boundary + 2].copy_from_slice(&[0xEE, 0x3F]);
-        prg[15 * PRG_BANK_BYTE_COUNT] = 0x05;
-
-        assert_eq!(
-            scan_direct_state_writers(&prg).unwrap(),
-            BTreeSet::from([
-                DirectStateWriter {
-                    physical_prg_bank: 2,
-                    cpu_address: 0xBFFE,
-                    opcode: 0xEE,
-                },
-                DirectStateWriter {
-                    physical_prg_bank: 3,
-                    cpu_address: 0x8100,
-                    opcode: 0xEE,
-                },
-            ])
-        );
-    }
-
-    #[test]
-    fn unknown_fixed_terminal_operands_fail_closed() {
-        let mut prg = vec![0x02; PRG_BANK_COUNT * PRG_BANK_BYTE_COUNT];
-        prg[PRG_BANK_COUNT * PRG_BANK_BYTE_COUNT - 1] = 0xEE;
-        assert!(scan_direct_state_writers(&prg).is_err());
     }
 
     #[test]

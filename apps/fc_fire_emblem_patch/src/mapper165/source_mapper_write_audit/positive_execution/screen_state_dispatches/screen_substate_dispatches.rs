@@ -18,7 +18,7 @@ use super::super::{
 
 mod map_preparation;
 
-use map_preparation::bind_map_preparation_lifecycle;
+use map_preparation::bind_map_preparation_dispatches;
 
 const SOURCE_PRG_BANK_BYTE_COUNT: usize = 16 * 1024;
 const OUTER_SCREEN_BANK: u8 = 0x06;
@@ -123,11 +123,8 @@ pub(super) fn bind_screen_substate_dispatches(
     chapter_map_dimensions: &BoundChapterMapDimensions,
 ) -> Result<Vec<ScreenSubstateDispatch>> {
     source.verify_supported_japanese()?;
-    let mut dispatches = vec![bind_map_preparation_lifecycle(
-        source,
-        unit_record_domain,
-        chapter_map_dimensions,
-    )?];
+    let mut dispatches =
+        bind_map_preparation_dispatches(source, unit_record_domain, chapter_map_dimensions)?;
 
     for spec in STATEFUL_DISPATCHES {
         let prefix_start = spec
