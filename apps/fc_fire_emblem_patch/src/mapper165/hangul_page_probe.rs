@@ -200,6 +200,27 @@ pub(crate) fn build_mapper165_hangul_page_probe(
     report_path: &Path,
 ) -> Result<HangulPageProbeSummary> {
     let source_rom = Rom::from_path(source_path)?;
+    let parity_base = assemble_mapper165_parity_bytes(&source_rom)?;
+    build_mapper165_hangul_page_probe_from_parity(
+        &source_rom,
+        &parity_base,
+        localization_path,
+        roster_localization_path,
+        options_screen_evidence_path,
+        output_path,
+        report_path,
+    )
+}
+
+pub(crate) fn build_mapper165_hangul_page_probe_from_parity(
+    source_rom: &Rom,
+    parity_base: &[u8],
+    localization_path: &Path,
+    roster_localization_path: &Path,
+    options_screen_evidence_path: &Path,
+    output_path: &Path,
+    report_path: &Path,
+) -> Result<HangulPageProbeSummary> {
     source_rom.verify_supported_japanese()?;
     let roster_owner_constructor_offset = switchable_bank_file_offset(
         ROSTER_OWNER_CONSTRUCTOR_PRG_BANK,
@@ -260,9 +281,8 @@ pub(crate) fn build_mapper165_hangul_page_probe(
         "roster Hangul page registers changed"
     );
 
-    let parity_base = assemble_mapper165_parity_bytes(&source_rom)?;
-    let parity_base_sha1 = sha1_hex(&parity_base);
-    let parity_rom = Rom::parse(parity_base.clone()).context("parse mapper 165 parity base")?;
+    let parity_base_sha1 = sha1_hex(parity_base);
+    let parity_rom = Rom::parse(parity_base.to_vec()).context("parse mapper 165 parity base")?;
     ensure!(
         parity_rom.chr().len() == 17 * 8 * 1024,
         "mapper 165 parity base CHR size changed"
@@ -348,7 +368,7 @@ pub(crate) fn build_mapper165_hangul_page_probe(
         + options_row_owner_gate_direct_transfer_count
         + roster_direct_transfer_count;
 
-    let mut expanded_base = parity_base.clone();
+    let mut expanded_base = parity_base.to_vec();
     expanded_base.extend_from_slice(&page_pack);
     expanded_base.extend_from_slice(&roster_pages.page_pack);
     ensure!(

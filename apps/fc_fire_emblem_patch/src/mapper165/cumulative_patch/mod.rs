@@ -13,10 +13,10 @@ use crate::{
 };
 
 use super::{
-    OUTPUT_MAPPER, SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
+    OUTPUT_MAPPER, SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS, assemble_mapper165_parity_bytes,
     bind_cumulative_font_page_fallback_graph,
     dialogue_lifetime_page::{SCREEN_ROLE, build_page_routine_at, plan_dialogue_lifetime_page},
-    hangul_page_probe::build_mapper165_hangul_page_probe,
+    hangul_page_probe::build_mapper165_hangul_page_probe_from_parity,
     roster_page::{
         PAGE_REGISTERS as ROSTER_PAGE_REGISTERS, PAGE_ROUTINE_ADDRESS as ROSTER_SELECTOR_ADDRESS,
         build_page_routine as build_roster_selector,
@@ -157,10 +157,12 @@ pub(crate) fn build_cumulative_patch(
         ref maximum_dialogue_plan,
         ..
     } = input_plan;
+    let parity = assemble_mapper165_parity_bytes(source_rom)?;
     let ui_stage_rom_path = inputs.stage_directory.join(UI_STAGE_ROM_NAME);
     let ui_stage_report_path = inputs.stage_directory.join(UI_STAGE_REPORT_NAME);
-    let ui_stage = build_mapper165_hangul_page_probe(
-        inputs.source_path,
+    let ui_stage = build_mapper165_hangul_page_probe_from_parity(
+        source_rom,
+        &parity,
         inputs.options_localization_path,
         inputs.roster_localization_path,
         inputs.options_screen_evidence_path,
@@ -527,7 +529,8 @@ pub(crate) fn build_cumulative_patch(
     )?;
     let battle_stage = install_battle_stage(BattleStageInputs {
         prior_output: &weapon_shop_shared_text_stage.output,
-        source_rom: &source_rom,
+        source_rom,
+        parity: &parity,
         source_path: inputs.source_path,
         fixed_workspace_path: inputs.fixed_text_workspace_path,
         dialogue_workspace_path: inputs.battle_dialogue_workspace_path,

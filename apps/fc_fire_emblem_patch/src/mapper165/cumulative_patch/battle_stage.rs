@@ -10,11 +10,11 @@ use crate::{
 };
 
 use super::super::{
-    OUTPUT_MAPPER, assemble_mapper165_parity_bytes,
+    OUTPUT_MAPPER,
     battle_composition_loader_probe::{
         BattleCompositionLoaderBuild, CUMULATIVE_RUNTIME_LAYOUT, build_battle_composition_loader,
     },
-    battle_text_runtime_base::build_battle_text_runtime_base,
+    battle_text_runtime_base::build_battle_text_runtime_base_on_parity,
 };
 use super::{ROSTER_SELECTOR_ADDRESS, write_file};
 
@@ -71,6 +71,7 @@ pub(super) struct BattleStageOutput {
 pub(super) struct BattleStageInputs<'a> {
     pub(super) prior_output: &'a [u8],
     pub(super) source_rom: &'a Rom,
+    pub(super) parity: &'a [u8],
     pub(super) source_path: &'a Path,
     pub(super) fixed_workspace_path: &'a Path,
     pub(super) dialogue_workspace_path: &'a Path,
@@ -81,8 +82,10 @@ pub(super) struct BattleStageInputs<'a> {
 pub(super) fn install_battle_stage(inputs: BattleStageInputs<'_>) -> Result<BattleStageOutput> {
     let runtime_base_path = inputs.stage_directory.join(BATTLE_RUNTIME_BASE_ROM_NAME);
     let runtime_base_report_path = inputs.stage_directory.join(BATTLE_RUNTIME_BASE_REPORT_NAME);
-    let runtime_base = build_battle_text_runtime_base(
+    let runtime_base = build_battle_text_runtime_base_on_parity(
+        inputs.source_rom,
         inputs.source_path,
+        inputs.parity,
         inputs.fixed_workspace_path,
         inputs.dialogue_workspace_path,
         inputs.temporal_manifest_path,
@@ -104,8 +107,8 @@ pub(super) fn install_battle_stage(inputs: BattleStageInputs<'_>) -> Result<Batt
     let metadata: BattleRuntimeBaseMetadata = serde_json::from_slice(&runtime_base_report_bytes)
         .context("parse battle runtime base metadata")?;
 
-    let parity = assemble_mapper165_parity_bytes(inputs.source_rom)?;
-    let parity_rom = Rom::parse(parity).context("parse cumulative battle parity baseline")?;
+    let parity_rom =
+        Rom::parse(inputs.parity.to_vec()).context("parse cumulative battle parity baseline")?;
     let prior_rom =
         Rom::parse(inputs.prior_output.to_vec()).context("parse pre-battle cumulative output")?;
     let standalone_rom =

@@ -139,13 +139,36 @@ pub(crate) fn build_battle_text_runtime_base(
     report_path: &Path,
 ) -> Result<BattleTextRuntimeBaseSummary> {
     let source_rom = Rom::from_path(source_path)?;
+    let parity = assemble_mapper165_parity_bytes(&source_rom)?;
+    build_battle_text_runtime_base_on_parity(
+        &source_rom,
+        source_path,
+        &parity,
+        fixed_workspace_path,
+        dialogue_workspace_path,
+        temporal_manifest_path,
+        output_path,
+        report_path,
+    )
+}
+
+pub(crate) fn build_battle_text_runtime_base_on_parity(
+    source_rom: &Rom,
+    source_path: &Path,
+    parity: &[u8],
+    fixed_workspace_path: &Path,
+    dialogue_workspace_path: &Path,
+    temporal_manifest_path: &Path,
+    output_path: &Path,
+    report_path: &Path,
+) -> Result<BattleTextRuntimeBaseSummary> {
     source_rom.verify_supported_japanese()?;
-    let fixed = plan_fixed_text(&source_rom, fixed_workspace_path)?;
-    let dialogue = plan_battle_dialogue_records(&source_rom, dialogue_workspace_path)?;
-    let material = plan_battle_cache_composition_material(&source_rom, &fixed, &dialogue)?;
+    let fixed = plan_fixed_text(source_rom, fixed_workspace_path)?;
+    let dialogue = plan_battle_dialogue_records(source_rom, dialogue_workspace_path)?;
+    let material = plan_battle_cache_composition_material(source_rom, &fixed, &dialogue)?;
     let evidence = load_observed_battle_temporal_evidence(source_path, temporal_manifest_path)?;
-    let observed = select_observed_battle_surfaces(&source_rom, &material, &evidence)?;
-    let codebook = plan_canonical_battle_codebook(&source_rom, &fixed, &dialogue)?;
+    let observed = select_observed_battle_surfaces(source_rom, &material, &evidence)?;
+    let codebook = plan_canonical_battle_codebook(source_rom, &fixed, &dialogue)?;
     ensure!(
         codebook.color_codes.len() == CANONICAL_ABSTRACT_COLOR_COUNT,
         "battle runtime base canonical table does not fill the logical codebook"
@@ -161,16 +184,10 @@ pub(crate) fn build_battle_text_runtime_base(
         "battle runtime base canonical table reuses a tile code"
     );
 
-    let parity = assemble_mapper165_parity_bytes(&source_rom)?;
-    let parity_rom = Rom::parse(parity.clone()).context("parse mapper 165 battle text parity")?;
-    let mut image = TrackedImage::new(parity.clone());
-    let fixed_installation = install_fixed_text(
-        &mut image,
-        &parity,
-        &fixed,
-        &material,
-        &codebook.glyph_codes,
-    )?;
+    let parity_rom = Rom::parse(parity.to_vec()).context("parse mapper 165 battle text parity")?;
+    let mut image = TrackedImage::new(parity.to_vec());
+    let fixed_installation =
+        install_fixed_text(&mut image, parity, &fixed, &material, &codebook.glyph_codes)?;
     let fixed_reinserted_entry_count = fixed_installation.total_count();
     let fixed_preserved_nonbattle_entry_count = fixed
         .entries
@@ -178,9 +195,9 @@ pub(crate) fn build_battle_text_runtime_base(
         .checked_sub(fixed_reinserted_entry_count)
         .context("battle fixed-text reinsertion count exceeds its source catalog")?;
     let dialogue_pointer_write_count =
-        install_battle_dialogue(&mut image, &parity, &dialogue, &codebook.glyph_codes)?;
-    install_forecast_label(&mut image, &parity, &codebook.glyph_codes)?;
-    image.verify_all_changes_tracked(&parity)?;
+        install_battle_dialogue(&mut image, parity, &dialogue, &codebook.glyph_codes)?;
+    install_forecast_label(&mut image, parity, &codebook.glyph_codes)?;
+    image.verify_all_changes_tracked(parity)?;
     let text_tracked_write_count = image.writes().len();
     ensure!(
         text_tracked_write_count
