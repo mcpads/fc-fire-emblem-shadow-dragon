@@ -19,7 +19,10 @@ use super::{
     control_state::{
         OUTER_SCREEN_STATE, ObservedControlStateWrites, known_control_state_write_values,
     },
-    fixed_vectors::{InlineDispatchSelectorBounds, trace_fixed_scheduler_contexts},
+    fixed_vectors::{
+        InlineDispatchSelectorBounds, trace_fixed_scheduler_contexts,
+        trace_source_bound_inline_state_handler,
+    },
     indexed_write_destinations::AbsoluteIndexedWriteDestinationBounds,
     shared_menu_request::SharedMenuExecutionSource,
 };
@@ -395,7 +398,7 @@ pub(super) fn bind_fixed_scheduler_execution(
         .copied()
         .filter(|(selector, _)| *selector != 0x04)
         .collect::<BTreeSet<_>>();
-    let mut handler_trace = trace_fixed_scheduler_contexts(
+    let non_outer_discovery_trace = trace_fixed_scheduler_contexts(
         source,
         FIXED_SCHEDULER_STATE_LOAD,
         FIXED_SCHEDULER_DISPATCH_CALL,
@@ -410,7 +413,7 @@ pub(super) fn bind_fixed_scheduler_execution(
 
     let outer_entry_context = (0x04, GAMEPLAY_SCHEDULER_BANK);
     let non_outer_produced_selectors = known_control_state_write_values(
-        handler_trace.control_state_write_values(),
+        non_outer_discovery_trace.control_state_write_values(),
         OUTER_SCREEN_STATE,
     );
     ensure!(
@@ -424,18 +427,25 @@ pub(super) fn bind_fixed_scheduler_execution(
         .copied()
         .collect::<VecDeque<_>>();
     let mut traced_outer_selectors = BTreeSet::new();
+    let mut discovered_outer_traces = Vec::new();
+    let outer_screen_state_load = outer_screen_site
+        .1
+        .checked_sub(2)
+        .context("outer-screen selector load underflows its dispatch call")?;
     while let Some(selector) = pending_outer_selectors.pop_front() {
         if !traced_outer_selectors.insert(selector) {
             continue;
         }
-        let selector_trace = trace_fixed_scheduler_contexts(
+        let selector_trace = trace_source_bound_inline_state_handler(
             source,
-            FIXED_SCHEDULER_STATE_LOAD,
-            FIXED_SCHEDULER_DISPATCH_CALL,
+            outer_screen_site.0,
+            outer_screen_state_load,
+            outer_screen_site.1,
             FIXED_SCHEDULER_RETURN_ADDRESS,
-            [outer_entry_context],
+            OUTER_SCREEN_STATE,
+            selector,
+            GAMEPLAY_SCHEDULER_BANK,
             &BTreeMap::from([(OUTER_SCREEN_STATE, selector)]),
-            &downstream_terminal_inline_dispatches,
             &owned_inline_dispatch_selector_bounds,
             indirect_write_destination_bounds,
             absolute_indexed_write_bounds,
@@ -453,12 +463,55 @@ pub(super) fn bind_fixed_scheduler_execution(
                 pending_outer_selectors.push_back(produced);
             }
         }
-        handler_trace.merge(selector_trace);
+        discovered_outer_traces.push(selector_trace);
     }
     ensure!(
         traced_outer_selectors == outer_screen_produced_selectors,
         "outer-screen producer worklist did not trace every discovered selector"
     );
+    owned_inline_dispatch_selector_bounds
+        .get_mut(&outer_screen_site)
+        .context("outer-screen dispatch disappeared before producer closure registration")?
+        .merge_source_producer_owner(&outer_screen_produced_selectors, Some(OUTER_SCREEN_STATE))?;
+    let mut handler_trace = non_outer_discovery_trace;
+    for selector_trace in discovered_outer_traces {
+        handler_trace.merge(selector_trace);
+    }
+    let outer_route_seed = *outer_screen_state_seed_selectors
+        .first()
+        .context("outer-screen route has no source-bound seed")?;
+    let outer_route_terminals = downstream_terminal_inline_dispatches
+        .iter()
+        .copied()
+        .chain([outer_screen_site])
+        .collect::<BTreeSet<_>>();
+    let outer_route_trace = trace_fixed_scheduler_contexts(
+        source,
+        FIXED_SCHEDULER_STATE_LOAD,
+        FIXED_SCHEDULER_DISPATCH_CALL,
+        FIXED_SCHEDULER_RETURN_ADDRESS,
+        [outer_entry_context],
+        &BTreeMap::from([(OUTER_SCREEN_STATE, outer_route_seed)]),
+        &outer_route_terminals,
+        &owned_inline_dispatch_selector_bounds,
+        indirect_write_destination_bounds,
+        absolute_indexed_write_bounds,
+    )?;
+    let outer_route_observed = known_control_state_write_values(
+        outer_route_trace.control_state_write_values(),
+        OUTER_SCREEN_STATE,
+    );
+    ensure!(
+        outer_route_observed.is_subset(&outer_screen_produced_selectors),
+        "fixed-scheduler outer route produced a selector outside the handler-derived closure: {outer_route_observed:02X?}"
+    );
+    handler_trace.merge(outer_route_trace);
+    handler_trace.close_inline_dispatch_producer_fact(
+        outer_screen_site.0,
+        outer_screen_site.1,
+        outer_screen_handler_domain.len(),
+        &outer_screen_produced_selectors,
+    )?;
     let observed_scheduler_contexts =
         handler_trace.inline_dispatch_contexts(FIXED_PRG_BANK, FIXED_SCHEDULER_DISPATCH_CALL);
     ensure!(

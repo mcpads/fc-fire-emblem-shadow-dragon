@@ -91,6 +91,13 @@ const TYPED_REGIONS: &[TypedRegion] = &[
         "select the enemy record base",
     ),
     region(
+        0x03,
+        0x9A91,
+        0x9ABA,
+        "d12b47d34a870dae62a9893f42d7dc7cd521acd5",
+        "rewrite the first enemy record derived status byte",
+    ),
+    region(
         0x06,
         0x9930,
         0x9965,
@@ -160,6 +167,7 @@ const WRITER_SITES: &[(u8, u16, u8)] = &[
     (0x03, 0x82D8, 0x9D),
     (0x03, 0x82E9, 0x04),
     (0x03, 0x8308, 0x9D),
+    (0x03, 0x9AB0, 0x9D),
     (0x06, 0x998C, 0x04),
     (0x06, 0xB4A0, 0x02),
     (0x02, 0xAABA, 0x6C),
@@ -268,6 +276,12 @@ pub(super) fn bind_gameplay_path_destinations(
     }
     insert_destination(
         &mut destinations,
+        (0x03, 0x9AB0, 0x9D),
+        "derived status byte of the first enemy record",
+        record_field_destination_ranges(ENEMY_RECORD_BASE, 1, 0x16)?,
+    )?;
+    insert_destination(
+        &mut destinations,
         (0x06, 0x998C, 0x04),
         "field three of one enemy record",
         enemy_field_three,
@@ -356,10 +370,10 @@ mod tests {
 
     #[test]
     fn gameplay_writer_catalog_is_grouped_by_complete_routine_families() {
-        assert_eq!(WRITER_SITES.len(), 20);
         assert_eq!(
             WRITER_SITES.iter().copied().collect::<BTreeSet<_>>().len(),
-            20
+            WRITER_SITES.len(),
+            "a gameplay writer site must have exactly one semantic owner"
         );
         for sites in [
             &[(0x06, 0x8767, 0x00), (0x06, 0x8773, 0x00)][..],
@@ -399,6 +413,10 @@ mod tests {
                 .unwrap()
                 .iter()
                 .all(|range| *range.end() < 0x8000)
+        );
+        assert_eq!(
+            record_field_destination_ranges(ENEMY_RECORD_BASE, 1, 0x16).unwrap(),
+            vec![0x708E..=0x708E]
         );
         assert!(indexed_pointer_destination_ranges(&[0x7F01], u8::MAX).is_err());
     }

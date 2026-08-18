@@ -346,6 +346,41 @@ impl StatefulBankExecution {
             &other.control_state_write_values,
         );
     }
+
+    pub(in super::super) fn close_inline_dispatch_producer_fact(
+        &mut self,
+        bank: u8,
+        address: u16,
+        handler_table_count: usize,
+        produced_selectors: &BTreeSet<u8>,
+    ) -> Result<()> {
+        let observed = self
+            .inline_dispatch_selectors
+            .get(&(bank, address))
+            .cloned()
+            .unwrap_or_default();
+        ensure!(
+            observed == *produced_selectors,
+            "cannot close inline-dispatch producer fact at {bank:02X}:${address:04X}: observed {observed:02X?}, expected {produced_selectors:02X?}"
+        );
+        self.open_facts
+            .remove(&inline_dispatch_producer_unknown_description(
+                bank,
+                address,
+                handler_table_count,
+            ));
+        Ok(())
+    }
+}
+
+fn inline_dispatch_producer_unknown_description(
+    bank: u8,
+    address: u16,
+    handler_table_count: usize,
+) -> String {
+    format!(
+        "inline_dispatch@{bank:02X}:{address:04X}:selector_producer_unknown[handler_table_count={handler_table_count}]"
+    )
 }
 
 fn merge_set_map<K: Ord, V: Ord>(
@@ -1042,8 +1077,8 @@ fn trace_bank_state_entries(
                             continue;
                         };
                         let Some(selectors) = bounds.source_bound_produced_selectors() else {
-                            open_facts.insert(format!(
-                                "inline_dispatch@{physical_bank:02X}:{:04X}:selector_producer_unknown[handler_table_count={}]",
+                            open_facts.insert(inline_dispatch_producer_unknown_description(
+                                physical_bank,
                                 state.address,
                                 bounds.admitted_selectors().len(),
                             ));
@@ -3214,6 +3249,33 @@ mod tests {
                 .reachable_instruction_starts()
                 .contains(&(0x0F, 0xC130))
         );
+    }
+
+    #[test]
+    fn later_source_producer_evidence_closes_the_matching_dispatch_fact() {
+        let selectors = BTreeSet::from([0x00, 0x01]);
+        let mut trace = StatefulBankExecution::default();
+        trace
+            .inline_dispatch_selectors
+            .insert((FIXED_PRG_BANK, 0xC108), selectors.clone());
+        trace
+            .open_facts
+            .insert(inline_dispatch_producer_unknown_description(
+                FIXED_PRG_BANK,
+                0xC108,
+                selectors.len(),
+            ));
+
+        trace
+            .close_inline_dispatch_producer_fact(
+                FIXED_PRG_BANK,
+                0xC108,
+                selectors.len(),
+                &selectors,
+            )
+            .unwrap();
+
+        assert!(trace.open_fact_descriptions().is_empty());
     }
 
     #[test]
