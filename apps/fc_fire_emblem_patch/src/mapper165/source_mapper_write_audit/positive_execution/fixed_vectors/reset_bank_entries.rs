@@ -19,19 +19,27 @@ use crate::{
     typed_source::{Rp2a03DirectControlFlow, rp2a03_direct_control_flow},
 };
 
+#[cfg(test)]
+use super::super::control_state::{
+    DEFERRED_MAIN_STATE, MAIN_STATE, MAP_DIALOGUE_OUTER_STATE, OUTER_SCREEN_STATE,
+};
 use super::super::control_state::{
     FIXED_SCHEDULER_DISPATCH_GATE, ObservedControlStateWrites, PENDING_SHARED_MENU_REQUEST_STATE,
     PRG_BANK_SHADOW, merge_observed_control_state_writes, positive_control_state,
 };
-#[cfg(test)]
-use super::super::control_state::{MAIN_STATE, MAP_DIALOGUE_OUTER_STATE, OUTER_SCREEN_STATE};
 use super::super::indexed_write_destinations::AbsoluteIndexedWriteDestinationBounds;
 use super::{FIXED_CPU_START, FIXED_PRG_BANK, RESET_RAM_CLEAR_CODE, RESET_RAM_CLEAR_START};
 
 mod call_effects;
+mod state_handler_batch;
 mod trace_state;
 
-use call_effects::{CallReturnEffect, TrackedStateCallSummary, inspect_tracked_state_call};
+pub(in super::super) use state_handler_batch::trace_source_bound_inline_state_handler_batch;
+
+use call_effects::{
+    CallReturnEffect, TrackedStateCallSummary, inspect_selected_state_call,
+    inspect_tracked_state_call,
+};
 use trace_state::{
     ActivationId, ByteValueSet, ResetTraceIdentity, ResetTraceState, ReturnContinuation,
     ReturnFrame, TrackedByteLocation,
@@ -185,13 +193,37 @@ struct ActivationNode {
     parent: Option<ActivationId>,
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum ActivationIdentityScope {
+    #[default]
+    CallerLineage,
+    CallSite,
+}
+
 struct ActivationArena {
     nodes: Vec<ActivationNode>,
     interned: BTreeMap<ActivationNode, ActivationId>,
+    identity_scope: ActivationIdentityScope,
+}
+
+impl Default for ActivationArena {
+    fn default() -> Self {
+        Self {
+            nodes: Vec::new(),
+            interned: BTreeMap::new(),
+            identity_scope: ActivationIdentityScope::CallerLineage,
+        }
+    }
 }
 
 impl ActivationArena {
+    fn joining_same_call_site_lineages() -> Self {
+        Self {
+            identity_scope: ActivationIdentityScope::CallSite,
+            ..Self::default()
+        }
+    }
+
     fn root(&mut self, entry_bank: u8, entry_address: u16) -> ActivationId {
         self.intern(ActivationNode {
             entry_bank,
@@ -210,6 +242,14 @@ impl ActivationArena {
         parent: ActivationId,
     ) -> ActivationId {
         let call_site = Some((call_site_bank, call_site_address));
+        if self.identity_scope == ActivationIdentityScope::CallSite {
+            return self.intern(ActivationNode {
+                entry_bank,
+                entry_address,
+                call_site,
+                parent: None,
+            });
+        }
         let mut ancestor = Some(parent);
         while let Some(activation) = ancestor {
             let node = &self.nodes[activation.0];
@@ -254,11 +294,28 @@ struct FixedSchedulerEntryState {
 #[derive(Debug, Default)]
 pub(in super::super) struct TrackedStateCallSummaries {
     by_entry: BTreeMap<(u8, u16), Option<TrackedStateCallSummary>>,
+    preserved_state_addresses: Option<BTreeSet<u16>>,
     #[cfg(test)]
     source_inspection_count: usize,
 }
 
 impl TrackedStateCallSummaries {
+    fn preserving_only(preserved_state_addresses: BTreeSet<u16>) -> Result<Self> {
+        ensure!(
+            !preserved_state_addresses.is_empty()
+                && preserved_state_addresses
+                    .iter()
+                    .all(|address| ResetTraceState::tracks_memory_address(*address)),
+            "selected call-summary scope contains no state or an untracked address"
+        );
+        Ok(Self {
+            by_entry: BTreeMap::new(),
+            preserved_state_addresses: Some(preserved_state_addresses),
+            #[cfg(test)]
+            source_inspection_count: 0,
+        })
+    }
+
     fn inspect_entry(
         &mut self,
         source: &Rom,
@@ -271,10 +328,19 @@ impl TrackedStateCallSummaries {
             {
                 self.source_inspection_count += 1;
             }
-            self.by_entry
-                .insert(entry, inspect_tracked_state_call(source, bank, address)?);
+            let summary = match &self.preserved_state_addresses {
+                Some(preserved) => inspect_selected_state_call(source, bank, address, preserved)?,
+                None => inspect_tracked_state_call(source, bank, address)?,
+            };
+            self.by_entry.insert(entry, summary);
         }
         Ok(self.by_entry.get(&entry).cloned().flatten())
+    }
+
+    fn invalidate_unpreserved_state(&self, state: &mut ResetTraceState) {
+        if let Some(preserved) = &self.preserved_state_addresses {
+            state.invalidate_memory_except(preserved);
+        }
     }
 
     #[cfg(test)]
@@ -399,6 +465,31 @@ impl StatefulBankExecution {
         ensure!(
             observed == *produced_selectors,
             "cannot close inline-dispatch producer fact at {bank:02X}:${address:04X}: observed {observed:02X?}, expected {produced_selectors:02X?}"
+        );
+        self.open_facts
+            .remove(&inline_dispatch_producer_unknown_description(
+                bank,
+                address,
+                handler_table_count,
+            ));
+        Ok(())
+    }
+
+    pub(in super::super) fn close_inline_dispatch_producer_upper_bound_fact(
+        &mut self,
+        bank: u8,
+        address: u16,
+        handler_table_count: usize,
+        produced_selectors: &BTreeSet<u8>,
+    ) -> Result<()> {
+        let observed = self
+            .inline_dispatch_selectors
+            .get(&(bank, address))
+            .cloned()
+            .unwrap_or_default();
+        ensure!(
+            observed.is_subset(produced_selectors),
+            "cannot close inline-dispatch producer upper bound at {bank:02X}:${address:04X}: observed {observed:02X?}, bound {produced_selectors:02X?}"
         );
         self.open_facts
             .remove(&inline_dispatch_producer_unknown_description(
@@ -1269,6 +1360,8 @@ fn trace_bank_state_entries(
                     if summary.return_effects().contains(&CallReturnEffect::Normal) {
                         let mut normal_return = state.clone();
                         normal_return.invalidate_registers_and_flags();
+                        tracked_state_call_summaries
+                            .invalidate_unpreserved_state(&mut normal_return);
                         normal_return.address = return_address;
                         pending.push_back(normal_return);
                     }
@@ -1277,6 +1370,7 @@ fn trace_bank_state_entries(
                         .contains(&CallReturnEffect::EscapeOneCaller)
                     {
                         state.invalidate_registers_and_flags();
+                        tracked_state_call_summaries.invalidate_unpreserved_state(&mut state);
                         record_completed_return(
                             state,
                             &mut return_flow,
@@ -3641,6 +3735,146 @@ mod tests {
     }
 
     #[test]
+    fn handler_batch_joins_memory_contexts_without_claiming_them_as_dispatch_entries() {
+        let source = synthetic_source(
+            &[
+                (
+                    0xC100,
+                    &[
+                        0xA5, 0x84, // LDA $84
+                        0x20, 0x4C, 0xC3, // JSR $C34C
+                        0x10, 0xC1, 0x20, 0xC1, 0x30, 0xC1, // handler table
+                    ],
+                ),
+                (
+                    0xC110,
+                    &[
+                        0xA5, 0x26, // LDA $26
+                        0x85, 0x84, // STA $84
+                        0x60, // RTS
+                    ],
+                ),
+                (0xC120, &[0xE6, 0x84, 0x60]), // INC $84; RTS
+                (0xC130, &[0x60]),
+                (
+                    INLINE_POINTER_DISPATCH_ADDRESS,
+                    &INLINE_POINTER_DISPATCH_CODE,
+                ),
+            ],
+            0xC100,
+        );
+        let bounds = BTreeMap::from([(
+            (FIXED_PRG_BANK, 0xC102),
+            InlineDispatchSelectorBounds::from_handler_table(BTreeSet::from([0x00, 0x01, 0x02]))
+                .with_selector_memory_address(MAIN_STATE),
+        )]);
+        let contexts = [
+            BTreeMap::from([(DEFERRED_MAIN_STATE, 0x00)]),
+            BTreeMap::from([(DEFERRED_MAIN_STATE, 0x02)]),
+        ];
+        let trace = trace_source_bound_inline_state_handler_batch(
+            &source,
+            FIXED_PRG_BANK,
+            0xC100,
+            0xC102,
+            0xC140,
+            MAIN_STATE,
+            &BTreeSet::from([DEFERRED_MAIN_STATE, MAIN_STATE]),
+            &BTreeSet::from([0x00, 0x01]),
+            FIXED_PRG_BANK,
+            &contexts,
+            &bounds,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            trace
+                .control_state_write_values()
+                .get(&(FIXED_PRG_BANK, 0xC112, MAIN_STATE,)),
+            Some(&Some(BTreeSet::from([0x00, 0x02])))
+        );
+        assert_eq!(
+            trace
+                .control_state_write_values()
+                .get(&(FIXED_PRG_BANK, 0xC120, MAIN_STATE,)),
+            Some(&Some(BTreeSet::from([0x02])))
+        );
+        assert!(
+            trace
+                .inline_dispatch_contexts(FIXED_PRG_BANK, 0xC102)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn selected_call_summary_invalidates_unpreserved_state_before_continuing() {
+        let source = synthetic_source(
+            &[
+                (
+                    0xC100,
+                    &[
+                        0xA5, 0x84, // LDA $84
+                        0x20, 0x4C, 0xC3, // JSR $C34C
+                        0x10, 0xC1, // handler table
+                    ],
+                ),
+                (
+                    0xC110,
+                    &[
+                        0x20, 0x30, 0xC1, // JSR $C130
+                        0xA5, 0x24, // LDA $24
+                        0x85, 0x84, // STA $84
+                        0x60, // RTS
+                    ],
+                ),
+                (
+                    0xC130,
+                    &[
+                        0xA9, 0x01, // LDA #$01
+                        0x85, 0x24, // STA $24
+                        0x60, // RTS
+                    ],
+                ),
+                (
+                    INLINE_POINTER_DISPATCH_ADDRESS,
+                    &INLINE_POINTER_DISPATCH_CODE,
+                ),
+            ],
+            0xC100,
+        );
+        let bounds = BTreeMap::from([(
+            (FIXED_PRG_BANK, 0xC102),
+            InlineDispatchSelectorBounds::from_handler_table(BTreeSet::from([0x00]))
+                .with_selector_memory_address(MAIN_STATE),
+        )]);
+        let trace = trace_source_bound_inline_state_handler_batch(
+            &source,
+            FIXED_PRG_BANK,
+            0xC100,
+            0xC102,
+            0xC140,
+            MAIN_STATE,
+            &BTreeSet::from([MAIN_STATE]),
+            &BTreeSet::from([0x00]),
+            FIXED_PRG_BANK,
+            &[BTreeMap::from([(OUTER_SCREEN_STATE, 0x0C)])],
+            &bounds,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            trace
+                .control_state_write_values()
+                .get(&(FIXED_PRG_BANK, 0xC115, MAIN_STATE,)),
+            Some(&None)
+        );
+    }
+
+    #[test]
     fn shared_callee_returns_only_to_its_call_site_context() {
         let source = synthetic_source(
             &[
@@ -3716,6 +3950,26 @@ mod tests {
             trace.switchable_roots(),
             &BTreeSet::from([(0x02, 0x8400), (0x03, 0x8500)])
         );
+    }
+
+    #[test]
+    fn upper_bound_mode_joins_the_same_nested_call_site_across_lineages() {
+        let mut lineage_sensitive = ActivationArena::default();
+        let left_parent = lineage_sensitive.root(FIXED_PRG_BANK, 0xC110);
+        let right_parent = lineage_sensitive.root(FIXED_PRG_BANK, 0xC140);
+        let left =
+            lineage_sensitive.called(FIXED_PRG_BANK, 0xC190, FIXED_PRG_BANK, 0xC180, left_parent);
+        let right =
+            lineage_sensitive.called(FIXED_PRG_BANK, 0xC190, FIXED_PRG_BANK, 0xC180, right_parent);
+        assert_ne!(left, right);
+
+        let mut upper_bound = ActivationArena::joining_same_call_site_lineages();
+        let left_parent = upper_bound.root(FIXED_PRG_BANK, 0xC110);
+        let right_parent = upper_bound.root(FIXED_PRG_BANK, 0xC140);
+        let left = upper_bound.called(FIXED_PRG_BANK, 0xC190, FIXED_PRG_BANK, 0xC180, left_parent);
+        let right =
+            upper_bound.called(FIXED_PRG_BANK, 0xC190, FIXED_PRG_BANK, 0xC180, right_parent);
+        assert_eq!(left, right);
     }
 
     #[test]

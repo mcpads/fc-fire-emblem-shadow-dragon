@@ -16,10 +16,21 @@ use super::{FIXED_CPU_START, FIXED_PRG_BANK, ResetTraceState, source_instruction
 
 const MAXIMUM_SUMMARIZED_STATE_COUNT: usize = 4_096;
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct CallSummaryState {
     address: u16,
-    software_stack_depth: i16,
+    stack: Vec<CallStackByte>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum CallStackByte {
+    ParentReturnHigh,
+    ParentReturnLow,
+    EntryReturnHigh,
+    EntryReturnLow,
+    DirectReturnHigh(u16),
+    DirectReturnLow(u16),
+    Scratch,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -45,27 +56,57 @@ impl TrackedStateCallSummary {
 }
 
 /// Finds a direct call graph whose instructions cannot change any state used to resolve PRG
-/// mappings or scheduler control. Balanced scratch-stack use is admitted. A call-free graph may
-/// also consume exactly one caller return address, which represents the source queue append's
-/// intentional early escape. Its register result is deliberately not summarized; the caller must
-/// invalidate A/X/Y and flags when applying this summary.
+/// mappings or scheduler control. The byte stack is followed across nested calls, so a callee that
+/// discards its own return address and returns through its caller composes into that caller's
+/// ordinary return. A graph may also consume the entry frame and one parent return address, which
+/// represents the source queue append's intentional early escape. Register results are deliberately
+/// not summarized; the caller must invalidate A/X/Y and flags when applying this summary.
 pub(super) fn inspect_tracked_state_call(
     source: &Rom,
     entry_bank: u8,
     entry_address: u16,
 ) -> Result<Option<TrackedStateCallSummary>> {
+    inspect_state_preserving_call(
+        source,
+        entry_bank,
+        entry_address,
+        ResetTraceState::tracks_memory_address,
+    )
+}
+
+pub(super) fn inspect_selected_state_call(
+    source: &Rom,
+    entry_bank: u8,
+    entry_address: u16,
+    preserved_addresses: &BTreeSet<u16>,
+) -> Result<Option<TrackedStateCallSummary>> {
+    inspect_state_preserving_call(source, entry_bank, entry_address, |address| {
+        preserved_addresses.contains(&address)
+    })
+}
+
+fn inspect_state_preserving_call(
+    source: &Rom,
+    entry_bank: u8,
+    entry_address: u16,
+    preserves_address: impl Fn(u16) -> bool,
+) -> Result<Option<TrackedStateCallSummary>> {
     let mut pending = vec![CallSummaryState {
         address: entry_address,
-        software_stack_depth: 0,
+        stack: vec![
+            CallStackByte::ParentReturnHigh,
+            CallStackByte::ParentReturnLow,
+            CallStackByte::EntryReturnHigh,
+            CallStackByte::EntryReturnLow,
+        ],
     }];
     let mut visited = BTreeSet::new();
     let mut instruction_starts = BTreeSet::new();
     let mut return_effects = BTreeSet::new();
-    let mut saw_direct_call = false;
     let mut reads_tracked_control_state = false;
 
     while let Some(summary_state) = pending.pop() {
-        if !visited.insert(summary_state) {
+        if !visited.insert(summary_state.clone()) {
             continue;
         }
         if visited.len() > MAXIMUM_SUMMARIZED_STATE_COUNT {
@@ -96,34 +137,29 @@ pub(super) fn inspect_tracked_state_call(
         {
             return Ok(None);
         }
-        if writes_mapper_control_state(&instruction, address) {
+        if writes_preserved_or_mapper_state(&instruction, address, &preserves_address) {
             return Ok(None);
         }
-        reads_tracked_control_state |= reads_tracked_state(&instruction, address);
-        let software_stack_depth = match instruction.mnemonic() {
+        reads_tracked_control_state |=
+            reads_preserved_state(&instruction, address, &preserves_address);
+        let mut stack = summary_state.stack;
+        match instruction.mnemonic() {
             Mnemonic::Pha | Mnemonic::Php => {
-                let Some(depth) = summary_state.software_stack_depth.checked_add(1) else {
-                    return Ok(None);
-                };
-                if depth > 0xFF {
+                if stack.len() >= 0x100 {
                     return Ok(None);
                 }
-                depth
+                stack.push(CallStackByte::Scratch);
             }
             Mnemonic::Pla | Mnemonic::Plp => {
-                let Some(depth) = summary_state.software_stack_depth.checked_sub(1) else {
+                let Some(_) = stack.pop() else {
                     return Ok(None);
                 };
-                if depth < -2 {
-                    return Ok(None);
-                }
-                depth
             }
-            _ => summary_state.software_stack_depth,
-        };
+            _ => {}
+        }
         let next_state = |address| CallSummaryState {
             address,
-            software_stack_depth,
+            stack: stack.clone(),
         };
 
         match rp2a03_direct_control_flow(&instruction, address)? {
@@ -144,25 +180,45 @@ pub(super) fn inspect_tracked_state_call(
                 target,
                 return_address,
             } => {
-                saw_direct_call = true;
-                // A direct callee owns a fresh relative stack depth. The caller continuation keeps
-                // its current depth; this admits balanced scratch pushes without conflating them
-                // with routines that consume a caller frame.
+                if stack.len() > 0xFE {
+                    return Ok(None);
+                }
+                stack.push(CallStackByte::DirectReturnHigh(return_address));
+                stack.push(CallStackByte::DirectReturnLow(return_address));
                 pending.push(CallSummaryState {
                     address: target,
-                    software_stack_depth: 0,
+                    stack,
                 });
-                pending.push(next_state(return_address));
             }
-            Rp2a03DirectControlFlow::Return => match software_stack_depth {
-                0 => {
-                    return_effects.insert(CallReturnEffect::Normal);
+            Rp2a03DirectControlFlow::Return => {
+                let (Some(low), Some(high)) = (stack.pop(), stack.pop()) else {
+                    return Ok(None);
+                };
+                match (high, low) {
+                    (
+                        CallStackByte::DirectReturnHigh(high_return),
+                        CallStackByte::DirectReturnLow(low_return),
+                    ) if high_return == low_return => pending.push(CallSummaryState {
+                        address: high_return,
+                        stack,
+                    }),
+                    (CallStackByte::EntryReturnHigh, CallStackByte::EntryReturnLow)
+                        if stack
+                            == [
+                                CallStackByte::ParentReturnHigh,
+                                CallStackByte::ParentReturnLow,
+                            ] =>
+                    {
+                        return_effects.insert(CallReturnEffect::Normal);
+                    }
+                    (CallStackByte::ParentReturnHigh, CallStackByte::ParentReturnLow)
+                        if stack.is_empty() =>
+                    {
+                        return_effects.insert(CallReturnEffect::EscapeOneCaller);
+                    }
+                    _ => return Ok(None),
                 }
-                -2 => {
-                    return_effects.insert(CallReturnEffect::EscapeOneCaller);
-                }
-                _ => return Ok(None),
-            },
+            }
             Rp2a03DirectControlFlow::Jump { target: None }
             | Rp2a03DirectControlFlow::Interrupt
             | Rp2a03DirectControlFlow::Stop => return Ok(None),
@@ -170,7 +226,6 @@ pub(super) fn inspect_tracked_state_call(
     }
 
     if return_effects.is_empty()
-        || saw_direct_call && return_effects.contains(&CallReturnEffect::EscapeOneCaller)
         || reads_tracked_control_state
             && return_effects.contains(&CallReturnEffect::EscapeOneCaller)
     {
@@ -182,7 +237,11 @@ pub(super) fn inspect_tracked_state_call(
     }))
 }
 
-fn reads_tracked_state(instruction: &retro_rp2a03::Instruction, address: u16) -> bool {
+fn reads_preserved_state(
+    instruction: &retro_rp2a03::Instruction,
+    address: u16,
+    preserves_address: &impl Fn(u16) -> bool,
+) -> bool {
     let semantics =
         Rp2A03::semantics(instruction, &address).expect("RP2A03 static semantics are infallible");
     semantics.location_accesses.into_iter().any(|access| {
@@ -193,9 +252,9 @@ fn reads_tracked_state(instruction: &retro_rp2a03::Instruction, address: u16) ->
             return false;
         };
         match memory {
-            MemoryAddress::Direct(target) => ResetTraceState::tracks_memory_address(target),
+            MemoryAddress::Direct(target) => preserves_address(target),
             MemoryAddress::Effective { mode, operand } => {
-                effective_access_may_touch_tracked_state(mode, operand)
+                effective_access_may_touch_preserved_state(mode, operand, preserves_address)
             }
             MemoryAddress::Pointer { .. } | MemoryAddress::InterruptVector => true,
             MemoryAddress::Stack => false,
@@ -203,16 +262,20 @@ fn reads_tracked_state(instruction: &retro_rp2a03::Instruction, address: u16) ->
     })
 }
 
-fn effective_access_may_touch_tracked_state(mode: AddressingMode, operand: Operand) -> bool {
+fn effective_access_may_touch_preserved_state(
+    mode: AddressingMode,
+    operand: Operand,
+    preserves_address: &impl Fn(u16) -> bool,
+) -> bool {
     match (mode, operand) {
         (AddressingMode::AbsoluteX | AddressingMode::AbsoluteY, Operand::Word(base)) => (0
             ..=u8::MAX)
             .map(|index| base.wrapping_add(u16::from(index)))
-            .any(ResetTraceState::tracks_memory_address),
+            .any(preserves_address),
         (AddressingMode::ZeroPageX | AddressingMode::ZeroPageY, Operand::Byte(base)) => (0
             ..=u8::MAX)
             .map(|index| u16::from(base.wrapping_add(index)))
-            .any(ResetTraceState::tracks_memory_address),
+            .any(preserves_address),
         (
             AddressingMode::ZeroPageIndexedIndirectX | AddressingMode::ZeroPageIndirectIndexedY,
             _,
@@ -221,7 +284,11 @@ fn effective_access_may_touch_tracked_state(mode: AddressingMode, operand: Opera
     }
 }
 
-fn writes_mapper_control_state(instruction: &retro_rp2a03::Instruction, address: u16) -> bool {
+fn writes_preserved_or_mapper_state(
+    instruction: &retro_rp2a03::Instruction,
+    address: u16,
+    preserves_address: &impl Fn(u16) -> bool,
+) -> bool {
     let semantics =
         Rp2A03::semantics(instruction, &address).expect("RP2A03 static semantics are infallible");
     semantics.location_accesses.into_iter().any(|access| {
@@ -232,9 +299,11 @@ fn writes_mapper_control_state(instruction: &retro_rp2a03::Instruction, address:
             return false;
         };
         match memory {
-            MemoryAddress::Direct(target) => address_changes_mapper_control(target),
+            MemoryAddress::Direct(target) => {
+                address_changes_mapper_control(target, preserves_address)
+            }
             MemoryAddress::Effective { mode, operand } => {
-                effective_write_may_change_mapper_control(mode, operand)
+                effective_write_may_change_mapper_control(mode, operand, preserves_address)
             }
             MemoryAddress::Stack => !matches!(
                 instruction.mnemonic(),
@@ -245,16 +314,20 @@ fn writes_mapper_control_state(instruction: &retro_rp2a03::Instruction, address:
     })
 }
 
-fn effective_write_may_change_mapper_control(mode: AddressingMode, operand: Operand) -> bool {
+fn effective_write_may_change_mapper_control(
+    mode: AddressingMode,
+    operand: Operand,
+    preserves_address: &impl Fn(u16) -> bool,
+) -> bool {
     match (mode, operand) {
         (AddressingMode::AbsoluteX | AddressingMode::AbsoluteY, Operand::Word(base)) => (0
             ..=u8::MAX)
             .map(|index| base.wrapping_add(u16::from(index)))
-            .any(address_changes_mapper_control),
+            .any(|address| address_changes_mapper_control(address, preserves_address)),
         (AddressingMode::ZeroPageX | AddressingMode::ZeroPageY, Operand::Byte(base)) => (0
             ..=u8::MAX)
             .map(|index| u16::from(base.wrapping_add(index)))
-            .any(address_changes_mapper_control),
+            .any(|address| address_changes_mapper_control(address, preserves_address)),
         (
             AddressingMode::ZeroPageIndexedIndirectX | AddressingMode::ZeroPageIndirectIndexedY,
             _,
@@ -263,8 +336,8 @@ fn effective_write_may_change_mapper_control(mode: AddressingMode, operand: Oper
     }
 }
 
-fn address_changes_mapper_control(address: u16) -> bool {
-    ResetTraceState::tracks_memory_address(address)
+fn address_changes_mapper_control(address: u16, preserves_address: &impl Fn(u16) -> bool) -> bool {
+    preserves_address(address)
         || decode_source_mmc4_write(address) == Some(SourceMmc4Register::PrgBank)
 }
 
@@ -328,6 +401,45 @@ mod tests {
     }
 
     #[test]
+    fn selected_state_summary_allows_unrelated_control_writes_only() {
+        let unrelated = synthetic_source(
+            0x03,
+            0x8250,
+            &[
+                0xA9, 0x01, // LDA #$01
+                0x85, 0x24, // STA $24
+                0x60, // RTS
+            ],
+        );
+        let preserved = BTreeSet::from([0x0026, 0x0084]);
+        assert!(
+            inspect_tracked_state_call(&unrelated, 0x03, 0x8250)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            inspect_selected_state_call(&unrelated, 0x03, 0x8250, &preserved)
+                .unwrap()
+                .is_some()
+        );
+
+        let protected = synthetic_source(
+            0x03,
+            0x8250,
+            &[
+                0xA9, 0x01, // LDA #$01
+                0x85, 0x84, // STA $84
+                0x60, // RTS
+            ],
+        );
+        assert!(
+            inspect_selected_state_call(&protected, 0x03, 0x8250, &preserved)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
     fn one_caller_frame_escape_is_an_explicit_call_effect() {
         let source = synthetic_source(
             FIXED_PRG_BANK,
@@ -345,6 +457,41 @@ mod tests {
         assert_eq!(
             summary.return_effects(),
             &BTreeSet::from([CallReturnEffect::EscapeOneCaller])
+        );
+    }
+
+    #[test]
+    fn nested_callee_escape_composes_into_its_callers_normal_return() {
+        let source = synthetic_source(
+            FIXED_PRG_BANK,
+            0xC100,
+            &[
+                0x20, 0x08, 0xC1, // JSR $C108
+                0xA9, 0x55, // unreachable caller continuation
+                0x85, 0x00, // unreachable caller continuation
+                0x60, // unreachable caller return
+                0x68, // PLA: discard nested return low
+                0x68, // PLA: discard nested return high
+                0x60, // RTS through the outer entry frame
+            ],
+        );
+
+        let summary = inspect_tracked_state_call(&source, FIXED_PRG_BANK, 0xC100)
+            .unwrap()
+            .expect("nested early return should compose without expanding the caller");
+
+        assert_eq!(
+            summary.instruction_starts(),
+            &BTreeSet::from([
+                (FIXED_PRG_BANK, 0xC100),
+                (FIXED_PRG_BANK, 0xC108),
+                (FIXED_PRG_BANK, 0xC109),
+                (FIXED_PRG_BANK, 0xC10A),
+            ])
+        );
+        assert_eq!(
+            summary.return_effects(),
+            &BTreeSet::from([CallReturnEffect::Normal])
         );
     }
 

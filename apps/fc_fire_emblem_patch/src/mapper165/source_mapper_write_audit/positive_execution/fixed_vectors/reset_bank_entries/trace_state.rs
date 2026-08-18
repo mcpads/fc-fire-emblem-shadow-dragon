@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::ops::RangeInclusive;
 
 use crate::chapter_transition::{
@@ -427,6 +428,14 @@ impl ResetTraceState {
         self.negative = None;
         self.carry = None;
         self.zero_source = None;
+    }
+
+    pub(super) fn invalidate_memory_except(&mut self, preserved_addresses: &BTreeSet<u16>) {
+        for address in ResetTraceMemory::ADDRESSES {
+            if !preserved_addresses.contains(&address) {
+                self.memory.write(address, ByteValueSet::Unknown);
+            }
+        }
     }
 
     pub(super) fn read_memory(&self, address: u16) -> Option<u8> {

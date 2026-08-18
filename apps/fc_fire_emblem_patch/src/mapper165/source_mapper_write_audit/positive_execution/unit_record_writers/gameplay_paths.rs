@@ -12,7 +12,7 @@ use super::{
     ACTION_BYTE_OFFSET, ALLIED_RECORD_BASE, COPIED_CLASS_OFFSET, DERIVED_MAP_X_OFFSET,
     DERIVED_MAP_Y_OFFSET, ENEMY_RECORD_BASE, RECORD_SCAN_CAPACITY,
     allied_and_enemy_field_destinations, indexed_pointer_destination_ranges, insert_destination,
-    record_field_destination_ranges,
+    record_copy_destination_range, record_field_destination_ranges,
 };
 
 const PRG_BANK_BYTE_COUNT: usize = 0x4000;
@@ -33,6 +33,13 @@ const TYPED_REGIONS: &[TypedRegion] = &[
         0x8267,
         "2b8d13dd12fc06765504035fbfe99e505c155a41",
         "select a runtime occupancy row from an enemy coordinate",
+    ),
+    region(
+        0x03,
+        0x8267,
+        0x8270,
+        "5d39962dca78807802ef1c74880221a24e81d8e9",
+        "select the first allied unit-record pointer",
     ),
     region(
         0x06,
@@ -85,6 +92,20 @@ const TYPED_REGIONS: &[TypedRegion] = &[
     ),
     region(
         0x03,
+        0x8509,
+        0x8524,
+        "090c6e286dea7a2ffb95d27fc755dfac5e5c350f",
+        "derive one selected unit-record status byte",
+    ),
+    region(
+        0x03,
+        0x8548,
+        0x85A4,
+        "b8d4874f5ed369aa7d741297386c9e0ff1ca3ec1",
+        "update selected unit occupancy and action state",
+    ),
+    region(
+        0x03,
         0x8FD2,
         0x8FDB,
         "ca0d65506c25bfd70d8425aff53ccf4bcabbd03c",
@@ -92,10 +113,38 @@ const TYPED_REGIONS: &[TypedRegion] = &[
     ),
     region(
         0x03,
+        0x8E52,
+        0x8EAF,
+        "99f2eed7ec23e57f2206253efa80fec7c9f49481",
+        "clear and rebuild one selected unit record",
+    ),
+    region(
+        0x03,
+        0x8EAF,
+        0x8EC4,
+        "a2d13b563e6dd2d47114041987b6b895772eccbb",
+        "publish one selected unit class byte",
+    ),
+    region(
+        0x03,
         0x9A91,
         0x9ABA,
         "d12b47d34a870dae62a9893f42d7dc7cd521acd5",
         "rewrite the first enemy record derived status byte",
+    ),
+    region(
+        0x03,
+        0x9E51,
+        0x9EAC,
+        "c304539e1d32acb1e9db03d5d8275f0936944ce9",
+        "copy source-bound allied and enemy unit records",
+    ),
+    region(
+        0x03,
+        0x9E0F,
+        0x9E4B,
+        "2b4f966aead132cb4276c5614fbfc8d57b05b035",
+        "publish selected unit fields and occupancy",
     ),
     region(
         0x06,
@@ -167,7 +216,23 @@ const WRITER_SITES: &[(u8, u16, u8)] = &[
     (0x03, 0x82D8, 0x9D),
     (0x03, 0x82E9, 0x04),
     (0x03, 0x8308, 0x9D),
+    (0x03, 0x8521, 0x9D),
+    (0x03, 0x856E, 0x04),
+    (0x03, 0x859F, 0x9D),
+    (0x03, 0x8E6B, 0x9F),
+    (0x03, 0x8E7D, 0x9F),
+    (0x03, 0x8E8C, 0x9F),
+    (0x03, 0x8E96, 0x9F),
+    (0x03, 0x8E9C, 0x9D),
+    (0x03, 0x8EA0, 0x9F),
+    (0x03, 0x8EA9, 0x9F),
+    (0x03, 0x8EC1, 0x9F),
     (0x03, 0x9AB0, 0x9D),
+    (0x03, 0x9E33, 0x9F),
+    (0x03, 0x9E55, 0x9F),
+    (0x03, 0x9E6F, 0x9F),
+    (0x03, 0x9E7C, 0x9D),
+    (0x03, 0x9EA4, 0x9F),
     (0x06, 0x998C, 0x04),
     (0x06, 0xB4A0, 0x02),
     (0x02, 0xAABA, 0x6C),
@@ -224,6 +289,12 @@ pub(super) fn bind_gameplay_path_destinations(
     let enemy_field_three =
         record_field_destination_ranges(ENEMY_RECORD_BASE, RECORD_SCAN_CAPACITY, 0x03)?;
     let allied_and_enemy_field_three = allied_and_enemy_field_destinations(0x03)?;
+    let allied_and_enemy_status = allied_and_enemy_field_destinations(0x16)?;
+    let allied_and_enemy_actions = allied_and_enemy_field_destinations(ACTION_BYTE_OFFSET)?;
+    let allied_and_enemy_records = vec![
+        record_copy_destination_range(ALLIED_RECORD_BASE, RECORD_SCAN_CAPACITY)?,
+        record_copy_destination_range(ENEMY_RECORD_BASE, RECORD_SCAN_CAPACITY)?,
+    ];
     let map_layer = indexed_pointer_destination_ranges(map_layer_row_pointers, u8::MAX)?;
 
     let mut destinations = BTreeMap::new();
@@ -272,6 +343,46 @@ pub(super) fn bind_gameplay_path_destinations(
             site,
             "field six of one of the first twenty enemy records",
             enemy_field_six.clone(),
+        )?;
+    }
+    insert_destination(
+        &mut destinations,
+        (0x03, 0x8521, 0x9D),
+        "derived status byte of one allied or enemy unit record",
+        allied_and_enemy_status,
+    )?;
+    insert_destination(
+        &mut destinations,
+        (0x03, 0x856E, 0x04),
+        "runtime map occupancy cell",
+        occupancy.clone(),
+    )?;
+    insert_destination(
+        &mut destinations,
+        (0x03, 0x859F, 0x9D),
+        "action byte of one allied or enemy unit record",
+        allied_and_enemy_actions,
+    )?;
+    for site in [
+        (0x03, 0x8E6B, 0x9F),
+        (0x03, 0x8E7D, 0x9F),
+        (0x03, 0x8E8C, 0x9F),
+        (0x03, 0x8E96, 0x9F),
+        (0x03, 0x8E9C, 0x9D),
+        (0x03, 0x8EA0, 0x9F),
+        (0x03, 0x8EA9, 0x9F),
+        (0x03, 0x8EC1, 0x9F),
+        (0x03, 0x9E33, 0x9F),
+        (0x03, 0x9E55, 0x9F),
+        (0x03, 0x9E6F, 0x9F),
+        (0x03, 0x9E7C, 0x9D),
+        (0x03, 0x9EA4, 0x9F),
+    ] {
+        insert_destination(
+            &mut destinations,
+            site,
+            "one complete allied or enemy unit record",
+            allied_and_enemy_records.clone(),
         )?;
     }
     insert_destination(
@@ -386,6 +497,28 @@ mod tests {
                 (0x06, 0x8EEF, 0x00),
             ][..],
             &[(0x06, 0x933F, 0x00), (0x06, 0x935C, 0x00)][..],
+            &[
+                (0x03, 0x8521, 0x9D),
+                (0x03, 0x856E, 0x04),
+                (0x03, 0x859F, 0x9D),
+            ][..],
+            &[
+                (0x03, 0x8E6B, 0x9F),
+                (0x03, 0x8E7D, 0x9F),
+                (0x03, 0x8E8C, 0x9F),
+                (0x03, 0x8E96, 0x9F),
+                (0x03, 0x8E9C, 0x9D),
+                (0x03, 0x8EA0, 0x9F),
+                (0x03, 0x8EA9, 0x9F),
+                (0x03, 0x8EC1, 0x9F),
+                (0x03, 0x9E33, 0x9F),
+            ][..],
+            &[
+                (0x03, 0x9E55, 0x9F),
+                (0x03, 0x9E6F, 0x9F),
+                (0x03, 0x9E7C, 0x9D),
+                (0x03, 0x9EA4, 0x9F),
+            ][..],
             &[
                 (0x02, 0xAABA, 0x6C),
                 (0x02, 0xABAD, 0x6C),
