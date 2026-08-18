@@ -29,8 +29,9 @@ pub(super) mod reset_bank_entries;
 mod special_bank_call;
 
 pub(super) use reset_bank_entries::{
-    InlineDispatchSelectorBounds, StatefulBankExecution, trace_fixed_scheduler_contexts,
-    trace_source_bound_inline_state_continuation, trace_source_bound_inline_state_handler,
+    InlineDispatchSelectorBounds, StatefulBankExecution, TrackedStateCallSummaries,
+    trace_fixed_scheduler_contexts, trace_source_bound_inline_state_continuation,
+    trace_source_bound_inline_state_handler,
 };
 
 use super::control_state::ObservedControlStateWrites;

@@ -20,7 +20,7 @@ use super::{
         OUTER_SCREEN_STATE, ObservedControlStateWrites, known_control_state_write_values,
     },
     fixed_vectors::{
-        InlineDispatchSelectorBounds, trace_fixed_scheduler_contexts,
+        InlineDispatchSelectorBounds, TrackedStateCallSummaries, trace_fixed_scheduler_contexts,
         trace_source_bound_inline_state_handler,
     },
     indexed_write_destinations::AbsoluteIndexedWriteDestinationBounds,
@@ -398,6 +398,7 @@ pub(super) fn bind_fixed_scheduler_execution(
         .copied()
         .filter(|(selector, _)| *selector != 0x04)
         .collect::<BTreeSet<_>>();
+    let mut tracked_state_call_summaries = TrackedStateCallSummaries::default();
     let non_outer_discovery_trace = trace_fixed_scheduler_contexts(
         source,
         FIXED_SCHEDULER_STATE_LOAD,
@@ -409,6 +410,7 @@ pub(super) fn bind_fixed_scheduler_execution(
         &owned_inline_dispatch_selector_bounds,
         indirect_write_destination_bounds,
         absolute_indexed_write_bounds,
+        &mut tracked_state_call_summaries,
     )?;
 
     let outer_entry_context = (0x04, GAMEPLAY_SCHEDULER_BANK);
@@ -449,6 +451,7 @@ pub(super) fn bind_fixed_scheduler_execution(
             &owned_inline_dispatch_selector_bounds,
             indirect_write_destination_bounds,
             absolute_indexed_write_bounds,
+            &mut tracked_state_call_summaries,
         )?;
         let observed = known_control_state_write_values(
             selector_trace.control_state_write_values(),
@@ -496,6 +499,7 @@ pub(super) fn bind_fixed_scheduler_execution(
         &owned_inline_dispatch_selector_bounds,
         indirect_write_destination_bounds,
         absolute_indexed_write_bounds,
+        &mut tracked_state_call_summaries,
     )?;
     let outer_route_observed = known_control_state_write_values(
         outer_route_trace.control_state_write_values(),

@@ -252,6 +252,43 @@ struct FixedSchedulerEntryState {
 }
 
 #[derive(Debug, Default)]
+pub(in super::super) struct TrackedStateCallSummaries {
+    by_entry: BTreeMap<(u8, u16), Option<TrackedStateCallSummary>>,
+    #[cfg(test)]
+    source_inspection_count: usize,
+}
+
+impl TrackedStateCallSummaries {
+    fn inspect_entry(
+        &mut self,
+        source: &Rom,
+        bank: u8,
+        address: u16,
+    ) -> Result<Option<TrackedStateCallSummary>> {
+        let entry = (bank, address);
+        if !self.by_entry.contains_key(&entry) {
+            #[cfg(test)]
+            {
+                self.source_inspection_count += 1;
+            }
+            self.by_entry
+                .insert(entry, inspect_tracked_state_call(source, bank, address)?);
+        }
+        Ok(self.by_entry.get(&entry).cloned().flatten())
+    }
+
+    #[cfg(test)]
+    fn entry_count(&self) -> usize {
+        self.by_entry.len()
+    }
+
+    #[cfg(test)]
+    fn source_inspection_count(&self) -> usize {
+        self.source_inspection_count
+    }
+}
+
+#[derive(Debug, Default)]
 pub(in super::super) struct StatefulBankExecution {
     switchable_roots: BTreeSet<(u8, u16)>,
     reachable_instruction_starts: BTreeSet<(u8, u16)>,
@@ -404,6 +441,7 @@ pub(super) fn bind_reset_bank_entries(
     );
     let mut activations = ActivationArena::default();
     let reset_activation = activations.root(FIXED_PRG_BANK, reset_root);
+    let mut tracked_state_call_summaries = TrackedStateCallSummaries::default();
     trace_bank_state_entries(
         source,
         VecDeque::from([ResetTraceState::at(reset_root, reset_activation)]),
@@ -415,6 +453,7 @@ pub(super) fn bind_reset_bank_entries(
         &BTreeMap::new(),
         indirect_write_destination_bounds,
         &BTreeMap::new(),
+        &mut tracked_state_call_summaries,
     )
     .context("trace reset-rooted source execution")
 }
@@ -430,6 +469,7 @@ pub(in super::super) fn trace_fixed_scheduler_contexts(
     inline_dispatch_selector_bounds: &BTreeMap<(u8, u16), InlineDispatchSelectorBounds>,
     indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
     absolute_indexed_write_bounds: &BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds>,
+    tracked_state_call_summaries: &mut TrackedStateCallSummaries,
 ) -> Result<StatefulBankExecution> {
     let entry_contexts = entry_contexts.into_iter().collect::<BTreeSet<_>>();
     ensure!(
@@ -529,6 +569,7 @@ pub(in super::super) fn trace_fixed_scheduler_contexts(
             inline_dispatch_selector_bounds,
             indirect_write_destination_bounds,
             absolute_indexed_write_bounds,
+            tracked_state_call_summaries,
         )?;
         epoch
             .reachable_instruction_starts
@@ -565,6 +606,7 @@ pub(in super::super) fn trace_source_bound_inline_state_handler(
     inline_dispatch_selector_bounds: &BTreeMap<(u8, u16), InlineDispatchSelectorBounds>,
     indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
     absolute_indexed_write_bounds: &BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds>,
+    tracked_state_call_summaries: &mut TrackedStateCallSummaries,
 ) -> Result<StatefulBankExecution> {
     ensure!(
         dispatch_bank <= FIXED_PRG_BANK && mapped_prg_bank <= FIXED_PRG_BANK,
@@ -622,6 +664,7 @@ pub(in super::super) fn trace_source_bound_inline_state_handler(
         inline_dispatch_selector_bounds,
         indirect_write_destination_bounds,
         absolute_indexed_write_bounds,
+        tracked_state_call_summaries,
     )?;
     execution
         .reachable_instruction_starts
@@ -646,6 +689,7 @@ pub(in super::super) fn trace_source_bound_inline_state_continuation(
     inline_dispatch_selector_bounds: &BTreeMap<(u8, u16), InlineDispatchSelectorBounds>,
     indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
     absolute_indexed_write_bounds: &BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds>,
+    tracked_state_call_summaries: &mut TrackedStateCallSummaries,
 ) -> Result<StatefulBankExecution> {
     ensure!(
         dispatch_bank <= FIXED_PRG_BANK && mapped_prg_bank <= FIXED_PRG_BANK,
@@ -736,6 +780,7 @@ pub(in super::super) fn trace_source_bound_inline_state_continuation(
         inline_dispatch_selector_bounds,
         indirect_write_destination_bounds,
         absolute_indexed_write_bounds,
+        tracked_state_call_summaries,
     )
     .context("trace source-bound asynchronous handler continuation")?;
     execution
@@ -781,6 +826,7 @@ fn trace_fixed_scheduler_entry_state(
     inline_dispatch_selector_bounds: &BTreeMap<(u8, u16), InlineDispatchSelectorBounds>,
     indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
     absolute_indexed_write_bounds: &BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds>,
+    tracked_state_call_summaries: &mut TrackedStateCallSummaries,
 ) -> Result<StatefulBankExecution> {
     let FixedSchedulerEntryState {
         selector,
@@ -843,6 +889,7 @@ fn trace_fixed_scheduler_entry_state(
         inline_dispatch_selector_bounds,
         indirect_write_destination_bounds,
         absolute_indexed_write_bounds,
+        tracked_state_call_summaries,
     )
     .context("trace one fixed-scheduler source epoch")?;
     execution
@@ -875,6 +922,7 @@ fn trace_bank_state_entries(
     inline_dispatch_selector_bounds: &BTreeMap<(u8, u16), InlineDispatchSelectorBounds>,
     indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
     absolute_indexed_write_bounds: &BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds>,
+    tracked_state_call_summaries: &mut TrackedStateCallSummaries,
 ) -> Result<StatefulBankExecution> {
     let mut visited = BTreeMap::<ResetTraceIdentity, ResetTraceState>::new();
     let mut switchable_roots = BTreeSet::new();
@@ -886,9 +934,6 @@ fn trace_bank_state_entries(
     let mut fixed_scheduler_entry_states = BTreeSet::new();
     let mut indirect_write_sites_below_mapper_space = BTreeMap::<_, bool>::new();
     let mut control_state_write_values = BTreeMap::new();
-    let mut tracked_state_call_summaries =
-        BTreeMap::<(u8, u16), Option<TrackedStateCallSummary>>::new();
-
     while let Some(mut state) = pending.pop_front() {
         let identity = state.identity();
         if let Some(previous) = visited.get(&identity) {
@@ -1208,12 +1253,7 @@ fn trace_bank_state_entries(
                 };
                 let tracked_state_summary = match target_bank {
                     Some(target_bank) => {
-                        let key = (target_bank, target);
-                        if !tracked_state_call_summaries.contains_key(&key) {
-                            let summary = inspect_tracked_state_call(source, target_bank, target)?;
-                            tracked_state_call_summaries.insert(key, summary);
-                        }
-                        tracked_state_call_summaries.get(&key).cloned().flatten()
+                        tracked_state_call_summaries.inspect_entry(source, target_bank, target)?
                     }
                     None => None,
                 };
@@ -2806,6 +2846,7 @@ mod tests {
     ) -> StatefulBankExecution {
         let mut activations = ActivationArena::default();
         let root_activation = activations.root(FIXED_PRG_BANK, root);
+        let mut tracked_state_call_summaries = TrackedStateCallSummaries::default();
         trace_bank_state_entries(
             source,
             VecDeque::from([ResetTraceState::at(root, root_activation)]),
@@ -2817,6 +2858,7 @@ mod tests {
             &bounds,
             &BTreeMap::new(),
             &BTreeMap::new(),
+            &mut tracked_state_call_summaries,
         )
         .unwrap()
     }
@@ -3443,7 +3485,8 @@ mod tests {
             InlineDispatchSelectorBounds::from_handler_table(BTreeSet::from([0x00]))
                 .with_selector_memory_address(OUTER_SCREEN_STATE),
         )]);
-        let trace = |progress_value| {
+        let mut tracked_state_call_summaries = TrackedStateCallSummaries::default();
+        let mut trace = |progress_value| {
             trace_source_bound_inline_state_continuation(
                 &source,
                 FIXED_PRG_BANK,
@@ -3463,6 +3506,7 @@ mod tests {
                 &bounds,
                 &BTreeMap::new(),
                 &BTreeMap::new(),
+                &mut tracked_state_call_summaries,
             )
             .unwrap()
         };
@@ -3539,6 +3583,61 @@ mod tests {
             trace.switchable_roots(),
             &BTreeSet::from([(0x02, 0x8400), (0x03, 0x8500)])
         );
+    }
+
+    #[test]
+    fn repeated_call_summary_requests_inspect_each_source_entry_once() {
+        let source = synthetic_source(
+            &[
+                (
+                    0xC140,
+                    &[
+                        0x48, // PHA
+                        0xA9, 0x7F, // LDA #$7F
+                        0x68, // PLA
+                        0x60, // RTS
+                    ],
+                ),
+                (
+                    0xC150,
+                    &[
+                        0xA9, 0x01, // LDA #$01
+                        0x85, 0x24, // STA $24; tracked control state, so not summarized
+                        0x60, // RTS
+                    ],
+                ),
+            ],
+            0xC140,
+        );
+        let mut summaries = TrackedStateCallSummaries::default();
+
+        let first = summaries
+            .inspect_entry(&source, FIXED_PRG_BANK, 0xC140)
+            .unwrap()
+            .unwrap();
+        let second = summaries
+            .inspect_entry(&source, FIXED_PRG_BANK, 0xC140)
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.instruction_starts(), second.instruction_starts());
+        assert_eq!(first.return_effects(), second.return_effects());
+        assert_eq!(summaries.entry_count(), 1);
+        assert_eq!(summaries.source_inspection_count(), 1);
+
+        assert!(
+            summaries
+                .inspect_entry(&source, FIXED_PRG_BANK, 0xC150)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            summaries
+                .inspect_entry(&source, FIXED_PRG_BANK, 0xC150)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(summaries.entry_count(), 2);
+        assert_eq!(summaries.source_inspection_count(), 2);
     }
 
     #[test]
@@ -3817,6 +3916,7 @@ mod tests {
             InlineDispatchSelectorBounds::from_source_producers(BTreeSet::from([0x00, 0x01])),
         )]);
 
+        let mut tracked_state_call_summaries = TrackedStateCallSummaries::default();
         let trace = trace_fixed_scheduler_contexts(
             &source,
             0xC100,
@@ -3828,6 +3928,7 @@ mod tests {
             &selector_bounds,
             &BTreeMap::new(),
             &BTreeMap::new(),
+            &mut tracked_state_call_summaries,
         )
         .unwrap();
 
@@ -3919,6 +4020,7 @@ mod tests {
             InlineDispatchSelectorBounds::from_source_producers(BTreeSet::from([0x00, 0x01])),
         )]);
 
+        let mut tracked_state_call_summaries = TrackedStateCallSummaries::default();
         let trace = trace_fixed_scheduler_contexts(
             &source,
             0xC190,
@@ -3930,6 +4032,7 @@ mod tests {
             &selector_bounds,
             &BTreeMap::new(),
             &BTreeMap::new(),
+            &mut tracked_state_call_summaries,
         )
         .unwrap();
 

@@ -17,7 +17,7 @@ use super::{
         merge_observed_control_state_writes,
     },
     fixed_vectors::{
-        InlineDispatchSelectorBounds, StatefulBankExecution,
+        InlineDispatchSelectorBounds, StatefulBankExecution, TrackedStateCallSummaries,
         trace_source_bound_inline_state_continuation, trace_source_bound_inline_state_handler,
     },
     indexed_write_destinations::AbsoluteIndexedWriteDestinationBounds,
@@ -124,6 +124,7 @@ pub(super) fn bind_ending_sequence_positive_execution(
     let mut traced_selectors = BTreeSet::new();
     let mut pending = VecDeque::from([initial_selector]);
     let mut aggregate: Option<StatefulBankExecution> = None;
+    let mut tracked_state_call_summaries = TrackedStateCallSummaries::default();
 
     while let Some(selector) = pending.pop_front() {
         if !traced_selectors.insert(selector) {
@@ -155,6 +156,7 @@ pub(super) fn bind_ending_sequence_positive_execution(
                     &selector_bounds,
                     indirect_write_destination_bounds,
                     absolute_indexed_write_bounds,
+                    &mut tracked_state_call_summaries,
                 )?;
                 match &mut boundary_trace {
                     Some(boundary_trace) => boundary_trace.merge(trace),
@@ -176,6 +178,7 @@ pub(super) fn bind_ending_sequence_positive_execution(
                 &selector_bounds,
                 indirect_write_destination_bounds,
                 absolute_indexed_write_bounds,
+                &mut tracked_state_call_summaries,
             )?
         };
         let observed = known_control_state_write_values(
