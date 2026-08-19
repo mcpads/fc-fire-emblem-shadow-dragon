@@ -16,6 +16,7 @@ mod font;
 mod font_slots;
 mod front_end_menu;
 mod full_translation_install;
+mod glyph_demand;
 mod hangul_page_plan;
 mod item_flow;
 mod japanese_encoding;
@@ -310,6 +311,23 @@ enum Command {
     AnalyzeItemFlow {
         source: PathBuf,
         #[arg(long, default_value = "out/item-flow.json")]
+        report: PathBuf,
+    },
+    /// Count per-glyph demand in every translation population and check co-resident sets.
+    AnalyzeGlyphDemand {
+        #[arg(long, default_value = "private/dialogue/main-workspace.json")]
+        main_dialogue_workspace: PathBuf,
+        #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
+        fixed_text_workspace: PathBuf,
+        /// NAME=UNIT_ID[,UNIT_ID...] population that ignores table boundaries.
+        #[arg(long = "population")]
+        populations: Vec<String>,
+        /// NAME=POPULATION[,POPULATION...] set that must fit one font page together.
+        #[arg(long = "coresident")]
+        coresident_sets: Vec<String>,
+        #[arg(long, default_value_t = font_slots::ACTIVE_HANGUL_SLOT_COUNT)]
+        slot_budget: usize,
+        #[arg(long, default_value = "out/glyph-demand.json")]
         report: PathBuf,
     },
     /// Bind unit-summary and unit-status composers, sources, labels, and shared page lifetime.

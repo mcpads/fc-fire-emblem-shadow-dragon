@@ -430,6 +430,37 @@ pub(super) fn execute(command: Command) -> Result<()> {
                 summary.next_observation_gate
             );
         }
+        Command::AnalyzeGlyphDemand {
+            main_dialogue_workspace,
+            fixed_text_workspace,
+            populations,
+            coresident_sets,
+            slot_budget,
+            report,
+        } => {
+            let summary = glyph_demand::analyze_glyph_demand(
+                &main_dialogue_workspace,
+                &fixed_text_workspace,
+                &populations,
+                &coresident_sets,
+                slot_budget,
+                &report,
+            )?;
+            println!("wrote {}", report.display());
+            println!("report SHA-1: {}", summary.report_sha1);
+            println!(
+                "glyph demand: {} populations, {} co-resident sets, {} over the {}-slot budget{}",
+                summary.population_count,
+                summary.coresident_set_count,
+                summary.over_budget_set_names.len(),
+                slot_budget,
+                if summary.over_budget_set_names.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {}", summary.over_budget_set_names.join(", "))
+                }
+            );
+        }
         Command::AnalyzeShopFlow { source, report } => {
             let summary = shop_flow::analyze_shop_flow(&source, &report)?;
             println!("wrote {}", report.display());
