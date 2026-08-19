@@ -1,11 +1,14 @@
-//! 저장소 대사와 그 위에 남는 고정 선택 라벨을 한 글꼴 페이지 수명으로 묶는다.
+//! 저장소 화면군의 대사와 그 위에 남는 고정 선택 라벨을 한 코드 배정으로 묶는다.
 //!
 //! 상태 1D와 23은 주 대사 페이지가 화면에 남아 있는 동안 bank 0B 고정 문자열을
 //! 덧붙인다. 따라서 고정 문자열용 정적 페이지를 다시 고르면 대사 타일이 깨지고,
-//! 반대로 대사 페이지에 선택 라벨의 코드가 없으면 라벨이 깨진다. 이 단계는 원본의
-//! 저장소·소지품 초과 상태 머신이 선택하는 레코드 전체가 아니라, 선택 라벨을
-//! 실제로 덧붙이기 직전까지 유지되는 첫 대사와 그 전이 사슬에만 고정 문자열 저장
-//! 코드와 같은 글리프 코드를 넣는다.
+//! 반대로 대사 페이지에 선택 라벨의 코드가 없으면 라벨이 깨진다.
+//!
+//! 라벨만으로는 부족하다. 원본은 레코드가 바뀌어도 여섯 줄 버퍼를 비우지 않으므로,
+//! 짧은 레코드는 앞선 레코드가 쓴 뒷줄을 화면에 그대로 남긴다. 그래서 이 단계는
+//! 저장소·소지품 초과 두 상태기가 고르는 모든 페이지에 대해, 그 페이지가 쓰지 않는
+//! 줄 슬롯에 같은 수명의 다른 페이지가 남길 수 있는 글자까지 같은 코드로 상주시킨다.
+//! 레코드 전체 합집합은 배정 가능한 코드 수를 넘기지만 줄 슬롯 꼬리는 들어간다.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -14,6 +17,7 @@ use serde::Serialize;
 
 use crate::{
     dialogue_assets::MainDialogueDisplayPlan,
+    dialogue_assets::MainDialoguePageWorkset,
     dialogue_inventory::{MainDialogueGraphReport, main_dialogue_transition_chain_record_ids},
     fixed_menu_labels::FIXED_MENU_LABEL_SPECS,
     font_slots::{ACTIVE_HANGUL_SLOT_COUNT, active_hangul_codes},
@@ -57,6 +61,8 @@ pub(super) struct StorageDialogueResidencyPlan {
     fixed_assignment_sha1: String,
     every_storage_label_glyph_uses_its_installed_code: bool,
     every_overlay_dialogue_page_contains_its_visible_storage_label_glyphs: bool,
+    every_page_holds_the_line_slots_the_lifetime_can_leave_behind: bool,
+    visible_lifetime_page_count: usize,
     storage_dialogue_does_not_reselect_the_static_menu_page: bool,
     capacity_notice_keeps_its_standalone_static_page: bool,
     #[serde(skip)]
@@ -158,20 +164,46 @@ pub(super) fn plan_storage_dialogue_residency(
         &overflow_overlay_record_ids,
         &label_glyphs,
     )?;
-    let required_glyphs_by_workset =
+    let mut required_glyphs_by_workset =
         collect_required_workset_glyphs(display, &required_glyphs_by_record_id)?;
+
+    let visible_lifetime_record_ids = facility_selected_record_ids
+        .union(&overflow_selected_record_ids)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let lifetime_workset_indices = display
+        .page_worksets
+        .iter()
+        .enumerate()
+        .filter(|(_, page)| visible_lifetime_record_ids.contains(&page.record_id))
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    let lifetime_pages = lifetime_workset_indices
+        .iter()
+        .map(|index| &display.page_worksets[*index])
+        .collect::<Vec<_>>();
+    for (index, tail) in lifetime_workset_indices
+        .iter()
+        .zip(line_tail_requirements(&lifetime_pages))
+    {
+        required_glyphs_by_workset
+            .entry(*index)
+            .or_default()
+            .extend(tail);
+    }
+
     let fixed_glyph_codes =
         assign_storage_label_codes(dialogue_worksets, &required_glyphs_by_workset)?;
     let (augmented_worksets, resident_workset_count, maximum_augmented_workset_slot_demand) =
         augment_storage_worksets(
             display,
             dialogue_worksets,
-            &required_glyphs_by_record_id,
+            &required_glyphs_by_workset,
             &fixed_glyph_codes,
         )?;
 
     Ok(StorageDialogueResidencyPlan {
-        strategy: "keep each installed storage-action label code resident only on the source-bound dialogue pages where that label is overlaid, while leaving result dialogue and the standalone capacity notice on their existing routes",
+        strategy: "give every page of the two storage state machines one compatible code assignment: the overlaid action labels where they are displayed, plus the line slots a shorter page leaves for a longer page of the same lifetime, because the source never clears the six line buffers between records",
         dialogue_table_id: DIALOGUE_TABLE_ID,
         dialogue_composite_states: [0x1D, 0x23],
         resident_fixed_label_indices: STORAGE_DIALOGUE_LABEL_INDICES,
@@ -191,11 +223,41 @@ pub(super) fn plan_storage_dialogue_residency(
         fixed_assignment_sha1: assignment_sha1(&fixed_glyph_codes),
         every_storage_label_glyph_uses_its_installed_code: true,
         every_overlay_dialogue_page_contains_its_visible_storage_label_glyphs: true,
+        every_page_holds_the_line_slots_the_lifetime_can_leave_behind: true,
+        visible_lifetime_page_count: lifetime_workset_indices.len(),
         storage_dialogue_does_not_reselect_the_static_menu_page: true,
         capacity_notice_keeps_its_standalone_static_page: true,
         augmented_worksets,
         fixed_glyph_codes,
     })
+}
+
+/// 줄 버퍼는 레코드가 바뀌어도 비워지지 않는다. 따라서 어떤 페이지가 쓰지 않는
+/// 줄 슬롯에는 같은 수명의 다른 페이지가 남긴 글자가 그대로 보인다. 그 페이지의
+/// 코드북은 남은 글자도 같은 뜻으로 담아야 한다.
+fn line_tail_requirements(worksets: &[&MainDialoguePageWorkset]) -> Vec<BTreeSet<char>> {
+    let slot_count = worksets
+        .iter()
+        .map(|workset| workset.visible_line_target_glyphs.len())
+        .max()
+        .unwrap_or_default();
+    let mut glyphs_by_slot = vec![BTreeSet::new(); slot_count];
+    for workset in worksets {
+        for (slot, glyphs) in workset.visible_line_target_glyphs.iter().enumerate() {
+            glyphs_by_slot[slot].extend(glyphs.iter().copied());
+        }
+    }
+
+    worksets
+        .iter()
+        .map(|workset| {
+            glyphs_by_slot
+                .iter()
+                .skip(workset.visible_line_target_glyphs.len())
+                .flat_map(|glyphs| glyphs.iter().copied())
+                .collect()
+        })
+        .collect()
 }
 
 fn transition_record_ids(
@@ -331,10 +393,20 @@ fn assign_storage_label_codes(
         .values()
         .flat_map(|glyphs| glyphs.iter().copied())
         .collect::<BTreeSet<_>>();
+    // 전이 수명이 이 페이지들의 작업집합을 하나로 합치므로, 한 페이지가 보존하는
+    // 코드는 그 글자를 요구하지 않는 페이지에서도 배정할 수 없다.
+    let mut lifetime_preserved_codes = BTreeSet::new();
+    for workset_index in required_glyphs_by_workset.keys() {
+        let workset = dialogue_worksets
+            .get(*workset_index)
+            .context("storage dialogue workset index is outside the workset population")?;
+        lifetime_preserved_codes.extend(workset.preserved_active_codes.iter().copied());
+    }
+
     let mut forbidden_codes_by_glyph = fixed_glyphs
         .iter()
         .copied()
-        .map(|glyph| (glyph, BTreeSet::new()))
+        .map(|glyph| (glyph, lifetime_preserved_codes.clone()))
         .collect::<BTreeMap<_, _>>();
     let mut preassigned_codes_by_glyph = BTreeMap::<char, BTreeSet<u8>>::new();
     for (workset_index, required_glyphs) in required_glyphs_by_workset {
@@ -342,10 +414,6 @@ fn assign_storage_label_codes(
             .get(*workset_index)
             .context("storage dialogue workset index is outside the workset population")?;
         for glyph in required_glyphs {
-            forbidden_codes_by_glyph
-                .get_mut(glyph)
-                .expect("storage glyph was initialized")
-                .extend(workset.preserved_active_codes.iter().copied());
             for (fixed_glyph, fixed_code) in &workset.fixed_glyph_codes {
                 if fixed_glyph == glyph {
                     preassigned_codes_by_glyph
@@ -373,21 +441,26 @@ fn assign_storage_label_codes(
 fn augment_storage_worksets(
     display: &MainDialogueDisplayPlan,
     dialogue_worksets: &[GlyphWorkset],
-    required_glyphs_by_record_id: &BTreeMap<String, BTreeSet<char>>,
+    required_glyphs_by_workset: &BTreeMap<usize, BTreeSet<char>>,
     fixed_glyph_codes: &BTreeMap<char, u8>,
 ) -> Result<(Vec<GlyphWorkset>, usize, usize)> {
     ensure!(
-        !required_glyphs_by_record_id.is_empty() && !fixed_glyph_codes.is_empty(),
-        "storage dialogue residency has an empty record or glyph population"
+        !required_glyphs_by_workset.is_empty() && !fixed_glyph_codes.is_empty(),
+        "storage dialogue residency has an empty page or glyph population"
     );
-    let mut found_record_ids = BTreeSet::new();
+    let mut found_workset_indices = BTreeSet::new();
     let mut resident_workset_count = 0;
     let mut maximum_augmented_workset_slot_demand = 0;
     let mut augmented_worksets = dialogue_worksets.to_vec();
 
-    for (page, workset) in display.page_worksets.iter().zip(&mut augmented_worksets) {
-        if let Some(required_glyphs) = required_glyphs_by_record_id.get(&page.record_id) {
-            found_record_ids.insert(page.record_id.clone());
+    for (index, (page, workset)) in display
+        .page_worksets
+        .iter()
+        .zip(&mut augmented_worksets)
+        .enumerate()
+    {
+        if let Some(required_glyphs) = required_glyphs_by_workset.get(&index) {
+            found_workset_indices.insert(index);
             resident_workset_count += 1;
             for glyph in required_glyphs {
                 let code = fixed_glyph_codes
@@ -425,11 +498,11 @@ fn augment_storage_worksets(
             .max(workset.target_glyphs.len() + workset.preserved_active_codes.len());
     }
     ensure!(
-        found_record_ids == required_glyphs_by_record_id.keys().cloned().collect(),
-        "storage dialogue residency is missing visible records"
+        found_workset_indices == required_glyphs_by_workset.keys().copied().collect(),
+        "storage dialogue residency is missing visible pages"
     );
     ensure!(
-        resident_workset_count >= required_glyphs_by_record_id.len(),
+        resident_workset_count == required_glyphs_by_workset.len(),
         "storage dialogue residency lost a visible page"
     );
     ensure!(
@@ -454,6 +527,7 @@ mod tests {
             record_id: record_id.to_owned(),
             page_index,
             target_glyphs: BTreeSet::new(),
+            visible_line_target_glyphs: Vec::new(),
             dynamic_string_selectors: BTreeSet::new(),
             dynamic_string_selector_counts: BTreeMap::new(),
             dynamic_string_control_count: 0,
@@ -468,6 +542,37 @@ mod tests {
             preserved_active_codes: BTreeSet::new(),
             fixed_glyph_codes: BTreeMap::new(),
         }
+    }
+
+    fn lined_page(record_id: &str, lines: &[&str]) -> MainDialoguePageWorkset {
+        let mut workset = page(record_id, 0);
+        workset.visible_line_target_glyphs =
+            lines.iter().map(|line| line.chars().collect()).collect();
+        workset.target_glyphs = lines.iter().flat_map(|line| line.chars()).collect();
+        workset
+    }
+
+    #[test]
+    fn a_short_page_must_hold_the_lines_a_longer_page_leaves_behind() {
+        let long = lined_page("shop-and-item-dialogue:041", &["가나", "다라"]);
+        let short = lined_page("shop-and-item-dialogue:006", &["마"]);
+
+        let required = line_tail_requirements(&[&long, &short]);
+
+        // 두 줄을 쓰는 페이지는 뒤에 남길 것이 없다.
+        assert_eq!(required[0], BTreeSet::new());
+        // 한 줄만 쓰는 페이지는 둘째 줄 슬롯에 남는 글자를 함께 담아야 한다.
+        assert_eq!(required[1], BTreeSet::from(['다', '라']));
+    }
+
+    #[test]
+    fn a_page_that_writes_every_line_slot_requires_no_tail() {
+        let long = lined_page("shop-and-item-dialogue:041", &["가", "나", "다"]);
+        let same = lined_page("shop-and-item-dialogue:042", &["라", "마", "바"]);
+
+        let required = line_tail_requirements(&[&long, &same]);
+
+        assert!(required.iter().all(BTreeSet::is_empty));
     }
 
     #[test]
@@ -485,10 +590,10 @@ mod tests {
             ],
         };
         let worksets = vec![workset("가"), workset("나"), workset("다")];
-        let requirements = BTreeMap::from([(
-            "shop-and-item-dialogue:041".to_owned(),
-            BTreeSet::from(['보', '관']),
-        )]);
+        let requirements = BTreeMap::from([
+            (0, BTreeSet::from(['보', '관'])),
+            (1, BTreeSet::from(['보', '관'])),
+        ]);
         let fixed = BTreeMap::from([('보', 0xA0), ('관', 0xA1)]);
 
         let (augmented, count, _) =
@@ -521,6 +626,28 @@ mod tests {
     }
 
     #[test]
+    fn assignment_avoids_every_code_any_page_of_the_lifetime_preserves() {
+        // 전이 수명은 같은 수명의 페이지 작업집합을 하나로 합친다. 따라서 어떤
+        // 페이지가 보존하는 코드는 그 글자를 요구하지 않는 페이지에서도 쓸 수 없다.
+        let mut first = workset("가");
+        let mut second = workset("나");
+        second.preserved_active_codes.insert(0x00);
+        first.preserved_active_codes.insert(0x01);
+
+        let assignment = assign_storage_label_codes(
+            &[first, second],
+            &BTreeMap::from([(0, BTreeSet::from(['보'])), (1, BTreeSet::from(['관']))]),
+        )
+        .unwrap();
+
+        assert!(
+            !assignment
+                .values()
+                .any(|code| *code == 0x00 || *code == 0x01)
+        );
+    }
+
+    #[test]
     fn preserved_dialogue_code_cannot_be_reused_for_a_storage_label() {
         let display = MainDialogueDisplayPlan {
             canonical_record_count: 1,
@@ -533,10 +660,7 @@ mod tests {
         let error = match augment_storage_worksets(
             &display,
             &[workset],
-            &BTreeMap::from([(
-                "shop-and-item-dialogue:041".to_owned(),
-                BTreeSet::from(['보']),
-            )]),
+            &BTreeMap::from([(0, BTreeSet::from(['보']))]),
             &BTreeMap::from([('보', 0xA0)]),
         ) {
             Ok(_) => panic!("preserved code collision unexpectedly passed"),
@@ -562,12 +686,9 @@ mod tests {
             ],
         };
         let requirements = BTreeMap::from([
+            (0, BTreeSet::from(['보', '관', '찾', '기'])),
             (
-                "shop-and-item-dialogue:041".to_owned(),
-                BTreeSet::from(['보', '관', '찾', '기']),
-            ),
-            (
-                "shop-and-item-dialogue:064".to_owned(),
+                1,
                 BTreeSet::from(['보', '관', '하', '나', '버', '리', '기']),
             ),
         ]);
