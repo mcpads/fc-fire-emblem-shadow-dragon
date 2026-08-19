@@ -386,28 +386,26 @@ fn record_page_worksets<'a>(
                     *dynamic_string_selector_counts.entry(selector).or_default() += count;
                 }
                 dynamic_string_control_count += line_control_count;
-                preserve_runtime_generated_active_codes(
-                    &source_logical_line,
-                    &mut preserved_target_active_codes,
-                );
+                // 원문 줄에서 가져오는 것은 런타임이 합성하는 코드뿐이다. 원문 리터럴은
+                // 번역문이 덮어쓰므로 대상 페이지에서 되찾을 수 있다.
+                if source_logical_line
+                    .contains(&LogicalDialogueByte::Encoded(DIALOGUE_PREFIX_CONTROL_CODE))
+                {
+                    preserved_target_active_codes.extend(DIALOGUE_PREFIX_OUTPUT_CODES);
+                }
 
                 if workspace_line.status == TranslationStatus::Untranslated {
                     continue;
                 }
                 let logical_line = encode_korean_markup(&workspace_line.korean)?;
-                preserve_runtime_generated_active_codes(
-                    &logical_line,
-                    &mut preserved_target_active_codes,
+                preserved_target_active_codes.extend(
+                    rendered_active_codes(&logical_line)
+                        .into_iter()
+                        .filter(|code| active_codes.contains(code)),
                 );
                 for byte in logical_line {
-                    match byte {
-                        LogicalDialogueByte::TargetGlyph(glyph) => {
-                            target_glyphs.insert(glyph);
-                        }
-                        LogicalDialogueByte::Encoded(code) if active_codes.contains(&code) => {
-                            preserved_target_active_codes.insert(code);
-                        }
-                        LogicalDialogueByte::Encoded(_) => {}
+                    if let LogicalDialogueByte::TargetGlyph(glyph) = byte {
+                        target_glyphs.insert(glyph);
                     }
                 }
                 for file_offset in &source_line.literal_file_offsets {
@@ -456,13 +454,35 @@ fn source_line_logical_bytes(
 
 /// 대사 바이트 자체가 아니라 제어 코드의 실행 결과로 화면에 생기는 글리프 코드를
 /// 현재 페이지에서 보호한다. `{EA}`는 원본 표식 두 타일을 `9E AB`로 출력한다.
-fn preserve_runtime_generated_active_codes(
-    bytes: &[LogicalDialogueByte],
-    preserved_codes: &mut BTreeSet<u8>,
-) {
-    if bytes.contains(&LogicalDialogueByte::Encoded(DIALOGUE_PREFIX_CONTROL_CODE)) {
-        preserved_codes.extend(DIALOGUE_PREFIX_OUTPUT_CODES);
+/// 이 논리열이 실제로 네임테이블에 그릴 수 있는 활성 코드만 고른다.
+///
+/// 뱅크 `0A`의 줄 버퍼 writer는 여덟 곳이고, 리터럴 경로 `$8299`는 15개 제어를
+/// 모두 분기로 걸러 낸 뒤에만 바이트를 쓴다. 따라서 제어 코드와 그 피연산자는
+/// 타일이 되지 않는다. `{EA}`가 합성하는 `9E`·`AB`와 평범한 리터럴만 남는다.
+/// 제어 코드 자체는 저장 바이트가 파서를 다시 지나므로 글리프에 배정할 수
+/// 없지만, 그 제약은 코드북 쪽이 따로 소유한다.
+fn rendered_active_codes(bytes: &[LogicalDialogueByte]) -> BTreeSet<u8> {
+    let mut rendered = BTreeSet::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        let LogicalDialogueByte::Encoded(code) = bytes[index] else {
+            index += 1;
+            continue;
+        };
+        let Some(control) = DIALOGUE_CONTROL_SPECS
+            .iter()
+            .find(|control| control.code == code)
+        else {
+            rendered.insert(code);
+            index += 1;
+            continue;
+        };
+        if code == DIALOGUE_PREFIX_CONTROL_CODE {
+            rendered.extend(DIALOGUE_PREFIX_OUTPUT_CODES);
+        }
+        index += 1 + control.inline_operand_byte_count + control.transition_target_byte_count;
     }
+    rendered
 }
 
 pub(super) fn dynamic_string_controls(
@@ -504,6 +524,52 @@ fn encode_logical_bytes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_control_and_its_operands_render_nothing() {
+        // {E4:B1:2D} is one transition control plus two target bytes the handler
+        // reads without advancing the current pointer. None reaches the line buffer.
+        let line = [
+            LogicalDialogueByte::Encoded(0xE4),
+            LogicalDialogueByte::Encoded(0xB1),
+            LogicalDialogueByte::Encoded(0x2D),
+        ];
+
+        assert!(rendered_active_codes(&line).is_empty());
+    }
+
+    #[test]
+    fn an_inline_operand_renders_nothing() {
+        // {DF:55} selects a bit table; {E9:02} sets the line count.
+        let line = [
+            LogicalDialogueByte::Encoded(0xDF),
+            LogicalDialogueByte::Encoded(0x55),
+            LogicalDialogueByte::Encoded(0xE9),
+            LogicalDialogueByte::Encoded(0x02),
+        ];
+
+        assert!(rendered_active_codes(&line).is_empty());
+    }
+
+    #[test]
+    fn a_literal_byte_renders_its_own_code() {
+        let line = [
+            LogicalDialogueByte::Encoded(0x9C),
+            LogicalDialogueByte::TargetGlyph('가'),
+        ];
+
+        assert_eq!(rendered_active_codes(&line), BTreeSet::from([0x9C]));
+    }
+
+    #[test]
+    fn the_speaker_prefix_control_renders_the_two_codes_it_synthesizes() {
+        let line = [LogicalDialogueByte::Encoded(DIALOGUE_PREFIX_CONTROL_CODE)];
+
+        assert_eq!(
+            rendered_active_codes(&line),
+            DIALOGUE_PREFIX_OUTPUT_CODES.into_iter().collect()
+        );
+    }
 
     fn source_record_with_line(source: &[u8]) -> MainDialogueStorageRecord {
         MainDialogueStorageRecord {
@@ -566,13 +632,47 @@ mod tests {
     }
 
     #[test]
-    fn ea_control_preserves_the_two_codes_it_writes_at_runtime() {
-        let logical = encode_korean_markup("{E9:03}{EA}마르스{EF}").unwrap();
-        let mut preserved = BTreeSet::new();
+    fn a_page_workset_does_not_preserve_the_japanese_literals_it_replaces() {
+        // 원문 리터럴 08은 번역문이 덮어쓰는 코드라 대상 페이지에서 되찾을 수 있어야
+        // 한다. 같은 줄의 {EA}가 합성하는 9E·AB만 남는다.
+        let source = [0xEA, 0x08, 0x09, 0xED];
+        let source_record = source_record_with_line(&source);
+        let workspace_record =
+            workspace_record_with_line(TranslationStatus::NeedsHumanReview, "{EA}가나{ED}");
 
-        preserve_runtime_generated_active_codes(&logical, &mut preserved);
+        let worksets = record_page_worksets(&source, &source_record, &workspace_record)
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
 
-        assert_eq!(preserved, BTreeSet::from(DIALOGUE_PREFIX_OUTPUT_CODES));
+        let preserved = &worksets[0].preserved_target_active_codes;
+        assert!(preserved.contains(&0x9E) && preserved.contains(&0xAB));
+        assert!(!preserved.contains(&0x08));
+        assert!(!preserved.contains(&0x09));
+    }
+
+    #[test]
+    fn a_page_workset_preserves_controls_and_rendered_literals_but_not_operands() {
+        let source = [0xDF, 0x55, 0xEA, 0x00, 0xE4, 0xB1, 0x2D];
+        let source_record = source_record_with_line(&source);
+        let workspace_record = workspace_record_with_line(
+            TranslationStatus::NeedsHumanReview,
+            "{DF:55}{EA}가{LIT:9C}{E4:B1:2D}",
+        );
+
+        let worksets = record_page_worksets(&source, &source_record, &workspace_record)
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+
+        let preserved = &worksets[0].preserved_target_active_codes;
+        // 그려지는 것: {EA}가 합성하는 9E·AB와 리터럴 9C.
+        assert!(preserved.contains(&0x9E) && preserved.contains(&0xAB));
+        assert!(preserved.contains(&0x9C));
+        // 파서가 먼저 보는 제어 코드는 글리프에 줄 수 없다.
+        assert!(preserved.contains(&0xDF) && preserved.contains(&0xE4));
+        // 피연산자는 그려지지도 파싱되지도 않으므로 슬롯을 묶지 않는다.
+        assert!(!preserved.contains(&0x55));
+        assert!(!preserved.contains(&0xB1));
+        assert!(!preserved.contains(&0x2D));
     }
 
     #[test]
