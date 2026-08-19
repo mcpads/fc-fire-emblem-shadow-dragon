@@ -61,23 +61,26 @@ pub(in crate::full_translation_install::runtime_code) fn gameplay_handoff_hook(
     })
 }
 
-/// The six path-leading fixed-menu appender calls have the same three-byte footprint as their
-/// source `JSR $8EEE`.  Redirecting only those calls avoids treating unrelated composite states as
-/// font-page owners.  The wrapper restores the label index before tail-calling the source appender.
+/// Standalone fixed-menu appender calls have the same three-byte footprint as their source
+/// `JSR $8EEE`. Calls that draw over main dialogue are deliberately left on the source appender so
+/// they cannot replace the active dialogue route with the unit-command page. The wrapper restores
+/// the label index before tail-calling the source appender.
 pub(in crate::full_translation_install::runtime_code) fn fixed_menu_font_page_hooks(
     wrapper: u16,
 ) -> Result<Vec<DialogueRuntimeHook>> {
     FIXED_MENU_FONT_PAGE_CALLS
         .into_iter()
-        .map(|(address, _, role, write_role)| {
-            Ok(DialogueRuntimeHook {
-                role,
-                write_role,
-                site: DialogueRuntimeHookSite::Switchable {
-                    bank: UNIT_UI_BANK,
-                    address,
-                },
-                bytes: assemble_at(address, &[Instruction::JsrAbsolute(wrapper)])?,
+        .filter_map(|(address, _, role, write_role)| {
+            role.map(|role| {
+                Ok(DialogueRuntimeHook {
+                    role,
+                    write_role,
+                    site: DialogueRuntimeHookSite::Switchable {
+                        bank: UNIT_UI_BANK,
+                        address,
+                    },
+                    bytes: assemble_at(address, &[Instruction::JsrAbsolute(wrapper)])?,
+                })
             })
         })
         .collect()

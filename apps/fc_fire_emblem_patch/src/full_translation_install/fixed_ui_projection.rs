@@ -25,7 +25,10 @@ use crate::{
     },
 };
 
-use super::{consumer_catalog::ConsumerCatalogPlan, consumer_codebook::ConsumerCodebookPlan};
+use super::{
+    consumer_catalog::ConsumerCatalogPlan, consumer_codebook::ConsumerCodebookPlan,
+    storage_residency::StorageDialogueResidencyPlan,
+};
 
 const FIXED_UI_BANK: u8 = 0x0B;
 const FIXED_STRING_POINTER_TABLE: u16 = 0x8FC2;
@@ -39,6 +42,7 @@ pub(super) struct FixedUiProjectionInputs<'a> {
     pub(super) unit_ui: &'a SemanticTranslationPlan,
     pub(super) item_actions: &'a SemanticTranslationPlan,
     pub(super) fixed_menu_labels: &'a SemanticTranslationPlan,
+    pub(super) storage_dialogue_residency: &'a StorageDialogueResidencyPlan,
     pub(super) map_menu: &'a MapMenuPlan,
     pub(super) consumer_codebook: &'a ConsumerCodebookPlan,
     pub(super) consumer_catalog: &'a ConsumerCatalogPlan,
@@ -201,9 +205,18 @@ pub(super) fn plan_fixed_ui_projection(
             .fixed_menu_labels
             .entry_logical_bytes(&id)
             .with_context(|| format!("fixed-menu plan lost {id}"))?;
-        let mut bytes = inputs
-            .consumer_codebook
-            .encode_fixed_ui_for("unit_command_menu", logical)?;
+        let mut bytes = if inputs
+            .storage_dialogue_residency
+            .owns_fixed_label(spec.index)
+        {
+            inputs
+                .storage_dialogue_residency
+                .encode_fixed_label(spec.index, logical)?
+        } else {
+            inputs
+                .consumer_codebook
+                .encode_fixed_ui_for("unit_command_menu", logical)?
+        };
         bytes.push(spec.terminator);
         targets.push(TargetString {
             id,

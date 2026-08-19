@@ -1,0 +1,400 @@
+use std::collections::{BTreeMap, BTreeSet};
+
+use anyhow::{Context, Result, ensure};
+
+use crate::{
+    dialogue_inventory::{
+        bind_caller_handoff_state_dispatch_sources, switchable_cpu_to_file_offset,
+    },
+    rom::Rom,
+    sha1_hex,
+    typed_source::decode_rp2a03_sequence,
+    unit_ui_text::bind_map_facility_dispatch_source,
+};
+
+const SOURCE_BANK: u8 = 0x06;
+const DIALOGUE_RECORD_ADDRESS: u16 = 0x77F1;
+const CALLER_STATE_ADDRESS: u16 = 0x05DB;
+const STORAGE_FACILITY_INDEX: u8 = 0x04;
+
+const FACILITY_DISPATCH_CALL: u16 = 0x9DC1;
+const FACILITY_STATE_MACHINE_START: u16 = 0x9DBE;
+const FACILITY_STATE_MACHINE_END: u16 = 0xA0C2;
+const FACILITY_HANDLER_TARGETS: [u16; 17] = [
+    0x99CC, 0xA13E, 0x99F1, 0x9E07, 0x9E15, 0xA13E, 0x9EAC, 0x9EC1, 0xA13E, 0x9DE6, 0x9F16, 0x9F99,
+    0x9C02, 0xA13E, 0x9B7A, 0xA07D, 0xA122,
+];
+const FACILITY_IMMEDIATE_RECORD_WRITES: [(u16, u8); 11] = [
+    (0x9E31, 0x3D),
+    (0x9E44, 0x2E),
+    (0x9E5B, 0x3F),
+    (0x9E75, 0x2A),
+    (0x9E84, 0x2B),
+    (0x9E90, 0x2C),
+    (0x9ECC, 0x2D),
+    (0x9F0B, 0x3B),
+    (0x9FB4, 0x2D),
+    (0x9FEC, 0x3E),
+    (0xA031, 0x3C),
+];
+const FACILITY_INITIALIZER: [u8; 31] = [
+    0xA9, 0x00, 0x8D, 0xDC, 0x77, 0x8D, 0xF0, 0x77, 0xAE, 0xD0, 0x77, 0xBD, 0xEB, 0x99, 0x8D, 0xF1,
+    0x77, 0xA9, 0xB1, 0x8D, 0xF4, 0x77, 0xA9, 0x01, 0x8D, 0xF7, 0x77, 0xEE, 0xDB, 0x05, 0x60,
+];
+const FACILITY_INITIAL_RECORDS: [u8; 6] = [0x00, 0x00, 0x07, 0x0E, 0x29, 0x47];
+const FACILITY_DIALOGUE_ADVANCE: [u8; 10] =
+    [0x20, 0x5A, 0x9C, 0x20, 0xBC, 0xA0, 0xEE, 0xDB, 0x05, 0x60];
+const FACILITY_ACTION_MENU_ENTRY: [u8; 14] = [
+    0x20, 0x5A, 0x9C, 0x20, 0x5C, 0xE6, 0xEE, 0xDB, 0x05, 0xA9, 0x1D, 0x4C, 0x90, 0xE6,
+];
+const FACILITY_EXIT: [u8; 27] = [
+    0xAE, 0xD0, 0x77, 0xBD, 0xB0, 0xA0, 0x8D, 0xF1, 0x77, 0xBD, 0xB6, 0xA0, 0x8D, 0xDB, 0x05, 0xA2,
+    0x19, 0xAD, 0xDC, 0x77, 0xD0, 0x02, 0xA2, 0x0E, 0x86, 0x26, 0x60,
+];
+const FACILITY_EXIT_RECORDS: [u8; 6] = [0x06, 0x06, 0x0D, 0x06, 0x06, 0x4D];
+const FACILITY_EXIT_STATES: [u8; 6] = [0x00, 0x08, 0x08, 0x00, 0x10, 0x08];
+
+const OVERFLOW_DISPATCH_CALL: u16 = 0xB110;
+const OVERFLOW_STATE_MACHINE_START: u16 = 0xB10D;
+const OVERFLOW_STATE_MACHINE_END: u16 = 0xB2A8;
+const OVERFLOW_HANDLER_TARGETS: [u16; 9] = [
+    0xB125, 0xA13E, 0xB17A, 0xB182, 0xB19C, 0xA13E, 0xB1F7, 0xB210, 0xA122,
+];
+const OVERFLOW_IMMEDIATE_RECORD_WRITES: [(u16, u8); 5] = [
+    (0xB140, 0x40),
+    (0xB1AB, 0x41),
+    (0xB1BE, 0x42),
+    (0xB1E9, 0x43),
+    (0xB259, 0x45),
+];
+const OVERFLOW_HELD_ITEM_DISCARD: [u8; 9] = [0xA9, 0x00, 0x8D, 0xB1, 0x77, 0xA9, 0x46, 0xD0, 0x31];
+const OVERFLOW_ACTION_MENU_ENTRY: [u8; 8] = [0xEE, 0xDB, 0x05, 0xA9, 0x23, 0x4C, 0x90, 0xE6];
+
+pub(super) struct StorageSourceBinding {
+    pub(super) facility_root_record_indices: BTreeSet<usize>,
+    pub(super) overflow_root_record_indices: BTreeSet<usize>,
+    pub(super) facility_overlay_root_record_index: usize,
+    pub(super) overflow_overlay_root_record_index: usize,
+    pub(super) source_dispatch_count: usize,
+    pub(super) source_direct_record_store_count: usize,
+    pub(super) source_binding_sha1: String,
+}
+
+pub(super) fn bind_storage_dialogue_sources(source: &Rom) -> Result<StorageSourceBinding> {
+    source.verify_supported_japanese()?;
+
+    let dispatches = bind_caller_handoff_state_dispatch_sources(source)?;
+    bind_dispatch(
+        &dispatches,
+        FACILITY_DISPATCH_CALL,
+        &FACILITY_HANDLER_TARGETS,
+        "storage facility",
+    )?;
+    bind_dispatch(
+        &dispatches,
+        OVERFLOW_DISPATCH_CALL,
+        &OVERFLOW_HANDLER_TARGETS,
+        "storage overflow",
+    )?;
+
+    let map_facilities = bind_map_facility_dispatch_source(source)?;
+    ensure!(
+        map_facilities
+            .produced_selectors()
+            .contains(&STORAGE_FACILITY_INDEX),
+        "map facility source no longer produces the storage facility index"
+    );
+
+    bind_exact_code(
+        source,
+        0x99CC,
+        &FACILITY_INITIALIZER,
+        "storage facility dialogue initializer",
+    )?;
+    bind_exact_bytes(
+        source,
+        0x99EB,
+        &FACILITY_INITIAL_RECORDS,
+        "storage facility initial record table",
+    )?;
+    bind_exact_code(
+        source,
+        0x99F1,
+        &FACILITY_DIALOGUE_ADVANCE,
+        "storage facility dialogue advance",
+    )?;
+    bind_exact_code(
+        source,
+        0x9E07,
+        &FACILITY_ACTION_MENU_ENTRY,
+        "storage facility action-menu entry",
+    )?;
+    bind_exact_code(
+        source,
+        0xA095,
+        &FACILITY_EXIT,
+        "storage facility exit selector",
+    )?;
+    bind_exact_bytes(
+        source,
+        0xA0B0,
+        &FACILITY_EXIT_RECORDS,
+        "storage facility exit record table",
+    )?;
+    bind_exact_bytes(
+        source,
+        0xA0B6,
+        &FACILITY_EXIT_STATES,
+        "storage facility exit state table",
+    )?;
+    ensure!(
+        FACILITY_INITIAL_RECORDS[usize::from(STORAGE_FACILITY_INDEX)] == 0x29
+            && FACILITY_EXIT_RECORDS[usize::from(STORAGE_FACILITY_INDEX)] == 0x06
+            && FACILITY_EXIT_STATES[usize::from(STORAGE_FACILITY_INDEX)] == 0x10,
+        "storage facility index no longer selects its entry dialogue and return state"
+    );
+
+    let facility_region = source_region(
+        source,
+        FACILITY_STATE_MACHINE_START,
+        FACILITY_STATE_MACHINE_END,
+    )?;
+    let facility_immediate = scan_immediate_record_writes(
+        facility_region,
+        FACILITY_STATE_MACHINE_START,
+        DIALOGUE_RECORD_ADDRESS,
+    )?;
+    ensure!(
+        facility_immediate == FACILITY_IMMEDIATE_RECORD_WRITES.into_iter().collect(),
+        "storage facility immediate dialogue-record writers changed: {facility_immediate:04X?}"
+    );
+    bind_direct_store_denominator(
+        facility_region,
+        FACILITY_STATE_MACHINE_START,
+        &FACILITY_IMMEDIATE_RECORD_WRITES,
+        &[0xA09B],
+        "storage facility",
+    )?;
+
+    let overflow_region = source_region(
+        source,
+        OVERFLOW_STATE_MACHINE_START,
+        OVERFLOW_STATE_MACHINE_END,
+    )?;
+    let overflow_immediate = scan_immediate_record_writes(
+        overflow_region,
+        OVERFLOW_STATE_MACHINE_START,
+        DIALOGUE_RECORD_ADDRESS,
+    )?;
+    ensure!(
+        overflow_immediate == OVERFLOW_IMMEDIATE_RECORD_WRITES.into_iter().collect(),
+        "storage overflow immediate dialogue-record writers changed: {overflow_immediate:04X?}"
+    );
+    bind_direct_store_denominator(
+        overflow_region,
+        OVERFLOW_STATE_MACHINE_START,
+        &OVERFLOW_IMMEDIATE_RECORD_WRITES,
+        &[],
+        "storage overflow",
+    )?;
+    bind_exact_code(
+        source,
+        0xB17A,
+        &OVERFLOW_ACTION_MENU_ENTRY,
+        "storage overflow action-menu entry",
+    )?;
+    bind_exact_code(
+        source,
+        0xB221,
+        &OVERFLOW_HELD_ITEM_DISCARD,
+        "storage overflow held-item discard branch",
+    )?;
+    let branch_target = 0xB221u16
+        .checked_add(OVERFLOW_HELD_ITEM_DISCARD.len() as u16)
+        .and_then(|next| next.checked_add(u16::from(OVERFLOW_HELD_ITEM_DISCARD[8])))
+        .context("storage overflow discard branch target overflow")?;
+    ensure!(
+        branch_target == 0xB25B,
+        "storage overflow record 0x46 no longer joins the common record store"
+    );
+
+    let mut facility_root_record_indices = FACILITY_IMMEDIATE_RECORD_WRITES
+        .iter()
+        .map(|(_, record)| usize::from(*record))
+        .collect::<BTreeSet<_>>();
+    facility_root_record_indices.insert(usize::from(
+        FACILITY_INITIAL_RECORDS[usize::from(STORAGE_FACILITY_INDEX)],
+    ));
+    facility_root_record_indices.insert(usize::from(
+        FACILITY_EXIT_RECORDS[usize::from(STORAGE_FACILITY_INDEX)],
+    ));
+    ensure!(
+        facility_root_record_indices
+            == BTreeSet::from([6, 41, 42, 43, 44, 45, 46, 59, 60, 61, 62, 63]),
+        "storage facility dialogue root population changed"
+    );
+
+    let mut overflow_root_record_indices = OVERFLOW_IMMEDIATE_RECORD_WRITES
+        .iter()
+        .map(|(_, record)| usize::from(*record))
+        .collect::<BTreeSet<_>>();
+    overflow_root_record_indices.insert(usize::from(OVERFLOW_HELD_ITEM_DISCARD[6]));
+    ensure!(
+        overflow_root_record_indices == BTreeSet::from([64, 65, 66, 67, 69, 70]),
+        "storage overflow dialogue root population changed"
+    );
+
+    let mut identity = Vec::new();
+    identity.extend_from_slice(&FACILITY_INITIALIZER);
+    identity.extend_from_slice(&FACILITY_INITIAL_RECORDS);
+    identity.extend_from_slice(facility_region);
+    identity.extend_from_slice(overflow_region);
+
+    Ok(StorageSourceBinding {
+        facility_root_record_indices,
+        overflow_root_record_indices,
+        facility_overlay_root_record_index: usize::from(
+            FACILITY_INITIAL_RECORDS[usize::from(STORAGE_FACILITY_INDEX)],
+        ),
+        overflow_overlay_root_record_index: 0x40,
+        source_dispatch_count: 2,
+        source_direct_record_store_count: FACILITY_IMMEDIATE_RECORD_WRITES.len()
+            + 1
+            + OVERFLOW_IMMEDIATE_RECORD_WRITES.len(),
+        source_binding_sha1: sha1_hex(&identity),
+    })
+}
+
+fn bind_dispatch(
+    dispatches: &[crate::dialogue_inventory::CallerHandoffStateDispatchSource],
+    call_address: u16,
+    expected_targets: &[u16],
+    role: &str,
+) -> Result<()> {
+    let dispatch = dispatches
+        .iter()
+        .find(|dispatch| {
+            dispatch.prg_bank() == SOURCE_BANK && dispatch.call_address() == call_address
+        })
+        .with_context(|| format!("{role} caller-handoff dispatch is absent"))?;
+    ensure!(
+        dispatch.selector_address() == CALLER_STATE_ADDRESS
+            && dispatch.selector_domain()
+                == &(0..expected_targets.len() as u8).collect::<BTreeSet<_>>()
+            && dispatch
+                .selector_domain()
+                .iter()
+                .all(|selector| dispatch.handler_target(*selector)
+                    == Some(expected_targets[usize::from(*selector)])),
+        "{role} caller-handoff state domain changed"
+    );
+    Ok(())
+}
+
+fn bind_direct_store_denominator(
+    region: &[u8],
+    origin: u16,
+    immediate_writes: &[(u16, u8)],
+    additional_stores: &[u16],
+    role: &str,
+) -> Result<()> {
+    let actual = region
+        .windows(3)
+        .enumerate()
+        .filter(|(_, window)| *window == [0x8D, 0xF1, 0x77])
+        .map(|(offset, _)| origin + offset as u16)
+        .collect::<BTreeSet<_>>();
+    let expected = immediate_writes
+        .iter()
+        .map(|(address, _)| address + 2)
+        .chain(additional_stores.iter().copied())
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        actual == expected,
+        "{role} direct dialogue-record store denominator changed: {actual:04X?}"
+    );
+    Ok(())
+}
+
+fn scan_immediate_record_writes(
+    region: &[u8],
+    origin: u16,
+    target_address: u16,
+) -> Result<BTreeMap<u16, u8>> {
+    let [target_low, target_high] = target_address.to_le_bytes();
+    let mut writes = BTreeMap::new();
+    for (offset, window) in region.windows(5).enumerate() {
+        if window[0] != 0xA9 || window[2..] != [0x8D, target_low, target_high] {
+            continue;
+        }
+        let address = origin
+            .checked_add(offset as u16)
+            .context("immediate dialogue-record writer address overflow")?;
+        decode_rp2a03_sequence(window, address, "immediate dialogue-record writer")?;
+        ensure!(
+            writes.insert(address, window[1]).is_none(),
+            "duplicate immediate dialogue-record writer at ${address:04X}"
+        );
+    }
+    Ok(writes)
+}
+
+fn bind_exact_code(source: &Rom, address: u16, expected: &[u8], role: &str) -> Result<()> {
+    bind_exact_bytes(source, address, expected, role)?;
+    decode_rp2a03_sequence(expected, address, role)?;
+    Ok(())
+}
+
+fn bind_exact_bytes(source: &Rom, address: u16, expected: &[u8], role: &str) -> Result<()> {
+    ensure!(
+        source_bytes(source, address, expected.len())? == expected,
+        "{role} changed at bank {SOURCE_BANK:02X}:${address:04X}"
+    );
+    Ok(())
+}
+
+fn source_region(source: &Rom, start: u16, end: u16) -> Result<&[u8]> {
+    ensure!(start < end, "source region is empty or reversed");
+    source_bytes(source, start, usize::from(end - start))
+}
+
+fn source_bytes(source: &Rom, address: u16, byte_count: usize) -> Result<&[u8]> {
+    let offset = switchable_cpu_to_file_offset(SOURCE_BANK, address)?;
+    source
+        .data()
+        .get(offset..offset + byte_count)
+        .with_context(|| format!("bank {SOURCE_BANK:02X}:${address:04X} is outside the ROM"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn immediate_record_writer_scan_rejects_an_added_route() {
+        let mut region = vec![0xEA; 16];
+        region[2..7].copy_from_slice(&[0xA9, 0x29, 0x8D, 0xF1, 0x77]);
+        region[9..14].copy_from_slice(&[0xA9, 0x2A, 0x8D, 0xF1, 0x77]);
+
+        let writes = scan_immediate_record_writes(&region, 0x9000, 0x77F1).unwrap();
+
+        assert_eq!(writes, BTreeMap::from([(0x9002, 0x29), (0x9009, 0x2A)]));
+        assert_ne!(writes, BTreeMap::from([(0x9002, 0x29)]));
+    }
+
+    #[test]
+    fn direct_store_denominator_includes_table_driven_store() {
+        let region = [
+            0xA9, 0x29, 0x8D, 0xF1, 0x77, 0xBD, 0x00, 0x90, 0x8D, 0xF1, 0x77,
+        ];
+
+        bind_direct_store_denominator(
+            &region,
+            0x9000,
+            &[(0x9000, 0x29)],
+            &[0x9008],
+            "synthetic storage",
+        )
+        .unwrap();
+    }
+}

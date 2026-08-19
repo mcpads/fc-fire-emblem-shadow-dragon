@@ -68,6 +68,7 @@ mod runtime_material;
 mod runtime_nmi_contract;
 mod runtime_state_storage;
 mod screen_font_residency;
+mod storage_residency;
 mod transition_residency;
 
 use chapter_intro_residency::plan_chapter_intro_residency;
@@ -128,6 +129,7 @@ use screen_font_residency::{
     DialogueSurfaceInputs, ScreenFontResidencyInputs, ScreenFontResidencyPlan,
     finalize_screen_font_residency, plan_screen_font_residency,
 };
+use storage_residency::{StorageDialogueResidencyPlan, plan_storage_dialogue_residency};
 use transition_residency::{bind_transition_lifetime_worksets, plan_transition_residency};
 
 /// 대사 런타임 재료 용기가 시작하는 MMC3 8 KiB 페이지다.
@@ -183,7 +185,7 @@ pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) output_will_be_emitted: bool,
 }
 
-pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 30;
+pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 31;
 
 pub(crate) struct FullTranslationInstallSummary {
     pub(crate) report_sha1: String,
@@ -378,6 +380,13 @@ pub(crate) fn plan_full_translation_installation(
         options_glyph_codes: &options_glyph_codes,
         transitions: &transitions,
     })?;
+    let storage_dialogue_residency = plan_storage_dialogue_residency(
+        &rom,
+        &dialogue_graph,
+        &display,
+        &fixed_menu_labels,
+        &choice_residency.augmented_worksets,
+    )?;
     let chapter_save_projection = plan_chapter_save_projection(ChapterSaveProjectionInputs {
         candidate: &current_candidate,
         choices: &choices,
@@ -426,7 +435,7 @@ pub(crate) fn plan_full_translation_installation(
         &display,
         &screen_font_residency_draft,
         front_end_result_menu_residency,
-        &choice_residency.augmented_worksets,
+        &storage_dialogue_residency.augmented_worksets,
     )?;
     let transition_residency = plan_transition_residency(
         &display,
@@ -440,6 +449,7 @@ pub(crate) fn plan_full_translation_installation(
             dynamic_inputs: &dynamic_inputs.augmented_worksets,
             chapter_intro: &chapter_intro_residency.augmented_worksets,
             choice_and_front_end_menu: &choice_residency.augmented_worksets,
+            storage_dialogue: &storage_dialogue_residency.augmented_worksets,
             front_end_result: &front_end_result_residency.augmented_worksets,
             transition_lifetime: &transition_residency.augmented_worksets,
             codebook: &codebook,
@@ -457,6 +467,7 @@ pub(crate) fn plan_full_translation_installation(
         unit_ui: &unit_ui,
         item_actions: &item_actions,
         fixed_menu_labels: &fixed_menu_labels,
+        storage_dialogue_residency: &storage_dialogue_residency,
         map_menu: &map_menu,
         consumer_codebook: &consumer_codebook,
         consumer_catalog: &consumer_catalog,
@@ -954,6 +965,7 @@ pub(crate) fn plan_full_translation_installation(
         dialogue_codebook: dialogue_codebook_report,
         chapter_intro_residency: chapter_intro_residency_report,
         choice_residency,
+        storage_dialogue_residency,
         screen_font_residency,
         front_end_result_residency,
         chapter_save_projection,

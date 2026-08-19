@@ -432,7 +432,7 @@ fn unit_status_retains_the_page_published_by_unit_summary() {
 }
 
 #[test]
-fn fixed_menu_appender_selects_the_static_page_and_preserves_the_label_index() {
+fn static_fixed_menu_appender_selects_its_page_without_shadowing_storage_dialogue() {
     let pages = pages();
     let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
     let wrapper_origin = ORIGIN + u16::try_from(activation.bytes.len()).unwrap();
@@ -453,20 +453,24 @@ fn fixed_menu_appender_selects_the_static_page_and_preserves_the_label_index() {
     assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], pages.unit_command);
 
     let hooks = fixed_menu_font_page_hooks(wrapper.address).unwrap();
-    assert_eq!(hooks.len(), FIXED_MENU_FONT_PAGE_CALLS.len());
+    let hooked_sites = hooks
+        .iter()
+        .map(|hook| match hook.site {
+            DialogueRuntimeHookSite::Switchable { bank, address } => (bank, address),
+            DialogueRuntimeHookSite::Fixed(_) => panic!("fixed-menu hook became fixed"),
+        })
+        .collect::<Vec<_>>();
     assert_eq!(
-        hooks
-            .iter()
-            .map(|hook| match hook.site {
-                DialogueRuntimeHookSite::Switchable { bank, address } => (bank, address),
-                DialogueRuntimeHookSite::Fixed(_) => panic!("fixed-menu hook became fixed"),
-            })
-            .collect::<Vec<_>>(),
-        FIXED_MENU_FONT_PAGE_CALLS
-            .iter()
-            .map(|(address, _, _, _)| (UNIT_UI_BANK, *address))
-            .collect::<Vec<_>>()
+        hooked_sites,
+        [
+            (UNIT_UI_BANK, 0x8A3C),
+            (UNIT_UI_BANK, 0x8A6D),
+            (UNIT_UI_BANK, 0x8A7A),
+            (UNIT_UI_BANK, 0x8E31),
+        ]
     );
+    assert!(!hooked_sites.contains(&(UNIT_UI_BANK, 0x8B1D)));
+    assert!(!hooked_sites.contains(&(UNIT_UI_BANK, 0x8DA8)));
     assert!(hooks.iter().all(|hook| hook.bytes[0] == 0x20));
 }
 

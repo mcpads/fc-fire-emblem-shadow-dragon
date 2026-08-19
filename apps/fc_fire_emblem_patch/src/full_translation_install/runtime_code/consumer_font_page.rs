@@ -79,45 +79,45 @@ const GAMEPLAY_HANDOFF_HOOK_ADDRESS: u16 = 0xF304;
 const GAMEPLAY_PHASE_LOW: u8 = 0x23;
 const GAMEPLAY_PHASE_HIGH: u8 = 0x24;
 
-/// Each site is the first fixed-menu label append on its execution path.  The speed selector has
-/// two mutually exclusive paths, so both calls are hooked.  The storage screens append their
-/// remaining labels linearly after the listed call and retain the selected page for the screen
-/// lifetime.
-const FIXED_MENU_FONT_PAGE_CALLS: [(u16, u8, DialogueRuntimeHookRole, &'static str); 6] = [
+/// Each site is the first fixed-menu label append on its execution path. The optional hook role
+/// distinguishes a standalone fixed-label screen from a label drawn over live main dialogue.
+/// Storage action and overflow labels must retain the dialogue route selected for the underlying
+/// record, while the storage-capacity notice is a standalone fixed-label screen.
+const FIXED_MENU_FONT_PAGE_CALLS: [(u16, u8, Option<DialogueRuntimeHookRole>, &'static str); 6] = [
     (
         0x8A3C,
         0x2C,
-        DialogueRuntimeHookRole::FixedMenuUnitSelectionAppender,
+        Some(DialogueRuntimeHookRole::FixedMenuUnitSelectionAppender),
         "unit-selection fixed-menu font-page hook",
     ),
     (
         0x8A6D,
         0x30,
-        DialogueRuntimeHookRole::FixedMenuFastSpeedAppender,
+        Some(DialogueRuntimeHookRole::FixedMenuFastSpeedAppender),
         "fast-speed fixed-menu font-page hook",
     ),
     (
         0x8A7A,
         0x31,
-        DialogueRuntimeHookRole::FixedMenuSlowSpeedAppender,
+        Some(DialogueRuntimeHookRole::FixedMenuSlowSpeedAppender),
         "slow-speed fixed-menu font-page hook",
     ),
     (
         0x8B1D,
         0x35,
-        DialogueRuntimeHookRole::FixedMenuStorageActionAppender,
+        None,
         "storage-action fixed-menu font-page hook",
     ),
     (
         0x8DA8,
         0x35,
-        DialogueRuntimeHookRole::FixedMenuStorageOverflowAppender,
+        None,
         "storage-overflow fixed-menu font-page hook",
     ),
     (
         0x8E31,
         0x47,
-        DialogueRuntimeHookRole::FixedMenuStorageCapacityAppender,
+        Some(DialogueRuntimeHookRole::FixedMenuStorageCapacityAppender),
         "storage-capacity fixed-menu font-page hook",
     ),
 ];
