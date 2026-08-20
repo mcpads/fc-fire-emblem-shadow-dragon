@@ -2,7 +2,10 @@
 
 use anyhow::{Context, Result, bail, ensure};
 
-use super::{COMPOSITE_STATE, MATERIAL_ROUTE_CATALOG, MATERIAL_ROUTE_DIALOGUE};
+use super::{
+    COMPOSITE_STATE, KIND_CLASS, KIND_ITEM, KIND_SHOP_ITEM_LIST, KIND_UNIT_OR_ENEMY,
+    MATERIAL_ROUTE_CATALOG, MATERIAL_ROUTE_DIALOGUE,
+};
 use crate::full_translation_install::{
     runtime_code::RuntimeRoutine, shop_item_residency::ShopItemResidencyRuntimeContract,
     storage_residency::StorageItemListRuntimeRoute,
@@ -277,4 +280,130 @@ pub(in crate::full_translation_install::runtime_code) fn verify_storage_item_res
         );
     }
     Ok(())
+}
+
+pub(super) fn verify_item_font_page_routes(
+    routine: &RuntimeRoutine,
+    font_page_activation: u16,
+    catalog_default_route: u8,
+) -> Result<()> {
+    for (kind, material_route, expected) in [
+        (
+            KIND_ITEM,
+            MATERIAL_ROUTE_CATALOG,
+            Some(catalog_default_route),
+        ),
+        (
+            KIND_SHOP_ITEM_LIST,
+            MATERIAL_ROUTE_CATALOG,
+            Some(catalog_default_route),
+        ),
+        (KIND_ITEM, MATERIAL_ROUTE_DIALOGUE, None),
+        (KIND_SHOP_ITEM_LIST, MATERIAL_ROUTE_DIALOGUE, None),
+        (KIND_UNIT_OR_ENEMY, MATERIAL_ROUTE_CATALOG, None),
+        (KIND_CLASS, MATERIAL_ROUTE_CATALOG, None),
+    ] {
+        ensure!(
+            observe_item_font_page_activation(routine, font_page_activation, kind, material_route,)?
+                == expected,
+            "consumer kind {kind} material route {material_route} selected the wrong font page"
+        );
+    }
+    Ok(())
+}
+
+fn observe_item_font_page_activation(
+    routine: &RuntimeRoutine,
+    font_page_activation: u16,
+    kind: u8,
+    material_route: u8,
+) -> Result<Option<u8>> {
+    let predicate = [0xA5, 0x05, 0xC9, KIND_ITEM];
+    let offsets = routine
+        .bytes
+        .windows(predicate.len())
+        .enumerate()
+        .filter_map(|(offset, bytes)| (bytes == predicate).then_some(offset))
+        .collect::<Vec<_>>();
+    ensure!(
+        offsets.len() == 1,
+        "consumer catalog emitted {} item font-page selectors",
+        offsets.len()
+    );
+
+    let mut memory = Box::new([0_u8; 0x10000]);
+    let start = usize::from(routine.address);
+    let end = start
+        .checked_add(routine.bytes.len())
+        .context("consumer catalog routine range overflow")?;
+    memory[start..end].copy_from_slice(&routine.bytes);
+    memory[0x05] = kind;
+    memory[0x03] = material_route;
+
+    let mut pc = routine.address
+        + u16::try_from(offsets[0]).context("item font selector offset exceeds u16")?;
+    let mut a = 0_u8;
+    let mut zero = false;
+    let mut activated = None;
+    for _ in 0..32 {
+        let opcode = memory[usize::from(pc)];
+        pc = pc.wrapping_add(1);
+        match opcode {
+            0x20 => {
+                let low = memory[usize::from(pc)];
+                let high = memory[usize::from(pc.wrapping_add(1))];
+                pc = pc.wrapping_add(2);
+                let target = u16::from_le_bytes([low, high]);
+                ensure!(
+                    target == font_page_activation,
+                    "item font route called unexpected subroutine {target:04X}"
+                );
+                activated = Some(a);
+            }
+            0x4C => {
+                let low = memory[usize::from(pc)];
+                let high = memory[usize::from(pc.wrapping_add(1))];
+                pc = u16::from_le_bytes([low, high]);
+            }
+            0xA0 => {
+                ensure!(
+                    memory[usize::from(pc)] == 0,
+                    "item font route did not rejoin at the material copy boundary"
+                );
+                return Ok(activated);
+            }
+            0xA5 => {
+                let address = memory[usize::from(pc)];
+                pc = pc.wrapping_add(1);
+                a = memory[usize::from(address)];
+                zero = a == 0;
+            }
+            0xA9 => {
+                a = memory[usize::from(pc)];
+                pc = pc.wrapping_add(1);
+                zero = a == 0;
+            }
+            0xC9 => {
+                let value = memory[usize::from(pc)];
+                pc = pc.wrapping_add(1);
+                zero = a == value;
+            }
+            0xD0 => {
+                let displacement = memory[usize::from(pc)] as i8;
+                pc = pc.wrapping_add(1);
+                if !zero {
+                    pc = pc.wrapping_add_signed(i16::from(displacement));
+                }
+            }
+            0xF0 => {
+                let displacement = memory[usize::from(pc)] as i8;
+                pc = pc.wrapping_add(1);
+                if zero {
+                    pc = pc.wrapping_add_signed(i16::from(displacement));
+                }
+            }
+            other => bail!("item font route reached unsupported opcode {other:02X}"),
+        }
+    }
+    bail!("item font route did not reach the material copy boundary")
 }

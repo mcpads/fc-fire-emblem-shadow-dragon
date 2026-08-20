@@ -33,10 +33,19 @@ pub(in crate::full_translation_install) const UNIT_COMMAND_COMPOSITE_STATE: u8 =
 pub(in crate::full_translation_install) const ATTACK_WEAPON_SELECTION_COMPOSITE_STATE: u8 = 0x06;
 pub(in crate::full_translation_install) const UNIT_ITEM_LIST_COMPOSITE_STATE: u8 = 0x07;
 pub(in crate::full_translation_install) const ITEM_ACTION_COMPOSITE_STATE: u8 = 0x09;
+pub(in crate::full_translation_install) const UNIT_ACTION_ITEM_COMPOSITE_STATE: u8 = 0x0A;
 pub(in crate::full_translation_install) const UNIT_STATUS_COMPOSITE_STATE: u8 = 0x0F;
 pub(in crate::full_translation_install) const MAP_FUNDS_COMPOSITE_STATE: u8 = 0x13;
 pub(in crate::full_translation_install) const MAP_SUMMARY_COMPOSITE_STATE: u8 = 0x14;
 pub(in crate::full_translation_install) const CHAPTER_SAVE_OFFER_COMPOSITE_STATE: u8 = 0x1C;
+pub(in crate::full_translation_install) const ITEM_USE_RESULT_COMPOSITE_STATE: u8 = 0x1E;
+pub(in crate::full_translation_install) const STORAGE_ITEM_DETAIL_COMPOSITE_STATE: u8 = 0x24;
+pub(in crate::full_translation_install) const ITEM_NAME_APPENDER_PUBLISHED_COMPOSITE_STATES: [u8;
+    3] = [
+    UNIT_ACTION_ITEM_COMPOSITE_STATE,
+    ITEM_USE_RESULT_COMPOSITE_STATE,
+    STORAGE_ITEM_DETAIL_COMPOSITE_STATE,
+];
 
 const DIRECT_COMPOSITE_STATE_START: u8 = 0x02;
 const DIRECT_COMPOSITE_STATE_END_INCLUSIVE: u8 = 0x26;
@@ -81,6 +90,7 @@ impl DelegatedFontPageOwner {
 pub(in crate::full_translation_install) enum ScreenFontResidencyPolicy {
     Static(ScreenFontPageRole),
     StorageDialogueOrStatic(ScreenFontPageRole),
+    ItemNamePublishedByAppender,
     UnitOrEnemyNamePublishedByAppender,
     UnitOrEnemyNameRetainedFromSummary,
     CompletedDialoguePageRetained,
@@ -98,7 +108,7 @@ pub(in crate::full_translation_install) enum ScreenFontResidencyPolicy {
 /// The runtime emitter consumes this prefix in its historical order. Keeping
 /// that order avoids changing branch layout merely because the coverage table
 /// now also names states with no central override.
-const CENTRAL_OVERRIDE_POLICIES: &[(u8, ScreenFontResidencyPolicy)] = &[
+const NON_DELEGATED_POLICIES: &[(u8, ScreenFontResidencyPolicy)] = &[
     (
         MAP_MENU_COMPOSITE_STATE,
         ScreenFontResidencyPolicy::Static(ScreenFontPageRole::MapMenu),
@@ -175,6 +185,18 @@ const CENTRAL_OVERRIDE_POLICIES: &[(u8, ScreenFontResidencyPolicy)] = &[
         SOURCE_PAGE_COMPOSITE_STATES[1],
         ScreenFontResidencyPolicy::SourcePageSelected,
     ),
+    (
+        ITEM_NAME_APPENDER_PUBLISHED_COMPOSITE_STATES[0],
+        ScreenFontResidencyPolicy::ItemNamePublishedByAppender,
+    ),
+    (
+        ITEM_NAME_APPENDER_PUBLISHED_COMPOSITE_STATES[1],
+        ScreenFontResidencyPolicy::ItemNamePublishedByAppender,
+    ),
+    (
+        ITEM_NAME_APPENDER_PUBLISHED_COMPOSITE_STATES[2],
+        ScreenFontResidencyPolicy::ItemNamePublishedByAppender,
+    ),
 ];
 
 const DELEGATED_POLICIES: &[(u8, DelegatedFontPageOwner)] = &[
@@ -227,16 +249,16 @@ const fn build_direct_state_policies()
         ScreenFontResidencyPolicy::UnresolvedPageOwner,
     ); DIRECT_COMPOSITE_STATE_COUNT];
     let mut policy_index = 0;
-    while policy_index < CENTRAL_OVERRIDE_POLICIES.len() {
-        policies[policy_index] = CENTRAL_OVERRIDE_POLICIES[policy_index];
+    while policy_index < NON_DELEGATED_POLICIES.len() {
+        policies[policy_index] = NON_DELEGATED_POLICIES[policy_index];
         policy_index += 1;
     }
     let mut state = DIRECT_COMPOSITE_STATE_START;
     while state <= DIRECT_COMPOSITE_STATE_END_INCLUSIVE {
         let mut override_index = 0;
         let mut has_central_override = false;
-        while override_index < CENTRAL_OVERRIDE_POLICIES.len() {
-            if CENTRAL_OVERRIDE_POLICIES[override_index].0 == state {
+        while override_index < NON_DELEGATED_POLICIES.len() {
+            if NON_DELEGATED_POLICIES[override_index].0 == state {
                 has_central_override = true;
             }
             override_index += 1;
@@ -281,7 +303,8 @@ impl ScreenFontResidencyPolicy {
     pub(in crate::full_translation_install) fn static_page(self) -> Option<ScreenFontPageRole> {
         match self {
             Self::Static(page) | Self::StorageDialogueOrStatic(page) => Some(page),
-            Self::UnitOrEnemyNamePublishedByAppender
+            Self::ItemNamePublishedByAppender
+            | Self::UnitOrEnemyNamePublishedByAppender
             | Self::UnitOrEnemyNameRetainedFromSummary
             | Self::CompletedDialoguePageRetained
             | Self::ActiveDialogueCallerRestored
@@ -346,6 +369,17 @@ pub(super) fn validate_composite_state_policies() -> Result<()> {
                 ScreenFontPageRole::CatalogDefault,
             )),
         "item-list font residency no longer distinguishes the storage dialogue lifetime from the standalone catalog page"
+    );
+    ensure!(
+        COMPOSITE_FONT_RESIDENCY_POLICIES
+            .iter()
+            .filter_map(|(state, policy)| {
+                (*policy == ScreenFontResidencyPolicy::ItemNamePublishedByAppender)
+                    .then_some(*state)
+            })
+            .collect::<Vec<_>>()
+            == ITEM_NAME_APPENDER_PUBLISHED_COMPOSITE_STATES,
+        "item-name appender composite state ownership changed"
     );
     ensure!(
         composite_font_residency_policy(UNIT_SUMMARY_COMPOSITE_STATE)

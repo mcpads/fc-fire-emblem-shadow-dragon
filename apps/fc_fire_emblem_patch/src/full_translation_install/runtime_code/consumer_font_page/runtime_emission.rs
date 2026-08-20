@@ -226,10 +226,10 @@ pub(in crate::full_translation_install::runtime_code) fn build_composite_font_pa
         instructions.push(Instruction::BeqAbsolute(origin));
         route_jumps.push((jump, page));
     }
-    // Unit summary, unit status, and auxiliary composers share the default retain path.  The
-    // source-bound summary composer always reaches its name appender before writing the selected
-    // name, and that appender publishes the exact unit/enemy catalog page for status to inherit.
-    // Clearing here is therefore both redundant and a transient source-page selection.
+    // Upstream-published item/name states and auxiliary composers share the default retain path.
+    // Their source-bound appenders publish the exact catalog page only when they emit the dynamic
+    // name; unit status then inherits the unit-summary page. Clearing here would be both redundant
+    // and a transient source-page selection.
     instructions.push(Instruction::CmpImmediate(
         STORAGE_ACTION_MENU_COMPOSITE_STATE,
     ));

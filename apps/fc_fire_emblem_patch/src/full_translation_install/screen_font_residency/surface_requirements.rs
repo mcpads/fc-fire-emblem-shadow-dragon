@@ -15,8 +15,10 @@ use crate::{
 
 use super::{
     ATTACK_WEAPON_SELECTION_COMPOSITE_STATE, COMPOSITE_FONT_RESIDENCY_POLICIES,
-    ITEM_ACTION_COMPOSITE_STATE, ScreenFontPageRole, ScreenFontResidencyPolicy,
-    UNIT_ITEM_LIST_COMPOSITE_STATE, UNIT_STATUS_COMPOSITE_STATE, UNIT_SUMMARY_COMPOSITE_STATE,
+    ITEM_ACTION_COMPOSITE_STATE, ITEM_NAME_APPENDER_PUBLISHED_COMPOSITE_STATES,
+    ITEM_USE_RESULT_COMPOSITE_STATE, STORAGE_ITEM_DETAIL_COMPOSITE_STATE, ScreenFontPageRole,
+    ScreenFontResidencyPolicy, UNIT_ACTION_ITEM_COMPOSITE_STATE, UNIT_ITEM_LIST_COMPOSITE_STATE,
+    UNIT_STATUS_COMPOSITE_STATE, UNIT_SUMMARY_COMPOSITE_STATE,
 };
 use crate::full_translation_install::{
     consumer_catalog::{ConsumerCatalogPage, ConsumerCatalogPlan},
@@ -99,6 +101,24 @@ const CATALOG_SCREEN_REQUIREMENTS: &[CatalogScreenRequirement] = &[
         screen_role: "item_action_menu",
         page_selection: CatalogPageSelection::DefaultCatalog,
         surfaces: &[CatalogSurface::ItemNames, CatalogSurface::ItemActionLabels],
+    },
+    CatalogScreenRequirement {
+        state: UNIT_ACTION_ITEM_COMPOSITE_STATE,
+        screen_role: "unit_action_item_names",
+        page_selection: CatalogPageSelection::DefaultCatalog,
+        surfaces: &[CatalogSurface::ItemNames],
+    },
+    CatalogScreenRequirement {
+        state: ITEM_USE_RESULT_COMPOSITE_STATE,
+        screen_role: "item_use_result_item_name",
+        page_selection: CatalogPageSelection::DefaultCatalog,
+        surfaces: &[CatalogSurface::ItemNames],
+    },
+    CatalogScreenRequirement {
+        state: STORAGE_ITEM_DETAIL_COMPOSITE_STATE,
+        screen_role: "storage_item_detail_name",
+        page_selection: CatalogPageSelection::DefaultCatalog,
+        surfaces: &[CatalogSurface::ItemNames],
     },
     CatalogScreenRequirement {
         state: UNIT_STATUS_COMPOSITE_STATE,
@@ -280,6 +300,11 @@ fn validate_requirement_policies() -> Result<()> {
                     ScreenFontPageRole::CatalogDefault,
                 )
             }
+            CatalogPageSelection::DefaultCatalog
+                if ITEM_NAME_APPENDER_PUBLISHED_COMPOSITE_STATES.contains(&requirement.state) =>
+            {
+                ScreenFontResidencyPolicy::ItemNamePublishedByAppender
+            }
             CatalogPageSelection::DefaultCatalog => {
                 ScreenFontResidencyPolicy::Static(ScreenFontPageRole::CatalogDefault)
             }
@@ -407,7 +432,19 @@ mod tests {
     #[test]
     fn catalog_screen_requirements_match_the_central_state_policies() {
         validate_requirement_policies().unwrap();
-        assert_eq!(CATALOG_SCREEN_REQUIREMENTS.len(), 6);
+        let published_item_states = CATALOG_SCREEN_REQUIREMENTS
+            .iter()
+            .filter_map(|requirement| {
+                (requirement.page_selection == CatalogPageSelection::DefaultCatalog
+                    && requirement.surfaces == [CatalogSurface::ItemNames]
+                    && ITEM_NAME_APPENDER_PUBLISHED_COMPOSITE_STATES.contains(&requirement.state))
+                .then_some(requirement.state)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            published_item_states,
+            ITEM_NAME_APPENDER_PUBLISHED_COMPOSITE_STATES
+        );
     }
 
     #[test]

@@ -18,6 +18,7 @@ pub(crate) struct PhysicalPrgPage<'a> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ProjectionLedgerCompleteness {
     Complete,
+    #[cfg(test)]
     Incomplete,
 }
 

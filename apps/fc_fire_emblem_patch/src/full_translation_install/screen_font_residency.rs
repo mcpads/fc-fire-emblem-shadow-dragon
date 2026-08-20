@@ -41,9 +41,11 @@ use composite_policies::validate_composite_state_policies;
 pub(in crate::full_translation_install) use composite_policies::{
     ATTACK_WEAPON_SELECTION_COMPOSITE_STATE, CHAPTER_SAVE_OFFER_COMPOSITE_STATE,
     COMPOSITE_FONT_RESIDENCY_POLICIES, DelegatedFontPageOwner, ITEM_ACTION_COMPOSITE_STATE,
-    MAP_FUNDS_COMPOSITE_STATE, MAP_SUMMARY_COMPOSITE_STATE, ScreenFontPageRole,
-    ScreenFontResidencyPolicy, UNIT_ITEM_LIST_COMPOSITE_STATE, UNIT_STATUS_COMPOSITE_STATE,
-    UNIT_SUMMARY_COMPOSITE_STATE, composite_font_residency_policy,
+    ITEM_NAME_APPENDER_PUBLISHED_COMPOSITE_STATES, ITEM_USE_RESULT_COMPOSITE_STATE,
+    MAP_FUNDS_COMPOSITE_STATE, MAP_SUMMARY_COMPOSITE_STATE, STORAGE_ITEM_DETAIL_COMPOSITE_STATE,
+    ScreenFontPageRole, ScreenFontResidencyPolicy, UNIT_ACTION_ITEM_COMPOSITE_STATE,
+    UNIT_ITEM_LIST_COMPOSITE_STATE, UNIT_STATUS_COMPOSITE_STATE, UNIT_SUMMARY_COMPOSITE_STATE,
+    composite_font_residency_policy,
 };
 pub(super) use dialogue_surfaces::DialogueSurfaceInputs;
 use dialogue_surfaces::{DialogueSurfacePlan, plan_dialogue_surfaces};
@@ -163,6 +165,7 @@ pub(super) struct ScreenFontResidencyDraft {
     unresolved_page_owner_state_count: usize,
     static_state_route_count: usize,
     source_page_selected_state_count: usize,
+    item_name_published_state_count: usize,
     unit_or_enemy_name_published_state_count: usize,
     unit_or_enemy_name_retained_state_count: usize,
     completed_dialogue_page_retained_state_count: usize,
@@ -338,8 +341,8 @@ pub(super) fn plan_screen_font_residency(
         .collect::<Vec<_>>();
 
     Ok(ScreenFontResidencyDraft {
-        schema: 11,
-        strategy: "bind every source-produced composite state to one explicit central residency action, a named upstream selector or appender, or an unresolved page owner; publish static pages at entry, explicitly select the source page for the source-bound post-battle result and NEXT STORY screens, retain the source-bound storage dialogue page when its item-list producer reuses state 07, let the unit-summary appender publish its name-dependent page, retain that page explicitly for unit status, delegate record-metadata composites 12/1F/20 to the active main-dialogue runtime selector, retain the options selector across the source-bound 1B-to-19 value-result overlay, and keep every state without an admitted owner visible instead of treating no central write as proof of safe inheritance",
+        schema: 12,
+        strategy: "bind every source-produced composite state to one explicit central residency action, a named upstream selector or appender, or an unresolved page owner; publish static pages at entry, let the shared item appender publish the default catalog page for catalog material while retaining the active dialogue page for dialogue material, explicitly select the source page for the source-bound post-battle result and NEXT STORY screens, retain the source-bound storage dialogue page when its item-list producer reuses state 07, let the unit-summary appender publish its name-dependent page, retain that page explicitly for unit status, delegate record-metadata composites 12/1F/20 to the active main-dialogue runtime selector, retain the options selector across the source-bound 1B-to-19 value-result overlay, and keep every state without an admitted owner visible instead of treating no central write as proof of safe inheritance",
         composite_state_policy_count: COMPOSITE_FONT_RESIDENCY_POLICIES.len(),
         delegated_page_owner_state_count: delegated_page_owners.len(),
         unresolved_page_owner_state_count: unresolved_page_owner_states_hex.len(),
@@ -350,6 +353,10 @@ pub(super) fn plan_screen_font_residency(
         source_page_selected_state_count: COMPOSITE_FONT_RESIDENCY_POLICIES
             .iter()
             .filter(|(_, policy)| *policy == ScreenFontResidencyPolicy::SourcePageSelected)
+            .count(),
+        item_name_published_state_count: COMPOSITE_FONT_RESIDENCY_POLICIES
+            .iter()
+            .filter(|(_, policy)| *policy == ScreenFontResidencyPolicy::ItemNamePublishedByAppender)
             .count(),
         unit_or_enemy_name_published_state_count: COMPOSITE_FONT_RESIDENCY_POLICIES
             .iter()
@@ -583,10 +590,26 @@ mod tests {
         assert_eq!(
             COMPOSITE_FONT_RESIDENCY_POLICIES
                 .iter()
-                .filter(|(_, policy)| *policy == ScreenFontResidencyPolicy::UnresolvedPageOwner)
-                .count(),
-            8
+                .filter_map(|(state, policy)| {
+                    (*policy == ScreenFontResidencyPolicy::UnresolvedPageOwner).then_some(*state)
+                })
+                .collect::<Vec<_>>(),
+            [0x02, 0x0B, 0x11, 0x17, 0x25]
         );
+    }
+
+    #[test]
+    fn shared_item_appender_publishes_the_catalog_page_for_all_admitted_states() {
+        validate_composite_state_policies().unwrap();
+        let actual = COMPOSITE_FONT_RESIDENCY_POLICIES
+            .iter()
+            .filter_map(|(state, policy)| {
+                (*policy == ScreenFontResidencyPolicy::ItemNamePublishedByAppender)
+                    .then_some(*state)
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(actual, ITEM_NAME_APPENDER_PUBLISHED_COMPOSITE_STATES);
     }
 
     #[test]

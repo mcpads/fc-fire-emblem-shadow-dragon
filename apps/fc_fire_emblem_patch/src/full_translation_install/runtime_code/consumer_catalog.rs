@@ -28,11 +28,10 @@ use crate::{
 
 use super::consumer_font_page::COMPOSITE_STATE;
 
+mod item_appender_routes;
 mod shop_item_list;
 mod shop_item_route;
 
-#[cfg(test)]
-use shop_item_route::{ItemMaterialRoute, select_shop_item_material, select_storage_item_material};
 pub(super) use shop_item_route::{
     verify_shop_item_residency_route, verify_storage_item_residency_route,
 };
@@ -148,6 +147,7 @@ pub(super) fn bind_consumer_catalog_sites(source: &Rom, candidate: &Rom) -> Resu
             )?;
         }
     }
+    item_appender_routes::bind_source_routes(source, candidate)?;
     shop_item_list::bind_site(source, candidate)?;
     ensure!(
         fixed_bytes(
@@ -167,6 +167,7 @@ pub(super) fn build_consumer_catalog_runtime(
     code_page: u8,
     entry_stub_origin: u16,
     font_page_activation: u16,
+    catalog_default_font_route: u8,
     front_end_record_action_route: u8,
     layout: ConsumerCatalogRuntimeLayout,
     shop_item_residency: ShopItemResidencyRuntimeContract,
@@ -175,10 +176,16 @@ pub(super) fn build_consumer_catalog_runtime(
     let code_routine = build_catalog_append_runtime(
         code_origin,
         font_page_activation,
+        catalog_default_font_route,
         front_end_record_action_route,
         layout,
         shop_item_residency,
         storage_item_list,
+    )?;
+    shop_item_route::verify_item_font_page_routes(
+        &code_routine,
+        font_page_activation,
+        catalog_default_font_route,
     )?;
     let mut next = entry_stub_origin;
     let mut fixed_routines = Vec::new();
@@ -222,6 +229,7 @@ pub(super) fn build_consumer_catalog_runtime(
             })
         })
         .collect::<Result<Vec<_>>>()?;
+    hooks.extend(item_appender_routes::build_hooks()?);
     hooks.push(shop_item_list::build_hook(FIXED_BRIDGE_ORIGIN)?);
 
     Ok(ConsumerCatalogRuntime {
@@ -286,11 +294,16 @@ fn build_fixed_bridge(origin: u16, appender: u16, code_page: u8) -> Result<Vec<u
 fn build_catalog_append_runtime(
     origin: u16,
     font_page_activation: u16,
+    catalog_default_font_route: u8,
     front_end_record_action_route: u8,
     layout: ConsumerCatalogRuntimeLayout,
     shop_item_residency: ShopItemResidencyRuntimeContract,
     storage_item_list: StorageItemListRuntimeRoute,
 ) -> Result<RuntimeRoutine> {
+    ensure!(
+        catalog_default_font_route != 0 && catalog_default_font_route & !0xFD == 0,
+        "consumer catalog default route is not a valid nonempty FD/FE route"
+    );
     ensure!(
         front_end_record_action_route & TRANSLATED_FE_PAGE_FLAG != 0,
         "consumer catalog record-action route does not select the translated FE page"
@@ -616,6 +629,45 @@ fn build_catalog_append_runtime(
         material_base_ready,
     );
     instructions.extend([
+        Instruction::LdaZeroPage(0x05),
+        Instruction::CmpImmediate(KIND_ITEM),
+    ]);
+    let catalog_item_kind = append_jump_if_equal(origin, &mut instructions)?;
+    instructions.push(Instruction::CmpImmediate(KIND_SHOP_ITEM_LIST));
+    let catalog_shop_item_kind = append_jump_if_equal(origin, &mut instructions)?;
+    let skip_catalog_item_activation = push_jump(&mut instructions, origin);
+    let catalog_item_activation = next_address(origin, &instructions)?;
+    patch_jump(
+        &mut instructions,
+        catalog_item_kind,
+        catalog_item_activation,
+    );
+    patch_jump(
+        &mut instructions,
+        catalog_shop_item_kind,
+        catalog_item_activation,
+    );
+    instructions.extend([
+        Instruction::LdaZeroPage(0x03),
+        Instruction::CmpImmediate(MATERIAL_ROUTE_DIALOGUE),
+    ]);
+    let retain_dialogue_item_page = append_jump_if_equal(origin, &mut instructions)?;
+    instructions.extend([
+        Instruction::LdaImmediate(catalog_default_font_route),
+        Instruction::JsrAbsolute(font_page_activation),
+    ]);
+    let catalog_item_activation_finished = next_address(origin, &instructions)?;
+    patch_jump(
+        &mut instructions,
+        retain_dialogue_item_page,
+        catalog_item_activation_finished,
+    );
+    patch_jump(
+        &mut instructions,
+        skip_catalog_item_activation,
+        catalog_item_activation_finished,
+    );
+    instructions.extend([
         Instruction::LdyImmediate(0),
         Instruction::LdaZeroPage(0x05),
         Instruction::CmpImmediate(KIND_UNIT_OR_ENEMY),
@@ -810,384 +862,4 @@ pub(super) fn verify_shop_item_list_hook(hooks: &[DialogueRuntimeHook]) -> Resul
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn execute_until_kind_validation(
-        routine: &RuntimeRoutine,
-        kind: u8,
-        original_y: u8,
-        output_x: u8,
-        initial_sp: u8,
-        scratch: [u8; 6],
-    ) -> (u8, u8, u8) {
-        let mut memory = Box::new([0_u8; 0x10000]);
-        let start = usize::from(routine.address);
-        memory[start..start + routine.bytes.len()].copy_from_slice(&routine.bytes);
-        memory[..scratch.len()].copy_from_slice(&scratch);
-        let mut pc = routine.address;
-        let mut a = kind;
-        let mut x = output_x;
-        let mut y = original_y;
-        let mut sp = initial_sp;
-        for _ in 0..64 {
-            let opcode = memory[usize::from(pc)];
-            pc = pc.wrapping_add(1);
-            match opcode {
-                0x48 => {
-                    memory[0x0100 + usize::from(sp)] = a;
-                    sp = sp.wrapping_sub(1);
-                }
-                0x85 => {
-                    let address = memory[usize::from(pc)];
-                    pc = pc.wrapping_add(1);
-                    memory[usize::from(address)] = a;
-                }
-                0x98 => a = y,
-                0x8A => a = x,
-                0xA5 => {
-                    let address = memory[usize::from(pc)];
-                    pc = pc.wrapping_add(1);
-                    a = memory[usize::from(address)];
-                }
-                0xA8 => y = a,
-                0xAA => x = a,
-                0xBA => x = sp,
-                0xBD => {
-                    let low = memory[usize::from(pc)];
-                    let high = memory[usize::from(pc.wrapping_add(1))];
-                    pc = pc.wrapping_add(2);
-                    let address = u16::from_le_bytes([low, high]).wrapping_add(u16::from(x));
-                    a = memory[usize::from(address)];
-                }
-                0xC9 => {
-                    let value = memory[usize::from(pc)];
-                    assert_eq!(value, KIND_COUNT);
-                    return (a, x, y);
-                }
-                other => panic!("catalog call-frame setup reached unsupported opcode {other:02X}"),
-            }
-        }
-        panic!("catalog call-frame setup did not reach kind validation")
-    }
-
-    fn layout() -> ConsumerCatalogRuntimeLayout {
-        ConsumerCatalogRuntimeLayout {
-            material_page: 0x32,
-            material_base: 0x8000,
-            item_directory: 0x8010,
-            class_directory: 0x80C6,
-            unit_directory: 0x80F2,
-            enemy_directory: 0x815C,
-        }
-    }
-
-    fn shop_item_residency() -> ShopItemResidencyRuntimeContract {
-        ShopItemResidencyRuntimeContract {
-            outer_state_address: 0x05DB,
-            composition_state: 0x03,
-            composite_state: 0x15,
-            selected_facility_address: 0x77D0,
-            dialogue_directory_address: 0x77F4,
-            dialogue_directory_selector: 0xB1,
-            e7_caller_resume_flag_address: 0x7809,
-            selling_facilities: [0x01, 0x02, 0x05],
-            non_selling_facilities: [0x03, 0x04],
-            dialogue_material_page: 0x31,
-            dialogue_material_base: 0x8000,
-            dialogue_item_directory: 0x8110,
-            catalog_material_page: layout().material_page,
-            catalog_material_base: layout().material_base,
-            catalog_item_directory: layout().item_directory,
-        }
-    }
-
-    fn storage_item_list() -> StorageItemListRuntimeRoute {
-        StorageItemListRuntimeRoute {
-            caller_state_address: 0x05DB,
-            composition_state: 0x06,
-            composite_state: crate::full_translation_install::screen_font_residency::UNIT_ITEM_LIST_COMPOSITE_STATE,
-        }
-    }
-
-    #[test]
-    fn three_five_byte_stubs_fill_the_remaining_producer_cave() {
-        let runtime = build_consumer_catalog_runtime(
-            0xA600,
-            0x30,
-            0xF7F8,
-            0xF620,
-            0xDD,
-            layout(),
-            shop_item_residency(),
-            storage_item_list(),
-        )
-        .unwrap();
-
-        assert_eq!(runtime.fixed_routines.len(), 4);
-        assert!(
-            runtime.fixed_routines[..3]
-                .iter()
-                .all(|routine| routine.bytes.len() == 5)
-        );
-        assert_eq!(
-            routine_end(&runtime.fixed_routines[2]).unwrap(),
-            ENTRY_STUB_CAVE_END
-        );
-    }
-
-    #[test]
-    fn fixed_bridge_fits_the_independent_forty_five_byte_cave() {
-        let bytes = build_fixed_bridge(FIXED_BRIDGE_ORIGIN, 0xA600, 0x30).unwrap();
-
-        assert!(usize::from(FIXED_BRIDGE_ORIGIN) + bytes.len() <= usize::from(FIXED_BRIDGE_END));
-        assert_eq!(bytes.last(), Some(&0x60));
-    }
-
-    #[test]
-    fn fixed_bridge_restores_output_x_original_y_and_catalog_kind_in_order() {
-        let bytes = build_fixed_bridge(FIXED_BRIDGE_ORIGIN, 0xA600, 0x30).unwrap();
-
-        assert!(bytes.starts_with(&[0x48, 0x98, 0x48, 0x8A, 0x48]));
-        assert!(
-            bytes
-                .windows(8)
-                .any(|window| { window == [0x68, 0xAA, 0x68, 0xA8, 0x68, 0x20, 0x00, 0xA6] })
-        );
-        assert!(!bytes.ends_with(&[0xA9, SEGMENT_SEPARATOR, 0x60]));
-        assert_eq!(
-            bytes.len(),
-            usize::from(FIXED_BRIDGE_END - FIXED_BRIDGE_ORIGIN)
-        );
-    }
-
-    #[test]
-    fn appender_uses_the_callers_output_position_after_reading_its_stack_frame() {
-        let runtime = build_consumer_catalog_runtime(
-            0xA600,
-            0x30,
-            0xF7F8,
-            0xF620,
-            0xDD,
-            layout(),
-            shop_item_residency(),
-            storage_item_list(),
-        )
-        .unwrap();
-
-        for (kind, original_y, output_x, initial_sp) in
-            [(0, 0x7E, 0x00, 0xF1), (3, 0x54, 0x6F, 0xB7)]
-        {
-            assert_eq!(
-                execute_until_kind_validation(
-                    &runtime.code_routine,
-                    kind,
-                    original_y,
-                    output_x,
-                    initial_sp,
-                    [0x11, 0x22, 0x33, 0x44, 0x55, 0x66],
-                ),
-                (kind, output_x, original_y)
-            );
-        }
-    }
-
-    #[test]
-    fn catalog_calls_and_shop_consumer_hook_have_distinct_owned_extents() {
-        let runtime = build_consumer_catalog_runtime(
-            0xA600,
-            0x30,
-            0xF7F8,
-            0xF620,
-            0xDD,
-            layout(),
-            shop_item_residency(),
-            storage_item_list(),
-        )
-        .unwrap();
-
-        assert_eq!(runtime.hooks.len(), HOOK_SITES.len() + 1);
-        assert!(
-            runtime.hooks[..HOOK_SITES.len()]
-                .iter()
-                .all(|hook| hook.bytes.len() == 3)
-        );
-        let shop = runtime.hooks.last().unwrap();
-        assert_eq!(shop.role, DialogueRuntimeHookRole::ShopItemListAppender);
-        assert_eq!(shop.bytes.len(), 10);
-    }
-
-    #[test]
-    fn all_three_item_selling_facilities_use_the_dialogue_item_encoding() {
-        let runtime = build_consumer_catalog_runtime(
-            0xA600,
-            0x30,
-            0xF7F8,
-            0xF620,
-            0xDD,
-            layout(),
-            shop_item_residency(),
-            storage_item_list(),
-        )
-        .unwrap();
-
-        verify_shop_item_residency_route(&runtime.code_routine, shop_item_residency()).unwrap();
-    }
-
-    #[test]
-    fn storage_item_list_uses_dialogue_material_only_during_its_source_composition_state() {
-        let runtime = build_consumer_catalog_runtime(
-            0xA600,
-            0x30,
-            0xF7F8,
-            0xF620,
-            0xDD,
-            layout(),
-            shop_item_residency(),
-            storage_item_list(),
-        )
-        .unwrap();
-        verify_storage_item_residency_route(
-            &runtime.code_routine,
-            shop_item_residency(),
-            storage_item_list(),
-        )
-        .unwrap();
-
-        assert_eq!(
-            select_storage_item_material(
-                &runtime.code_routine,
-                shop_item_residency(),
-                storage_item_list(),
-                storage_item_list().composite_state,
-                storage_item_list().composition_state,
-            )
-            .unwrap(),
-            ItemMaterialRoute {
-                directory: shop_item_residency().dialogue_item_directory,
-                material_page: shop_item_residency().dialogue_material_page,
-                material_base: shop_item_residency().dialogue_material_base,
-            }
-        );
-    }
-
-    #[test]
-    fn nonshop_or_inactive_e7_lifetimes_keep_the_catalog_item_encoding() {
-        let runtime = build_consumer_catalog_runtime(
-            0xA600,
-            0x30,
-            0xF7F8,
-            0xF620,
-            0xDD,
-            layout(),
-            shop_item_residency(),
-            storage_item_list(),
-        )
-        .unwrap();
-        let expected = ItemMaterialRoute {
-            directory: layout().item_directory,
-            material_page: layout().material_page,
-            material_base: layout().material_base,
-        };
-        let contract = shop_item_residency();
-
-        for state in [
-            (
-                contract.composition_state.wrapping_add(1),
-                contract.selling_facilities[0],
-                contract.dialogue_directory_selector,
-                1,
-            ),
-            (
-                contract.composition_state,
-                contract.non_selling_facilities[0],
-                contract.dialogue_directory_selector,
-                1,
-            ),
-            (
-                contract.composition_state,
-                contract.non_selling_facilities[1],
-                contract.dialogue_directory_selector,
-                1,
-            ),
-            (
-                contract.composition_state,
-                contract.selling_facilities[0],
-                contract.dialogue_directory_selector.wrapping_add(1),
-                1,
-            ),
-            (
-                contract.composition_state,
-                contract.selling_facilities[0],
-                contract.dialogue_directory_selector,
-                0,
-            ),
-        ] {
-            assert_eq!(
-                select_shop_item_material(
-                    &runtime.code_routine,
-                    shop_item_residency(),
-                    state.0,
-                    state.1,
-                    state.2,
-                    state.3,
-                )
-                .unwrap(),
-                expected
-            );
-        }
-    }
-
-    #[test]
-    fn record_action_name_uses_the_planned_screen_route_before_shared_activation() {
-        let activation = 0xF620;
-        let origin = 0xA600;
-        let record_action_route = 0xDD;
-        let runtime = build_consumer_catalog_runtime(
-            origin,
-            0x30,
-            0xF7F8,
-            activation,
-            record_action_route,
-            layout(),
-            shop_item_residency(),
-            storage_item_list(),
-        )
-        .unwrap();
-        let prefix = [
-            0xB1,
-            0x00,
-            0x48,
-            0xAD,
-            COMPOSITE_STATE as u8,
-            (COMPOSITE_STATE >> 8) as u8,
-            0xC9,
-            RECORD_ACTION_COMPOSITE_STATE,
-            0xD0,
-            0x03,
-        ];
-        let offset = runtime
-            .code_routine
-            .bytes
-            .windows(prefix.len())
-            .position(|window| window == prefix)
-            .expect("unit/enemy page prefix did not test the record-action lifetime");
-        let sequence = &runtime.code_routine.bytes[offset..offset + 24];
-        let sequence_address = origin + u16::try_from(offset).unwrap();
-
-        assert_eq!(
-            u16::from_le_bytes([sequence[11], sequence[12]]),
-            sequence_address + 17
-        );
-        assert_eq!(sequence[13], 0x68);
-        assert_eq!(
-            u16::from_le_bytes([sequence[15], sequence[16]]),
-            sequence_address + 20
-        );
-        assert_eq!(&sequence[17..20], &[0x68, 0xA9, record_action_route]);
-        assert_eq!(
-            &sequence[20..24],
-            &[0x20, activation as u8, (activation >> 8) as u8, 0xC8,]
-        );
-    }
-}
+mod tests;
