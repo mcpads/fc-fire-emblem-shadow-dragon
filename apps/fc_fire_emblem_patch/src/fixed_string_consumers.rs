@@ -138,22 +138,6 @@ impl CompositeStateDispatchSource {
     }
 }
 
-impl CompositeStateProducer {
-    pub(crate) const fn new(
-        prg_bank: u8,
-        cpu_address: u16,
-        transfer_opcode: u8,
-        state: u8,
-    ) -> Self {
-        Self {
-            prg_bank,
-            cpu_address,
-            transfer_opcode,
-            state,
-        }
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct FixedStringRecord {
     pub(crate) index: u8,

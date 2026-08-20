@@ -6,6 +6,7 @@ use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
+    front_end_menu::RECORD_ACTION_COMPOSITE_STATE,
     semantic_translation::SemanticTranslationPlan,
     text_inventory::{FixedTextPlan, FixedTextPlannedEntry},
     unit_names::UnitNamePlan,
@@ -14,9 +15,8 @@ use crate::{
 
 use super::{
     ATTACK_WEAPON_SELECTION_COMPOSITE_STATE, COMPOSITE_FONT_RESIDENCY_POLICIES,
-    ITEM_ACTION_COMPOSITE_STATE, RECORD_ACTION_COMPOSITE_STATE, ScreenFontPageRole,
-    ScreenFontResidencyPolicy, UNIT_ITEM_LIST_COMPOSITE_STATE, UNIT_STATUS_COMPOSITE_STATE,
-    UNIT_SUMMARY_COMPOSITE_STATE,
+    ITEM_ACTION_COMPOSITE_STATE, ScreenFontPageRole, ScreenFontResidencyPolicy,
+    UNIT_ITEM_LIST_COMPOSITE_STATE, UNIT_STATUS_COMPOSITE_STATE, UNIT_SUMMARY_COMPOSITE_STATE,
 };
 use crate::full_translation_install::{
     consumer_catalog::{ConsumerCatalogPage, ConsumerCatalogPlan},

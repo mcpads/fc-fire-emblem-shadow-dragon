@@ -139,17 +139,17 @@ fn bind_direct_composite_state_producers(source: &Rom, candidate: &Rom) -> Resul
         "candidate direct composite-state producer catalog changed"
     );
 
-    let font_page_states = COMPOSITE_FONT_RESIDENCY_POLICIES
+    let policy_states = COMPOSITE_FONT_RESIDENCY_POLICIES
         .iter()
         .map(|(state, _)| *state)
         .collect::<BTreeSet<_>>();
-    let page_producers = source_catalog
-        .into_iter()
-        .filter(|producer| font_page_states.contains(&producer.state))
-        .collect::<Vec<_>>();
+    let source_states = source_catalog
+        .iter()
+        .map(|producer| producer.state)
+        .collect::<BTreeSet<_>>();
     ensure!(
-        page_producers == EXPECTED_FONT_PAGE_STATE_PRODUCERS,
-        "font-page composite-state producer routes changed: {page_producers:?}"
+        source_states == policy_states,
+        "screen font residency and direct composite-state producers disagree: source {source_states:?}, policies {policy_states:?}"
     );
     Ok(())
 }

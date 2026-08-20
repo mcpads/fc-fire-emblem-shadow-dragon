@@ -4,6 +4,7 @@
 //! 원천 합성 상태와 가시 표면을 합쳐 화면별 경로를 고르고, 런타임 코드는 그 결과를
 //! 그대로 방출한다. 이전 화면이 남긴 `$07FD`를 암묵적인 입력으로 쓰지 않는다.
 
+mod composite_policies;
 mod dialogue_surfaces;
 mod selector_forwarders;
 mod surface_requirements;
@@ -17,25 +18,24 @@ use serde::Serialize;
 use crate::{
     chapter_transition::{ChapterTitlePlan, TransitionTranslationPlans},
     choice_labels::ChoiceLabelPlan,
-    front_end_menu::{
-        FRONT_END_FONT_STATES, RECORD_ACTION_COMPOSITE_STATE, RECORD_LIST_COMPOSITE_STATE,
-        SAVE_SLOT_SELECTION_COMPOSITE_STATE, START_MENU_COMPOSITE_STATE,
-    },
+    front_end_menu::FRONT_END_FONT_STATES,
     mapper165::font_pair_projection::{TRANSLATED_FE_PAGE_FLAG, mapper_register_from_route},
     rom::Rom,
     semantic_translation::SemanticTranslationPlan,
-    shop_flow::SHOP_ITEM_COMPOSITE_STATE,
     text_inventory::FixedTextPlan,
     unit_names::UnitNamePlan,
 };
 
 use super::{
-    consumer_catalog::ConsumerCatalogPlan,
-    consumer_codebook::ConsumerCodebookPlan,
-    storage_residency::{
-        STORAGE_ACTION_MENU_COMPOSITE_STATE, STORAGE_DIALOGUE_OVERLAY_COMPOSITE_STATES,
-        STORAGE_OVERFLOW_ACTION_COMPOSITE_STATE,
-    },
+    consumer_catalog::ConsumerCatalogPlan, consumer_codebook::ConsumerCodebookPlan,
+    storage_residency::STORAGE_DIALOGUE_OVERLAY_COMPOSITE_STATES,
+};
+use composite_policies::validate_composite_state_policies;
+pub(in crate::full_translation_install) use composite_policies::{
+    ATTACK_WEAPON_SELECTION_COMPOSITE_STATE, CHAPTER_SAVE_OFFER_COMPOSITE_STATE,
+    COMPOSITE_FONT_RESIDENCY_POLICIES, ITEM_ACTION_COMPOSITE_STATE, MAP_FUNDS_COMPOSITE_STATE,
+    MAP_SUMMARY_COMPOSITE_STATE, ScreenFontPageRole, ScreenFontResidencyPolicy,
+    UNIT_ITEM_LIST_COMPOSITE_STATE, UNIT_STATUS_COMPOSITE_STATE, UNIT_SUMMARY_COMPOSITE_STATE,
 };
 pub(super) use dialogue_surfaces::DialogueSurfaceInputs;
 use dialogue_surfaces::{DialogueSurfacePlan, plan_dialogue_surfaces};
@@ -50,186 +50,6 @@ use transition_surfaces::{
 
 pub(super) const FRONT_END_SAVE_SUMMARY_UNIT_SOURCE_INDEX: usize = 0;
 pub(super) const FRONT_END_SAVE_SUMMARY_CLASS_SOURCE_INDEX: usize = 20;
-
-pub(in crate::full_translation_install) const MAP_MENU_COMPOSITE_STATE: u8 = 0x03;
-pub(in crate::full_translation_install) const UNIT_SUMMARY_COMPOSITE_STATE: u8 = 0x04;
-pub(in crate::full_translation_install) const UNIT_COMMAND_COMPOSITE_STATE: u8 = 0x05;
-pub(in crate::full_translation_install) const ATTACK_WEAPON_SELECTION_COMPOSITE_STATE: u8 = 0x06;
-pub(in crate::full_translation_install) const UNIT_ITEM_LIST_COMPOSITE_STATE: u8 = 0x07;
-pub(in crate::full_translation_install) const ITEM_ACTION_COMPOSITE_STATE: u8 = 0x09;
-pub(in crate::full_translation_install) const UNIT_STATUS_COMPOSITE_STATE: u8 = 0x0F;
-pub(in crate::full_translation_install) const MAP_FUNDS_COMPOSITE_STATE: u8 = 0x13;
-pub(in crate::full_translation_install) const MAP_SUMMARY_COMPOSITE_STATE: u8 = 0x14;
-pub(in crate::full_translation_install) const CHAPTER_SAVE_OFFER_COMPOSITE_STATE: u8 = 0x1C;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::full_translation_install) enum ScreenFontPageRole {
-    FrontEndMenu,
-    FrontEndRecordAction,
-    UnitCommand,
-    MapMenu,
-    ChapterSaveOffer,
-    CatalogDefault,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::full_translation_install) enum ScreenFontResidencyPolicy {
-    Static(ScreenFontPageRole),
-    StorageDialogueOrStatic(ScreenFontPageRole),
-    UnitOrEnemyNamePublishedByAppender,
-    UnitOrEnemyNameRetainedFromSummary,
-    CompletedDialoguePageRetained,
-    ActiveDialogueCallerRestored,
-}
-
-/// 번역 글꼴을 쓰는 원본 합성 상태의 전체 정책 집합이다. 고정 표면은 진입 즉시
-/// 페이지를 게시한다. 요약 화면은 이름 appender가 선택한 카탈로그 페이지를 게시하고,
-/// 상태 화면은 같은 화면 수명 안에서 요약이 게시한 페이지를 명시적으로 유지한다.
-pub(in crate::full_translation_install) const COMPOSITE_FONT_RESIDENCY_POLICIES: [(
-    u8,
-    ScreenFontResidencyPolicy,
-); 17] = [
-    (
-        MAP_MENU_COMPOSITE_STATE,
-        ScreenFontResidencyPolicy::Static(ScreenFontPageRole::MapMenu),
-    ),
-    (
-        MAP_FUNDS_COMPOSITE_STATE,
-        ScreenFontResidencyPolicy::Static(ScreenFontPageRole::MapMenu),
-    ),
-    (
-        MAP_SUMMARY_COMPOSITE_STATE,
-        ScreenFontResidencyPolicy::Static(ScreenFontPageRole::MapMenu),
-    ),
-    (
-        UNIT_COMMAND_COMPOSITE_STATE,
-        ScreenFontResidencyPolicy::Static(ScreenFontPageRole::UnitCommand),
-    ),
-    (
-        ATTACK_WEAPON_SELECTION_COMPOSITE_STATE,
-        ScreenFontResidencyPolicy::Static(ScreenFontPageRole::CatalogDefault),
-    ),
-    (
-        UNIT_ITEM_LIST_COMPOSITE_STATE,
-        ScreenFontResidencyPolicy::StorageDialogueOrStatic(ScreenFontPageRole::CatalogDefault),
-    ),
-    (
-        ITEM_ACTION_COMPOSITE_STATE,
-        ScreenFontResidencyPolicy::Static(ScreenFontPageRole::CatalogDefault),
-    ),
-    (
-        CHAPTER_SAVE_OFFER_COMPOSITE_STATE,
-        ScreenFontResidencyPolicy::Static(ScreenFontPageRole::ChapterSaveOffer),
-    ),
-    (
-        START_MENU_COMPOSITE_STATE,
-        ScreenFontResidencyPolicy::Static(ScreenFontPageRole::FrontEndMenu),
-    ),
-    (
-        RECORD_LIST_COMPOSITE_STATE,
-        ScreenFontResidencyPolicy::Static(ScreenFontPageRole::FrontEndMenu),
-    ),
-    (
-        SAVE_SLOT_SELECTION_COMPOSITE_STATE,
-        ScreenFontResidencyPolicy::Static(ScreenFontPageRole::FrontEndMenu),
-    ),
-    (
-        RECORD_ACTION_COMPOSITE_STATE,
-        ScreenFontResidencyPolicy::Static(ScreenFontPageRole::FrontEndRecordAction),
-    ),
-    (
-        UNIT_SUMMARY_COMPOSITE_STATE,
-        ScreenFontResidencyPolicy::UnitOrEnemyNamePublishedByAppender,
-    ),
-    (
-        UNIT_STATUS_COMPOSITE_STATE,
-        ScreenFontResidencyPolicy::UnitOrEnemyNameRetainedFromSummary,
-    ),
-    (
-        STORAGE_ACTION_MENU_COMPOSITE_STATE,
-        ScreenFontResidencyPolicy::CompletedDialoguePageRetained,
-    ),
-    (
-        STORAGE_OVERFLOW_ACTION_COMPOSITE_STATE,
-        ScreenFontResidencyPolicy::CompletedDialoguePageRetained,
-    ),
-    (
-        SHOP_ITEM_COMPOSITE_STATE,
-        ScreenFontResidencyPolicy::ActiveDialogueCallerRestored,
-    ),
-];
-
-impl ScreenFontResidencyPolicy {
-    pub(in crate::full_translation_install) fn static_page(self) -> Option<ScreenFontPageRole> {
-        match self {
-            Self::Static(page) | Self::StorageDialogueOrStatic(page) => Some(page),
-            Self::UnitOrEnemyNamePublishedByAppender
-            | Self::UnitOrEnemyNameRetainedFromSummary
-            | Self::CompletedDialoguePageRetained
-            | Self::ActiveDialogueCallerRestored => None,
-        }
-    }
-}
-
-fn validate_composite_state_policies() -> Result<()> {
-    let states = COMPOSITE_FONT_RESIDENCY_POLICIES
-        .iter()
-        .map(|(state, _)| *state)
-        .collect::<BTreeSet<_>>();
-    ensure!(
-        states.len() == COMPOSITE_FONT_RESIDENCY_POLICIES.len(),
-        "screen font residency assigns more than one policy to a composite state"
-    );
-    ensure!(
-        COMPOSITE_FONT_RESIDENCY_POLICIES
-            .iter()
-            .find_map(|(state, policy)| {
-                (*state == UNIT_ITEM_LIST_COMPOSITE_STATE).then_some(*policy)
-            })
-            == Some(ScreenFontResidencyPolicy::StorageDialogueOrStatic(
-                ScreenFontPageRole::CatalogDefault,
-            )),
-        "item-list font residency no longer distinguishes the storage dialogue lifetime from the standalone catalog page"
-    );
-    ensure!(
-        COMPOSITE_FONT_RESIDENCY_POLICIES
-            .iter()
-            .find_map(|(state, policy)| {
-                (*state == UNIT_SUMMARY_COMPOSITE_STATE).then_some(*policy)
-            })
-            == Some(ScreenFontResidencyPolicy::UnitOrEnemyNamePublishedByAppender),
-        "unit-summary font residency no longer delegates page publication to its name appender"
-    );
-    ensure!(
-        COMPOSITE_FONT_RESIDENCY_POLICIES
-            .iter()
-            .find_map(|(state, policy)| {
-                (*state == UNIT_STATUS_COMPOSITE_STATE).then_some(*policy)
-            })
-            == Some(ScreenFontResidencyPolicy::UnitOrEnemyNameRetainedFromSummary),
-        "unit-status font residency no longer retains the page published by unit summary"
-    );
-    let completed_dialogue_states = COMPOSITE_FONT_RESIDENCY_POLICIES
-        .iter()
-        .filter_map(|(state, policy)| {
-            (*policy == ScreenFontResidencyPolicy::CompletedDialoguePageRetained).then_some(*state)
-        })
-        .collect::<Vec<_>>();
-    ensure!(
-        completed_dialogue_states == STORAGE_DIALOGUE_OVERLAY_COMPOSITE_STATES,
-        "completed-dialogue font residency no longer matches the source-bound storage overlay states"
-    );
-    ensure!(
-        COMPOSITE_FONT_RESIDENCY_POLICIES
-            .iter()
-            .find_map(|(state, policy)| {
-                (*state == SHOP_ITEM_COMPOSITE_STATE).then_some(*policy)
-            })
-            == Some(ScreenFontResidencyPolicy::ActiveDialogueCallerRestored),
-        "shop item composition no longer restores the active E7 dialogue page"
-    );
-    Ok(())
-}
 
 #[derive(Clone, Copy)]
 pub(in crate::full_translation_install) struct ScreenFontPageRoutes {
@@ -327,6 +147,7 @@ pub(super) struct ScreenFontResidencyDraft {
     schema: u8,
     strategy: &'static str,
     composite_state_policy_count: usize,
+    no_central_page_override_state_count: usize,
     static_state_route_count: usize,
     unit_or_enemy_name_published_state_count: usize,
     unit_or_enemy_name_retained_state_count: usize,
@@ -456,9 +277,13 @@ pub(super) fn plan_screen_font_residency(
         .len();
 
     Ok(ScreenFontResidencyDraft {
-        schema: 6,
-        strategy: "derive every composite-screen font policy from one residency plan; publish static pages at entry, retain the source-bound storage dialogue page when its item-list producer reuses state 07, let the unit-summary appender publish its name-dependent page, retain that page explicitly for unit status, and select the protagonist catalog page explicitly for the front-end record-action lifetime",
+        schema: 7,
+        strategy: "bind every source-produced composite state to one explicit central residency action; publish static pages at entry, retain the source-bound storage dialogue page when its item-list producer reuses state 07, let the unit-summary appender publish its name-dependent page, retain that page explicitly for unit status, select the protagonist catalog page explicitly for the front-end record-action lifetime, and report states with no central override without claiming that their translated-glyph ownership is complete",
         composite_state_policy_count: COMPOSITE_FONT_RESIDENCY_POLICIES.len(),
+        no_central_page_override_state_count: COMPOSITE_FONT_RESIDENCY_POLICIES
+            .iter()
+            .filter(|(_, policy)| *policy == ScreenFontResidencyPolicy::NoCentralPageOverride)
+            .count(),
         static_state_route_count: COMPOSITE_FONT_RESIDENCY_POLICIES
             .iter()
             .filter(|(_, policy)| policy.static_page().is_some())
@@ -557,6 +382,10 @@ fn bind_required_glyph_codes(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::front_end_menu::{
+        RECORD_ACTION_COMPOSITE_STATE, RECORD_LIST_COMPOSITE_STATE,
+        SAVE_SLOT_SELECTION_COMPOSITE_STATE, START_MENU_COMPOSITE_STATE,
+    };
 
     fn routes() -> ScreenFontPageRoutes {
         ScreenFontPageRoutes {

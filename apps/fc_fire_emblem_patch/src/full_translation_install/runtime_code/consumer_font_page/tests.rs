@@ -1,5 +1,14 @@
 use super::*;
-use crate::shop_flow::SHOP_ITEM_COMPOSITE_STATE;
+use crate::{
+    front_end_menu::{
+        RECORD_ACTION_COMPOSITE_STATE, RECORD_LIST_COMPOSITE_STATE,
+        SAVE_SLOT_SELECTION_COMPOSITE_STATE, START_MENU_COMPOSITE_STATE,
+    },
+    full_translation_install::screen_font_residency::{
+        ITEM_ACTION_COMPOSITE_STATE, UNIT_STATUS_COMPOSITE_STATE, UNIT_SUMMARY_COMPOSITE_STATE,
+    },
+    shop_flow::SHOP_ITEM_COMPOSITE_STATE,
+};
 
 const ORIGIN: u16 = 0xF620;
 const APPLY_ROUTE: u16 = 0xF900;

@@ -23,22 +23,14 @@ use super::{
 };
 use crate::{
     fixed_string_consumers::{
-        CompositeStateProducer, bind_direct_composite_state_producer_catalog,
-        scan_direct_composite_state_producers,
-    },
-    front_end_menu::{
-        RECORD_ACTION_COMPOSITE_STATE, RECORD_LIST_COMPOSITE_STATE,
-        SAVE_SLOT_SELECTION_COMPOSITE_STATE, START_MENU_COMPOSITE_STATE,
+        bind_direct_composite_state_producer_catalog, scan_direct_composite_state_producers,
     },
     full_translation_install::{
         runtime_state_storage::CONSUMER_FONT_PAGE,
         screen_font_residency::{
-            ATTACK_WEAPON_SELECTION_COMPOSITE_STATE, CHAPTER_SAVE_OFFER_COMPOSITE_STATE,
-            COMPOSITE_FONT_RESIDENCY_POLICIES, ITEM_ACTION_COMPOSITE_STATE,
-            MAP_FUNDS_COMPOSITE_STATE, MAP_MENU_COMPOSITE_STATE, MAP_SUMMARY_COMPOSITE_STATE,
-            ScreenFontPageRole, ScreenFontPageRoutes, UNIT_COMMAND_COMPOSITE_STATE,
-            UNIT_ITEM_LIST_COMPOSITE_STATE, UNIT_STATUS_COMPOSITE_STATE,
-            UNIT_SUMMARY_COMPOSITE_STATE,
+            COMPOSITE_FONT_RESIDENCY_POLICIES, MAP_FUNDS_COMPOSITE_STATE,
+            MAP_SUMMARY_COMPOSITE_STATE, ScreenFontPageRole, ScreenFontPageRoutes,
+            UNIT_ITEM_LIST_COMPOSITE_STATE,
         },
         storage_residency::{
             STORAGE_ACTION_MENU_COMPOSITE_STATE, STORAGE_OVERFLOW_ACTION_COMPOSITE_STATE,
@@ -47,7 +39,6 @@ use crate::{
     },
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
-    shop_flow::SHOP_ITEM_COMPOSITE_STATE,
     typed_source::decode_rp2a03_sequence,
     unit_ui_text::bind_unit_summary_status_page_inheritance_source,
 };
@@ -88,7 +79,7 @@ const GAMEPLAY_PHASE_HIGH: u8 = 0x24;
 /// distinguishes a standalone fixed-label screen from a label drawn over live main dialogue.
 /// Storage action and overflow labels must retain the dialogue route selected for the underlying
 /// record, while the storage-capacity notice is a standalone fixed-label screen.
-const FIXED_MENU_FONT_PAGE_CALLS: [(u16, u8, Option<DialogueRuntimeHookRole>, &'static str); 6] = [
+const FIXED_MENU_FONT_PAGE_CALLS: [(u16, u8, Option<DialogueRuntimeHookRole>, &str); 6] = [
     (
         0x8A3C,
         0x2C,
@@ -126,31 +117,6 @@ const FIXED_MENU_FONT_PAGE_CALLS: [(u16, u8, Option<DialogueRuntimeHookRole>, &'
         "storage-capacity fixed-menu font-page hook",
     ),
 ];
-const EXPECTED_FONT_PAGE_STATE_PRODUCERS: [CompositeStateProducer; 22] = [
-    CompositeStateProducer::new(0x02, 0xA693, 0x4C, START_MENU_COMPOSITE_STATE),
-    CompositeStateProducer::new(0x02, 0xA6CC, 0x4C, SAVE_SLOT_SELECTION_COMPOSITE_STATE),
-    CompositeStateProducer::new(0x02, 0xA6D5, 0x4C, RECORD_LIST_COMPOSITE_STATE),
-    CompositeStateProducer::new(0x02, 0xA6DE, 0x4C, RECORD_LIST_COMPOSITE_STATE),
-    CompositeStateProducer::new(0x02, 0xA6E7, 0x4C, RECORD_LIST_COMPOSITE_STATE),
-    CompositeStateProducer::new(0x02, 0xA79A, 0x20, RECORD_ACTION_COMPOSITE_STATE),
-    CompositeStateProducer::new(0x06, 0x882D, 0x20, UNIT_SUMMARY_COMPOSITE_STATE),
-    CompositeStateProducer::new(0x06, 0x8F1A, 0x20, UNIT_SUMMARY_COMPOSITE_STATE),
-    CompositeStateProducer::new(0x06, 0x903C, 0x20, UNIT_COMMAND_COMPOSITE_STATE),
-    CompositeStateProducer::new(0x06, 0x90AF, 0x20, ATTACK_WEAPON_SELECTION_COMPOSITE_STATE),
-    CompositeStateProducer::new(0x06, 0x93E2, 0x4C, UNIT_ITEM_LIST_COMPOSITE_STATE),
-    CompositeStateProducer::new(0x06, 0x941D, 0x20, ITEM_ACTION_COMPOSITE_STATE),
-    CompositeStateProducer::new(0x06, 0x9A07, 0x20, SHOP_ITEM_COMPOSITE_STATE),
-    CompositeStateProducer::new(0x06, 0x9E12, 0x4C, STORAGE_ACTION_MENU_COMPOSITE_STATE),
-    CompositeStateProducer::new(0x06, 0x9EB4, 0x20, UNIT_ITEM_LIST_COMPOSITE_STATE),
-    CompositeStateProducer::new(0x06, 0xA0BE, 0x20, MAP_FUNDS_COMPOSITE_STATE),
-    CompositeStateProducer::new(0x06, 0xA30D, 0x4C, MAP_MENU_COMPOSITE_STATE),
-    CompositeStateProducer::new(0x06, 0xAF0C, 0x20, UNIT_STATUS_COMPOSITE_STATE),
-    CompositeStateProducer::new(0x06, 0xB17F, 0x4C, STORAGE_OVERFLOW_ACTION_COMPOSITE_STATE),
-    CompositeStateProducer::new(0x06, 0xB40B, 0x4C, MAP_SUMMARY_COMPOSITE_STATE),
-    CompositeStateProducer::new(0x06, 0xB413, 0x4C, MAP_FUNDS_COMPOSITE_STATE),
-    CompositeStateProducer::new(0x06, 0xB78A, 0x4C, CHAPTER_SAVE_OFFER_COMPOSITE_STATE),
-];
-
 mod runtime_emission;
 mod source_binding;
 
