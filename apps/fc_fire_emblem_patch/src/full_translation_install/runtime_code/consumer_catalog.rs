@@ -364,9 +364,11 @@ fn build_catalog_append_runtime(
         "consumer catalog runtime no longer uses the shop residency fallback material"
     );
     ensure!(
-        storage_item_list.composite_state
-            == crate::full_translation_install::screen_font_residency::UNIT_ITEM_LIST_COMPOSITE_STATE,
-        "storage item material route no longer refines the shared item-list composite state"
+        storage_item_list.facility_composite_state
+            == crate::full_translation_install::screen_font_residency::UNIT_ITEM_LIST_COMPOSITE_STATE
+            && storage_item_list.overflow_composite_state
+                == crate::full_translation_install::screen_font_residency::STORAGE_ITEM_DETAIL_COMPOSITE_STATE,
+        "storage item material routes no longer refine the facility and overflow item-list states"
     );
     // The appender's caller owns X as the next composite-buffer position.  TSX is
     // needed only to inspect this temporary call frame, so save the incoming X
@@ -427,9 +429,19 @@ fn build_catalog_append_runtime(
         Instruction::SbcImmediate(1),
         Instruction::StaZeroPage(0x04),
         Instruction::LdaAbsolute(COMPOSITE_STATE),
-        Instruction::CmpImmediate(storage_item_list.composite_state),
+        Instruction::CmpImmediate(storage_item_list.facility_composite_state),
     ]);
+    let facility_item_composite = append_jump_if_equal(origin, &mut instructions)?;
+    instructions.push(Instruction::CmpImmediate(
+        storage_item_list.overflow_composite_state,
+    ));
     let catalog_item_composite = append_jump_if_not_equal(origin, &mut instructions)?;
+    let storage_item_composite = next_address(origin, &instructions)?;
+    patch_jump(
+        &mut instructions,
+        facility_item_composite,
+        storage_item_composite,
+    );
     instructions.extend([
         Instruction::LdaAbsolute(storage_item_list.caller_state_address),
         Instruction::CmpImmediate(storage_item_list.composition_state),

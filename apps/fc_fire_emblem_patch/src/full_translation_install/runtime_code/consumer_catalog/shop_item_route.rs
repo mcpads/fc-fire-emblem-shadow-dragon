@@ -53,7 +53,7 @@ pub(super) fn select_storage_item_material(
         COMPOSITE_STATE as u8,
         (COMPOSITE_STATE >> 8) as u8,
         0xC9,
-        storage.composite_state,
+        storage.facility_composite_state,
     ];
     let mut memory = Box::new([0_u8; 0x10000]);
     memory[usize::from(COMPOSITE_STATE)] = composite_state;
@@ -244,27 +244,29 @@ pub(in crate::full_translation_install::runtime_code) fn verify_storage_item_res
     material: ShopItemResidencyRuntimeContract,
     storage: StorageItemListRuntimeRoute,
 ) -> Result<()> {
-    ensure!(
-        select_storage_item_material(
-            routine,
-            material,
-            storage,
-            storage.composite_state,
-            storage.composition_state,
-        )? == dialogue_material(material),
-        "storage item-list composer does not use dialogue-encoded item material"
-    );
+    for composite_state in storage.dialogue_material_composite_states() {
+        ensure!(
+            select_storage_item_material(
+                routine,
+                material,
+                storage,
+                composite_state,
+                storage.composition_state,
+            )? == dialogue_material(material),
+            "storage item-list composer state {composite_state:02X} does not use dialogue-encoded item material"
+        );
+    }
     for (composite_state, caller_state) in [
         (
-            storage.composite_state.wrapping_add(1),
+            storage.facility_composite_state.wrapping_add(1),
             storage.composition_state,
         ),
         (
-            storage.composite_state,
+            storage.facility_composite_state,
             storage.composition_state.wrapping_sub(1),
         ),
         (
-            storage.composite_state,
+            storage.overflow_composite_state,
             storage.composition_state.wrapping_add(1),
         ),
     ] {

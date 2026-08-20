@@ -96,8 +96,10 @@ fn storage_item_list() -> StorageItemListRuntimeRoute {
     StorageItemListRuntimeRoute {
         caller_state_address: 0x05DB,
         composition_state: 0x06,
-        composite_state:
+        facility_composite_state:
             crate::full_translation_install::screen_font_residency::UNIT_ITEM_LIST_COMPOSITE_STATE,
+        overflow_composite_state:
+            crate::full_translation_install::screen_font_residency::STORAGE_ITEM_DETAIL_COMPOSITE_STATE,
     }
 }
 
@@ -277,7 +279,23 @@ fn storage_item_list_uses_dialogue_material_only_during_its_source_composition_s
             &runtime.code_routine,
             shop_item_residency(),
             storage_item_list(),
-            storage_item_list().composite_state,
+            storage_item_list().facility_composite_state,
+            storage_item_list().composition_state,
+        )
+        .unwrap(),
+        ItemMaterialRoute {
+            directory: shop_item_residency().dialogue_item_directory,
+            material_page: shop_item_residency().dialogue_material_page,
+            material_base: shop_item_residency().dialogue_material_base,
+        }
+    );
+
+    assert_eq!(
+        select_storage_item_material(
+            &runtime.code_routine,
+            shop_item_residency(),
+            storage_item_list(),
+            storage_item_list().overflow_composite_state,
             storage_item_list().composition_state,
         )
         .unwrap(),

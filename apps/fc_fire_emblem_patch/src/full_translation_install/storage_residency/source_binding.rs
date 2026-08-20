@@ -94,6 +94,36 @@ const FACILITY_ITEM_LIST_COMPOSER_BYTES: [u8; 21] = [
     0x05,
     0x60,
 ];
+const OVERFLOW_ITEM_LIST_DIALOGUE_RECORD: u8 = 0x44;
+const OVERFLOW_ITEM_LIST_COMPOSITE_STATE: u8 = 0x24;
+const OVERFLOW_ITEM_LIST_COMPOSER: u16 = 0xB1F7;
+const OVERFLOW_ITEM_LIST_COMPOSER_BYTES: [u8; 25] = [
+    0xAD,
+    0xF4,
+    0x76,
+    0x10,
+    0x08,
+    0xA9,
+    0x15,
+    0x85,
+    0x74,
+    0xA9,
+    0x77,
+    0x85,
+    0x75,
+    0xEE,
+    0xE2,
+    0x05,
+    0xA9,
+    OVERFLOW_ITEM_LIST_COMPOSITE_STATE,
+    0x20,
+    0x90,
+    0xE6,
+    0xEE,
+    0xDB,
+    0x05,
+    0x60,
+];
 
 const OVERFLOW_DISPATCH_CALL: u16 = 0xB110;
 const OVERFLOW_STATE_MACHINE_START: u16 = 0xB10D;
@@ -125,7 +155,8 @@ pub(super) struct StorageSourceBinding {
     pub(super) overflow_root_record_indices: BTreeSet<usize>,
     pub(super) facility_overlay_root_record_index: usize,
     pub(super) overflow_overlay_root_record_index: usize,
-    pub(super) item_list_overlay_root_record_index: usize,
+    pub(super) facility_item_list_overlay_root_record_index: usize,
+    pub(super) overflow_item_list_overlay_root_record_index: usize,
     pub(super) item_list_settled_state: u8,
     pub(super) item_list_route: super::StorageItemListRuntimeRoute,
     pub(super) source_dispatch_count: usize,
@@ -206,6 +237,12 @@ pub(super) fn bind_storage_dialogue_sources(source: &Rom) -> Result<StorageSourc
         &FACILITY_ITEM_LIST_COMPOSER_BYTES,
         "storage facility dialogue-retaining item-list composer",
     )?;
+    bind_exact_code(
+        source,
+        OVERFLOW_ITEM_LIST_COMPOSER,
+        &OVERFLOW_ITEM_LIST_COMPOSER_BYTES,
+        "storage overflow dialogue-retaining item-list composer",
+    )?;
     ensure!(
         FACILITY_INITIAL_RECORDS[usize::from(STORAGE_FACILITY_INDEX)] == 0x29
             && FACILITY_EXIT_RECORDS[usize::from(STORAGE_FACILITY_INDEX)] == 0x06
@@ -220,6 +257,12 @@ pub(super) fn bind_storage_dialogue_sources(source: &Rom) -> Result<StorageSourc
             && FACILITY_ITEM_LIST_SETTLED_STATE
                 == FACILITY_ITEM_LIST_COMPOSITION_STATE.wrapping_add(1),
         "storage item-list state no longer follows dialogue record 0x2A and advance into state 0x07"
+    );
+    ensure!(
+        OVERFLOW_HANDLER_TARGETS[usize::from(FACILITY_ITEM_LIST_COMPOSITION_STATE)]
+            == OVERFLOW_ITEM_LIST_COMPOSER
+            && OVERFLOW_IMMEDIATE_RECORD_WRITES.contains(&(0xB1BE, 0x42)),
+        "storage overflow item-list state no longer follows the full-storage dialogue into state 0x24"
     );
 
     let facility_region = source_region(
@@ -325,12 +368,18 @@ pub(super) fn bind_storage_dialogue_sources(source: &Rom) -> Result<StorageSourc
             FACILITY_INITIAL_RECORDS[usize::from(STORAGE_FACILITY_INDEX)],
         ),
         overflow_overlay_root_record_index: 0x40,
-        item_list_overlay_root_record_index: usize::from(FACILITY_ITEM_LIST_DIALOGUE_RECORD),
+        facility_item_list_overlay_root_record_index: usize::from(
+            FACILITY_ITEM_LIST_DIALOGUE_RECORD,
+        ),
+        overflow_item_list_overlay_root_record_index: usize::from(
+            OVERFLOW_ITEM_LIST_DIALOGUE_RECORD,
+        ),
         item_list_settled_state: FACILITY_ITEM_LIST_SETTLED_STATE,
         item_list_route: super::StorageItemListRuntimeRoute {
             caller_state_address: CALLER_STATE_ADDRESS,
             composition_state: FACILITY_ITEM_LIST_COMPOSITION_STATE,
-            composite_state: FACILITY_ITEM_LIST_COMPOSITE_STATE,
+            facility_composite_state: FACILITY_ITEM_LIST_COMPOSITE_STATE,
+            overflow_composite_state: OVERFLOW_ITEM_LIST_COMPOSITE_STATE,
         },
         source_dispatch_count: 2,
         source_direct_record_store_count: FACILITY_IMMEDIATE_RECORD_WRITES.len()

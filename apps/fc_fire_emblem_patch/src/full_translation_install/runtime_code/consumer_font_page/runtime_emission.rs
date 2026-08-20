@@ -182,11 +182,13 @@ pub(in crate::full_translation_install::runtime_code) fn build_composite_font_pa
 ) -> Result<CompositeFontPagePublisher> {
     pages.validate()?;
     ensure!(
-        storage_item_list.composite_state == UNIT_ITEM_LIST_COMPOSITE_STATE,
-        "storage item-list route no longer refines composite state 0x{UNIT_ITEM_LIST_COMPOSITE_STATE:02X}"
+        storage_item_list.facility_composite_state == UNIT_ITEM_LIST_COMPOSITE_STATE,
+        "storage facility item-list route no longer refines composite state 0x{UNIT_ITEM_LIST_COMPOSITE_STATE:02X}"
     );
     let mut instructions = vec![Instruction::StaAbsolute(COMPOSITE_STATE)];
-    instructions.push(Instruction::CmpImmediate(storage_item_list.composite_state));
+    instructions.push(Instruction::CmpImmediate(
+        storage_item_list.facility_composite_state,
+    ));
     let non_item_list_state = instructions.len();
     instructions.push(Instruction::BneAbsolute(origin));
     instructions.extend([
@@ -206,7 +208,7 @@ pub(in crate::full_translation_install::runtime_code) fn build_composite_font_pa
     let mut route_jumps = Vec::with_capacity(COMPOSITE_FONT_RESIDENCY_POLICIES.len());
     let mut source_page_states = Vec::new();
     for (state, policy) in COMPOSITE_FONT_RESIDENCY_POLICIES {
-        if state == storage_item_list.composite_state {
+        if state == storage_item_list.facility_composite_state {
             continue;
         }
         if policy == ScreenFontResidencyPolicy::SourcePageSelected {

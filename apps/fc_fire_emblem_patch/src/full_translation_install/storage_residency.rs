@@ -1,8 +1,9 @@
 //! 저장소 화면군의 대사와 그 위에 남는 고정 선택 라벨을 한 코드 배정으로 묶는다.
 //!
 //! 상태 1D와 23은 주 대사 페이지가 화면에 남아 있는 동안 bank 0B 고정 문자열을
-//! 덧붙인다. 따라서 고정 문자열용 정적 페이지를 다시 고르면 대사 타일이 깨지고,
-//! 반대로 대사 페이지에 선택 라벨의 코드가 없으면 라벨이 깨진다.
+//! 덧붙인다. 상태 07과 24는 그 대사 위에 품목 이름 목록을 합성한다. 따라서 별도
+//! 정적·카탈로그 페이지를 다시 고르면 대사 타일이 깨지고, 반대로 대사 페이지에
+//! 겹쳐 보이는 라벨이나 품목 이름의 코드가 없으면 합성된 글자가 깨진다.
 //!
 //! 레코드 전환 잔여물은 여기서 코드북 합집합으로 숨기지 않는다. 최초·E4·E6·E7
 //! 새 레코드 진입이 공통 resolver에서 여섯 물리 줄을 비우므로, 이 단계는 실제로
@@ -26,7 +27,9 @@ use crate::{
 };
 
 use super::{
-    dialogue_item_worksets::{DialogueItemWorksetInputs, augment_dialogue_item_worksets},
+    dialogue_item_worksets::{
+        DialogueItemWorksetInputs, augment_dialogue_item_worksets, collect_item_name_glyphs,
+    },
     resident_glyph_assignment::{assign_resident_glyph_codes, assignment_sha1},
 };
 
@@ -50,7 +53,16 @@ pub(in crate::full_translation_install) const STORAGE_DIALOGUE_OVERLAY_COMPOSITE
 pub(in crate::full_translation_install) struct StorageItemListRuntimeRoute {
     pub(in crate::full_translation_install) caller_state_address: u16,
     pub(in crate::full_translation_install) composition_state: u8,
-    pub(in crate::full_translation_install) composite_state: u8,
+    pub(in crate::full_translation_install) facility_composite_state: u8,
+    pub(in crate::full_translation_install) overflow_composite_state: u8,
+}
+
+impl StorageItemListRuntimeRoute {
+    pub(in crate::full_translation_install) const fn dialogue_material_composite_states(
+        self,
+    ) -> [u8; 2] {
+        [self.facility_composite_state, self.overflow_composite_state]
+    }
 }
 
 #[derive(Serialize)]
@@ -68,10 +80,12 @@ pub(super) struct StorageDialogueResidencyPlan {
     facility_overlay_record_ids: Vec<String>,
     overflow_overlay_record_ids: Vec<String>,
     overlay_record_ids: Vec<String>,
+    facility_item_list_overlay_record_ids: Vec<String>,
+    overflow_item_list_overlay_record_ids: Vec<String>,
     item_list_overlay_record_ids: Vec<String>,
     item_list_composition_state: u8,
     item_list_settled_state: u8,
-    item_list_composite_state: u8,
+    item_list_composite_states: [u8; 2],
     item_list_workset_count: usize,
     item_list_glyph_count: usize,
     preserved_item_code_count: usize,
@@ -159,44 +173,79 @@ pub(super) fn plan_storage_dialogue_residency(
         "storage dialogue state-machine population changed"
     );
 
-    let facility_overlay_record_ids = transition_record_ids(
+    let facility_entry_overlay_record_ids = transition_record_ids(
         graph,
         &BTreeSet::from([source_binding.facility_overlay_root_record_index]),
         "storage facility action-menu overlay",
     )?;
-    let overflow_overlay_record_ids = transition_record_ids(
+    let overflow_entry_overlay_record_ids = transition_record_ids(
         graph,
         &BTreeSet::from([source_binding.overflow_overlay_root_record_index]),
         "storage overflow action-menu overlay",
     )?;
     ensure!(
-        facility_overlay_record_ids.is_disjoint(&overflow_overlay_record_ids),
+        facility_entry_overlay_record_ids.is_disjoint(&overflow_entry_overlay_record_ids),
         "storage action-menu dialogue populations unexpectedly overlap"
     );
     ensure!(
-        facility_overlay_record_ids.is_subset(&facility_selected_record_ids)
-            && overflow_overlay_record_ids.is_subset(&overflow_selected_record_ids),
+        facility_entry_overlay_record_ids.is_subset(&facility_selected_record_ids)
+            && overflow_entry_overlay_record_ids.is_subset(&overflow_selected_record_ids),
         "storage overlay dialogue escaped its source-selected state machine"
     );
+    let facility_item_list_overlay_record_ids = transition_record_ids(
+        graph,
+        &BTreeSet::from([source_binding.facility_item_list_overlay_root_record_index]),
+        "storage facility item-list dialogue overlay",
+    )?;
+    ensure!(
+        !facility_item_list_overlay_record_ids.is_empty()
+            && facility_item_list_overlay_record_ids.is_subset(&facility_selected_record_ids),
+        "storage facility item-list dialogue escaped its source-selected state machine"
+    );
+    let overflow_item_list_overlay_record_ids = transition_record_ids(
+        graph,
+        &BTreeSet::from([source_binding.overflow_item_list_overlay_root_record_index]),
+        "storage overflow item-list dialogue overlay",
+    )?;
+    ensure!(
+        !overflow_item_list_overlay_record_ids.is_empty()
+            && overflow_item_list_overlay_record_ids.is_subset(&overflow_selected_record_ids),
+        "storage overflow item-list dialogue escaped its source-selected state machine"
+    );
+    ensure!(
+        facility_item_list_overlay_record_ids.is_disjoint(&overflow_item_list_overlay_record_ids),
+        "storage facility and overflow item-list dialogue populations overlap"
+    );
+    let item_list_overlay_record_ids = facility_item_list_overlay_record_ids
+        .union(&overflow_item_list_overlay_record_ids)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    // Both item lists return to their action menu on B without selecting a new dialogue record.
+    // The completed list prompt therefore remains under the fixed labels and must use the same
+    // label codes as the entry prompt.
+    let facility_overlay_record_ids = facility_entry_overlay_record_ids
+        .union(&facility_item_list_overlay_record_ids)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let overflow_overlay_record_ids = overflow_entry_overlay_record_ids
+        .union(&overflow_item_list_overlay_record_ids)
+        .cloned()
+        .collect::<BTreeSet<_>>();
     let overlay_record_ids = facility_overlay_record_ids
         .union(&overflow_overlay_record_ids)
         .cloned()
         .collect::<BTreeSet<_>>();
     ensure!(
-        !overlay_record_ids.is_empty(),
-        "storage action-menu dialogue population is empty"
-    );
-    let item_list_overlay_record_ids = transition_record_ids(
-        graph,
-        &BTreeSet::from([source_binding.item_list_overlay_root_record_index]),
-        "storage item-list dialogue overlay",
-    )?;
-    ensure!(
-        !item_list_overlay_record_ids.is_empty()
-            && item_list_overlay_record_ids.is_subset(&facility_selected_record_ids),
-        "storage item-list dialogue escaped the source-selected facility state machine"
+        overlay_record_ids.len() == 4,
+        "storage entry and item-list cancel overlay population changed"
     );
 
+    let item_source_indices = (0..SHOP_ITEM_ENTRY_COUNT).collect::<BTreeSet<_>>();
+    let (item_name_glyphs, _) = collect_item_name_glyphs(
+        "storage item-list dialogue residency",
+        fixed,
+        &item_source_indices,
+    )?;
     let label_glyphs = storage_label_glyphs_by_index(fixed_menu_labels)?;
     let required_glyphs_by_record_id = overlay_glyph_requirements(
         &facility_overlay_record_ids,
@@ -206,15 +255,18 @@ pub(super) fn plan_storage_dialogue_residency(
     let required_glyphs_by_workset =
         collect_required_workset_glyphs(display, &required_glyphs_by_record_id)?;
 
-    let fixed_glyph_codes =
-        assign_storage_label_codes(dialogue_worksets, &required_glyphs_by_workset)?;
+    let fixed_glyph_codes = assign_storage_label_codes(
+        dialogue_worksets,
+        &required_glyphs_by_workset,
+        canonical_item_codes,
+        &item_name_glyphs,
+    )?;
     let (label_augmented_worksets, resident_workset_count, _) = augment_storage_worksets(
         display,
         dialogue_worksets,
         &required_glyphs_by_workset,
         &fixed_glyph_codes,
     )?;
-    let item_source_indices = (0..SHOP_ITEM_ENTRY_COUNT).collect::<BTreeSet<_>>();
     let item_augmentation = augment_dialogue_item_worksets(DialogueItemWorksetInputs {
         role: "storage item-list dialogue residency",
         display,
@@ -226,7 +278,7 @@ pub(super) fn plan_storage_dialogue_residency(
     })?;
 
     Ok(StorageDialogueResidencyPlan {
-        strategy: "give storage dialogue pages one compatible code assignment for visible fixed action labels and every item name synthesized over record 0x2A; retain the canonical dialogue item encoding instead of replacing the completed dialogue page with the generic catalog page",
+        strategy: "give storage dialogue pages one compatible code assignment for fixed action labels at entry and after item-list cancellation plus every item name synthesized over facility record 0x2A or overflow record 0x44; retain the canonical dialogue item encoding instead of replacing either completed dialogue page with the generic catalog page",
         dialogue_table_id: DIALOGUE_TABLE_ID,
         dialogue_composite_states: STORAGE_DIALOGUE_OVERLAY_COMPOSITE_STATES,
         resident_fixed_label_indices: STORAGE_DIALOGUE_LABEL_INDICES,
@@ -239,10 +291,18 @@ pub(super) fn plan_storage_dialogue_residency(
         facility_overlay_record_ids: facility_overlay_record_ids.into_iter().collect(),
         overflow_overlay_record_ids: overflow_overlay_record_ids.into_iter().collect(),
         overlay_record_ids: overlay_record_ids.into_iter().collect(),
+        facility_item_list_overlay_record_ids: facility_item_list_overlay_record_ids
+            .into_iter()
+            .collect(),
+        overflow_item_list_overlay_record_ids: overflow_item_list_overlay_record_ids
+            .into_iter()
+            .collect(),
         item_list_overlay_record_ids: item_list_overlay_record_ids.into_iter().collect(),
         item_list_composition_state: source_binding.item_list_route.composition_state,
         item_list_settled_state: source_binding.item_list_settled_state,
-        item_list_composite_state: source_binding.item_list_route.composite_state,
+        item_list_composite_states: source_binding
+            .item_list_route
+            .dialogue_material_composite_states(),
         item_list_workset_count: item_augmentation.target_workset_count,
         item_list_glyph_count: item_augmentation.item_glyph_count,
         preserved_item_code_count: item_augmentation.preserved_item_code_count,
@@ -392,6 +452,8 @@ fn collect_required_workset_glyphs(
 fn assign_storage_label_codes(
     dialogue_worksets: &[GlyphWorkset],
     required_glyphs_by_workset: &BTreeMap<usize, BTreeSet<char>>,
+    canonical_item_codes: &BTreeMap<char, u8>,
+    item_name_glyphs: &BTreeSet<char>,
 ) -> Result<BTreeMap<char, u8>> {
     let fixed_glyphs = required_glyphs_by_workset
         .values()
@@ -413,6 +475,47 @@ fn assign_storage_label_codes(
         .map(|glyph| (glyph, lifetime_preserved_codes.clone()))
         .collect::<BTreeMap<_, _>>();
     let mut preassigned_codes_by_glyph = BTreeMap::<char, BTreeSet<u8>>::new();
+    // The action labels remain visible when an item-list prompt is cancelled. Their codes must
+    // therefore be injective with every item-name code that can be synthesized over that prompt.
+    // A glyph shared by both surfaces keeps its canonical item code; every other label must avoid
+    // the complete item-code range. Treating only the shared glyph as special leaves unrelated
+    // pairs such as `관` and `후` free to claim the same physical tile.
+    let canonical_item_code_set = item_name_glyphs
+        .iter()
+        .map(|glyph| {
+            canonical_item_codes
+                .get(glyph)
+                .copied()
+                .with_context(|| format!("storage item glyph {glyph:?} has no canonical code"))
+        })
+        .collect::<Result<BTreeSet<_>>>()?;
+    ensure!(
+        canonical_item_code_set.len() == item_name_glyphs.len(),
+        "storage item-name canonical codes are not injective"
+    );
+    for glyph in &fixed_glyphs {
+        if item_name_glyphs.contains(glyph) {
+            let code = canonical_item_codes[glyph];
+            preassigned_codes_by_glyph
+                .entry(*glyph)
+                .or_default()
+                .insert(code);
+            forbidden_codes_by_glyph
+                .get_mut(glyph)
+                .expect("storage glyph was initialized")
+                .extend(
+                    canonical_item_code_set
+                        .iter()
+                        .copied()
+                        .filter(|other| *other != code),
+                );
+        } else {
+            forbidden_codes_by_glyph
+                .get_mut(glyph)
+                .expect("storage glyph was initialized")
+                .extend(canonical_item_code_set.iter().copied());
+        }
+    }
     for (workset_index, required_glyphs) in required_glyphs_by_workset {
         let workset = dialogue_worksets
             .get(*workset_index)
@@ -590,7 +693,13 @@ mod tests {
             (1, BTreeSet::from(['보'])),
         ]);
 
-        let assigned = assign_storage_label_codes(&[first, second], &requirements).unwrap();
+        let assigned = assign_storage_label_codes(
+            &[first, second],
+            &requirements,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+        )
+        .unwrap();
 
         assert_ne!(assigned.get(&'보'), Some(&0x87));
         assert_ne!(assigned.get(&'관'), Some(&0x87));
@@ -609,6 +718,8 @@ mod tests {
         let assignment = assign_storage_label_codes(
             &[first, second],
             &BTreeMap::from([(0, BTreeSet::from(['보'])), (1, BTreeSet::from(['관']))]),
+            &BTreeMap::new(),
+            &BTreeSet::new(),
         )
         .unwrap();
 
@@ -689,5 +800,67 @@ mod tests {
         assert!(augmented[1].fixed_glyph_codes.contains_key(&'버'));
         assert!(!augmented[1].fixed_glyph_codes.contains_key(&'찾'));
         assert!(augmented[2].fixed_glyph_codes.is_empty());
+    }
+
+    #[test]
+    fn item_list_cancel_records_keep_the_action_labels_of_their_state_machine() {
+        let facility = BTreeSet::from([
+            "shop-and-item-dialogue:041".to_owned(),
+            "shop-and-item-dialogue:042".to_owned(),
+        ]);
+        let overflow = BTreeSet::from([
+            "shop-and-item-dialogue:064".to_owned(),
+            "shop-and-item-dialogue:068".to_owned(),
+        ]);
+        let glyphs = BTreeMap::from([
+            (0x35, BTreeSet::from(['보', '관'])),
+            (0x36, BTreeSet::from(['찾', '기'])),
+            (0x46, BTreeSet::from(['하', '나', '버', '리', '기'])),
+        ]);
+
+        let requirements = overlay_glyph_requirements(&facility, &overflow, &glyphs).unwrap();
+
+        assert_eq!(requirements.len(), 4);
+        for record_id in &facility {
+            let required = &requirements[record_id];
+            assert!(required.contains(&'찾'));
+            assert!(!required.contains(&'버'));
+        }
+        for record_id in &overflow {
+            let required = &requirements[record_id];
+            assert!(required.contains(&'버'));
+            assert!(!required.contains(&'찾'));
+        }
+    }
+
+    #[test]
+    fn storage_labels_shared_with_item_names_keep_the_canonical_item_code() {
+        let assignment = assign_storage_label_codes(
+            &[workset("가"), workset("나")],
+            &BTreeMap::from([
+                (0, BTreeSet::from(['기', '보'])),
+                (1, BTreeSet::from(['기'])),
+            ]),
+            &BTreeMap::from([('기', 0xA7)]),
+            &BTreeSet::from(['기']),
+        )
+        .unwrap();
+
+        assert_eq!(assignment.get(&'기'), Some(&0xA7));
+        assert_ne!(assignment.get(&'보'), Some(&0xA7));
+    }
+
+    #[test]
+    fn storage_labels_do_not_reuse_an_unrelated_item_name_code() {
+        let assignment = assign_storage_label_codes(
+            &[workset("가"), workset("나")],
+            &BTreeMap::from([(0, BTreeSet::from(['관'])), (1, BTreeSet::from(['관']))]),
+            &BTreeMap::from([('후', 0x01), ('검', 0x02)]),
+            &BTreeSet::from(['후', '검']),
+        )
+        .unwrap();
+
+        assert_ne!(assignment.get(&'관'), Some(&0x01));
+        assert_ne!(assignment.get(&'관'), Some(&0x02));
     }
 }

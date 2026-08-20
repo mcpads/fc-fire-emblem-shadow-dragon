@@ -5,7 +5,8 @@ use crate::{
         SAVE_SLOT_SELECTION_COMPOSITE_STATE, START_MENU_COMPOSITE_STATE,
     },
     full_translation_install::screen_font_residency::{
-        ITEM_ACTION_COMPOSITE_STATE, UNIT_STATUS_COMPOSITE_STATE, UNIT_SUMMARY_COMPOSITE_STATE,
+        ITEM_ACTION_COMPOSITE_STATE, STORAGE_ITEM_DETAIL_COMPOSITE_STATE,
+        UNIT_STATUS_COMPOSITE_STATE, UNIT_SUMMARY_COMPOSITE_STATE,
     },
     shop_flow::SHOP_ITEM_COMPOSITE_STATE,
 };
@@ -33,7 +34,8 @@ fn storage_item_list_route() -> StorageItemListRuntimeRoute {
     StorageItemListRuntimeRoute {
         caller_state_address: 0x05DB,
         composition_state: 0x06,
-        composite_state: UNIT_ITEM_LIST_COMPOSITE_STATE,
+        facility_composite_state: UNIT_ITEM_LIST_COMPOSITE_STATE,
+        overflow_composite_state: STORAGE_ITEM_DETAIL_COMPOSITE_STATE,
     }
 }
 
@@ -361,7 +363,7 @@ fn reused_item_list_state_retains_storage_dialogue_only_for_its_source_composer(
         storage_memory,
         &[&activation, &publisher],
         publisher.address,
-        route.composite_state,
+        route.facility_composite_state,
         0xA5,
     );
     assert_eq!(storage_memory[usize::from(CONSUMER_FONT_PAGE)], 0);
@@ -379,7 +381,7 @@ fn reused_item_list_state_retains_storage_dialogue_only_for_its_source_composer(
             ordinary_memory,
             &[&activation, &publisher],
             publisher.address,
-            route.composite_state,
+            route.facility_composite_state,
             0x24,
         );
         assert_eq!(

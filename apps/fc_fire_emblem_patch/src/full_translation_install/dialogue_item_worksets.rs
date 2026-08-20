@@ -30,6 +30,27 @@ pub(super) struct DialogueItemWorksetAugmentation {
     pub(super) maximum_augmented_workset_slot_demand: usize,
 }
 
+pub(super) fn collect_item_name_glyphs(
+    role: &str,
+    fixed: &FixedTextPlan,
+    item_source_indices: &BTreeSet<usize>,
+) -> Result<(BTreeSet<char>, BTreeSet<u8>)> {
+    let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
+    let mut item_glyphs = BTreeSet::new();
+    let mut preserved_item_codes = BTreeSet::new();
+    for source_index in item_source_indices {
+        let entry = fixed
+            .entry_for_source_index("item-names", *source_index)
+            .with_context(|| format!("{role} item {source_index} has no translated name"))?;
+        item_glyphs.extend(entry.unique_glyphs());
+        preserved_item_codes.extend(entry.logical_bytes.iter().filter_map(|byte| match byte {
+            FixedTextLogicalByte::Encoded(code) if active_codes.contains(code) => Some(*code),
+            FixedTextLogicalByte::TargetGlyph(_) | FixedTextLogicalByte::Encoded(_) => None,
+        }));
+    }
+    Ok((item_glyphs, preserved_item_codes))
+}
+
 pub(super) fn augment_dialogue_item_worksets(
     inputs: DialogueItemWorksetInputs<'_>,
 ) -> Result<DialogueItemWorksetAugmentation> {
@@ -44,22 +65,8 @@ pub(super) fn augment_dialogue_item_worksets(
         inputs.role
     );
 
-    let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
-    let mut item_glyphs = BTreeSet::new();
-    let mut preserved_item_codes = BTreeSet::new();
-    for source_index in inputs.item_source_indices {
-        let entry = inputs
-            .fixed
-            .entry_for_source_index("item-names", *source_index)
-            .with_context(|| {
-                format!("{} item {source_index} has no translated name", inputs.role)
-            })?;
-        item_glyphs.extend(entry.unique_glyphs());
-        preserved_item_codes.extend(entry.logical_bytes.iter().filter_map(|byte| match byte {
-            FixedTextLogicalByte::Encoded(code) if active_codes.contains(code) => Some(*code),
-            FixedTextLogicalByte::TargetGlyph(_) | FixedTextLogicalByte::Encoded(_) => None,
-        }));
-    }
+    let (item_glyphs, preserved_item_codes) =
+        collect_item_name_glyphs(inputs.role, inputs.fixed, inputs.item_source_indices)?;
     ensure!(
         !item_glyphs.is_empty()
             && item_glyphs
@@ -100,14 +107,17 @@ pub(super) fn augment_dialogue_item_worksets(
             .extend(preserved_item_codes.iter().copied());
         for glyph in &item_glyphs {
             let code = inputs.canonical_item_codes[glyph];
-            ensure!(
+            let conflicting_glyph =
                 workset
                     .fixed_glyph_codes
                     .iter()
-                    .all(|(existing_glyph, existing_code)| {
-                        existing_glyph == glyph || *existing_code != code
-                    }),
-                "{} dialogue {} page {} already assigns canonical item code 0x{code:02X} to another glyph",
+                    .find_map(|(existing_glyph, existing_code)| {
+                        (*existing_glyph != *glyph && *existing_code == code)
+                            .then_some(*existing_glyph)
+                    });
+            ensure!(
+                conflicting_glyph.is_none(),
+                "{} dialogue {} page {} cannot assign item glyph {glyph:?} to canonical code 0x{code:02X}; that code already belongs to {conflicting_glyph:?}",
                 inputs.role,
                 page.record_id,
                 page.page_index,
@@ -284,6 +294,6 @@ mod tests {
         })
         .err()
         .expect("fixed-code collision unexpectedly passed");
-        assert!(error.to_string().contains("another glyph"));
+        assert!(error.to_string().contains("already belongs to"));
     }
 }
