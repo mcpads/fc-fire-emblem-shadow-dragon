@@ -140,11 +140,11 @@ mod runtime_emission;
 mod source_binding;
 
 pub(super) use runtime_emission::{
-    build_composite_font_page_publisher, build_consumer_font_page_activation,
-    build_consumer_font_page_close, build_consumer_font_page_gameplay_handoff,
-    build_consumer_font_page_open, build_fixed_menu_font_page_appender,
-    fixed_menu_font_page_appender_installation, fixed_menu_font_page_hooks, gameplay_handoff_hook,
-    page_publisher_hook, screen_lifetime_hooks,
+    CompositeFontPagePublisher, build_composite_font_page_publisher,
+    build_consumer_font_page_activation, build_consumer_font_page_close,
+    build_consumer_font_page_gameplay_handoff, build_consumer_font_page_open,
+    build_fixed_menu_font_page_appender, fixed_menu_font_page_appender_installation,
+    fixed_menu_font_page_hooks, gameplay_handoff_hook, page_publisher_hook, screen_lifetime_hooks,
 };
 pub(super) use source_binding::bind_consumer_font_page_lifetime;
 

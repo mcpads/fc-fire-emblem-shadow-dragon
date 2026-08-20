@@ -326,7 +326,7 @@ impl DialogueRuntimeCodePlan {
             *storage,
         )?;
         ensure!(
-            publisher.bytes == expected.bytes,
+            publisher.bytes == expected.routine.bytes,
             "storage item-list route no longer refines the installed composite font publisher"
         );
         Ok(())
@@ -581,7 +581,10 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     let composite_font_page_publisher_origin = consumer_font_page_activation.address
         + u16::try_from(consumer_font_page_activation.bytes.len())
             .context("consumer font page activation length overflow")?;
-    let composite_font_page_publisher = consumer_font_page::build_composite_font_page_publisher(
+    let consumer_font_page::CompositeFontPagePublisher {
+        routine: composite_font_page_publisher,
+        source_page_selection,
+    } = consumer_font_page::build_composite_font_page_publisher(
         composite_font_page_publisher_origin,
         consumer_font_page_activation.address,
         consumer_font_pages,
@@ -593,6 +596,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     let consumer_font_page_open = consumer_font_page::build_consumer_font_page_open(
         consumer_font_page_open_origin,
         consumer_font_page_activation.address,
+        source_page_selection,
     )?;
     let consumer_font_page_close_origin = consumer_font_page_open.address
         + u16::try_from(consumer_font_page_open.bytes.len())

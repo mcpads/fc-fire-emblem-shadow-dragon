@@ -57,6 +57,10 @@ struct HandlerOnlyRouteReport {
     indices_hex: Vec<String>,
 }
 
+pub(crate) fn is_preserved_fixed_string_index(index: u8) -> bool {
+    PRESERVED_FIXED_STRING_INDICES.contains(&index)
+}
+
 pub(crate) fn inspect_fixed_string_ownership(
     inspection: &FixedStringConsumerInspection,
 ) -> Result<FixedStringOwnershipReport> {

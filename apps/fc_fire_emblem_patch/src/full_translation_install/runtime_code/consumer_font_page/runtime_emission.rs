@@ -157,6 +157,14 @@ pub(in crate::full_translation_install::runtime_code) fn build_fixed_menu_font_p
     })
 }
 
+/// The composite publisher contains one shared source-page entry.  Both the
+/// state dispatcher and the screen-open fallback enter this exact sequence,
+/// so clearing a stale translated route cannot drift into two implementations.
+pub(in crate::full_translation_install::runtime_code) struct CompositeFontPagePublisher {
+    pub(in crate::full_translation_install::runtime_code) routine: RuntimeRoutine,
+    pub(in crate::full_translation_install::runtime_code) source_page_selection: u16,
+}
+
 /// 이번 합성이 바꾸는 페이지 수명을 게시한다. 요약은 route를 직접 바꾸지 않고
 /// source-bound unit/enemy appender가 첫 글자를 쓰기 전에 실제 페이지를 게시하게
 /// 하며, 상태는 요약이 게시한 route를 그대로 유지한다. 저장소 overlay는 완료 대사
@@ -171,7 +179,7 @@ pub(in crate::full_translation_install::runtime_code) fn build_composite_font_pa
     activation: u16,
     pages: ScreenFontPageRoutes,
     storage_item_list: StorageItemListRuntimeRoute,
-) -> Result<RuntimeRoutine> {
+) -> Result<CompositeFontPagePublisher> {
     pages.validate()?;
     ensure!(
         storage_item_list.composite_state == UNIT_ITEM_LIST_COMPOSITE_STATE,
@@ -185,17 +193,26 @@ pub(in crate::full_translation_install::runtime_code) fn build_composite_font_pa
         Instruction::LdaAbsolute(storage_item_list.caller_state_address),
         Instruction::CmpImmediate(storage_item_list.composition_state),
     ]);
-    let clear_for_storage_item_list_jump = instructions.len();
-    instructions.push(Instruction::BeqAbsolute(origin));
+    let catalog_for_ordinary_item_list_jump = instructions.len();
+    instructions.push(Instruction::BneAbsolute(origin));
+    let source_page_selection = next_address(origin, &instructions)?;
     instructions.extend([
-        Instruction::LdaImmediate(pages.catalog[0]),
-        Instruction::BneAbsolute(activation),
+        Instruction::LdaImmediate(0),
+        Instruction::StaAbsolute(CONSUMER_FONT_PAGE),
+        Instruction::JmpAbsolute(CENTRAL_RIGHT_FD_WRITER),
     ]);
     let ordinary_state_target = next_address(origin, &instructions)?;
     instructions[non_item_list_state] = Instruction::BneAbsolute(ordinary_state_target);
     let mut route_jumps = Vec::with_capacity(COMPOSITE_FONT_RESIDENCY_POLICIES.len());
+    let mut source_page_jumps = Vec::new();
     for (state, policy) in COMPOSITE_FONT_RESIDENCY_POLICIES {
         if state == storage_item_list.composite_state {
+            continue;
+        }
+        if policy == ScreenFontResidencyPolicy::SourcePageSelected {
+            instructions.push(Instruction::CmpImmediate(state));
+            source_page_jumps.push(instructions.len());
+            instructions.push(Instruction::BeqAbsolute(origin));
             continue;
         }
         let Some(page) = policy.static_page() else {
@@ -237,16 +254,12 @@ pub(in crate::full_translation_install::runtime_code) fn build_composite_font_pa
     let shop_dialogue_restore_jump = instructions.len();
     instructions.push(Instruction::BeqAbsolute(origin));
     instructions.push(Instruction::Rts);
-    let clear_target = next_address(origin, &instructions)?;
-    instructions[clear_for_storage_action_jump] = Instruction::BeqAbsolute(clear_target);
-    instructions[clear_for_storage_overflow_jump] = Instruction::BeqAbsolute(clear_target);
-    instructions[clear_for_storage_item_list_jump] = Instruction::BeqAbsolute(clear_target);
-    instructions[shop_dialogue_restore_jump] = Instruction::BeqAbsolute(clear_target);
-    instructions.extend([
-        Instruction::LdaImmediate(0),
-        Instruction::StaAbsolute(CONSUMER_FONT_PAGE),
-        Instruction::JmpAbsolute(CENTRAL_RIGHT_FD_WRITER),
-    ]);
+    instructions[clear_for_storage_action_jump] = Instruction::BeqAbsolute(source_page_selection);
+    instructions[clear_for_storage_overflow_jump] = Instruction::BeqAbsolute(source_page_selection);
+    instructions[shop_dialogue_restore_jump] = Instruction::BeqAbsolute(source_page_selection);
+    for jump in source_page_jumps {
+        instructions[jump] = Instruction::BeqAbsolute(source_page_selection);
+    }
     for page in [
         ScreenFontPageRole::FrontEndMenu,
         ScreenFontPageRole::FrontEndRecordAction,
@@ -264,6 +277,9 @@ pub(in crate::full_translation_install::runtime_code) fn build_composite_font_pa
         if page == ScreenFontPageRole::MapMenu {
             instructions[map_summary_range_jump] = Instruction::BccAbsolute(target);
         }
+        if page == ScreenFontPageRole::CatalogDefault {
+            instructions[catalog_for_ordinary_item_list_jump] = Instruction::BneAbsolute(target);
+        }
         instructions.extend([
             Instruction::LdaImmediate(page.mapper_route(pages)),
             // Every validated mapper route is nonzero. The taken relative branch is
@@ -273,10 +289,13 @@ pub(in crate::full_translation_install::runtime_code) fn build_composite_font_pa
         ]);
     }
 
-    Ok(RuntimeRoutine {
-        role: "composite consumer font page publisher",
-        address: origin,
-        bytes: assemble_at(origin, &instructions)?,
+    Ok(CompositeFontPagePublisher {
+        routine: RuntimeRoutine {
+            role: "composite consumer font page publisher",
+            address: origin,
+            bytes: assemble_at(origin, &instructions)?,
+        },
+        source_page_selection,
     })
 }
 
@@ -285,6 +304,7 @@ pub(in crate::full_translation_install::runtime_code) fn build_composite_font_pa
 pub(in crate::full_translation_install::runtime_code) fn build_consumer_font_page_open(
     origin: u16,
     activation: u16,
+    source_page_selection: u16,
 ) -> Result<RuntimeRoutine> {
     let mut instructions = vec![Instruction::LdaAbsolute(CONSUMER_FONT_PAGE)];
     let no_page = instructions.len();
@@ -295,12 +315,7 @@ pub(in crate::full_translation_install::runtime_code) fn build_consumer_font_pag
         Instruction::StaZeroPage(RIGHT_FD_SOURCE_SHADOW),
         Instruction::Rts,
     ]);
-    let no_page_target = next_address(origin, &instructions)?;
-    instructions[no_page] = Instruction::BeqAbsolute(no_page_target);
-    instructions.extend([
-        Instruction::LdaImmediate(0),
-        Instruction::JmpAbsolute(CENTRAL_RIGHT_FD_WRITER),
-    ]);
+    instructions[no_page] = Instruction::BeqAbsolute(source_page_selection);
 
     Ok(RuntimeRoutine {
         role: "consumer font page screen open",

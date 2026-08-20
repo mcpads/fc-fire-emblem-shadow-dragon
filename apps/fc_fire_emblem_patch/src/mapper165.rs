@@ -63,6 +63,7 @@ mod roster_page;
 mod runtime;
 pub(crate) mod selector_safety;
 mod shop_dialogue_page;
+pub(crate) mod source_code_binding;
 mod source_indexed_mapper_aliases;
 mod source_mapper_write_audit;
 #[cfg(test)]

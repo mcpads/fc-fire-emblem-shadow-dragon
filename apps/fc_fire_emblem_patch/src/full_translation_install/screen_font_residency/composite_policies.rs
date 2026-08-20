@@ -25,6 +25,7 @@ use crate::{
 };
 
 use super::STORAGE_DIALOGUE_OVERLAY_COMPOSITE_STATES;
+use super::source_page_composites::SOURCE_PAGE_COMPOSITE_STATES;
 
 pub(in crate::full_translation_install) const MAP_MENU_COMPOSITE_STATE: u8 = 0x03;
 pub(in crate::full_translation_install) const UNIT_SUMMARY_COMPOSITE_STATE: u8 = 0x04;
@@ -84,6 +85,9 @@ pub(in crate::full_translation_install) enum ScreenFontResidencyPolicy {
     UnitOrEnemyNameRetainedFromSummary,
     CompletedDialoguePageRetained,
     ActiveDialogueCallerRestored,
+    /// This standalone screen uses only source-preserved Latin/digits and
+    /// explicitly returns both the residency state and the mapper to page zero.
+    SourcePageSelected,
     Delegated(DelegatedFontPageOwner),
     /// The central composite-state publisher performs no page write and no
     /// other page owner has yet been admitted for this state. This remains a
@@ -162,6 +166,14 @@ const CENTRAL_OVERRIDE_POLICIES: &[(u8, ScreenFontResidencyPolicy)] = &[
     (
         SHOP_ITEM_COMPOSITE_STATE,
         ScreenFontResidencyPolicy::ActiveDialogueCallerRestored,
+    ),
+    (
+        SOURCE_PAGE_COMPOSITE_STATES[0],
+        ScreenFontResidencyPolicy::SourcePageSelected,
+    ),
+    (
+        SOURCE_PAGE_COMPOSITE_STATES[1],
+        ScreenFontResidencyPolicy::SourcePageSelected,
     ),
 ];
 
@@ -273,6 +285,7 @@ impl ScreenFontResidencyPolicy {
             | Self::UnitOrEnemyNameRetainedFromSummary
             | Self::CompletedDialoguePageRetained
             | Self::ActiveDialogueCallerRestored
+            | Self::SourcePageSelected
             | Self::Delegated(_)
             | Self::UnresolvedPageOwner => None,
         }
@@ -358,6 +371,16 @@ pub(super) fn validate_composite_state_policies() -> Result<()> {
         composite_font_residency_policy(SHOP_ITEM_COMPOSITE_STATE)
             == Some(ScreenFontResidencyPolicy::ActiveDialogueCallerRestored),
         "shop item composition no longer restores the active E7 dialogue page"
+    );
+    let source_page_states = COMPOSITE_FONT_RESIDENCY_POLICIES
+        .iter()
+        .filter_map(|(state, policy)| {
+            (*policy == ScreenFontResidencyPolicy::SourcePageSelected).then_some(*state)
+        })
+        .collect::<Vec<_>>();
+    ensure!(
+        source_page_states == SOURCE_PAGE_COMPOSITE_STATES,
+        "source-page composite state ownership changed"
     );
     Ok(())
 }

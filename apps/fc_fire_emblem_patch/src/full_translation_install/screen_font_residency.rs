@@ -7,6 +7,7 @@
 mod composite_policies;
 mod dialogue_surfaces;
 mod selector_forwarders;
+mod source_page_composites;
 mod surface_requirements;
 mod transition_surfaces;
 
@@ -48,6 +49,7 @@ pub(super) use dialogue_surfaces::DialogueSurfaceInputs;
 use dialogue_surfaces::{DialogueSurfacePlan, plan_dialogue_surfaces};
 pub(in crate::full_translation_install) use selector_forwarders::FontPageSelectorForwarderPlan;
 use selector_forwarders::plan_font_page_selector_forwarders;
+use source_page_composites::{SOURCE_PAGE_COMPOSITE_STATES, bind_source_page_composite_lifetimes};
 use surface_requirements::{
     ScreenFontSurfaceInputs, ScreenFontSurfacePlan, plan_screen_font_surfaces,
 };
@@ -160,6 +162,7 @@ pub(super) struct ScreenFontResidencyDraft {
     delegated_page_owner_state_count: usize,
     unresolved_page_owner_state_count: usize,
     static_state_route_count: usize,
+    source_page_selected_state_count: usize,
     unit_or_enemy_name_published_state_count: usize,
     unit_or_enemy_name_retained_state_count: usize,
     completed_dialogue_page_retained_state_count: usize,
@@ -226,6 +229,14 @@ pub(super) fn plan_screen_font_residency(
             && options_lifetime.result_fixed_string_indices() == [0x2E, 0x2F]
             && options_lifetime.result_producer_count() == 2,
         "options composite lifetime source ownership changed"
+    );
+    let source_page_lifetimes =
+        bind_source_page_composite_lifetimes(inputs.source, inputs.fixed_string_consumers)?;
+    ensure!(
+        source_page_lifetimes.states() == SOURCE_PAGE_COMPOSITE_STATES
+            && source_page_lifetimes.preserved_fixed_string_indices() == [0x0B, 0x12, 0x3E]
+            && source_page_lifetimes.producer_count() == SOURCE_PAGE_COMPOSITE_STATES.len(),
+        "source-page composite lifetime ownership changed"
     );
     ensure!(
         composite_font_residency_policy(inputs.choice_residency.composite_state())
@@ -327,14 +338,18 @@ pub(super) fn plan_screen_font_residency(
         .collect::<Vec<_>>();
 
     Ok(ScreenFontResidencyDraft {
-        schema: 10,
-        strategy: "bind every source-produced composite state to one explicit central residency action, a named upstream selector or appender, or an unresolved page owner; publish static pages at entry, retain the source-bound storage dialogue page when its item-list producer reuses state 07, let the unit-summary appender publish its name-dependent page, retain that page explicitly for unit status, delegate record-metadata composites 12/1F/20 to the active main-dialogue runtime selector, retain the options selector across the source-bound 1B-to-19 value-result overlay, and keep every state without an admitted owner visible instead of treating no central write as proof of safe inheritance",
+        schema: 11,
+        strategy: "bind every source-produced composite state to one explicit central residency action, a named upstream selector or appender, or an unresolved page owner; publish static pages at entry, explicitly select the source page for the source-bound post-battle result and NEXT STORY screens, retain the source-bound storage dialogue page when its item-list producer reuses state 07, let the unit-summary appender publish its name-dependent page, retain that page explicitly for unit status, delegate record-metadata composites 12/1F/20 to the active main-dialogue runtime selector, retain the options selector across the source-bound 1B-to-19 value-result overlay, and keep every state without an admitted owner visible instead of treating no central write as proof of safe inheritance",
         composite_state_policy_count: COMPOSITE_FONT_RESIDENCY_POLICIES.len(),
         delegated_page_owner_state_count: delegated_page_owners.len(),
         unresolved_page_owner_state_count: unresolved_page_owner_states_hex.len(),
         static_state_route_count: COMPOSITE_FONT_RESIDENCY_POLICIES
             .iter()
             .filter(|(_, policy)| policy.static_page().is_some())
+            .count(),
+        source_page_selected_state_count: COMPOSITE_FONT_RESIDENCY_POLICIES
+            .iter()
+            .filter(|(_, policy)| *policy == ScreenFontResidencyPolicy::SourcePageSelected)
             .count(),
         unit_or_enemy_name_published_state_count: COMPOSITE_FONT_RESIDENCY_POLICIES
             .iter()
@@ -570,8 +585,21 @@ mod tests {
                 .iter()
                 .filter(|(_, policy)| *policy == ScreenFontResidencyPolicy::UnresolvedPageOwner)
                 .count(),
-            10
+            8
         );
+    }
+
+    #[test]
+    fn source_only_composites_select_page_zero_instead_of_inheriting_a_translation_page() {
+        validate_composite_state_policies().unwrap();
+        let actual = COMPOSITE_FONT_RESIDENCY_POLICIES
+            .iter()
+            .filter_map(|(state, policy)| {
+                (*policy == ScreenFontResidencyPolicy::SourcePageSelected).then_some(*state)
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(actual, SOURCE_PAGE_COMPOSITE_STATES);
     }
 
     #[test]

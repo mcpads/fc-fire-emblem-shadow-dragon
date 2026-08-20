@@ -5,14 +5,15 @@
 //! 셋째 값은 별도 `1A` 게임 속도 appender로 간다. 이 경계를 잃으면 `19`를 단지
 //! 보존 문자열 두 개를 쓴다는 이유로 이전 CHR 페이지에 묵시적으로 맡기게 된다.
 
-use anyhow::{Context, Result, ensure};
-use retro_rp2a03::{AddressingMode, Location, MemoryAddress, Operand, Rp2A03, decode_bytes};
-use typed_isa_core::{AccessKind, StaticSemantics};
+use anyhow::{Result, ensure};
 
 use crate::{
     fixed_string_consumers::FixedStringConsumerInspection,
-    mapper165::inline_pointer_dispatch::bind_inline_pointer_dispatch, rom::Rom,
-    typed_source::decode_rp2a03_sequence,
+    mapper165::{
+        inline_pointer_dispatch::bind_inline_pointer_dispatch,
+        source_code_binding::bind_exact_switchable_code_without_mmc4_writes,
+    },
+    rom::Rom,
 };
 
 use super::{
@@ -20,7 +21,6 @@ use super::{
     OPTIONS_RESULT_COMPOSITE_STATE,
 };
 
-const SOURCE_PRG_BANK_BYTE_COUNT: usize = 16 * 1024;
 const OPTIONS_PRG_BANK: u8 = 0x06;
 const GAMEPLAY_MAIN_STATE_DISPATCH_CALL: u16 = 0x8964;
 const OPTIONS_MAIN_HANDLER: u16 = 0xB349;
@@ -194,8 +194,9 @@ pub(crate) fn bind_options_composite_lifetime(
         "gameplay main state 38 no longer enters the options lifetime"
     );
 
-    bind_code_without_source_mapper_writes(
+    bind_exact_switchable_code_without_mmc4_writes(
         source,
+        OPTIONS_PRG_BANK,
         OPTIONS_MAIN_HANDLER,
         &OPTIONS_ENTRY,
         "options lifetime entry",
@@ -214,20 +215,23 @@ pub(crate) fn bind_options_composite_lifetime(
         "options lifetime substate table changed"
     );
 
-    bind_code_without_source_mapper_writes(
+    bind_exact_switchable_code_without_mmc4_writes(
         source,
+        OPTIONS_PRG_BANK,
         OPTIONS_SUBSTATE_HANDLERS[0],
         &OPTIONS_INITIAL_SCREEN,
         "options initial screen producer",
     )?;
-    bind_code_without_source_mapper_writes(
+    bind_exact_switchable_code_without_mmc4_writes(
         source,
+        OPTIONS_PRG_BANK,
         OPTIONS_SUBSTATE_HANDLERS[1],
         &OPTIONS_VALUE_SELECTION,
         "options value-selection branches",
     )?;
-    bind_code_without_source_mapper_writes(
+    bind_exact_switchable_code_without_mmc4_writes(
         source,
+        OPTIONS_PRG_BANK,
         OPTIONS_SUBSTATE_HANDLERS[2],
         &OPTIONS_FINISH,
         "options lifetime completion",
@@ -277,72 +281,6 @@ pub(crate) fn bind_options_composite_lifetime(
             .filter(|producer| producer.state == OPTIONS_RESULT_COMPOSITE_STATE)
             .count(),
     })
-}
-
-fn bind_code_without_source_mapper_writes(
-    source: &Rom,
-    address: u16,
-    expected: &[u8],
-    role: &str,
-) -> Result<()> {
-    let actual = source_bytes(source, address, expected.len())?;
-    ensure!(actual == expected, "{role} source bytes changed");
-    decode_rp2a03_sequence(actual, address, role)?;
-
-    let mut offset = 0_usize;
-    while offset < actual.len() {
-        let instruction = decode_bytes(&actual[offset..])
-            .with_context(|| format!("decode {role} at +0x{offset:X}"))?;
-        let instruction_address = address
-            .checked_add(u16::try_from(offset)?)
-            .context("options source instruction address overflow")?;
-        for access in Rp2A03::semantics(&instruction, &instruction_address)
-            .expect("RP2A03 static semantics are infallible")
-            .location_accesses
-        {
-            if access.kind != AccessKind::Write {
-                continue;
-            }
-            match access.location {
-                Location::Memory(MemoryAddress::Direct(target)) => ensure!(
-                    target < 0xA000,
-                    "{role} gained a direct source mapper write at ${instruction_address:04X}"
-                ),
-                Location::Memory(MemoryAddress::Effective {
-                    mode: AddressingMode::AbsoluteX | AddressingMode::AbsoluteY,
-                    operand: Operand::Word(base),
-                }) => ensure!(
-                    base < 0xA000 && base.saturating_add(0xFF) < 0xA000,
-                    "{role} gained an indexed source mapper-write envelope at ${instruction_address:04X}"
-                ),
-                Location::Memory(MemoryAddress::Effective { .. }) => anyhow::bail!(
-                    "{role} gained an unbounded effective write at ${instruction_address:04X}"
-                ),
-                _ => {}
-            }
-        }
-        offset += instruction.encoded_len();
-    }
-    ensure!(
-        offset == actual.len(),
-        "{role} typed decode ended mid-region"
-    );
-    Ok(())
-}
-
-fn source_bytes(source: &Rom, address: u16, byte_count: usize) -> Result<&[u8]> {
-    ensure!(
-        (0x8000..0xC000).contains(&address),
-        "options source address is outside the switchable window"
-    );
-    let start = usize::from(OPTIONS_PRG_BANK)
-        .checked_mul(SOURCE_PRG_BANK_BYTE_COUNT)
-        .and_then(|base| base.checked_add(usize::from(address - 0x8000)))
-        .context("options source range offset overflow")?;
-    source
-        .prg()
-        .get(start..start + byte_count)
-        .context("options source range exceeds PRG")
 }
 
 #[cfg(test)]
