@@ -273,6 +273,13 @@ fn validate_requirement_policies() -> Result<()> {
                 )
             })?;
         let expected = match requirement.page_selection {
+            CatalogPageSelection::DefaultCatalog
+                if requirement.state == UNIT_ITEM_LIST_COMPOSITE_STATE =>
+            {
+                ScreenFontResidencyPolicy::StorageDialogueOrStatic(
+                    ScreenFontPageRole::CatalogDefault,
+                )
+            }
             CatalogPageSelection::DefaultCatalog => {
                 ScreenFontResidencyPolicy::Static(ScreenFontPageRole::CatalogDefault)
             }

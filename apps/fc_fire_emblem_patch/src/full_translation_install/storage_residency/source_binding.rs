@@ -66,6 +66,34 @@ const FACILITY_EXIT: [u8; 27] = [
 ];
 const FACILITY_EXIT_RECORDS: [u8; 6] = [0x06, 0x06, 0x0D, 0x06, 0x06, 0x4D];
 const FACILITY_EXIT_STATES: [u8; 6] = [0x00, 0x08, 0x08, 0x00, 0x10, 0x08];
+const FACILITY_ITEM_LIST_COMPOSITION_STATE: u8 = 0x06;
+const FACILITY_ITEM_LIST_SETTLED_STATE: u8 = 0x07;
+const FACILITY_ITEM_LIST_DIALOGUE_RECORD: u8 = 0x2A;
+const FACILITY_ITEM_LIST_COMPOSITE_STATE: u8 = 0x07;
+const FACILITY_ITEM_LIST_COMPOSER: u16 = 0x9EAC;
+const FACILITY_ITEM_LIST_COMPOSER_BYTES: [u8; 21] = [
+    0x20,
+    0x5A,
+    0x9C,
+    0x20,
+    0x5C,
+    0xE6,
+    0xA9,
+    FACILITY_ITEM_LIST_COMPOSITE_STATE,
+    0x20,
+    0x90,
+    0xE6,
+    0xA9,
+    0x20,
+    0x85,
+    0x70,
+    0x85,
+    0x71,
+    0xEE,
+    0xDB,
+    0x05,
+    0x60,
+];
 
 const OVERFLOW_DISPATCH_CALL: u16 = 0xB110;
 const OVERFLOW_STATE_MACHINE_START: u16 = 0xB10D;
@@ -97,6 +125,9 @@ pub(super) struct StorageSourceBinding {
     pub(super) overflow_root_record_indices: BTreeSet<usize>,
     pub(super) facility_overlay_root_record_index: usize,
     pub(super) overflow_overlay_root_record_index: usize,
+    pub(super) item_list_overlay_root_record_index: usize,
+    pub(super) item_list_settled_state: u8,
+    pub(super) item_list_route: super::StorageItemListRuntimeRoute,
     pub(super) source_dispatch_count: usize,
     pub(super) source_direct_record_store_count: usize,
     pub(super) source_binding_sha1: String,
@@ -169,11 +200,26 @@ pub(super) fn bind_storage_dialogue_sources(source: &Rom) -> Result<StorageSourc
         &FACILITY_EXIT_STATES,
         "storage facility exit state table",
     )?;
+    bind_exact_code(
+        source,
+        FACILITY_ITEM_LIST_COMPOSER,
+        &FACILITY_ITEM_LIST_COMPOSER_BYTES,
+        "storage facility dialogue-retaining item-list composer",
+    )?;
     ensure!(
         FACILITY_INITIAL_RECORDS[usize::from(STORAGE_FACILITY_INDEX)] == 0x29
             && FACILITY_EXIT_RECORDS[usize::from(STORAGE_FACILITY_INDEX)] == 0x06
             && FACILITY_EXIT_STATES[usize::from(STORAGE_FACILITY_INDEX)] == 0x10,
         "storage facility index no longer selects its entry dialogue and return state"
+    );
+    ensure!(
+        FACILITY_HANDLER_TARGETS[usize::from(FACILITY_ITEM_LIST_COMPOSITION_STATE)]
+            == FACILITY_ITEM_LIST_COMPOSER
+            && FACILITY_IMMEDIATE_RECORD_WRITES
+                .contains(&(0x9E75, FACILITY_ITEM_LIST_DIALOGUE_RECORD))
+            && FACILITY_ITEM_LIST_SETTLED_STATE
+                == FACILITY_ITEM_LIST_COMPOSITION_STATE.wrapping_add(1),
+        "storage item-list state no longer follows dialogue record 0x2A and advance into state 0x07"
     );
 
     let facility_region = source_region(
@@ -279,6 +325,13 @@ pub(super) fn bind_storage_dialogue_sources(source: &Rom) -> Result<StorageSourc
             FACILITY_INITIAL_RECORDS[usize::from(STORAGE_FACILITY_INDEX)],
         ),
         overflow_overlay_root_record_index: 0x40,
+        item_list_overlay_root_record_index: usize::from(FACILITY_ITEM_LIST_DIALOGUE_RECORD),
+        item_list_settled_state: FACILITY_ITEM_LIST_SETTLED_STATE,
+        item_list_route: super::StorageItemListRuntimeRoute {
+            caller_state_address: CALLER_STATE_ADDRESS,
+            composition_state: FACILITY_ITEM_LIST_COMPOSITION_STATE,
+            composite_state: FACILITY_ITEM_LIST_COMPOSITE_STATE,
+        },
         source_dispatch_count: 2,
         source_direct_record_store_count: FACILITY_IMMEDIATE_RECORD_WRITES.len()
             + 1

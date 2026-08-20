@@ -21,10 +21,14 @@ use crate::{
     mapper165::battle_codebook_plan::GlyphWorkset,
     rom::Rom,
     semantic_translation::SemanticTranslationPlan,
-    text_inventory::FixedTextLogicalByte,
+    shop_flow::SHOP_ITEM_ENTRY_COUNT,
+    text_inventory::{FixedTextLogicalByte, FixedTextPlan},
 };
 
-use super::resident_glyph_assignment::{assign_resident_glyph_codes, assignment_sha1};
+use super::{
+    dialogue_item_worksets::{DialogueItemWorksetInputs, augment_dialogue_item_worksets},
+    resident_glyph_assignment::{assign_resident_glyph_codes, assignment_sha1},
+};
 
 mod source_binding;
 
@@ -42,6 +46,13 @@ pub(in crate::full_translation_install) const STORAGE_DIALOGUE_OVERLAY_COMPOSITE
     STORAGE_OVERFLOW_ACTION_COMPOSITE_STATE,
 ];
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::full_translation_install) struct StorageItemListRuntimeRoute {
+    pub(in crate::full_translation_install) caller_state_address: u16,
+    pub(in crate::full_translation_install) composition_state: u8,
+    pub(in crate::full_translation_install) composite_state: u8,
+}
+
 #[derive(Serialize)]
 pub(super) struct StorageDialogueResidencyPlan {
     strategy: &'static str,
@@ -57,6 +68,13 @@ pub(super) struct StorageDialogueResidencyPlan {
     facility_overlay_record_ids: Vec<String>,
     overflow_overlay_record_ids: Vec<String>,
     overlay_record_ids: Vec<String>,
+    item_list_overlay_record_ids: Vec<String>,
+    item_list_composition_state: u8,
+    item_list_settled_state: u8,
+    item_list_composite_state: u8,
+    item_list_workset_count: usize,
+    item_list_glyph_count: usize,
+    preserved_item_code_count: usize,
     resident_workset_count: usize,
     fixed_glyph_count: usize,
     fixed_code_count: usize,
@@ -67,10 +85,13 @@ pub(super) struct StorageDialogueResidencyPlan {
     record_transition_line_residue_included_in_codebook: bool,
     storage_dialogue_does_not_reselect_the_static_menu_page: bool,
     capacity_notice_keeps_its_standalone_static_page: bool,
+    item_list_dialogue_pages_use_canonical_item_codes: bool,
     #[serde(skip)]
     pub(super) augmented_worksets: Vec<GlyphWorkset>,
     #[serde(skip)]
     fixed_glyph_codes: BTreeMap<char, u8>,
+    #[serde(skip)]
+    item_list_route: StorageItemListRuntimeRoute,
 }
 
 impl StorageDialogueResidencyPlan {
@@ -99,14 +120,20 @@ impl StorageDialogueResidencyPlan {
             })
             .collect()
     }
+
+    pub(super) fn item_list_runtime_route(&self) -> StorageItemListRuntimeRoute {
+        self.item_list_route
+    }
 }
 
 pub(super) fn plan_storage_dialogue_residency(
     source: &Rom,
     graph: &MainDialogueGraphReport,
     display: &MainDialogueDisplayPlan,
+    fixed: &FixedTextPlan,
     fixed_menu_labels: &SemanticTranslationPlan,
     dialogue_worksets: &[GlyphWorkset],
+    canonical_item_codes: &BTreeMap<char, u8>,
 ) -> Result<StorageDialogueResidencyPlan> {
     ensure!(
         display.page_worksets.len() == dialogue_worksets.len(),
@@ -159,6 +186,16 @@ pub(super) fn plan_storage_dialogue_residency(
         !overlay_record_ids.is_empty(),
         "storage action-menu dialogue population is empty"
     );
+    let item_list_overlay_record_ids = transition_record_ids(
+        graph,
+        &BTreeSet::from([source_binding.item_list_overlay_root_record_index]),
+        "storage item-list dialogue overlay",
+    )?;
+    ensure!(
+        !item_list_overlay_record_ids.is_empty()
+            && item_list_overlay_record_ids.is_subset(&facility_selected_record_ids),
+        "storage item-list dialogue escaped the source-selected facility state machine"
+    );
 
     let label_glyphs = storage_label_glyphs_by_index(fixed_menu_labels)?;
     let required_glyphs_by_record_id = overlay_glyph_requirements(
@@ -171,16 +208,25 @@ pub(super) fn plan_storage_dialogue_residency(
 
     let fixed_glyph_codes =
         assign_storage_label_codes(dialogue_worksets, &required_glyphs_by_workset)?;
-    let (augmented_worksets, resident_workset_count, maximum_augmented_workset_slot_demand) =
-        augment_storage_worksets(
-            display,
-            dialogue_worksets,
-            &required_glyphs_by_workset,
-            &fixed_glyph_codes,
-        )?;
+    let (label_augmented_worksets, resident_workset_count, _) = augment_storage_worksets(
+        display,
+        dialogue_worksets,
+        &required_glyphs_by_workset,
+        &fixed_glyph_codes,
+    )?;
+    let item_source_indices = (0..SHOP_ITEM_ENTRY_COUNT).collect::<BTreeSet<_>>();
+    let item_augmentation = augment_dialogue_item_worksets(DialogueItemWorksetInputs {
+        role: "storage item-list dialogue residency",
+        display,
+        fixed,
+        dialogue_worksets: &label_augmented_worksets,
+        canonical_item_codes,
+        item_source_indices: &item_source_indices,
+        target_record_ids: &item_list_overlay_record_ids,
+    })?;
 
     Ok(StorageDialogueResidencyPlan {
-        strategy: "give the storage dialogue pages one compatible code assignment for the fixed action labels that are visibly overlaid; exclude cross-record line residue because every installed new-record route clears all six physical rows centrally",
+        strategy: "give storage dialogue pages one compatible code assignment for visible fixed action labels and every item name synthesized over record 0x2A; retain the canonical dialogue item encoding instead of replacing the completed dialogue page with the generic catalog page",
         dialogue_table_id: DIALOGUE_TABLE_ID,
         dialogue_composite_states: STORAGE_DIALOGUE_OVERLAY_COMPOSITE_STATES,
         resident_fixed_label_indices: STORAGE_DIALOGUE_LABEL_INDICES,
@@ -193,18 +239,28 @@ pub(super) fn plan_storage_dialogue_residency(
         facility_overlay_record_ids: facility_overlay_record_ids.into_iter().collect(),
         overflow_overlay_record_ids: overflow_overlay_record_ids.into_iter().collect(),
         overlay_record_ids: overlay_record_ids.into_iter().collect(),
+        item_list_overlay_record_ids: item_list_overlay_record_ids.into_iter().collect(),
+        item_list_composition_state: source_binding.item_list_route.composition_state,
+        item_list_settled_state: source_binding.item_list_settled_state,
+        item_list_composite_state: source_binding.item_list_route.composite_state,
+        item_list_workset_count: item_augmentation.target_workset_count,
+        item_list_glyph_count: item_augmentation.item_glyph_count,
+        preserved_item_code_count: item_augmentation.preserved_item_code_count,
         resident_workset_count,
         fixed_glyph_count: fixed_glyph_codes.len(),
         fixed_code_count: fixed_glyph_codes.len(),
-        maximum_augmented_workset_slot_demand,
+        maximum_augmented_workset_slot_demand: item_augmentation
+            .maximum_augmented_workset_slot_demand,
         fixed_assignment_sha1: assignment_sha1(&fixed_glyph_codes),
         every_storage_label_glyph_uses_its_installed_code: true,
         every_overlay_dialogue_page_contains_its_visible_storage_label_glyphs: true,
         record_transition_line_residue_included_in_codebook: false,
         storage_dialogue_does_not_reselect_the_static_menu_page: true,
         capacity_notice_keeps_its_standalone_static_page: true,
-        augmented_worksets,
+        item_list_dialogue_pages_use_canonical_item_codes: true,
+        augmented_worksets: item_augmentation.augmented_worksets,
         fixed_glyph_codes,
+        item_list_route: source_binding.item_list_route,
     })
 }
 

@@ -18,6 +18,7 @@ use crate::{
     full_translation_install::{
         consumer_catalog::ConsumerCatalogRuntimeLayout,
         shop_item_residency::ShopItemResidencyRuntimeContract,
+        storage_residency::StorageItemListRuntimeRoute,
     },
     mapper165::font_pair_projection::TRANSLATED_FE_PAGE_FLAG,
     rom::Rom,
@@ -30,9 +31,11 @@ use super::consumer_font_page::COMPOSITE_STATE;
 mod shop_item_list;
 mod shop_item_route;
 
-pub(super) use shop_item_route::verify_shop_item_residency_route;
 #[cfg(test)]
-use shop_item_route::{ItemMaterialRoute, select_item_material};
+use shop_item_route::{ItemMaterialRoute, select_shop_item_material, select_storage_item_material};
+pub(super) use shop_item_route::{
+    verify_shop_item_residency_route, verify_storage_item_residency_route,
+};
 
 const UNIT_UI_BANK: u8 = 0x0B;
 const ENTRY_STUB_CAVE_END: u16 = 0xF807;
@@ -167,6 +170,7 @@ pub(super) fn build_consumer_catalog_runtime(
     front_end_record_action_route: u8,
     layout: ConsumerCatalogRuntimeLayout,
     shop_item_residency: ShopItemResidencyRuntimeContract,
+    storage_item_list: StorageItemListRuntimeRoute,
 ) -> Result<ConsumerCatalogRuntime> {
     let code_routine = build_catalog_append_runtime(
         code_origin,
@@ -174,6 +178,7 @@ pub(super) fn build_consumer_catalog_runtime(
         front_end_record_action_route,
         layout,
         shop_item_residency,
+        storage_item_list,
     )?;
     let mut next = entry_stub_origin;
     let mut fixed_routines = Vec::new();
@@ -284,6 +289,7 @@ fn build_catalog_append_runtime(
     front_end_record_action_route: u8,
     layout: ConsumerCatalogRuntimeLayout,
     shop_item_residency: ShopItemResidencyRuntimeContract,
+    storage_item_list: StorageItemListRuntimeRoute,
 ) -> Result<RuntimeRoutine> {
     ensure!(
         front_end_record_action_route & TRANSLATED_FE_PAGE_FLAG != 0,
@@ -294,6 +300,11 @@ fn build_catalog_append_runtime(
             && layout.material_page == shop_item_residency.catalog_material_page
             && layout.item_directory == shop_item_residency.catalog_item_directory,
         "consumer catalog runtime no longer uses the shop residency fallback material"
+    );
+    ensure!(
+        storage_item_list.composite_state
+            == crate::full_translation_install::screen_font_residency::UNIT_ITEM_LIST_COMPOSITE_STATE,
+        "storage item material route no longer refines the shared item-list composite state"
     );
     // The appender's caller owns X as the next composite-buffer position.  TSX is
     // needed only to inspect this temporary call frame, so save the incoming X
@@ -353,7 +364,29 @@ fn build_catalog_append_runtime(
         Instruction::Sec,
         Instruction::SbcImmediate(1),
         Instruction::StaZeroPage(0x04),
+        Instruction::LdaAbsolute(COMPOSITE_STATE),
+        Instruction::CmpImmediate(storage_item_list.composite_state),
     ]);
+    let catalog_item_composite = append_jump_if_not_equal(origin, &mut instructions)?;
+    instructions.extend([
+        Instruction::LdaAbsolute(storage_item_list.caller_state_address),
+        Instruction::CmpImmediate(storage_item_list.composition_state),
+    ]);
+    let catalog_item_state = append_jump_if_not_equal(origin, &mut instructions)?;
+    set_pointer(
+        &mut instructions,
+        shop_item_residency.dialogue_item_directory,
+    );
+    set_material_route(
+        &mut instructions,
+        shop_item_residency.dialogue_material_page,
+        MATERIAL_ROUTE_DIALOGUE,
+    );
+    let directory_ready_from_storage_item = push_jump(&mut instructions, origin);
+
+    let catalog_item = next_address(origin, &instructions)?;
+    patch_jump(&mut instructions, catalog_item_composite, catalog_item);
+    patch_jump(&mut instructions, catalog_item_state, catalog_item);
     set_pointer(&mut instructions, layout.item_directory);
     set_material_route(
         &mut instructions,
@@ -533,6 +566,7 @@ fn build_catalog_append_runtime(
     let directory_ready = next_address(origin, &instructions)?;
     for jump in [
         directory_ready_from_shop_item,
+        directory_ready_from_storage_item,
         directory_ready_from_catalog_item,
         directory_ready_from_shop_item_fallback,
         directory_ready_from_unit,
@@ -868,6 +902,14 @@ mod tests {
         }
     }
 
+    fn storage_item_list() -> StorageItemListRuntimeRoute {
+        StorageItemListRuntimeRoute {
+            caller_state_address: 0x05DB,
+            composition_state: 0x06,
+            composite_state: crate::full_translation_install::screen_font_residency::UNIT_ITEM_LIST_COMPOSITE_STATE,
+        }
+    }
+
     #[test]
     fn three_five_byte_stubs_fill_the_remaining_producer_cave() {
         let runtime = build_consumer_catalog_runtime(
@@ -878,6 +920,7 @@ mod tests {
             0xDD,
             layout(),
             shop_item_residency(),
+            storage_item_list(),
         )
         .unwrap();
 
@@ -928,6 +971,7 @@ mod tests {
             0xDD,
             layout(),
             shop_item_residency(),
+            storage_item_list(),
         )
         .unwrap();
 
@@ -958,6 +1002,7 @@ mod tests {
             0xDD,
             layout(),
             shop_item_residency(),
+            storage_item_list(),
         )
         .unwrap();
 
@@ -982,10 +1027,48 @@ mod tests {
             0xDD,
             layout(),
             shop_item_residency(),
+            storage_item_list(),
         )
         .unwrap();
 
         verify_shop_item_residency_route(&runtime.code_routine, shop_item_residency()).unwrap();
+    }
+
+    #[test]
+    fn storage_item_list_uses_dialogue_material_only_during_its_source_composition_state() {
+        let runtime = build_consumer_catalog_runtime(
+            0xA600,
+            0x30,
+            0xF7F8,
+            0xF620,
+            0xDD,
+            layout(),
+            shop_item_residency(),
+            storage_item_list(),
+        )
+        .unwrap();
+        verify_storage_item_residency_route(
+            &runtime.code_routine,
+            shop_item_residency(),
+            storage_item_list(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            select_storage_item_material(
+                &runtime.code_routine,
+                shop_item_residency(),
+                storage_item_list(),
+                storage_item_list().composite_state,
+                storage_item_list().composition_state,
+            )
+            .unwrap(),
+            ItemMaterialRoute {
+                directory: shop_item_residency().dialogue_item_directory,
+                material_page: shop_item_residency().dialogue_material_page,
+                material_base: shop_item_residency().dialogue_material_base,
+            }
+        );
     }
 
     #[test]
@@ -998,6 +1081,7 @@ mod tests {
             0xDD,
             layout(),
             shop_item_residency(),
+            storage_item_list(),
         )
         .unwrap();
         let expected = ItemMaterialRoute {
@@ -1040,7 +1124,7 @@ mod tests {
             ),
         ] {
             assert_eq!(
-                select_item_material(
+                select_shop_item_material(
                     &runtime.code_routine,
                     shop_item_residency(),
                     state.0,
@@ -1067,6 +1151,7 @@ mod tests {
             record_action_route,
             layout(),
             shop_item_residency(),
+            storage_item_list(),
         )
         .unwrap();
         let prefix = [

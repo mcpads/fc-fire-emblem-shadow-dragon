@@ -46,6 +46,7 @@ mod consumer_installation;
 mod cross_domain_material;
 mod current_candidate;
 mod dialogue_bank_layout;
+mod dialogue_item_worksets;
 mod dynamic_composition;
 mod dynamic_input_producers;
 mod dynamic_inputs;
@@ -397,8 +398,10 @@ pub(crate) fn plan_full_translation_installation(
         &rom,
         &dialogue_graph,
         &display,
+        &fixed,
         &fixed_menu_labels,
         &choice_residency.augmented_worksets,
+        dynamic_inputs.canonical_dynamic_codes(),
     )?;
     let chapter_save_projection = plan_chapter_save_projection(ChapterSaveProjectionInputs {
         candidate: &current_candidate,
@@ -655,6 +658,7 @@ pub(crate) fn plan_full_translation_installation(
         layout,
         consumer_catalog_runtime_layout,
         shop_item_residency.runtime_contract(),
+        storage_dialogue_residency.item_list_runtime_route(),
         cold_request_presentation.mapper_register,
         screen_font_residency.routes(),
     )?;
@@ -665,6 +669,11 @@ pub(crate) fn plan_full_translation_installation(
     shop_item_residency.bind_runtime_routes(
         &dialogue_runtime_code,
         dynamic_producer_encoding.canonical_outputs_ready(),
+    )?;
+    dialogue_runtime_code.verify_storage_item_residency_routes(
+        &shop_item_residency.runtime_contract(),
+        &storage_dialogue_residency.item_list_runtime_route(),
+        screen_font_residency.routes(),
     )?;
     let dynamic_string_producers_bound = dynamic_input_producers
         .every_record_selector_route_bound()

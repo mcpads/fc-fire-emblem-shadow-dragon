@@ -75,6 +75,7 @@ pub(in crate::full_translation_install) enum ScreenFontPageRole {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::full_translation_install) enum ScreenFontResidencyPolicy {
     Static(ScreenFontPageRole),
+    StorageDialogueOrStatic(ScreenFontPageRole),
     UnitOrEnemyNamePublishedByAppender,
     UnitOrEnemyNameRetainedFromSummary,
     CompletedDialoguePageRetained,
@@ -110,7 +111,7 @@ pub(in crate::full_translation_install) const COMPOSITE_FONT_RESIDENCY_POLICIES:
     ),
     (
         UNIT_ITEM_LIST_COMPOSITE_STATE,
-        ScreenFontResidencyPolicy::Static(ScreenFontPageRole::CatalogDefault),
+        ScreenFontResidencyPolicy::StorageDialogueOrStatic(ScreenFontPageRole::CatalogDefault),
     ),
     (
         ITEM_ACTION_COMPOSITE_STATE,
@@ -161,7 +162,7 @@ pub(in crate::full_translation_install) const COMPOSITE_FONT_RESIDENCY_POLICIES:
 impl ScreenFontResidencyPolicy {
     pub(in crate::full_translation_install) fn static_page(self) -> Option<ScreenFontPageRole> {
         match self {
-            Self::Static(page) => Some(page),
+            Self::Static(page) | Self::StorageDialogueOrStatic(page) => Some(page),
             Self::UnitOrEnemyNamePublishedByAppender
             | Self::UnitOrEnemyNameRetainedFromSummary
             | Self::CompletedDialoguePageRetained
@@ -178,6 +179,17 @@ fn validate_composite_state_policies() -> Result<()> {
     ensure!(
         states.len() == COMPOSITE_FONT_RESIDENCY_POLICIES.len(),
         "screen font residency assigns more than one policy to a composite state"
+    );
+    ensure!(
+        COMPOSITE_FONT_RESIDENCY_POLICIES
+            .iter()
+            .find_map(|(state, policy)| {
+                (*state == UNIT_ITEM_LIST_COMPOSITE_STATE).then_some(*policy)
+            })
+            == Some(ScreenFontResidencyPolicy::StorageDialogueOrStatic(
+                ScreenFontPageRole::CatalogDefault,
+            )),
+        "item-list font residency no longer distinguishes the storage dialogue lifetime from the standalone catalog page"
     );
     ensure!(
         COMPOSITE_FONT_RESIDENCY_POLICIES
@@ -319,6 +331,7 @@ pub(super) struct ScreenFontResidencyDraft {
     unit_or_enemy_name_published_state_count: usize,
     unit_or_enemy_name_retained_state_count: usize,
     completed_dialogue_page_retained_state_count: usize,
+    storage_dialogue_or_static_state_count: usize,
     front_end_composite_state_count: usize,
     front_end_record_action_catalog_page_index: usize,
     front_end_record_action_mapper_route: u8,
@@ -443,8 +456,8 @@ pub(super) fn plan_screen_font_residency(
         .len();
 
     Ok(ScreenFontResidencyDraft {
-        schema: 5,
-        strategy: "derive every composite-screen font policy from one residency plan; publish static pages at entry, let the unit-summary appender publish its name-dependent page, retain that page explicitly for unit status, retain a completed dialogue page only across source-bound storage overlay states, and select the protagonist catalog page explicitly for the front-end record-action lifetime",
+        schema: 6,
+        strategy: "derive every composite-screen font policy from one residency plan; publish static pages at entry, retain the source-bound storage dialogue page when its item-list producer reuses state 07, let the unit-summary appender publish its name-dependent page, retain that page explicitly for unit status, and select the protagonist catalog page explicitly for the front-end record-action lifetime",
         composite_state_policy_count: COMPOSITE_FONT_RESIDENCY_POLICIES.len(),
         static_state_route_count: COMPOSITE_FONT_RESIDENCY_POLICIES
             .iter()
@@ -466,6 +479,15 @@ pub(super) fn plan_screen_font_residency(
             .iter()
             .filter(|(_, policy)| {
                 *policy == ScreenFontResidencyPolicy::CompletedDialoguePageRetained
+            })
+            .count(),
+        storage_dialogue_or_static_state_count: COMPOSITE_FONT_RESIDENCY_POLICIES
+            .iter()
+            .filter(|(_, policy)| {
+                matches!(
+                    policy,
+                    ScreenFontResidencyPolicy::StorageDialogueOrStatic(_)
+                )
             })
             .count(),
         front_end_composite_state_count: FRONT_END_FONT_STATES.len(),
@@ -611,6 +633,20 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(actual, STORAGE_DIALOGUE_OVERLAY_COMPOSITE_STATES);
+    }
+
+    #[test]
+    fn shared_item_list_state_declares_its_storage_dialogue_override() {
+        validate_composite_state_policies().unwrap();
+        assert_eq!(
+            COMPOSITE_FONT_RESIDENCY_POLICIES
+                .iter()
+                .find(|(state, _)| *state == UNIT_ITEM_LIST_COMPOSITE_STATE)
+                .map(|(_, policy)| *policy),
+            Some(ScreenFontResidencyPolicy::StorageDialogueOrStatic(
+                ScreenFontPageRole::CatalogDefault,
+            ))
+        );
     }
 
     #[test]

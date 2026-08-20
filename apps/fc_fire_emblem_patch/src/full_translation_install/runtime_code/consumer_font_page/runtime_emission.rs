@@ -157,9 +157,10 @@ pub(in crate::full_translation_install::runtime_code) fn build_fixed_menu_font_p
     })
 }
 
-/// 이번 합성이 바꾸는 페이지 수명을 게시한다. 요약은 이전 route를 지운 뒤
-/// unit/enemy appender가 실제 페이지를 게시하게 하고, 상태는 요약이 게시한 route를
-/// 그대로 유지한다. 저장소 overlay는 완료 대사 selector로 명시적으로 넘긴다.
+/// 이번 합성이 바꾸는 페이지 수명을 게시한다. 요약은 route를 직접 바꾸지 않고
+/// source-bound unit/enemy appender가 첫 글자를 쓰기 전에 실제 페이지를 게시하게
+/// 하며, 상태는 요약이 게시한 route를 그대로 유지한다. 저장소 overlay는 완료 대사
+/// selector로 명시적으로 넘긴다.
 ///
 /// 그 밖의 합성 상태는 **현재 화면의 보조 합성**일 수 있으므로 게시값을 바꾸지 않는다.
 /// 실제 화면 이탈은 별도 close/gameplay-handoff 경계가 소유한다. 합성기 번호 하나를
@@ -169,11 +170,34 @@ pub(in crate::full_translation_install::runtime_code) fn build_composite_font_pa
     origin: u16,
     activation: u16,
     pages: ScreenFontPageRoutes,
+    storage_item_list: StorageItemListRuntimeRoute,
 ) -> Result<RuntimeRoutine> {
     pages.validate()?;
+    ensure!(
+        storage_item_list.composite_state == UNIT_ITEM_LIST_COMPOSITE_STATE,
+        "storage item-list route no longer refines composite state 0x{UNIT_ITEM_LIST_COMPOSITE_STATE:02X}"
+    );
     let mut instructions = vec![Instruction::StaAbsolute(COMPOSITE_STATE)];
+    instructions.push(Instruction::CmpImmediate(storage_item_list.composite_state));
+    let non_item_list_state = instructions.len();
+    instructions.push(Instruction::BneAbsolute(origin));
+    instructions.extend([
+        Instruction::LdaAbsolute(storage_item_list.caller_state_address),
+        Instruction::CmpImmediate(storage_item_list.composition_state),
+    ]);
+    let clear_for_storage_item_list_jump = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(origin));
+    instructions.extend([
+        Instruction::LdaImmediate(pages.catalog[0]),
+        Instruction::BneAbsolute(activation),
+    ]);
+    let ordinary_state_target = next_address(origin, &instructions)?;
+    instructions[non_item_list_state] = Instruction::BneAbsolute(ordinary_state_target);
     let mut route_jumps = Vec::with_capacity(COMPOSITE_FONT_RESIDENCY_POLICIES.len());
     for (state, policy) in COMPOSITE_FONT_RESIDENCY_POLICIES {
+        if state == storage_item_list.composite_state {
+            continue;
+        }
         let Some(page) = policy.static_page() else {
             continue;
         };
@@ -185,12 +209,10 @@ pub(in crate::full_translation_install::runtime_code) fn build_composite_font_pa
         instructions.push(Instruction::BeqAbsolute(origin));
         route_jumps.push((jump, page));
     }
-    instructions.push(Instruction::CmpImmediate(UNIT_SUMMARY_COMPOSITE_STATE));
-    let clear_for_summary_jump = instructions.len();
-    instructions.push(Instruction::BeqAbsolute(origin));
-    // Unit status and auxiliary composers share the default retain path.  The source-bound
-    // summary entry below is the only member of that lifetime which must clear the prior route;
-    // its name appender then publishes the exact unit/enemy catalog page for status to inherit.
+    // Unit summary, unit status, and auxiliary composers share the default retain path.  The
+    // source-bound summary composer always reaches its name appender before writing the selected
+    // name, and that appender publishes the exact unit/enemy catalog page for status to inherit.
+    // Clearing here is therefore both redundant and a transient source-page selection.
     instructions.push(Instruction::CmpImmediate(
         STORAGE_ACTION_MENU_COMPOSITE_STATE,
     ));
@@ -216,9 +238,9 @@ pub(in crate::full_translation_install::runtime_code) fn build_composite_font_pa
     instructions.push(Instruction::BeqAbsolute(origin));
     instructions.push(Instruction::Rts);
     let clear_target = next_address(origin, &instructions)?;
-    instructions[clear_for_summary_jump] = Instruction::BeqAbsolute(clear_target);
     instructions[clear_for_storage_action_jump] = Instruction::BeqAbsolute(clear_target);
     instructions[clear_for_storage_overflow_jump] = Instruction::BeqAbsolute(clear_target);
+    instructions[clear_for_storage_item_list_jump] = Instruction::BeqAbsolute(clear_target);
     instructions[shop_dialogue_restore_jump] = Instruction::BeqAbsolute(clear_target);
     instructions.extend([
         Instruction::LdaImmediate(0),

@@ -13,6 +13,7 @@ use super::{
     runtime_bank_contract::bind_bank_restore_contract, runtime_nmi_contract::bind_quiet_frame_gate,
     screen_font_residency::ScreenFontPageRoutes,
     shop_item_residency::ShopItemResidencyRuntimeContract,
+    storage_residency::StorageItemListRuntimeRoute,
 };
 use crate::{
     mapper165::{
@@ -295,6 +296,42 @@ impl DialogueRuntimeCodePlan {
         Ok(())
     }
 
+    pub(in crate::full_translation_install) fn verify_storage_item_residency_routes(
+        &self,
+        material: &ShopItemResidencyRuntimeContract,
+        storage: &StorageItemListRuntimeRoute,
+        pages: ScreenFontPageRoutes,
+    ) -> Result<()> {
+        let item_appender = self
+            .code_routines
+            .iter()
+            .find(|routine| routine.role == "consumer catalog indexed string appender")
+            .context("consumer catalog item appender is missing")?;
+        consumer_catalog::verify_storage_item_residency_route(item_appender, *material, *storage)?;
+
+        let activation = self
+            .fixed_routines
+            .iter()
+            .find(|routine| routine.role == "consumer font page activation")
+            .context("consumer font page activation is missing")?;
+        let publisher = self
+            .fixed_routines
+            .iter()
+            .find(|routine| routine.role == "composite consumer font page publisher")
+            .context("composite consumer font page publisher is missing")?;
+        let expected = consumer_font_page::build_composite_font_page_publisher(
+            publisher.address,
+            activation.address,
+            pages,
+            *storage,
+        )?;
+        ensure!(
+            publisher.bytes == expected.bytes,
+            "storage item-list route no longer refines the installed composite font publisher"
+        );
+        Ok(())
+    }
+
     pub(in crate::full_translation_install) fn final_roster_consumer_route(
         &self,
     ) -> Result<FinalRosterConsumerRoute> {
@@ -432,6 +469,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     layout: resolve_request::MaterialLayout,
     consumer_catalog_layout: ConsumerCatalogRuntimeLayout,
     shop_item_residency: ShopItemResidencyRuntimeContract,
+    storage_item_list: StorageItemListRuntimeRoute,
     cold_request_mapper_register: u8,
     consumer_font_pages: ScreenFontPageRoutes,
 ) -> Result<DialogueRuntimeCodePlan> {
@@ -547,6 +585,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         composite_font_page_publisher_origin,
         consumer_font_page_activation.address,
         consumer_font_pages,
+        storage_item_list,
     )?;
     let consumer_font_page_open_origin = composite_font_page_publisher.address
         + u16::try_from(composite_font_page_publisher.bytes.len())
@@ -562,9 +601,11 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         consumer_font_page_close_origin,
         restore_source_pair_address,
     )?;
-    let consumer_font_page_gameplay_handoff_origin = consumer_font_page_close.address
-        + u16::try_from(consumer_font_page_close.bytes.len())
-            .context("consumer font page close length overflow")?;
+    // The ending exit-tail owner leaves one exact eight-byte suffix in its source-bound cave.
+    // Gameplay handoff is independent of selector ordering, so placing it there keeps the
+    // selector cave available for screen-residency policy without admitting another raw gap.
+    let consumer_font_page_gameplay_handoff_origin =
+        consumer_font_page::ending_lifetime::ENDING_FONT_EXIT_TAIL_END;
     let consumer_font_page_gameplay_handoff =
         consumer_font_page::build_consumer_font_page_gameplay_handoff(
             consumer_font_page_gameplay_handoff_origin,
@@ -604,6 +645,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         consumer_font_pages.front_end_record_action,
         consumer_catalog_layout,
         shop_item_residency,
+        storage_item_list,
     )?;
     ensure_routines_fit_cave(
         &[
@@ -696,7 +738,10 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         dispatcher_gate::SOURCE_IDENTITY_PUBLISHER_TAIL_CAVE_END,
     )?;
     ensure_routines_fit_cave(
-        &[&ending_font_lifetime.exit_tail],
+        &[
+            &ending_font_lifetime.exit_tail,
+            &consumer_font_page_gameplay_handoff,
+        ],
         consumer_font_page::ending_lifetime::ENDING_FONT_EXIT_TAIL_ORIGIN,
         consumer_font_page::ending_lifetime::ENDING_FONT_EXIT_TAIL_CAVE_END,
     )?;
@@ -718,7 +763,6 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
             &composite_font_page_publisher,
             &consumer_font_page_open,
             &consumer_font_page_close,
-            &consumer_font_page_gameplay_handoff,
         ],
         chr_selector::SELECTOR_CAVE_ORIGIN,
         chr_selector::SELECTOR_CAVE_END,

@@ -20,6 +20,14 @@ fn pages() -> ScreenFontPageRoutes {
     }
 }
 
+fn storage_item_list_route() -> StorageItemListRuntimeRoute {
+    StorageItemListRuntimeRoute {
+        caller_state_address: 0x05DB,
+        composition_state: 0x06,
+        composite_state: UNIT_ITEM_LIST_COMPOSITE_STATE,
+    }
+}
+
 #[derive(Default)]
 struct RunResult {
     applied_route: Option<u8>,
@@ -252,8 +260,13 @@ fn static_redraw_maps_immediately_and_screen_close_clears_the_page() {
     let pages = pages();
     let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
     let publisher_origin = ORIGIN + u16::try_from(activation.bytes.len()).unwrap();
-    let publisher =
-        build_composite_font_page_publisher(publisher_origin, activation.address, pages).unwrap();
+    let publisher = build_composite_font_page_publisher(
+        publisher_origin,
+        activation.address,
+        pages,
+        storage_item_list_route(),
+    )
+    .unwrap();
     let close_origin = publisher.address + u16::try_from(publisher.bytes.len()).unwrap();
     let close = build_consumer_font_page_close(close_origin, RESTORE_SOURCE_PAIR).unwrap();
     let memory = vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
@@ -289,12 +302,65 @@ fn static_redraw_maps_immediately_and_screen_close_clears_the_page() {
 }
 
 #[test]
+fn reused_item_list_state_retains_storage_dialogue_only_for_its_source_composer() {
+    let pages = pages();
+    let route = storage_item_list_route();
+    let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
+    let publisher_origin = ORIGIN + u16::try_from(activation.bytes.len()).unwrap();
+    let publisher =
+        build_composite_font_page_publisher(publisher_origin, activation.address, pages, route)
+            .unwrap();
+
+    let mut storage_memory: Box<[u8; 0x10000]> =
+        vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
+    storage_memory[usize::from(CONSUMER_FONT_PAGE)] = pages.unit_command;
+    storage_memory[usize::from(route.caller_state_address)] = route.composition_state;
+    let (storage_memory, storage) = run_routines(
+        storage_memory,
+        &[&activation, &publisher],
+        publisher.address,
+        route.composite_state,
+        0xA5,
+    );
+    assert_eq!(storage_memory[usize::from(CONSUMER_FONT_PAGE)], 0);
+    assert_eq!(storage.central_writer_value, Some(0));
+    assert_eq!(storage.applied_route, None);
+
+    for caller_state in [
+        route.composition_state.wrapping_sub(1),
+        route.composition_state.wrapping_add(1),
+    ] {
+        let mut ordinary_memory: Box<[u8; 0x10000]> =
+            vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
+        ordinary_memory[usize::from(route.caller_state_address)] = caller_state;
+        let (ordinary_memory, ordinary) = run_routines(
+            ordinary_memory,
+            &[&activation, &publisher],
+            publisher.address,
+            route.composite_state,
+            0x24,
+        );
+        assert_eq!(
+            ordinary_memory[usize::from(CONSUMER_FONT_PAGE)],
+            pages.catalog[0]
+        );
+        assert_eq!(ordinary.applied_route, Some(pages.catalog[0]));
+        assert_eq!(ordinary.central_writer_value, None);
+    }
+}
+
+#[test]
 fn map_funds_and_summary_states_share_the_map_menu_page_until_close() {
     let pages = pages();
     let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
     let publisher_origin = ORIGIN + u16::try_from(activation.bytes.len()).unwrap();
-    let publisher =
-        build_composite_font_page_publisher(publisher_origin, activation.address, pages).unwrap();
+    let publisher = build_composite_font_page_publisher(
+        publisher_origin,
+        activation.address,
+        pages,
+        storage_item_list_route(),
+    )
+    .unwrap();
     let close_origin = publisher.address + u16::try_from(publisher.bytes.len()).unwrap();
     let close = build_consumer_font_page_close(close_origin, RESTORE_SOURCE_PAIR).unwrap();
     let memory = vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
@@ -373,12 +439,17 @@ fn dynamic_name_page_can_change_during_one_open_screen() {
 }
 
 #[test]
-fn unit_summary_clears_stale_residency_before_its_name_appender_publishes() {
+fn unit_summary_leaves_residency_to_its_mandatory_name_appender() {
     let pages = pages();
     let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
     let publisher_origin = ORIGIN + u16::try_from(activation.bytes.len()).unwrap();
-    let publisher =
-        build_composite_font_page_publisher(publisher_origin, activation.address, pages).unwrap();
+    let publisher = build_composite_font_page_publisher(
+        publisher_origin,
+        activation.address,
+        pages,
+        storage_item_list_route(),
+    )
+    .unwrap();
     let mut memory: Box<[u8; 0x10000]> = vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
     memory[usize::from(CONSUMER_FONT_PAGE)] = pages.catalog[0];
 
@@ -390,7 +461,7 @@ fn unit_summary_clears_stale_residency_before_its_name_appender_publishes() {
         0x24,
     );
     assert_eq!(summary_entry.applied_route, None);
-    assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], 0);
+    assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], pages.catalog[0]);
 
     let (memory, name_appended) = run_routines(
         memory,
@@ -408,8 +479,13 @@ fn unit_status_retains_the_page_published_by_unit_summary() {
     let pages = pages();
     let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
     let publisher_origin = ORIGIN + u16::try_from(activation.bytes.len()).unwrap();
-    let publisher =
-        build_composite_font_page_publisher(publisher_origin, activation.address, pages).unwrap();
+    let publisher = build_composite_font_page_publisher(
+        publisher_origin,
+        activation.address,
+        pages,
+        storage_item_list_route(),
+    )
+    .unwrap();
 
     for retained_route in [0, pages.catalog[0], pages.catalog[1]] {
         let mut memory: Box<[u8; 0x10000]> =
@@ -438,8 +514,13 @@ fn dialogue_owned_composites_reenter_the_central_fd_selector_after_clearing_stat
     let pages = pages();
     let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
     let publisher_origin = ORIGIN + u16::try_from(activation.bytes.len()).unwrap();
-    let publisher =
-        build_composite_font_page_publisher(publisher_origin, activation.address, pages).unwrap();
+    let publisher = build_composite_font_page_publisher(
+        publisher_origin,
+        activation.address,
+        pages,
+        storage_item_list_route(),
+    )
+    .unwrap();
 
     for state in [
         SHOP_ITEM_COMPOSITE_STATE,
@@ -524,8 +605,13 @@ fn every_front_end_state_selects_its_page_without_prior_residency() {
     let pages = pages();
     let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
     let publisher_origin = ORIGIN + u16::try_from(activation.bytes.len()).unwrap();
-    let publisher =
-        build_composite_font_page_publisher(publisher_origin, activation.address, pages).unwrap();
+    let publisher = build_composite_font_page_publisher(
+        publisher_origin,
+        activation.address,
+        pages,
+        storage_item_list_route(),
+    )
+    .unwrap();
 
     let memory = vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
     let (memory, start_menu) = run_routines(
@@ -567,8 +653,13 @@ fn auxiliary_composite_preserves_the_page_until_the_screen_close_boundary() {
     let pages = pages();
     let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
     let publisher_origin = ORIGIN + u16::try_from(activation.bytes.len()).unwrap();
-    let publisher =
-        build_composite_font_page_publisher(publisher_origin, activation.address, pages).unwrap();
+    let publisher = build_composite_font_page_publisher(
+        publisher_origin,
+        activation.address,
+        pages,
+        storage_item_list_route(),
+    )
+    .unwrap();
     let mut memory: Box<[u8; 0x10000]> = vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
     memory[usize::from(CONSUMER_FONT_PAGE)] = pages.catalog[1];
 
@@ -590,8 +681,13 @@ fn reused_state_20_never_claims_the_ending_font_page() {
     let pages = pages();
     let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
     let publisher_origin = ORIGIN + u16::try_from(activation.bytes.len()).unwrap();
-    let publisher =
-        build_composite_font_page_publisher(publisher_origin, activation.address, pages).unwrap();
+    let publisher = build_composite_font_page_publisher(
+        publisher_origin,
+        activation.address,
+        pages,
+        storage_item_list_route(),
+    )
+    .unwrap();
 
     let close_origin = publisher.address + u16::try_from(publisher.bytes.len()).unwrap();
     let close = build_consumer_font_page_close(close_origin, RESTORE_SOURCE_PAIR).unwrap();
