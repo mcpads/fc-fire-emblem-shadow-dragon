@@ -11,11 +11,15 @@ mod game_over;
 mod shop;
 
 pub(crate) use epilogue::ending_character_epilogue_preserved_active_codes;
+#[cfg(test)]
+pub(super) use game_over::test_game_over_dialogue_source_binding;
+pub(super) use game_over::{GameOverDialogueSourceBinding, bind_game_over_dialogue_source};
 
 pub(super) fn observed_screen_lifetime_reports(
     filled_glyphs_by_record: &BTreeMap<DialogueRecordKey, BTreeSet<char>>,
     approved_glyphs_by_record: &BTreeMap<DialogueRecordKey, BTreeSet<char>>,
     graph: &MainDialogueGraphReport,
+    game_over_source_binding: Option<&GameOverDialogueSourceBinding>,
     active_slot_count: usize,
     working_set_ready: bool,
 ) -> Result<Vec<ObservedScreenLifetimeReport>> {
@@ -40,6 +44,7 @@ pub(super) fn observed_screen_lifetime_reports(
     if let Some(report) = game_over::turn_boundary_game_over_report(
         filled_glyphs_by_record,
         approved_glyphs_by_record,
+        game_over_source_binding,
         active_slot_count,
         working_set_ready,
     )? {

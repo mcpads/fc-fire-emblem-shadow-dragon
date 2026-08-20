@@ -16,6 +16,7 @@ pub enum Instruction {
     LdxZeroPage(u8),
     LdyImmediate(u8),
     LdyZeroPage(u8),
+    LdyAbsolute(u16),
     LdyAbsoluteX(u16),
     StaZeroPage(u8),
     StxZeroPage(u8),
@@ -133,6 +134,7 @@ impl Instruction {
             | Self::LdxAbsolute(_)
             | Self::CmpAbsolute(_)
             | Self::SbcAbsolute(_)
+            | Self::LdyAbsolute(_)
             | Self::LdyAbsoluteX(_)
             | Self::StaAbsolute(_)
             | Self::StaAbsoluteX(_)
@@ -193,6 +195,7 @@ impl Instruction {
             | Self::StaAbsolute(_)
             | Self::AdcAbsolute(_)
             | Self::LdxAbsolute(_)
+            | Self::LdyAbsolute(_)
             | Self::CmpAbsolute(_)
             | Self::SbcAbsolute(_) => 4,
             // 색인 적재는 페이지 경계를 넘으면 한 사이클 더 쓴다.
@@ -235,6 +238,7 @@ impl Instruction {
             Self::LdxZeroPage(address) => zero_page(Mnemonic::Ldx, address),
             Self::LdyImmediate(value) => immediate(Mnemonic::Ldy, value),
             Self::LdyZeroPage(address) => zero_page(Mnemonic::Ldy, address),
+            Self::LdyAbsolute(address) => absolute(Mnemonic::Ldy, address),
             Self::LdyAbsoluteX(address) => absolute_x(Mnemonic::Ldy, address),
             Self::StaZeroPage(address) => zero_page(Mnemonic::Sta, address),
             Self::StxZeroPage(address) => zero_page(Mnemonic::Stx, address),
@@ -376,6 +380,15 @@ pub fn assemble_at(origin: u16, instructions: &[Instruction]) -> Result<Vec<u8>>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn encodes_absolute_y_load() {
+        assert_eq!(
+            assemble_at(0x8000, &[Instruction::LdyAbsolute(0x7674)]).unwrap(),
+            [0xAC, 0x74, 0x76]
+        );
+        assert_eq!(Instruction::LdyAbsolute(0x7674).worst_case_cycles(), 4);
+    }
 
     #[test]
     fn encodes_only_the_declared_addressing_forms() {

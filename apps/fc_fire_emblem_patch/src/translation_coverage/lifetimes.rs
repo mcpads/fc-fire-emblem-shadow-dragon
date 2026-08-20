@@ -407,7 +407,7 @@ fn build_translation_lifetime_inventory(
             ),
             "turn-boundary game over" => (
                 "game_over",
-                "observed turn-boundary game-over union and selected dialogue",
+                "observed turn-boundary game-over union and source-selected dialogue family",
             ),
             "chapter-seven maximum dialogue page" => (
                 "chapter_clear_epilogue_dialogue",
@@ -496,7 +496,7 @@ mod tests {
             observed_screen_lifetimes: vec![
                 observed("weapon-shop purchase handoff", 9, 17, 0),
                 observed("ending character epilogue family", 33, 6, 18),
-                observed("turn-boundary game over", 30, 90, 0),
+                observed("turn-boundary game over", 71, 90, 0),
                 observed("chapter-seven maximum dialogue page", 35, 100, 0),
             ],
             capacity: MainDialogueCapacity {

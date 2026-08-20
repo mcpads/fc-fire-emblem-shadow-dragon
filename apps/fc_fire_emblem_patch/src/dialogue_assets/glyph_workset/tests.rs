@@ -12,6 +12,7 @@ fn approved_set_uses_only_complete_lines() {
         &empty_graph(),
         "workspace-sha1".to_owned(),
         None,
+        None,
     )
     .unwrap();
 
@@ -40,6 +41,7 @@ fn all_complete_input_reports_final_capacity() {
         &empty_graph(),
         "workspace-sha1".to_owned(),
         None,
+        None,
     )
     .unwrap();
 
@@ -61,6 +63,7 @@ fn serialized_report_omits_dialogue_glyphs_and_paths() {
         &workspace,
         &empty_graph(),
         "workspace-sha1".to_owned(),
+        None,
         None,
     )
     .unwrap();
@@ -87,7 +90,8 @@ fn transition_chain_capacity_uses_the_union_of_every_record() {
     let graph = graph_with_edge("main-dialogue", 0, "main-dialogue", 1);
 
     let report =
-        build_glyph_workset_report(&workspace, &graph, "workspace-sha1".to_owned(), None).unwrap();
+        build_glyph_workset_report(&workspace, &graph, "workspace-sha1".to_owned(), None, None)
+            .unwrap();
 
     assert_eq!(report.max_record_unique_glyph_count, 110);
     assert_eq!(report.max_transition_chain_unique_glyph_count, 220);
@@ -131,6 +135,7 @@ fn observed_shop_lifetime_counts_retained_source_slots_and_both_dialogue_records
         &empty_graph(),
         "workspace-sha1".to_owned(),
         None,
+        None,
     )
     .unwrap();
 
@@ -171,6 +176,7 @@ fn observed_epilogue_family_reserves_names_locations_and_the_dialogue_chain() {
         &empty_graph(),
         "workspace-sha1".to_owned(),
         None,
+        None,
     )
     .unwrap();
 
@@ -184,30 +190,60 @@ fn observed_epilogue_family_reserves_names_locations_and_the_dialogue_chain() {
 }
 
 #[test]
-fn observed_game_over_budget_uses_only_the_runtime_selected_record() {
-    let glyphs = (0..121)
-        .map(|index| char::from_u32(0xAC00 + index).unwrap())
-        .collect::<String>();
-    let workspace = workspace_with_records(vec![record(
-        "victory-and-defeat-dialogue",
-        10,
-        &format!("{glyphs}{{E7}}"),
-    )]);
+fn observed_game_over_budget_uses_the_complete_source_selected_family() {
+    let boundaries = [0..25, 25..50, 50..75, 75..100, 100..121];
+    let workspace = workspace_with_records(
+        [6, 7, 8, 9, 10]
+            .into_iter()
+            .zip(boundaries)
+            .map(|(index, range)| {
+                let glyphs = range
+                    .map(|glyph_index| char::from_u32(0xAC00 + glyph_index).unwrap())
+                    .collect::<String>();
+                record(
+                    "victory-and-defeat-dialogue",
+                    index,
+                    &format!("{glyphs}{{E7}}"),
+                )
+            })
+            .collect(),
+    );
+    let source_binding = screen_lifetimes::test_game_over_dialogue_source_binding();
 
     let report = build_glyph_workset_report(
         &workspace,
         &empty_graph(),
         "workspace-sha1".to_owned(),
         None,
+        Some(&source_binding),
     )
     .unwrap();
 
     let lifetime = &report.observed_screen_lifetimes[0];
-    assert_eq!(lifetime.source_record_count, 1);
+    assert_eq!(lifetime.source_record_count, 5);
     assert_eq!(lifetime.filled_unique_glyph_count, 121);
     assert_eq!(lifetime.preserved_active_source_code_count, 90);
     assert_eq!(lifetime.filled_slot_demand, 211);
     assert!(!lifetime.filled_set_fits_one_page_so_far);
+}
+
+#[test]
+fn game_over_records_cannot_bypass_the_source_selector_binding() {
+    let workspace =
+        workspace_with_records(vec![record("victory-and-defeat-dialogue", 10, "가{E7}")]);
+
+    let error = build_glyph_workset_report(
+        &workspace,
+        &empty_graph(),
+        "workspace-sha1".to_owned(),
+        None,
+        None,
+    )
+    .err()
+    .unwrap()
+    .to_string();
+
+    assert!(error.contains("without a bound source selector family"));
 }
 
 fn workspace_with_lines(lines: Vec<WorkspaceLine>) -> MainDialogueWorkspace {

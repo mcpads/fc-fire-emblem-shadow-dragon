@@ -57,8 +57,15 @@ pub(crate) fn analyze_main_dialogue_glyph_workset(
     validate_workspace_translations(&workspace)?;
 
     let graph = inspect_main_dialogue_graph(rom.data())?;
+    let game_over_source_binding = screen_lifetimes::bind_game_over_dialogue_source(&rom)?;
     let workspace_sha1 = sha1_hex(&workspace_bytes);
-    let preliminary = build_glyph_workset_report(&workspace, &graph, workspace_sha1.clone(), None)?;
+    let preliminary = build_glyph_workset_report(
+        &workspace,
+        &graph,
+        workspace_sha1.clone(),
+        None,
+        Some(&game_over_source_binding),
+    )?;
     let mut maximum_source_binding = maximum_source::bind_maximum_dialogue_source(
         rom.prg(),
         &preliminary.maximum_transition_chain,
@@ -87,6 +94,7 @@ pub(crate) fn analyze_main_dialogue_glyph_workset(
         &graph,
         workspace_sha1,
         Some(maximum_source_binding),
+        Some(&game_over_source_binding),
     )?;
     let mut report_bytes =
         serde_json::to_vec_pretty(&report).context("serialize main-dialogue glyph workset")?;
@@ -122,6 +130,7 @@ fn build_glyph_workset_report(
     graph: &MainDialogueGraphReport,
     workspace_sha1: String,
     maximum_source_binding: Option<maximum_source::MaximumDialogueSourceBinding>,
+    game_over_source_binding: Option<&screen_lifetimes::GameOverDialogueSourceBinding>,
 ) -> Result<MainDialogueGlyphWorksetReport> {
     let mut status_counts = GlyphWorksetStatusCounts::default();
     let mut filled_glyphs = BTreeSet::new();
@@ -199,6 +208,7 @@ fn build_glyph_workset_report(
         &filled_glyphs_by_record,
         &approved_glyphs_by_record,
         graph,
+        game_over_source_binding,
         active_slot_count,
         review_complete,
     )?;
