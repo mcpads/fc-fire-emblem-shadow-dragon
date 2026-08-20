@@ -156,8 +156,15 @@ pub(crate) struct FixedStringCallSite {
 pub(crate) struct FixedStringConsumerInspection {
     pub(crate) records: Vec<FixedStringRecord>,
     pub(crate) call_sites: Vec<FixedStringCallSite>,
+    pub(crate) composite_state_producers: Vec<CompositeStateProducer>,
     pub(crate) direct_producer_bound_indices: BTreeSet<u8>,
     pub(crate) census: FixedStringConsumerCensus,
+}
+
+impl FixedStringConsumerInspection {
+    pub(crate) fn composite_handler_target(&self, state: u8) -> Option<u16> {
+        EXPECTED_COMPOSITE_HANDLERS.get(usize::from(state)).copied()
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -282,6 +289,7 @@ pub(crate) fn inspect_fixed_string_consumers(rom: &Rom) -> Result<FixedStringCon
     Ok(FixedStringConsumerInspection {
         records,
         call_sites: calls,
+        composite_state_producers: producers,
         direct_producer_bound_indices,
         census,
     })

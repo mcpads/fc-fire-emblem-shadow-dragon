@@ -9,7 +9,7 @@ use crate::{
         SAVE_SLOT_SELECTION_COMPOSITE_STATE, START_MENU_COMPOSITE_STATE,
     },
     mapper165::{
-        BoundFontPageFallbackGraph, FontPageFallbackNodeRole, OPTIONS_FONT_PAGE_COMPOSITE_STATE,
+        BoundFontPageFallbackGraph, FontPageFallbackNodeRole, OPTIONS_FONT_PAGE_COMPOSITE_STATES,
         ROSTER_FONT_PAGE_COMPOSITE_STATE, bind_cumulative_font_page_fallback_graph,
         build_front_end_font_page_forwarder, build_unit_name_font_page_forwarder,
     },
@@ -30,16 +30,20 @@ const UNIT_NAME_PAGE_DOMAINS: &[&str] = &[
     "item_names",
     "unit_ui_labels",
 ];
-const DELEGATED_DYNAMIC_SELECTORS: &[(u8, DelegatedFontPageOwner, FontPageFallbackNodeRole)] = &[
+const DELEGATED_DYNAMIC_SELECTOR_OWNERS: &[(
+    DelegatedFontPageOwner,
+    FontPageFallbackNodeRole,
+    &[u8],
+)] = &[
     (
-        OPTIONS_FONT_PAGE_COMPOSITE_STATE,
         DelegatedFontPageOwner::OptionsSelector,
         FontPageFallbackNodeRole::OptionsMenu,
+        &OPTIONS_FONT_PAGE_COMPOSITE_STATES,
     ),
     (
-        ROSTER_FONT_PAGE_COMPOSITE_STATE,
         DelegatedFontPageOwner::UnitRosterSelector,
         FontPageFallbackNodeRole::UnitRoster,
+        &[ROSTER_FONT_PAGE_COMPOSITE_STATE],
     ),
 ];
 
@@ -225,7 +229,7 @@ pub(super) fn plan_font_page_selector_forwarders(
     let source_fallback_graph = fallback_graph_migration_report(&bound_source_graph);
 
     Ok(FontPageSelectorForwarderPlan {
-        schema: 4,
+        schema: 5,
         strategy: "bind the complete branching cumulative fallback graph before replacing a screen selector; centralize only decisions fully owned by the screen residency plan, preserve dynamic options, roster, shop, and chapter-dialogue selectors, and leave battle/maximum-dialogue rebinding to the integrated runtime owner",
         centralized_selector_count: source_fallback_graph.central_policy_forwarder_count,
         centrally_owned_composite_state_count: FRONT_END_FONT_STATES.len() + 2,
@@ -233,7 +237,10 @@ pub(super) fn plan_font_page_selector_forwarders(
         direct_predecessor_count: 2,
         installed_forwarder_byte_count: unit_replacement.len() + front_end_replacement.len(),
         retained_dynamic_selector_count: source_fallback_graph.retained_dynamic_selector_count,
-        delegated_dynamic_selector_state_count: DELEGATED_DYNAMIC_SELECTORS.len(),
+        delegated_dynamic_selector_state_count: DELEGATED_DYNAMIC_SELECTOR_OWNERS
+            .iter()
+            .map(|(_, _, states)| states.len())
+            .sum(),
         integrated_runtime_rebound_selector_count: source_fallback_graph
             .integrated_runtime_rebound_selector_count,
         central_policy_owns_every_removed_decision: true,
@@ -245,14 +252,14 @@ pub(super) fn plan_font_page_selector_forwarders(
                 "unit_summary_and_status",
                 2,
                 UNIT_NAME_PAGE_DOMAINS,
-                &unit_selector,
+                unit_selector,
                 unit_replacement.len(),
             ),
             forwarder_report(
                 "front_end_menu",
                 FRONT_END_FONT_STATES.len(),
                 FRONT_END_DOMAINS,
-                &front_end_selector,
+                front_end_selector,
                 front_end_replacement.len(),
             ),
         ],
@@ -421,13 +428,20 @@ fn bind_unit_name_central_ownership(routes: ScreenFontPageRoutes) -> Result<()> 
 }
 
 fn bind_delegated_dynamic_selector_ownership(graph: &BoundFontPageFallbackGraph) -> Result<()> {
-    for &(state, owner, role) in DELEGATED_DYNAMIC_SELECTORS {
+    for &(owner, role, states) in DELEGATED_DYNAMIC_SELECTOR_OWNERS {
         ensure!(
-            composite_font_residency_policy(state)
-                == Some(ScreenFontResidencyPolicy::Delegated(owner)),
-            "composite state {state:02X} is not delegated to {}",
+            !states.is_empty(),
+            "{} owns no composite states",
             owner.id()
         );
+        for &state in states {
+            ensure!(
+                composite_font_residency_policy(state)
+                    == Some(ScreenFontResidencyPolicy::Delegated(owner)),
+                "composite state {state:02X} is not delegated to {}",
+                owner.id()
+            );
+        }
         let nodes = graph
             .nodes
             .iter()

@@ -18,8 +18,13 @@ use serde::Serialize;
 use crate::{
     chapter_transition::{ChapterTitlePlan, TransitionTranslationPlans},
     choice_labels::ChoiceLabelPlan,
+    fixed_string_consumers::FixedStringConsumerInspection,
     front_end_menu::FRONT_END_FONT_STATES,
     mapper165::font_pair_projection::{TRANSLATED_FE_PAGE_FLAG, mapper_register_from_route},
+    mapper165::{
+        BoundOptionsCompositeLifetime, OPTIONS_FONT_PAGE_COMPOSITE_STATES,
+        bind_options_composite_lifetime,
+    },
     rom::Rom,
     semantic_translation::SemanticTranslationPlan,
     text_inventory::FixedTextPlan,
@@ -128,6 +133,8 @@ impl ScreenFontPageRoutes {
 }
 
 pub(super) struct ScreenFontResidencyInputs<'a> {
+    pub(super) source: &'a Rom,
+    pub(super) fixed_string_consumers: &'a FixedStringConsumerInspection,
     pub(super) front_end_menu_route: u8,
     pub(super) map_menu_route: u8,
     pub(super) consumer_catalog: &'a ConsumerCatalogPlan,
@@ -212,6 +219,14 @@ pub(super) fn plan_screen_font_residency(
     inputs: ScreenFontResidencyInputs<'_>,
 ) -> Result<ScreenFontResidencyDraft> {
     validate_composite_state_policies()?;
+    let options_lifetime: BoundOptionsCompositeLifetime =
+        bind_options_composite_lifetime(inputs.source, inputs.fixed_string_consumers)?;
+    ensure!(
+        options_lifetime.delegated_states() == OPTIONS_FONT_PAGE_COMPOSITE_STATES
+            && options_lifetime.result_fixed_string_indices() == [0x2E, 0x2F]
+            && options_lifetime.result_producer_count() == 2,
+        "options composite lifetime source ownership changed"
+    );
     ensure!(
         composite_font_residency_policy(inputs.choice_residency.composite_state())
             == Some(ScreenFontResidencyPolicy::Delegated(
@@ -307,15 +322,13 @@ pub(super) fn plan_screen_font_residency(
         .collect::<Vec<_>>();
     let unresolved_page_owner_states_hex = COMPOSITE_FONT_RESIDENCY_POLICIES
         .iter()
-        .filter_map(|(state, policy)| {
-            (*policy == ScreenFontResidencyPolicy::UnresolvedPageOwner)
-                .then(|| format!("0x{state:02X}"))
-        })
+        .filter(|(_, policy)| *policy == ScreenFontResidencyPolicy::UnresolvedPageOwner)
+        .map(|(state, _)| format!("0x{state:02X}"))
         .collect::<Vec<_>>();
 
     Ok(ScreenFontResidencyDraft {
-        schema: 9,
-        strategy: "bind every source-produced composite state to one explicit central residency action, a named upstream selector or appender, or an unresolved page owner; publish static pages at entry, retain the source-bound storage dialogue page when its item-list producer reuses state 07, let the unit-summary appender publish its name-dependent page, retain that page explicitly for unit status, delegate record-metadata composites 12/1F/20 to the active main-dialogue runtime selector, and keep every state without an admitted owner visible instead of treating no central write as proof of safe inheritance",
+        schema: 10,
+        strategy: "bind every source-produced composite state to one explicit central residency action, a named upstream selector or appender, or an unresolved page owner; publish static pages at entry, retain the source-bound storage dialogue page when its item-list producer reuses state 07, let the unit-summary appender publish its name-dependent page, retain that page explicitly for unit status, delegate record-metadata composites 12/1F/20 to the active main-dialogue runtime selector, retain the options selector across the source-bound 1B-to-19 value-result overlay, and keep every state without an admitted owner visible instead of treating no central write as proof of safe inheritance",
         composite_state_policy_count: COMPOSITE_FONT_RESIDENCY_POLICIES.len(),
         delegated_page_owner_state_count: delegated_page_owners.len(),
         unresolved_page_owner_state_count: unresolved_page_owner_states_hex.len(),
@@ -430,7 +443,7 @@ mod tests {
             RECORD_ACTION_COMPOSITE_STATE, RECORD_LIST_COMPOSITE_STATE,
             SAVE_SLOT_SELECTION_COMPOSITE_STATE, START_MENU_COMPOSITE_STATE,
         },
-        mapper165::{OPTIONS_FONT_PAGE_COMPOSITE_STATE, ROSTER_FONT_PAGE_COMPOSITE_STATE},
+        mapper165::{OPTIONS_FONT_PAGE_COMPOSITE_STATES, ROSTER_FONT_PAGE_COMPOSITE_STATE},
     };
 
     fn routes() -> ScreenFontPageRoutes {
@@ -531,12 +544,16 @@ mod tests {
                     DelegatedFontPageOwner::GameSpeedAppender,
                 ),
                 (
-                    OPTIONS_FONT_PAGE_COMPOSITE_STATE,
+                    OPTIONS_FONT_PAGE_COMPOSITE_STATES[0],
                     DelegatedFontPageOwner::OptionsSelector,
                 ),
                 (
                     MAIN_DIALOGUE_COMPOSITE_APPENDER_STATES[1],
                     DelegatedFontPageOwner::MainDialogueRuntimeSelector,
+                ),
+                (
+                    OPTIONS_FONT_PAGE_COMPOSITE_STATES[1],
+                    DelegatedFontPageOwner::OptionsSelector,
                 ),
                 (
                     MAIN_DIALOGUE_COMPOSITE_APPENDER_STATES[2],
@@ -553,7 +570,7 @@ mod tests {
                 .iter()
                 .filter(|(_, policy)| *policy == ScreenFontResidencyPolicy::UnresolvedPageOwner)
                 .count(),
-            11
+            10
         );
     }
 

@@ -431,6 +431,8 @@ pub(crate) fn plan_full_translation_installation(
         item_actions: &item_actions,
     })?;
     let screen_font_residency_draft = plan_screen_font_residency(ScreenFontResidencyInputs {
+        source: &rom,
+        fixed_string_consumers: &fixed_string_consumers,
         front_end_menu_route: front_end_mapper_route,
         map_menu_route: consumer_codebook.mapper_route_for("map_menu")?,
         consumer_catalog: &consumer_catalog,

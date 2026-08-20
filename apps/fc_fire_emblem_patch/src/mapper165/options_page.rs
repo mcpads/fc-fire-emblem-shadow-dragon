@@ -2,6 +2,10 @@ use anyhow::Result;
 
 use crate::rp2a03::{Instruction, assemble_at};
 
+mod source_lifetime;
+
+pub(crate) use source_lifetime::{BoundOptionsCompositeLifetime, bind_options_composite_lifetime};
+
 pub(super) const ROW_PRG_BANK: u8 = 0x0B;
 pub(super) const ROW_HOOK_ADDRESS: u16 = 0x93B7;
 pub(super) const ROW_HOOK_LEN: usize = 11;
@@ -13,6 +17,9 @@ pub(super) const PAGE_A_REGISTER: u8 = 0x88;
 pub(super) const PAGE_B_REGISTER: u8 = 0x8C;
 pub(super) const OPTIONS_COMPOSITE_STATE_ADDRESS: u16 = 0x05E8;
 pub(super) const OPTIONS_COMPOSITE_STATE: u8 = 0x1B;
+pub(super) const OPTIONS_RESULT_COMPOSITE_STATE: u8 = 0x19;
+pub(super) const OPTIONS_COMPOSITE_LIFETIME_STATES: [u8; 2] =
+    [OPTIONS_RESULT_COMPOSITE_STATE, OPTIONS_COMPOSITE_STATE];
 pub(super) const OPTIONS_MAIN_STATE_ADDRESS: u16 = 0x0084;
 pub(super) const OPTIONS_MAIN_STATE: u8 = 0x38;
 

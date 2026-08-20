@@ -81,7 +81,9 @@ pub(crate) use weapon_shop_shared_text::{
 };
 
 pub(crate) const ROSTER_HEADER_FIXED_STRING_INDEX: u8 = roster_page::HEADER_RESOURCE_ID;
-pub(crate) const OPTIONS_FONT_PAGE_COMPOSITE_STATE: u8 = options_page::OPTIONS_COMPOSITE_STATE;
+pub(crate) use options_page::{BoundOptionsCompositeLifetime, bind_options_composite_lifetime};
+pub(crate) const OPTIONS_FONT_PAGE_COMPOSITE_STATES: [u8; 2] =
+    options_page::OPTIONS_COMPOSITE_LIFETIME_STATES;
 pub(crate) const ROSTER_FONT_PAGE_COMPOSITE_STATE: u8 = roster_page::COMPOSITE_STATE;
 
 use runtime::{

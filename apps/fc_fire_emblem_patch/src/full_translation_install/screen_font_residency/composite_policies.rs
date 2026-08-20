@@ -20,7 +20,7 @@ use crate::{
     full_translation_install::storage_residency::{
         STORAGE_ACTION_MENU_COMPOSITE_STATE, STORAGE_OVERFLOW_ACTION_COMPOSITE_STATE,
     },
-    mapper165::{OPTIONS_FONT_PAGE_COMPOSITE_STATE, ROSTER_FONT_PAGE_COMPOSITE_STATE},
+    mapper165::{OPTIONS_FONT_PAGE_COMPOSITE_STATES, ROSTER_FONT_PAGE_COMPOSITE_STATE},
     shop_flow::SHOP_ITEM_COMPOSITE_STATE,
 };
 
@@ -183,11 +183,15 @@ const DELEGATED_POLICIES: &[(u8, DelegatedFontPageOwner)] = &[
         DelegatedFontPageOwner::UnitSelectionAppender,
     ),
     (
+        OPTIONS_FONT_PAGE_COMPOSITE_STATES[0],
+        DelegatedFontPageOwner::OptionsSelector,
+    ),
+    (
         GAME_SPEED_SELECTION_COMPOSITE_STATE,
         DelegatedFontPageOwner::GameSpeedAppender,
     ),
     (
-        OPTIONS_FONT_PAGE_COMPOSITE_STATE,
+        OPTIONS_FONT_PAGE_COMPOSITE_STATES[1],
         DelegatedFontPageOwner::OptionsSelector,
     ),
     (
