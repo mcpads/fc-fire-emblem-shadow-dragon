@@ -27,6 +27,7 @@ use crate::{
 use super::STORAGE_DIALOGUE_OVERLAY_COMPOSITE_STATES;
 use super::source_page_composites::SOURCE_PAGE_COMPOSITE_STATES;
 
+pub(in crate::full_translation_install) const UNIT_NAME_DETAIL_COMPOSITE_STATE: u8 = 0x02;
 pub(in crate::full_translation_install) const MAP_MENU_COMPOSITE_STATE: u8 = 0x03;
 pub(in crate::full_translation_install) const UNIT_SUMMARY_COMPOSITE_STATE: u8 = 0x04;
 pub(in crate::full_translation_install) const UNIT_COMMAND_COMPOSITE_STATE: u8 = 0x05;
@@ -34,6 +35,7 @@ pub(in crate::full_translation_install) const ATTACK_WEAPON_SELECTION_COMPOSITE_
 pub(in crate::full_translation_install) const UNIT_ITEM_LIST_COMPOSITE_STATE: u8 = 0x07;
 pub(in crate::full_translation_install) const ITEM_ACTION_COMPOSITE_STATE: u8 = 0x09;
 pub(in crate::full_translation_install) const UNIT_ACTION_ITEM_COMPOSITE_STATE: u8 = 0x0A;
+pub(in crate::full_translation_install) const CLASS_NAME_ONLY_COMPOSITE_STATE: u8 = 0x0B;
 pub(in crate::full_translation_install) const UNIT_STATUS_COMPOSITE_STATE: u8 = 0x0F;
 pub(in crate::full_translation_install) const MAP_FUNDS_COMPOSITE_STATE: u8 = 0x13;
 pub(in crate::full_translation_install) const MAP_SUMMARY_COMPOSITE_STATE: u8 = 0x14;
@@ -46,6 +48,8 @@ pub(in crate::full_translation_install) const ITEM_NAME_APPENDER_PUBLISHED_COMPO
     ITEM_USE_RESULT_COMPOSITE_STATE,
     STORAGE_ITEM_DETAIL_COMPOSITE_STATE,
 ];
+pub(in crate::full_translation_install) const UNIT_OR_ENEMY_NAME_APPENDER_PUBLISHED_COMPOSITE_STATES:
+    [u8; 2] = [UNIT_NAME_DETAIL_COMPOSITE_STATE, UNIT_SUMMARY_COMPOSITE_STATE];
 
 const DIRECT_COMPOSITE_STATE_START: u8 = 0x02;
 const DIRECT_COMPOSITE_STATE_END_INCLUSIVE: u8 = 0x26;
@@ -91,6 +95,7 @@ pub(in crate::full_translation_install) enum ScreenFontResidencyPolicy {
     Static(ScreenFontPageRole),
     StorageDialogueOrStatic(ScreenFontPageRole),
     ItemNamePublishedByAppender,
+    ClassNamePublishedByAppender,
     UnitOrEnemyNamePublishedByAppender,
     UnitOrEnemyNameRetainedFromSummary,
     CompletedDialoguePageRetained,
@@ -109,6 +114,10 @@ pub(in crate::full_translation_install) enum ScreenFontResidencyPolicy {
 /// that order avoids changing branch layout merely because the coverage table
 /// now also names states with no central override.
 const NON_DELEGATED_POLICIES: &[(u8, ScreenFontResidencyPolicy)] = &[
+    (
+        UNIT_OR_ENEMY_NAME_APPENDER_PUBLISHED_COMPOSITE_STATES[0],
+        ScreenFontResidencyPolicy::UnitOrEnemyNamePublishedByAppender,
+    ),
     (
         MAP_MENU_COMPOSITE_STATE,
         ScreenFontResidencyPolicy::Static(ScreenFontPageRole::MapMenu),
@@ -158,7 +167,7 @@ const NON_DELEGATED_POLICIES: &[(u8, ScreenFontResidencyPolicy)] = &[
         ScreenFontResidencyPolicy::Static(ScreenFontPageRole::FrontEndRecordAction),
     ),
     (
-        UNIT_SUMMARY_COMPOSITE_STATE,
+        UNIT_OR_ENEMY_NAME_APPENDER_PUBLISHED_COMPOSITE_STATES[1],
         ScreenFontResidencyPolicy::UnitOrEnemyNamePublishedByAppender,
     ),
     (
@@ -196,6 +205,10 @@ const NON_DELEGATED_POLICIES: &[(u8, ScreenFontResidencyPolicy)] = &[
     (
         ITEM_NAME_APPENDER_PUBLISHED_COMPOSITE_STATES[2],
         ScreenFontResidencyPolicy::ItemNamePublishedByAppender,
+    ),
+    (
+        CLASS_NAME_ONLY_COMPOSITE_STATE,
+        ScreenFontResidencyPolicy::ClassNamePublishedByAppender,
     ),
 ];
 
@@ -304,6 +317,7 @@ impl ScreenFontResidencyPolicy {
         match self {
             Self::Static(page) | Self::StorageDialogueOrStatic(page) => Some(page),
             Self::ItemNamePublishedByAppender
+            | Self::ClassNamePublishedByAppender
             | Self::UnitOrEnemyNamePublishedByAppender
             | Self::UnitOrEnemyNameRetainedFromSummary
             | Self::CompletedDialoguePageRetained
@@ -382,9 +396,20 @@ pub(super) fn validate_composite_state_policies() -> Result<()> {
         "item-name appender composite state ownership changed"
     );
     ensure!(
-        composite_font_residency_policy(UNIT_SUMMARY_COMPOSITE_STATE)
-            == Some(ScreenFontResidencyPolicy::UnitOrEnemyNamePublishedByAppender),
-        "unit-summary font residency no longer delegates page publication to its name appender"
+        COMPOSITE_FONT_RESIDENCY_POLICIES
+            .iter()
+            .filter_map(|(state, policy)| {
+                (*policy == ScreenFontResidencyPolicy::UnitOrEnemyNamePublishedByAppender)
+                    .then_some(*state)
+            })
+            .collect::<Vec<_>>()
+            == UNIT_OR_ENEMY_NAME_APPENDER_PUBLISHED_COMPOSITE_STATES,
+        "unit-or-enemy name appender composite state ownership changed"
+    );
+    ensure!(
+        composite_font_residency_policy(CLASS_NAME_ONLY_COMPOSITE_STATE)
+            == Some(ScreenFontResidencyPolicy::ClassNamePublishedByAppender),
+        "class-name-only font residency no longer delegates page publication to its appender"
     );
     ensure!(
         composite_font_residency_policy(UNIT_STATUS_COMPOSITE_STATE)

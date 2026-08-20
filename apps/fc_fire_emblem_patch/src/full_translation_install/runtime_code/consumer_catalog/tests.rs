@@ -204,6 +204,22 @@ fn catalog_calls_and_shop_consumer_hook_have_distinct_owned_extents() {
             .iter()
             .all(|hook| hook.bytes.len() == 3)
     );
+    assert_eq!(runtime.hooks[0].bytes[0], 0x20);
+    assert_eq!(runtime.hooks[1].bytes[0], 0x4C);
+    assert_eq!(runtime.hooks[2].bytes[0], 0x4C);
+    for (hook, address) in runtime.hooks[..HOOK_SITES.len()].iter().zip([
+        0x875F,
+        UNIT_NAME_APPENDER_ENTRY,
+        CLASS_NAME_APPENDER_ENTRY,
+    ]) {
+        assert!(matches!(
+            hook.site,
+            DialogueRuntimeHookSite::Switchable {
+                bank: UNIT_UI_BANK,
+                address: actual,
+            } if actual == address
+        ));
+    }
     assert_eq!(
         runtime.hooks[HOOK_SITES.len()].role,
         DialogueRuntimeHookRole::ConsumerCatalogDirectItemEntry

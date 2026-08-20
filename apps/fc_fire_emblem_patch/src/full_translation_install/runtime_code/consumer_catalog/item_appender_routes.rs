@@ -8,10 +8,10 @@
 
 use anyhow::{Context, Result, ensure};
 
-use super::{FIXED_BRIDGE_ORIGIN, KIND_SHOP_ITEM_LIST, UNIT_UI_BANK};
+use super::{FIXED_BRIDGE_ORIGIN, KIND_SHOP_ITEM_LIST, UNIT_UI_BANK, direct_jsr_sites};
 use crate::{
     dialogue_inventory::switchable_cpu_to_file_offset,
-    fixed_string_consumers::inspect_fixed_string_consumers,
+    fixed_string_consumers::FixedStringConsumerInspection,
     full_translation_install::{
         runtime_code::{DialogueRuntimeHook, DialogueRuntimeHookRole, DialogueRuntimeHookSite},
         screen_font_residency::{
@@ -82,8 +82,11 @@ const DIRECT_ITEM_CALLERS: [DirectItemCaller; 4] = [
     },
 ];
 
-pub(super) fn bind_source_routes(source: &Rom, candidate: &Rom) -> Result<()> {
-    let consumers = inspect_fixed_string_consumers(source)?;
+pub(super) fn bind_source_routes(
+    source: &Rom,
+    candidate: &Rom,
+    consumers: &FixedStringConsumerInspection,
+) -> Result<()> {
     ensure!(
         consumers.composite_handler_target(0x0A) == Some(GENERIC_ITEM_LOOP_ADDRESS),
         "generic item appender state 0A handler changed"
@@ -143,7 +146,7 @@ pub(super) fn bind_source_routes(source: &Rom, candidate: &Rom) -> Result<()> {
             "{image_role} direct item normalizer cave is not exact FF"
         );
 
-        let transfers = direct_transfer_sites(rom, DIRECT_ITEM_APPENDER_ENTRY)?;
+        let transfers = direct_jsr_sites(rom, DIRECT_ITEM_APPENDER_ENTRY)?;
         ensure!(
             transfers == DIRECT_ITEM_CALLERS.map(|caller| caller.call),
             "{image_role} direct item appender caller census changed: {transfers:?}"
@@ -244,21 +247,6 @@ fn switchable_slice(rom: &Rom, address: u16, length: usize) -> Result<&[u8]> {
     rom.data()
         .get(offset..offset + length)
         .context("consumer catalog item-appender range is outside the ROM")
-}
-
-fn direct_transfer_sites(rom: &Rom, target: u16) -> Result<[u16; 4]> {
-    let operand = target.to_le_bytes();
-    let sites = switchable_slice(rom, 0x8000, PRG_BANK_BYTE_COUNT)?
-        .windows(3)
-        .enumerate()
-        .filter_map(|(offset, bytes)| {
-            (bytes[0] == 0x20 && bytes[1..] == operand)
-                .then_some(0x8000_u16 + u16::try_from(offset).expect("16 KiB offset fits u16"))
-        })
-        .collect::<Vec<_>>();
-    sites.try_into().map_err(|sites: Vec<u16>| {
-        anyhow::anyhow!("expected four direct item calls, found {sites:?}")
-    })
 }
 
 #[cfg(test)]

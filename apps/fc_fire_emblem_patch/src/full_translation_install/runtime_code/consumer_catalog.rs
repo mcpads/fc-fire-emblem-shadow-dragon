@@ -14,9 +14,11 @@ use super::{
 };
 use crate::{
     dialogue_inventory::switchable_cpu_to_file_offset,
+    fixed_string_consumers::inspect_fixed_string_consumers,
     front_end_menu::RECORD_ACTION_COMPOSITE_STATE,
     full_translation_install::{
         consumer_catalog::ConsumerCatalogRuntimeLayout,
+        screen_font_residency::CLASS_NAME_ONLY_COMPOSITE_STATE,
         shop_item_residency::ShopItemResidencyRuntimeContract,
         storage_residency::StorageItemListRuntimeRoute,
     },
@@ -72,39 +74,72 @@ const MATERIAL_ROUTE_CATALOG: u8 = 0;
 const MATERIAL_ROUTE_DIALOGUE: u8 = 1;
 
 #[derive(Clone, Copy)]
+enum HookTransfer {
+    CallStub,
+    ReplaceEntry,
+}
+
+#[derive(Clone, Copy)]
 struct HookSite {
     role: DialogueRuntimeHookRole,
     write_role: &'static str,
     address: u16,
-    expected_call: [u8; 3],
-    expected_continuation: &'static [u8],
+    expected_source: &'static [u8],
+    expected_candidate: Option<&'static [u8]>,
     kind: u8,
+    transfer: HookTransfer,
 }
+
+const RECORD_ITEM_APPENDER_CALL_SOURCE: [u8; 7] = [0x20, 0x6B, 0x8E, 0xA0, 0x00, 0xB1, 0x74];
+const UNIT_NAME_APPENDER_SOURCE: [u8; 50] = [
+    0xA0, 0x00, 0xB1, 0x74, 0x29, 0x7F, 0xA8, 0x88, 0x98, 0x0A, 0xA8, 0xAD, 0xF4, 0x76, 0x29, 0x80,
+    0xF0, 0x0C, 0xB9, 0xA4, 0xDF, 0x85, 0x00, 0xB9, 0xA5, 0xDF, 0x85, 0x01, 0xD0, 0x0A, 0xB9, 0x2B,
+    0xDE, 0x85, 0x00, 0xB9, 0x2C, 0xDE, 0x85, 0x01, 0x20, 0xFA, 0x8E, 0xA9, 0xED, 0x9D, 0x51, 0x04,
+    0xE8, 0x60,
+];
+const UNIT_NAME_APPENDER_CUMULATIVE: [u8; 50] = [
+    0xA0, 0x00, 0xB1, 0x74, 0x29, 0x7F, 0xA8, 0x88, 0x98, 0x0A, 0xA8, 0xAD, 0xF4, 0x76, 0x29, 0x80,
+    0xF0, 0x0C, 0xB9, 0xA4, 0xDF, 0x85, 0x00, 0xB9, 0xA5, 0xDF, 0x85, 0x01, 0xD0, 0x0A, 0x20, 0xD0,
+    0xB6, 0xEA, 0xEA, 0xEA, 0xEA, 0xEA, 0xEA, 0xEA, 0x20, 0xFA, 0x8E, 0xA9, 0xED, 0x9D, 0x51, 0x04,
+    0xE8, 0x60,
+];
+const CLASS_NAME_APPENDER_SOURCE: [u8; 29] = [
+    0xA0, 0x01, 0xB1, 0x74, 0xA8, 0x88, 0x98, 0x0A, 0xA8, 0xB9, 0x1F, 0xDA, 0x85, 0x00, 0xB9, 0x20,
+    0xDA, 0x85, 0x01, 0x20, 0xFA, 0x8E, 0xA9, 0xED, 0x9D, 0x51, 0x04, 0xE8, 0x60,
+];
+
+const UNIT_NAME_APPENDER_ENTRY: u16 = 0x8E88;
+const CLASS_NAME_APPENDER_ENTRY: u16 = 0x8EBA;
+const UNIT_NAME_APPENDER_CALLERS: [u16; 3] = [0x80A4, 0x8106, 0x8284];
+const CLASS_NAME_APPENDER_CALLERS: [u16; 2] = [0x82A7, 0x8699];
 
 const HOOK_SITES: [HookSite; 3] = [
     HookSite {
         role: DialogueRuntimeHookRole::ConsumerCatalogItemAppender,
         write_role: "consumer catalog item appender hook",
         address: 0x875F,
-        expected_call: [0x20, 0x6B, 0x8E],
-        expected_continuation: &[0xA0, 0x00, 0xB1, 0x74],
+        expected_source: &RECORD_ITEM_APPENDER_CALL_SOURCE,
+        expected_candidate: None,
         kind: KIND_ITEM,
+        transfer: HookTransfer::CallStub,
     },
     HookSite {
         role: DialogueRuntimeHookRole::ConsumerCatalogUnitAppender,
-        write_role: "consumer catalog unit-or-enemy appender hook",
-        address: 0x8284,
-        expected_call: [0x20, 0x88, 0x8E],
-        expected_continuation: &[0xA0, 0x00, 0xB1, 0x74],
+        write_role: "consumer catalog shared unit-or-enemy appender entry",
+        address: UNIT_NAME_APPENDER_ENTRY,
+        expected_source: &UNIT_NAME_APPENDER_SOURCE,
+        expected_candidate: Some(&UNIT_NAME_APPENDER_CUMULATIVE),
         kind: KIND_UNIT_OR_ENEMY,
+        transfer: HookTransfer::ReplaceEntry,
     },
     HookSite {
         role: DialogueRuntimeHookRole::ConsumerCatalogClassAppender,
-        write_role: "consumer catalog class appender hook",
-        address: 0x82A7,
-        expected_call: [0x20, 0xBA, 0x8E],
-        expected_continuation: &[0xA9, 0x08],
+        write_role: "consumer catalog shared class appender entry",
+        address: CLASS_NAME_APPENDER_ENTRY,
+        expected_source: &CLASS_NAME_APPENDER_SOURCE,
+        expected_candidate: None,
         kind: KIND_CLASS,
+        transfer: HookTransfer::ReplaceEntry,
     },
 ];
 
@@ -115,39 +150,47 @@ pub(super) struct ConsumerCatalogRuntime {
 }
 
 pub(super) fn bind_consumer_catalog_sites(source: &Rom, candidate: &Rom) -> Result<()> {
+    let consumers = inspect_fixed_string_consumers(source)?;
     for site in HOOK_SITES {
-        for (image_role, rom) in [("source", source), ("candidate", candidate)] {
+        for (image_role, rom, expected) in [
+            ("source", source, site.expected_source),
+            (
+                "candidate",
+                candidate,
+                site.expected_candidate.unwrap_or(site.expected_source),
+            ),
+        ] {
             let offset = switchable_cpu_to_file_offset(UNIT_UI_BANK, site.address)?;
             ensure!(
-                rom.data().get(offset..offset + site.expected_call.len())
-                    == Some(site.expected_call.as_slice()),
+                rom.data().get(offset..offset + expected.len()) == Some(expected),
                 "{image_role} {} changed at {UNIT_UI_BANK:02X}:{:04X}",
                 site.write_role,
                 site.address
             );
-            let continuation_offset = offset + site.expected_call.len();
-            let continuation = rom
-                .data()
-                .get(continuation_offset..continuation_offset + site.expected_continuation.len())
-                .with_context(|| {
-                    format!(
-                        "{image_role} {} continuation is outside the ROM",
-                        site.write_role
-                    )
-                })?;
-            ensure!(
-                continuation == site.expected_continuation,
-                "{image_role} {} no longer overwrites A before observing it",
-                site.write_role
-            );
-            decode_rp2a03_sequence(
-                continuation,
-                site.address + u16::try_from(site.expected_call.len())?,
-                "consumer catalog post-call A-overwrite continuation",
-            )?;
+            decode_rp2a03_sequence(expected, site.address, site.write_role)?;
         }
     }
-    item_appender_routes::bind_source_routes(source, candidate)?;
+    ensure!(
+        consumers.composite_handler_target(0x00) == Some(0x8054)
+            && consumers.composite_handler_target(0x02) == Some(0x80F6)
+            && consumers.composite_handler_target(0x04) == Some(0x826C),
+        "shared unit-name appender caller handlers changed"
+    );
+    ensure!(
+        consumers.composite_handler_target(0x0B) == Some(0x867D),
+        "class-name-only appender caller handler changed"
+    );
+    for (image_role, rom) in [("source", source), ("candidate", candidate)] {
+        ensure!(
+            direct_jsr_sites(rom, UNIT_NAME_APPENDER_ENTRY)? == UNIT_NAME_APPENDER_CALLERS,
+            "{image_role} shared unit-name appender caller census changed"
+        );
+        ensure!(
+            direct_jsr_sites(rom, CLASS_NAME_APPENDER_ENTRY)? == CLASS_NAME_APPENDER_CALLERS,
+            "{image_role} shared class-name appender caller census changed"
+        );
+    }
+    item_appender_routes::bind_source_routes(source, candidate, &consumers)?;
     shop_item_list::bind_site(source, candidate)?;
     ensure!(
         fixed_bytes(
@@ -182,7 +225,7 @@ pub(super) fn build_consumer_catalog_runtime(
         shop_item_residency,
         storage_item_list,
     )?;
-    shop_item_route::verify_item_font_page_routes(
+    shop_item_route::verify_catalog_font_page_routes(
         &code_routine,
         font_page_activation,
         catalog_default_font_route,
@@ -225,7 +268,13 @@ pub(super) fn build_consumer_catalog_runtime(
                     bank: UNIT_UI_BANK,
                     address: site.address,
                 },
-                bytes: assemble_at(site.address, &[Instruction::JsrAbsolute(routine.address)])?,
+                bytes: assemble_at(
+                    site.address,
+                    &[match site.transfer {
+                        HookTransfer::CallStub => Instruction::JsrAbsolute(routine.address),
+                        HookTransfer::ReplaceEntry => Instruction::JmpAbsolute(routine.address),
+                    }],
+                )?,
             })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -635,7 +684,9 @@ fn build_catalog_append_runtime(
     let catalog_item_kind = append_jump_if_equal(origin, &mut instructions)?;
     instructions.push(Instruction::CmpImmediate(KIND_SHOP_ITEM_LIST));
     let catalog_shop_item_kind = append_jump_if_equal(origin, &mut instructions)?;
-    let skip_catalog_item_activation = push_jump(&mut instructions, origin);
+    instructions.push(Instruction::CmpImmediate(KIND_CLASS));
+    let catalog_class_kind = append_jump_if_equal(origin, &mut instructions)?;
+    let skip_catalog_page_activation = push_jump(&mut instructions, origin);
     let catalog_item_activation = next_address(origin, &instructions)?;
     patch_jump(
         &mut instructions,
@@ -662,11 +713,32 @@ fn build_catalog_append_runtime(
         retain_dialogue_item_page,
         catalog_item_activation_finished,
     );
+    let item_activation_complete = push_jump(&mut instructions, origin);
+
+    let catalog_class_activation = next_address(origin, &instructions)?;
     patch_jump(
         &mut instructions,
-        skip_catalog_item_activation,
-        catalog_item_activation_finished,
+        catalog_class_kind,
+        catalog_class_activation,
     );
+    instructions.extend([
+        Instruction::LdaAbsolute(COMPOSITE_STATE),
+        Instruction::CmpImmediate(CLASS_NAME_ONLY_COMPOSITE_STATE),
+    ]);
+    let retain_existing_class_page = append_jump_if_not_equal(origin, &mut instructions)?;
+    instructions.extend([
+        Instruction::LdaImmediate(catalog_default_font_route),
+        Instruction::JsrAbsolute(font_page_activation),
+    ]);
+
+    let catalog_page_activation_finished = next_address(origin, &instructions)?;
+    for jump in [
+        skip_catalog_page_activation,
+        item_activation_complete,
+        retain_existing_class_page,
+    ] {
+        patch_jump(&mut instructions, jump, catalog_page_activation_finished);
+    }
     instructions.extend([
         Instruction::LdyImmediate(0),
         Instruction::LdaZeroPage(0x05),
@@ -855,6 +927,23 @@ fn fixed_bytes(rom: &Rom, start: u16, length: u16) -> Result<&[u8]> {
     rom.prg()
         .get(offset..offset + usize::from(length))
         .context("consumer catalog fixed bridge is outside candidate")
+}
+
+pub(super) fn direct_jsr_sites(rom: &Rom, target: u16) -> Result<Vec<u16>> {
+    let bank_offset = switchable_cpu_to_file_offset(UNIT_UI_BANK, 0x8000)?;
+    let bank = rom
+        .data()
+        .get(bank_offset..bank_offset + 16 * 1024)
+        .context("consumer catalog bank is outside the ROM")?;
+    let operand = target.to_le_bytes();
+    Ok(bank
+        .windows(3)
+        .enumerate()
+        .filter_map(|(offset, bytes)| {
+            (bytes[0] == 0x20 && bytes[1..] == operand)
+                .then_some(0x8000_u16 + u16::try_from(offset).expect("16 KiB offset fits u16"))
+        })
+        .collect())
 }
 
 pub(super) fn verify_shop_item_list_hook(hooks: &[DialogueRuntimeHook]) -> Result<()> {

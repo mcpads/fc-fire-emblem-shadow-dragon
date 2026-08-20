@@ -1,10 +1,10 @@
-//! 대사와 일반 카탈로그가 공유하는 아이템명 material 선택을 실행 의미로 검증한다.
+//! 대사와 일반 카탈로그가 공유하는 이름 material 및 글꼴 선택을 실행 의미로 검증한다.
 
 use anyhow::{Context, Result, bail, ensure};
 
 use super::{
-    COMPOSITE_STATE, KIND_CLASS, KIND_ITEM, KIND_SHOP_ITEM_LIST, KIND_UNIT_OR_ENEMY,
-    MATERIAL_ROUTE_CATALOG, MATERIAL_ROUTE_DIALOGUE,
+    CLASS_NAME_ONLY_COMPOSITE_STATE, COMPOSITE_STATE, KIND_CLASS, KIND_ITEM, KIND_SHOP_ITEM_LIST,
+    KIND_UNIT_OR_ENEMY, MATERIAL_ROUTE_CATALOG, MATERIAL_ROUTE_DIALOGUE,
 };
 use crate::full_translation_install::{
     runtime_code::RuntimeRoutine, shop_item_residency::ShopItemResidencyRuntimeContract,
@@ -282,41 +282,70 @@ pub(in crate::full_translation_install::runtime_code) fn verify_storage_item_res
     Ok(())
 }
 
-pub(super) fn verify_item_font_page_routes(
+pub(super) fn verify_catalog_font_page_routes(
     routine: &RuntimeRoutine,
     font_page_activation: u16,
     catalog_default_route: u8,
 ) -> Result<()> {
-    for (kind, material_route, expected) in [
+    for (kind, material_route, composite_state, expected) in [
         (
             KIND_ITEM,
             MATERIAL_ROUTE_CATALOG,
+            CLASS_NAME_ONLY_COMPOSITE_STATE,
             Some(catalog_default_route),
         ),
         (
             KIND_SHOP_ITEM_LIST,
             MATERIAL_ROUTE_CATALOG,
+            CLASS_NAME_ONLY_COMPOSITE_STATE,
             Some(catalog_default_route),
         ),
-        (KIND_ITEM, MATERIAL_ROUTE_DIALOGUE, None),
-        (KIND_SHOP_ITEM_LIST, MATERIAL_ROUTE_DIALOGUE, None),
-        (KIND_UNIT_OR_ENEMY, MATERIAL_ROUTE_CATALOG, None),
-        (KIND_CLASS, MATERIAL_ROUTE_CATALOG, None),
+        (
+            KIND_CLASS,
+            MATERIAL_ROUTE_CATALOG,
+            CLASS_NAME_ONLY_COMPOSITE_STATE,
+            Some(catalog_default_route),
+        ),
+        (
+            KIND_ITEM,
+            MATERIAL_ROUTE_DIALOGUE,
+            CLASS_NAME_ONLY_COMPOSITE_STATE,
+            None,
+        ),
+        (
+            KIND_SHOP_ITEM_LIST,
+            MATERIAL_ROUTE_DIALOGUE,
+            CLASS_NAME_ONLY_COMPOSITE_STATE,
+            None,
+        ),
+        (
+            KIND_UNIT_OR_ENEMY,
+            MATERIAL_ROUTE_CATALOG,
+            CLASS_NAME_ONLY_COMPOSITE_STATE,
+            None,
+        ),
+        (KIND_CLASS, MATERIAL_ROUTE_CATALOG, 0x04, None),
     ] {
         ensure!(
-            observe_item_font_page_activation(routine, font_page_activation, kind, material_route,)?
-                == expected,
-            "consumer kind {kind} material route {material_route} selected the wrong font page"
+            observe_catalog_font_page_activation(
+                routine,
+                font_page_activation,
+                kind,
+                material_route,
+                composite_state,
+            )? == expected,
+            "consumer kind {kind} material route {material_route} state {composite_state:02X} selected the wrong font page"
         );
     }
     Ok(())
 }
 
-fn observe_item_font_page_activation(
+fn observe_catalog_font_page_activation(
     routine: &RuntimeRoutine,
     font_page_activation: u16,
     kind: u8,
     material_route: u8,
+    composite_state: u8,
 ) -> Result<Option<u8>> {
     let predicate = [0xA5, 0x05, 0xC9, KIND_ITEM];
     let offsets = routine
@@ -339,6 +368,7 @@ fn observe_item_font_page_activation(
     memory[start..end].copy_from_slice(&routine.bytes);
     memory[0x05] = kind;
     memory[0x03] = material_route;
+    memory[usize::from(COMPOSITE_STATE)] = composite_state;
 
     let mut pc = routine.address
         + u16::try_from(offsets[0]).context("item font selector offset exceeds u16")?;
@@ -383,6 +413,13 @@ fn observe_item_font_page_activation(
                 pc = pc.wrapping_add(1);
                 zero = a == 0;
             }
+            0xAD => {
+                let low = memory[usize::from(pc)];
+                let high = memory[usize::from(pc.wrapping_add(1))];
+                pc = pc.wrapping_add(2);
+                a = memory[usize::from(u16::from_le_bytes([low, high]))];
+                zero = a == 0;
+            }
             0xC9 => {
                 let value = memory[usize::from(pc)];
                 pc = pc.wrapping_add(1);
@@ -402,8 +439,8 @@ fn observe_item_font_page_activation(
                     pc = pc.wrapping_add_signed(i16::from(displacement));
                 }
             }
-            other => bail!("item font route reached unsupported opcode {other:02X}"),
+            other => bail!("catalog font route reached unsupported opcode {other:02X}"),
         }
     }
-    bail!("item font route did not reach the material copy boundary")
+    bail!("catalog font route did not reach the material copy boundary")
 }

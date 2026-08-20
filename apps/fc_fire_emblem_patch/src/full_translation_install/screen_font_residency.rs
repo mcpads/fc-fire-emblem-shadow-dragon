@@ -37,14 +37,17 @@ use super::{
     consumer_codebook::ConsumerCodebookPlan,
     storage_residency::STORAGE_DIALOGUE_OVERLAY_COMPOSITE_STATES,
 };
+#[cfg(test)]
+use composite_policies::UNIT_OR_ENEMY_NAME_APPENDER_PUBLISHED_COMPOSITE_STATES;
 use composite_policies::validate_composite_state_policies;
 pub(in crate::full_translation_install) use composite_policies::{
     ATTACK_WEAPON_SELECTION_COMPOSITE_STATE, CHAPTER_SAVE_OFFER_COMPOSITE_STATE,
-    COMPOSITE_FONT_RESIDENCY_POLICIES, DelegatedFontPageOwner, ITEM_ACTION_COMPOSITE_STATE,
-    ITEM_NAME_APPENDER_PUBLISHED_COMPOSITE_STATES, ITEM_USE_RESULT_COMPOSITE_STATE,
-    MAP_FUNDS_COMPOSITE_STATE, MAP_SUMMARY_COMPOSITE_STATE, STORAGE_ITEM_DETAIL_COMPOSITE_STATE,
-    ScreenFontPageRole, ScreenFontResidencyPolicy, UNIT_ACTION_ITEM_COMPOSITE_STATE,
-    UNIT_ITEM_LIST_COMPOSITE_STATE, UNIT_STATUS_COMPOSITE_STATE, UNIT_SUMMARY_COMPOSITE_STATE,
+    CLASS_NAME_ONLY_COMPOSITE_STATE, COMPOSITE_FONT_RESIDENCY_POLICIES, DelegatedFontPageOwner,
+    ITEM_ACTION_COMPOSITE_STATE, ITEM_NAME_APPENDER_PUBLISHED_COMPOSITE_STATES,
+    ITEM_USE_RESULT_COMPOSITE_STATE, MAP_FUNDS_COMPOSITE_STATE, MAP_SUMMARY_COMPOSITE_STATE,
+    STORAGE_ITEM_DETAIL_COMPOSITE_STATE, ScreenFontPageRole, ScreenFontResidencyPolicy,
+    UNIT_ACTION_ITEM_COMPOSITE_STATE, UNIT_ITEM_LIST_COMPOSITE_STATE,
+    UNIT_NAME_DETAIL_COMPOSITE_STATE, UNIT_STATUS_COMPOSITE_STATE, UNIT_SUMMARY_COMPOSITE_STATE,
     composite_font_residency_policy,
 };
 pub(super) use dialogue_surfaces::DialogueSurfaceInputs;
@@ -166,6 +169,7 @@ pub(super) struct ScreenFontResidencyDraft {
     static_state_route_count: usize,
     source_page_selected_state_count: usize,
     item_name_published_state_count: usize,
+    class_name_published_state_count: usize,
     unit_or_enemy_name_published_state_count: usize,
     unit_or_enemy_name_retained_state_count: usize,
     completed_dialogue_page_retained_state_count: usize,
@@ -341,8 +345,8 @@ pub(super) fn plan_screen_font_residency(
         .collect::<Vec<_>>();
 
     Ok(ScreenFontResidencyDraft {
-        schema: 12,
-        strategy: "bind every source-produced composite state to one explicit central residency action, a named upstream selector or appender, or an unresolved page owner; publish static pages at entry, let the shared item appender publish the default catalog page for catalog material while retaining the active dialogue page for dialogue material, explicitly select the source page for the source-bound post-battle result and NEXT STORY screens, retain the source-bound storage dialogue page when its item-list producer reuses state 07, let the unit-summary appender publish its name-dependent page, retain that page explicitly for unit status, delegate record-metadata composites 12/1F/20 to the active main-dialogue runtime selector, retain the options selector across the source-bound 1B-to-19 value-result overlay, and keep every state without an admitted owner visible instead of treating no central write as proof of safe inheritance",
+        schema: 13,
+        strategy: "bind every source-produced composite state to one explicit central residency action, a named upstream selector or appender, or an unresolved page owner; publish static pages at entry, let shared item and class appenders publish the default catalog page only for catalog-owned material and class-only composition while retaining active dialogue or selected-unit pages, let the shared unit-or-enemy appender publish each selected name page, explicitly select the source page for the source-bound post-battle result and NEXT STORY screens, retain the source-bound storage dialogue page when its item-list producer reuses state 07, retain the unit-summary page explicitly for unit status, delegate record-metadata composites 12/1F/20 to the active main-dialogue runtime selector, retain the options selector across the source-bound 1B-to-19 value-result overlay, and keep every state without an admitted owner visible instead of treating no central write as proof of safe inheritance",
         composite_state_policy_count: COMPOSITE_FONT_RESIDENCY_POLICIES.len(),
         delegated_page_owner_state_count: delegated_page_owners.len(),
         unresolved_page_owner_state_count: unresolved_page_owner_states_hex.len(),
@@ -357,6 +361,12 @@ pub(super) fn plan_screen_font_residency(
         item_name_published_state_count: COMPOSITE_FONT_RESIDENCY_POLICIES
             .iter()
             .filter(|(_, policy)| *policy == ScreenFontResidencyPolicy::ItemNamePublishedByAppender)
+            .count(),
+        class_name_published_state_count: COMPOSITE_FONT_RESIDENCY_POLICIES
+            .iter()
+            .filter(|(_, policy)| {
+                *policy == ScreenFontResidencyPolicy::ClassNamePublishedByAppender
+            })
             .count(),
         unit_or_enemy_name_published_state_count: COMPOSITE_FONT_RESIDENCY_POLICIES
             .iter()
@@ -513,14 +523,17 @@ mod tests {
     }
 
     #[test]
-    fn unit_summary_publishes_and_unit_status_retains_one_name_page() {
+    fn shared_unit_appender_publishes_both_name_states_and_status_retains_summary() {
         validate_composite_state_policies().unwrap();
         assert_eq!(
             COMPOSITE_FONT_RESIDENCY_POLICIES
                 .iter()
-                .find(|(state, _)| *state == UNIT_SUMMARY_COMPOSITE_STATE)
-                .map(|(_, policy)| *policy),
-            Some(ScreenFontResidencyPolicy::UnitOrEnemyNamePublishedByAppender)
+                .filter_map(|(state, policy)| {
+                    (*policy == ScreenFontResidencyPolicy::UnitOrEnemyNamePublishedByAppender)
+                        .then_some(*state)
+                })
+                .collect::<Vec<_>>(),
+            UNIT_OR_ENEMY_NAME_APPENDER_PUBLISHED_COMPOSITE_STATES
         );
         assert_eq!(
             COMPOSITE_FONT_RESIDENCY_POLICIES
@@ -594,7 +607,16 @@ mod tests {
                     (*policy == ScreenFontResidencyPolicy::UnresolvedPageOwner).then_some(*state)
                 })
                 .collect::<Vec<_>>(),
-            [0x02, 0x0B, 0x11, 0x17, 0x25]
+            [0x11, 0x17, 0x25]
+        );
+    }
+
+    #[test]
+    fn class_only_state_publishes_the_default_catalog_page() {
+        validate_composite_state_policies().unwrap();
+        assert_eq!(
+            composite_font_residency_policy(CLASS_NAME_ONLY_COMPOSITE_STATE),
+            Some(ScreenFontResidencyPolicy::ClassNamePublishedByAppender)
         );
     }
 
