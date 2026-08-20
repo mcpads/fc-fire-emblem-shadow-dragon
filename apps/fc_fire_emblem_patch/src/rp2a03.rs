@@ -36,7 +36,6 @@ pub enum Instruction {
     AdcAbsoluteX(u16),
     SbcImmediate(u8),
     SbcAbsolute(u16),
-    SbcZeroPage(u8),
     CmpImmediate(u8),
     CmpAbsolute(u16),
     CmpZeroPage(u8),
@@ -46,10 +45,10 @@ pub enum Instruction {
     IncAbsoluteX(u16),
     IncZeroPage(u8),
     DecAbsolute(u16),
-    DecZeroPage(u8),
     Inx,
     Dex,
     Iny,
+    Dey,
     Tax,
     Txa,
     Tay,
@@ -86,6 +85,7 @@ impl Instruction {
             | Self::Inx
             | Self::Dex
             | Self::Iny
+            | Self::Dey
             | Self::Tax
             | Self::Txa
             | Self::Tay
@@ -114,7 +114,6 @@ impl Instruction {
             | Self::AdcImmediate(_)
             | Self::AdcZeroPage(_)
             | Self::SbcImmediate(_)
-            | Self::SbcZeroPage(_)
             | Self::CmpImmediate(_)
             | Self::CmpZeroPage(_)
             | Self::CpxImmediate(_)
@@ -122,7 +121,6 @@ impl Instruction {
             | Self::OraImmediate(_)
             | Self::OraZeroPage(_)
             | Self::IncZeroPage(_)
-            | Self::DecZeroPage(_)
             | Self::BeqAbsolute(_)
             | Self::BccAbsolute(_)
             | Self::BcsAbsolute(_)
@@ -159,6 +157,7 @@ impl Instruction {
             | Self::Inx
             | Self::Dex
             | Self::Iny
+            | Self::Dey
             | Self::Tax
             | Self::Txa
             | Self::Tay
@@ -187,8 +186,7 @@ impl Instruction {
             | Self::AndZeroPage(_)
             | Self::AdcZeroPage(_)
             | Self::CmpZeroPage(_)
-            | Self::OraZeroPage(_)
-            | Self::SbcZeroPage(_) => 3,
+            | Self::OraZeroPage(_) => 3,
             Self::Pla | Self::Plp => 4,
             Self::JmpAbsolute(_) => 3,
             Self::LdaAbsolute(_)
@@ -203,10 +201,7 @@ impl Instruction {
             | Self::LdyAbsoluteX(_)
             | Self::AdcAbsoluteX(_) => 5,
             Self::StaAbsoluteX(_) | Self::StaAbsoluteY(_) => 5,
-            Self::AslZeroPage(_)
-            | Self::RolZeroPage(_)
-            | Self::IncZeroPage(_)
-            | Self::DecZeroPage(_) => 5,
+            Self::AslZeroPage(_) | Self::RolZeroPage(_) | Self::IncZeroPage(_) => 5,
             Self::LdaIndirectY(_) => 6,
             Self::StaIndirectY(_) => 6,
             Self::IncAbsolute(_)
@@ -264,7 +259,6 @@ impl Instruction {
             Self::AdcAbsoluteX(address) => absolute_x(Mnemonic::Adc, address),
             Self::SbcImmediate(value) => immediate(Mnemonic::Sbc, value),
             Self::SbcAbsolute(address) => absolute(Mnemonic::Sbc, address),
-            Self::SbcZeroPage(address) => zero_page(Mnemonic::Sbc, address),
             Self::CmpImmediate(value) => immediate(Mnemonic::Cmp, value),
             Self::CmpAbsolute(address) => absolute(Mnemonic::Cmp, address),
             Self::CmpZeroPage(address) => zero_page(Mnemonic::Cmp, address),
@@ -274,10 +268,10 @@ impl Instruction {
             Self::IncAbsoluteX(address) => absolute_x(Mnemonic::Inc, address),
             Self::IncZeroPage(address) => zero_page(Mnemonic::Inc, address),
             Self::DecAbsolute(address) => absolute(Mnemonic::Dec, address),
-            Self::DecZeroPage(address) => zero_page(Mnemonic::Dec, address),
             Self::Inx => implied(Mnemonic::Inx, AddressingMode::Implied),
             Self::Dex => implied(Mnemonic::Dex, AddressingMode::Implied),
             Self::Iny => implied(Mnemonic::Iny, AddressingMode::Implied),
+            Self::Dey => implied(Mnemonic::Dey, AddressingMode::Implied),
             Self::Tax => implied(Mnemonic::Tax, AddressingMode::Implied),
             Self::Txa => implied(Mnemonic::Txa, AddressingMode::Implied),
             Self::Tay => implied(Mnemonic::Tay, AddressingMode::Implied),
@@ -417,6 +411,7 @@ mod tests {
                 Instruction::DecAbsolute(0x67FC),
                 Instruction::Inx,
                 Instruction::Dex,
+                Instruction::Dey,
                 Instruction::Tax,
                 Instruction::Txa,
                 Instruction::Tay,
@@ -449,9 +444,9 @@ mod tests {
                 0x00, 0xA0, 0x00, 0xBC, 0x03, 0x01, 0x85, 0x29, 0x84, 0x21, 0x8D, 0x17, 0x51, 0x9D,
                 0x00, 0x5C, 0x99, 0xEE, 0x7F, 0x91, 0x00, 0x0A, 0x06, 0x02, 0x26, 0x03, 0x4A, 0x29,
                 0x3F, 0x69, 0x20, 0x65, 0x01, 0xE9, 0x10, 0xC9, 0x18, 0xE0, 0x20, 0xC0, 0x02, 0xEE,
-                0xF4, 0x67, 0xCE, 0xFC, 0x67, 0xE8, 0xCA, 0xAA, 0x8A, 0xA8, 0x98, 0xBA, 0x09, 0x80,
-                0x05, 0x52, 0x18, 0x38, 0x48, 0x08, 0x68, 0x28, 0x20, 0x30, 0xFB, 0xF0, 0xAD, 0x90,
-                0xAB, 0xB0, 0xA9, 0xD0, 0xA7, 0x4C, 0x75, 0xC0, 0x60, 0xEA,
+                0xF4, 0x67, 0xCE, 0xFC, 0x67, 0xE8, 0xCA, 0x88, 0xAA, 0x8A, 0xA8, 0x98, 0xBA, 0x09,
+                0x80, 0x05, 0x52, 0x18, 0x38, 0x48, 0x08, 0x68, 0x28, 0x20, 0x30, 0xFB, 0xF0, 0xAC,
+                0x90, 0xAA, 0xB0, 0xA8, 0xD0, 0xA6, 0x4C, 0x75, 0xC0, 0x60, 0xEA,
             ]
         );
     }
@@ -469,30 +464,6 @@ mod tests {
         .unwrap();
 
         assert_eq!(bytes, [0xB1, 0x6E, 0x7D, 0xD8, 0x93, 0xC8]);
-    }
-
-    /// 전송 루프는 제로 페이지 카운터를 줄인다. 절대 형식으로도 같은 자리에 닿지만
-    /// vblank 예산 안에서 도는 코드라 명령마다 1사이클이 의미가 있다.
-    #[test]
-    fn encodes_the_zero_page_decrement_the_transport_loop_uses() {
-        let bytes = assemble_at(0xB000, &[Instruction::DecZeroPage(0x00)]).unwrap();
-
-        assert_eq!(bytes, [0xC6, 0x00]);
-    }
-
-    /// 전송 마무리는 커서를 절대 주소로 더하고 제로 페이지로 뺀다.
-    #[test]
-    fn encodes_the_cursor_arithmetic_the_transport_epilogue_uses() {
-        let bytes = assemble_at(
-            0xB000,
-            &[
-                Instruction::AdcAbsolute(0x07F7),
-                Instruction::SbcZeroPage(0x00),
-            ],
-        )
-        .unwrap();
-
-        assert_eq!(bytes, [0x6D, 0xF7, 0x07, 0xE5, 0x00]);
     }
 
     /// 전송은 이번 프레임 몫을 X에 두고 그 값을 제로 페이지로도 옮긴다.
