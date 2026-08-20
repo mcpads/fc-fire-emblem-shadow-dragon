@@ -1,4 +1,5 @@
 use super::*;
+use crate::dialogue_inventory::bind_main_dialogue_composite_appenders;
 
 /// 합성 진입과 화면 열기·닫기의 중앙 FD 공급을 원본과 후보 양쪽에 묶는다.
 /// bank 0B에서 `$C9BE`를 직접 부르는 곳이 이 두 자리뿐이어야, 열기만 현재 UI
@@ -8,6 +9,7 @@ pub(in crate::full_translation_install::runtime_code) fn bind_consumer_font_page
     candidate: &Rom,
 ) -> Result<()> {
     bind_unit_summary_status_page_inheritance_source(source.data())?;
+    bind_main_dialogue_composite_page_ownership(source)?;
     bind_direct_composite_state_producers(source, candidate)?;
     bind_fixed_menu_font_page_appender_cave(source, candidate)?;
     let fixed_strings = inspect_fixed_string_consumers(source)?;
@@ -104,6 +106,21 @@ pub(in crate::full_translation_install::runtime_code) fn bind_consumer_font_page
             "{image_role} bank {UNIT_UI_BANK:02X} central right-FD direct-transfer census changed: {transfers:?}"
         );
     }
+    Ok(())
+}
+
+fn bind_main_dialogue_composite_page_ownership(source: &Rom) -> Result<()> {
+    let routes = bind_main_dialogue_composite_appenders(source)?;
+    ensure!(
+        !routes.is_empty()
+            && routes.iter().all(|route| {
+                composite_font_residency_policy(route.composite_state)
+                    == Some(ScreenFontResidencyPolicy::Delegated(
+                        DelegatedFontPageOwner::MainDialogueRuntimeSelector,
+                    ))
+            }),
+        "main-dialogue auxiliary composites are not delegated to the dialogue runtime selector"
+    );
     Ok(())
 }
 

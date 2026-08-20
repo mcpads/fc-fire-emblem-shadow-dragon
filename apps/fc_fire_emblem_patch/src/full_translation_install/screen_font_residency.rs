@@ -314,8 +314,8 @@ pub(super) fn plan_screen_font_residency(
         .collect::<Vec<_>>();
 
     Ok(ScreenFontResidencyDraft {
-        schema: 8,
-        strategy: "bind every source-produced composite state to one explicit central residency action, a named upstream selector or appender, or an unresolved page owner; publish static pages at entry, retain the source-bound storage dialogue page when its item-list producer reuses state 07, let the unit-summary appender publish its name-dependent page, retain that page explicitly for unit status, and keep every state without an admitted owner visible instead of treating no central write as proof of safe inheritance",
+        schema: 9,
+        strategy: "bind every source-produced composite state to one explicit central residency action, a named upstream selector or appender, or an unresolved page owner; publish static pages at entry, retain the source-bound storage dialogue page when its item-list producer reuses state 07, let the unit-summary appender publish its name-dependent page, retain that page explicitly for unit status, delegate record-metadata composites 12/1F/20 to the active main-dialogue runtime selector, and keep every state without an admitted owner visible instead of treating no central write as proof of safe inheritance",
         composite_state_policy_count: COMPOSITE_FONT_RESIDENCY_POLICIES.len(),
         delegated_page_owner_state_count: delegated_page_owners.len(),
         unresolved_page_owner_state_count: unresolved_page_owner_states_hex.len(),
@@ -421,6 +421,7 @@ mod tests {
     use super::*;
     use crate::{
         choice_labels::CHOICE_LABEL_COMPOSITE_STATE,
+        dialogue_inventory::MAIN_DIALOGUE_COMPOSITE_APPENDER_STATES,
         fixed_menu_labels::{
             GAME_SPEED_SELECTION_COMPOSITE_STATE, STORAGE_CAPACITY_NOTICE_COMPOSITE_STATE,
             UNIT_SELECTION_COMPOSITE_STATE,
@@ -514,6 +515,10 @@ mod tests {
                     DelegatedFontPageOwner::ChoiceDialogueResidency,
                 ),
                 (
+                    MAIN_DIALOGUE_COMPOSITE_APPENDER_STATES[0],
+                    DelegatedFontPageOwner::MainDialogueRuntimeSelector,
+                ),
+                (
                     ROSTER_FONT_PAGE_COMPOSITE_STATE,
                     DelegatedFontPageOwner::UnitRosterSelector,
                 ),
@@ -530,6 +535,14 @@ mod tests {
                     DelegatedFontPageOwner::OptionsSelector,
                 ),
                 (
+                    MAIN_DIALOGUE_COMPOSITE_APPENDER_STATES[1],
+                    DelegatedFontPageOwner::MainDialogueRuntimeSelector,
+                ),
+                (
+                    MAIN_DIALOGUE_COMPOSITE_APPENDER_STATES[2],
+                    DelegatedFontPageOwner::MainDialogueRuntimeSelector,
+                ),
+                (
                     STORAGE_CAPACITY_NOTICE_COMPOSITE_STATE,
                     DelegatedFontPageOwner::StorageCapacityAppender,
                 ),
@@ -540,7 +553,7 @@ mod tests {
                 .iter()
                 .filter(|(_, policy)| *policy == ScreenFontResidencyPolicy::UnresolvedPageOwner)
                 .count(),
-            14
+            11
         );
     }
 

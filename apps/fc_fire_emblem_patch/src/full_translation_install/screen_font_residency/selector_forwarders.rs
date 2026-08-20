@@ -17,9 +17,8 @@ use crate::{
 };
 
 use super::{
-    COMPOSITE_FONT_RESIDENCY_POLICIES, DelegatedFontPageOwner, ScreenFontPageRole,
-    ScreenFontPageRoutes, ScreenFontResidencyPolicy, UNIT_STATUS_COMPOSITE_STATE,
-    UNIT_SUMMARY_COMPOSITE_STATE, composite_font_residency_policy,
+    DelegatedFontPageOwner, ScreenFontPageRole, ScreenFontPageRoutes, ScreenFontResidencyPolicy,
+    UNIT_STATUS_COMPOSITE_STATE, UNIT_SUMMARY_COMPOSITE_STATE, composite_font_residency_policy,
 };
 
 const FIXED_BANK_BYTE_COUNT: usize = 16 * 1024;
@@ -392,13 +391,8 @@ fn bind_front_end_central_ownership(routes: ScreenFontPageRoutes) -> Result<()> 
         "front-end selector migration state population changed"
     );
     for (state, required_policy, route) in expected {
-        let policies = COMPOSITE_FONT_RESIDENCY_POLICIES
-            .iter()
-            .filter(|(candidate_state, _)| *candidate_state == state)
-            .map(|(_, policy)| *policy)
-            .collect::<Vec<_>>();
         ensure!(
-            policies == vec![required_policy] && route != 0,
+            composite_font_residency_policy(state) == Some(required_policy) && route != 0,
             "front-end state {state:02X} is not exclusively owned by a nonempty central font route"
         );
     }
@@ -417,13 +411,9 @@ fn bind_unit_name_central_ownership(routes: ScreenFontPageRoutes) -> Result<()> 
         ),
     ];
     for (state, required_policy) in expected {
-        let policies = COMPOSITE_FONT_RESIDENCY_POLICIES
-            .iter()
-            .filter(|(candidate_state, _)| *candidate_state == state)
-            .map(|(_, policy)| *policy)
-            .collect::<Vec<_>>();
         ensure!(
-            policies == vec![required_policy] && routes.catalog.iter().all(|route| *route != 0),
+            composite_font_residency_policy(state) == Some(required_policy)
+                && routes.catalog.iter().all(|route| *route != 0),
             "unit-name state {state:02X} is not exclusively owned by a nonempty central font route"
         );
     }

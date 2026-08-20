@@ -132,6 +132,131 @@ pub(crate) const fn main_dialogue_runtime_handler_roots() -> [u16; 18] {
     MAIN_DIALOGUE_STATE_HANDLERS
 }
 
+pub(crate) const MAIN_DIALOGUE_COMPOSITE_APPENDER_STATES: [u8; 3] = [0x12, 0x1F, 0x20];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct MainDialogueCompositeAppenderSource {
+    pub(crate) dialogue_state: u8,
+    pub(crate) composite_state: u8,
+    pub(crate) prg_bank: u8,
+    pub(crate) load_address: u16,
+    pub(crate) transfer_address: u16,
+}
+
+#[derive(Clone, Copy)]
+struct MainDialogueCompositeAppenderSpec {
+    dialogue_state: u8,
+    composite_state: u8,
+    handler_address: u16,
+    load_address: u16,
+    code_region_role: &'static str,
+}
+
+const MAIN_DIALOGUE_COMPOSITE_APPENDER_SPECS: [MainDialogueCompositeAppenderSpec; 3] = [
+    MainDialogueCompositeAppenderSpec {
+        dialogue_state: 0x02,
+        composite_state: MAIN_DIALOGUE_COMPOSITE_APPENDER_STATES[0],
+        handler_address: 0x80A2,
+        load_address: 0x80DD,
+        code_region_role: "inspect_and_consume_optional_E5_prefix",
+    },
+    MainDialogueCompositeAppenderSpec {
+        dialogue_state: 0x04,
+        composite_state: MAIN_DIALOGUE_COMPOSITE_APPENDER_STATES[1],
+        handler_address: 0x80E6,
+        load_address: 0x8110,
+        code_region_role: "consume_fixed_four_byte_record_header",
+    },
+    MainDialogueCompositeAppenderSpec {
+        dialogue_state: 0x06,
+        composite_state: MAIN_DIALOGUE_COMPOSITE_APPENDER_STATES[2],
+        handler_address: 0x8126,
+        load_address: 0x8168,
+        code_region_role: "publish_optional_E8_composite_and_display_flags",
+    },
+];
+
+/// Binds the three bank-0A dialogue handlers that hand decoded record metadata to the
+/// bank-0B composite appender. These are auxiliary parts of one live dialogue surface, not
+/// independent screens that may choose a font page from the composite-state byte alone.
+pub(crate) fn bind_main_dialogue_composite_appenders(
+    rom: &Rom,
+) -> Result<Vec<MainDialogueCompositeAppenderSource>> {
+    rom.verify_supported_japanese()?;
+    bind_main_dialogue_composite_appenders_in_source(rom.data())
+}
+
+fn bind_main_dialogue_composite_appenders_in_source(
+    source: &[u8],
+) -> Result<Vec<MainDialogueCompositeAppenderSource>> {
+    let state_machine = build_main_dialogue_state_machine(source)?;
+    let mut routes = Vec::with_capacity(MAIN_DIALOGUE_COMPOSITE_APPENDER_SPECS.len());
+    for spec in MAIN_DIALOGUE_COMPOSITE_APPENDER_SPECS {
+        let handler = state_machine
+            .handlers
+            .get(usize::from(spec.dialogue_state))
+            .context("main-dialogue composite appender lost its dialogue state")?;
+        let transfer_address = spec
+            .load_address
+            .checked_add(2)
+            .context("main-dialogue composite transfer address overflow")?;
+        let sequence_end = spec
+            .load_address
+            .checked_add(5)
+            .context("main-dialogue composite producer range overflow")?;
+        let containing_region_count = state_machine
+            .code_regions
+            .iter()
+            .filter(|region| {
+                let region_start = usize::from(region.cpu_address);
+                let region_end = region_start + region.byte_count;
+                region.role == spec.code_region_role
+                    && region_start <= usize::from(spec.load_address)
+                    && region_end >= usize::from(sequence_end)
+            })
+            .count();
+        ensure!(
+            containing_region_count == 1,
+            "main-dialogue composite state {:02X} lost its unique owning code region",
+            spec.composite_state
+        );
+        ensure!(
+            handler.cpu_address == spec.handler_address,
+            "main-dialogue composite state {:02X} left its owning handler",
+            spec.composite_state
+        );
+
+        let file_offset = switchable_cpu_to_file_offset(MAIN_DIALOGUE_PRG_BANK, spec.load_address)?;
+        let expected = [0xA9, spec.composite_state, 0x20, 0x90, 0xE6];
+        ensure!(
+            source.get(file_offset..file_offset + expected.len()) == Some(expected.as_slice()),
+            "main-dialogue composite state {:02X} producer changed",
+            spec.composite_state
+        );
+        decode_rp2a03_sequence(
+            &expected,
+            spec.load_address,
+            "publish one main-dialogue auxiliary composite",
+        )?;
+        routes.push(MainDialogueCompositeAppenderSource {
+            dialogue_state: spec.dialogue_state,
+            composite_state: spec.composite_state,
+            prg_bank: MAIN_DIALOGUE_PRG_BANK,
+            load_address: spec.load_address,
+            transfer_address,
+        });
+    }
+    ensure!(
+        routes
+            .iter()
+            .map(|route| route.composite_state)
+            .collect::<Vec<_>>()
+            == MAIN_DIALOGUE_COMPOSITE_APPENDER_STATES,
+        "main-dialogue composite appender state family changed"
+    );
+    Ok(routes)
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct MainDialogueProgressSource {
     caller_prg_bank: u8,

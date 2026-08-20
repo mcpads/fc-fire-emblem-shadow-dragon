@@ -248,6 +248,40 @@ fn validates_main_dialogue_state_dispatch_prefix_and_handoff() {
 }
 
 #[test]
+fn binds_all_main_dialogue_auxiliary_composites_as_one_family() {
+    let mut source = synthetic_source();
+    write_main_dialogue_state_machine(&mut source);
+
+    let routes = bind_main_dialogue_composite_appenders_in_source(&source).unwrap();
+
+    assert_eq!(
+        routes
+            .iter()
+            .map(|route| route.composite_state)
+            .collect::<Vec<_>>(),
+        MAIN_DIALOGUE_COMPOSITE_APPENDER_STATES
+    );
+    assert_eq!(
+        routes
+            .iter()
+            .map(|route| {
+                (
+                    route.dialogue_state,
+                    route.load_address,
+                    route.transfer_address,
+                )
+            })
+            .collect::<Vec<_>>(),
+        [
+            (0x02, 0x80DD, 0x80DF),
+            (0x04, 0x8110, 0x8112),
+            (0x06, 0x8168, 0x816A),
+        ]
+    );
+    assert!(routes.iter().all(|route| route.prg_bank == 0x0A));
+}
+
+#[test]
 fn rejects_a_changed_caller_handoff_observer_set() {
     let mut source = synthetic_source();
     write_main_dialogue_state_machine(&mut source);

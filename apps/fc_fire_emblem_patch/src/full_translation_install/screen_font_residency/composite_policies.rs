@@ -8,6 +8,7 @@ use anyhow::{Result, ensure};
 
 use crate::{
     choice_labels::CHOICE_LABEL_COMPOSITE_STATE,
+    dialogue_inventory::MAIN_DIALOGUE_COMPOSITE_APPENDER_STATES,
     fixed_menu_labels::{
         GAME_SPEED_SELECTION_COMPOSITE_STATE, STATIC_FONT_PAGE_APPENDER_COMPOSITE_STATES,
         STORAGE_CAPACITY_NOTICE_COMPOSITE_STATE, UNIT_SELECTION_COMPOSITE_STATE,
@@ -53,6 +54,7 @@ pub(in crate::full_translation_install) enum ScreenFontPageRole {
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(in crate::full_translation_install) enum DelegatedFontPageOwner {
     ChoiceDialogueResidency,
+    MainDialogueRuntimeSelector,
     UnitRosterSelector,
     UnitSelectionAppender,
     GameSpeedAppender,
@@ -64,6 +66,7 @@ impl DelegatedFontPageOwner {
     pub(in crate::full_translation_install) const fn id(self) -> &'static str {
         match self {
             Self::ChoiceDialogueResidency => "choice_dialogue_residency",
+            Self::MainDialogueRuntimeSelector => "main_dialogue_runtime_selector",
             Self::UnitRosterSelector => "unit_roster_selector",
             Self::UnitSelectionAppender => "unit_selection_appender",
             Self::GameSpeedAppender => "game_speed_appender",
@@ -168,6 +171,10 @@ const DELEGATED_POLICIES: &[(u8, DelegatedFontPageOwner)] = &[
         DelegatedFontPageOwner::ChoiceDialogueResidency,
     ),
     (
+        MAIN_DIALOGUE_COMPOSITE_APPENDER_STATES[0],
+        DelegatedFontPageOwner::MainDialogueRuntimeSelector,
+    ),
+    (
         ROSTER_FONT_PAGE_COMPOSITE_STATE,
         DelegatedFontPageOwner::UnitRosterSelector,
     ),
@@ -182,6 +189,14 @@ const DELEGATED_POLICIES: &[(u8, DelegatedFontPageOwner)] = &[
     (
         OPTIONS_FONT_PAGE_COMPOSITE_STATE,
         DelegatedFontPageOwner::OptionsSelector,
+    ),
+    (
+        MAIN_DIALOGUE_COMPOSITE_APPENDER_STATES[1],
+        DelegatedFontPageOwner::MainDialogueRuntimeSelector,
+    ),
+    (
+        MAIN_DIALOGUE_COMPOSITE_APPENDER_STATES[2],
+        DelegatedFontPageOwner::MainDialogueRuntimeSelector,
     ),
     (
         STORAGE_CAPACITY_NOTICE_COMPOSITE_STATE,
@@ -281,6 +296,16 @@ pub(super) fn validate_composite_state_policies() -> Result<()> {
     ensure!(
         delegated == DELEGATED_POLICIES,
         "delegated font-page ownership changed"
+    );
+    let main_dialogue_states = delegated
+        .iter()
+        .filter_map(|(state, owner)| {
+            (*owner == DelegatedFontPageOwner::MainDialogueRuntimeSelector).then_some(*state)
+        })
+        .collect::<Vec<_>>();
+    ensure!(
+        main_dialogue_states == MAIN_DIALOGUE_COMPOSITE_APPENDER_STATES,
+        "main-dialogue composite state ownership changed"
     );
     let delegated_fixed_menu_states = delegated
         .iter()
