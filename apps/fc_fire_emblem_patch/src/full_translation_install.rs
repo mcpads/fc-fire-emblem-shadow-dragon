@@ -72,6 +72,7 @@ mod screen_font_residency;
 mod shop_item_residency;
 mod storage_residency;
 mod transition_residency;
+mod unit_selection_help_residency;
 
 use chapter_intro_residency::plan_chapter_intro_residency;
 use chapter_save_projection::{
@@ -137,6 +138,10 @@ use shop_item_residency::{
 };
 use storage_residency::{StorageDialogueResidencyPlan, plan_storage_dialogue_residency};
 use transition_residency::{bind_transition_lifetime_worksets, plan_transition_residency};
+use unit_selection_help_residency::{
+    UnitSelectionHelpResidencyPlan, finalize_unit_selection_help_residency,
+    plan_unit_selection_help_lifetime,
+};
 
 /// 대사 런타임 재료 용기가 시작하는 MMC3 8 KiB 페이지다.
 const MAIN_DIALOGUE_MATERIAL_FIRST_PAGE: u8 = 0x2C;
@@ -191,7 +196,7 @@ pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) output_will_be_emitted: bool,
 }
 
-pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 34;
+pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 35;
 
 pub(crate) struct FullTranslationInstallSummary {
     pub(crate) report_sha1: String,
@@ -360,6 +365,12 @@ pub(crate) fn plan_full_translation_installation(
         &choices,
         &front_end_result_menu_residency.augmented_worksets,
     )?;
+    let unit_selection_help_lifetime = plan_unit_selection_help_lifetime(
+        &rom,
+        &display,
+        &fixed_menu_labels,
+        &choice_residency.augmented_worksets,
+    )?;
     let source_font_page = rom
         .chr()
         .get(..FONT_PAGE_SIZE)
@@ -387,6 +398,7 @@ pub(crate) fn plan_full_translation_installation(
         chapter_titles: &chapter_titles,
         choices: &choices,
         choice_glyph_codes: &choice_residency.choice_glyph_codes,
+        unit_selection_help: &unit_selection_help_lifetime,
         map_menu: &map_menu,
         unit_ui: &unit_ui,
         item_actions: &item_actions,
@@ -394,13 +406,22 @@ pub(crate) fn plan_full_translation_installation(
         options_glyph_codes: &options_glyph_codes,
         transitions: &transitions,
     })?;
+    let installed_help_glyph_codes = consumer_codebook.fixed_ui_glyph_codes_for(
+        "unit_command_menu",
+        unit_selection_help_lifetime.help_glyphs(),
+    )?;
+    let unit_selection_help_residency = finalize_unit_selection_help_residency(
+        unit_selection_help_lifetime,
+        &choice_residency.augmented_worksets,
+        installed_help_glyph_codes,
+    )?;
     let storage_dialogue_residency = plan_storage_dialogue_residency(
         &rom,
         &dialogue_graph,
         &display,
         &fixed,
         &fixed_menu_labels,
-        &choice_residency.augmented_worksets,
+        &unit_selection_help_residency.augmented_worksets,
         dynamic_inputs.canonical_dynamic_codes(),
     )?;
     let chapter_save_projection = plan_chapter_save_projection(ChapterSaveProjectionInputs {
@@ -469,6 +490,7 @@ pub(crate) fn plan_full_translation_installation(
             shop_items: &shop_item_workset_residency.augmented_worksets,
             chapter_intro: &chapter_intro_residency.augmented_worksets,
             choice_and_front_end_menu: &choice_residency.augmented_worksets,
+            unit_selection_help: &unit_selection_help_residency.augmented_worksets,
             storage_dialogue: &storage_dialogue_residency.augmented_worksets,
             front_end_result: &front_end_result_residency.augmented_worksets,
             transition_lifetime: &transition_residency.augmented_worksets,
@@ -1011,6 +1033,7 @@ pub(crate) fn plan_full_translation_installation(
         dialogue_codebook: dialogue_codebook_report,
         chapter_intro_residency: chapter_intro_residency_report,
         choice_residency,
+        unit_selection_help_residency,
         storage_dialogue_residency,
         shop_item_residency,
         screen_font_residency,

@@ -9,13 +9,12 @@ use crate::{
     chapter_transition::bind_save_complete_dialogue_records,
     choice_labels::{CHOICE_LABEL_COMPOSITE_STATE, ChoiceLabelPlan},
     dialogue_assets::MainDialogueDisplayPlan,
-    font_slots::{ACTIVE_HANGUL_SLOT_COUNT, active_hangul_codes},
     front_end_menu::FRONT_END_RESULT_DIALOGUE_RECORD_IDS,
     mapper165::battle_codebook_plan::GlyphWorkset,
     rom::Rom,
 };
 
-use super::resident_glyph_assignment::{assign_resident_glyph_codes, assignment_sha1};
+use super::resident_glyph_assignment::{assign_and_augment_resident_worksets, assignment_sha1};
 
 #[derive(Serialize)]
 pub(super) struct ChoiceResidencyPlan {
@@ -104,12 +103,12 @@ fn collect_resident_workset_indices(
         .iter()
         .enumerate()
         .filter_map(|(index, workset)| {
-            resident_record_ids
-                .contains(workset.record_id.as_str())
-                .then(|| {
-                    found_record_ids.insert(workset.record_id.as_str());
-                    index
-                })
+            if resident_record_ids.contains(workset.record_id.as_str()) {
+                found_record_ids.insert(workset.record_id.as_str());
+                Some(index)
+            } else {
+                None
+            }
         })
         .collect::<BTreeSet<_>>();
     ensure!(
@@ -128,72 +127,17 @@ fn assign_and_augment_choice_worksets(
     resident_workset_indices: &BTreeSet<usize>,
     dialogue_worksets: &[GlyphWorkset],
 ) -> Result<(BTreeMap<char, u8>, Vec<GlyphWorkset>, usize)> {
-    let mut forbidden_codes_by_glyph = choice_glyphs
-        .iter()
-        .copied()
-        .map(|glyph| (glyph, BTreeSet::new()))
-        .collect::<BTreeMap<_, _>>();
-    let mut preassigned_codes_by_glyph = BTreeMap::<char, BTreeSet<u8>>::new();
-    for workset_index in resident_workset_indices {
-        let workset = &dialogue_worksets[*workset_index];
-        for glyph in choice_glyphs {
-            forbidden_codes_by_glyph
-                .get_mut(glyph)
-                .expect("choice glyph was initialized")
-                .extend(workset.preserved_active_codes.iter().copied());
-            for (fixed_glyph, fixed_code) in &workset.fixed_glyph_codes {
-                if fixed_glyph == glyph {
-                    preassigned_codes_by_glyph
-                        .entry(*glyph)
-                        .or_default()
-                        .insert(*fixed_code);
-                } else {
-                    forbidden_codes_by_glyph
-                        .get_mut(glyph)
-                        .expect("choice glyph was initialized")
-                        .insert(*fixed_code);
-                }
-            }
-        }
-    }
-    let choice_glyph_codes = assign_resident_glyph_codes(
+    let plan = assign_and_augment_resident_worksets(
         "save-complete choice residency",
-        &forbidden_codes_by_glyph,
-        &preassigned_codes_by_glyph,
-        &active_hangul_codes().into_iter().collect(),
+        choice_glyphs,
+        resident_workset_indices,
+        dialogue_worksets,
+        &BTreeMap::new(),
     )?;
-
-    let mut augmented_worksets = dialogue_worksets.to_vec();
-    let mut maximum_augmented_workset_slot_demand = 0;
-    for (index, workset) in augmented_worksets.iter_mut().enumerate() {
-        if resident_workset_indices.contains(&index) {
-            for glyph in choice_glyphs {
-                let code = choice_glyph_codes[glyph];
-                ensure!(
-                    !workset.preserved_active_codes.contains(&code),
-                    "choice glyph {glyph:?} uses a code preserved by the continue prompt"
-                );
-                workset.target_glyphs.insert(*glyph);
-                if let Some(existing) = workset.fixed_glyph_codes.insert(*glyph, code) {
-                    ensure!(
-                        existing == code,
-                        "choice glyph {glyph:?} changes its preassigned fixed code"
-                    );
-                }
-            }
-        }
-        maximum_augmented_workset_slot_demand = maximum_augmented_workset_slot_demand
-            .max(workset.target_glyphs.len() + workset.preserved_active_codes.len());
-    }
-    ensure!(
-        maximum_augmented_workset_slot_demand <= ACTIVE_HANGUL_SLOT_COUNT,
-        "choice-augmented dialogue page needs {maximum_augmented_workset_slot_demand} active slots but only {ACTIVE_HANGUL_SLOT_COUNT} exist"
-    );
-
     Ok((
-        choice_glyph_codes,
-        augmented_worksets,
-        maximum_augmented_workset_slot_demand,
+        plan.glyph_codes,
+        plan.augmented_worksets,
+        plan.maximum_augmented_workset_slot_demand,
     ))
 }
 

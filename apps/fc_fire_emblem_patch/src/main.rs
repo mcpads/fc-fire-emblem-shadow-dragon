@@ -21,6 +21,7 @@ mod hangul_page_plan;
 mod item_flow;
 mod japanese_encoding;
 mod localization;
+mod map_dialogue_lifecycle;
 mod map_menu;
 mod mapper165;
 mod mmc4_latch;

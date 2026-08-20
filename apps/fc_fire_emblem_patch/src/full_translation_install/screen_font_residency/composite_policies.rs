@@ -95,6 +95,9 @@ impl DelegatedFontPageOwner {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::full_translation_install) enum ScreenFontResidencyPolicy {
     Static(ScreenFontPageRole),
+    /// 이 상태가 고정 오버레이를 먼저 그리지만, 그 바이트는 곧이어 선택되는 주 대사
+    /// 페이지 위에도 남는다. 진입 페이지와 후속 대사 작업집합이 같은 코드를 써야 한다.
+    OverlayThenDialogue(ScreenFontPageRole),
     StorageDialogueOrStatic(ScreenFontPageRole),
     ItemNamePublishedByAppender,
     ClassNamePublishedByAppender,
@@ -137,7 +140,7 @@ const NON_DELEGATED_POLICIES: &[(u8, ScreenFontResidencyPolicy)] = &[
     ),
     (
         UNIT_SELECTION_HELP_COMPOSITE_STATE,
-        ScreenFontResidencyPolicy::Static(ScreenFontPageRole::UnitCommand),
+        ScreenFontResidencyPolicy::OverlayThenDialogue(ScreenFontPageRole::UnitCommand),
     ),
     (
         ATTACK_WEAPON_SELECTION_COMPOSITE_STATE,
@@ -333,7 +336,9 @@ pub(in crate::full_translation_install) fn composite_font_residency_policy(
 impl ScreenFontResidencyPolicy {
     pub(in crate::full_translation_install) fn static_page(self) -> Option<ScreenFontPageRole> {
         match self {
-            Self::Static(page) | Self::StorageDialogueOrStatic(page) => Some(page),
+            Self::Static(page)
+            | Self::OverlayThenDialogue(page)
+            | Self::StorageDialogueOrStatic(page) => Some(page),
             Self::ItemNamePublishedByAppender
             | Self::ClassNamePublishedByAppender
             | Self::UnitOrEnemyNamePublishedByAppender
@@ -445,10 +450,10 @@ pub(super) fn validate_composite_state_policies() -> Result<()> {
     );
     ensure!(
         composite_font_residency_policy(UNIT_SELECTION_HELP_COMPOSITE_STATE)
-            == Some(ScreenFontResidencyPolicy::Static(
+            == Some(ScreenFontResidencyPolicy::OverlayThenDialogue(
                 ScreenFontPageRole::UnitCommand,
             )),
-        "unit-selection help no longer selects the unit-command page"
+        "unit-selection help no longer bridges the unit-command page into its dialogue"
     );
     let completed_dialogue_states = COMPOSITE_FONT_RESIDENCY_POLICIES
         .iter()

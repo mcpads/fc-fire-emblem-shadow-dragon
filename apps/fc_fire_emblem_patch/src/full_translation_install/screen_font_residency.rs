@@ -169,6 +169,7 @@ pub(super) struct ScreenFontResidencyDraft {
     delegated_page_owner_state_count: usize,
     unresolved_page_owner_state_count: usize,
     static_state_route_count: usize,
+    dialogue_overlay_state_count: usize,
     control_only_retained_state_count: usize,
     source_page_selected_state_count: usize,
     item_name_published_state_count: usize,
@@ -347,13 +348,19 @@ pub(super) fn plan_screen_font_residency(
 
     Ok(ScreenFontResidencyDraft {
         schema: 14,
-        strategy: "bind every source-produced composite state to one explicit central residency action or a named upstream selector/appender; publish static pages at entry, install unit-selection help on the unit-command page, retain only the two source handlers proven to emit ED/EF controls without glyphs, let shared item/class/unit appenders publish their catalog pages, explicitly select the source page for source-only results, and preserve the source-bound dialogue, options, storage, and transition lifetimes",
+        strategy: "bind every source-produced composite state to one explicit central residency action or a named upstream selector/appender; publish static pages at entry, carry the unit-selection help codes from its unit-command overlay into the following dialogue page, retain only the two source handlers proven to emit ED/EF controls without glyphs, let shared item/class/unit appenders publish their catalog pages, explicitly select the source page for source-only results, and preserve the source-bound dialogue, options, storage, and transition lifetimes",
         composite_state_policy_count: COMPOSITE_FONT_RESIDENCY_POLICIES.len(),
         delegated_page_owner_state_count: delegated_page_owners.len(),
         unresolved_page_owner_state_count: unresolved_page_owner_states_hex.len(),
         static_state_route_count: COMPOSITE_FONT_RESIDENCY_POLICIES
             .iter()
             .filter(|(_, policy)| policy.static_page().is_some())
+            .count(),
+        dialogue_overlay_state_count: COMPOSITE_FONT_RESIDENCY_POLICIES
+            .iter()
+            .filter(|(_, policy)| {
+                matches!(policy, ScreenFontResidencyPolicy::OverlayThenDialogue(_))
+            })
             .count(),
         control_only_retained_state_count: COMPOSITE_FONT_RESIDENCY_POLICIES
             .iter()
@@ -625,7 +632,7 @@ mod tests {
         );
         assert_eq!(
             composite_font_residency_policy(UNIT_SELECTION_HELP_COMPOSITE_STATE),
-            Some(ScreenFontResidencyPolicy::Static(
+            Some(ScreenFontResidencyPolicy::OverlayThenDialogue(
                 ScreenFontPageRole::UnitCommand,
             ))
         );

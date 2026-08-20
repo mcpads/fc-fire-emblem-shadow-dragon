@@ -36,6 +36,7 @@ use self::{
 };
 use super::{
     chapter_intro_residency::ChapterIntroResidencyPlan, dynamic_inputs::DynamicDialogueInputPlan,
+    unit_selection_help_residency::UnitSelectionHelpLifetimePlan,
 };
 
 pub(super) struct ConsumerCodebookInputs<'a> {
@@ -50,6 +51,7 @@ pub(super) struct ConsumerCodebookInputs<'a> {
     pub(super) chapter_titles: &'a ChapterTitlePlan,
     pub(super) choices: &'a ChoiceLabelPlan,
     pub(super) choice_glyph_codes: &'a BTreeMap<char, u8>,
+    pub(super) unit_selection_help: &'a UnitSelectionHelpLifetimePlan,
     pub(super) map_menu: &'a MapMenuPlan,
     pub(super) unit_ui: &'a SemanticTranslationPlan,
     pub(super) item_actions: &'a SemanticTranslationPlan,
@@ -116,6 +118,33 @@ impl ConsumerCodebookPlan {
         logical: &[FixedTextLogicalByte],
     ) -> Result<Vec<u8>> {
         self.encode_for(page_id, CodeOwner::FixedUi, logical)
+    }
+
+    pub(super) fn fixed_ui_glyph_codes_for(
+        &self,
+        page_id: &str,
+        glyphs: &BTreeSet<char>,
+    ) -> Result<BTreeMap<char, u8>> {
+        let page = self
+            .pages
+            .iter()
+            .find(|page| page.id == page_id)
+            .with_context(|| format!("consumer codebook has no {page_id} page"))?;
+        glyphs
+            .iter()
+            .map(|glyph| {
+                page.assignments
+                    .get(&GlyphKey {
+                        owner: CodeOwner::FixedUi,
+                        glyph: *glyph,
+                    })
+                    .copied()
+                    .with_context(|| {
+                        format!("consumer page {page_id} has no fixed-UI code for {glyph:?}")
+                    })
+                    .map(|code| (*glyph, code))
+            })
+            .collect()
     }
 
     pub(super) fn encode_chapter_title_for(
@@ -303,6 +332,12 @@ pub(super) fn plan_consumer_codebook(
     )?;
     merge_preassignments(
         &mut preassigned,
+        CodeOwner::FixedUi,
+        inputs.unit_selection_help.preassigned_glyph_codes(),
+        "unit-selection help codes fixed by its dialogue",
+    )?;
+    merge_preassignments(
+        &mut preassigned,
         CodeOwner::OptionsTable,
         inputs.options_glyph_codes,
         "resident options labels",
@@ -313,7 +348,16 @@ pub(super) fn plan_consumer_codebook(
     );
 
     let graph = ConflictGraph::from_lifetimes(&lifetimes, preassigned.keys().copied());
-    let forbidden = forbidden_codes_by_glyph(&lifetimes);
+    let mut forbidden = forbidden_codes_by_glyph(&lifetimes);
+    for (glyph, codes) in inputs.unit_selection_help.forbidden_codes_by_glyph() {
+        forbidden
+            .entry(GlyphKey {
+                owner: CodeOwner::FixedUi,
+                glyph: *glyph,
+            })
+            .or_default()
+            .extend(codes);
+    }
     let (assignments, coloring_strategy, color_split_count) =
         assign_codes(&graph, &forbidden, &preassigned, &active_codes)?;
     verify_assignment(&graph, &forbidden, &preassigned, &assignments)?;

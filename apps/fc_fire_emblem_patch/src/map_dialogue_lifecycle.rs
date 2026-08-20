@@ -1,3 +1,9 @@
+//! 지도 위 고정 오버레이에서 주 대사로 넘어가는 원본 수명을 결속한다.
+//!
+//! mapper 실행 그래프와 한글 글꼴 residency가 같은 상태기와 같은 대사 정체성을
+//! 소비한다. 한쪽에서 주소를 다시 열거하면 화면 전환은 맞아도 두 글꼴 페이지가
+//! 서로 다른 수명을 모델링할 수 있으므로 이 모듈이 원천 결속을 한 번만 소유한다.
+
 use std::collections::BTreeSet;
 
 use anyhow::{Context, Result, ensure};
@@ -20,19 +26,43 @@ const INITIALIZE_SCREEN_STATES: &[u8] = &[
     0xA9, 0x00, 0x85, 0x23, 0x85, 0x24, 0x85, 0x84, 0x85, 0x26, 0x8D, 0xDB, 0x05,
 ];
 const DISPATCH_PREFIX: &[u8] = &[0xAD, 0xDB, 0x05, 0x20, 0x4C, 0xC3];
-const ADVANCE_TO_DIALOGUE_STATE_ONE: &[u8] = &[0xEE, 0xDB, 0x05, 0xA9, 0x25, 0x4C, 0x90, 0xE6];
-const ADVANCE_TO_DIALOGUE_STATE_TWO: &[u8] = &[
+const ADVANCE_TO_HELP_OVERLAY: &[u8] = &[0xEE, 0xDB, 0x05, 0xA9, 0x25, 0x4C, 0x90, 0xE6];
+const ADVANCE_TO_HELP_DIALOGUE: &[u8] = &[
     0x20, 0x5C, 0xE6, 0xA9, 0x00, 0x8D, 0xF0, 0x77, 0xA9, 0xB1, 0x8D, 0xF4, 0x77, 0xA9, 0x01, 0x8D,
     0xF7, 0x77, 0xA9, 0x04, 0x85, 0x26, 0xA9, 0x52, 0x8D, 0xF1, 0x77, 0xEE, 0xDB, 0x05, 0x60,
 ];
+const HELP_DIALOGUE_DIRECTORY_SELECTOR: u8 = ADVANCE_TO_HELP_DIALOGUE[9];
+const HELP_DIALOGUE_ENTRY_INDEX: u8 = ADVANCE_TO_HELP_DIALOGUE[23];
 
-pub(super) struct MapDialogueLifecycle {
-    pub(super) dispatch_call: u16,
-    pub(super) handler_domain: BTreeSet<u8>,
-    pub(super) produced_selectors: BTreeSet<u8>,
+pub(crate) struct MapDialogueLifecycle {
+    dispatch_call: u16,
+    handler_domain: BTreeSet<u8>,
+    produced_selectors: BTreeSet<u8>,
 }
 
-pub(super) fn bind_outer_screen_map_dialogue_lifecycle(
+impl MapDialogueLifecycle {
+    pub(crate) fn dispatch_call(&self) -> u16 {
+        self.dispatch_call
+    }
+
+    pub(crate) fn handler_domain(&self) -> &BTreeSet<u8> {
+        &self.handler_domain
+    }
+
+    pub(crate) fn produced_selectors(&self) -> &BTreeSet<u8> {
+        &self.produced_selectors
+    }
+
+    pub(crate) fn help_dialogue_directory_selector(&self) -> u8 {
+        HELP_DIALOGUE_DIRECTORY_SELECTOR
+    }
+
+    pub(crate) fn help_dialogue_entry_index(&self) -> usize {
+        usize::from(HELP_DIALOGUE_ENTRY_INDEX)
+    }
+}
+
+pub(crate) fn bind_outer_screen_map_dialogue_lifecycle(
     source: &Rom,
 ) -> Result<MapDialogueLifecycle> {
     source.verify_supported_japanese()?;
@@ -64,15 +94,15 @@ pub(super) fn bind_outer_screen_map_dialogue_lifecycle(
         source,
         OUTER_SCREEN_BANK,
         0x8600,
-        ADVANCE_TO_DIALOGUE_STATE_ONE,
-        "advance outer-screen map dialogue to state one",
+        ADVANCE_TO_HELP_OVERLAY,
+        "advance outer-screen map dialogue to the fixed help overlay",
     )?;
     bind_exact_code(
         source,
         OUTER_SCREEN_BANK,
         0x8608,
-        ADVANCE_TO_DIALOGUE_STATE_TWO,
-        "advance outer-screen map dialogue to caller handoff",
+        ADVANCE_TO_HELP_DIALOGUE,
+        "advance outer-screen map dialogue from the help overlay to its dialogue",
     )?;
     ensure!(
         scan_absolute_state_writers(lifecycle, LIFECYCLE_START)?
@@ -106,22 +136,18 @@ pub(super) fn bind_outer_screen_map_dialogue_lifecycle(
 
 fn scan_absolute_state_writers(bytes: &[u8], start: u16) -> Result<BTreeSet<(u16, u8)>> {
     let direct_write_opcodes = [0x0E, 0x2E, 0x4E, 0x6E, 0x8C, 0x8D, 0x8E, 0xCE, 0xEE];
-    bytes
-        .windows(3)
-        .enumerate()
-        .filter_map(|(offset, window)| {
-            (direct_write_opcodes.contains(&window[0])
-                && u16::from_le_bytes([window[1], window[2]]) == MAP_DIALOGUE_STATE_ADDRESS)
-                .then(|| {
-                    Ok((
-                        start
-                            .checked_add(u16::try_from(offset)?)
-                            .context("map-dialogue writer address overflow")?,
-                        window[0],
-                    ))
-                })
-        })
-        .collect()
+    let mut writers = BTreeSet::new();
+    for (offset, window) in bytes.windows(3).enumerate() {
+        if direct_write_opcodes.contains(&window[0])
+            && u16::from_le_bytes([window[1], window[2]]) == MAP_DIALOGUE_STATE_ADDRESS
+        {
+            let address = start
+                .checked_add(u16::try_from(offset)?)
+                .context("map-dialogue writer address overflow")?;
+            writers.insert((address, window[0]));
+        }
+    }
+    Ok(writers)
 }
 
 fn bind_exact_code(

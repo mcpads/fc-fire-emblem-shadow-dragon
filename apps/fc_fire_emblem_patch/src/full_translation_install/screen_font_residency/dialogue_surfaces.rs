@@ -14,11 +14,12 @@ use crate::{
     mapper165::battle_codebook_plan::{GlyphWorkset, GlyphWorksetPagePlan},
 };
 
-const RESIDENCY_STAGE_NAMES: [&str; 7] = [
+const RESIDENCY_STAGE_NAMES: [&str; 8] = [
     "dynamic_inputs",
     "shop_items",
     "chapter_intro",
     "choice_and_front_end_menu",
+    "unit_selection_help_dialogue_handoff",
     "storage_dialogue",
     "front_end_result",
     "transition_lifetime",
@@ -29,6 +30,7 @@ pub(in crate::full_translation_install) struct DialogueSurfaceInputs<'a> {
     pub(in crate::full_translation_install) shop_items: &'a [GlyphWorkset],
     pub(in crate::full_translation_install) chapter_intro: &'a [GlyphWorkset],
     pub(in crate::full_translation_install) choice_and_front_end_menu: &'a [GlyphWorkset],
+    pub(in crate::full_translation_install) unit_selection_help: &'a [GlyphWorkset],
     pub(in crate::full_translation_install) storage_dialogue: &'a [GlyphWorkset],
     pub(in crate::full_translation_install) front_end_result: &'a [GlyphWorkset],
     pub(in crate::full_translation_install) transition_lifetime: &'a [GlyphWorkset],
@@ -58,6 +60,7 @@ pub(super) fn plan_dialogue_surfaces(
         inputs.shop_items,
         inputs.chapter_intro,
         inputs.choice_and_front_end_menu,
+        inputs.unit_selection_help,
         inputs.storage_dialogue,
         inputs.front_end_result,
         inputs.transition_lifetime,
@@ -138,7 +141,7 @@ pub(super) fn plan_dialogue_surfaces(
     );
 
     Ok(DialogueSurfacePlan {
-        strategy: "carry every visible dialogue workset monotonically through dynamic strings, externally composed shop items, chapter titles, choices, storage overlays, retained front-end results, and transition lifetimes; then rebind each final workset to its selected codebook page",
+        strategy: "carry every visible dialogue workset monotonically through dynamic strings, externally composed shop items, chapter titles, choices, the unit-selection help handoff, storage overlays, retained front-end results, and transition lifetimes; then rebind each final workset to its selected codebook page",
         residency_stage_count: RESIDENCY_STAGE_NAMES.len(),
         visible_workset_count,
         target_glyph_count: all_target_glyphs.len(),
@@ -206,7 +209,7 @@ mod tests {
     }
 
     fn inputs<'a>(
-        stages: [&'a [GlyphWorkset]; 7],
+        stages: [&'a [GlyphWorkset]; 8],
         codebook: &'a GlyphWorksetPagePlan,
     ) -> DialogueSurfaceInputs<'a> {
         DialogueSurfaceInputs {
@@ -214,9 +217,10 @@ mod tests {
             shop_items: stages[1],
             chapter_intro: stages[2],
             choice_and_front_end_menu: stages[3],
-            storage_dialogue: stages[4],
-            front_end_result: stages[5],
-            transition_lifetime: stages[6],
+            unit_selection_help: stages[4],
+            storage_dialogue: stages[5],
+            front_end_result: stages[6],
+            transition_lifetime: stages[7],
             codebook,
         }
     }
@@ -227,9 +231,10 @@ mod tests {
         let shop = vec![workset("가나", &[0xA0], &[('나', 0xA1)])];
         let chapter = vec![workset("가나다", &[0xA0], &[('나', 0xA1)])];
         let choice = vec![workset("가나다라", &[0xA0], &[('나', 0xA1)])];
-        let storage = vec![workset("가나다라마", &[0xA0], &[('나', 0xA1)])];
-        let result = vec![workset("가나다라마바", &[0xA0], &[('나', 0xA1)])];
-        let transition = vec![workset("가나다라마바사", &[0xA0], &[('나', 0xA1)])];
+        let help = vec![workset("가나다라마", &[0xA0], &[('나', 0xA1)])];
+        let storage = vec![workset("가나다라마바", &[0xA0], &[('나', 0xA1)])];
+        let result = vec![workset("가나다라마바사", &[0xA0], &[('나', 0xA1)])];
+        let transition = vec![workset("가나다라마바사아", &[0xA0], &[('나', 0xA1)])];
         let codebook = codebook(BTreeMap::from([
             ('가', 0xA2),
             ('나', 0xA1),
@@ -238,6 +243,7 @@ mod tests {
             ('마', 0xA5),
             ('바', 0xA6),
             ('사', 0xA7),
+            ('아', 0xA8),
         ]));
 
         let plan = plan_dialogue_surfaces(inputs(
@@ -246,6 +252,7 @@ mod tests {
                 &shop,
                 &chapter,
                 &choice,
+                &help,
                 &storage,
                 &result,
                 &transition,
@@ -255,7 +262,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(plan.visible_workset_count, 1);
-        assert_eq!(plan.target_glyph_count, 7);
+        assert_eq!(plan.target_glyph_count, 8);
         assert_eq!(plan.codebook_page_count, 1);
     }
 
@@ -266,7 +273,9 @@ mod tests {
         let codebook = codebook(BTreeMap::from([('가', 0xA0)]));
 
         let error = plan_dialogue_surfaces(inputs(
-            [&earlier, &later, &later, &later, &later, &later, &later],
+            [
+                &earlier, &later, &later, &later, &later, &later, &later, &later,
+            ],
             &codebook,
         ))
         .unwrap_err();
@@ -280,7 +289,9 @@ mod tests {
         let codebook = codebook(BTreeMap::from([('가', 0xA1)]));
 
         let error = plan_dialogue_surfaces(inputs(
-            [&stage, &stage, &stage, &stage, &stage, &stage, &stage],
+            [
+                &stage, &stage, &stage, &stage, &stage, &stage, &stage, &stage,
+            ],
             &codebook,
         ))
         .unwrap_err();

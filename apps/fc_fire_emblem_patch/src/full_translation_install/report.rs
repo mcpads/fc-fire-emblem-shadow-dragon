@@ -24,6 +24,7 @@ pub(super) struct FullTranslationInstallReport {
     pub(super) dialogue_codebook: DialogueCodebook,
     pub(super) chapter_intro_residency: ChapterIntroResidency,
     pub(super) choice_residency: ChoiceResidencyPlan,
+    pub(super) unit_selection_help_residency: UnitSelectionHelpResidencyPlan,
     pub(super) storage_dialogue_residency: StorageDialogueResidencyPlan,
     pub(super) shop_item_residency: shop_item_residency::ShopItemResidencyPlan,
     pub(super) screen_font_residency: ScreenFontResidencyPlan,

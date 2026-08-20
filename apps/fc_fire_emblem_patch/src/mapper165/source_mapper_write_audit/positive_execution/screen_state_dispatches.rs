@@ -6,6 +6,7 @@ use crate::{
     chapter_transition::bind_outer_screen_state_dispatch_source,
     dialogue_inventory::bind_caller_handoff_state_dispatch_sources,
     fixed_string_consumers::bind_composite_state_dispatch_source,
+    map_dialogue_lifecycle::bind_outer_screen_map_dialogue_lifecycle,
     mapper165::{
         battle_codebook_plan::IndirectWriteDestinationBounds,
         inline_pointer_dispatch::bind_inline_pointer_dispatch,
@@ -23,7 +24,6 @@ use super::{
 mod battle_animation_test_lifecycle;
 mod dialogue_or_sound_lifecycles;
 mod main_state_lifecycles;
-mod map_dialogue_lifecycles;
 mod screen_substate_dispatches;
 mod selector_transition_graph;
 mod state_transition_evidence;
@@ -31,7 +31,6 @@ mod state_transition_evidence;
 use battle_animation_test_lifecycle::bind_battle_animation_test_phase_lifecycle;
 use dialogue_or_sound_lifecycles::bind_dialogue_or_sound_state_lifecycles;
 use main_state_lifecycles::bind_outer_screen_main_state_lifecycles;
-use map_dialogue_lifecycles::{MapDialogueLifecycle, bind_outer_screen_map_dialogue_lifecycle};
 use screen_substate_dispatches::bind_screen_substate_dispatches;
 
 const SOURCE_PRG_BANK_BYTE_COUNT: usize = 16 * 1024;
@@ -265,29 +264,25 @@ pub(super) fn bind_source_screen_state_dispatches(
         )?;
     }
 
-    let MapDialogueLifecycle {
-        dispatch_call,
-        handler_domain,
-        produced_selectors,
-    } = bind_outer_screen_map_dialogue_lifecycle(source)?;
+    let map_dialogue_lifecycle = bind_outer_screen_map_dialogue_lifecycle(source)?;
     insert_domain(
         &mut selector_domains,
         0x06,
-        dispatch_call,
-        handler_domain,
+        map_dialogue_lifecycle.dispatch_call(),
+        map_dialogue_lifecycle.handler_domain().clone(),
         "outer-screen map-dialogue state dispatch",
     )?;
     insert_domain(
         &mut source_producer_domains,
         0x06,
-        dispatch_call,
-        produced_selectors,
+        map_dialogue_lifecycle.dispatch_call(),
+        map_dialogue_lifecycle.produced_selectors().clone(),
         "outer-screen map-dialogue state producer",
     )?;
     insert_selector_memory_address(
         &mut selector_memory_addresses,
         0x06,
-        dispatch_call,
+        map_dialogue_lifecycle.dispatch_call(),
         0x05DB,
         "outer-screen map-dialogue state dispatch",
     )?;
