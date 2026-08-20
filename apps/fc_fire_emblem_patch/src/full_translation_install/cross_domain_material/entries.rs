@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, ensure};
 
 use crate::{
+    fixed_menu_labels::FIXED_MENU_TRANSLATION_ENTRY_COUNT,
     semantic_translation::SemanticTranslationPlan,
     sha1_hex,
     text_inventory::{FixedTextLogicalByte, FixedTextPlan, FixedTextPlannedEntry},
@@ -141,7 +142,21 @@ pub(super) fn collect_section_inputs(
             semantic_entries(inputs.unit_ui)?,
         ),
     ];
-    let expected_entry_counts = [1, 25, 2, 22, 1, 69, 7, 4, 91, 24, 8, 53, 25];
+    let expected_entry_counts = [
+        1,
+        25,
+        2,
+        22,
+        1,
+        69,
+        FIXED_MENU_TRANSLATION_ENTRY_COUNT,
+        4,
+        91,
+        24,
+        8,
+        53,
+        25,
+    ];
     ensure!(
         sections.len() == EXPECTED_SECTION_COUNT
             && sections

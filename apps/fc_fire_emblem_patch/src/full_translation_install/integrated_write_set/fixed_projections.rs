@@ -28,8 +28,8 @@ pub(super) fn install_fixed_ui_projection(
     plan: &FixedUiProjectionPlan,
 ) -> Result<()> {
     ensure!(
-        plan.write_count() == 80,
-        "fixed UI projection must install thirty-six slots, thirty-six pointers, six map-menu labels, and two map funds-summary labels"
+        plan.write_count() == 86,
+        "fixed UI projection must install thirty-six slots, thirty-six pointers, six unit-selection help lines, six map-menu labels, and two map funds-summary labels"
     );
     for write in plan.writes() {
         image.write_expected(

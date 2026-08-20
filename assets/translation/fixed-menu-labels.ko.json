@@ -46,6 +46,42 @@
       "japanese_markup": "こ{FF}あずけられます",
       "korean_markup": "개{FF}보관가능",
       "status": "needs_human_review"
+    },
+    {
+      "id": "unit-selection-help:select-unit",
+      "japanese_markup": "Aホ゛タン{FF}{FF}{8D}{FF}ユニット.セレクト",
+      "korean_markup": "A버튼{FF}{FF}{8D}{FF}유닛.선택",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-selection-help:return-map",
+      "japanese_markup": "Bホ゛タン{FF}{FF}{8D}{FF}マッフ゜にもと゛る",
+      "korean_markup": "B버튼{FF}{FF}{8D}{FF}지도로돌아감",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-selection-help:move-cursor",
+      "japanese_markup": "うえ.した{FF}{8D}{FF}カーソルいと゛う",
+      "korean_markup": "위.아래{FF}{8D}{FF}커서이동",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-selection-help:view-items",
+      "japanese_markup": "ひた゛り.みき゛{8D}{FF}もちものをみる",
+      "korean_markup": "좌.우{8D}{FF}소지품보기",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-selection-help:start-condition",
+      "japanese_markup": "のこりか゛{FF}0のときにスタートを",
+      "korean_markup": "남은수{FF}0일때시작을",
+      "status": "needs_human_review"
+    },
+    {
+      "id": "unit-selection-help:start-game",
+      "japanese_markup": "おすと{FF}ケ゛ームか゛{FF}はし゛まります",
+      "korean_markup": "누르면{FF}게임이{FF}시작됩니다",
+      "status": "needs_human_review"
     }
   ]
 }

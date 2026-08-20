@@ -63,7 +63,7 @@ pub(super) struct TranslationInputs {
     pub(super) map_menu_label_count: usize,
     pub(super) unit_ui_label_count: usize,
     pub(super) item_action_label_count: usize,
-    pub(super) fixed_menu_label_count: usize,
+    pub(super) fixed_menu_text_count: usize,
     pub(super) transition_label_count: usize,
     pub(super) location_name_count: usize,
     pub(super) translation_input_complete: bool,

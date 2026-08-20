@@ -107,6 +107,10 @@ impl TestCpu {
                 0x28 => {
                     self.p = self.pop();
                 }
+                0x29 => {
+                    self.a &= self.read_pc();
+                    self.set_zero(self.a == 0);
+                }
                 0x38 => self.p |= STATUS_CARRY,
                 0x48 => self.push(self.a),
                 0x4C => {
@@ -309,6 +313,33 @@ fn static_redraw_maps_immediately_and_screen_close_clears_the_page() {
     assert!(closed.restored_source_pair);
     assert_eq!(closed.applied_route, None);
     assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], 0);
+}
+
+#[test]
+fn unit_selection_help_selects_the_same_page_as_the_unit_command_family() {
+    let pages = pages();
+    let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
+    let publisher_origin = ORIGIN + u16::try_from(activation.bytes.len()).unwrap();
+    let publisher = build_composite_font_page_publisher(
+        publisher_origin,
+        activation.address,
+        pages,
+        storage_item_list_route(),
+    )
+    .unwrap()
+    .routine;
+    let memory: Box<[u8; 0x10000]> = vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
+
+    let (memory, result) = run_routines(
+        memory,
+        &[&activation, &publisher],
+        publisher.address,
+        crate::fixed_menu_labels::UNIT_SELECTION_HELP_COMPOSITE_STATE,
+        0,
+    );
+
+    assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], pages.unit_command);
+    assert_eq!(result.applied_route, Some(pages.unit_command));
 }
 
 #[test]
@@ -691,6 +722,98 @@ fn auxiliary_composite_preserves_the_page_until_the_screen_close_boundary() {
     assert_eq!(memory[usize::from(COMPOSITE_STATE)], 0x0A);
     assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], pages.catalog[1]);
     assert_eq!(result.applied_route, None);
+}
+
+#[test]
+fn control_only_composites_retain_every_current_page_without_mapper_writes() {
+    let pages = pages();
+    let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
+    let publisher_origin = ORIGIN + u16::try_from(activation.bytes.len()).unwrap();
+    let publisher = build_composite_font_page_publisher(
+        publisher_origin,
+        activation.address,
+        pages,
+        storage_item_list_route(),
+    )
+    .unwrap()
+    .routine;
+
+    for state in [0x11, 0x17] {
+        for retained_route in [0, pages.unit_command, pages.catalog[1]] {
+            let mut memory: Box<[u8; 0x10000]> =
+                vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
+            memory[usize::from(CONSUMER_FONT_PAGE)] = retained_route;
+            let (memory, result) = run_routines(
+                memory,
+                &[&activation, &publisher],
+                publisher.address,
+                state,
+                0,
+            );
+
+            assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], retained_route);
+            assert_eq!(result.applied_route, None);
+            assert_eq!(result.central_writer_value, None);
+        }
+    }
+}
+
+#[test]
+fn every_direct_composite_state_follows_its_declared_page_action() {
+    let pages = pages();
+    let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
+    let publisher_origin = ORIGIN + u16::try_from(activation.bytes.len()).unwrap();
+    let publisher = build_composite_font_page_publisher(
+        publisher_origin,
+        activation.address,
+        pages,
+        storage_item_list_route(),
+    )
+    .unwrap()
+    .routine;
+    let retained_route = 0xB4;
+
+    for (state, policy) in COMPOSITE_FONT_RESIDENCY_POLICIES {
+        let mut memory: Box<[u8; 0x10000]> =
+            vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
+        memory[usize::from(CONSUMER_FONT_PAGE)] = retained_route;
+        let (memory, result) = run_routines(
+            memory,
+            &[&activation, &publisher],
+            publisher.address,
+            state,
+            0,
+        );
+
+        let (expected_page, expected_applied_route, expected_central_write) =
+            if let Some(page) = policy.static_page() {
+                let route = page.mapper_route(pages);
+                (route, Some(route), None)
+            } else if matches!(
+                policy,
+                ScreenFontResidencyPolicy::SourcePageSelected
+                    | ScreenFontResidencyPolicy::CompletedDialoguePageRetained
+                    | ScreenFontResidencyPolicy::ActiveDialogueCallerRestored
+            ) {
+                (0, None, Some(0))
+            } else {
+                (retained_route, None, None)
+            };
+
+        assert_eq!(
+            memory[usize::from(CONSUMER_FONT_PAGE)],
+            expected_page,
+            "composite state {state:02X} selected the wrong retained page"
+        );
+        assert_eq!(
+            result.applied_route, expected_applied_route,
+            "composite state {state:02X} applied the wrong translated route"
+        );
+        assert_eq!(
+            result.central_writer_value, expected_central_write,
+            "composite state {state:02X} took the wrong source-page path"
+        );
+    }
 }
 
 #[test]

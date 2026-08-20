@@ -12,6 +12,7 @@ use crate::{
     fixed_menu_labels::{
         GAME_SPEED_SELECTION_COMPOSITE_STATE, STATIC_FONT_PAGE_APPENDER_COMPOSITE_STATES,
         STORAGE_CAPACITY_NOTICE_COMPOSITE_STATE, UNIT_SELECTION_COMPOSITE_STATE,
+        UNIT_SELECTION_HELP_COMPOSITE_STATE,
     },
     front_end_menu::{
         RECORD_ACTION_COMPOSITE_STATE, RECORD_LIST_COMPOSITE_STATE,
@@ -25,6 +26,7 @@ use crate::{
 };
 
 use super::STORAGE_DIALOGUE_OVERLAY_COMPOSITE_STATES;
+use super::control_only_composites::CONTROL_ONLY_RETAINED_COMPOSITE_STATES;
 use super::source_page_composites::SOURCE_PAGE_COMPOSITE_STATES;
 
 pub(in crate::full_translation_install) const UNIT_NAME_DETAIL_COMPOSITE_STATE: u8 = 0x02;
@@ -100,14 +102,13 @@ pub(in crate::full_translation_install) enum ScreenFontResidencyPolicy {
     UnitOrEnemyNameRetainedFromSummary,
     CompletedDialoguePageRetained,
     ActiveDialogueCallerRestored,
+    /// The complete source handler emits only `ED` row controls and `EF`, so it
+    /// cannot reinterpret a glyph through the page retained by its parent.
+    ControlOnlyRetainsCurrentPage,
     /// This standalone screen uses only source-preserved Latin/digits and
     /// explicitly returns both the residency state and the mapper to page zero.
     SourcePageSelected,
     Delegated(DelegatedFontPageOwner),
-    /// The central composite-state publisher performs no page write and no
-    /// other page owner has yet been admitted for this state. This remains a
-    /// visible gap rather than inheriting the previous page by assumption.
-    UnresolvedPageOwner,
 }
 
 /// The runtime emitter consumes this prefix in its historical order. Keeping
@@ -132,6 +133,10 @@ const NON_DELEGATED_POLICIES: &[(u8, ScreenFontResidencyPolicy)] = &[
     ),
     (
         UNIT_COMMAND_COMPOSITE_STATE,
+        ScreenFontResidencyPolicy::Static(ScreenFontPageRole::UnitCommand),
+    ),
+    (
+        UNIT_SELECTION_HELP_COMPOSITE_STATE,
         ScreenFontResidencyPolicy::Static(ScreenFontPageRole::UnitCommand),
     ),
     (
@@ -185,6 +190,14 @@ const NON_DELEGATED_POLICIES: &[(u8, ScreenFontResidencyPolicy)] = &[
     (
         SHOP_ITEM_COMPOSITE_STATE,
         ScreenFontResidencyPolicy::ActiveDialogueCallerRestored,
+    ),
+    (
+        CONTROL_ONLY_RETAINED_COMPOSITE_STATES[0],
+        ScreenFontResidencyPolicy::ControlOnlyRetainsCurrentPage,
+    ),
+    (
+        CONTROL_ONLY_RETAINED_COMPOSITE_STATES[1],
+        ScreenFontResidencyPolicy::ControlOnlyRetainsCurrentPage,
     ),
     (
         SOURCE_PAGE_COMPOSITE_STATES[0],
@@ -259,7 +272,7 @@ const fn build_direct_state_policies()
 -> [(u8, ScreenFontResidencyPolicy); DIRECT_COMPOSITE_STATE_COUNT] {
     let mut policies = [(
         DIRECT_COMPOSITE_STATE_START,
-        ScreenFontResidencyPolicy::UnresolvedPageOwner,
+        ScreenFontResidencyPolicy::ControlOnlyRetainsCurrentPage,
     ); DIRECT_COMPOSITE_STATE_COUNT];
     let mut policy_index = 0;
     while policy_index < NON_DELEGATED_POLICIES.len() {
@@ -278,13 +291,18 @@ const fn build_direct_state_policies()
         }
         if !has_central_override {
             let mut delegated_index = 0;
-            let mut policy = ScreenFontResidencyPolicy::UnresolvedPageOwner;
+            let mut policy = ScreenFontResidencyPolicy::ControlOnlyRetainsCurrentPage;
+            let mut has_delegated_owner = false;
             while delegated_index < DELEGATED_POLICIES.len() {
                 if DELEGATED_POLICIES[delegated_index].0 == state {
                     policy =
                         ScreenFontResidencyPolicy::Delegated(DELEGATED_POLICIES[delegated_index].1);
+                    has_delegated_owner = true;
                 }
                 delegated_index += 1;
+            }
+            if !has_delegated_owner {
+                panic!("direct composite state has no residency owner");
             }
             policies[policy_index] = (state, policy);
             policy_index += 1;
@@ -322,9 +340,9 @@ impl ScreenFontResidencyPolicy {
             | Self::UnitOrEnemyNameRetainedFromSummary
             | Self::CompletedDialoguePageRetained
             | Self::ActiveDialogueCallerRestored
+            | Self::ControlOnlyRetainsCurrentPage
             | Self::SourcePageSelected
-            | Self::Delegated(_)
-            | Self::UnresolvedPageOwner => None,
+            | Self::Delegated(_) => None,
         }
     }
 }
@@ -415,6 +433,22 @@ pub(super) fn validate_composite_state_policies() -> Result<()> {
         composite_font_residency_policy(UNIT_STATUS_COMPOSITE_STATE)
             == Some(ScreenFontResidencyPolicy::UnitOrEnemyNameRetainedFromSummary),
         "unit-status font residency no longer retains the page published by unit summary"
+    );
+    ensure!(
+        CONTROL_ONLY_RETAINED_COMPOSITE_STATES
+            .into_iter()
+            .all(|state| {
+                composite_font_residency_policy(state)
+                    == Some(ScreenFontResidencyPolicy::ControlOnlyRetainsCurrentPage)
+            }),
+        "control-only composite residency changed"
+    );
+    ensure!(
+        composite_font_residency_policy(UNIT_SELECTION_HELP_COMPOSITE_STATE)
+            == Some(ScreenFontResidencyPolicy::Static(
+                ScreenFontPageRole::UnitCommand,
+            )),
+        "unit-selection help no longer selects the unit-command page"
     );
     let completed_dialogue_states = COMPOSITE_FONT_RESIDENCY_POLICIES
         .iter()

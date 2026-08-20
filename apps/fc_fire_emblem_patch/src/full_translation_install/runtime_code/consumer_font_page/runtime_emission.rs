@@ -204,15 +204,13 @@ pub(in crate::full_translation_install::runtime_code) fn build_composite_font_pa
     let ordinary_state_target = next_address(origin, &instructions)?;
     instructions[non_item_list_state] = Instruction::BneAbsolute(ordinary_state_target);
     let mut route_jumps = Vec::with_capacity(COMPOSITE_FONT_RESIDENCY_POLICIES.len());
-    let mut source_page_jumps = Vec::new();
+    let mut source_page_states = Vec::new();
     for (state, policy) in COMPOSITE_FONT_RESIDENCY_POLICIES {
         if state == storage_item_list.composite_state {
             continue;
         }
         if policy == ScreenFontResidencyPolicy::SourcePageSelected {
-            instructions.push(Instruction::CmpImmediate(state));
-            source_page_jumps.push(instructions.len());
-            instructions.push(Instruction::BeqAbsolute(origin));
+            source_page_states.push(state);
             continue;
         }
         let Some(page) = policy.static_page() else {
@@ -253,13 +251,25 @@ pub(in crate::full_translation_install::runtime_code) fn build_composite_font_pa
     instructions.push(Instruction::BccAbsolute(origin));
     let shop_dialogue_restore_jump = instructions.len();
     instructions.push(Instruction::BeqAbsolute(origin));
+    ensure!(
+        source_page_states == [0x08, 0x10],
+        "source-page composite state family changed"
+    );
+    // A now holds `state - $13`. Source-only states $08/$10 become $F5/$FD;
+    // clearing bit 3 maps exactly those two values to $F5 across the complete
+    // direct-state domain. This replaces two independent CMP/BEQ pairs and
+    // keeps the publisher inside its already-owned cave.
+    instructions.extend([
+        Instruction::AndImmediate(0xF7),
+        Instruction::CmpImmediate(0xF5),
+    ]);
+    let source_page_pair_jump = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(origin));
     instructions.push(Instruction::Rts);
     instructions[clear_for_storage_action_jump] = Instruction::BeqAbsolute(source_page_selection);
     instructions[clear_for_storage_overflow_jump] = Instruction::BeqAbsolute(source_page_selection);
     instructions[shop_dialogue_restore_jump] = Instruction::BeqAbsolute(source_page_selection);
-    for jump in source_page_jumps {
-        instructions[jump] = Instruction::BeqAbsolute(source_page_selection);
-    }
+    instructions[source_page_pair_jump] = Instruction::BeqAbsolute(source_page_selection);
     for page in [
         ScreenFontPageRole::FrontEndMenu,
         ScreenFontPageRole::FrontEndRecordAction,

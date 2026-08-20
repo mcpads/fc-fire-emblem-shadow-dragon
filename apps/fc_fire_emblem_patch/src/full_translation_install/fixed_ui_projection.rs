@@ -13,7 +13,9 @@ use serde::Serialize;
 
 use crate::{
     dialogue_inventory::switchable_cpu_to_file_offset,
-    fixed_menu_labels::{FIXED_MENU_LABEL_SPECS, fixed_menu_screen_roles},
+    fixed_menu_labels::{
+        FIXED_MENU_LABEL_SPECS, UNIT_SELECTION_HELP_LINE_SPECS, fixed_menu_screen_roles,
+    },
     item_flow::ITEM_ACTION_LABELS,
     map_menu::MapMenuPlan,
     rom::Rom,
@@ -56,8 +58,11 @@ pub(super) struct FixedUiProjectionPlan {
     projected_pointer_entry_count: usize,
     projected_map_menu_entry_count: usize,
     projected_summary_status_label_count: usize,
-    projected_fixed_menu_label_count: usize,
+    projected_fixed_menu_text_count: usize,
+    projected_inline_fixed_menu_text_count: usize,
     source_slot_capacity_byte_count: usize,
+    inline_source_storage_byte_count: usize,
+    inline_projected_string_byte_count: usize,
     projected_string_byte_count: usize,
     longest_source_slot_byte_count: usize,
     longest_projected_string_byte_count: usize,
@@ -281,6 +286,40 @@ pub(super) fn plan_fixed_ui_projection(
         assignment_identity.extend_from_slice(&replacement);
     }
 
+    let mut inline_projected_string_byte_count = 0;
+    let mut longest_inline_projected_string_byte_count = 0;
+    for spec in UNIT_SELECTION_HELP_LINE_SPECS {
+        let logical = inputs
+            .fixed_menu_labels
+            .entry_logical_bytes(spec.id)
+            .with_context(|| format!("fixed-menu plan lost {}", spec.id))?;
+        let encoded = inputs
+            .consumer_codebook
+            .encode_fixed_ui_for("unit_command_menu", logical)?;
+        let projected_string_byte_count = encoded.len() + 1;
+        let replacement =
+            project_inline_fixed_menu_text(spec.id, spec.expected, &encoded, SEGMENT_END)?;
+        let file_offset = switchable_cpu_to_file_offset(FIXED_UI_BANK, spec.cpu_address)?;
+        bind_candidate(
+            inputs.candidate,
+            file_offset,
+            spec.expected,
+            &format!("{} source storage", spec.id),
+        )?;
+        assignment_identity.extend_from_slice(spec.id.as_bytes());
+        assignment_identity.extend_from_slice(&replacement);
+        inline_projected_string_byte_count += projected_string_byte_count;
+        longest_inline_projected_string_byte_count =
+            longest_inline_projected_string_byte_count.max(projected_string_byte_count);
+        writes.push(FixedUiExpectedWrite {
+            domain: "fixed_menu_labels",
+            role: format!("{} inline storage projection", spec.id),
+            file_offset,
+            expected: spec.expected.to_vec(),
+            replacement,
+        });
+    }
+
     for entry in &inputs.map_menu.entries {
         let encoded = inputs
             .consumer_codebook
@@ -305,9 +344,22 @@ pub(super) fn plan_fixed_ui_projection(
 
     ensure_disjoint_writes(&writes)?;
     let source_slot_capacity_byte_count = slots.iter().map(|slot| slot.expected.len()).sum();
-    let projected_string_byte_count = targets.iter().map(|target| target.bytes.len()).sum();
+    let inline_source_storage_byte_count = UNIT_SELECTION_HELP_LINE_SPECS
+        .iter()
+        .map(|spec| spec.expected.len())
+        .sum();
+    let pointer_projected_string_byte_count = targets
+        .iter()
+        .map(|target| target.bytes.len())
+        .sum::<usize>();
+    let projected_string_byte_count =
+        pointer_projected_string_byte_count + inline_projected_string_byte_count;
+    let longest_projected_string_byte_count = targets
+        .first()
+        .map_or(0, |target| target.bytes.len())
+        .max(longest_inline_projected_string_byte_count);
     Ok(FixedUiProjectionPlan {
-        strategy: "preserve each summary/status label's source display-cell span, match every encoded Japanese fixed-label target to one source-owned pointer-table slot by descending storage length, then project the map-menu block in place",
+        strategy: "preserve each summary/status label's source display-cell span, match every encoded Japanese pointer-label target to one source-owned slot by descending storage length, project the six source-bound unit-selection help lines in place, then project the map-menu block in place",
         pointer_table_cpu_address_hex: "0x8FC2",
         source_slot_count: slots.len(),
         projected_pointer_entry_count: targets.len(),
@@ -316,12 +368,15 @@ pub(super) fn plan_fixed_ui_projection(
             .iter()
             .filter(|spec| spec.translation_scope == JAPANESE_ONLY)
             .count(),
-        projected_fixed_menu_label_count: FIXED_MENU_LABEL_SPECS.len(),
+        projected_fixed_menu_text_count: inputs.fixed_menu_labels.entry_count,
+        projected_inline_fixed_menu_text_count: UNIT_SELECTION_HELP_LINE_SPECS.len(),
         source_slot_capacity_byte_count,
+        inline_source_storage_byte_count,
+        inline_projected_string_byte_count,
         projected_string_byte_count,
         longest_source_slot_byte_count: slots.first().map_or(0, |slot| slot.expected.len()),
-        longest_projected_string_byte_count: targets.first().map_or(0, |target| target.bytes.len()),
-        storage_write_count: targets.len(),
+        longest_projected_string_byte_count,
+        storage_write_count: targets.len() + UNIT_SELECTION_HELP_LINE_SPECS.len(),
         pointer_write_count: targets.len(),
         map_menu_write_count: inputs.map_menu.entries.len(),
         assignment_sha1: sha1_hex(&assignment_identity),
@@ -332,6 +387,33 @@ pub(super) fn plan_fixed_ui_projection(
         every_map_menu_entry_fits_owned_storage: true,
         writes,
     })
+}
+
+fn project_inline_fixed_menu_text(
+    id: &str,
+    source_storage: &[u8],
+    encoded: &[u8],
+    terminator: u8,
+) -> Result<Vec<u8>> {
+    ensure!(
+        source_storage.last() == Some(&terminator),
+        "inline fixed-menu source lost its terminator for {id}"
+    );
+    ensure!(
+        !encoded.contains(&SEGMENT_END) && !encoded.contains(&STRING_END),
+        "translated inline fixed-menu text contains a structural terminator for {id}"
+    );
+    ensure!(
+        encoded.len() < source_storage.len(),
+        "translated inline fixed-menu text exceeds its source line for {id}"
+    );
+
+    let mut replacement = vec![0xFF; source_storage.len()];
+    replacement[..encoded.len()].copy_from_slice(encoded);
+    *replacement
+        .last_mut()
+        .expect("source storage was proven nonempty by its terminator") = terminator;
+    Ok(replacement)
 }
 
 fn project_map_menu_entry(
@@ -525,6 +607,15 @@ mod tests {
                 .collect::<Vec<_>>(),
             [(5, 6), (3, 4), (2, 3)]
         );
+    }
+
+    #[test]
+    fn inline_projection_preserves_the_owned_line_span_and_terminator() {
+        let projected =
+            project_inline_fixed_menu_text("help", &[0x10, 0x11, 0x12, 0xED], &[0x60], 0xED)
+                .unwrap();
+
+        assert_eq!(projected, [0x60, 0xFF, 0xFF, 0xED]);
     }
 
     #[test]

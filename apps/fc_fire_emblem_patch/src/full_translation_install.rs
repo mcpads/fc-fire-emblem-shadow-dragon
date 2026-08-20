@@ -10,7 +10,7 @@ use crate::{
     choice_labels::plan_choice_labels,
     dialogue_assets::{plan_all_main_dialogue_records, validate_main_dialogue_workspace},
     dialogue_inventory::inspect_main_dialogue_graph,
-    fixed_menu_labels::plan_fixed_menu_labels,
+    fixed_menu_labels::{FIXED_MENU_TRANSLATION_ENTRY_COUNT, plan_fixed_menu_labels},
     fixed_string_consumers::{FixedStringConsumerCensus, inspect_fixed_string_consumers},
     fixed_string_ownership::{FixedStringOwnershipReport, inspect_fixed_string_ownership},
     font_slots::FONT_PAGE_SIZE,
@@ -191,7 +191,7 @@ pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) output_will_be_emitted: bool,
 }
 
-pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 33;
+pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 34;
 
 pub(crate) struct FullTranslationInstallSummary {
     pub(crate) report_sha1: String,
@@ -290,7 +290,7 @@ pub(crate) fn plan_full_translation_installation(
             && map_menu.translated_entry_count == 8
             && unit_ui.entry_count == 25
             && item_actions.entry_count == 4
-            && fixed_menu_labels.entry_count == 7
+            && fixed_menu_labels.entry_count == FIXED_MENU_TRANSLATION_ENTRY_COUNT
             && transitions.save_offer.entry_count == 1
             && transitions.ending_record.entry_count == 1
             && locations.entries.len() == 24,
@@ -999,7 +999,7 @@ pub(crate) fn plan_full_translation_installation(
             map_menu_label_count: map_menu.entry_count,
             unit_ui_label_count: unit_ui.entry_count,
             item_action_label_count: item_actions.entry_count,
-            fixed_menu_label_count: fixed_menu_labels.entry_count,
+            fixed_menu_text_count: fixed_menu_labels.entry_count,
             transition_label_count: transitions.save_offer.entry_count
                 + transitions.ending_record.entry_count,
             location_name_count: locations.entries.len(),
