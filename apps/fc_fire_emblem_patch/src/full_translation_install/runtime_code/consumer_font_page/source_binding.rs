@@ -10,8 +10,9 @@ pub(in crate::full_translation_install::runtime_code) fn bind_consumer_font_page
     bind_unit_summary_status_page_inheritance_source(source.data())?;
     bind_direct_composite_state_producers(source, candidate)?;
     bind_fixed_menu_font_page_appender_cave(source, candidate)?;
+    let fixed_strings = inspect_fixed_string_consumers(source)?;
     for (image_role, rom) in [("source", source), ("candidate", candidate)] {
-        for (call, index, _, role) in FIXED_MENU_FONT_PAGE_CALLS {
+        for (call, index, delegated, role) in FIXED_MENU_FONT_PAGE_CALLS {
             let producer = call
                 .checked_sub(2)
                 .context("fixed-menu appender producer address underflow")?;
@@ -26,6 +27,25 @@ pub(in crate::full_translation_install::runtime_code) fn bind_consumer_font_page
                 producer,
                 "load and append the first fixed-menu label on one execution path",
             )?;
+            if image_role == "source" {
+                if let Some((_, owner)) = delegated {
+                    let call_site = fixed_strings
+                        .call_sites
+                        .iter()
+                        .find(|candidate| candidate.cpu_address == call)
+                        .with_context(|| {
+                            format!("{role} disappeared from the fixed-string call census")
+                        })?;
+                    ensure!(
+                        call_site.possible_indices == [index]
+                            && composite_font_residency_policy(call_site.composite_state)
+                                == Some(ScreenFontResidencyPolicy::Delegated(owner)),
+                        "{role} no longer delegates composite state {:02X} to {}",
+                        call_site.composite_state,
+                        owner.id()
+                    );
+                }
+            }
         }
 
         let entry = fixed_slice(rom, COMPOSITE_PAGE_ENTRY, COMPOSITE_PAGE_ENTRY_SOURCE.len())?;

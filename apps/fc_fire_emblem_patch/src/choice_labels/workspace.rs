@@ -8,6 +8,7 @@ use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 
 use crate::{
+    fixed_string_consumers::inspect_fixed_string_consumers,
     font_slots::active_hangul_codes,
     japanese_encoding::is_japanese_text_code,
     mmc5_chr::switchable_bank_file_offset,
@@ -19,8 +20,9 @@ use crate::{
 };
 
 use super::source_spec::{
-    LABEL_SPECS, POINTER_LOAD_ADDRESS, POINTER_LOAD_BYTES, POINTER_TABLE_ADDRESS,
-    SHOP_CHOICE_COMPOSER_ADDRESS, SHOP_CHOICE_COMPOSER_BYTES, SOURCE_PRG_BANK,
+    CHOICE_LABEL_COMPOSITE_STATE, LABEL_SPECS, POINTER_LOAD_ADDRESS, POINTER_LOAD_BYTES,
+    POINTER_TABLE_ADDRESS, SHOP_CHOICE_COMPOSER_ADDRESS, SHOP_CHOICE_COMPOSER_BYTES,
+    SOURCE_PRG_BANK,
 };
 
 #[derive(Debug, Deserialize)]
@@ -240,6 +242,20 @@ fn validate_consumers(rom: &Rom) -> Result<()> {
         ensure!(
             rom.data()[offset..offset + expected.len()] == *expected,
             "choice-label {role} changed"
+        );
+    }
+    let inspection = inspect_fixed_string_consumers(rom)?;
+    for (call_address, index) in [
+        (SHOP_CHOICE_COMPOSER_ADDRESS + 2, 0x22),
+        (SHOP_CHOICE_COMPOSER_ADDRESS + 7, 0x23),
+    ] {
+        ensure!(
+            inspection.call_sites.iter().any(|call| {
+                call.cpu_address == call_address
+                    && call.composite_state == CHOICE_LABEL_COMPOSITE_STATE
+                    && call.possible_indices == [index]
+            }),
+            "choice-label appender at 0B:{call_address:04X} lost composite state {CHOICE_LABEL_COMPOSITE_STATE:02X} or fixed-string index {index:02X}"
         );
     }
     Ok(())

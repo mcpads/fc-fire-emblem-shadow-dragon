@@ -26,6 +26,15 @@ use crate::{
 const FIXED_STRING_BANK: usize = 0x0B;
 const FIXED_STRING_POINTER_TABLE: u16 = 0x8FC2;
 
+pub(crate) const UNIT_SELECTION_COMPOSITE_STATE: u8 = 0x18;
+pub(crate) const GAME_SPEED_SELECTION_COMPOSITE_STATE: u8 = 0x1A;
+pub(crate) const STORAGE_CAPACITY_NOTICE_COMPOSITE_STATE: u8 = 0x26;
+pub(crate) const STATIC_FONT_PAGE_APPENDER_COMPOSITE_STATES: [u8; 3] = [
+    UNIT_SELECTION_COMPOSITE_STATE,
+    GAME_SPEED_SELECTION_COMPOSITE_STATE,
+    STORAGE_CAPACITY_NOTICE_COMPOSITE_STATE,
+];
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct FixedMenuLabelSpec {
     pub(crate) index: u8,
@@ -115,10 +124,17 @@ struct ScreenRoute {
 }
 
 const SCREEN_ROUTES: [ScreenRoute; 5] = [
-    route("unit_selection", 0x18, 0x8A25, 0x06, 0x86B8, &[0x2C]),
+    route(
+        "unit_selection",
+        UNIT_SELECTION_COMPOSITE_STATE,
+        0x8A25,
+        0x06,
+        0x86B8,
+        &[0x2C],
+    ),
     route(
         "game_speed_selection",
-        0x1A,
+        GAME_SPEED_SELECTION_COMPOSITE_STATE,
         0x8A47,
         0x06,
         0xB3BC,
@@ -142,7 +158,7 @@ const SCREEN_ROUTES: [ScreenRoute; 5] = [
     ),
     route(
         "storage_capacity_notice",
-        0x26,
+        STORAGE_CAPACITY_NOTICE_COMPOSITE_STATE,
         0x8E0F,
         0x06,
         0xA743,

@@ -57,6 +57,7 @@ use super::{
         PAGE_REGISTERS as ROSTER_PAGE_REGISTERS,
         PAGE_ROUTINE_ADDRESS as ROSTER_PAGE_ROUTINE_ADDRESS,
         PHYSICAL_CHR_PAGES as ROSTER_PHYSICAL_CHR_PAGES,
+        bind_header_composite_route as bind_roster_header_composite_route,
         build_page_routine_with_fallback as build_roster_page_routine,
         central_right_fd_selector_call, central_right_fe_companion_fd_refresh_call,
     },
@@ -395,6 +396,7 @@ fn inspect_roster(
     inputs: &CarriedUiDomainInputs<'_>,
     report: &CumulativeReport,
 ) -> Result<CarriedUiDomain> {
+    bind_roster_header_composite_route(inputs.source)?;
     let localization =
         RosterLocalization::from_path(inputs.roster_localization_path)?.validate()?;
     ensure!(

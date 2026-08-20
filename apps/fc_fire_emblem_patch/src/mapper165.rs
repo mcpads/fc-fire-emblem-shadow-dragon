@@ -81,6 +81,8 @@ pub(crate) use weapon_shop_shared_text::{
 };
 
 pub(crate) const ROSTER_HEADER_FIXED_STRING_INDEX: u8 = roster_page::HEADER_RESOURCE_ID;
+pub(crate) const OPTIONS_FONT_PAGE_COMPOSITE_STATE: u8 = options_page::OPTIONS_COMPOSITE_STATE;
+pub(crate) const ROSTER_FONT_PAGE_COMPOSITE_STATE: u8 = roster_page::COMPOSITE_STATE;
 
 use runtime::{
     build_routines, replace_central_chr_writer, replace_central_prg_writer, replace_direct_writer,

@@ -7,6 +7,11 @@
 use anyhow::{Result, ensure};
 
 use crate::{
+    choice_labels::CHOICE_LABEL_COMPOSITE_STATE,
+    fixed_menu_labels::{
+        GAME_SPEED_SELECTION_COMPOSITE_STATE, STATIC_FONT_PAGE_APPENDER_COMPOSITE_STATES,
+        STORAGE_CAPACITY_NOTICE_COMPOSITE_STATE, UNIT_SELECTION_COMPOSITE_STATE,
+    },
     front_end_menu::{
         RECORD_ACTION_COMPOSITE_STATE, RECORD_LIST_COMPOSITE_STATE,
         SAVE_SLOT_SELECTION_COMPOSITE_STATE, START_MENU_COMPOSITE_STATE,
@@ -14,6 +19,7 @@ use crate::{
     full_translation_install::storage_residency::{
         STORAGE_ACTION_MENU_COMPOSITE_STATE, STORAGE_OVERFLOW_ACTION_COMPOSITE_STATE,
     },
+    mapper165::{OPTIONS_FONT_PAGE_COMPOSITE_STATE, ROSTER_FONT_PAGE_COMPOSITE_STATE},
     shop_flow::SHOP_ITEM_COMPOSITE_STATE,
 };
 
@@ -34,8 +40,6 @@ const DIRECT_COMPOSITE_STATE_START: u8 = 0x02;
 const DIRECT_COMPOSITE_STATE_END_INCLUSIVE: u8 = 0x26;
 const DIRECT_COMPOSITE_STATE_COUNT: usize =
     (DIRECT_COMPOSITE_STATE_END_INCLUSIVE - DIRECT_COMPOSITE_STATE_START + 1) as usize;
-const CENTRAL_OVERRIDE_POLICY_COUNT: usize = 17;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::full_translation_install) enum ScreenFontPageRole {
     FrontEndMenu,
@@ -46,6 +50,29 @@ pub(in crate::full_translation_install) enum ScreenFontPageRole {
     CatalogDefault,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(in crate::full_translation_install) enum DelegatedFontPageOwner {
+    ChoiceDialogueResidency,
+    UnitRosterSelector,
+    UnitSelectionAppender,
+    GameSpeedAppender,
+    OptionsSelector,
+    StorageCapacityAppender,
+}
+
+impl DelegatedFontPageOwner {
+    pub(in crate::full_translation_install) const fn id(self) -> &'static str {
+        match self {
+            Self::ChoiceDialogueResidency => "choice_dialogue_residency",
+            Self::UnitRosterSelector => "unit_roster_selector",
+            Self::UnitSelectionAppender => "unit_selection_appender",
+            Self::GameSpeedAppender => "game_speed_appender",
+            Self::OptionsSelector => "options_selector",
+            Self::StorageCapacityAppender => "storage_capacity_appender",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::full_translation_install) enum ScreenFontResidencyPolicy {
     Static(ScreenFontPageRole),
@@ -54,16 +81,17 @@ pub(in crate::full_translation_install) enum ScreenFontResidencyPolicy {
     UnitOrEnemyNameRetainedFromSummary,
     CompletedDialoguePageRetained,
     ActiveDialogueCallerRestored,
-    /// The central composite-state publisher performs no page write. Another
-    /// producer may own the active page, so this is not a claim that the
-    /// surface has no translated glyph demand.
-    NoCentralPageOverride,
+    Delegated(DelegatedFontPageOwner),
+    /// The central composite-state publisher performs no page write and no
+    /// other page owner has yet been admitted for this state. This remains a
+    /// visible gap rather than inheriting the previous page by assumption.
+    UnresolvedPageOwner,
 }
 
 /// The runtime emitter consumes this prefix in its historical order. Keeping
 /// that order avoids changing branch layout merely because the coverage table
 /// now also names states with no central override.
-const CENTRAL_OVERRIDE_POLICIES: [(u8, ScreenFontResidencyPolicy); CENTRAL_OVERRIDE_POLICY_COUNT] = [
+const CENTRAL_OVERRIDE_POLICIES: &[(u8, ScreenFontResidencyPolicy)] = &[
     (
         MAP_MENU_COMPOSITE_STATE,
         ScreenFontResidencyPolicy::Static(ScreenFontPageRole::MapMenu),
@@ -134,14 +162,41 @@ const CENTRAL_OVERRIDE_POLICIES: [(u8, ScreenFontResidencyPolicy); CENTRAL_OVERR
     ),
 ];
 
+const DELEGATED_POLICIES: &[(u8, DelegatedFontPageOwner)] = &[
+    (
+        CHOICE_LABEL_COMPOSITE_STATE,
+        DelegatedFontPageOwner::ChoiceDialogueResidency,
+    ),
+    (
+        ROSTER_FONT_PAGE_COMPOSITE_STATE,
+        DelegatedFontPageOwner::UnitRosterSelector,
+    ),
+    (
+        UNIT_SELECTION_COMPOSITE_STATE,
+        DelegatedFontPageOwner::UnitSelectionAppender,
+    ),
+    (
+        GAME_SPEED_SELECTION_COMPOSITE_STATE,
+        DelegatedFontPageOwner::GameSpeedAppender,
+    ),
+    (
+        OPTIONS_FONT_PAGE_COMPOSITE_STATE,
+        DelegatedFontPageOwner::OptionsSelector,
+    ),
+    (
+        STORAGE_CAPACITY_NOTICE_COMPOSITE_STATE,
+        DelegatedFontPageOwner::StorageCapacityAppender,
+    ),
+];
+
 const fn build_direct_state_policies()
 -> [(u8, ScreenFontResidencyPolicy); DIRECT_COMPOSITE_STATE_COUNT] {
     let mut policies = [(
         DIRECT_COMPOSITE_STATE_START,
-        ScreenFontResidencyPolicy::NoCentralPageOverride,
+        ScreenFontResidencyPolicy::UnresolvedPageOwner,
     ); DIRECT_COMPOSITE_STATE_COUNT];
     let mut policy_index = 0;
-    while policy_index < CENTRAL_OVERRIDE_POLICY_COUNT {
+    while policy_index < CENTRAL_OVERRIDE_POLICIES.len() {
         policies[policy_index] = CENTRAL_OVERRIDE_POLICIES[policy_index];
         policy_index += 1;
     }
@@ -149,14 +204,23 @@ const fn build_direct_state_policies()
     while state <= DIRECT_COMPOSITE_STATE_END_INCLUSIVE {
         let mut override_index = 0;
         let mut has_central_override = false;
-        while override_index < CENTRAL_OVERRIDE_POLICY_COUNT {
+        while override_index < CENTRAL_OVERRIDE_POLICIES.len() {
             if CENTRAL_OVERRIDE_POLICIES[override_index].0 == state {
                 has_central_override = true;
             }
             override_index += 1;
         }
         if !has_central_override {
-            policies[policy_index] = (state, ScreenFontResidencyPolicy::NoCentralPageOverride);
+            let mut delegated_index = 0;
+            let mut policy = ScreenFontResidencyPolicy::UnresolvedPageOwner;
+            while delegated_index < DELEGATED_POLICIES.len() {
+                if DELEGATED_POLICIES[delegated_index].0 == state {
+                    policy =
+                        ScreenFontResidencyPolicy::Delegated(DELEGATED_POLICIES[delegated_index].1);
+                }
+                delegated_index += 1;
+            }
+            policies[policy_index] = (state, policy);
             policy_index += 1;
         }
         state += 1;
@@ -174,6 +238,14 @@ pub(in crate::full_translation_install) const COMPOSITE_FONT_RESIDENCY_POLICIES:
 );
     DIRECT_COMPOSITE_STATE_COUNT] = build_direct_state_policies();
 
+pub(in crate::full_translation_install) fn composite_font_residency_policy(
+    state: u8,
+) -> Option<ScreenFontResidencyPolicy> {
+    COMPOSITE_FONT_RESIDENCY_POLICIES
+        .iter()
+        .find_map(|(candidate, policy)| (*candidate == state).then_some(*policy))
+}
+
 impl ScreenFontResidencyPolicy {
     pub(in crate::full_translation_install) fn static_page(self) -> Option<ScreenFontPageRole> {
         match self {
@@ -182,7 +254,8 @@ impl ScreenFontResidencyPolicy {
             | Self::UnitOrEnemyNameRetainedFromSummary
             | Self::CompletedDialoguePageRetained
             | Self::ActiveDialogueCallerRestored
-            | Self::NoCentralPageOverride => None,
+            | Self::Delegated(_)
+            | Self::UnresolvedPageOwner => None,
         }
     }
 }
@@ -198,32 +271,47 @@ pub(super) fn validate_composite_state_policies() -> Result<()> {
                 == (DIRECT_COMPOSITE_STATE_START..=DIRECT_COMPOSITE_STATE_END_INCLUSIVE).collect(),
         "screen font residency does not cover every direct composite state exactly once"
     );
+    let delegated = COMPOSITE_FONT_RESIDENCY_POLICIES
+        .iter()
+        .filter_map(|(state, policy)| match policy {
+            ScreenFontResidencyPolicy::Delegated(owner) => Some((*state, *owner)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
     ensure!(
-        COMPOSITE_FONT_RESIDENCY_POLICIES
-            .iter()
-            .find_map(|(state, policy)| {
-                (*state == UNIT_ITEM_LIST_COMPOSITE_STATE).then_some(*policy)
-            })
+        delegated == DELEGATED_POLICIES,
+        "delegated font-page ownership changed"
+    );
+    let delegated_fixed_menu_states = delegated
+        .iter()
+        .filter_map(|(state, owner)| {
+            matches!(
+                owner,
+                DelegatedFontPageOwner::UnitSelectionAppender
+                    | DelegatedFontPageOwner::GameSpeedAppender
+                    | DelegatedFontPageOwner::StorageCapacityAppender
+            )
+            .then_some(*state)
+        })
+        .collect::<Vec<_>>();
+    ensure!(
+        delegated_fixed_menu_states == STATIC_FONT_PAGE_APPENDER_COMPOSITE_STATES,
+        "fixed-menu appender state ownership changed"
+    );
+    ensure!(
+        composite_font_residency_policy(UNIT_ITEM_LIST_COMPOSITE_STATE)
             == Some(ScreenFontResidencyPolicy::StorageDialogueOrStatic(
                 ScreenFontPageRole::CatalogDefault,
             )),
         "item-list font residency no longer distinguishes the storage dialogue lifetime from the standalone catalog page"
     );
     ensure!(
-        COMPOSITE_FONT_RESIDENCY_POLICIES
-            .iter()
-            .find_map(|(state, policy)| {
-                (*state == UNIT_SUMMARY_COMPOSITE_STATE).then_some(*policy)
-            })
+        composite_font_residency_policy(UNIT_SUMMARY_COMPOSITE_STATE)
             == Some(ScreenFontResidencyPolicy::UnitOrEnemyNamePublishedByAppender),
         "unit-summary font residency no longer delegates page publication to its name appender"
     );
     ensure!(
-        COMPOSITE_FONT_RESIDENCY_POLICIES
-            .iter()
-            .find_map(|(state, policy)| {
-                (*state == UNIT_STATUS_COMPOSITE_STATE).then_some(*policy)
-            })
+        composite_font_residency_policy(UNIT_STATUS_COMPOSITE_STATE)
             == Some(ScreenFontResidencyPolicy::UnitOrEnemyNameRetainedFromSummary),
         "unit-status font residency no longer retains the page published by unit summary"
     );
@@ -238,11 +326,7 @@ pub(super) fn validate_composite_state_policies() -> Result<()> {
         "completed-dialogue font residency no longer matches the source-bound storage overlay states"
     );
     ensure!(
-        COMPOSITE_FONT_RESIDENCY_POLICIES
-            .iter()
-            .find_map(|(state, policy)| {
-                (*state == SHOP_ITEM_COMPOSITE_STATE).then_some(*policy)
-            })
+        composite_font_residency_policy(SHOP_ITEM_COMPOSITE_STATE)
             == Some(ScreenFontResidencyPolicy::ActiveDialogueCallerRestored),
         "shop item composition no longer restores the active E7 dialogue page"
     );

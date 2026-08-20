@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::{
     chapter_transition::bind_save_complete_dialogue_records,
-    choice_labels::ChoiceLabelPlan,
+    choice_labels::{CHOICE_LABEL_COMPOSITE_STATE, ChoiceLabelPlan},
     dialogue_assets::MainDialogueDisplayPlan,
     font_slots::{ACTIVE_HANGUL_SLOT_COUNT, active_hangul_codes},
     front_end_menu::FRONT_END_RESULT_DIALOGUE_RECORD_IDS,
@@ -20,6 +20,7 @@ use super::resident_glyph_assignment::{assign_resident_glyph_codes, assignment_s
 #[derive(Serialize)]
 pub(super) struct ChoiceResidencyPlan {
     strategy: &'static str,
+    composite_state: u8,
     continue_prompt_record_id: &'static str,
     front_end_result_record_ids: [&'static str; 4],
     resident_workset_count: usize,
@@ -33,6 +34,12 @@ pub(super) struct ChoiceResidencyPlan {
     pub(super) augmented_worksets: Vec<GlyphWorkset>,
     #[serde(skip)]
     pub(super) choice_glyph_codes: BTreeMap<char, u8>,
+}
+
+impl ChoiceResidencyPlan {
+    pub(super) fn composite_state(&self) -> u8 {
+        self.composite_state
+    }
 }
 
 pub(super) fn plan_choice_residency(
@@ -64,6 +71,7 @@ pub(super) fn plan_choice_residency(
 
     Ok(ChoiceResidencyPlan {
         strategy: "assign one injective choice-label codebook across the save-complete prompt and every retained front-end copy/delete/error result surface",
+        composite_state: CHOICE_LABEL_COMPOSITE_STATE,
         continue_prompt_record_id: records.continue_prompt,
         front_end_result_record_ids: FRONT_END_RESULT_DIALOGUE_RECORD_IDS,
         resident_workset_count: resident_workset_indices.len(),

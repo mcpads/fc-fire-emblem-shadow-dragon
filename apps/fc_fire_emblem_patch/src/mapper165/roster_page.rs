@@ -1,6 +1,10 @@
-use anyhow::Result;
+use anyhow::{Result, ensure};
 
-use crate::rp2a03::{Instruction, assemble_at};
+use crate::{
+    fixed_string_consumers::inspect_fixed_string_consumers,
+    rom::Rom,
+    rp2a03::{Instruction, assemble_at},
+};
 
 use super::{FIRST_EXTENSION_CHR_PAGE, SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS};
 
@@ -15,10 +19,24 @@ pub(super) const OWNER_CONSTRUCTOR_SIGNATURE: [u8; 18] = [
 ];
 pub(super) const HEADER_CALL_ADDRESS: u16 = 0x89F2;
 pub(super) const HEADER_RESOURCE_ID: u8 = 0x2B;
+pub(super) const COMPOSITE_STATE: u8 = 0x16;
 pub(super) const CENTRAL_RIGHT_FD_SELECTOR_CALL_ADDRESS: u16 = 0xC9C2;
 pub(super) const CENTRAL_RIGHT_FE_COMPANION_FD_REFRESH_CALL_ADDRESS: u16 = 0xFABB;
 pub(super) const PAGE_ROUTINE_ADDRESS: u16 = 0xFB80;
 pub(super) const PAGE_ROUTINE_END: u16 = 0xFBD4;
+
+pub(super) fn bind_header_composite_route(source: &Rom) -> Result<()> {
+    let inspection = inspect_fixed_string_consumers(source)?;
+    ensure!(
+        inspection.call_sites.iter().any(|call| {
+            call.cpu_address == HEADER_CALL_ADDRESS
+                && call.composite_state == COMPOSITE_STATE
+                && call.possible_indices == [HEADER_RESOURCE_ID]
+        }),
+        "roster header appender lost composite state {COMPOSITE_STATE:02X} or fixed-string index {HEADER_RESOURCE_ID:02X}"
+    );
+    Ok(())
+}
 
 pub(super) fn central_right_fd_selector_call(target: u16) -> Result<Vec<u8>> {
     assemble_at(

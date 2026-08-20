@@ -70,8 +70,8 @@ pub(in crate::full_translation_install::runtime_code) fn fixed_menu_font_page_ho
 ) -> Result<Vec<DialogueRuntimeHook>> {
     FIXED_MENU_FONT_PAGE_CALLS
         .into_iter()
-        .filter_map(|(address, _, role, write_role)| {
-            role.map(|role| {
+        .filter_map(|(address, _, delegated, write_role)| {
+            delegated.map(|(role, _)| {
                 Ok(DialogueRuntimeHook {
                     role,
                     write_role,

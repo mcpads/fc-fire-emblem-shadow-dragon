@@ -44,6 +44,7 @@ use super::{
         PAGE_ROUTINE_ADDRESS as ROSTER_PAGE_ROUTINE_ADDRESS,
         PAGE_ROUTINE_END as ROSTER_PAGE_ROUTINE_END,
         PHYSICAL_CHR_PAGES as ROSTER_PHYSICAL_CHR_PAGES,
+        bind_header_composite_route as bind_roster_header_composite_route,
         build_page_routine as build_roster_page_routine, central_right_fd_selector_call,
     },
 };
@@ -222,6 +223,7 @@ pub(crate) fn build_mapper165_hangul_page_probe_from_parity(
     report_path: &Path,
 ) -> Result<HangulPageProbeSummary> {
     source_rom.verify_supported_japanese()?;
+    bind_roster_header_composite_route(source_rom)?;
     let roster_owner_constructor_offset = switchable_bank_file_offset(
         ROSTER_OWNER_CONSTRUCTOR_PRG_BANK,
         ROSTER_OWNER_CONSTRUCTOR_ADDRESS,

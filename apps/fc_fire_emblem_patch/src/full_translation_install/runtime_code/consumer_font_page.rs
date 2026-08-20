@@ -23,14 +23,16 @@ use super::{
 };
 use crate::{
     fixed_string_consumers::{
-        bind_direct_composite_state_producer_catalog, scan_direct_composite_state_producers,
+        bind_direct_composite_state_producer_catalog, inspect_fixed_string_consumers,
+        scan_direct_composite_state_producers,
     },
     full_translation_install::{
         runtime_state_storage::CONSUMER_FONT_PAGE,
         screen_font_residency::{
-            COMPOSITE_FONT_RESIDENCY_POLICIES, MAP_FUNDS_COMPOSITE_STATE,
+            COMPOSITE_FONT_RESIDENCY_POLICIES, DelegatedFontPageOwner, MAP_FUNDS_COMPOSITE_STATE,
             MAP_SUMMARY_COMPOSITE_STATE, ScreenFontPageRole, ScreenFontPageRoutes,
-            UNIT_ITEM_LIST_COMPOSITE_STATE,
+            ScreenFontResidencyPolicy, UNIT_ITEM_LIST_COMPOSITE_STATE,
+            composite_font_residency_policy,
         },
         storage_residency::{
             STORAGE_ACTION_MENU_COMPOSITE_STATE, STORAGE_OVERFLOW_ACTION_COMPOSITE_STATE,
@@ -79,23 +81,37 @@ const GAMEPLAY_PHASE_HIGH: u8 = 0x24;
 /// distinguishes a standalone fixed-label screen from a label drawn over live main dialogue.
 /// Storage action and overflow labels must retain the dialogue route selected for the underlying
 /// record, while the storage-capacity notice is a standalone fixed-label screen.
-const FIXED_MENU_FONT_PAGE_CALLS: [(u16, u8, Option<DialogueRuntimeHookRole>, &str); 6] = [
+const FIXED_MENU_FONT_PAGE_CALLS: [(
+    u16,
+    u8,
+    Option<(DialogueRuntimeHookRole, DelegatedFontPageOwner)>,
+    &str,
+); 6] = [
     (
         0x8A3C,
         0x2C,
-        Some(DialogueRuntimeHookRole::FixedMenuUnitSelectionAppender),
+        Some((
+            DialogueRuntimeHookRole::FixedMenuUnitSelectionAppender,
+            DelegatedFontPageOwner::UnitSelectionAppender,
+        )),
         "unit-selection fixed-menu font-page hook",
     ),
     (
         0x8A6D,
         0x30,
-        Some(DialogueRuntimeHookRole::FixedMenuFastSpeedAppender),
+        Some((
+            DialogueRuntimeHookRole::FixedMenuFastSpeedAppender,
+            DelegatedFontPageOwner::GameSpeedAppender,
+        )),
         "fast-speed fixed-menu font-page hook",
     ),
     (
         0x8A7A,
         0x31,
-        Some(DialogueRuntimeHookRole::FixedMenuSlowSpeedAppender),
+        Some((
+            DialogueRuntimeHookRole::FixedMenuSlowSpeedAppender,
+            DelegatedFontPageOwner::GameSpeedAppender,
+        )),
         "slow-speed fixed-menu font-page hook",
     ),
     (
@@ -113,7 +129,10 @@ const FIXED_MENU_FONT_PAGE_CALLS: [(u16, u8, Option<DialogueRuntimeHookRole>, &s
     (
         0x8E31,
         0x47,
-        Some(DialogueRuntimeHookRole::FixedMenuStorageCapacityAppender),
+        Some((
+            DialogueRuntimeHookRole::FixedMenuStorageCapacityAppender,
+            DelegatedFontPageOwner::StorageCapacityAppender,
+        )),
         "storage-capacity fixed-menu font-page hook",
     ),
 ];

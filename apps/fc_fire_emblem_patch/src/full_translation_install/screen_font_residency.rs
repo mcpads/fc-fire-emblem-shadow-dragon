@@ -27,15 +27,17 @@ use crate::{
 };
 
 use super::{
-    consumer_catalog::ConsumerCatalogPlan, consumer_codebook::ConsumerCodebookPlan,
+    choice_residency::ChoiceResidencyPlan, consumer_catalog::ConsumerCatalogPlan,
+    consumer_codebook::ConsumerCodebookPlan,
     storage_residency::STORAGE_DIALOGUE_OVERLAY_COMPOSITE_STATES,
 };
 use composite_policies::validate_composite_state_policies;
 pub(in crate::full_translation_install) use composite_policies::{
     ATTACK_WEAPON_SELECTION_COMPOSITE_STATE, CHAPTER_SAVE_OFFER_COMPOSITE_STATE,
-    COMPOSITE_FONT_RESIDENCY_POLICIES, ITEM_ACTION_COMPOSITE_STATE, MAP_FUNDS_COMPOSITE_STATE,
-    MAP_SUMMARY_COMPOSITE_STATE, ScreenFontPageRole, ScreenFontResidencyPolicy,
-    UNIT_ITEM_LIST_COMPOSITE_STATE, UNIT_STATUS_COMPOSITE_STATE, UNIT_SUMMARY_COMPOSITE_STATE,
+    COMPOSITE_FONT_RESIDENCY_POLICIES, DelegatedFontPageOwner, ITEM_ACTION_COMPOSITE_STATE,
+    MAP_FUNDS_COMPOSITE_STATE, MAP_SUMMARY_COMPOSITE_STATE, ScreenFontPageRole,
+    ScreenFontResidencyPolicy, UNIT_ITEM_LIST_COMPOSITE_STATE, UNIT_STATUS_COMPOSITE_STATE,
+    UNIT_SUMMARY_COMPOSITE_STATE, composite_font_residency_policy,
 };
 pub(super) use dialogue_surfaces::DialogueSurfaceInputs;
 use dialogue_surfaces::{DialogueSurfacePlan, plan_dialogue_surfaces};
@@ -132,6 +134,7 @@ pub(super) struct ScreenFontResidencyInputs<'a> {
     pub(super) consumer_codebook: &'a ConsumerCodebookPlan,
     pub(super) chapter_titles: &'a ChapterTitlePlan,
     pub(super) choices: &'a ChoiceLabelPlan,
+    pub(super) choice_residency: &'a ChoiceResidencyPlan,
     pub(super) transitions: &'a TransitionTranslationPlans,
     pub(super) fixed: &'a FixedTextPlan,
     pub(super) unit_names: &'a UnitNamePlan,
@@ -147,7 +150,8 @@ pub(super) struct ScreenFontResidencyDraft {
     schema: u8,
     strategy: &'static str,
     composite_state_policy_count: usize,
-    no_central_page_override_state_count: usize,
+    delegated_page_owner_state_count: usize,
+    unresolved_page_owner_state_count: usize,
     static_state_route_count: usize,
     unit_or_enemy_name_published_state_count: usize,
     unit_or_enemy_name_retained_state_count: usize,
@@ -160,6 +164,8 @@ pub(super) struct ScreenFontResidencyDraft {
     retained_summary_glyph_count: usize,
     retained_record_action_glyph_count: usize,
     every_static_state_selects_an_explicit_route: bool,
+    delegated_page_owners: Vec<DelegatedCompositeStateReport>,
+    unresolved_page_owner_states_hex: Vec<String>,
     record_action_page_contains_every_menu_glyph: bool,
     record_action_page_contains_the_protagonist_name_and_class: bool,
     surface_requirements: ScreenFontSurfacePlan,
@@ -168,6 +174,12 @@ pub(super) struct ScreenFontResidencyDraft {
     routes: ScreenFontPageRoutes,
     #[serde(skip)]
     record_action_summary_glyph_codes: BTreeMap<char, u8>,
+}
+
+#[derive(Serialize)]
+struct DelegatedCompositeStateReport {
+    state_hex: String,
+    owner: &'static str,
 }
 
 impl ScreenFontResidencyDraft {
@@ -200,6 +212,13 @@ pub(super) fn plan_screen_font_residency(
     inputs: ScreenFontResidencyInputs<'_>,
 ) -> Result<ScreenFontResidencyDraft> {
     validate_composite_state_policies()?;
+    ensure!(
+        composite_font_residency_policy(inputs.choice_residency.composite_state())
+            == Some(ScreenFontResidencyPolicy::Delegated(
+                DelegatedFontPageOwner::ChoiceDialogueResidency,
+            )),
+        "choice-label residency is not delegated from its source composite state"
+    );
     ensure!(
         !inputs.installed_front_end_glyph_codes.is_empty(),
         "screen font residency has no installed front-end glyphs"
@@ -276,14 +295,30 @@ pub(super) fn plan_screen_font_residency(
         .collect::<BTreeSet<_>>()
         .len();
 
+    let delegated_page_owners = COMPOSITE_FONT_RESIDENCY_POLICIES
+        .iter()
+        .filter_map(|(state, policy)| match policy {
+            ScreenFontResidencyPolicy::Delegated(owner) => Some(DelegatedCompositeStateReport {
+                state_hex: format!("0x{state:02X}"),
+                owner: owner.id(),
+            }),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let unresolved_page_owner_states_hex = COMPOSITE_FONT_RESIDENCY_POLICIES
+        .iter()
+        .filter_map(|(state, policy)| {
+            (*policy == ScreenFontResidencyPolicy::UnresolvedPageOwner)
+                .then(|| format!("0x{state:02X}"))
+        })
+        .collect::<Vec<_>>();
+
     Ok(ScreenFontResidencyDraft {
-        schema: 7,
-        strategy: "bind every source-produced composite state to one explicit central residency action; publish static pages at entry, retain the source-bound storage dialogue page when its item-list producer reuses state 07, let the unit-summary appender publish its name-dependent page, retain that page explicitly for unit status, select the protagonist catalog page explicitly for the front-end record-action lifetime, and report states with no central override without claiming that their translated-glyph ownership is complete",
+        schema: 8,
+        strategy: "bind every source-produced composite state to one explicit central residency action, a named upstream selector or appender, or an unresolved page owner; publish static pages at entry, retain the source-bound storage dialogue page when its item-list producer reuses state 07, let the unit-summary appender publish its name-dependent page, retain that page explicitly for unit status, and keep every state without an admitted owner visible instead of treating no central write as proof of safe inheritance",
         composite_state_policy_count: COMPOSITE_FONT_RESIDENCY_POLICIES.len(),
-        no_central_page_override_state_count: COMPOSITE_FONT_RESIDENCY_POLICIES
-            .iter()
-            .filter(|(_, policy)| *policy == ScreenFontResidencyPolicy::NoCentralPageOverride)
-            .count(),
+        delegated_page_owner_state_count: delegated_page_owners.len(),
+        unresolved_page_owner_state_count: unresolved_page_owner_states_hex.len(),
         static_state_route_count: COMPOSITE_FONT_RESIDENCY_POLICIES
             .iter()
             .filter(|(_, policy)| policy.static_page().is_some())
@@ -322,6 +357,8 @@ pub(super) fn plan_screen_font_residency(
         retained_summary_glyph_count: record_action_summary_glyph_codes.len(),
         retained_record_action_glyph_count,
         every_static_state_selects_an_explicit_route: true,
+        delegated_page_owners,
+        unresolved_page_owner_states_hex,
         record_action_page_contains_every_menu_glyph: true,
         record_action_page_contains_the_protagonist_name_and_class: true,
         surface_requirements,
@@ -382,9 +419,17 @@ fn bind_required_glyph_codes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::front_end_menu::{
-        RECORD_ACTION_COMPOSITE_STATE, RECORD_LIST_COMPOSITE_STATE,
-        SAVE_SLOT_SELECTION_COMPOSITE_STATE, START_MENU_COMPOSITE_STATE,
+    use crate::{
+        choice_labels::CHOICE_LABEL_COMPOSITE_STATE,
+        fixed_menu_labels::{
+            GAME_SPEED_SELECTION_COMPOSITE_STATE, STORAGE_CAPACITY_NOTICE_COMPOSITE_STATE,
+            UNIT_SELECTION_COMPOSITE_STATE,
+        },
+        front_end_menu::{
+            RECORD_ACTION_COMPOSITE_STATE, RECORD_LIST_COMPOSITE_STATE,
+            SAVE_SLOT_SELECTION_COMPOSITE_STATE, START_MENU_COMPOSITE_STATE,
+        },
+        mapper165::{OPTIONS_FONT_PAGE_COMPOSITE_STATE, ROSTER_FONT_PAGE_COMPOSITE_STATE},
     };
 
     fn routes() -> ScreenFontPageRoutes {
@@ -447,6 +492,55 @@ mod tests {
                 .find(|(state, _)| *state == UNIT_STATUS_COMPOSITE_STATE)
                 .map(|(_, policy)| *policy),
             Some(ScreenFontResidencyPolicy::UnitOrEnemyNameRetainedFromSummary)
+        );
+    }
+
+    #[test]
+    fn named_upstream_owners_are_distinct_from_unresolved_page_inheritance() {
+        validate_composite_state_policies().unwrap();
+        let delegated = COMPOSITE_FONT_RESIDENCY_POLICIES
+            .iter()
+            .filter_map(|(state, policy)| match policy {
+                ScreenFontResidencyPolicy::Delegated(owner) => Some((*state, *owner)),
+                _ => None,
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        assert_eq!(
+            delegated,
+            BTreeMap::from([
+                (
+                    CHOICE_LABEL_COMPOSITE_STATE,
+                    DelegatedFontPageOwner::ChoiceDialogueResidency,
+                ),
+                (
+                    ROSTER_FONT_PAGE_COMPOSITE_STATE,
+                    DelegatedFontPageOwner::UnitRosterSelector,
+                ),
+                (
+                    UNIT_SELECTION_COMPOSITE_STATE,
+                    DelegatedFontPageOwner::UnitSelectionAppender,
+                ),
+                (
+                    GAME_SPEED_SELECTION_COMPOSITE_STATE,
+                    DelegatedFontPageOwner::GameSpeedAppender,
+                ),
+                (
+                    OPTIONS_FONT_PAGE_COMPOSITE_STATE,
+                    DelegatedFontPageOwner::OptionsSelector,
+                ),
+                (
+                    STORAGE_CAPACITY_NOTICE_COMPOSITE_STATE,
+                    DelegatedFontPageOwner::StorageCapacityAppender,
+                ),
+            ])
+        );
+        assert_eq!(
+            COMPOSITE_FONT_RESIDENCY_POLICIES
+                .iter()
+                .filter(|(_, policy)| *policy == ScreenFontResidencyPolicy::UnresolvedPageOwner)
+                .count(),
+            14
         );
     }
 

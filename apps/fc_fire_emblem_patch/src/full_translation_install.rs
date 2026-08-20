@@ -437,6 +437,7 @@ pub(crate) fn plan_full_translation_installation(
         consumer_codebook: &consumer_codebook,
         chapter_titles: &chapter_titles,
         choices: &choices,
+        choice_residency: &choice_residency,
         transitions: &transitions,
         fixed: &fixed,
         unit_names: &unit_names,
