@@ -72,12 +72,14 @@ const PAGE_RECIPE_ENTRY_BYTE_COUNT: u8 = 3;
 /// atlas가 타일 하나에 쓰는 바이트다. 1bpp 8×8.
 pub(super) const ATLAS_TILE_BYTE_COUNT: u8 = 8;
 /// 타일 하나가 CHR에서 차지하는 바이트다. 2bpp 8×8.
-pub(super) const CHR_TILE_BYTE_COUNT: u8 = ATLAS_TILE_BYTE_COUNT * 2;
 
 /// 요청 상태 바이트다. 생산자가 쓰고 소비자가 지운다.
 pub(in crate::full_translation_install) use super::super::runtime_state_storage::REQUEST_STATE;
 /// 합성이 끝나 출력해도 되는 상태다.
 pub(super) const STATE_READY: u8 = 3;
+/// 일반 대사가 끝났지만 원천에 결속된 복합 선택 화면이 같은 완료 페이지를
+/// 다시 사용할 수 있는 상태다. 전송기는 이 값을 소비하지 않는다.
+pub(super) const STATE_COMPLETED_PAGE_SUSPENDED: u8 = 4;
 
 /// CHR RAM이 PPU 주소 공간에서 시작하는 자리다.
 const CHR_RAM_BASE: u16 = 0x1000;
@@ -567,7 +569,7 @@ mod tests {
             .filter(|instruction| matches!(instruction, Instruction::StaAbsolute(PPU_DATA)))
             .count();
 
-        assert_eq!(ppu_data_writes, usize::from(CHR_TILE_BYTE_COUNT));
+        assert_eq!(ppu_data_writes, usize::from(ATLAS_TILE_BYTE_COUNT * 2));
     }
 
     /// 빌린 제로 페이지는 민 순서의 반대로 되돌아가야 한다. 순서가 어긋나면 원본이

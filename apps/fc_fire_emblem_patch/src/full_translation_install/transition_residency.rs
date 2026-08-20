@@ -266,7 +266,6 @@ mod tests {
             record_id: record_id.to_owned(),
             page_index,
             target_glyphs: glyphs.chars().collect(),
-            visible_line_target_glyphs: Vec::new(),
             dynamic_string_selectors: BTreeSet::new(),
             dynamic_string_selector_counts: BTreeMap::new(),
             dynamic_string_control_count: 0,

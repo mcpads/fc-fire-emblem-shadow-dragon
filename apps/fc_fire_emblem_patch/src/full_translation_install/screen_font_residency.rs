@@ -24,11 +24,19 @@ use crate::{
     mapper165::font_pair_projection::{TRANSLATED_FE_PAGE_FLAG, mapper_register_from_route},
     rom::Rom,
     semantic_translation::SemanticTranslationPlan,
+    shop_flow::SHOP_ITEM_COMPOSITE_STATE,
     text_inventory::FixedTextPlan,
     unit_names::UnitNamePlan,
 };
 
-use super::{consumer_catalog::ConsumerCatalogPlan, consumer_codebook::ConsumerCodebookPlan};
+use super::{
+    consumer_catalog::ConsumerCatalogPlan,
+    consumer_codebook::ConsumerCodebookPlan,
+    storage_residency::{
+        STORAGE_ACTION_MENU_COMPOSITE_STATE, STORAGE_DIALOGUE_OVERLAY_COMPOSITE_STATES,
+        STORAGE_OVERFLOW_ACTION_COMPOSITE_STATE,
+    },
+};
 pub(super) use dialogue_surfaces::DialogueSurfaceInputs;
 use dialogue_surfaces::{DialogueSurfacePlan, plan_dialogue_surfaces};
 pub(in crate::full_translation_install) use selector_forwarders::FontPageSelectorForwarderPlan;
@@ -69,6 +77,8 @@ pub(in crate::full_translation_install) enum ScreenFontResidencyPolicy {
     Static(ScreenFontPageRole),
     UnitOrEnemyNamePublishedByAppender,
     UnitOrEnemyNameRetainedFromSummary,
+    CompletedDialoguePageRetained,
+    ActiveDialogueCallerRestored,
 }
 
 /// 번역 글꼴을 쓰는 원본 합성 상태의 전체 정책 집합이다. 고정 표면은 진입 즉시
@@ -77,7 +87,7 @@ pub(in crate::full_translation_install) enum ScreenFontResidencyPolicy {
 pub(in crate::full_translation_install) const COMPOSITE_FONT_RESIDENCY_POLICIES: [(
     u8,
     ScreenFontResidencyPolicy,
-); 14] = [
+); 17] = [
     (
         MAP_MENU_COMPOSITE_STATE,
         ScreenFontResidencyPolicy::Static(ScreenFontPageRole::MapMenu),
@@ -134,15 +144,28 @@ pub(in crate::full_translation_install) const COMPOSITE_FONT_RESIDENCY_POLICIES:
         UNIT_STATUS_COMPOSITE_STATE,
         ScreenFontResidencyPolicy::UnitOrEnemyNameRetainedFromSummary,
     ),
+    (
+        STORAGE_ACTION_MENU_COMPOSITE_STATE,
+        ScreenFontResidencyPolicy::CompletedDialoguePageRetained,
+    ),
+    (
+        STORAGE_OVERFLOW_ACTION_COMPOSITE_STATE,
+        ScreenFontResidencyPolicy::CompletedDialoguePageRetained,
+    ),
+    (
+        SHOP_ITEM_COMPOSITE_STATE,
+        ScreenFontResidencyPolicy::ActiveDialogueCallerRestored,
+    ),
 ];
 
 impl ScreenFontResidencyPolicy {
     pub(in crate::full_translation_install) fn static_page(self) -> Option<ScreenFontPageRole> {
         match self {
             Self::Static(page) => Some(page),
-            Self::UnitOrEnemyNamePublishedByAppender | Self::UnitOrEnemyNameRetainedFromSummary => {
-                None
-            }
+            Self::UnitOrEnemyNamePublishedByAppender
+            | Self::UnitOrEnemyNameRetainedFromSummary
+            | Self::CompletedDialoguePageRetained
+            | Self::ActiveDialogueCallerRestored => None,
         }
     }
 }
@@ -173,6 +196,25 @@ fn validate_composite_state_policies() -> Result<()> {
             })
             == Some(ScreenFontResidencyPolicy::UnitOrEnemyNameRetainedFromSummary),
         "unit-status font residency no longer retains the page published by unit summary"
+    );
+    let completed_dialogue_states = COMPOSITE_FONT_RESIDENCY_POLICIES
+        .iter()
+        .filter_map(|(state, policy)| {
+            (*policy == ScreenFontResidencyPolicy::CompletedDialoguePageRetained).then_some(*state)
+        })
+        .collect::<Vec<_>>();
+    ensure!(
+        completed_dialogue_states == STORAGE_DIALOGUE_OVERLAY_COMPOSITE_STATES,
+        "completed-dialogue font residency no longer matches the source-bound storage overlay states"
+    );
+    ensure!(
+        COMPOSITE_FONT_RESIDENCY_POLICIES
+            .iter()
+            .find_map(|(state, policy)| {
+                (*state == SHOP_ITEM_COMPOSITE_STATE).then_some(*policy)
+            })
+            == Some(ScreenFontResidencyPolicy::ActiveDialogueCallerRestored),
+        "shop item composition no longer restores the active E7 dialogue page"
     );
     Ok(())
 }
@@ -276,6 +318,7 @@ pub(super) struct ScreenFontResidencyDraft {
     static_state_route_count: usize,
     unit_or_enemy_name_published_state_count: usize,
     unit_or_enemy_name_retained_state_count: usize,
+    completed_dialogue_page_retained_state_count: usize,
     front_end_composite_state_count: usize,
     front_end_record_action_catalog_page_index: usize,
     front_end_record_action_mapper_route: u8,
@@ -400,8 +443,8 @@ pub(super) fn plan_screen_font_residency(
         .len();
 
     Ok(ScreenFontResidencyDraft {
-        schema: 4,
-        strategy: "derive every composite-screen font policy from one residency plan; publish static pages at entry, let the unit-summary appender publish its name-dependent page, retain that page explicitly for unit status, and select the protagonist catalog page explicitly for the front-end record-action lifetime",
+        schema: 5,
+        strategy: "derive every composite-screen font policy from one residency plan; publish static pages at entry, let the unit-summary appender publish its name-dependent page, retain that page explicitly for unit status, retain a completed dialogue page only across source-bound storage overlay states, and select the protagonist catalog page explicitly for the front-end record-action lifetime",
         composite_state_policy_count: COMPOSITE_FONT_RESIDENCY_POLICIES.len(),
         static_state_route_count: COMPOSITE_FONT_RESIDENCY_POLICIES
             .iter()
@@ -417,6 +460,12 @@ pub(super) fn plan_screen_font_residency(
             .iter()
             .filter(|(_, policy)| {
                 *policy == ScreenFontResidencyPolicy::UnitOrEnemyNameRetainedFromSummary
+            })
+            .count(),
+        completed_dialogue_page_retained_state_count: COMPOSITE_FONT_RESIDENCY_POLICIES
+            .iter()
+            .filter(|(_, policy)| {
+                *policy == ScreenFontResidencyPolicy::CompletedDialoguePageRetained
             })
             .count(),
         front_end_composite_state_count: FRONT_END_FONT_STATES.len(),
@@ -548,6 +597,20 @@ mod tests {
                 .map(|(_, policy)| *policy),
             Some(ScreenFontResidencyPolicy::UnitOrEnemyNameRetainedFromSummary)
         );
+    }
+
+    #[test]
+    fn storage_overlays_retain_only_the_source_bound_completed_dialogue_states() {
+        validate_composite_state_policies().unwrap();
+        let actual = COMPOSITE_FONT_RESIDENCY_POLICIES
+            .iter()
+            .filter_map(|(state, policy)| {
+                (*policy == ScreenFontResidencyPolicy::CompletedDialoguePageRetained)
+                    .then_some(*state)
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(actual, STORAGE_DIALOGUE_OVERLAY_COMPOSITE_STATES);
     }
 
     #[test]

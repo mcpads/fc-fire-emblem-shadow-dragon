@@ -583,7 +583,6 @@ mod tests {
                 record_id: record_id.to_string(),
                 page_index: 0,
                 target_glyphs: BTreeSet::from(['끝']),
-                visible_line_target_glyphs: Vec::new(),
                 dynamic_string_selectors: BTreeSet::from([selector]),
                 dynamic_string_selector_counts: BTreeMap::from([(selector, 1)]),
                 dynamic_string_control_count: 1,

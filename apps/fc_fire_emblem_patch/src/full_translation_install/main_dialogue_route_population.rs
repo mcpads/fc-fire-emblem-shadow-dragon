@@ -94,6 +94,7 @@ pub(super) struct MainDialogueRoutePopulationPlan {
     cross_family_transition_edge_count: usize,
     dynamic_string_control_count: usize,
     common_runtime_hook_roles: Vec<DialogueRuntimeHookRole>,
+    every_new_record_entry_clears_all_physical_line_buffers: bool,
     identity_lookup_boundary_partition: IdentityLookupBoundaryPartition,
     every_route_family_fully_installed: bool,
     every_transition_target_installed: bool,
@@ -152,6 +153,7 @@ pub(super) fn plan_main_dialogue_route_population(
     graph: &MainDialogueGraphReport,
     dynamic_producers: &DynamicInputProducerPlan,
     assembled_hook_roles: &[DialogueRuntimeHookRole],
+    new_record_line_buffer_reset_routes_bound: bool,
 ) -> Result<MainDialogueRoutePopulationPlan> {
     let identities = inspect_main_dialogue_runtime_identities(source.data())?;
     let storage = inspect_main_dialogue_storage(source.data())?;
@@ -168,6 +170,7 @@ pub(super) fn plan_main_dialogue_route_population(
         graph,
         dynamic_producers.every_record_selector_route_bound(),
         assembled_hook_roles,
+        new_record_line_buffer_reset_routes_bound,
     )
 }
 
@@ -288,6 +291,7 @@ fn build_route_population(
     graph: &MainDialogueGraphReport,
     dynamic_producer_routes_bound: bool,
     assembled_hook_roles: &[DialogueRuntimeHookRole],
+    new_record_line_buffer_reset_routes_bound: bool,
 ) -> Result<MainDialogueRoutePopulationPlan> {
     ensure!(
         !expected_families.is_empty(),
@@ -399,6 +403,10 @@ fn build_route_population(
             .iter()
             .all(|role| actual_hook_roles.contains(role)),
         "main-dialogue route population lacks a common runtime entry hook"
+    );
+    ensure!(
+        new_record_line_buffer_reset_routes_bound,
+        "main-dialogue new-record routes do not share the physical line-buffer reset"
     );
     ensure!(
         dynamic_producer_routes_bound,
@@ -546,6 +554,7 @@ fn build_route_population(
         cross_family_transition_edge_count,
         dynamic_string_control_count,
         common_runtime_hook_roles: REQUIRED_COMMON_HOOKS.to_vec(),
+        every_new_record_entry_clears_all_physical_line_buffers: true,
         identity_lookup_boundary_partition: IdentityLookupBoundaryPartition {
             e4_published_lookahead_record_count: e4_lookahead_record_count,
             e6_published_lookahead_record_count: e6_lookahead_record_count,
@@ -644,10 +653,38 @@ mod tests {
             },
             true,
             &[],
+            true,
         )
         .err()
         .expect("missing common runtime hook must fail");
         assert!(error.to_string().contains("common runtime entry hook"));
+    }
+
+    #[test]
+    fn common_hooks_without_the_shared_physical_row_reset_are_not_complete_routes() {
+        let expected = [family("table", 0x20, 1, 1, 0)];
+        let records = [record("table:000", "table", 0x20, 1, 0, 0xEF)];
+        let error = build_route_population(
+            &expected,
+            &records,
+            &MainDialogueGraphReport {
+                node_count: 1,
+                transition_edge_count: 0,
+                terminal_reachable_node_count: 1,
+                caller_handoff_boundary_reachable_node_count: 0,
+                max_transition_edge_count_to_boundary: 0,
+                cycle_count: 0,
+                unresolved_node_count: 0,
+                transition_edges: vec![],
+            },
+            true,
+            &REQUIRED_COMMON_HOOKS,
+            false,
+        )
+        .err()
+        .expect("missing shared physical row reset must fail");
+
+        assert!(error.to_string().contains("physical line-buffer reset"));
     }
 
     #[test]
@@ -664,10 +701,16 @@ mod tests {
             unresolved_node_count: 0,
             transition_edges: vec![edge("source", "missing")],
         };
-        let error =
-            build_route_population(&expected, &records, &graph, true, &REQUIRED_COMMON_HOOKS)
-                .err()
-                .expect("transition outside the installed population must fail");
+        let error = build_route_population(
+            &expected,
+            &records,
+            &graph,
+            true,
+            &REQUIRED_COMMON_HOOKS,
+            true,
+        )
+        .err()
+        .expect("transition outside the installed population must fail");
         assert!(
             error
                 .to_string()
@@ -691,10 +734,16 @@ mod tests {
             unresolved_node_count: 0,
             transition_edges: vec![],
         };
-        let error =
-            build_route_population(&expected, &records, &graph, true, &REQUIRED_COMMON_HOOKS)
-                .err()
-                .expect("handler hole reclassification must fail");
+        let error = build_route_population(
+            &expected,
+            &records,
+            &graph,
+            true,
+            &REQUIRED_COMMON_HOOKS,
+            true,
+        )
+        .err()
+        .expect("handler hole reclassification must fail");
         assert!(error.to_string().contains("handler holes"));
     }
 
@@ -712,10 +761,16 @@ mod tests {
             unresolved_node_count: 0,
             transition_edges: vec![],
         };
-        let error =
-            build_route_population(&expected, &records, &graph, false, &REQUIRED_COMMON_HOOKS)
-                .err()
-                .expect("unresolved dynamic producer routes must fail");
+        let error = build_route_population(
+            &expected,
+            &records,
+            &graph,
+            false,
+            &REQUIRED_COMMON_HOOKS,
+            true,
+        )
+        .err()
+        .expect("unresolved dynamic producer routes must fail");
         assert!(error.to_string().contains("dynamic-string producer"));
     }
 }

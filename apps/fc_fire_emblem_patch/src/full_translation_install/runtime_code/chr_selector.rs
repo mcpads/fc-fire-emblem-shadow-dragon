@@ -41,18 +41,20 @@ use super::{
     chr_source_state::{
         CHR_RAM_BANK_VALUE, CHR_SOURCE_HIGH_BITS, DIALOGUE_FD_SOURCE_PAGE, RIGHT_FD_SOURCE_SHADOW,
     },
+    consumer_font_page::COMPOSITE_STATE,
     dispatcher_gate::{
         DISPATCHER_STATE, STATE_COLD_REQUESTED, STATE_RESIDENT_PAGE_OVERLAY_REQUESTED,
     },
-    lifecycle::TERMINAL_STATE,
+    lifecycle::{E7_CALLER_RESUME_FLAG, TERMINAL_STATE},
     next_address,
-    transport::{REQUEST_STATE, STATE_READY},
+    transport::{REQUEST_STATE, STATE_COMPLETED_PAGE_SUSPENDED, STATE_READY},
 };
 use crate::{
     chapter_transition::{
         ENDING_CHARACTER_EPILOGUE_FONT_RESIDENCY_PHASE_MASK,
         ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE_START, ENDING_RECORD_PHASE_ADDRESS,
     },
+    full_translation_install::storage_residency::STORAGE_DIALOGUE_OVERLAY_COMPOSITE_STATES,
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
     typed_source::decode_rp2a03_sequence,
@@ -153,12 +155,36 @@ pub(super) fn build_chr_selector(
     ));
     let resident_overlay_state_placeholder = instructions.len();
     instructions.push(Instruction::BeqAbsolute(origin));
+    instructions.push(Instruction::CmpImmediate(STATE_COMPLETED_PAGE_SUSPENDED));
+    let completed_page_suspended_placeholder = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(origin));
     let unsupported_state_placeholder = instructions.len();
     instructions.push(Instruction::BneAbsolute(origin));
+
+    let completed_page_suspended = next_address(origin, &instructions)?;
+    instructions[completed_page_suspended_placeholder] =
+        Instruction::BeqAbsolute(completed_page_suspended);
+    instructions.extend([
+        Instruction::LdaAbsolute(COMPOSITE_STATE),
+        Instruction::CmpImmediate(STORAGE_DIALOGUE_OVERLAY_COMPOSITE_STATES[0]),
+    ]);
+    let facility_overlay_placeholder = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(origin));
+    instructions.push(Instruction::CmpImmediate(
+        STORAGE_DIALOGUE_OVERLAY_COMPOSITE_STATES[1],
+    ));
+    let overflow_overlay_placeholder = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(origin));
+    let suspended_outside_storage_placeholder = instructions.len();
+    instructions.push(Instruction::BneAbsolute(origin));
+
     let eligible_state = next_address(origin, &instructions)?;
     instructions[ready_placeholder] = Instruction::BeqAbsolute(eligible_state);
     instructions[cold_state_placeholder] = Instruction::BeqAbsolute(eligible_state);
     instructions[resident_overlay_state_placeholder] = Instruction::BeqAbsolute(eligible_state);
+    instructions.push(Instruction::LdaAbsolute(E7_CALLER_RESUME_FLAG));
+    let e7_external_caller_placeholder = instructions.len();
+    instructions.push(Instruction::BneAbsolute(origin));
     instructions.extend([
         Instruction::LdaAbsolute(DISPATCHER_STATE),
         Instruction::CmpImmediate(TERMINAL_STATE),
@@ -179,7 +205,10 @@ pub(super) fn build_chr_selector(
     let terminal_outside_epilogue_placeholder = instructions.len();
     instructions.push(Instruction::BneAbsolute(origin));
     let visible_dialogue = next_address(origin, &instructions)?;
+    instructions[e7_external_caller_placeholder] = Instruction::BneAbsolute(visible_dialogue);
     instructions[active_dialogue_placeholder] = Instruction::BccAbsolute(visible_dialogue);
+    instructions[facility_overlay_placeholder] = Instruction::BeqAbsolute(visible_dialogue);
+    instructions[overflow_overlay_placeholder] = Instruction::BeqAbsolute(visible_dialogue);
     instructions.extend([
         Instruction::LdaZeroPage(RIGHT_FD_SOURCE_SHADOW),
         Instruction::OraZeroPage(CHR_SOURCE_HIGH_BITS),
@@ -192,8 +221,13 @@ pub(super) fn build_chr_selector(
         Instruction::LdaAbsolute(REQUEST_STATE),
         Instruction::CmpImmediate(STATE_READY),
     ]);
+    let ready_request_placeholder = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(origin));
+    instructions.push(Instruction::CmpImmediate(STATE_COMPLETED_PAGE_SUSPENDED));
     let incomplete_request_placeholder = instructions.len();
     instructions.push(Instruction::BneAbsolute(origin));
+    let complete_request = next_address(origin, &instructions)?;
+    instructions[ready_request_placeholder] = Instruction::BeqAbsolute(complete_request);
     instructions.extend([
         Instruction::LdaImmediate(CHR_RAM_BANK_VALUE),
         Instruction::JsrAbsolute(project_dialogue_page),
@@ -212,6 +246,8 @@ pub(super) fn build_chr_selector(
     ]);
     let unsupported_state = next_address(origin, &instructions)?;
     instructions[unsupported_state_placeholder] = Instruction::BneAbsolute(unsupported_state);
+    instructions[suspended_outside_storage_placeholder] =
+        Instruction::BneAbsolute(unsupported_state);
     instructions[past_terminal_placeholder] = Instruction::BneAbsolute(unsupported_state);
     instructions[terminal_outside_epilogue_placeholder] =
         Instruction::BneAbsolute(unsupported_state);
@@ -227,6 +263,70 @@ pub(super) fn build_chr_selector(
         address: origin,
         bytes: assemble_at(origin, &instructions)?,
     })
+}
+
+pub(super) fn verify_e7_dialogue_page_residency(
+    routine: &RuntimeRoutine,
+    e7_caller_resume_flag_address: u16,
+) -> Result<()> {
+    ensure!(
+        e7_caller_resume_flag_address == E7_CALLER_RESUME_FLAG,
+        "shop residency and dialogue lifecycle disagree about the E7 caller flag"
+    );
+    decode_rp2a03_sequence(
+        &routine.bytes,
+        routine.address,
+        "dialogue CHR selector E7 residency route",
+    )?;
+    let e7_branch = [
+        0xAD,
+        e7_caller_resume_flag_address as u8,
+        (e7_caller_resume_flag_address >> 8) as u8,
+        0xD0,
+    ];
+    let offsets = routine
+        .bytes
+        .windows(e7_branch.len())
+        .enumerate()
+        .filter_map(|(offset, bytes)| (bytes == e7_branch).then_some(offset))
+        .collect::<Vec<_>>();
+    ensure!(
+        offsets.len() == 1,
+        "dialogue CHR selector emitted {} E7 residency branches",
+        offsets.len()
+    );
+    let displacement = *routine
+        .bytes
+        .get(offsets[0] + e7_branch.len())
+        .context("E7 residency branch lost its displacement")? as i8;
+    let branch_end = routine
+        .address
+        .checked_add(u16::try_from(offsets[0] + e7_branch.len() + 1)?)
+        .context("E7 residency branch address overflow")?;
+    let target = branch_end.wrapping_add_signed(i16::from(displacement));
+    let target_offset = usize::from(
+        target
+            .checked_sub(routine.address)
+            .context("E7 residency branch leaves the dialogue selector")?,
+    );
+    let visible_dialogue_prefix = [
+        0xA5,
+        RIGHT_FD_SOURCE_SHADOW,
+        0x05,
+        CHR_SOURCE_HIGH_BITS,
+        0x29,
+        0x1F,
+        0xC9,
+        DIALOGUE_FD_SOURCE_PAGE,
+    ];
+    ensure!(
+        routine
+            .bytes
+            .get(target_offset..target_offset + visible_dialogue_prefix.len())
+            == Some(visible_dialogue_prefix.as_slice()),
+        "E7 caller lifetime no longer enters the visible dialogue-page route"
+    );
+    Ok(())
 }
 
 /// 요청 발행기가 NMI를 다시 켜기 전에 냉간 표시 페이지를 원자적으로 고른다.
@@ -262,16 +362,24 @@ mod tests {
 
     /// Executes the generated selector itself, so the test observes branch
     /// behavior rather than merely recognizing one byte pattern.
-    fn run_terminal_selector(phase: u8) -> SelectorOutcome {
+    fn run_selector(
+        request_state: u8,
+        dialogue_state: u8,
+        ending_phase: u8,
+        composite_state: u8,
+        e7_caller_resume: u8,
+    ) -> SelectorOutcome {
         let routine =
             build_chr_selector(0xF4A0, 0xC8, SELECTOR_CHAIN_FALLBACK, PROJECT_DIALOGUE_PAGE)
                 .unwrap();
         let mut memory = vec![0u8; 0x10000];
         let start = usize::from(routine.address);
         memory[start..start + routine.bytes.len()].copy_from_slice(&routine.bytes);
-        memory[usize::from(REQUEST_STATE)] = STATE_READY;
-        memory[usize::from(DISPATCHER_STATE)] = TERMINAL_STATE;
-        memory[usize::from(ENDING_RECORD_PHASE_ADDRESS)] = phase;
+        memory[usize::from(REQUEST_STATE)] = request_state;
+        memory[usize::from(DISPATCHER_STATE)] = dialogue_state;
+        memory[usize::from(ENDING_RECORD_PHASE_ADDRESS)] = ending_phase;
+        memory[usize::from(COMPOSITE_STATE)] = composite_state;
+        memory[usize::from(E7_CALLER_RESUME_FLAG)] = e7_caller_resume;
         memory[usize::from(RIGHT_FD_SOURCE_SHADOW)] = DIALOGUE_FD_SOURCE_PAGE;
         memory[usize::from(CHR_SOURCE_HIGH_BITS)] = 0;
 
@@ -383,6 +491,10 @@ mod tests {
         panic!("selector test did not return")
     }
 
+    fn run_terminal_selector(phase: u8) -> SelectorOutcome {
+        run_selector(STATE_READY, TERMINAL_STATE, phase, 0, 0)
+    }
+
     fn set_nz(status: &mut u8, value: u8) {
         *status &= !0x82;
         if value == 0 {
@@ -484,6 +596,55 @@ mod tests {
                 "phase {phase:02X} is outside the completed-page residency lifetime"
             );
         }
+    }
+
+    #[test]
+    fn suspended_completed_page_is_visible_only_in_source_bound_storage_overlays() {
+        for composite_state in STORAGE_DIALOGUE_OVERLAY_COMPOSITE_STATES {
+            for dialogue_state in [TERMINAL_STATE, TERMINAL_STATE + 2] {
+                assert_eq!(
+                    run_selector(
+                        STATE_COMPLETED_PAGE_SUSPENDED,
+                        dialogue_state,
+                        0,
+                        composite_state,
+                        0,
+                    ),
+                    SelectorOutcome::Projected(CHR_RAM_BANK_VALUE),
+                    "storage overlay state {composite_state:02X} must reuse the completed page after the outer source handler advances"
+                );
+            }
+        }
+
+        for (request_state, dialogue_state, composite_state) in [
+            (
+                0,
+                TERMINAL_STATE,
+                STORAGE_DIALOGUE_OVERLAY_COMPOSITE_STATES[0],
+            ),
+            (STATE_COMPLETED_PAGE_SUSPENDED, TERMINAL_STATE, 0),
+            (STATE_COMPLETED_PAGE_SUSPENDED, TERMINAL_STATE, 0x26),
+        ] {
+            assert_eq!(
+                run_selector(request_state, dialogue_state, 0, composite_state, 0),
+                SelectorOutcome::Fallback,
+                "an inactive, unrelated, or standalone screen fabricated a completed page"
+            );
+        }
+    }
+
+    #[test]
+    fn ready_page_remains_visible_for_the_source_bound_e7_external_caller_lifetime() {
+        assert_eq!(
+            run_selector(STATE_READY, TERMINAL_STATE + 2, 0, 0, 1),
+            SelectorOutcome::Projected(CHR_RAM_BANK_VALUE),
+            "an active E7 caller must retain its prepared dialogue page after state 0x0F"
+        );
+        assert_eq!(
+            run_selector(STATE_READY, TERMINAL_STATE + 2, 0, 0, 0),
+            SelectorOutcome::Fallback,
+            "a past-terminal state without the source E7 caller flag must not fabricate dialogue ownership"
+        );
     }
 
     /// 표시 페이지 선택은 여기서 FD 하나를 하드코딩하지 않고, live FE 원천을 아는

@@ -882,35 +882,6 @@ fn encode_visible_page_recipe_blocks(
     Ok((offsets, blocks))
 }
 
-fn encode_dense_group_lookups(
-    page_assignments: &[BTreeMap<char, u8>],
-    glyph_atlas_indices: &BTreeMap<char, usize>,
-) -> Result<Vec<u8>> {
-    let mut encoded = Vec::with_capacity(page_assignments.len() * (256 + 64));
-    for (group_index, assignments) in page_assignments.iter().enumerate() {
-        let mut low_indices = vec![0u8; 256];
-        let mut high_classes = vec![0xFFu8; 64];
-        for (glyph, code) in assignments {
-            let atlas_index = glyph_atlas_indices.get(glyph).copied().with_context(|| {
-                format!("dialogue page group {group_index} lost atlas glyph {glyph:?}")
-            })?;
-            ensure!(
-                atlas_index < 3 * 256,
-                "dialogue atlas index does not fit the two-bit lookup class"
-            );
-            low_indices[usize::from(*code)] = atlas_index as u8;
-            let packed_index = usize::from(*code) / 4;
-            let shift = usize::from(*code % 4) * 2;
-            let mask = !(0b11 << shift);
-            high_classes[packed_index] = (high_classes[packed_index] & mask)
-                | (u8::try_from(atlas_index >> 8).expect("atlas class is below three") << shift);
-        }
-        encoded.extend_from_slice(&low_indices);
-        encoded.extend_from_slice(&high_classes);
-    }
-    Ok(encoded)
-}
-
 fn changed_tile_count(from: &[u8], to: &[u8]) -> Result<usize> {
     ensure!(
         from.len() == FONT_PAGE_SIZE && to.len() == FONT_PAGE_SIZE,
@@ -1025,22 +996,6 @@ mod tests {
         assert_eq!(measured.block_count, 1);
         assert_eq!(measured.index_bit_count, 1);
         assert_eq!(measured.byte_count, 3);
-    }
-
-    #[test]
-    fn dense_group_lookup_uses_class_three_as_the_unassigned_sentinel() {
-        let assignments = vec![BTreeMap::from([('가', 0x42), ('나', 0x43)])];
-        let atlas = BTreeMap::from([('가', 5usize), ('나', 0x105usize)]);
-
-        let encoded = encode_dense_group_lookups(&assignments, &atlas).unwrap();
-
-        assert_eq!(encoded.len(), 320);
-        assert_eq!(encoded[0x42], 5);
-        assert_eq!(encoded[0x43], 5);
-        let classes = encoded[256 + usize::from(0x42u8) / 4];
-        assert_eq!((classes >> ((0x42 % 4) * 2)) & 0b11, 0);
-        assert_eq!((classes >> ((0x43 % 4) * 2)) & 0b11, 1);
-        assert_eq!(encoded[256] & 0b11, 0b11);
     }
 
     /// 레시피는 그 가시 페이지가 쓰는 코드만 담아야 한다. 같은 그룹의 다른 페이지

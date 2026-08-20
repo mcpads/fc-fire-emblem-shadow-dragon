@@ -1,4 +1,5 @@
 use super::*;
+use crate::shop_flow::SHOP_ITEM_COMPOSITE_STATE;
 
 const ORIGIN: u16 = 0xF620;
 const APPLY_ROUTE: u16 = 0xF900;
@@ -318,12 +319,10 @@ fn map_funds_and_summary_states_share_the_map_menu_page_until_close() {
     assert_eq!(summary.applied_route, Some(pages.map_menu));
     assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], pages.map_menu);
 
-    // The compact unsigned range must admit exactly $13 and $14. Adjacent
-    // states are unrelated composites and must release the old page.
-    for state in [
-        MAP_FUNDS_COMPOSITE_STATE - 1,
-        MAP_SUMMARY_COMPOSITE_STATE + 1,
-    ] {
+    // The compact range gives $13/$14 to the map page and $15 to the active
+    // shop dialogue. States outside that owned run retain the current screen
+    // lifetime until its explicit close boundary.
+    for state in [MAP_FUNDS_COMPOSITE_STATE - 1, SHOP_ITEM_COMPOSITE_STATE + 1] {
         let mut adjacent_memory = memory.clone();
         adjacent_memory[usize::from(CONSUMER_FONT_PAGE)] = pages.map_menu;
         let (adjacent_memory, adjacent) = run_routines(
@@ -334,7 +333,10 @@ fn map_funds_and_summary_states_share_the_map_menu_page_until_close() {
             0x24,
         );
         assert_eq!(adjacent.applied_route, None);
-        assert_eq!(adjacent_memory[usize::from(CONSUMER_FONT_PAGE)], 0);
+        assert_eq!(
+            adjacent_memory[usize::from(CONSUMER_FONT_PAGE)],
+            pages.map_menu
+        );
     }
 
     let (memory, closed) = run_routines(memory, &[&close], close.address, 0x19, 0x64);
@@ -432,6 +434,49 @@ fn unit_status_retains_the_page_published_by_unit_summary() {
 }
 
 #[test]
+fn dialogue_owned_composites_reenter_the_central_fd_selector_after_clearing_static_residency() {
+    let pages = pages();
+    let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
+    let publisher_origin = ORIGIN + u16::try_from(activation.bytes.len()).unwrap();
+    let publisher =
+        build_composite_font_page_publisher(publisher_origin, activation.address, pages).unwrap();
+
+    for state in [
+        SHOP_ITEM_COMPOSITE_STATE,
+        STORAGE_ACTION_MENU_COMPOSITE_STATE,
+        STORAGE_OVERFLOW_ACTION_COMPOSITE_STATE,
+    ] {
+        for request_state in [0, super::super::transport::STATE_COMPLETED_PAGE_SUSPENDED] {
+            let mut memory: Box<[u8; 0x10000]> =
+                vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
+            memory[usize::from(CONSUMER_FONT_PAGE)] = pages.unit_command;
+            memory[usize::from(super::super::transport::REQUEST_STATE)] = request_state;
+
+            let (memory, result) = run_routines(
+                memory,
+                &[&activation, &publisher],
+                publisher.address,
+                state,
+                0xA5,
+            );
+
+            assert_eq!(memory[usize::from(COMPOSITE_STATE)], state);
+            assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], 0);
+            assert_eq!(
+                memory[usize::from(super::super::transport::REQUEST_STATE)],
+                request_state
+            );
+            assert_eq!(result.applied_route, None);
+            assert_eq!(
+                result.central_writer_value,
+                Some(0),
+                "dialogue-owned state {state:02X} did not re-enter the central right-FD selector"
+            );
+        }
+    }
+}
+
+#[test]
 fn static_fixed_menu_appender_selects_its_page_without_shadowing_storage_dialogue() {
     let pages = pages();
     let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
@@ -518,7 +563,7 @@ fn every_front_end_state_selects_its_page_without_prior_residency() {
 }
 
 #[test]
-fn unsupported_composite_clears_the_previous_screen_page() {
+fn auxiliary_composite_preserves_the_page_until_the_screen_close_boundary() {
     let pages = pages();
     let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
     let publisher_origin = ORIGIN + u16::try_from(activation.bytes.len()).unwrap();
@@ -536,7 +581,7 @@ fn unsupported_composite_clears_the_previous_screen_page() {
     );
 
     assert_eq!(memory[usize::from(COMPOSITE_STATE)], 0x0A);
-    assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], 0);
+    assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], pages.catalog[1]);
     assert_eq!(result.applied_route, None);
 }
 
@@ -548,8 +593,13 @@ fn reused_state_20_never_claims_the_ending_font_page() {
     let publisher =
         build_composite_font_page_publisher(publisher_origin, activation.address, pages).unwrap();
 
+    let close_origin = publisher.address + u16::try_from(publisher.bytes.len()).unwrap();
+    let close = build_consumer_font_page_close(close_origin, RESTORE_SOURCE_PAIR).unwrap();
     let mut memory: Box<[u8; 0x10000]> = vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
     memory[usize::from(CONSUMER_FONT_PAGE)] = pages.catalog[0];
+    let (memory, closed) = run_routines(memory, &[&close], close.address, 0, 0);
+    assert!(closed.restored_source_pair);
+    assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], 0);
     let (memory, result) = run_routines(
         memory,
         &[&activation, &publisher],

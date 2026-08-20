@@ -30,7 +30,6 @@ pub(crate) enum TranslatedFePageSelection {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct RightFontPageProjection {
-    source_fd_page: u8,
     required_fd_trigger_high_plane: [u8; FD_TILE_HIGH_PLANE_BYTE_COUNT],
     fe_selection: TranslatedFePageSelection,
 }
@@ -94,7 +93,6 @@ impl RightFontPageProjection {
         );
 
         Ok(Self {
-            source_fd_page,
             required_fd_trigger_high_plane: *required_planes
                 .first()
                 .context("screen-role family has no FE trigger plane")?,
@@ -126,10 +124,6 @@ impl RightFontPageProjection {
                 TranslatedFePageSelection::PreserveSource => 0,
                 TranslatedFePageSelection::UseTranslatedPage => TRANSLATED_FE_PAGE_FLAG,
             })
-    }
-
-    pub(crate) fn source_fd_page(self) -> u8 {
-        self.source_fd_page
     }
 
     pub(crate) fn fe_selection(self) -> TranslatedFePageSelection {
@@ -217,7 +211,6 @@ mod tests {
         let mut page = vec![0xFF; FONT_PAGE_SIZE];
         projection.apply_to_page(&mut page).unwrap();
 
-        assert_eq!(projection.source_fd_page(), 0);
         assert_eq!(
             projection.fe_selection(),
             TranslatedFePageSelection::PreserveSource

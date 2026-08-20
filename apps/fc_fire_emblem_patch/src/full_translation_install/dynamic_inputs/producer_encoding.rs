@@ -48,6 +48,20 @@ pub(in crate::full_translation_install) struct DynamicProducerEncodingPlan {
 }
 
 impl DynamicProducerEncodingPlan {
+    pub(in crate::full_translation_install) fn item_material_entry_count(&self) -> Result<usize> {
+        ensure!(
+            self.material.get(..4) == Some(MATERIAL_MAGIC.as_slice())
+                && self.material.get(4) == Some(&MATERIAL_SCHEMA)
+                && self.item_directory_offset == MATERIAL_HEADER_BYTE_COUNT,
+            "dynamic producer item material header changed"
+        );
+        self.material
+            .get(5)
+            .copied()
+            .map(usize::from)
+            .context("dynamic producer item material lost its population")
+    }
+
     pub(in crate::full_translation_install) fn canonical_outputs_ready(&self) -> bool {
         self.complete
     }

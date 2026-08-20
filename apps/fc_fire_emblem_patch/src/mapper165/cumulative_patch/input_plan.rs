@@ -12,15 +12,13 @@ use crate::{
     },
     front_end_menu::{FRONT_END_RESULT_DIALOGUE_RECORD_IDS, FrontEndMenuPlan, plan_front_end_menu},
     rom::Rom,
+    shop_flow::SHOP_DIALOGUE_LIFETIME_RECORD_IDS,
     text_inventory::{FixedTextPlan, plan_fixed_text},
     title_graphics::{TitleGraphicsPlan, plan_title_graphics},
     unit_names::{UnitNamePlan, plan_unit_names},
 };
 
-use super::super::{
-    maximum_dialogue_page::TARGET_RECORD_ID as MAXIMUM_DIALOGUE_RECORD_ID,
-    shop_dialogue_page::RECORD_IDS as SHOP_DIALOGUE_RECORD_IDS,
-};
+use super::super::maximum_dialogue_page::TARGET_RECORD_ID as MAXIMUM_DIALOGUE_RECORD_ID;
 use super::CumulativePatchInputs;
 
 pub(super) struct CumulativeInputPlan {
@@ -98,7 +96,7 @@ pub(super) fn prepare_cumulative_inputs(
     let shop_dialogue_plan = plan_main_dialogue_bundle(
         &source_rom,
         inputs.main_dialogue_workspace_path,
-        &SHOP_DIALOGUE_RECORD_IDS,
+        &SHOP_DIALOGUE_LIFETIME_RECORD_IDS,
     )?;
     ensure!(
         shop_dialogue_plan.workspace_sha1 == dialogue_workspace.workspace_sha1,
@@ -109,7 +107,7 @@ pub(super) fn prepare_cumulative_inputs(
             .record_ids
             .iter()
             .map(String::as_str)
-            .eq(SHOP_DIALOGUE_RECORD_IDS),
+            .eq(SHOP_DIALOGUE_LIFETIME_RECORD_IDS),
         "weapon-shop dialogue plan order changed"
     );
     let maximum_dialogue_plan = plan_main_dialogue_slice(

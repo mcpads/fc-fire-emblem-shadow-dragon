@@ -64,6 +64,9 @@ pub(super) const RECLAIMED_GATE_CAVE_END: u16 = 0xF378;
 /// publisher leaves the translated-page writer at $F390 undisturbed.
 pub(super) const SOURCE_IDENTITY_PUBLISHER_TAIL_ORIGIN: u16 = 0xF378;
 pub(super) const SOURCE_IDENTITY_PUBLISHER_TAIL_CAVE_END: u16 = WRITE_TRANSLATED_CHR_PAGE_ADDRESS;
+pub(super) const SOURCE_IDENTITY_REQUEST_PUBLISHER_ROLE: &str =
+    "dialogue source-identity request publisher";
+pub(super) const INITIAL_REQUEST_PUBLISHER_ROLE: &str = "dialogue initial-entry request publisher";
 pub(in crate::full_translation_install) const EXPECTED_RECLAIMED_GATE_CAVE_SHA1: &str =
     "7ad92984b55ad0cdfc465743a52002420d3ae394";
 
@@ -303,7 +306,7 @@ pub(super) fn build_source_identity_request_publisher(
 
     Ok(SourceIdentityRequestPublisher {
         head: RuntimeRoutine {
-            role: "dialogue source-identity request publisher",
+            role: SOURCE_IDENTITY_REQUEST_PUBLISHER_ROLE,
             address: origin,
             bytes: assemble_at(origin, &instructions)?,
         },
@@ -337,7 +340,7 @@ pub(super) fn build_initial_request_publisher(
     instructions.push(Instruction::JmpAbsolute(SOURCE_POINTER_RESOLVER));
 
     Ok(RuntimeRoutine {
-        role: "dialogue initial-entry request publisher",
+        role: INITIAL_REQUEST_PUBLISHER_ROLE,
         address: origin,
         bytes: assemble_at(origin, &instructions)?,
     })

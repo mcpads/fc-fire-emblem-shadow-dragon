@@ -28,12 +28,14 @@ use super::super::runtime_state_storage::{
     CANDIDATE_START, CURRENT_PAGE_RESIDENCY, DIALOGUE_RUNTIME_STATE_END, RECORD_INDEX_HIGH,
     RECORD_INDEX_LOW, REQUEST_STATE, VISIBLE_PAGE_INDEX,
 };
-use super::transport::{PHASE_RESTORE, RESTORE_CHUNK_COUNT};
+use super::transport::{PHASE_RESTORE, RESTORE_CHUNK_COUNT, STATE_COMPLETED_PAGE_SUSPENDED};
 use super::{RuntimeRoutine, next_address};
 use crate::rp2a03::{Instruction, assemble_at};
 
 pub(in crate::full_translation_install) const INITIAL_PAGE_REQUEST_RESOLVER_ROLE: &str =
     "dialogue initial-page request resolver";
+pub(in crate::full_translation_install) const NEXT_PAGE_REQUEST_RESOLVER_ROLE: &str =
+    "dialogue next-page request resolver";
 
 /// 원본이 디렉터리 선택자를 담아 두는 자리다.
 pub(super) const SOURCE_DIRECTORY_SELECTOR: u16 = 0x77F4;
@@ -52,6 +54,12 @@ const PRG_8000_REGISTER: u8 = 6;
 const DATA_WINDOW_BASE: u16 = 0x8000;
 /// MMC3 페이지 하나가 자료 창에서 차지하는 크기다.
 const DATA_WINDOW_SIZE: u16 = 0x2000;
+
+/// 원본 대사 상태기가 쓰는 여섯 32바이트 물리 줄 버퍼다. 새 레코드는 이 범위
+/// 전체를 `FF`로 비우고, 같은 레코드의 다음 페이지는 현재 줄 수명을 이어 간다.
+const LINE_BUFFER_START: u16 = 0x7832;
+const LINE_BUFFER_BYTE_COUNT: u8 = 6 * 0x20;
+const LINE_BUFFER_BLANK: u8 = 0xFF;
 
 /// 빌드가 아는 재료 배치다. 런타임은 이 값들을 상수로 받는다.
 #[derive(Debug, Clone, Copy)]
@@ -136,6 +144,38 @@ fn clear_runtime_state(instructions: &mut Vec<Instruction>) {
     }
 }
 
+fn new_record_line_buffer_reset(origin: u16) -> Result<Vec<Instruction>> {
+    let mut instructions = vec![
+        Instruction::LdaImmediate(LINE_BUFFER_BLANK),
+        Instruction::LdyImmediate(LINE_BUFFER_BYTE_COUNT),
+    ];
+    let loop_address = next_address(origin, &instructions)?;
+    instructions.extend([
+        Instruction::Dey,
+        Instruction::StaAbsoluteY(LINE_BUFFER_START),
+        Instruction::BneAbsolute(loop_address),
+    ]);
+    Ok(instructions)
+}
+
+fn append_new_record_line_buffer_reset(
+    instructions: &mut Vec<Instruction>,
+    routine_origin: u16,
+) -> Result<()> {
+    let reset_origin = next_address(routine_origin, instructions)?;
+    instructions.extend(new_record_line_buffer_reset(reset_origin)?);
+    Ok(())
+}
+
+pub(super) fn contains_new_record_line_buffer_reset(routine: &RuntimeRoutine) -> Result<bool> {
+    let origin = 0x8000;
+    let reset = assemble_at(origin, &new_record_line_buffer_reset(origin)?)?;
+    Ok(routine
+        .bytes
+        .windows(reset.len())
+        .any(|window| window == reset))
+}
+
 /// 영속 레코드 색인 `$07F0/1`과 가시 페이지 색인 `$07F2`를 사용해 페이지 그룹과
 /// 전송 커서를 세운다. 레코드 디렉터리의 다음 항목이 현재 레코드의 끝이므로, 선택할
 /// 페이지 오프셋이 그 끝보다 작은지도 함께 확인한다.
@@ -144,7 +184,8 @@ fn append_page_request_resolution(
     failure_branches: &mut Vec<usize>,
     origin: u16,
     layout: MaterialLayout,
-) -> Result<()> {
+) -> Result<Vec<usize>> {
+    let mut page_exhausted_branches = Vec::new();
     instructions.extend(map_page(Instruction::LdaImmediate(layout.scan_index_page)));
     instructions.extend([
         // 레코드 색인 × 2가 디렉터리 안의 자리다.
@@ -189,7 +230,7 @@ fn append_page_request_resolution(
     let lower_high_byte_placeholder = next_address(origin, instructions)?;
     instructions.push(Instruction::BccAbsolute(lower_high_byte_placeholder));
     // 상위 바이트가 같지 않으면서 작지도 않으면 선택 오프셋이 끝을 넘었다.
-    failure_branches.push(branch_to_failure(
+    page_exhausted_branches.push(branch_to_failure(
         instructions,
         origin,
         Instruction::BeqAbsolute,
@@ -199,7 +240,7 @@ fn append_page_request_resolution(
         Instruction::CmpZeroPage(0x02),
     ]);
     // 같은 상위 바이트에서 하위 바이트가 끝 이상이어도 범위 밖이다.
-    failure_branches.push(branch_to_failure(
+    page_exhausted_branches.push(branch_to_failure(
         instructions,
         origin,
         Instruction::BccAbsolute,
@@ -282,22 +323,37 @@ fn append_page_request_resolution(
         Instruction::LdaImmediate(RESTORE_CHUNK_COUNT),
         Instruction::StaAbsolute(CURSOR_REMAINING_TILES),
     ]);
-    Ok(())
+    Ok(page_exhausted_branches)
 }
 
 fn finish_resolver(
     origin: u16,
     mut instructions: Vec<Instruction>,
     failure_branches: Vec<usize>,
+    page_exhausted_branches: Vec<usize>,
     role: &'static str,
 ) -> Result<RuntimeRoutine> {
     instructions.push(Instruction::Sec);
     restore_scratch(&mut instructions);
     instructions.push(Instruction::Rts);
 
+    let page_exhausted = next_address(origin, &instructions)?;
+    if !page_exhausted_branches.is_empty() {
+        instructions.extend([
+            // 레코드의 마지막 번역 페이지 다음은 손상된 레시피와 다르다. 전송은
+            // 끝났지만 원천 상태기가 곧 같은 완료 페이지 위에 선택 UI를 얹을 수
+            // 있으므로, 그 UI만 다시 고를 수 있는 별도 상태로 내린다.
+            Instruction::LdaImmediate(STATE_COMPLETED_PAGE_SUSPENDED),
+            Instruction::StaAbsolute(REQUEST_STATE),
+        ]);
+    }
+
     let failure = next_address(origin, &instructions)?;
     for index in failure_branches {
         instructions[index] = Instruction::JmpAbsolute(failure);
+    }
+    for index in page_exhausted_branches {
+        instructions[index] = Instruction::JmpAbsolute(page_exhausted);
     }
     instructions.push(Instruction::Clc);
     restore_scratch(&mut instructions);
@@ -350,6 +406,10 @@ pub(in crate::full_translation_install) fn build_resolve_request(
     let resolve_identity = next_address(origin, &instructions)?;
     instructions[identity_selected] = Instruction::JmpAbsolute(resolve_identity);
     clear_runtime_state(&mut instructions);
+    // 최초 진입뿐 아니라 E4/E6 lookahead와 E7 caller-resume도 모두 여기서 새 레코드
+    // 수명을 연다. 원본 state-1만 갖고 있던 0x00C0-byte fill을 이 공통 경계로 올려,
+    // 어느 외부 상태기가 레코드를 골라도 직전 레코드의 물리 줄을 재해석하지 않는다.
+    append_new_record_line_buffer_reset(&mut instructions, origin)?;
     instructions.extend([
         Instruction::LdaAbsolute(SOURCE_DIRECTORY_SELECTOR),
         Instruction::StaAbsolute(REQUEST_SOURCE_DIRECTORY_SELECTOR),
@@ -413,18 +473,22 @@ pub(in crate::full_translation_install) fn build_resolve_request(
         Instruction::BneAbsolute,
     )?);
 
-    append_page_request_resolution(&mut instructions, &mut failure_branches, origin, layout)?;
+    let page_exhausted_branches =
+        append_page_request_resolution(&mut instructions, &mut failure_branches, origin, layout)?;
+    failure_branches.extend(page_exhausted_branches);
     finish_resolver(
         origin,
         instructions,
         failure_branches,
+        Vec::new(),
         INITIAL_PAGE_REQUEST_RESOLVER_ROLE,
     )
 }
 
 /// 같은 레코드의 다음 가시 페이지를 찾는다. 호출자는 원본 완료 상태가 실제로
 /// `09` 계속을 선택한 경계이므로, 이 루틴은 페이지를 정확히 한 칸만 올린다.
-/// 디렉터리의 끝을 넘으면 실패하며 요청은 `inactive`로 남는다.
+/// 디렉터리의 끝에 닿으면 완료 페이지를 보류하고, 그 밖의 자료 실패는 요청을
+/// `inactive`로 남긴다.
 pub(in crate::full_translation_install) fn build_resolve_next_page_request(
     origin: u16,
     layout: MaterialLayout,
@@ -446,12 +510,14 @@ pub(in crate::full_translation_install) fn build_resolve_next_page_request(
         Instruction::LdaAbsolute(RECORD_INDEX_HIGH),
         Instruction::StaZeroPage(0x03),
     ]);
-    append_page_request_resolution(&mut instructions, &mut failure_branches, origin, layout)?;
+    let page_exhausted_branches =
+        append_page_request_resolution(&mut instructions, &mut failure_branches, origin, layout)?;
     finish_resolver(
         origin,
         instructions,
         failure_branches,
-        "dialogue next-page request resolver",
+        page_exhausted_branches,
+        NEXT_PAGE_REQUEST_RESOLVER_ROLE,
     )
 }
 
@@ -484,6 +550,91 @@ mod tests {
         instructions
             .extend((CANDIDATE_START..=DIALOGUE_RUNTIME_STATE_END).map(Instruction::StaAbsolute));
         assemble_at(0x8000, &instructions).unwrap()
+    }
+
+    fn execute_line_buffer_reset(bytes: &[u8], origin: u16, memory: &mut [u8; 0x10000]) -> usize {
+        let mut pc = origin;
+        let mut a = 0;
+        let mut y = 0;
+        let mut write_count = 0;
+        let end = origin + u16::try_from(bytes.len()).unwrap();
+        for _ in 0..1_000 {
+            if pc == end {
+                return write_count;
+            }
+            let offset = usize::from(pc - origin);
+            match bytes[offset] {
+                0xA9 => {
+                    a = bytes[offset + 1];
+                    pc += 2;
+                }
+                0xA0 => {
+                    y = bytes[offset + 1];
+                    pc += 2;
+                }
+                0x88 => {
+                    y = y.wrapping_sub(1);
+                    pc += 1;
+                }
+                0x99 => {
+                    let base = u16::from_le_bytes([bytes[offset + 1], bytes[offset + 2]]);
+                    memory[usize::from(base.wrapping_add(u16::from(y)))] = a;
+                    write_count += 1;
+                    pc += 3;
+                }
+                0xD0 => {
+                    let displacement = bytes[offset + 1] as i8;
+                    pc += 2;
+                    if y != 0 {
+                        pc = pc.wrapping_add_signed(i16::from(displacement));
+                    }
+                }
+                opcode => panic!("unsupported line-buffer reset opcode {opcode:02X}"),
+            }
+        }
+        panic!("line-buffer reset did not terminate");
+    }
+
+    #[test]
+    fn a_new_record_clears_all_six_physical_rows_without_touching_neighbors() {
+        let origin = 0x9000;
+        let instructions = new_record_line_buffer_reset(origin).unwrap();
+        let bytes = assemble_at(origin, &instructions).unwrap();
+        let mut memory = [0x5A; 0x10000];
+
+        let write_count = execute_line_buffer_reset(&bytes, origin, &mut memory);
+
+        let end = LINE_BUFFER_START + u16::from(LINE_BUFFER_BYTE_COUNT);
+        assert_eq!(write_count, usize::from(LINE_BUFFER_BYTE_COUNT));
+        assert!(
+            memory[usize::from(LINE_BUFFER_START)..usize::from(end)]
+                .iter()
+                .all(|byte| *byte == LINE_BUFFER_BLANK)
+        );
+        assert_eq!(memory[usize::from(LINE_BUFFER_START - 1)], 0x5A);
+        assert_eq!(memory[usize::from(end)], 0x5A);
+    }
+
+    #[test]
+    fn only_new_record_resolution_owns_the_physical_row_reset() {
+        let reset = assemble_at(0x9000, &new_record_line_buffer_reset(0x9000).unwrap()).unwrap();
+        let initial = build_resolve_request(0xA400, layout()).unwrap();
+        let next = build_resolve_next_page_request(0xA700, layout()).unwrap();
+
+        assert!(
+            initial
+                .bytes
+                .windows(reset.len())
+                .any(|window| window == reset),
+            "new-record resolution never clears the physical rows"
+        );
+        assert!(
+            !next
+                .bytes
+                .windows(reset.len())
+                .any(|window| window == reset),
+            "same-record page advance must preserve the current row lifetime"
+        );
     }
 
     /// 새 대사 수명은 조회 성공 여부와 관계없이 이전 정체성과 전송 커서를 모두
@@ -738,6 +889,61 @@ mod tests {
                 routine.role
             );
         }
+    }
+
+    #[test]
+    fn only_next_page_exhaustion_suspends_the_completed_page() {
+        let initial = build_resolve_request(0xA400, layout()).unwrap();
+        let next = build_resolve_next_page_request(0xA700, layout()).unwrap();
+        let suspension = [
+            0xA9,
+            STATE_COMPLETED_PAGE_SUSPENDED,
+            0x8D,
+            REQUEST_STATE as u8,
+            (REQUEST_STATE >> 8) as u8,
+        ];
+
+        assert!(
+            !initial
+                .bytes
+                .windows(suspension.len())
+                .any(|window| window == suspension),
+            "an initial lookup failure must not retain an unrelated old page"
+        );
+
+        let suspension_offset = next
+            .bytes
+            .windows(suspension.len())
+            .position(|window| window == suspension)
+            .expect("next-page exhaustion never suspends the completed page");
+        let suspension_address = next.address + u16::try_from(suspension_offset).unwrap();
+        let mut ordinary_failure_tail = vec![0x18];
+        for address in BORROWED_SCRATCH.iter().rev() {
+            ordinary_failure_tail.extend([0x68, 0x85, *address]);
+        }
+        ordinary_failure_tail.push(0x60);
+        assert!(next.bytes.ends_with(&ordinary_failure_tail));
+        let ordinary_failure_address =
+            next.address + u16::try_from(next.bytes.len() - ordinary_failure_tail.len()).unwrap();
+        let jump_targets = next
+            .bytes
+            .windows(3)
+            .filter(|window| window[0] == 0x4C)
+            .map(|window| u16::from_le_bytes([window[1], window[2]]))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            jump_targets
+                .iter()
+                .filter(|target| **target == suspension_address)
+                .count(),
+            2,
+            "the high-byte and same-high-byte record-end checks must share the suspension exit"
+        );
+        assert!(
+            jump_targets.contains(&ordinary_failure_address),
+            "malformed or empty recipe failures must remain inactive instead of reusing stale material"
+        );
     }
 
     /// 실패는 커서를 세우지 않고 캐리를 지워서 알려야 한다. 세워 버리면 생산자가

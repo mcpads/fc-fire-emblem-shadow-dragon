@@ -13,7 +13,7 @@ use super::shop_dialogue_page::{ShopDialoguePagePlan, extend_shop_dialogue_page}
 mod projection;
 mod selectors;
 
-pub(super) use selectors::{
+pub(crate) use selectors::{
     CHOICE_POINTER_LOAD_ADDRESS, CHOICE_POINTER_LOAD_BYTES, CHOICE_POINTER_LOAD_PRG_BANK,
     CHOICE_SELECTOR_ADDRESS, CODE_RANGES, ITEM_LIST_POINTER_LOAD_ADDRESS,
     ITEM_LIST_POINTER_LOAD_BYTES, ITEM_LIST_POINTER_LOAD_PRG_BANK, ITEM_LIST_SELECTOR_ADDRESS,

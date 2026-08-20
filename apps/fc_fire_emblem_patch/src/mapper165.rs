@@ -75,6 +75,11 @@ mod weapon_shop_shared_text;
 mod writer_census;
 mod writer_sites;
 
+pub(crate) use weapon_shop_shared_text::{
+    ITEM_LIST_POINTER_LOAD_ADDRESS, ITEM_LIST_POINTER_LOAD_BYTES, ITEM_LIST_POINTER_LOAD_PRG_BANK,
+    build_item_list_pointer_load_call,
+};
+
 pub(crate) const ROSTER_HEADER_FIXED_STRING_INDEX: u8 = roster_page::HEADER_RESOURCE_ID;
 
 use runtime::{

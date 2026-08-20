@@ -68,6 +68,7 @@ mod runtime_material;
 mod runtime_nmi_contract;
 mod runtime_state_storage;
 mod screen_font_residency;
+mod shop_item_residency;
 mod storage_residency;
 mod transition_residency;
 
@@ -129,6 +130,10 @@ use screen_font_residency::{
     DialogueSurfaceInputs, ScreenFontResidencyInputs, ScreenFontResidencyPlan,
     finalize_screen_font_residency, plan_screen_font_residency,
 };
+use shop_item_residency::{
+    ShopItemResidencyInputs, ShopItemWorksetResidencyInputs, plan_shop_item_residency,
+    plan_shop_item_workset_residency,
+};
 use storage_residency::{StorageDialogueResidencyPlan, plan_storage_dialogue_residency};
 use transition_residency::{bind_transition_lifetime_worksets, plan_transition_residency};
 
@@ -185,7 +190,7 @@ pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) output_will_be_emitted: bool,
 }
 
-pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 31;
+pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 33;
 
 pub(crate) struct FullTranslationInstallSummary {
     pub(crate) report_sha1: String,
@@ -319,6 +324,14 @@ pub(crate) fn plan_full_translation_installation(
         &locations.entries,
         &transition_lifetimes,
     )?;
+    let shop_item_workset_residency =
+        plan_shop_item_workset_residency(ShopItemWorksetResidencyInputs {
+            source: &rom,
+            display: &display,
+            fixed: &fixed,
+            dialogue_worksets: &dynamic_inputs.augmented_worksets,
+            canonical_dynamic_codes: dynamic_inputs.canonical_dynamic_codes(),
+        })?;
     let dynamic_input_producers = inspect_dynamic_input_producers(&rom)?;
     let mut dynamic_producer_encoding = bind_dynamic_producer_encoding(
         &current_candidate,
@@ -331,7 +344,7 @@ pub(crate) fn plan_full_translation_installation(
         &rom,
         &display,
         &chapter_titles,
-        &dynamic_inputs.augmented_worksets,
+        &shop_item_workset_residency.augmented_worksets,
     )?;
     let front_end_result_menu_residency = plan_front_end_result_menu_residency(
         &rom,
@@ -447,6 +460,7 @@ pub(crate) fn plan_full_translation_installation(
         screen_font_residency_draft,
         DialogueSurfaceInputs {
             dynamic_inputs: &dynamic_inputs.augmented_worksets,
+            shop_items: &shop_item_workset_residency.augmented_worksets,
             chapter_intro: &chapter_intro_residency.augmented_worksets,
             choice_and_front_end_menu: &choice_residency.augmented_worksets,
             storage_dialogue: &storage_dialogue_residency.augmented_worksets,
@@ -620,6 +634,18 @@ pub(crate) fn plan_full_translation_installation(
         )?,
         producer_encoding_base: window(producer_encoding_offset)?,
     };
+    let consumer_catalog_runtime_layout =
+        cross_domain_material.consumer_catalog_runtime_layout()?;
+    let mut shop_item_residency = plan_shop_item_residency(ShopItemResidencyInputs {
+        workset_residency: &shop_item_workset_residency,
+        dynamic_producer_encoding: &dynamic_producer_encoding,
+        consumer_catalog_runtime: cross_domain_material.consumer_catalog_runtime(),
+        producer_material_page: layout.producer_encoding_page,
+        producer_material_base: layout.producer_encoding_base,
+        producer_item_directory: layout.producer_item_directory,
+        consumer_catalog_layout: consumer_catalog_runtime_layout,
+        e7_caller_resume_flag_address: runtime_code::lifecycle::E7_CALLER_RESUME_FLAG,
+    })?;
     let dialogue_runtime_code = plan_dialogue_runtime_code(
         &rom,
         &current_candidate,
@@ -627,12 +653,19 @@ pub(crate) fn plan_full_translation_installation(
         page(atlas_offset)?,
         runtime_material.runtime_code_mmc3_page(),
         layout,
-        cross_domain_material.consumer_catalog_runtime_layout()?,
+        consumer_catalog_runtime_layout,
+        shop_item_residency.runtime_contract(),
         cold_request_presentation.mapper_register,
         screen_font_residency.routes(),
     )?;
     let assembled_hook_roles = dialogue_runtime_code.hook_roles();
+    let new_record_line_buffer_reset_routes_bound =
+        dialogue_runtime_code.new_record_line_buffer_reset_routes_bound()?;
     dynamic_producer_encoding.bind_runtime_hooks(&assembled_hook_roles)?;
+    shop_item_residency.bind_runtime_routes(
+        &dialogue_runtime_code,
+        dynamic_producer_encoding.canonical_outputs_ready(),
+    )?;
     let dynamic_string_producers_bound = dynamic_input_producers
         .every_record_selector_route_bound()
         && dynamic_producer_encoding.canonical_outputs_ready();
@@ -643,6 +676,7 @@ pub(crate) fn plan_full_translation_installation(
         &dialogue_graph,
         &dynamic_input_producers,
         &assembled_hook_roles,
+        new_record_line_buffer_reset_routes_bound,
     )?;
     for routine in &dialogue_runtime_code.code_routines {
         runtime_material.place_runtime_code(routine.address, &routine.bytes)?;
@@ -966,6 +1000,7 @@ pub(crate) fn plan_full_translation_installation(
         chapter_intro_residency: chapter_intro_residency_report,
         choice_residency,
         storage_dialogue_residency,
+        shop_item_residency,
         screen_font_residency,
         front_end_result_residency,
         chapter_save_projection,

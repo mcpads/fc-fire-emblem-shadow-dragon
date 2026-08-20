@@ -157,10 +157,14 @@ pub(in crate::full_translation_install::runtime_code) fn build_fixed_menu_font_p
     })
 }
 
-/// 이번 합성에 필요한 페이지 수명을 게시한다. 요약은 이전 route를 지운 뒤
+/// 이번 합성이 바꾸는 페이지 수명을 게시한다. 요약은 이전 route를 지운 뒤
 /// unit/enemy appender가 실제 페이지를 게시하게 하고, 상태는 요약이 게시한 route를
-/// 그대로 유지한다. 아이템·병종·동작 문자열은 모든 카탈로그 페이지에서 같은 코드를
-/// 쓰므로 기본 카탈로그 페이지를 게시한다.
+/// 그대로 유지한다. 저장소 overlay는 완료 대사 selector로 명시적으로 넘긴다.
+///
+/// 그 밖의 합성 상태는 **현재 화면의 보조 합성**일 수 있으므로 게시값을 바꾸지 않는다.
+/// 실제 화면 이탈은 별도 close/gameplay-handoff 경계가 소유한다. 합성기 번호 하나를
+/// 화면 수명으로 오해해 여기서 0을 쓰면, unit-summary가 이름 페이지를 게시한 직후
+/// 상태 `$0A` 보조 합성이 그 페이지를 지워 원문 CHR로 되돌아간다.
 pub(in crate::full_translation_install::runtime_code) fn build_composite_font_page_publisher(
     origin: u16,
     activation: u16,
@@ -184,11 +188,23 @@ pub(in crate::full_translation_install::runtime_code) fn build_composite_font_pa
     instructions.push(Instruction::CmpImmediate(UNIT_SUMMARY_COMPOSITE_STATE));
     let clear_for_summary_jump = instructions.len();
     instructions.push(Instruction::BeqAbsolute(origin));
-    instructions.push(Instruction::CmpImmediate(UNIT_STATUS_COMPOSITE_STATE));
-    let retain_for_status_jump = instructions.len();
+    // Unit status and auxiliary composers share the default retain path.  The source-bound
+    // summary entry below is the only member of that lifetime which must clear the prior route;
+    // its name appender then publishes the exact unit/enemy catalog page for status to inherit.
+    instructions.push(Instruction::CmpImmediate(
+        STORAGE_ACTION_MENU_COMPOSITE_STATE,
+    ));
+    let clear_for_storage_action_jump = instructions.len();
     instructions.push(Instruction::BeqAbsolute(origin));
-    // States $13 and $14 are adjacent and share the map-menu page. A final
-    // unsigned range check represents both without growing two equality routes.
+    instructions.push(Instruction::CmpImmediate(
+        STORAGE_OVERFLOW_ACTION_COMPOSITE_STATE,
+    ));
+    let clear_for_storage_overflow_jump = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(origin));
+    // States $13 and $14 are adjacent and share the map-menu page.  The following
+    // state $15 is the source-bound shop item composer: it must discard the prior
+    // unit-command route so the active E7 caller can restore its dialogue page.
+    // One subtraction therefore owns all three states without another full CMP route.
     instructions.extend([
         Instruction::Sec,
         Instruction::SbcImmediate(MAP_FUNDS_COMPOSITE_STATE),
@@ -196,16 +212,19 @@ pub(in crate::full_translation_install::runtime_code) fn build_composite_font_pa
     ]);
     let map_summary_range_jump = instructions.len();
     instructions.push(Instruction::BccAbsolute(origin));
+    let shop_dialogue_restore_jump = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(origin));
+    instructions.push(Instruction::Rts);
     let clear_target = next_address(origin, &instructions)?;
     instructions[clear_for_summary_jump] = Instruction::BeqAbsolute(clear_target);
+    instructions[clear_for_storage_action_jump] = Instruction::BeqAbsolute(clear_target);
+    instructions[clear_for_storage_overflow_jump] = Instruction::BeqAbsolute(clear_target);
+    instructions[shop_dialogue_restore_jump] = Instruction::BeqAbsolute(clear_target);
     instructions.extend([
         Instruction::LdaImmediate(0),
         Instruction::StaAbsolute(CONSUMER_FONT_PAGE),
+        Instruction::JmpAbsolute(CENTRAL_RIGHT_FD_WRITER),
     ]);
-    instructions.push(Instruction::Rts);
-    let retain_target = next_address(origin, &instructions)?;
-    instructions[retain_for_status_jump] = Instruction::BeqAbsolute(retain_target);
-    instructions.push(Instruction::Rts);
     for page in [
         ScreenFontPageRole::FrontEndMenu,
         ScreenFontPageRole::FrontEndRecordAction,

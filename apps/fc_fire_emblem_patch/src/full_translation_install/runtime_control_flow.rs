@@ -37,7 +37,7 @@ const CENTRAL_SELECTOR_FALLBACK: u16 = 0xFF40;
 /// 완성된 대사 수명이 원본 제어 흐름에 끼어들어야 하는 모든 역할이다.
 ///
 /// 주소의 개수가 아니다. 완료 판정은 이 역할 집합에서 빠진 것이 없는지를 본다.
-const PLANNED_HOOK_ROLES: [DialogueRuntimeHookRole; 31] = [
+const PLANNED_HOOK_ROLES: [DialogueRuntimeHookRole; 32] = [
     DialogueRuntimeHookRole::InitialDirectEntryRequest,
     DialogueRuntimeHookRole::E4TransitionEntryRequest,
     DialogueRuntimeHookRole::E6TransitionEntryRequest,
@@ -56,6 +56,7 @@ const PLANNED_HOOK_ROLES: [DialogueRuntimeHookRole; 31] = [
     DialogueRuntimeHookRole::ConsumerCatalogItemAppender,
     DialogueRuntimeHookRole::ConsumerCatalogUnitAppender,
     DialogueRuntimeHookRole::ConsumerCatalogClassAppender,
+    DialogueRuntimeHookRole::ShopItemListAppender,
     DialogueRuntimeHookRole::ConsumerFontPagePublisher,
     DialogueRuntimeHookRole::ConsumerFontPageOpen,
     DialogueRuntimeHookRole::ConsumerFontPageClose,
@@ -506,14 +507,14 @@ pub(super) fn plan_dialogue_runtime_control_flow(
                 prg_bank_hex: "0x0A",
                 cpu_address_hex: "0x85C9",
                 source_span_byte_count: 29,
-                request: "invalidate_terminal_but_retain_resident_page_through_E6_idle_transition",
-                continuity: "terminal ends the lifetime; E6 idle immediately enters its declared next record",
+                request: "suspend_a_terminal_page_for_source_bound_storage_overlays_or_retain_residency_through_E6_idle",
+                continuity: "terminal selection is retained only by storage composite states 1D/23; E6 idle immediately enters its declared next record",
             },
         ])
         .collect();
 
     Ok(DialogueRuntimeControlFlowPlan {
-        strategy: "treat the original selector and entry as a one-record lookahead pipeline: seed a new lifetime from the live identity, promote the previously published identity on a changed producer call, freeze the new live identity for the following transition, advance exactly one four-line workset only when the original completed-page state chooses 09 continue, retain the completed CHR page through E6 and E7 non-dialogue states, invalidate it at the actual battle CHR-RAM writer, reuse only the exact repeated identity without skipping the displaced source resolver, overlay every glyph used by each newly resolved visible page without restoring 4 KiB when residency exists, and cold-compose only without valid residency",
+        strategy: "treat the original selector and entry as a one-record lookahead pipeline: seed a new lifetime from the live identity, promote the previously published identity on a changed producer call, freeze the new live identity for the following transition, advance exactly one four-line workset only when the original completed-page state chooses 09 continue, retain the completed CHR page through E6 and E7 non-dialogue states and through source-bound storage overlays 1D/23, invalidate it at a new request or the actual battle CHR-RAM writer, reuse only the exact repeated identity without skipping the displaced source resolver, overlay every glyph used by each newly resolved visible page without restoring 4 KiB when residency exists, and cold-compose only without valid residency",
         states: vec![
             RuntimeState {
                 id: "inactive",

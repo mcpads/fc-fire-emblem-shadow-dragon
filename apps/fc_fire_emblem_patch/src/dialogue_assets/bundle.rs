@@ -44,9 +44,6 @@ pub(crate) struct MainDialoguePageWorkset {
     pub(crate) record_id: String,
     pub(crate) page_index: usize,
     pub(crate) target_glyphs: BTreeSet<char>,
-    /// 이 페이지가 실제로 쓰는 줄들의 글리프를 순서대로 담는다. 줄 버퍼는 레코드가
-    /// 바뀌어도 비워지지 않으므로, 짧은 레코드가 앞선 레코드의 뒷줄을 화면에 남긴다.
-    pub(crate) visible_line_target_glyphs: Vec<BTreeSet<char>>,
     pub(crate) dynamic_string_selectors: BTreeSet<u8>,
     pub(crate) dynamic_string_selector_counts: BTreeMap<u8, usize>,
     pub(crate) dynamic_string_control_count: usize,
@@ -372,7 +369,6 @@ fn record_page_worksets<'a>(
                 workspace_record.id
             );
             let mut target_glyphs = BTreeSet::new();
-            let mut visible_line_target_glyphs = Vec::new();
             let mut dynamic_string_selector_counts = BTreeMap::new();
             let mut dynamic_string_control_count = 0;
             let mut preserved_target_active_codes = script_control_codes.clone();
@@ -407,14 +403,11 @@ fn record_page_worksets<'a>(
                         .into_iter()
                         .filter(|code| active_codes.contains(code)),
                 );
-                let mut line_glyphs = BTreeSet::new();
                 for byte in logical_line {
                     if let LogicalDialogueByte::TargetGlyph(glyph) = byte {
                         target_glyphs.insert(glyph);
-                        line_glyphs.insert(glyph);
                     }
                 }
-                visible_line_target_glyphs.push(line_glyphs);
                 for file_offset in &source_line.literal_file_offsets {
                     let code = *source
                         .get(*file_offset)
@@ -433,7 +426,6 @@ fn record_page_worksets<'a>(
                 record_id: workspace_record.id.clone(),
                 page_index,
                 target_glyphs,
-                visible_line_target_glyphs,
                 dynamic_string_selectors: dynamic_string_selector_counts.keys().copied().collect(),
                 dynamic_string_selector_counts,
                 dynamic_string_control_count,
@@ -637,23 +629,6 @@ mod tests {
         let selectors = dynamic_string_controls(&logical).unwrap();
 
         assert_eq!(selectors, BTreeMap::from([(0, 2), (2, 1)]));
-    }
-
-    #[test]
-    fn a_page_workset_keeps_each_visible_line_glyph_set_in_order() {
-        let source = [0xEA, 0x08, 0xED, 0x09, 0xEF];
-        let source_record = source_record_with_line(&source);
-        let workspace_record =
-            workspace_record_with_line(TranslationStatus::NeedsHumanReview, "{EA}가나{ED}");
-
-        let worksets = record_page_worksets(&source, &source_record, &workspace_record)
-            .collect::<Result<Vec<_>>>()
-            .unwrap();
-
-        assert_eq!(
-            worksets[0].visible_line_target_glyphs,
-            vec![BTreeSet::from(['가', '나'])]
-        );
     }
 
     #[test]

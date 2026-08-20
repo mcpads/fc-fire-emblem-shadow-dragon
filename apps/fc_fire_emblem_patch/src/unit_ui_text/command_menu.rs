@@ -147,12 +147,29 @@ pub(crate) const COMMAND_LABEL_SPECS: &[FixedLabelSpec] = &[
 ];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct MapFacilityActionRecord {
+    facility_selector: u8,
+    payload: u8,
+}
+
+impl MapFacilityActionRecord {
+    pub(crate) fn facility_selector(&self) -> u8 {
+        self.facility_selector
+    }
+
+    pub(crate) fn payload(&self) -> u8 {
+        self.payload
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct MapFacilityDispatchSource {
     prg_bank: u8,
     dispatch_call: u16,
     handler_selectors: BTreeSet<u8>,
     produced_selectors: BTreeSet<u8>,
     producer_instruction_starts: BTreeSet<u16>,
+    records: Vec<MapFacilityActionRecord>,
 }
 
 impl MapFacilityDispatchSource {
@@ -172,8 +189,16 @@ impl MapFacilityDispatchSource {
         &self.produced_selectors
     }
 
+    pub(crate) fn handler_target(&self, selector: u8) -> Option<u16> {
+        FACILITY_HANDLER_TARGETS.get(usize::from(selector)).copied()
+    }
+
     pub(crate) fn producer_instruction_starts(&self) -> &BTreeSet<u16> {
         &self.producer_instruction_starts
+    }
+
+    pub(crate) fn records(&self) -> &[MapFacilityActionRecord] {
+        &self.records
     }
 }
 
@@ -227,10 +252,10 @@ pub(crate) fn bind_map_facility_dispatch_source(source: &Rom) -> Result<MapFacil
 
     let records = parse_map_facility_records(source.prg())?;
     ensure!(
-        records.record_count == CHAPTER_FACILITY_RECORD_COUNT
+        records.records.len() == CHAPTER_FACILITY_RECORD_COUNT
             && records.end_address == CHAPTER_FACILITY_RECORDS_END,
         "map facility record directory extent changed: records={}, end=${:04X}",
-        records.record_count,
+        records.records.len(),
         records.end_address,
     );
     let produced_selectors = records.facility_types;
@@ -246,13 +271,14 @@ pub(crate) fn bind_map_facility_dispatch_source(source: &Rom) -> Result<MapFacil
         handler_selectors,
         produced_selectors,
         producer_instruction_starts: BTreeSet::from([0xA2C0, 0xA2CC, 0xA2D0, 0xA2DF]),
+        records: records.records,
     })
 }
 
 #[derive(Debug)]
 struct MapFacilityRecords {
     facility_types: BTreeSet<u8>,
-    record_count: usize,
+    records: Vec<MapFacilityActionRecord>,
     end_address: u16,
 }
 
@@ -273,7 +299,7 @@ fn parse_map_facility_records(prg: &[u8]) -> Result<MapFacilityRecords> {
     );
 
     let mut facility_types = BTreeSet::new();
-    let mut record_count = 0_usize;
+    let mut records = Vec::new();
     let mut final_end = None;
     for (chapter_index, &pointer) in pointers.iter().enumerate() {
         let mut address = pointer;
@@ -306,7 +332,10 @@ fn parse_map_facility_records(prg: &[u8]) -> Result<MapFacilityRecords> {
                 record[2]
             );
             facility_types.insert(record[2]);
-            record_count += 1;
+            records.push(MapFacilityActionRecord {
+                facility_selector: record[2],
+                payload: record[3],
+            });
             address = address
                 .checked_add(CHAPTER_FACILITY_RECORD_SIZE as u16)
                 .context("map facility record address overflow")?;
@@ -321,7 +350,7 @@ fn parse_map_facility_records(prg: &[u8]) -> Result<MapFacilityRecords> {
 
     Ok(MapFacilityRecords {
         facility_types,
-        record_count,
+        records,
         end_address: final_end.context("map facility directory has no final list")?,
     })
 }
@@ -776,7 +805,9 @@ mod tests {
             records.facility_types,
             BTreeSet::from([0x01, 0x02, 0x03, 0x04, 0x05])
         );
-        assert_eq!(records.record_count, CHAPTER_FACILITY_COUNT);
+        assert_eq!(records.records.len(), CHAPTER_FACILITY_COUNT);
+        assert_eq!(records.records[0].facility_selector(), 0x01);
+        assert_eq!(records.records[0].payload(), 0x00);
     }
 
     #[test]

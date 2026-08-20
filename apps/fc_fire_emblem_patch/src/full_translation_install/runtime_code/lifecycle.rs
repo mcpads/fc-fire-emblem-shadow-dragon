@@ -16,7 +16,7 @@ use super::super::{
     runtime_bank_contract::PRG_A000_REGISTER, runtime_nmi_contract::PPU_CONTROL_SHADOW,
     runtime_state_storage::CURRENT_PAGE_RESIDENCY,
 };
-use super::transport::{REQUEST_STATE, STATE_READY};
+use super::transport::{REQUEST_STATE, STATE_COMPLETED_PAGE_SUSPENDED, STATE_READY};
 use super::{RuntimeRoutine, next_address};
 use crate::{
     chapter_transition::{ENDING_CHARACTER_EPILOGUE_SELECTOR_PHASE, ENDING_RECORD_PHASE_ADDRESS},
@@ -51,7 +51,7 @@ const PAGE_ADVANCE_CLEAR: u16 = 0x7804;
 const E7_DECODER_FLAG: u16 = 0x7808;
 /// E7 외부 호출자가 복귀를 요청할 때 올리고, `$871C`의 resolver 직후 지우는
 /// 원본 플래그다. E4/E6 lookahead에서는 0, caller resume에서는 1이다.
-pub(super) const E7_CALLER_RESUME_FLAG: u16 = 0x7809;
+pub(in crate::full_translation_install) const E7_CALLER_RESUME_FLAG: u16 = 0x7809;
 
 const BANK_VALUE_REGISTER: u16 = 0x8001;
 const PAIRED_BANK_HELPER: u16 = 0xFA20;
@@ -295,7 +295,9 @@ pub(super) fn build_lifecycle_suite(
     let visible_epilogue_placeholder = instructions.len();
     instructions.push(Instruction::BeqAbsolute(origin));
     instructions.extend([
-        Instruction::LdaImmediate(0),
+        // 일반 종단은 selector에서 즉시 숨기되, 원천에 결속된 저장소 overlay가
+        // 같은 완료 페이지를 다시 고를 수 있도록 전송과 구별되는 상태로 내린다.
+        Instruction::LdaImmediate(STATE_COMPLETED_PAGE_SUSPENDED),
         Instruction::StaAbsolute(REQUEST_STATE),
     ]);
     let restore_terminal_state = next_address(origin, &instructions)?;
@@ -403,7 +405,7 @@ mod tests {
     }
 
     #[test]
-    fn page_completion_preserves_all_three_source_outcomes() {
+    fn page_completion_preserves_all_three_source_outcomes_and_suspends_a_terminal_page() {
         let suite = lifecycle_suite();
         for state in [TERMINAL_STATE, IDLE_STATE, CONTINUE_STATE] {
             assert!(
@@ -423,6 +425,16 @@ mod tests {
                 .windows(invalidate.len())
                 .any(|window| window == invalidate)
         );
+        assert!(suite.routine.bytes.windows(5).any(|window| {
+            window
+                == [
+                    0xA9,
+                    STATE_COMPLETED_PAGE_SUSPENDED,
+                    0x8D,
+                    REQUEST_STATE as u8,
+                    (REQUEST_STATE >> 8) as u8,
+                ]
+        }));
     }
 
     #[test]
@@ -456,9 +468,9 @@ mod tests {
             ENDING_CHARACTER_EPILOGUE_SELECTOR_PHASE,
             0xF0,
         ];
-        let invalidate = [
+        let suspend_completed_page = [
             0xA9,
-            0x00,
+            STATE_COMPLETED_PAGE_SUSPENDED,
             0x8D,
             REQUEST_STATE as u8,
             (REQUEST_STATE >> 8) as u8,
@@ -476,7 +488,7 @@ mod tests {
         );
         assert_eq!(
             &bytes[terminal_target + ending_guard.len() + 1..retain_target],
-            invalidate
+            suspend_completed_page
         );
         assert_eq!(bytes[retain_target], 0x68, "terminal state A is restored");
     }

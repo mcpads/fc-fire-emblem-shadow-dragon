@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{collections::BTreeSet, fs, path::Path};
 
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
@@ -7,6 +7,8 @@ use crate::{
     dialogue_inventory::{ShopDialogueTableBinding, inspect_shop_dialogue_table},
     rom::{EXPECTED_SOURCE_SHA1, HEADER_SIZE, Rom},
     sha1_hex,
+    typed_source::decode_rp2a03_sequence,
+    unit_ui_text::bind_map_facility_dispatch_source,
 };
 
 mod report;
@@ -16,10 +18,23 @@ mod source_spec;
 #[cfg(test)]
 mod tests;
 
+pub(crate) const SHOP_DIALOGUE_LIFETIME_RECORD_IDS: [&str; 8] = [
+    "shop-and-item-dialogue:000",
+    "shop-and-item-dialogue:001",
+    "shop-and-item-dialogue:002",
+    "shop-and-item-dialogue:003",
+    "shop-and-item-dialogue:004",
+    "shop-and-item-dialogue:005",
+    "shop-and-item-dialogue:006",
+    "shop-and-item-dialogue:054",
+];
+pub(crate) const SHOP_ITEM_ENTRY_COUNT: usize = 0x5B;
+
 pub use report::ShopFlowSummary;
 use report::*;
 use screen_roles::*;
 use source_binding::*;
+pub(crate) use source_binding::{SHOP_ITEM_COMPOSITE_STATE, bind_shop_item_composition_source};
 pub(crate) use source_binding::{SharedMenuControllerSource, bind_shared_menu_controller_source};
 use source_spec::*;
 

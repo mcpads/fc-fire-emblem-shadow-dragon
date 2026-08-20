@@ -73,6 +73,10 @@ pub(in crate::full_translation_install) struct ConsumerCatalogRuntimeMaterialPla
 }
 
 impl ConsumerCatalogRuntimeMaterialPlan {
+    pub(in crate::full_translation_install) fn item_material_entry_count(&self) -> usize {
+        self.item_entry_count
+    }
+
     pub(in crate::full_translation_install) fn layout(
         &self,
     ) -> Result<ConsumerCatalogRuntimeLayout> {

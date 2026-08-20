@@ -7,9 +7,9 @@ use std::{
 use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 
-use crate::{rom::EXPECTED_SOURCE_SHA1, sha1_hex};
+use crate::{rom::EXPECTED_SOURCE_SHA1, sha1_hex, shop_flow::SHOP_DIALOGUE_LIFETIME_RECORD_IDS};
 
-use super::{RECORD_IDS, SCREEN_ROLE};
+use super::SCREEN_ROLE;
 
 const NAMETABLE_MEMORY_SIZE: usize = 2 * 1024;
 const INTERNAL_RAM_SIZE: usize = 2 * 1024;
@@ -76,7 +76,10 @@ pub(super) fn load_shop_screen_codes(manifest_path: &Path) -> Result<ShopScreenE
         "weapon-shop screen evidence role changed"
     );
     ensure!(
-        manifest.target_record_ids == RECORD_IDS.map(str::to_owned).to_vec(),
+        manifest.target_record_ids
+            == SHOP_DIALOGUE_LIFETIME_RECORD_IDS
+                .map(str::to_owned)
+                .to_vec(),
         "weapon-shop screen evidence record bundle changed"
     );
     ensure!(

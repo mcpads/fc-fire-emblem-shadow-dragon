@@ -25,16 +25,6 @@ pub(super) use selector::{
 };
 
 pub(super) const SCREEN_ROLE: &str = "weapon_shop_dialogue_lifetime";
-pub(super) const RECORD_IDS: [&str; 8] = [
-    "shop-and-item-dialogue:000",
-    "shop-and-item-dialogue:001",
-    "shop-and-item-dialogue:002",
-    "shop-and-item-dialogue:003",
-    "shop-and-item-dialogue:004",
-    "shop-and-item-dialogue:005",
-    "shop-and-item-dialogue:006",
-    "shop-and-item-dialogue:054",
-];
 
 const SOURCE_FONT_PHYSICAL_PAGE: usize = 2;
 

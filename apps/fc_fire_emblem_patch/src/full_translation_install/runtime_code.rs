@@ -12,6 +12,7 @@ use super::{
     consumer_catalog::ConsumerCatalogRuntimeLayout,
     runtime_bank_contract::bind_bank_restore_contract, runtime_nmi_contract::bind_quiet_frame_gate,
     screen_font_residency::ScreenFontPageRoutes,
+    shop_item_residency::ShopItemResidencyRuntimeContract,
 };
 use crate::{
     mapper165::{
@@ -71,6 +72,7 @@ pub(in crate::full_translation_install) enum DialogueRuntimeHookRole {
     ConsumerCatalogItemAppender,
     ConsumerCatalogUnitAppender,
     ConsumerCatalogClassAppender,
+    ShopItemListAppender,
     ConsumerFontPagePublisher,
     ConsumerFontPageOpen,
     ConsumerFontPageClose,
@@ -156,12 +158,99 @@ impl DialogueRuntimeCodePlan {
         self.hooks.iter().map(|hook| hook.role).collect()
     }
 
+    /// 네 종류의 새 레코드 진입이 하나의 물리 줄 초기화 경계를 공유하고, 같은
+    /// 레코드의 다음 페이지는 그 초기화를 우회하는지 조립 결과에서 다시 확인한다.
+    pub(in crate::full_translation_install) fn new_record_line_buffer_reset_routes_bound(
+        &self,
+    ) -> Result<bool> {
+        let resolver = self
+            .code_routines
+            .iter()
+            .find(|routine| routine.role == resolve_request::INITIAL_PAGE_REQUEST_RESOLVER_ROLE)
+            .context("new-record request resolver is missing")?;
+        ensure!(
+            resolve_request::contains_new_record_line_buffer_reset(resolver)?,
+            "new-record request resolver no longer clears the six physical dialogue rows"
+        );
+        let next_page_resolver = self
+            .code_routines
+            .iter()
+            .find(|routine| routine.role == resolve_request::NEXT_PAGE_REQUEST_RESOLVER_ROLE)
+            .context("same-record next-page resolver is missing")?;
+        ensure!(
+            !resolve_request::contains_new_record_line_buffer_reset(next_page_resolver)?,
+            "same-record next-page resolver unexpectedly clears the physical dialogue rows"
+        );
+
+        let initial_publisher = self
+            .fixed_routines
+            .iter()
+            .find(|routine| routine.role == dispatcher_gate::INITIAL_REQUEST_PUBLISHER_ROLE)
+            .context("initial request publisher is missing")?;
+        let transition_publisher = self
+            .fixed_routines
+            .iter()
+            .find(|routine| routine.role == dispatcher_gate::SOURCE_IDENTITY_REQUEST_PUBLISHER_ROLE)
+            .context("source-identity request publisher is missing")?;
+        for publisher in [initial_publisher, transition_publisher] {
+            let resolver_call = [0x20, resolver.address as u8, (resolver.address >> 8) as u8];
+            ensure!(
+                publisher
+                    .bytes
+                    .windows(resolver_call.len())
+                    .any(|window| window == resolver_call),
+                "{} no longer reaches the new-record resolver",
+                publisher.role
+            );
+        }
+
+        for (role, expected_target) in [
+            (
+                DialogueRuntimeHookRole::InitialDirectEntryRequest,
+                initial_publisher.address,
+            ),
+            (
+                DialogueRuntimeHookRole::E4TransitionEntryRequest,
+                transition_publisher.address,
+            ),
+            (
+                DialogueRuntimeHookRole::E6TransitionEntryRequest,
+                transition_publisher.address,
+            ),
+            (
+                DialogueRuntimeHookRole::E7CallerResumeRequest,
+                transition_publisher.address,
+            ),
+        ] {
+            let matching = self
+                .hooks
+                .iter()
+                .filter(|hook| hook.role == role)
+                .collect::<Vec<_>>();
+            ensure!(
+                matching.len() == 1,
+                "new-record line-buffer route has {} hooks for {role:?}",
+                matching.len()
+            );
+            let hook = matching[0];
+            ensure!(
+                matches!(
+                    hook.site,
+                    DialogueRuntimeHookSite::Switchable { bank: 0x0A, .. }
+                ) && hook.bytes == [0x20, expected_target as u8, (expected_target >> 8) as u8,],
+                "{role:?} no longer reaches its new-record request publisher"
+            );
+        }
+        Ok(true)
+    }
+
     pub(in crate::full_translation_install) fn consumer_catalog_paths_planned(&self) -> bool {
         let roles = self.hook_roles().into_iter().collect::<BTreeSet<_>>();
         [
             DialogueRuntimeHookRole::ConsumerCatalogItemAppender,
             DialogueRuntimeHookRole::ConsumerCatalogUnitAppender,
             DialogueRuntimeHookRole::ConsumerCatalogClassAppender,
+            DialogueRuntimeHookRole::ShopItemListAppender,
             DialogueRuntimeHookRole::ConsumerFontPagePublisher,
             DialogueRuntimeHookRole::ConsumerFontPageOpen,
             DialogueRuntimeHookRole::ConsumerFontPageClose,
@@ -181,6 +270,29 @@ impl DialogueRuntimeCodePlan {
                 .fixed_routines
                 .iter()
                 .any(|routine| routine.role == "consumer font page activation")
+    }
+
+    pub(in crate::full_translation_install) fn verify_shop_item_residency_routes(
+        &self,
+        contract: &ShopItemResidencyRuntimeContract,
+    ) -> Result<()> {
+        let item_appender = self
+            .code_routines
+            .iter()
+            .find(|routine| routine.role == "consumer catalog indexed string appender")
+            .context("consumer catalog item appender is missing")?;
+        consumer_catalog::verify_shop_item_residency_route(item_appender, *contract)?;
+        consumer_catalog::verify_shop_item_list_hook(&self.hooks)?;
+        let selector = self
+            .fixed_routines
+            .iter()
+            .find(|routine| routine.role == "dialogue CHR RAM selector")
+            .context("dialogue CHR selector is missing")?;
+        chr_selector::verify_e7_dialogue_page_residency(
+            selector,
+            contract.e7_caller_resume_flag_address,
+        )?;
+        Ok(())
     }
 
     pub(in crate::full_translation_install) fn final_roster_consumer_route(
@@ -319,6 +431,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     code_page: u8,
     layout: resolve_request::MaterialLayout,
     consumer_catalog_layout: ConsumerCatalogRuntimeLayout,
+    shop_item_residency: ShopItemResidencyRuntimeContract,
     cold_request_mapper_register: u8,
     consumer_font_pages: ScreenFontPageRoutes,
 ) -> Result<DialogueRuntimeCodePlan> {
@@ -490,6 +603,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         consumer_font_page_activation.address,
         consumer_font_pages.front_end_record_action,
         consumer_catalog_layout,
+        shop_item_residency,
     )?;
     ensure_routines_fit_cave(
         &[
@@ -769,6 +883,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         hooks,
         chr_restore_callee_cycles,
     };
+    plan.new_record_line_buffer_reset_routes_bound()?;
     verify_planned_mapper_select_writes(&plan)?;
     Ok(plan)
 }

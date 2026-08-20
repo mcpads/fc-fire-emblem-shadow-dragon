@@ -4,11 +4,9 @@
 //! 덧붙인다. 따라서 고정 문자열용 정적 페이지를 다시 고르면 대사 타일이 깨지고,
 //! 반대로 대사 페이지에 선택 라벨의 코드가 없으면 라벨이 깨진다.
 //!
-//! 라벨만으로는 부족하다. 원본은 레코드가 바뀌어도 여섯 줄 버퍼를 비우지 않으므로,
-//! 짧은 레코드는 앞선 레코드가 쓴 뒷줄을 화면에 그대로 남긴다. 그래서 이 단계는
-//! 저장소·소지품 초과 두 상태기가 고르는 모든 페이지에 대해, 그 페이지가 쓰지 않는
-//! 줄 슬롯에 같은 수명의 다른 페이지가 남길 수 있는 글자까지 같은 코드로 상주시킨다.
-//! 레코드 전체 합집합은 배정 가능한 코드 수를 넘기지만 줄 슬롯 꼬리는 들어간다.
+//! 레코드 전환 잔여물은 여기서 코드북 합집합으로 숨기지 않는다. 최초·E4·E6·E7
+//! 새 레코드 진입이 공통 resolver에서 여섯 물리 줄을 비우므로, 이 단계는 실제로
+//! 겹쳐 보이는 고정 라벨만 대사 페이지와 같은 코드 배정으로 묶는다.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -17,7 +15,6 @@ use serde::Serialize;
 
 use crate::{
     dialogue_assets::MainDialogueDisplayPlan,
-    dialogue_assets::MainDialoguePageWorkset,
     dialogue_inventory::{MainDialogueGraphReport, main_dialogue_transition_chain_record_ids},
     fixed_menu_labels::FIXED_MENU_LABEL_SPECS,
     font_slots::{ACTIVE_HANGUL_SLOT_COUNT, active_hangul_codes},
@@ -38,6 +35,12 @@ const STORAGE_DIALOGUE_LABEL_INDICES: [u8; 3] = [0x35, 0x36, 0x46];
 const FACILITY_OVERLAY_LABEL_INDICES: [u8; 2] = [0x35, 0x36];
 const OVERFLOW_OVERLAY_LABEL_INDICES: [u8; 2] = [0x35, 0x46];
 const STANDALONE_CAPACITY_LABEL_INDEX: u8 = 0x47;
+pub(in crate::full_translation_install) const STORAGE_ACTION_MENU_COMPOSITE_STATE: u8 = 0x1D;
+pub(in crate::full_translation_install) const STORAGE_OVERFLOW_ACTION_COMPOSITE_STATE: u8 = 0x23;
+pub(in crate::full_translation_install) const STORAGE_DIALOGUE_OVERLAY_COMPOSITE_STATES: [u8; 2] = [
+    STORAGE_ACTION_MENU_COMPOSITE_STATE,
+    STORAGE_OVERFLOW_ACTION_COMPOSITE_STATE,
+];
 
 #[derive(Serialize)]
 pub(super) struct StorageDialogueResidencyPlan {
@@ -61,8 +64,7 @@ pub(super) struct StorageDialogueResidencyPlan {
     fixed_assignment_sha1: String,
     every_storage_label_glyph_uses_its_installed_code: bool,
     every_overlay_dialogue_page_contains_its_visible_storage_label_glyphs: bool,
-    every_page_holds_the_line_slots_the_lifetime_can_leave_behind: bool,
-    visible_lifetime_page_count: usize,
+    record_transition_line_residue_included_in_codebook: bool,
     storage_dialogue_does_not_reselect_the_static_menu_page: bool,
     capacity_notice_keeps_its_standalone_static_page: bool,
     #[serde(skip)]
@@ -164,33 +166,8 @@ pub(super) fn plan_storage_dialogue_residency(
         &overflow_overlay_record_ids,
         &label_glyphs,
     )?;
-    let mut required_glyphs_by_workset =
+    let required_glyphs_by_workset =
         collect_required_workset_glyphs(display, &required_glyphs_by_record_id)?;
-
-    let visible_lifetime_record_ids = facility_selected_record_ids
-        .union(&overflow_selected_record_ids)
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    let lifetime_workset_indices = display
-        .page_worksets
-        .iter()
-        .enumerate()
-        .filter(|(_, page)| visible_lifetime_record_ids.contains(&page.record_id))
-        .map(|(index, _)| index)
-        .collect::<Vec<_>>();
-    let lifetime_pages = lifetime_workset_indices
-        .iter()
-        .map(|index| &display.page_worksets[*index])
-        .collect::<Vec<_>>();
-    for (index, tail) in lifetime_workset_indices
-        .iter()
-        .zip(line_tail_requirements(&lifetime_pages))
-    {
-        required_glyphs_by_workset
-            .entry(*index)
-            .or_default()
-            .extend(tail);
-    }
 
     let fixed_glyph_codes =
         assign_storage_label_codes(dialogue_worksets, &required_glyphs_by_workset)?;
@@ -203,9 +180,9 @@ pub(super) fn plan_storage_dialogue_residency(
         )?;
 
     Ok(StorageDialogueResidencyPlan {
-        strategy: "give every page of the two storage state machines one compatible code assignment: the overlaid action labels where they are displayed, plus the line slots a shorter page leaves for a longer page of the same lifetime, because the source never clears the six line buffers between records",
+        strategy: "give the storage dialogue pages one compatible code assignment for the fixed action labels that are visibly overlaid; exclude cross-record line residue because every installed new-record route clears all six physical rows centrally",
         dialogue_table_id: DIALOGUE_TABLE_ID,
-        dialogue_composite_states: [0x1D, 0x23],
+        dialogue_composite_states: STORAGE_DIALOGUE_OVERLAY_COMPOSITE_STATES,
         resident_fixed_label_indices: STORAGE_DIALOGUE_LABEL_INDICES,
         standalone_static_label_index: STANDALONE_CAPACITY_LABEL_INDEX,
         source_dispatch_count: source_binding.source_dispatch_count,
@@ -223,41 +200,12 @@ pub(super) fn plan_storage_dialogue_residency(
         fixed_assignment_sha1: assignment_sha1(&fixed_glyph_codes),
         every_storage_label_glyph_uses_its_installed_code: true,
         every_overlay_dialogue_page_contains_its_visible_storage_label_glyphs: true,
-        every_page_holds_the_line_slots_the_lifetime_can_leave_behind: true,
-        visible_lifetime_page_count: lifetime_workset_indices.len(),
+        record_transition_line_residue_included_in_codebook: false,
         storage_dialogue_does_not_reselect_the_static_menu_page: true,
         capacity_notice_keeps_its_standalone_static_page: true,
         augmented_worksets,
         fixed_glyph_codes,
     })
-}
-
-/// 줄 버퍼는 레코드가 바뀌어도 비워지지 않는다. 따라서 어떤 페이지가 쓰지 않는
-/// 줄 슬롯에는 같은 수명의 다른 페이지가 남긴 글자가 그대로 보인다. 그 페이지의
-/// 코드북은 남은 글자도 같은 뜻으로 담아야 한다.
-fn line_tail_requirements(worksets: &[&MainDialoguePageWorkset]) -> Vec<BTreeSet<char>> {
-    let slot_count = worksets
-        .iter()
-        .map(|workset| workset.visible_line_target_glyphs.len())
-        .max()
-        .unwrap_or_default();
-    let mut glyphs_by_slot = vec![BTreeSet::new(); slot_count];
-    for workset in worksets {
-        for (slot, glyphs) in workset.visible_line_target_glyphs.iter().enumerate() {
-            glyphs_by_slot[slot].extend(glyphs.iter().copied());
-        }
-    }
-
-    worksets
-        .iter()
-        .map(|workset| {
-            glyphs_by_slot
-                .iter()
-                .skip(workset.visible_line_target_glyphs.len())
-                .flat_map(|glyphs| glyphs.iter().copied())
-                .collect()
-        })
-        .collect()
 }
 
 fn transition_record_ids(
@@ -527,7 +475,6 @@ mod tests {
             record_id: record_id.to_owned(),
             page_index,
             target_glyphs: BTreeSet::new(),
-            visible_line_target_glyphs: Vec::new(),
             dynamic_string_selectors: BTreeSet::new(),
             dynamic_string_selector_counts: BTreeMap::new(),
             dynamic_string_control_count: 0,
@@ -542,37 +489,6 @@ mod tests {
             preserved_active_codes: BTreeSet::new(),
             fixed_glyph_codes: BTreeMap::new(),
         }
-    }
-
-    fn lined_page(record_id: &str, lines: &[&str]) -> MainDialoguePageWorkset {
-        let mut workset = page(record_id, 0);
-        workset.visible_line_target_glyphs =
-            lines.iter().map(|line| line.chars().collect()).collect();
-        workset.target_glyphs = lines.iter().flat_map(|line| line.chars()).collect();
-        workset
-    }
-
-    #[test]
-    fn a_short_page_must_hold_the_lines_a_longer_page_leaves_behind() {
-        let long = lined_page("shop-and-item-dialogue:041", &["가나", "다라"]);
-        let short = lined_page("shop-and-item-dialogue:006", &["마"]);
-
-        let required = line_tail_requirements(&[&long, &short]);
-
-        // 두 줄을 쓰는 페이지는 뒤에 남길 것이 없다.
-        assert_eq!(required[0], BTreeSet::new());
-        // 한 줄만 쓰는 페이지는 둘째 줄 슬롯에 남는 글자를 함께 담아야 한다.
-        assert_eq!(required[1], BTreeSet::from(['다', '라']));
-    }
-
-    #[test]
-    fn a_page_that_writes_every_line_slot_requires_no_tail() {
-        let long = lined_page("shop-and-item-dialogue:041", &["가", "나", "다"]);
-        let same = lined_page("shop-and-item-dialogue:042", &["라", "마", "바"]);
-
-        let required = line_tail_requirements(&[&long, &same]);
-
-        assert!(required.iter().all(BTreeSet::is_empty));
     }
 
     #[test]
