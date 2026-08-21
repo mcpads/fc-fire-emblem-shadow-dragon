@@ -42,6 +42,7 @@ mod runtime_storage_layout;
 mod screen_contracts;
 mod semantic_translation;
 mod shop_flow;
+mod source_direct_memory_writers;
 mod source_font_page;
 mod source_literals;
 mod static_analysis;

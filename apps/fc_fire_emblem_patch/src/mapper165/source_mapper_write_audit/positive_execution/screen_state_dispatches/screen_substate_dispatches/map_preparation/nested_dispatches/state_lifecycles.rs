@@ -2,41 +2,51 @@ use std::collections::BTreeSet;
 
 use anyhow::{Result, ensure};
 
-use crate::rom::Rom;
+use crate::{
+    rom::Rom,
+    source_direct_memory_writers::{DirectMemoryWriter, scan_direct_memory_writers},
+};
 
 use super::super::super::super::super::control_state::{MAP_EVENT_STATE, VICTORY_STAGE};
 use super::super::super::super::selector_transition_graph::{StateTransition, reachable_selectors};
-use super::super::state_writer_census::{DirectStateWriter, scan_direct_state_writers};
 use super::bind_exact_code;
 
-const VICTORY_STAGE_WRITERS: [DirectStateWriter; 9] = [
-    DirectStateWriter::in_map_preparation_bank(0x9A47, 0xEE, VICTORY_STAGE),
-    DirectStateWriter::in_map_preparation_bank(0x9A7B, 0x8D, VICTORY_STAGE),
-    DirectStateWriter::in_map_preparation_bank(0x9A9A, 0xEE, VICTORY_STAGE),
-    DirectStateWriter::in_map_preparation_bank(0x9AC8, 0xEE, VICTORY_STAGE),
-    DirectStateWriter::in_map_preparation_bank(0x9B3F, 0xEE, VICTORY_STAGE),
-    DirectStateWriter::in_map_preparation_bank(0x9D88, 0xEE, VICTORY_STAGE),
-    DirectStateWriter::in_map_preparation_bank(0x9DFE, 0x8D, VICTORY_STAGE),
-    DirectStateWriter::in_map_preparation_bank(0x9F17, 0xEE, VICTORY_STAGE),
-    DirectStateWriter::in_map_preparation_bank(0x9F3E, 0x8D, VICTORY_STAGE),
+const VICTORY_STAGE_WRITERS: [DirectMemoryWriter; 9] = [
+    map_preparation_writer(0x9A47, 0xEE, VICTORY_STAGE),
+    map_preparation_writer(0x9A7B, 0x8D, VICTORY_STAGE),
+    map_preparation_writer(0x9A9A, 0xEE, VICTORY_STAGE),
+    map_preparation_writer(0x9AC8, 0xEE, VICTORY_STAGE),
+    map_preparation_writer(0x9B3F, 0xEE, VICTORY_STAGE),
+    map_preparation_writer(0x9D88, 0xEE, VICTORY_STAGE),
+    map_preparation_writer(0x9DFE, 0x8D, VICTORY_STAGE),
+    map_preparation_writer(0x9F17, 0xEE, VICTORY_STAGE),
+    map_preparation_writer(0x9F3E, 0x8D, VICTORY_STAGE),
 ];
 
-const MAP_EVENT_STATE_WRITERS: [DirectStateWriter; 11] = [
-    DirectStateWriter::in_map_preparation_bank(0x8CEA, 0x8D, MAP_EVENT_STATE),
-    DirectStateWriter::in_map_preparation_bank(0x8D62, 0xEE, MAP_EVENT_STATE),
-    DirectStateWriter::in_map_preparation_bank(0x8D69, 0x8D, MAP_EVENT_STATE),
-    DirectStateWriter::in_map_preparation_bank(0x8DEF, 0x8D, MAP_EVENT_STATE),
-    DirectStateWriter::in_map_preparation_bank(0x8E30, 0x8D, MAP_EVENT_STATE),
-    DirectStateWriter::in_map_preparation_bank(0x8E4E, 0xEE, MAP_EVENT_STATE),
-    DirectStateWriter::in_map_preparation_bank(0x8F50, 0x8D, MAP_EVENT_STATE),
-    DirectStateWriter::in_map_preparation_bank(0x9F95, 0xEE, MAP_EVENT_STATE),
-    DirectStateWriter::in_map_preparation_bank(0x9FC4, 0x8D, MAP_EVENT_STATE),
-    DirectStateWriter::in_map_preparation_bank(0xA072, 0xEE, MAP_EVENT_STATE),
-    DirectStateWriter::in_map_preparation_bank(0xA089, 0x8D, MAP_EVENT_STATE),
+const MAP_EVENT_STATE_WRITERS: [DirectMemoryWriter; 11] = [
+    map_preparation_writer(0x8CEA, 0x8D, MAP_EVENT_STATE),
+    map_preparation_writer(0x8D62, 0xEE, MAP_EVENT_STATE),
+    map_preparation_writer(0x8D69, 0x8D, MAP_EVENT_STATE),
+    map_preparation_writer(0x8DEF, 0x8D, MAP_EVENT_STATE),
+    map_preparation_writer(0x8E30, 0x8D, MAP_EVENT_STATE),
+    map_preparation_writer(0x8E4E, 0xEE, MAP_EVENT_STATE),
+    map_preparation_writer(0x8F50, 0x8D, MAP_EVENT_STATE),
+    map_preparation_writer(0x9F95, 0xEE, MAP_EVENT_STATE),
+    map_preparation_writer(0x9FC4, 0x8D, MAP_EVENT_STATE),
+    map_preparation_writer(0xA072, 0xEE, MAP_EVENT_STATE),
+    map_preparation_writer(0xA089, 0x8D, MAP_EVENT_STATE),
 ];
+
+const fn map_preparation_writer(
+    cpu_address: u16,
+    opcode: u8,
+    target_address: u16,
+) -> DirectMemoryWriter {
+    DirectMemoryWriter::new(0x03, cpu_address, opcode, target_address)
+}
 
 pub(super) fn bind_selector_writer_census(source: &Rom) -> Result<()> {
-    let actual = scan_direct_state_writers(source.prg(), &[VICTORY_STAGE, MAP_EVENT_STATE])?;
+    let actual = scan_direct_memory_writers(source.prg(), &[VICTORY_STAGE, MAP_EVENT_STATE])?;
     let expected = VICTORY_STAGE_WRITERS
         .into_iter()
         .chain(MAP_EVENT_STATE_WRITERS)

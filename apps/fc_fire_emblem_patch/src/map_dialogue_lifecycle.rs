@@ -9,7 +9,10 @@ use std::collections::BTreeSet;
 use anyhow::{Context, Result, ensure};
 
 use crate::{
-    mapper165::inline_pointer_dispatch::bind_inline_pointer_dispatch, rom::Rom, sha1_hex,
+    mapper165::inline_pointer_dispatch::bind_inline_pointer_dispatch,
+    rom::Rom,
+    sha1_hex,
+    source_direct_memory_writers::{DirectMemoryWriter, scan_direct_memory_writers},
     typed_source::decode_rp2a03_sequence,
 };
 
@@ -35,21 +38,55 @@ const HELP_DIALOGUE_DIRECTORY_SELECTOR: u8 = ADVANCE_TO_HELP_DIALOGUE[9];
 const HELP_DIALOGUE_ENTRY_INDEX: u8 = ADVANCE_TO_HELP_DIALOGUE[23];
 
 // The outer screen reaches the help/dialogue lifecycle through one source-owned
-// deployment decision.  Keep the four participating regions here so the font
-// residency owner and the mapper execution audit cannot silently model
-// different entry conditions.
-const AUTOMATIC_SELECTION_THRESHOLD_SCAN_START: u16 = 0xB8B3;
-const AUTOMATIC_SELECTION_THRESHOLD_SCAN_END: u16 = 0xB8DE;
-const AUTOMATIC_SELECTION_THRESHOLD_SCAN_SHA1: &str = "9aa4938449a1a6e64f348e65d1b28d778ae9559d";
-const AUTOMATIC_SELECTION_THRESHOLD_PUBLISH_START: u16 = 0x8905;
-const AUTOMATIC_SELECTION_THRESHOLD_PUBLISH_END: u16 = 0x8919;
-const AUTOMATIC_SELECTION_THRESHOLD_PUBLISH_SHA1: &str = "0651f581279713e041226fc28cb3956e89954c4e";
+// deployment decision. Keep every producer that writes the reused $05EA byte in
+// this owner: bank 06 first publishes a unit-status count, then bank 08 replaces
+// it with the current chapter's deployment limit before bank 06 compares it with
+// the selectable-unit count.
+const UNIT_SELECTION_LIMIT_ADDRESS: u16 = 0x05EA;
+const UNIT_STATUS_COUNT_SCAN_START: u16 = 0xB8B3;
+const UNIT_STATUS_COUNT_SCAN_END: u16 = 0xB8DE;
+const UNIT_STATUS_COUNT_SCAN_SHA1: &str = "9aa4938449a1a6e64f348e65d1b28d778ae9559d";
+const UNIT_STATUS_COUNT_PUBLISH_START: u16 = 0x8905;
+const UNIT_STATUS_COUNT_PUBLISH_END: u16 = 0x8919;
+const UNIT_STATUS_COUNT_PUBLISH_SHA1: &str = "0651f581279713e041226fc28cb3956e89954c4e";
+const CHAPTER_DEPLOYMENT_BANK: u8 = 0x08;
+const CHAPTER_DEPLOYMENT_LIMIT_LOAD_START: u16 = 0xBA7A;
+const CHAPTER_DEPLOYMENT_LIMIT_LOAD_END: u16 = 0xBA93;
+const CHAPTER_DEPLOYMENT_LIMIT_LOAD_SHA1: &str = "dbc671678c8bd55982a49c3e5b42b35308ca23b1";
+const CHAPTER_DEPLOYMENT_POINTER_TABLE: u16 = 0x8790;
+const CHAPTER_COUNT: usize = 25;
+const CHAPTER_DEPLOYMENT_POINTER_TABLE_SHA1: &str = "60e866d62625abf92c92365ac27cc8226a9a6960";
+const CHAPTER_DEPLOYMENT_LIMITS: [u8; CHAPTER_COUNT] = [
+    0x08, 0x08, 0x0E, 0x0E, 0x0A, 0x0E, 0x0E, 0x0D, 0x0F, 0x0E, 0x0E, 0x0B, 0x0E, 0x0E, 0x10, 0x0E,
+    0x10, 0x0F, 0x0C, 0x0F, 0x10, 0x10, 0x0C, 0x0F, 0x0F,
+];
 const UNIT_SELECTION_LIST_START: u16 = 0x8A92;
 const UNIT_SELECTION_LIST_END: u16 = 0x8AD5;
 const UNIT_SELECTION_LIST_SHA1: &str = "a849935a36bdd48f4a0aa533ae0d17914585376d";
 const UNIT_SELECTION_DECISION_START: u16 = 0x8627;
 const UNIT_SELECTION_DECISION_END: u16 = 0x867B;
 const UNIT_SELECTION_DECISION_SHA1: &str = "3abe708d3d1fd560b99487dfb60aa78dae7d3bd4";
+const UNIT_SELECTION_LIMIT_WRITERS: [DirectMemoryWriter; 15] = [
+    unit_selection_limit_writer(0x02, 0xAA07, 0xCE),
+    unit_selection_limit_writer(0x06, 0x863E, 0x8D),
+    unit_selection_limit_writer(0x06, 0x8657, 0xCE),
+    unit_selection_limit_writer(0x06, 0x866F, 0xCE),
+    unit_selection_limit_writer(0x06, 0x877A, 0xCE),
+    unit_selection_limit_writer(0x06, 0x877F, 0xEE),
+    unit_selection_limit_writer(0x06, 0x8916, 0x8D),
+    unit_selection_limit_writer(0x07, 0x8B53, 0xEE),
+    unit_selection_limit_writer(0x08, 0xA084, 0xEE),
+    unit_selection_limit_writer(0x08, 0xB66F, 0xEE),
+    unit_selection_limit_writer(0x08, 0xB738, 0xEE),
+    unit_selection_limit_writer(0x08, 0xBA8F, 0x8D),
+    unit_selection_limit_writer(0x0C, 0x85AF, 0xEE),
+    unit_selection_limit_writer(0x0C, 0x90D3, 0xEE),
+    unit_selection_limit_writer(0x0C, 0xB376, 0xEE),
+];
+
+const fn unit_selection_limit_writer(bank: u8, cpu_address: u16, opcode: u8) -> DirectMemoryWriter {
+    DirectMemoryWriter::new(bank, cpu_address, opcode, UNIT_SELECTION_LIMIT_ADDRESS)
+}
 
 pub(crate) struct MapDialogueLifecycle {
     dispatch_call: u16,
@@ -153,45 +190,100 @@ pub(crate) fn bind_outer_screen_map_dialogue_lifecycle(
 }
 
 fn bind_natural_unit_selection_entry(source: &Rom) -> Result<()> {
-    // B8B3 scans allied records and counts the two source status classes in
-    // $02/$04.  8905 adds them and publishes the automatic-selection threshold in
-    // $05EA.  8A92 builds the selectable-unit list and publishes its count in
-    // $776C.  State one at 8627 enters state two only when $776C is strictly
-    // greater than the original $05EA; the equal-or-smaller branch selects all
-    // candidates automatically and advances to state eight.
-    for (start, end, expected_sha1, role) in [
+    let actual_writers = scan_direct_memory_writers(source.prg(), &[UNIT_SELECTION_LIMIT_ADDRESS])?;
+    let expected_writers = UNIT_SELECTION_LIMIT_WRITERS.into_iter().collect();
+    ensure!(
+        actual_writers == expected_writers,
+        "unit-selection limit writer census changed: expected {expected_writers:?}, found {actual_writers:?}"
+    );
+
+    // 8905's unit-status count is an earlier use of $05EA, not the value consumed
+    // by the decision. Bank 08:BA7A selects the chapter record through 8790 and
+    // replaces $05EA with that record's first byte. State one at 8627 enters state
+    // two only when $776C is strictly greater than this deployment limit; the
+    // equal-or-smaller branch selects every candidate and advances to state eight.
+    for (bank, start, end, expected_sha1, role) in [
         (
-            AUTOMATIC_SELECTION_THRESHOLD_SCAN_START,
-            AUTOMATIC_SELECTION_THRESHOLD_SCAN_END,
-            AUTOMATIC_SELECTION_THRESHOLD_SCAN_SHA1,
-            "count source unit-status classes for automatic selection",
+            OUTER_SCREEN_BANK,
+            UNIT_STATUS_COUNT_SCAN_START,
+            UNIT_STATUS_COUNT_SCAN_END,
+            UNIT_STATUS_COUNT_SCAN_SHA1,
+            "count source unit-status classes before loading the chapter deployment limit",
         ),
         (
-            AUTOMATIC_SELECTION_THRESHOLD_PUBLISH_START,
-            AUTOMATIC_SELECTION_THRESHOLD_PUBLISH_END,
-            AUTOMATIC_SELECTION_THRESHOLD_PUBLISH_SHA1,
-            "publish the automatic-selection threshold",
+            OUTER_SCREEN_BANK,
+            UNIT_STATUS_COUNT_PUBLISH_START,
+            UNIT_STATUS_COUNT_PUBLISH_END,
+            UNIT_STATUS_COUNT_PUBLISH_SHA1,
+            "publish the earlier unit-status count",
         ),
         (
+            CHAPTER_DEPLOYMENT_BANK,
+            CHAPTER_DEPLOYMENT_LIMIT_LOAD_START,
+            CHAPTER_DEPLOYMENT_LIMIT_LOAD_END,
+            CHAPTER_DEPLOYMENT_LIMIT_LOAD_SHA1,
+            "load the current chapter deployment limit",
+        ),
+        (
+            OUTER_SCREEN_BANK,
             UNIT_SELECTION_LIST_START,
             UNIT_SELECTION_LIST_END,
             UNIT_SELECTION_LIST_SHA1,
             "build and count the selectable-unit list",
         ),
         (
+            OUTER_SCREEN_BANK,
             UNIT_SELECTION_DECISION_START,
             UNIT_SELECTION_DECISION_END,
             UNIT_SELECTION_DECISION_SHA1,
             "choose automatic or manual unit selection",
         ),
     ] {
-        let bytes = source_bytes(source, OUTER_SCREEN_BANK, start, usize::from(end - start))?;
+        let bytes = source_bytes(source, bank, start, usize::from(end - start))?;
         ensure!(
             sha1_hex(bytes) == expected_sha1,
             "{role} source digest changed"
         );
         decode_rp2a03_sequence(bytes, start, role)?;
     }
+    bind_chapter_deployment_limits(source)?;
+    Ok(())
+}
+
+fn bind_chapter_deployment_limits(source: &Rom) -> Result<()> {
+    let table = source_bytes(
+        source,
+        CHAPTER_DEPLOYMENT_BANK,
+        CHAPTER_DEPLOYMENT_POINTER_TABLE,
+        CHAPTER_COUNT * 2,
+    )?;
+    ensure!(
+        sha1_hex(table) == CHAPTER_DEPLOYMENT_POINTER_TABLE_SHA1,
+        "chapter deployment pointer table changed"
+    );
+    let pointers = table
+        .chunks_exact(2)
+        .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
+        .collect::<Vec<_>>();
+    let table_end = CHAPTER_DEPLOYMENT_POINTER_TABLE
+        .checked_add(u16::try_from(CHAPTER_COUNT * 2)?)
+        .context("chapter deployment pointer table end overflow")?;
+    ensure!(
+        pointers
+            .iter()
+            .all(|pointer| *pointer >= table_end && *pointer < 0xC000),
+        "chapter deployment pointer left bank 08 data"
+    );
+    let limits = pointers
+        .iter()
+        .map(|pointer| {
+            source_bytes(source, CHAPTER_DEPLOYMENT_BANK, *pointer, 1).map(|bytes| bytes[0])
+        })
+        .collect::<Result<Vec<_>>>()?;
+    ensure!(
+        limits.as_slice() == CHAPTER_DEPLOYMENT_LIMITS,
+        "chapter deployment limits changed"
+    );
     Ok(())
 }
 

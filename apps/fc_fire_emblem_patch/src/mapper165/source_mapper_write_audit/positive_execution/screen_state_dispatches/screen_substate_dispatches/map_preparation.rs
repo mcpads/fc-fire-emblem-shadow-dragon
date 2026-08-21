@@ -3,7 +3,12 @@ use std::collections::BTreeSet;
 use anyhow::{Context, Result, ensure};
 use retro_rp2a03::{AddressingMode, Mnemonic, Operand, decode_bytes};
 
-use crate::{rom::Rom, sha1_hex, typed_source::decode_rp2a03_sequence};
+use crate::{
+    rom::Rom,
+    sha1_hex,
+    source_direct_memory_writers::{DirectMemoryWriter, scan_direct_memory_writers},
+    typed_source::decode_rp2a03_sequence,
+};
 
 use super::super::super::{
     chapter_map_loader::BoundChapterMapDimensions,
@@ -16,7 +21,6 @@ use super::{
 
 mod indirect_write_destinations;
 mod nested_dispatches;
-mod state_writer_census;
 
 use indirect_write_destinations::bind_indirect_write_destinations;
 #[cfg(test)]
@@ -25,7 +29,6 @@ use indirect_write_destinations::{
     indexed_pointer_destination_ranges,
 };
 use nested_dispatches::bind_nested_map_preparation_dispatches;
-use state_writer_census::{DirectStateWriter, scan_direct_state_writers};
 
 const PRG_BANK_BYTE_COUNT: usize = 16 * 1024;
 const MAP_PREPARATION_BANK: u8 = 0x03;
@@ -196,7 +199,7 @@ const fn region(start: u16, end: u16, sha1: &'static str, role: &'static str) ->
     }
 }
 
-const DIRECT_STATE_WRITERS: [DirectStateWriter; 7] = [
+const DIRECT_STATE_WRITERS: [DirectMemoryWriter; 7] = [
     writer(0x8022, 0xEE),
     writer(0x8029, 0xEE),
     writer(0x8033, 0x8D),
@@ -206,8 +209,13 @@ const DIRECT_STATE_WRITERS: [DirectStateWriter; 7] = [
     writer(0x9427, 0xEE),
 ];
 
-const fn writer(cpu_address: u16, opcode: u8) -> DirectStateWriter {
-    DirectStateWriter::in_map_preparation_bank(cpu_address, opcode, MAP_PREPARATION_STATE_ADDRESS)
+const fn writer(cpu_address: u16, opcode: u8) -> DirectMemoryWriter {
+    DirectMemoryWriter::new(
+        MAP_PREPARATION_BANK,
+        cpu_address,
+        opcode,
+        MAP_PREPARATION_STATE_ADDRESS,
+    )
 }
 
 #[derive(Clone, Copy)]
@@ -432,7 +440,8 @@ fn bind_map_preparation_lifecycle(
         "map-preparation state handlers changed"
     );
 
-    let direct_writers = scan_direct_state_writers(source.prg(), &[MAP_PREPARATION_STATE_ADDRESS])?;
+    let direct_writers =
+        scan_direct_memory_writers(source.prg(), &[MAP_PREPARATION_STATE_ADDRESS])?;
     ensure!(
         direct_writers == BTreeSet::from(DIRECT_STATE_WRITERS),
         "map-preparation direct state-writer census changed: expected {:?}, found {direct_writers:?}",
