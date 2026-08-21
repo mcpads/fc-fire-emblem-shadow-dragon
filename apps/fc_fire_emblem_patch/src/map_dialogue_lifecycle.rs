@@ -34,6 +34,23 @@ const ADVANCE_TO_HELP_DIALOGUE: &[u8] = &[
 const HELP_DIALOGUE_DIRECTORY_SELECTOR: u8 = ADVANCE_TO_HELP_DIALOGUE[9];
 const HELP_DIALOGUE_ENTRY_INDEX: u8 = ADVANCE_TO_HELP_DIALOGUE[23];
 
+// The outer screen reaches the help/dialogue lifecycle through one source-owned
+// deployment decision.  Keep the four participating regions here so the font
+// residency owner and the mapper execution audit cannot silently model
+// different entry conditions.
+const AUTOMATIC_SELECTION_THRESHOLD_SCAN_START: u16 = 0xB8B3;
+const AUTOMATIC_SELECTION_THRESHOLD_SCAN_END: u16 = 0xB8DE;
+const AUTOMATIC_SELECTION_THRESHOLD_SCAN_SHA1: &str = "9aa4938449a1a6e64f348e65d1b28d778ae9559d";
+const AUTOMATIC_SELECTION_THRESHOLD_PUBLISH_START: u16 = 0x8905;
+const AUTOMATIC_SELECTION_THRESHOLD_PUBLISH_END: u16 = 0x8919;
+const AUTOMATIC_SELECTION_THRESHOLD_PUBLISH_SHA1: &str = "0651f581279713e041226fc28cb3956e89954c4e";
+const UNIT_SELECTION_LIST_START: u16 = 0x8A92;
+const UNIT_SELECTION_LIST_END: u16 = 0x8AD5;
+const UNIT_SELECTION_LIST_SHA1: &str = "a849935a36bdd48f4a0aa533ae0d17914585376d";
+const UNIT_SELECTION_DECISION_START: u16 = 0x8627;
+const UNIT_SELECTION_DECISION_END: u16 = 0x867B;
+const UNIT_SELECTION_DECISION_SHA1: &str = "3abe708d3d1fd560b99487dfb60aa78dae7d3bd4";
+
 pub(crate) struct MapDialogueLifecycle {
     dispatch_call: u16,
     handler_domain: BTreeSet<u8>,
@@ -66,6 +83,7 @@ pub(crate) fn bind_outer_screen_map_dialogue_lifecycle(
     source: &Rom,
 ) -> Result<MapDialogueLifecycle> {
     source.verify_supported_japanese()?;
+    bind_natural_unit_selection_entry(source)?;
     bind_exact_code(
         source,
         FIXED_PRG_BANK,
@@ -132,6 +150,49 @@ pub(crate) fn bind_outer_screen_map_dialogue_lifecycle(
         handler_domain,
         produced_selectors,
     })
+}
+
+fn bind_natural_unit_selection_entry(source: &Rom) -> Result<()> {
+    // B8B3 scans allied records and counts the two source status classes in
+    // $02/$04.  8905 adds them and publishes the automatic-selection threshold in
+    // $05EA.  8A92 builds the selectable-unit list and publishes its count in
+    // $776C.  State one at 8627 enters state two only when $776C is strictly
+    // greater than the original $05EA; the equal-or-smaller branch selects all
+    // candidates automatically and advances to state eight.
+    for (start, end, expected_sha1, role) in [
+        (
+            AUTOMATIC_SELECTION_THRESHOLD_SCAN_START,
+            AUTOMATIC_SELECTION_THRESHOLD_SCAN_END,
+            AUTOMATIC_SELECTION_THRESHOLD_SCAN_SHA1,
+            "count source unit-status classes for automatic selection",
+        ),
+        (
+            AUTOMATIC_SELECTION_THRESHOLD_PUBLISH_START,
+            AUTOMATIC_SELECTION_THRESHOLD_PUBLISH_END,
+            AUTOMATIC_SELECTION_THRESHOLD_PUBLISH_SHA1,
+            "publish the automatic-selection threshold",
+        ),
+        (
+            UNIT_SELECTION_LIST_START,
+            UNIT_SELECTION_LIST_END,
+            UNIT_SELECTION_LIST_SHA1,
+            "build and count the selectable-unit list",
+        ),
+        (
+            UNIT_SELECTION_DECISION_START,
+            UNIT_SELECTION_DECISION_END,
+            UNIT_SELECTION_DECISION_SHA1,
+            "choose automatic or manual unit selection",
+        ),
+    ] {
+        let bytes = source_bytes(source, OUTER_SCREEN_BANK, start, usize::from(end - start))?;
+        ensure!(
+            sha1_hex(bytes) == expected_sha1,
+            "{role} source digest changed"
+        );
+        decode_rp2a03_sequence(bytes, start, role)?;
+    }
+    Ok(())
 }
 
 fn scan_absolute_state_writers(bytes: &[u8], start: u16) -> Result<BTreeSet<(u16, u8)>> {
