@@ -18,6 +18,7 @@ pub(crate) const SELECT_REGISTER_ROUTINE_ADDRESS: u16 = 0xFA58;
 /// The selected MMC3 register, saved so an NMI can restore an interrupted pair write.
 pub(crate) const SELECTED_REGISTER_SHADOW: u8 = 0x51;
 /// Callee cost only; a caller's six-cycle JSR is accounted separately.
+#[cfg(test)]
 pub(crate) const SELECT_REGISTER_CALLEE_CYCLES: u32 = 13;
 
 pub(super) const NMI_ENTRY_CONTINUATION_ADDRESS: u16 = 0xFA76;
@@ -52,13 +53,11 @@ pub(crate) fn verify_installed_contract(candidate: &Rom) -> Result<()> {
     installed_verification::verify_installed_contract(candidate)
 }
 
-/// Final full-translation images replace only the first preserved NMI call with their typed
-/// trampoline. The selector stack boundary and the second source call remain identical.
-pub(crate) fn verify_final_installed_contract(
-    candidate: &Rom,
-    first_nmi_call_target: u16,
-) -> Result<()> {
-    installed_verification::verify_final_installed_contract(candidate, first_nmi_call_target)
+/// Final full-translation images keep both original NMI calls intact. Dialogue CHR composition
+/// runs synchronously outside the NMI, while this contract continues to protect the selector
+/// shadow and universal exit protocol.
+pub(crate) fn verify_final_installed_contract(candidate: &Rom) -> Result<()> {
+    installed_verification::verify_final_installed_contract(candidate)
 }
 
 pub(crate) fn verify_parity_nonindexed_absolute_mapper_select_store(candidate: &Rom) -> Result<()> {

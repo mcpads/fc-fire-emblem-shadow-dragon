@@ -9,7 +9,9 @@ use serde::Deserialize;
 
 use crate::{dialogue_assets::MainDialogueSlicePlan, rom::EXPECTED_SOURCE_SHA1, sha1_hex};
 
-use super::maximum_dialogue_page::{COMPLETED_PAGE_COUNT, SCREEN_ROLE, TARGET_RECORD_ID};
+use super::maximum_dialogue_page::{
+    COMPLETED_PAGE_COUNT, DISPLAY_LINES_PER_PAGE, SCREEN_ROLE, TARGET_RECORD_ID,
+};
 
 #[derive(Debug, Deserialize)]
 struct PageBoundaryManifest {
@@ -46,7 +48,6 @@ struct CompletedPage {
 pub(super) struct ObservedPageBoundaries {
     pub(super) manifest_sha1: String,
     pub(super) observation_output_sha1: String,
-    pub(super) completed_page_pointers: Vec<u16>,
 }
 
 pub(super) fn load_observed_page_boundaries(
@@ -68,8 +69,8 @@ pub(super) fn load_observed_page_boundaries(
     ensure!(
         manifest.source_sha1 == EXPECTED_SOURCE_SHA1
             && is_lower_hex_sha1(&manifest.workspace_sha1)
-            && manifest.record_page_boundary_topology_sha1 == record.page_boundary_topology_sha1(),
-        "maximum dialogue page boundaries are bound to different inputs"
+            && is_lower_hex_sha1(&manifest.record_page_boundary_topology_sha1),
+        "maximum dialogue page-boundary reference identity changed"
     );
     ensure!(
         parse_hex_u16(&manifest.source_pointer_cpu_address, "source pointer")?
@@ -132,12 +133,28 @@ pub(super) fn load_observed_page_boundaries(
             "completed-page pointer",
         )?);
     }
-    record.page_unique_glyphs(&completed_page_pointers)?;
+    ensure!(
+        completed_page_pointers
+            .windows(2)
+            .all(|pair| pair[0] < pair[1])
+            && completed_page_pointers.iter().all(|pointer| {
+                pointer
+                    .checked_sub(record.source_pointer_cpu_address())
+                    .is_some_and(|offset| usize::from(offset) <= record.source_storage_byte_count)
+            }),
+        "maximum dialogue observed reference pointers leave owned record storage"
+    );
+    ensure!(
+        record
+            .completed_page_pointers(DISPLAY_LINES_PER_PAGE)?
+            .len()
+            == COMPLETED_PAGE_COUNT,
+        "maximum dialogue current line layout changed its completed-page count"
+    );
 
     Ok(ObservedPageBoundaries {
         manifest_sha1: sha1_hex(&bytes),
         observation_output_sha1: manifest.observation_output_sha1,
-        completed_page_pointers,
     })
 }
 

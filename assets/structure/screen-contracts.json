@@ -915,6 +915,22 @@
       "contract_state": "unobserved"
     },
     {
+      "screen_role": "storage_follow_up_choice",
+      "surface_family": "fixed_menu",
+      "runtime_observed": true,
+      "input_behavior": "input_wait",
+      "translation_scope": "japanese_with_preserved_original_latin",
+      "temporal_behavior": "the completed storage follow-up prompt and its yes-no window stayed byte-identical across frame offsets 0, 7, 19, and 43 while waiting for input",
+      "known_focus": [
+        "bank 06:9B7A appends shared composite state 0C over storage dialogue record 2D",
+        "both bank 06:9ECC and 9FB4 select record 2D before the same follow-up choice composer",
+        "the exact integrated artifact displayed readable Korean dialogue and 예/아니오 while preserving the original funds digits and G"
+      ],
+      "unresolved_focus": ["yes branch return to the storage action menu", "withdraw-result variant", "exact CHR pair and font-page exit lifetime"],
+      "next_gate": "bind this observation to the exact final-artifact manifest and cover the yes and withdraw variants in the bundled storage route",
+      "contract_state": "observed_partial"
+    },
+    {
       "screen_role": "storage_overflow_action",
       "surface_family": "fixed_menu",
       "runtime_observed": false,

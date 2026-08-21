@@ -10,7 +10,8 @@ use serde::Serialize;
 
 use super::{
     consumer_catalog::ConsumerCatalogRuntimeLayout,
-    runtime_bank_contract::bind_bank_restore_contract, runtime_nmi_contract::bind_quiet_frame_gate,
+    runtime_bank_contract::bind_bank_restore_contract,
+    runtime_nmi_contract::bind_synchronous_composer_resume,
     screen_font_residency::ScreenFontPageRoutes,
     shop_item_residency::ShopItemResidencyRuntimeContract,
     storage_residency::StorageItemListRuntimeRoute,
@@ -32,20 +33,17 @@ mod consumer_catalog;
 pub(in crate::full_translation_install) mod consumer_font_page;
 pub(in crate::full_translation_install) mod dispatcher_gate;
 mod dynamic_producer;
-mod fixed_cfg_cycles;
 mod font_page_route;
 pub(in crate::full_translation_install) mod lifecycle;
 mod mapper_write_verification;
 pub(in crate::full_translation_install) mod resolve_request;
 mod resolved_page_publication;
 mod speaker_prefix;
-pub(super) mod trampoline;
+pub(super) mod synchronous_composer;
 pub(in crate::full_translation_install) mod transport;
 
 pub(in crate::full_translation_install) use assembly::RuntimeRoutine;
-use assembly::{
-    ensure_routines_fit_cave, next_address, worst_case_cycles, worst_case_cycles_with_calls,
-};
+use assembly::{ensure_routines_fit_cave, next_address};
 use mapper_write_verification::verify_planned_mapper_select_writes;
 
 /// 대사 런타임이 원본 제어 흐름에 끼어드는 각 자리의 의미다.
@@ -62,7 +60,6 @@ pub(in crate::full_translation_install) enum DialogueRuntimeHookRole {
     CompletedPageAdvanceOrLifetimeEnd,
     E7CallerHandoffResidencySuspension,
     BattleComposerInvalidatesDialogueResidency,
-    NmiPageComposer,
     DispatcherGate,
     ChrRamSelector,
     DynamicItemSlotProducer,
@@ -115,30 +112,7 @@ pub(in crate::full_translation_install) struct ReclaimedFixedRuntimeRoutine {
     /// belong to the overwrite contract, not to the executable decoder denominator.
     pub(in crate::full_translation_install) executable_byte_count: usize,
     pub(in crate::full_translation_install) source_end_exclusive: u16,
-    pub(in crate::full_translation_install) expected_source_sha1: &'static str,
-}
-
-/// 원본 `$C179` 진입 시점에 남아 있는 vblank다. 앞에 NMI 진입 오버헤드와 OAM DMA밖에
-/// 없고 둘 다 고정 비용이라 이 값은 표본이 아니라 상수다. 에뮬레이터 실측으로
-/// 확인했고 계산값 `2,273 − 566`과 3사이클 차이다. 의사결정 64번을 따른다.
-const SOURCE_MEASURED_VBLANK_REMAINDER: u32 = 1_704;
-/// mapper165가 `$C173`에서 selector를 스택에 더 저장하고 원래 `$00/$01` 저장으로
-/// 돌아오는 고정 오버헤드다. OAM DMA 뒤에 생기므로 DMA parity에는 영향을 주지 않는다.
-const SELECTOR_STACK_ENTRY_OVERHEAD: u32 = 12;
-/// mapper165 후보가 같은 `$C179` 훅에 도달했을 때 실제로 남는 vblank다.
-const MAPPER_VBLANK_REMAINDER: u32 =
-    SOURCE_MEASURED_VBLANK_REMAINDER - SELECTOR_STACK_ENTRY_OVERHEAD;
-/// 실기 여유다. 남은 vblank를 전부 쓰지 않는다.
-const SAFETY_MARGIN_PERCENT: u32 = 20;
-/// `$C179`의 `JSR`가 쓰는 몫이다.
-const CONSUMER_HOOK_CALL_CYCLES: u32 = 6;
-/// 전송 루틴이 한 프레임에 쓸 수 있는 사이클이다.
-///
-/// `trampoline_reserve`는 훅 호출과 트램폴린이 실제로 쓰는 최악 사이클이고 방출한
-/// 명령에서 센 값이다. 임의의 여백을 따로 두지 않는다. 안전 여유는 위의 20% 하나뿐이고,
-/// 여백을 두 겹으로 쌓으면 어느 쪽이 실제 근거인지 알 수 없게 된다.
-fn budgeted_transport_cycles(trampoline_reserve: u32) -> u32 {
-    MAPPER_VBLANK_REMAINDER * (100 - SAFETY_MARGIN_PERCENT) / 100 - trampoline_reserve
+    pub(in crate::full_translation_install) expected_source_sha1: String,
 }
 
 /// 대사 런타임이 ROM에 넣는 실행 코드와 훅 전체다.
@@ -152,8 +126,6 @@ pub(in crate::full_translation_install) struct DialogueRuntimeCodePlan {
         Vec<ReclaimedFixedRuntimeRoutine>,
     /// 원본에 실제로 설치할 훅이다. 역할과 주소와 바이트가 한 단위라 따로 세지 않는다.
     pub(in crate::full_translation_install) hooks: Vec<DialogueRuntimeHook>,
-    /// 후보 고정 코드의 typed CFG에서 계산한 FD/FE 복원 helper 상한이다.
-    pub(in crate::full_translation_install) chr_restore_callee_cycles: [(u16, u32); 2],
 }
 
 impl DialogueRuntimeCodePlan {
@@ -467,6 +439,7 @@ pub(in crate::full_translation_install) fn verify_installed_chr_ram_ownership_ga
 pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     source: &Rom,
     candidate: &Rom,
+    maximum_dialogue_font_group_selector_range_sha1: &str,
     runtime_code_cpu_start: u16,
     atlas_page: u8,
     code_page: u8,
@@ -478,7 +451,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     consumer_font_pages: ScreenFontPageRoutes,
 ) -> Result<DialogueRuntimeCodePlan> {
     let bank_restore = bind_bank_restore_contract(candidate)?;
-    bind_quiet_frame_gate(source, candidate)?;
+    bind_synchronous_composer_resume(source, candidate)?;
     dispatcher_gate::bind_dispatcher_entry(source, candidate)?;
     dispatcher_gate::bind_source_identity_publisher_tail_cave(source, candidate)?;
     lifecycle::bind_lifecycle_sites(source, candidate)?;
@@ -490,7 +463,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     dynamic_producer::bind_hook_sites(source, candidate)?;
     consumer_catalog::bind_consumer_catalog_sites(source, candidate)?;
     speaker_prefix::bind_speaker_prefix_output(source, candidate)?;
-    let chr_source_state = chr_source_state::bind_chr_source_state(candidate)?;
+    chr_source_state::bind_chr_source_state(candidate)?;
 
     let font_page_routes = font_page_route::build_font_page_route_runtime()?;
     let selector = chr_selector::build_chr_selector(
@@ -523,7 +496,6 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         chr_ram_ownership::build_battle_composition_ownership_transfer(ownership_transfer_origin)?;
     let ownership_transfer_address = ownership_transfer.address;
 
-    let chr_restore_callee_cycles = chr_source_state.restore_callee_cycles();
     let transport = transport::build_transport_routine(
         runtime_code_cpu_start,
         atlas_page,
@@ -536,7 +508,11 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         + u16::try_from(resolver.bytes.len()).context("initial resolver length overflow")?;
     let next_page_resolver =
         resolve_request::build_resolve_next_page_request(next_page_resolver_origin, layout)?;
-    let trampoline_routine = trampoline::build_trampoline(bank_restore, transport.address)?;
+    let synchronous_composer = synchronous_composer::build_synchronous_composer(
+        bank_restore,
+        transport.address,
+        code_page,
+    )?;
 
     let gate = dispatcher_gate::build_dispatcher_gate(dispatcher_gate::RECLAIMED_GATE_CAVE_ORIGIN)?;
     let gate_address = gate.address;
@@ -548,6 +524,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     let resolved_page_publication = resolved_page_publication::build_resolved_page_publication(
         publication_origin,
         page_recipe_request_initializer_address,
+        synchronous_composer.address,
     )?;
     let resolved_page_publication_address = resolved_page_publication.address;
     let initial_request_publisher_origin = resolved_page_publication.address
@@ -692,9 +669,9 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         bytes: fixed_support_bytes,
     };
 
-    let publisher_origin = trampoline_routine.address
-        + u16::try_from(trampoline_routine.bytes.len())
-            .context("dialogue trampoline length overflow")?;
+    let publisher_origin = synchronous_composer.address
+        + u16::try_from(synchronous_composer.bytes.len())
+            .context("synchronous dialogue composer length overflow")?;
     let publisher = dispatcher_gate::build_source_identity_request_publisher(
         publisher_origin,
         resolver.address,
@@ -702,44 +679,11 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         resolved_page_publication_address,
     )?;
 
-    // 예산은 시험만이 아니라 빌드가 지킨다. vblank를 넘기는 코드는 ROM에 들어가면
-    // 안 되므로, 여기서 막지 않으면 그 판정이 시험을 돌리는 사람에게 넘어간다.
-    // 의사결정 62번을 따른다.
-    let reserve = trampoline::worst_case_reserve_cycles(bank_restore)?;
-    let budget = budgeted_transport_cycles(reserve);
-    let (largest_batch, frame_components) = transport::largest_fitting_tile_batch(
-        runtime_code_cpu_start,
-        atlas_page,
-        chr_source_state,
-        cold_request_mapper_register,
-        budget,
-    )?;
-    ensure!(
-        transport::TILES_PER_FRAME == largest_batch,
-        "dialogue transport emits {} tile(s) per frame, but the candidate-bound emitted-code \
-         cycle model selects {largest_batch} as the largest batch within the {budget}-cycle \
-         transport budget (fixed={}, phase_route={}, overlay={}, restore={}, total={})",
-        transport::TILES_PER_FRAME,
-        frame_components.fixed,
-        frame_components.phase_route,
-        frame_components.overlay,
-        frame_components.restore,
-        frame_components.total(),
-    );
-    let frame_cycles = frame_components.total();
-    ensure!(
-        frame_cycles <= budget,
-        "one transport frame costs {frame_cycles} cycles but only {budget} of the measured \
-         {MAPPER_VBLANK_REMAINDER}-cycle mapper vblank remainder are budgeted after the \
-         {SELECTOR_STACK_ENTRY_OVERHEAD}-cycle selector-stack entry overhead, the \
-         {SAFETY_MARGIN_PERCENT}% margin, and the {reserve}-cycle trampoline reserve"
-    );
-
     let publisher_address = publisher.head.address;
     ensure_routines_fit_cave(
-        &[&trampoline_routine, &publisher.head],
-        trampoline::TRAMPOLINE_ORIGIN,
-        trampoline::TRAMPOLINE_CAVE_END,
+        &[&synchronous_composer, &publisher.head],
+        synchronous_composer::COMPOSER_ORIGIN,
+        synchronous_composer::COMPOSER_CAVE_END,
     )?;
     ensure_routines_fit_cave(
         &[&publisher.tail],
@@ -778,7 +722,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     )?;
     let mut fixed_routines = vec![
         font_page_routes.routine,
-        trampoline_routine,
+        synchronous_composer,
         publisher.head,
         publisher.tail,
         selector,
@@ -807,13 +751,13 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
             routine: fixed_support,
             executable_byte_count: fixed_support_executable_byte_count,
             source_end_exclusive: dispatcher_gate::RECLAIMED_GATE_CAVE_END,
-            expected_source_sha1: dispatcher_gate::EXPECTED_RECLAIMED_GATE_CAVE_SHA1,
+            expected_source_sha1: maximum_dialogue_font_group_selector_range_sha1.to_owned(),
         },
         ReclaimedFixedRuntimeRoutine {
             routine: lifecycle.routine,
             executable_byte_count: lifecycle.executable_byte_count,
             source_end_exclusive: lifecycle::LIFECYCLE_CAVE_END,
-            expected_source_sha1: lifecycle::EXPECTED_SAMPLE_LIFECYCLE_SHA1,
+            expected_source_sha1: lifecycle::EXPECTED_SAMPLE_LIFECYCLE_SHA1.to_owned(),
         },
     ];
 
@@ -824,12 +768,6 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
             write_role: "dialogue CHR RAM selector hook",
             site: DialogueRuntimeHookSite::Fixed(chr_selector::SELECTOR_CHAIN_SITE),
             bytes: chr_selector::selector_hook_bytes(font_page_routes.select_active_page).to_vec(),
-        },
-        DialogueRuntimeHook {
-            role: DialogueRuntimeHookRole::NmiPageComposer,
-            write_role: "dialogue NMI page composer hook",
-            site: DialogueRuntimeHookSite::Fixed(super::runtime_nmi_contract::CONSUMER_HOOK),
-            bytes: trampoline::hook_bytes().to_vec(),
         },
         DialogueRuntimeHook {
             role: DialogueRuntimeHookRole::DispatcherGate,
@@ -934,21 +872,8 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         fixed_routines,
         reclaimed_fixed_routines,
         hooks,
-        chr_restore_callee_cycles,
     };
     plan.new_record_line_buffer_reset_routes_bound()?;
     verify_planned_mapper_select_writes(&plan)?;
     Ok(plan)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn selector_stack_entry_overhead_is_removed_from_the_source_measurement() {
-        assert_eq!(SOURCE_MEASURED_VBLANK_REMAINDER, 1_704);
-        assert_eq!(SELECTOR_STACK_ENTRY_OVERHEAD, 12);
-        assert_eq!(MAPPER_VBLANK_REMAINDER, 1_692);
-    }
 }

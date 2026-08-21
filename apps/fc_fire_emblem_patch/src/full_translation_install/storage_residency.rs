@@ -40,6 +40,7 @@ mod source_binding;
 use source_binding::bind_storage_dialogue_sources;
 
 const DIALOGUE_TABLE_ID: &str = "shop-and-item-dialogue";
+pub(crate) const STORAGE_CHOICE_DIALOGUE_RECORD_ID: &str = "shop-and-item-dialogue:045";
 const STORAGE_DIALOGUE_LABEL_INDICES: [u8; 3] = [0x35, 0x36, 0x46];
 const FACILITY_OVERLAY_LABEL_INDICES: [u8; 2] = [0x35, 0x36];
 const OVERFLOW_OVERLAY_LABEL_INDICES: [u8; 2] = [0x35, 0x46];
@@ -142,6 +143,19 @@ impl StorageDialogueResidencyPlan {
     pub(super) fn item_list_runtime_route(&self) -> StorageItemListRuntimeRoute {
         self.item_list_route
     }
+}
+
+pub(super) fn bind_storage_choice_dialogue_record_id(source: &Rom) -> Result<String> {
+    let binding = bind_storage_dialogue_sources(source)?;
+    let record_id = format!(
+        "{DIALOGUE_TABLE_ID}:{:03}",
+        binding.facility_choice_record_index
+    );
+    ensure!(
+        record_id == STORAGE_CHOICE_DIALOGUE_RECORD_ID,
+        "storage follow-up choice record identity changed"
+    );
+    Ok(record_id)
 }
 
 pub(super) fn plan_storage_dialogue_residency(

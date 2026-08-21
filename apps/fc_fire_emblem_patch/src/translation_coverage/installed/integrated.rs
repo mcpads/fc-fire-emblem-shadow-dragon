@@ -17,18 +17,21 @@ use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 
 use super::{
-    CurrentInstallation, InstalledFixedMenuLifetime, InstalledLifetimeDemand,
-    inspect_current_installation,
+    CurrentInstallation, InstalledChoiceLifetime, InstalledFixedMenuLifetime,
+    InstalledLifetimeDemand, inspect_current_installation,
 };
 use crate::{
     fixed_menu_labels::{
         FIXED_MENU_LABEL_SPECS, UNIT_SELECTION_HELP_LINE_SPECS, fixed_menu_screen_roles,
     },
     font_slots::ACTIVE_HANGUL_SLOT_COUNT,
-    full_translation_install::FULL_TRANSLATION_REPORT_SCHEMA,
+    full_translation_install::{FULL_TRANSLATION_REPORT_SCHEMA, STORAGE_CHOICE_DIALOGUE_RECORD_ID},
     rom::EXPECTED_SOURCE_SHA1,
     sha1_hex,
-    translation_coverage::{DomainInstallation, inspect_domain_screen_targets},
+    translation_coverage::{
+        DomainInstallation, inspect_domain_screen_targets,
+        screen_targets::STORAGE_FOLLOW_UP_CHOICE_SCREEN_ROLE,
+    },
 };
 
 const CARRIED_BATTLE_DOMAIN_IDS: [&str; 4] = [
@@ -55,12 +58,34 @@ struct IntegratedBuildReport {
     carried_ui_domain_preservation: CarriedUiDomainPreservation,
     carried_battle_domain_preservation: CarriedBattleDomainPreservation,
     integrated_write_set: IntegratedWriteSet,
+    choice_residency: IntegratedChoiceResidency,
     consumer_codebook: IntegratedConsumerCodebook,
     unit_selection_help_residency: IntegratedUnitSelectionHelpResidency,
     storage_dialogue_residency: IntegratedStorageDialogueResidency,
     final_artifact_runtime_evidence: FinalArtifactRuntimeEvidence,
     installation_gates: IntegratedInstallationGates,
     rom_emitted: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct IntegratedChoiceResidency {
+    composite_state: u8,
+    continue_prompt_record_id: String,
+    front_end_result_record_ids: Vec<String>,
+    storage_choice_record_id: String,
+    direct_choice_composite_producer_count: usize,
+    resident_record_ids: Vec<String>,
+    resident_workset_count: usize,
+    choice_glyph_count: usize,
+    fixed_code_count: usize,
+    maximum_augmented_workset_slot_demand: usize,
+    storage_follow_up_workset_count: usize,
+    storage_follow_up_target_glyph_count: usize,
+    storage_follow_up_preserved_active_code_count: usize,
+    storage_follow_up_total_slot_demand: usize,
+    fixed_assignment_sha1: String,
+    every_choice_glyph_has_one_stable_code: bool,
+    every_resident_page_contains_every_choice_glyph: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -278,6 +303,7 @@ struct IntegratedInstallationEvidence {
     final_static_domain_ids: BTreeSet<String>,
     domains: BTreeMap<String, DomainInstallation>,
     fixed_menu_lifetime: InstalledFixedMenuLifetime,
+    choice_lifetime: InstalledChoiceLifetime,
 }
 
 pub(crate) fn inspect_integrated_installation(
@@ -455,6 +481,8 @@ fn bind_integrated_installation(
         &canonical_targets,
         &report_sha1,
     )?;
+    let choice_lifetime =
+        bind_choice_lifetime(&report.choice_residency, &canonical_targets, &report_sha1)?;
     let observed_screen_roles =
         bind_runtime_evidence(&report.final_artifact_runtime_evidence, &output_sha1)?;
     let carried_domains =
@@ -604,6 +632,7 @@ fn bind_integrated_installation(
         final_static_domain_ids,
         domains,
         fixed_menu_lifetime,
+        choice_lifetime,
     })
 }
 
@@ -633,7 +662,81 @@ fn apply_integrated_installation(
     current.build_output_sha1 = evidence.output_sha1;
     current.build_report_sha1 = evidence.report_sha1;
     current.fixed_menu_lifetime = Some(evidence.fixed_menu_lifetime);
+    let choice_lifetime_installed =
+        ["main_dialogue", "choice_labels"]
+            .into_iter()
+            .all(|domain_id| {
+                current.domains.get(domain_id).is_some_and(|installation| {
+                    installation
+                        .consumer_complete_screen_roles
+                        .iter()
+                        .any(|role| role == STORAGE_FOLLOW_UP_CHOICE_SCREEN_ROLE)
+                })
+            });
+    current.choice_lifetime = choice_lifetime_installed.then_some(evidence.choice_lifetime);
     Ok(())
+}
+
+fn bind_choice_lifetime(
+    choice: &IntegratedChoiceResidency,
+    canonical_targets: &BTreeMap<&'static str, BTreeSet<String>>,
+    report_sha1: &str,
+) -> Result<InstalledChoiceLifetime> {
+    let resident_record_ids = unique_strings(
+        choice.resident_record_ids.clone(),
+        "integrated choice residency records",
+    )?;
+    let front_end_record_ids = unique_strings(
+        choice.front_end_result_record_ids.clone(),
+        "integrated front-end choice residency records",
+    )?;
+    ensure!(
+        choice.composite_state == crate::choice_labels::CHOICE_LABEL_COMPOSITE_STATE
+            && choice.direct_choice_composite_producer_count == 3
+            && choice.storage_choice_record_id == STORAGE_CHOICE_DIALOGUE_RECORD_ID
+            && !choice.continue_prompt_record_id.is_empty()
+            && front_end_record_ids.len() == 4
+            && resident_record_ids.len() == front_end_record_ids.len() + 2
+            && resident_record_ids.contains(&choice.continue_prompt_record_id)
+            && resident_record_ids.contains(STORAGE_CHOICE_DIALOGUE_RECORD_ID)
+            && front_end_record_ids.is_subset(&resident_record_ids)
+            && choice.resident_workset_count >= resident_record_ids.len()
+            && choice.storage_follow_up_workset_count > 0
+            && choice.storage_follow_up_workset_count <= choice.resident_workset_count
+            && choice.choice_glyph_count > 0
+            && choice.fixed_code_count == choice.choice_glyph_count
+            && !choice.fixed_assignment_sha1.is_empty()
+            && choice.every_choice_glyph_has_one_stable_code
+            && choice.every_resident_page_contains_every_choice_glyph,
+        "integrated shared choice residency is incomplete"
+    );
+    let storage_follow_up = installed_lifetime_demand(
+        "storage follow-up choice",
+        choice.storage_follow_up_target_glyph_count,
+        choice.storage_follow_up_preserved_active_code_count,
+        choice.storage_follow_up_total_slot_demand,
+    )?;
+    ensure!(
+        storage_follow_up.total_slot_demand <= choice.maximum_augmented_workset_slot_demand,
+        "storage follow-up choice exceeds the installed shared choice bound"
+    );
+    for domain_id in ["main_dialogue", "choice_labels"] {
+        ensure!(
+            canonical_targets
+                .get(domain_id)
+                .is_some_and(|roles| roles.contains(STORAGE_FOLLOW_UP_CHOICE_SCREEN_ROLE)),
+            "storage follow-up choice lost its {domain_id} screen ownership"
+        );
+    }
+    ensure!(
+        !report_sha1.is_empty(),
+        "storage follow-up choice has no exact-final report identity"
+    );
+    Ok(InstalledChoiceLifetime {
+        screen_role: STORAGE_FOLLOW_UP_CHOICE_SCREEN_ROLE.to_owned(),
+        storage_follow_up,
+        evidence_report_sha1: report_sha1.to_owned(),
+    })
 }
 
 fn bind_fixed_menu_lifetime(
@@ -1224,6 +1327,37 @@ mod tests {
                 "all_declared_domains_contribute_expected_writes": true,
                 "rom_emitted": true
             },
+            "choice_residency": {
+                "composite_state": 12,
+                "continue_prompt_record_id": "victory-and-defeat-dialogue:000",
+                "front_end_result_record_ids": [
+                    "front-end-dialogue:000",
+                    "front-end-dialogue:001",
+                    "front-end-dialogue:002",
+                    "front-end-dialogue:003"
+                ],
+                "storage_choice_record_id": "shop-and-item-dialogue:045",
+                "direct_choice_composite_producer_count": 3,
+                "resident_record_ids": [
+                    "front-end-dialogue:000",
+                    "front-end-dialogue:001",
+                    "front-end-dialogue:002",
+                    "front-end-dialogue:003",
+                    "shop-and-item-dialogue:045",
+                    "victory-and-defeat-dialogue:000"
+                ],
+                "resident_workset_count": 6,
+                "choice_glyph_count": 4,
+                "fixed_code_count": 4,
+                "maximum_augmented_workset_slot_demand": 195,
+                "storage_follow_up_workset_count": 1,
+                "storage_follow_up_target_glyph_count": 143,
+                "storage_follow_up_preserved_active_code_count": 52,
+                "storage_follow_up_total_slot_demand": 195,
+                "fixed_assignment_sha1": "choice-assignment",
+                "every_choice_glyph_has_one_stable_code": true,
+                "every_resident_page_contains_every_choice_glyph": true
+            },
             "consumer_codebook": {
                 "schema": 1,
                 "static_page_count": 1,
@@ -1355,6 +1489,14 @@ mod tests {
                 .total_slot_demand,
             195
         );
+        assert_eq!(
+            evidence.choice_lifetime.screen_role,
+            STORAGE_FOLLOW_UP_CHOICE_SCREEN_ROLE
+        );
+        assert_eq!(
+            evidence.choice_lifetime.storage_follow_up.total_slot_demand,
+            195
+        );
     }
 
     #[test]
@@ -1384,6 +1526,29 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("does not close its declared consumer plan")
+        );
+    }
+
+    #[test]
+    fn storage_follow_up_choice_lifetime_component_or_record_drift_fails_closed() {
+        let mut value: serde_json::Value = serde_json::from_slice(&report_json(None)).unwrap();
+        value["choice_residency"]["storage_follow_up_total_slot_demand"] = 194.into();
+        let report = serde_json::to_vec(&value).unwrap();
+        assert!(
+            bind_integrated_installation(&report, b"final", "base-output", "base-report")
+                .unwrap_err()
+                .to_string()
+                .contains("components")
+        );
+
+        let mut value: serde_json::Value = serde_json::from_slice(&report_json(None)).unwrap();
+        value["choice_residency"]["storage_choice_record_id"] = "shop-and-item-dialogue:044".into();
+        let report = serde_json::to_vec(&value).unwrap();
+        assert!(
+            bind_integrated_installation(&report, b"final", "base-output", "base-report")
+                .unwrap_err()
+                .to_string()
+                .contains("incomplete")
         );
     }
 

@@ -75,7 +75,7 @@ pub(super) fn plan_maximum_dialogue_pages(
         "maximum dialogue completed-page count changed"
     );
     let observed_boundaries = load_observed_page_boundaries(page_boundary_path, record)?;
-    let completed_page_pointers = observed_boundaries.completed_page_pointers;
+    let completed_page_pointers = record.completed_page_pointers(DISPLAY_LINES_PER_PAGE)?;
 
     let page_glyphs = record.page_unique_glyphs(&completed_page_pointers)?;
     ensure!(

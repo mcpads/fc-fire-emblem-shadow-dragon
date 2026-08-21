@@ -237,7 +237,7 @@ pub(in crate::full_translation_install::integrated_write_set) fn plan_required_m
         let expected =
             mutation_expected_slice(inputs.candidate.data(), offset, capacity, routine.role)?;
         ensure!(
-            sha1_hex(expected) == reclaimed.expected_source_sha1,
+            sha1_hex(expected) == reclaimed.expected_source_sha1.as_str(),
             "{} source digest changed",
             routine.role
         );

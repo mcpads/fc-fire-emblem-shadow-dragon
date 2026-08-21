@@ -96,6 +96,42 @@ impl MainDialogueSlicePlan {
         self.logical_line_ranges.len()
     }
 
+    pub(crate) fn completed_page_pointers(&self, lines_per_page: usize) -> Result<Vec<u16>> {
+        ensure!(
+            lines_per_page > 0,
+            "dialogue page must contain at least one line"
+        );
+        ensure!(
+            !self.logical_line_ranges.is_empty(),
+            "dialogue has no logical lines to partition"
+        );
+
+        let mut pointers =
+            Vec::with_capacity(self.logical_line_ranges.len().div_ceil(lines_per_page));
+        for lines in self.logical_line_ranges.chunks(lines_per_page) {
+            let logical_end = lines
+                .last()
+                .context("dialogue page lost its final logical line")?
+                .end;
+            let pointer_offset = u16::try_from(logical_end)
+                .context("dialogue completed-page offset does not fit u16")?;
+            pointers.push(
+                self.source_pointer_cpu_address
+                    .checked_add(pointer_offset)
+                    .context("dialogue completed-page pointer overflow")?,
+            );
+        }
+        ensure!(
+            pointers.last().copied()
+                == self.source_pointer_cpu_address.checked_add(
+                    u16::try_from(self.logical_bytes.len())
+                        .context("dialogue logical byte count does not fit u16")?,
+                ),
+            "dialogue derived page pointers do not consume the logical record"
+        );
+        Ok(pointers)
+    }
+
     pub(crate) fn page_unique_glyphs(
         &self,
         completed_page_pointers: &[u16],
@@ -245,7 +281,7 @@ impl MainDialogueSlicePlan {
     fn page_byte_ranges(&self, completed_page_pointers: &[u16]) -> Result<Vec<Range<usize>>> {
         ensure!(
             !completed_page_pointers.is_empty(),
-            "dialogue has no observed completed-page pointers"
+            "dialogue has no completed-page pointers"
         );
         let mut ranges = Vec::with_capacity(completed_page_pointers.len());
         let mut start = 0usize;
@@ -528,7 +564,7 @@ mod tests {
     }
 
     #[test]
-    fn observed_page_boundaries_drive_storage_codes_and_glyph_sets() {
+    fn completed_page_boundaries_drive_storage_codes_and_glyph_sets() {
         let plan = MainDialogueSlicePlan {
             workspace_sha1: "workspace".to_owned(),
             record_id: "record".to_owned(),
@@ -568,6 +604,38 @@ mod tests {
                 .collect::<Vec<_>>(),
             [2, 1]
         );
+    }
+
+    #[test]
+    fn completed_page_pointers_follow_current_line_lengths() {
+        let baseline = MainDialogueSlicePlan {
+            workspace_sha1: "workspace-a".to_owned(),
+            record_id: "record".to_owned(),
+            source_file_offset: 0,
+            source_storage_byte_count: 16,
+            translated_line_count: 3,
+            transition_chain_record_count: 1,
+            preserved_source_codes: BTreeSet::new(),
+            source_pointer_cpu_address: 0x8FF0,
+            logical_line_ranges: vec![1..3, 3..5, 5..7],
+            logical_bytes: vec![LogicalDialogueByte::Encoded(0); 7],
+        };
+        let reflowed = MainDialogueSlicePlan {
+            workspace_sha1: "workspace-b".to_owned(),
+            logical_line_ranges: vec![1..4, 4..7, 7..10],
+            logical_bytes: vec![LogicalDialogueByte::Encoded(0); 10],
+            ..baseline
+        };
+
+        assert_eq!(
+            reflowed.completed_page_pointers(2).unwrap(),
+            [0x8FF7, 0x8FFA]
+        );
+        assert_ne!(
+            reflowed.completed_page_pointers(2).unwrap(),
+            [0x8FF5, 0x8FF7]
+        );
+        assert!(reflowed.completed_page_pointers(0).is_err());
     }
 
     #[test]

@@ -192,7 +192,7 @@ pub(super) fn assign_resident_glyph_codes(
             let preassigned = preassigned_codes_by_glyph.get(glyph);
             ensure!(
                 preassigned.is_none_or(|codes| codes.len() == 1),
-                "{role} glyph {glyph:?} has conflicting preassigned codes"
+                "{role} glyph {glyph:?} has conflicting preassigned codes: {preassigned:02X?}"
             );
             let allowed = match preassigned.and_then(|codes| codes.first().copied()) {
                 Some(code) => {

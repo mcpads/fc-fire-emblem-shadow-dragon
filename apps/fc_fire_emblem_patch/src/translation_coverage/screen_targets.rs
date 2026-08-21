@@ -15,6 +15,8 @@ pub(crate) struct DomainScreenTargets {
     pub(crate) screen_roles: Vec<String>,
 }
 
+pub(crate) const STORAGE_FOLLOW_UP_CHOICE_SCREEN_ROLE: &str = "storage_follow_up_choice";
+
 pub(crate) const DOMAIN_SEEDS: &[TranslationDomainSeed] = &[
     domain("battle_dialogue", "dialogue_line"),
     domain("battle_forecast_label", "inline_label"),
@@ -149,6 +151,10 @@ const SCREEN_TARGETS: &[ScreenTargetSeed] = &[
     screen("unit_selection", &["fixed_menu_labels"]),
     screen("game_speed_selection", &["fixed_menu_labels"]),
     screen("storage_action_menu", &["fixed_menu_labels"]),
+    screen(
+        STORAGE_FOLLOW_UP_CHOICE_SCREEN_ROLE,
+        &["main_dialogue", "choice_labels"],
+    ),
     screen("storage_overflow_action", &["fixed_menu_labels"]),
     screen("storage_capacity_notice", &["fixed_menu_labels"]),
 ];
@@ -254,8 +260,8 @@ mod tests {
         let partition = inspect_screen_translation_partition().unwrap();
         let domains = bind_domain_screen_targets(&partition).unwrap();
 
-        assert_eq!(partition.screen_count, 52);
-        assert_eq!(partition.japanese_bearing_screens.len(), 43);
+        assert_eq!(partition.screen_count, 53);
+        assert_eq!(partition.japanese_bearing_screens.len(), 44);
         assert_eq!(partition.preserved_original_only_screen_count, 5);
         assert_eq!(partition.no_text_screen_count, 4);
         assert_eq!(domains.len(), DOMAIN_SEEDS.len());
@@ -285,5 +291,30 @@ mod tests {
                 expected_roles.iter().copied().collect::<BTreeSet<_>>()
             );
         }
+    }
+
+    #[test]
+    fn storage_follow_up_choice_binds_dialogue_and_shared_choice_labels() {
+        let partition = inspect_screen_translation_partition().unwrap();
+        let domains = bind_domain_screen_targets(&partition).unwrap();
+
+        for domain_id in ["main_dialogue", "choice_labels"] {
+            assert!(
+                domains
+                    .iter()
+                    .find(|domain| domain.id == domain_id)
+                    .unwrap()
+                    .screen_roles
+                    .iter()
+                    .any(|role| role == "storage_follow_up_choice")
+            );
+        }
+        assert!(domains.iter().all(|domain| {
+            ["main_dialogue", "choice_labels"].contains(&domain.id)
+                || !domain
+                    .screen_roles
+                    .iter()
+                    .any(|role| role == "storage_follow_up_choice")
+        }));
     }
 }

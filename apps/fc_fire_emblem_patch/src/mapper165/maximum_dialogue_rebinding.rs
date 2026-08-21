@@ -9,7 +9,9 @@ use crate::{
 use super::{
     OUTPUT_MAPPER,
     maximum_dialogue_boundary::load_observed_page_boundaries,
-    maximum_dialogue_page::{FONT_GROUP_COUNT, PAGES_PER_FONT_GROUP, TARGET_RECORD_ID},
+    maximum_dialogue_page::{
+        DISPLAY_LINES_PER_PAGE, FONT_GROUP_COUNT, PAGES_PER_FONT_GROUP, TARGET_RECORD_ID,
+    },
 };
 
 const FIRST_MAXIMUM_DIALOGUE_FONT_PAGE: usize = 50;
@@ -34,8 +36,9 @@ pub(crate) fn verify_maximum_dialogue_boundary_rebinding(
     let source = Rom::from_path(source_path)?;
     source.verify_supported_japanese()?;
     let record = plan_main_dialogue_slice(&source, workspace_path, TARGET_RECORD_ID)?;
-    let boundaries = load_observed_page_boundaries(page_boundary_path, &record)?;
-    let page_groups = (0..boundaries.completed_page_pointers.len())
+    load_observed_page_boundaries(page_boundary_path, &record)?;
+    let completed_page_pointers = record.completed_page_pointers(DISPLAY_LINES_PER_PAGE)?;
+    let page_groups = (0..completed_page_pointers.len())
         .map(|page_index| page_index / PAGES_PER_FONT_GROUP)
         .collect::<Vec<_>>();
     ensure!(
@@ -49,8 +52,7 @@ pub(crate) fn verify_maximum_dialogue_boundary_rebinding(
     validate_output_layout(&candidate, "candidate")?;
 
     let record_start = record.source_file_offset;
-    let record_length = boundaries
-        .completed_page_pointers
+    let record_length = completed_page_pointers
         .last()
         .context("maximum dialogue rebinding has no completed page")?
         .checked_sub(record.source_pointer_cpu_address())
@@ -68,11 +70,11 @@ pub(crate) fn verify_maximum_dialogue_boundary_rebinding(
         .context("candidate maximum dialogue record is outside PRG")?;
     let candidate_pages = maximum_dialogue_font_pages(&candidate)?;
 
-    let reference_target_count = record
-        .verify_encoded_page_topology(reference_record, &boundaries.completed_page_pointers)?;
+    let reference_target_count =
+        record.verify_encoded_page_topology(reference_record, &completed_page_pointers)?;
     let candidate_target_count = record.verify_encoded_page_rendering(
         candidate_record,
-        &boundaries.completed_page_pointers,
+        &completed_page_pointers,
         &page_groups,
         &candidate_pages,
     )?;
@@ -85,7 +87,7 @@ pub(crate) fn verify_maximum_dialogue_boundary_rebinding(
         reference_output_sha1: sha1_hex(reference.data()),
         candidate_output_sha1: sha1_hex(candidate.data()),
         record_page_boundary_topology_sha1: record.page_boundary_topology_sha1(),
-        page_count: boundaries.completed_page_pointers.len(),
+        page_count: completed_page_pointers.len(),
         logical_byte_count: reference_record.len(),
         target_glyph_byte_count: reference_target_count,
     })

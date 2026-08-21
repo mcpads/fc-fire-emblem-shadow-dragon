@@ -4,9 +4,8 @@ use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use super::{
-    runtime_bank_contract::bind_bank_restore_contract,
-    runtime_code::{DialogueRuntimeHookRole, dispatcher_gate::EXPECTED_RECLAIMED_GATE_CAVE_SHA1},
-    runtime_nmi_contract::bind_quiet_frame_gate,
+    runtime_bank_contract::bind_bank_restore_contract, runtime_code::DialogueRuntimeHookRole,
+    runtime_nmi_contract::bind_synchronous_composer_resume,
 };
 use crate::{
     dialogue_inventory::switchable_cpu_to_file_offset,
@@ -37,7 +36,7 @@ const CENTRAL_SELECTOR_FALLBACK: u16 = 0xFF40;
 /// 완성된 대사 수명이 원본 제어 흐름에 끼어들어야 하는 모든 역할이다.
 ///
 /// 주소의 개수가 아니다. 완료 판정은 이 역할 집합에서 빠진 것이 없는지를 본다.
-const PLANNED_HOOK_ROLES: [DialogueRuntimeHookRole; 34] = [
+const PLANNED_HOOK_ROLES: [DialogueRuntimeHookRole; 33] = [
     DialogueRuntimeHookRole::InitialDirectEntryRequest,
     DialogueRuntimeHookRole::E4TransitionEntryRequest,
     DialogueRuntimeHookRole::E6TransitionEntryRequest,
@@ -45,7 +44,6 @@ const PLANNED_HOOK_ROLES: [DialogueRuntimeHookRole; 34] = [
     DialogueRuntimeHookRole::CompletedPageAdvanceOrLifetimeEnd,
     DialogueRuntimeHookRole::E7CallerHandoffResidencySuspension,
     DialogueRuntimeHookRole::BattleComposerInvalidatesDialogueResidency,
-    DialogueRuntimeHookRole::NmiPageComposer,
     DialogueRuntimeHookRole::DispatcherGate,
     DialogueRuntimeHookRole::ChrRamSelector,
     DialogueRuntimeHookRole::DynamicItemSlotProducer,
@@ -81,9 +79,6 @@ const BATTLE_SOURCE_PAGE_MMC3_PAGE: u8 = 0x21;
 const EXPECTED_COMPLETED_PAGE_SOURCE_SHA1: &str = "8c2a9f5a6e028a59409f9cc254add2b81f318b21";
 const EXPECTED_COMPLETED_PAGE_CANDIDATE_SHA1: &str = "1cb949f9ec4e524b9935e195b5eac7fae604a2d3";
 const EXPECTED_SAMPLE_PAGE_RELOAD_SHA1: &str = "7dd596b275d4ee7dc0424071840cbc1a286d3662";
-pub(in crate::full_translation_install) const EXPECTED_SAMPLE_INITIAL_SELECTOR_SHA1: &str =
-    "67856cd2b7a26ef43649181f5e86ffe2741eb8b3";
-
 #[derive(Serialize)]
 pub(super) struct DialogueRuntimeControlFlowPlan {
     strategy: &'static str,
@@ -102,8 +97,8 @@ pub(super) struct DialogueRuntimeControlFlowPlan {
     /// `$FA20`이 닿을 수 있는 8 KiB 페이지 수다. 실행 코드 페이지가 이 밖이라
     /// 소비자는 뱅크 레지스터를 직접 쓴다.
     source_bank_helper_reachable_page_count: u16,
-    /// 소비자가 «조용한 프레임»에만 도는 근거인 원본 분기 수다.
-    quiet_frame_gated_branch_count: usize,
+    /// 동기 합성 뒤 렌더링을 되살리는 원본 NMI 복원 자리 수다.
+    synchronous_composer_resume_site_count: usize,
     runtime_material_execution_address_bound: bool,
     runtime_state_storage_bound: bool,
     runtime_code_routines_assembled: bool,
@@ -137,21 +132,20 @@ struct RuntimeProducer {
 
 #[derive(Serialize)]
 struct NmiConsumer {
-    source_hook_cpu_address_hex: &'static str,
+    existing_battle_hook_cpu_address_hex: &'static str,
     existing_dispatch_cpu_range_hex: &'static str,
     existing_dispatch_sha1: String,
     exact_ff_expansion_byte_count: usize,
     battle_composition_priority_preserved: bool,
-    source_input_scan_called_once: bool,
+    dialogue_page_composition_runs_in_nmi: bool,
+    synchronous_composer_cpu_range_hex: &'static str,
+    clean_vblank_boundary_count: usize,
     render_disabled_mask_hex: &'static str,
     ppu_address_latch_reset: bool,
     sequential_ppu_increment_forced: bool,
     source_prg_bank_restored: bool,
-    scroll_restore_preserved: bool,
+    scroll_restore_deferred_to_next_source_nmi: bool,
     registers_and_status_preserved: bool,
-    chr_restore_cycle_bounds_from_typed_cfg: bool,
-    chr_fd_restore_callee_worst_case_cycles: u32,
-    chr_fe_restore_callee_worst_case_cycles: u32,
 }
 
 #[derive(Serialize)]
@@ -233,8 +227,9 @@ pub(super) struct RuntimeControlFlowInputs<'a> {
     pub(super) runtime_code_routines_assembled: bool,
     /// 정적 코드 계획이 조립한 훅의 역할이다. 최종 ROM 설치 여부는 별도 write set이 맡는다.
     pub(super) assembled_hook_roles: &'a [DialogueRuntimeHookRole],
-    pub(super) chr_restore_callee_cycles: [(u16, u32); 2],
     pub(super) canonical_dynamic_codes_are_page_physical_codes: bool,
+    pub(super) maximum_dialogue_font_group_selector_range_sha1: &'a str,
+    pub(super) maximum_dialogue_initial_selector_range_sha1: &'a str,
 }
 
 fn classify_assembled_hook_roles(
@@ -270,14 +265,6 @@ pub(super) fn plan_dialogue_runtime_control_flow(
     );
     let (assembled_hook_roles, missing_assembled_hook_roles) =
         classify_assembled_hook_roles(inputs.assembled_hook_roles)?;
-    let [
-        (fd_helper, fd_restore_cycles),
-        (fe_helper, fe_restore_cycles),
-    ] = inputs.chr_restore_callee_cycles;
-    ensure!(
-        fd_helper == 0xFA80 && fe_helper == 0xFAA0,
-        "dialogue CHR restore cycle bounds target different helpers"
-    );
     let producer_specs = [
         (
             "initial_direct_entry",
@@ -454,22 +441,21 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         usize::from(SAMPLE_INITIAL_SELECTOR_END - SAMPLE_INITIAL_SELECTOR_START),
     )?;
     ensure!(
-        sha1_hex(sample_group) == EXPECTED_RECLAIMED_GATE_CAVE_SHA1
-            && sha1_hex(sample_initial) == EXPECTED_SAMPLE_INITIAL_SELECTOR_SHA1
+        sha1_hex(sample_group) == inputs.maximum_dialogue_font_group_selector_range_sha1
+            && sha1_hex(sample_initial) == inputs.maximum_dialogue_initial_selector_range_sha1
             && fixed_bytes(inputs.candidate, CENTRAL_SELECTOR_FALLBACK, 3)?
                 == [
                     0x4C,
                     SAMPLE_INITIAL_SELECTOR_START as u8,
                     (SAMPLE_INITIAL_SELECTOR_START >> 8) as u8,
                 ],
-        "sample-specific maximum-dialogue selector ownership changed"
+        "current cumulative maximum-dialogue selector ownership changed"
     );
 
     // 소비자가 실행 코드 페이지를 `$A000`에 잠깐 걸고 되돌리는 계약이다. 되돌릴 값의
     // 출처가 원본에 있어야 하므로 코드를 방출하기 전에 먼저 확인한다.
     let bank_restore = bind_bank_restore_contract(inputs.candidate)?;
-    // 소비자가 들어갈 자리와, «조용한 프레임»의 뜻을 지키는 원본 분기들이다.
-    let quiet_frame_gate = bind_quiet_frame_gate(inputs.source, inputs.candidate)?;
+    let composer_resume = bind_synchronous_composer_resume(inputs.source, inputs.candidate)?;
 
     let producers = producer_specs
         .into_iter()
@@ -537,21 +523,20 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         ],
         producers,
         nmi_consumer: NmiConsumer {
-            source_hook_cpu_address_hex: "0xC179",
+            existing_battle_hook_cpu_address_hex: "0xC191",
             existing_dispatch_cpu_range_hex: "0xFC20..0xFC56",
             existing_dispatch_sha1: sha1_hex(shared_dispatch),
             exact_ff_expansion_byte_count: nmi_expansion.len(),
             battle_composition_priority_preserved: true,
-            source_input_scan_called_once: true,
-            render_disabled_mask_hex: "0x06",
+            dialogue_page_composition_runs_in_nmi: false,
+            synchronous_composer_cpu_range_hex: "0xF400..0xF4B0",
+            clean_vblank_boundary_count: 2,
+            render_disabled_mask_hex: "0x00",
             ppu_address_latch_reset: true,
             sequential_ppu_increment_forced: true,
             source_prg_bank_restored: true,
-            scroll_restore_preserved: true,
+            scroll_restore_deferred_to_next_source_nmi: true,
             registers_and_status_preserved: true,
-            chr_restore_cycle_bounds_from_typed_cfg: true,
-            chr_fd_restore_callee_worst_case_cycles: fd_restore_cycles,
-            chr_fe_restore_callee_worst_case_cycles: fe_restore_cycles,
         },
         font_page_builder: FontPageBuilder {
             strategy: "cold dialogue-FD source-page rebuild plus direct visible-page recipe overlay while native FE remains the backdrop",
@@ -622,7 +607,7 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         existing_nmi_owner_preserved: true,
         prg_bank_restore_bound: true,
         source_bank_helper_reachable_page_count: bank_restore.helper_reachable_page_count,
-        quiet_frame_gated_branch_count: quiet_frame_gate.gated_branch_count,
+        synchronous_composer_resume_site_count: composer_resume.restore_site_count,
         runtime_material_execution_address_bound: true,
         runtime_state_storage_bound: true,
         runtime_code_routines_assembled: inputs.runtime_code_routines_assembled,
@@ -670,7 +655,6 @@ mod tests {
     fn partial_hook_roles_report_what_is_missing() {
         let assembled = [
             DialogueRuntimeHookRole::InitialDirectEntryRequest,
-            DialogueRuntimeHookRole::NmiPageComposer,
             DialogueRuntimeHookRole::DispatcherGate,
             DialogueRuntimeHookRole::ChrRamSelector,
         ];
@@ -691,8 +675,8 @@ mod tests {
     #[test]
     fn duplicate_hook_roles_are_not_counted_as_progress() {
         let assembled = [
-            DialogueRuntimeHookRole::NmiPageComposer,
-            DialogueRuntimeHookRole::NmiPageComposer,
+            DialogueRuntimeHookRole::DispatcherGate,
+            DialogueRuntimeHookRole::DispatcherGate,
         ];
 
         let error = classify_assembled_hook_roles(&assembled).unwrap_err();

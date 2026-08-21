@@ -64,48 +64,6 @@ pub(super) fn next_address(origin: u16, instructions: &[Instruction]) -> Result<
         .context("dialogue runtime routine crosses the CPU address space")
 }
 
-/// 명령 목록이 최악의 경우 쓰는 사이클이다.
-///
-/// `JSR`는 명령 자체의 6사이클만 세고 불려 가는 코드의 비용은 세지 않는다. 그래서
-/// 호출이 섞인 목록을 그냥 더하면 예산이 조용히 과소평가된다. vblank 예산에서
-/// 과소평가는 실기 손상이므로, 이 함수는 호출을 만나면 그 자리에서 거부한다.
-///
-/// 호출이 필요한 코드는 `worst_case_cycles_with_calls`로 불린 곳의 실측 비용을 함께
-/// 넘겨야 한다. «얼마인지 모르는 것을 6이라고 세지 않는다»가 규칙이다.
-pub(super) fn worst_case_cycles(instructions: &[Instruction]) -> Result<u32> {
-    worst_case_cycles_with_calls(instructions, &[])
-}
-
-/// 불려 가는 코드의 최악 사이클을 주소별로 함께 받는다.
-pub(super) fn worst_case_cycles_with_calls(
-    instructions: &[Instruction],
-    callee_cycles: &[(u16, u32)],
-) -> Result<u32> {
-    let mut total = 0;
-    for instruction in instructions {
-        total += u32::from(instruction.worst_case_cycles());
-        if let Instruction::JsrAbsolute(target) = instruction {
-            let cost = (*target
-                == crate::mapper165::selector_safety::SELECT_REGISTER_ROUTINE_ADDRESS)
-                .then_some(crate::mapper165::selector_safety::SELECT_REGISTER_CALLEE_CYCLES)
-                .or_else(|| {
-                    callee_cycles
-                        .iter()
-                        .find(|(address, _)| address == target)
-                        .map(|(_, cost)| *cost)
-                })
-                .with_context(|| {
-                    format!(
-                        "a cycle budget counted JSR {target:04X} as six cycles; \
-                         the cost of the called code is unknown and must be measured"
-                    )
-                })?;
-            total += cost;
-        }
-    }
-    Ok(total)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

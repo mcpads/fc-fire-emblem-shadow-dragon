@@ -1,8 +1,9 @@
 //! 실행 코드 페이지에 놓이는 전송 루틴이다.
 //!
-//! 한 프레임에 정해진 수의 타일만 CHR RAM으로 올리고 커서를 남긴다. 그 수는
-//! `$C179`의 vblank 잔여 1,704사이클에서 안전 여유 20%를 뺀 값 안에 실제 코드의
-//! 최악 사이클이 들어가도록 정한다. 의사결정 64번을 따른다.
+//! 동기 합성기가 렌더링과 NMI를 끈 구간에서 이 루틴을 `ready`가 될 때까지 부른다.
+//! 각 호출은 현재 단계의 남은 몫을 u8 상한까지 모두 처리한다. 화면별 프레임 예산은
+//! 없고, cold는 원본 4 KiB 복원 호출과 overlay 호출 두 번, resident는 overlay 호출
+//! 한 번으로 끝난다.
 //!
 //! 옮기는 것은 가시 페이지 레시피의 항목이다. 항목은 `[코드][atlas 주소 하위][atlas 주소 상위]`
 //! 세 바이트이고, 빌드가 주소를 미리 더해 두어 소비자는 계산을 하지 않는다.
@@ -46,21 +47,21 @@ use super::super::runtime_cursor_storage::{
     CURSOR_REMAINING_TILES, PUBLISHED_SOURCE_DIRECTORY_SELECTOR, PUBLISHED_SOURCE_ENTRY_INDEX,
     REQUEST_SOURCE_DIRECTORY_SELECTOR, REQUEST_SOURCE_ENTRY_INDEX,
 };
-use super::{RuntimeRoutine, next_address, worst_case_cycles, worst_case_cycles_with_calls};
+use super::{RuntimeRoutine, next_address};
 use crate::{
     full_translation_install::runtime_state_storage::CONSUMER_FONT_PAGE,
     rp2a03::{Instruction, assemble_at},
 };
 
-/// 한 프레임에 올리는 타일 수다. 사이클 예산에서 유도한 값이므로 늘리려면
-/// 아래 예산 시험이 먼저 통과해야 한다.
-pub(in crate::full_translation_install) const TILES_PER_FRAME: u8 = 1;
+/// 한 호출이 처리할 수 있는 overlay 타일 상한이다. 실제 남은 값이 더 작으면 그 값을
+/// 쓰므로 모든 정상 요청은 한 overlay 호출에 끝난다.
+pub(in crate::full_translation_install) const TILES_PER_CALL: u8 = u8::MAX;
 /// 복원 단계가 한 번에 옮기는 덩어리의 크기다.
 const RESTORE_CHUNK_BYTE_COUNT: u8 = 32;
 /// 4 KiB 페이지를 그 크기로 나눈 덩어리 수다.
 pub(in crate::full_translation_install) const RESTORE_CHUNK_COUNT: u8 = 128;
-/// 한 프레임에 옮기는 덩어리 수다. 타일 수와 같은 예산에서 따로 유도한다.
-pub(in crate::full_translation_install) const RESTORE_CHUNKS_PER_FRAME: u8 = 1;
+/// 한 호출이 처리할 수 있는 복원 덩어리 상한이다. 전체 128개가 한 호출에 들어간다.
+pub(in crate::full_translation_install) const RESTORE_CHUNKS_PER_CALL: u8 = u8::MAX;
 /// 원본 배경 페이지를 복제해 둔 PRG 페이지다.
 pub(in crate::full_translation_install) const SOURCE_PAGE_MMC3_PAGE: u8 = 0x21;
 /// 복원 단계를 뜻하는 값이다.
@@ -149,12 +150,12 @@ fn frame_prologue(origin: u16) -> Result<(Vec<Instruction>, usize)> {
         Instruction::BneAbsolute(origin),
     ]);
     let overlay_budget_placeholder = instructions.len() - 1;
-    instructions.push(Instruction::LdaImmediate(RESTORE_CHUNKS_PER_FRAME));
+    instructions.push(Instruction::LdaImmediate(RESTORE_CHUNKS_PER_CALL));
     let budget_chosen_placeholder = instructions.len();
     instructions.push(Instruction::JmpAbsolute(origin));
     let overlay_budget = next_address(origin, &instructions)?;
     instructions[overlay_budget_placeholder] = Instruction::BneAbsolute(overlay_budget);
-    instructions.push(Instruction::LdaImmediate(TILES_PER_FRAME));
+    instructions.push(Instruction::LdaImmediate(TILES_PER_CALL));
     let budget_chosen = next_address(origin, &instructions)?;
     instructions[budget_chosen_placeholder] = Instruction::JmpAbsolute(budget_chosen);
     instructions.extend([
@@ -458,101 +459,6 @@ pub(super) fn build_transport_routine(
     })
 }
 
-/// 방출된 프롤로그·분기·단계 몸통·에필로그에서 독립적으로 센 프레임 비용이다.
-///
-/// 최종 합계만 남기면 helper 비용이나 단계 라우팅 하나가 빠졌을 때 어느 경계에서
-/// 과소평가됐는지 알 수 없다. 이 조각들은 빌드 오류에도 그대로 노출한다.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct FrameCycleComponents {
-    pub(super) fixed: u32,
-    pub(super) phase_route: u32,
-    pub(super) overlay: u32,
-    pub(super) restore: u32,
-}
-
-impl FrameCycleComponents {
-    pub(super) const fn total(self) -> u32 {
-        self.fixed
-            + self.phase_route
-            + if self.overlay > self.restore {
-                self.overlay
-            } else {
-                self.restore
-            }
-    }
-}
-
-fn worst_case_frame_cycle_components_for_batch(
-    origin: u16,
-    atlas_page: u8,
-    chr_source_state: super::chr_source_state::ChrSourceStateContract,
-    cold_request_mapper_register: u8,
-    tiles_per_frame: u8,
-) -> Result<FrameCycleComponents> {
-    let (prologue, _) = frame_prologue(origin)?;
-    let loop_start = next_address(origin, &prologue)?;
-    let fixed = worst_case_cycles(&prologue)?
-        + worst_case_cycles_with_calls(
-            &frame_epilogue(origin, cold_request_mapper_register)?.0,
-            &chr_source_state.restore_callee_cycles(),
-        )?
-        + u32::from(Instruction::Rts.worst_case_cycles());
-    let phase_route = worst_case_cycles(&[
-        Instruction::LdaAbsolute(CURSOR_PHASE),
-        Instruction::BeqAbsolute(origin),
-    ])?;
-    let overlay = worst_case_cycles(&[Instruction::JmpAbsolute(origin)])?
-        + worst_case_cycles(&tile_body(loop_start, atlas_page)?)? * u32::from(tiles_per_frame);
-    let restore = worst_case_cycles(&map_data_page(Instruction::LdaImmediate(
-        SOURCE_PAGE_MMC3_PAGE,
-    )))? + worst_case_cycles(&restore_body(loop_start)?)?
-        * u32::from(RESTORE_CHUNKS_PER_FRAME)
-        + worst_case_cycles(&[Instruction::JmpAbsolute(origin)])?;
-    Ok(FrameCycleComponents {
-        fixed,
-        phase_route,
-        overlay,
-        restore,
-    })
-}
-
-/// 실제 후보 helper와 방출 코드로부터 예산 안에 들어가는 가장 큰 배치를 찾는다.
-///
-/// `TILES_PER_FRAME`를 먼저 정하고 그 값 하나만 검사하면, 더 큰 값이 안전해졌거나
-/// 현재 값조차 불안전해졌을 때 정책과 코드가 조용히 어긋난다. 모든 `u8` 후보를 같은
-/// 생산 계산기에 태워 가장 큰 값을 고른 뒤 상수와 일치시키는 쪽이 실패 폐쇄적이다.
-pub(super) fn largest_fitting_tile_batch(
-    origin: u16,
-    atlas_page: u8,
-    chr_source_state: super::chr_source_state::ChrSourceStateContract,
-    cold_request_mapper_register: u8,
-    budget: u32,
-) -> Result<(u8, FrameCycleComponents)> {
-    let mut largest = None;
-    let mut previous_total = 0;
-    for tiles_per_frame in 1..=u8::MAX {
-        let components = worst_case_frame_cycle_components_for_batch(
-            origin,
-            atlas_page,
-            chr_source_state,
-            cold_request_mapper_register,
-            tiles_per_frame,
-        )?;
-        let total = components.total();
-        ensure!(
-            total >= previous_total,
-            "transport cycle model is not monotonic at batch {tiles_per_frame}: {total} < {previous_total}"
-        );
-        previous_total = total;
-        if total <= budget {
-            largest = Some((tiles_per_frame, components));
-        } else {
-            break;
-        }
-    }
-    largest.context("not even one dialogue tile fits the production vblank transport budget")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -825,56 +731,6 @@ mod tests {
             "the transport routine is {} bytes",
             routine.bytes.len()
         );
-    }
-
-    /// 예산은 불려 가는 코드의 비용을 모르면 세지 않는다. 그것이 «모르는 것을
-    /// 6사이클이라고 세지 않는다»는 규칙이고, vblank에서 과소평가는 실기 손상이다.
-    #[test]
-    fn a_call_with_an_unmeasured_callee_is_refused_by_the_cycle_budget() {
-        let error =
-            super::super::worst_case_cycles(&[Instruction::JsrAbsolute(0xFA80)]).unwrap_err();
-
-        assert!(error.to_string().contains("must be measured"));
-    }
-
-    #[test]
-    fn largest_batch_selection_uses_the_emitted_cycle_boundary() {
-        let source_state =
-            super::super::chr_source_state::ChrSourceStateContract::with_restore_callee_cycles(
-                64, 64,
-            );
-        let one = worst_case_frame_cycle_components_for_batch(
-            0xA000,
-            ATLAS_PAGE,
-            source_state,
-            COLD_REQUEST_MAPPER_REGISTER,
-            1,
-        )
-        .unwrap()
-        .total();
-        let two = worst_case_frame_cycle_components_for_batch(
-            0xA000,
-            ATLAS_PAGE,
-            source_state,
-            COLD_REQUEST_MAPPER_REGISTER,
-            2,
-        )
-        .unwrap()
-        .total();
-        assert!(one < two);
-
-        let boundary_budget = two - 1;
-        let (largest, selected) = largest_fitting_tile_batch(
-            0xA000,
-            ATLAS_PAGE,
-            source_state,
-            COLD_REQUEST_MAPPER_REGISTER,
-            boundary_budget,
-        )
-        .unwrap();
-
-        assert_eq!(largest, 1);
-        assert_eq!(selected.total(), one);
     }
 
     /// 남은 타일이 0인 프레임은 PPU를 건드리지 않고 곧바로 돌아가야 한다.

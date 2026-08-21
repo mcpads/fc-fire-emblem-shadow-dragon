@@ -294,6 +294,8 @@ pub(super) struct CumulativeMaximumDialogueReport {
     pub(super) group_transition_pointers_hex: Vec<String>,
     pub(super) initial_selector_byte_count: usize,
     pub(super) font_group_selector_byte_count: usize,
+    pub(super) initial_selector_range_sha1: String,
+    pub(super) font_group_selector_range_sha1: String,
     pub(super) completed_page_transition_byte_count: usize,
     pub(super) completed_page_reload_installed: bool,
     pub(super) final_page_exit_bypasses_reload: bool,

@@ -21,6 +21,7 @@ pub(super) struct FullTranslationInstallReport {
     pub(super) translation_inputs: TranslationInputs,
     pub(super) fixed_string_consumers: FixedStringConsumerCensus,
     pub(super) fixed_string_ownership: FixedStringOwnershipReport,
+    pub(super) dialogue_line_layout: dialogue_line_layout::DialogueLineLayoutAudit,
     pub(super) dialogue_codebook: DialogueCodebook,
     pub(super) chapter_intro_residency: ChapterIntroResidency,
     pub(super) choice_residency: ChoiceResidencyPlan,
@@ -69,6 +70,7 @@ pub(super) struct TranslationInputs {
     pub(super) location_name_count: usize,
     pub(super) translation_input_complete: bool,
     pub(super) review_complete: bool,
+    pub(super) translation_baseline_accepted: bool,
 }
 
 #[derive(Serialize)]
@@ -159,9 +161,10 @@ pub(super) struct DialogueRuntimeComposition {
     pub(super) visible_page_recipe_reference_count: usize,
     pub(super) visible_page_overlay_reference_count: usize,
     pub(super) maximum_visible_page_overlay_tile_count: usize,
-    pub(super) cold_page_restore_frame_count: usize,
-    pub(super) maximum_cold_page_preparation_frame_count: usize,
-    pub(super) maximum_resident_page_overlay_frame_count: usize,
+    pub(super) synchronous_render_off_composition: bool,
+    pub(super) cold_page_restore_transport_call_count: usize,
+    pub(super) maximum_cold_page_preparation_transport_call_count: usize,
+    pub(super) maximum_resident_page_overlay_transport_call_count: usize,
     pub(super) maximum_visible_page_rebuild_ppu_write_count: usize,
     pub(super) sequential_page_transition_count: usize,
     pub(super) distinct_visible_page_recipe_transition_count: usize,

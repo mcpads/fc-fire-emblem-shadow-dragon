@@ -5,7 +5,9 @@ use serde::Deserialize;
 
 use crate::{font_slots::ACTIVE_HANGUL_SLOT_COUNT, rom::EXPECTED_SOURCE_SHA1, sha1_hex};
 
-use super::installed::{InstalledFixedMenuLifetime, InstalledIntroDialogueCapacity};
+use super::installed::{
+    InstalledChoiceLifetime, InstalledFixedMenuLifetime, InstalledIntroDialogueCapacity,
+};
 use super::report::{StrongestLifetimeReport, TranslationLifetimeDemandReport};
 
 mod chapter_intro_composite;
@@ -18,6 +20,7 @@ mod intro_dialogue;
 mod item_flow;
 mod map_menu;
 mod options_menu;
+mod storage_follow_up_choice;
 mod title_graphics;
 mod unit_roster;
 mod unit_ui;
@@ -73,6 +76,7 @@ pub(super) struct LifetimeInputBindings<'a> {
     pub(super) battle_temporal_manifest_sha1: &'a str,
     pub(super) intro_dialogue_capacities: &'a [InstalledIntroDialogueCapacity],
     pub(super) fixed_menu_lifetime: &'a InstalledFixedMenuLifetime,
+    pub(super) choice_lifetime: &'a InstalledChoiceLifetime,
 }
 
 pub(super) struct TranslationLifetimeInventory {
@@ -102,6 +106,7 @@ struct ConsumerLifetimeDemands {
     intro_dialogue: Vec<TranslationLifetimeDemandReport>,
     chapter_intro_composite: TranslationLifetimeDemandReport,
     fixed_menu: Vec<TranslationLifetimeDemandReport>,
+    storage_follow_up_choice: TranslationLifetimeDemandReport,
 }
 
 #[derive(Debug, Deserialize)]
@@ -299,6 +304,8 @@ pub(super) fn inspect_translation_lifetimes(
             chapter_title_workspace_sha1: bindings.chapter_title_workspace_sha1,
         })?;
     let fixed_menu_demands = fixed_menu::inspect(bindings.fixed_menu_lifetime)?;
+    let storage_follow_up_choice_demand =
+        storage_follow_up_choice::inspect(bindings.choice_lifetime)?;
 
     build_translation_lifetime_inventory(
         LifetimeReports {
@@ -322,6 +329,7 @@ pub(super) fn inspect_translation_lifetimes(
             intro_dialogue: intro_dialogue_demands,
             chapter_intro_composite: chapter_intro_composite_demand,
             fixed_menu: fixed_menu_demands,
+            storage_follow_up_choice: storage_follow_up_choice_demand,
         },
         japanese_bearing_screen_roles,
     )
@@ -384,6 +392,7 @@ fn build_translation_lifetime_inventory(
     demands.extend(consumer_demands.intro_dialogue);
     demands.push(consumer_demands.chapter_intro_composite);
     demands.extend(consumer_demands.fixed_menu);
+    demands.push(consumer_demands.storage_follow_up_choice);
     for lifetime in main.observed_screen_lifetimes {
         ensure!(
             lifetime.filled_unique_glyph_count
@@ -591,6 +600,19 @@ mod tests {
             evidence_report_sha1: "exact-final-report".to_owned(),
         };
         let fixed_menu_demands = fixed_menu::inspect(&fixed_menu_lifetime).unwrap();
+        let choice_lifetime = InstalledChoiceLifetime {
+            screen_role:
+                crate::translation_coverage::screen_targets::STORAGE_FOLLOW_UP_CHOICE_SCREEN_ROLE
+                    .to_owned(),
+            storage_follow_up: InstalledLifetimeDemand {
+                target_glyph_count: 143,
+                preserved_active_code_count: 52,
+                total_slot_demand: 195,
+            },
+            evidence_report_sha1: "exact-final-report".to_owned(),
+        };
+        let storage_follow_up_choice_demand =
+            storage_follow_up_choice::inspect(&choice_lifetime).unwrap();
         let mut roles = [
             "battle_animation",
             "class_profile",
@@ -603,6 +625,7 @@ mod tests {
             "map_menu",
             "new_game_choice",
             "save_slot_selection",
+            "storage_follow_up_choice",
             "options",
             "unit_command_menu",
             "unit_roster",
@@ -679,6 +702,7 @@ mod tests {
                 battle_temporal_manifest_sha1: "temporal",
                 intro_dialogue_capacities: &[],
                 fixed_menu_lifetime: &fixed_menu_lifetime,
+                choice_lifetime: &choice_lifetime,
             },
             ConsumerLifetimeDemands {
                 unit_ui: unit_ui_demands,
@@ -722,6 +746,7 @@ mod tests {
                     evidence_report_sha1: "chapter-intro-evidence".to_owned(),
                 },
                 fixed_menu: fixed_menu_demands,
+                storage_follow_up_choice: storage_follow_up_choice_demand,
             },
             &roles,
         )

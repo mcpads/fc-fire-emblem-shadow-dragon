@@ -168,20 +168,20 @@ fn runtime_routine_and_hook_derivations_are_part_of_identity() {
     );
 
     let required_hook = MutationIdentity::runtime_hook(
-        "NMI hook",
+        "CHR selector hook",
         4,
         &[0, 0],
         &[0x20, 0x90],
-        DialogueRuntimeHookRole::NmiPageComposer,
-        RuntimeHookSiteIdentity::Fixed(0xC179),
+        DialogueRuntimeHookRole::ChrRamSelector,
+        RuntimeHookSiteIdentity::Fixed(0xFF40),
     );
     let wrong_site_hook = MutationIdentity::runtime_hook(
-        "NMI hook",
+        "CHR selector hook",
         4,
         &[0, 0],
         &[0x20, 0x90],
-        DialogueRuntimeHookRole::NmiPageComposer,
-        RuntimeHookSiteIdentity::Fixed(0xC17A),
+        DialogueRuntimeHookRole::ChrRamSelector,
+        RuntimeHookSiteIdentity::Fixed(0xFF41),
     );
     let installed =
         materialize_mutation_plan(&source, std::slice::from_ref(&wrong_site_hook)).unwrap();
@@ -290,7 +290,6 @@ fn runtime_material_production_wiring_emits_every_routine_as_its_own_identity() 
         fixed_routines: Vec::new(),
         reclaimed_fixed_routines: Vec::new(),
         hooks: Vec::new(),
-        chr_restore_callee_cycles: [(0, 0); 2],
     };
 
     let required =

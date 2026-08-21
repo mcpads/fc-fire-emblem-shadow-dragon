@@ -449,7 +449,7 @@ fn validate_translation_fields(
         let target = inspect_markup(&line.korean, MarkupRole::KoreanTarget)
             .with_context(|| format!("inspect battle target at {}", line.id))?;
         ensure!(
-            source.protected_items == target.protected_items,
+            preserves_battle_protected_items(&source.protected_items, &target.protected_items),
             "{} changed a control token or existing English/digit literal",
             line.id
         );

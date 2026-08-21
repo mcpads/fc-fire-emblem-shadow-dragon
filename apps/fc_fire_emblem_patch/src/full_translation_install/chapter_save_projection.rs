@@ -66,6 +66,7 @@ impl ChapterSaveProjectionPlan {
             "choice_labels" => &[
                 "chapter_save_offer",
                 "chapter_save_complete_continue_prompt",
+                "storage_follow_up_choice",
             ],
             _ => &[],
         }
@@ -164,7 +165,7 @@ pub(super) fn plan_chapter_save_projection(
 
     ensure_disjoint(&writes)?;
     Ok(ChapterSaveProjectionPlan {
-        strategy: "keep weapon-shop choices in their existing lifetime-specific cave, project the original fallback choices with continue-prompt fixed codes, and use those same codes on a dedicated chapter-save page",
+        strategy: "keep weapon-shop choices in their existing lifetime-specific cave, project the original fallback choices with one code assignment shared by chapter-save and storage follow-up consumers, and use those same codes on a dedicated chapter-save page",
         choice_entry_count: inputs.choices.entries.len(),
         save_offer_entry_count: inputs.transitions.save_offer.entry_count,
         storage_write_count: writes.len(),

@@ -15,7 +15,7 @@ pub(super) fn validate_translation_markup_pair(
     let target = inspect_markup(korean_markup, MarkupRole::KoreanTarget)
         .with_context(|| format!("inspect korean markup at {id}"))?;
     ensure!(
-        target.protected_items == source.protected_items,
+        preserves_main_dialogue_protected_items(&source.protected_items, &target.protected_items,),
         "{id} changed, removed, or added a protected control token or existing English character"
     );
     validate_neutral_variable_postpositions(id, korean_markup, |_, _| false)?;
@@ -31,6 +31,58 @@ pub(super) fn validate_translation_markup_pair(
         );
     }
     Ok(target.editable_glyph_count)
+}
+
+const EDITABLE_JAPANESE_PRESENTATION_TOKENS: [&str; 5] =
+    ["{LIT:96}", "{LIT:99}", "{LIT:9A}", "{LIT:BD}", "{LIT:BE}"];
+
+pub(super) fn preserves_main_dialogue_protected_items(
+    source: &[String],
+    target: &[String],
+) -> bool {
+    let structural_source = source
+        .iter()
+        .filter(|item| !EDITABLE_JAPANESE_PRESENTATION_TOKENS.contains(&item.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    preserves_protected_items_with_added_layout_spaces(&structural_source, target, "{SP}")
+}
+
+pub(super) fn preserves_protected_items_with_added_layout_spaces(
+    source: &[String],
+    target: &[String],
+    layout_space: &str,
+) -> bool {
+    let mut source_index = 0;
+    for target_item in target {
+        if source
+            .get(source_index)
+            .is_some_and(|source_item| source_item == target_item)
+        {
+            source_index += 1;
+        } else if target_item != layout_space {
+            return false;
+        }
+    }
+    source_index == source.len()
+}
+
+pub(super) fn preserves_battle_protected_items(source: &[String], target: &[String]) -> bool {
+    let source_without_editable_periods = source
+        .iter()
+        .filter(|item| item.as_str() != ".")
+        .cloned()
+        .collect::<Vec<_>>();
+    let target_without_editable_periods = target
+        .iter()
+        .filter(|item| item.as_str() != ".")
+        .cloned()
+        .collect::<Vec<_>>();
+    preserves_protected_items_with_added_layout_spaces(
+        &source_without_editable_periods,
+        &target_without_editable_periods,
+        "{SP}",
+    )
 }
 
 pub(super) fn validate_neutral_variable_postpositions(
@@ -151,12 +203,10 @@ pub(super) fn is_japanese_markup_character(character: char) -> bool {
 }
 
 pub(super) fn is_korean_target_character(character: char) -> bool {
-    matches!(character, '\u{AC00}'..='\u{D7A3}')
-        || matches!(
-            character,
-            ',' | '!' | '?' | '…' | '·' | '~' | '-' | '\'' | '“' | '”' | '‘' | '’' | '(' | ')'
-        )
+    matches!(character, '\u{AC00}'..='\u{D7A3}') || KOREAN_TARGET_PUNCTUATION.contains(&character)
 }
+
+pub(super) const KOREAN_TARGET_PUNCTUATION: [char; 8] = [',', '!', '?', '~', '-', '\'', '(', ')'];
 
 pub(super) fn build_logical_dialogue_record(
     source: &[u8],

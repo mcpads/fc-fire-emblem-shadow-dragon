@@ -149,6 +149,64 @@ fn accepts_hangul_while_preserving_existing_english_and_control_tokens() {
 }
 
 #[test]
+fn accepts_added_layout_spaces_without_weakening_source_token_ownership() {
+    let added = workspace_line(
+        "マルスSTR{SP}おうし゛{EF}",
+        "마르스{SP}STR{SP}왕자{SP}님{EF}",
+    );
+    let result = validate_translation_markup(&added);
+    assert!(result.is_ok(), "{result:?}");
+
+    let removed = workspace_line("マルスSTR{SP}おうし゛{EF}", "마르스STR왕자님{EF}");
+    assert!(validate_translation_markup(&removed).is_err());
+
+    let changed = workspace_line("マルスSTR{SP}おうし゛{EF}", "마르스{SP}STR{SP}왕자님{EE}");
+    assert!(validate_translation_markup(&changed).is_err());
+}
+
+#[test]
+fn localizes_japanese_presentation_literals_without_weakening_structural_tokens() {
+    let localized = workspace_line(
+        "{LIT:BD}すけ゛{LIT:99}なひと{LIT:BE}{LIT:9C}{EF}",
+        "'멋진{SP}사람'{LIT:9C}{EF}",
+    );
+    let result = validate_translation_markup(&localized);
+    assert!(result.is_ok(), "{result:?}");
+
+    let retained_japanese = workspace_line("すけ゛{LIT:99}なひと{EF}", "멋{LIT:99}진{SP}사람{EF}");
+    assert!(validate_translation_markup(&retained_japanese).is_err());
+
+    let removed_question = workspace_line("た゛れ{LIT:9C}{EF}", "누구{EF}");
+    assert!(validate_translation_markup(&removed_question).is_err());
+}
+
+#[test]
+fn battle_dialogue_may_localize_period_runs_without_changing_controls() {
+    let source = inspect_markup("マルスさま...{AC}{ED}", MarkupRole::Source).unwrap();
+    let target =
+        inspect_markup("마르스님{SP}부탁합니다..{AC}{ED}", MarkupRole::KoreanTarget).unwrap();
+    assert!(preserves_battle_protected_items(
+        &source.protected_items,
+        &target.protected_items,
+    ));
+
+    let changed_control =
+        inspect_markup("마르스님{SP}부탁합니다..{AC}{EE}", MarkupRole::KoreanTarget).unwrap();
+    assert!(!preserves_battle_protected_items(
+        &source.protected_items,
+        &changed_control.protected_items,
+    ));
+}
+
+#[test]
+fn every_accepted_target_punctuation_has_a_renderable_glyph() {
+    let font = crate::font::load_dalmoori().unwrap();
+    for character in KOREAN_TARGET_PUNCTUATION {
+        crate::font::rasterize_glyph(&font, character).unwrap();
+    }
+}
+
+#[test]
 fn variable_item_names_require_a_neutral_korean_postposition() {
     let mut line = workspace_line("{EC:00}を{SP}わたす{EF}", "{EC:00}를{SP}전한다{EF}");
     line.id = "village-and-outro-dialogue:014:line:10".to_owned();

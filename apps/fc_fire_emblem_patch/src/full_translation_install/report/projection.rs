@@ -216,21 +216,24 @@ pub(in crate::full_translation_install) fn project_dialogue_runtime_composition(
         visible_page_overlay_reference_count: composition.visible_page_overlay_reference_count,
         maximum_visible_page_overlay_tile_count: composition
             .maximum_visible_page_overlay_tile_count,
-        cold_page_restore_frame_count: usize::from(runtime_code::transport::RESTORE_CHUNK_COUNT)
-            .div_ceil(usize::from(
-                runtime_code::transport::RESTORE_CHUNKS_PER_FRAME,
-            )),
-        maximum_cold_page_preparation_frame_count: usize::from(
+        synchronous_render_off_composition: true,
+        cold_page_restore_transport_call_count: usize::from(
             runtime_code::transport::RESTORE_CHUNK_COUNT,
         )
         .div_ceil(usize::from(
-            runtime_code::transport::RESTORE_CHUNKS_PER_FRAME,
+            runtime_code::transport::RESTORE_CHUNKS_PER_CALL,
+        )),
+        maximum_cold_page_preparation_transport_call_count: usize::from(
+            runtime_code::transport::RESTORE_CHUNK_COUNT,
+        )
+        .div_ceil(usize::from(
+            runtime_code::transport::RESTORE_CHUNKS_PER_CALL,
         )) + composition
             .maximum_visible_page_overlay_tile_count
-            .div_ceil(usize::from(runtime_code::transport::TILES_PER_FRAME)),
-        maximum_resident_page_overlay_frame_count: composition
+            .div_ceil(usize::from(runtime_code::transport::TILES_PER_CALL)),
+        maximum_resident_page_overlay_transport_call_count: composition
             .maximum_visible_page_overlay_tile_count
-            .div_ceil(usize::from(runtime_code::transport::TILES_PER_FRAME)),
+            .div_ceil(usize::from(runtime_code::transport::TILES_PER_CALL)),
         maximum_visible_page_rebuild_ppu_write_count: FONT_PAGE_SIZE
             + composition.maximum_visible_page_overlay_tile_count * FONT_TILE_SIZE,
         sequential_page_transition_count: composition.sequential_page_transition_count,

@@ -381,6 +381,10 @@ pub(crate) fn analyze_translation_coverage(
                 .fixed_menu_lifetime
                 .as_ref()
                 .context("exact integrated installation has no fixed-menu lifetime evidence")?,
+            choice_lifetime: installation
+                .choice_lifetime
+                .as_ref()
+                .context("exact integrated installation has no shared-choice lifetime evidence")?,
         },
         &japanese_bearing_screen_roles,
     )?;

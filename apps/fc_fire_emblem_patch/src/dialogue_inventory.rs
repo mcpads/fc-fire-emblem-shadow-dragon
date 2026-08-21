@@ -12,6 +12,7 @@ mod tests;
 
 use battle_dialogue::*;
 use main_dialogue_graph::*;
+pub(crate) use main_dialogue_record::inspect_main_dialogue_fixed_text_width;
 use main_dialogue_record::*;
 use main_dialogue_state::*;
 use main_dialogue_translation_view::{

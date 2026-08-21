@@ -31,12 +31,22 @@ pub(super) enum DynamicStringDomain {
     LocationName,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum DynamicDisplayWidth {
+    Translated {
+        maximum_target_cell_count: usize,
+        maximum_growth_over_source_cell_count: usize,
+    },
+    PreservedSource,
+}
+
 pub(super) struct DynamicDialogueInputPlan {
     pub(super) augmented_worksets: Vec<GlyphWorkset>,
     dynamic_glyphs_by_workset: Vec<BTreeSet<char>>,
     translated_dynamic_by_workset: Vec<bool>,
     preserved_numeric_by_workset: Vec<bool>,
     canonical_dynamic_codes: BTreeMap<char, u8>,
+    display_width_by_binding: BTreeMap<(String, u8), DynamicDisplayWidth>,
     pub(super) declared_domain_count: usize,
     pub(super) translated_dynamic_page_count: usize,
     pub(super) preserved_numeric_page_count: usize,
@@ -56,6 +66,17 @@ impl DynamicDialogueInputPlan {
     /// 소비자마다 다시 인코딩하지 않는다.
     pub(super) fn canonical_dynamic_codes(&self) -> &BTreeMap<char, u8> {
         &self.canonical_dynamic_codes
+    }
+
+    pub(super) fn display_width(
+        &self,
+        record_id: &str,
+        selector: u8,
+    ) -> Result<DynamicDisplayWidth> {
+        self.display_width_by_binding
+            .get(&(record_id.to_owned(), selector))
+            .copied()
+            .with_context(|| format!("{record_id} has no classified EC selector {selector:02X}"))
     }
 }
 
@@ -99,6 +120,7 @@ pub(super) fn plan_dynamic_dialogue_inputs(
     let mut maximum_rendered_target_glyph_upper_bound = 0;
     let mut mixed_dynamic_domain_page_count = 0;
     let mut classified_control_count = 0;
+    let mut display_width_by_binding = BTreeMap::new();
 
     for workset in &dialogue.page_worksets {
         let mut target_glyphs = workset.target_glyphs.clone();
@@ -120,8 +142,11 @@ pub(super) fn plan_dynamic_dialogue_inputs(
                 )
             })?;
             classified_control_count += *control_count;
-            match domain {
-                DynamicStringDomain::PreservedNumeric => has_preserved_numeric = true,
+            let display_width = match domain {
+                DynamicStringDomain::PreservedNumeric => {
+                    has_preserved_numeric = true;
+                    DynamicDisplayWidth::PreservedSource
+                }
                 translated => {
                     has_translated_domain = true;
                     let glyphs = possible_dynamic_glyphs(
@@ -131,18 +156,46 @@ pub(super) fn plan_dynamic_dialogue_inputs(
                         &domains,
                         unit_names,
                     )?;
-                    let maximum_entry_glyph_count = if translated
-                        == DynamicStringDomain::PlayableUnitName
-                        && epilogue_unit_name_source_index(&workset.record_id, *selector).is_some()
-                    {
-                        glyphs.len()
-                    } else {
-                        domains[&translated].maximum_entry_glyph_count
-                    };
+                    let (maximum_entry_display_cell_count, maximum_growth_cell_count) =
+                        if translated == DynamicStringDomain::PlayableUnitName
+                            && epilogue_unit_name_source_index(&workset.record_id, *selector)
+                                .is_some()
+                        {
+                            let entry = exact_epilogue_unit_name(
+                                &workset.record_id,
+                                *selector,
+                                unit_names,
+                            )?;
+                            (
+                                entry.display_cell_count(),
+                                entry
+                                    .display_cell_count()
+                                    .saturating_sub(entry.source_display_cell_count),
+                            )
+                        } else {
+                            (
+                                domains[&translated].maximum_entry_display_cell_count,
+                                domains[&translated].maximum_growth_over_source_cell_count,
+                            )
+                        };
                     possible_domain_glyphs.extend(glyphs.iter().copied());
                     rendered_dynamic_glyph_upper_bound +=
-                        *control_count * maximum_entry_glyph_count;
+                        *control_count * maximum_entry_display_cell_count;
+                    DynamicDisplayWidth::Translated {
+                        maximum_target_cell_count: maximum_entry_display_cell_count,
+                        maximum_growth_over_source_cell_count: maximum_growth_cell_count,
+                    }
                 }
+            };
+            let binding = (workset.record_id.clone(), *selector);
+            if let Some(previous) = display_width_by_binding.insert(binding.clone(), display_width)
+            {
+                ensure!(
+                    previous == display_width,
+                    "{} selector {:02X} changed its rendered-width bound between pages",
+                    binding.0,
+                    binding.1
+                );
             }
         }
         if has_translated_domain {
@@ -227,6 +280,7 @@ pub(super) fn plan_dynamic_dialogue_inputs(
         translated_dynamic_by_workset,
         preserved_numeric_by_workset,
         canonical_dynamic_codes,
+        display_width_by_binding,
         declared_domain_count: DynamicStringDomain::ALL.len(),
         translated_dynamic_page_count,
         preserved_numeric_page_count,
@@ -360,7 +414,8 @@ fn assign_dynamic_glyph_code(
 
 struct DomainGlyphs {
     glyphs: BTreeSet<char>,
-    maximum_entry_glyph_count: usize,
+    maximum_entry_display_cell_count: usize,
+    maximum_growth_over_source_cell_count: usize,
 }
 
 fn domain_glyphs(entries: &[FixedTextPlannedEntry], table_id: &str) -> Result<DomainGlyphs> {
@@ -377,9 +432,18 @@ fn domain_glyphs(entries: &[FixedTextPlannedEntry], table_id: &str) -> Result<Do
             .iter()
             .flat_map(|entry| entry.unique_glyphs())
             .collect(),
-        maximum_entry_glyph_count: selected
+        maximum_entry_display_cell_count: selected
             .iter()
-            .map(|entry| entry.unique_glyphs().len())
+            .map(|entry| entry.display_cell_count())
+            .max()
+            .unwrap_or(0),
+        maximum_growth_over_source_cell_count: selected
+            .iter()
+            .map(|entry| {
+                entry
+                    .display_cell_count()
+                    .saturating_sub(entry.source_display_cell_count)
+            })
             .max()
             .unwrap_or(0),
     })
@@ -444,6 +508,23 @@ fn possible_dynamic_glyphs(
         return Ok(entry.unique_glyphs());
     }
     Ok(domains[&domain].glyphs.clone())
+}
+
+fn exact_epilogue_unit_name<'a>(
+    record_id: &str,
+    selector: u8,
+    unit_names: &'a [FixedTextPlannedEntry],
+) -> Result<&'a FixedTextPlannedEntry> {
+    let source_index = epilogue_unit_name_source_index(record_id, selector)
+        .with_context(|| format!("{record_id} is not an exact epilogue unit-name binding"))?;
+    unit_names
+        .iter()
+        .find(|entry| entry.table_id == "unit-names" && entry.source_index == source_index)
+        .with_context(|| {
+            format!(
+                "ending character epilogue record {record_id} lost unit-name source index {source_index}"
+            )
+        })
 }
 
 fn dynamic_string_domain(record_id: &str, selector: u8) -> Option<DynamicStringDomain> {
@@ -567,6 +648,7 @@ mod tests {
             alias_indices: Vec::new(),
             file_offset: 0,
             source_storage_byte_count: text.chars().count(),
+            source_display_cell_count: text.chars().count(),
             review_complete: true,
             logical_bytes: text
                 .chars()
@@ -690,6 +772,38 @@ mod tests {
                 .fixed_glyph_codes
                 .values()
                 .all(|code| !installed_workset.preserved_active_codes.contains(code))
+        );
+        assert_eq!(
+            plan.display_width("epilogue-dialogue:001", 0).unwrap(),
+            DynamicDisplayWidth::Translated {
+                maximum_target_cell_count: 3,
+                maximum_growth_over_source_cell_count: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn dynamic_width_uses_rendered_cells_instead_of_unique_glyphs() {
+        let mut expanded_name = fixed_entry("item-names", 0, "가가가");
+        expanded_name.source_display_cell_count = 1;
+        let plan = plan_dynamic_dialogue_inputs(
+            &one_page_display("shop-and-item-dialogue:008", 0),
+            &[expanded_name, fixed_entry("item-names", 1, "나")],
+            &[fixed_entry("unit-names", 0, "마르스")],
+            &[fixed_entry("location-names", 0, "아리티아")],
+            &[TransitionLifetimeWorksets {
+                record_indices: vec![0],
+                workset_indices: vec![0],
+            }],
+        )
+        .unwrap();
+
+        assert_eq!(
+            plan.display_width("shop-and-item-dialogue:008", 0).unwrap(),
+            DynamicDisplayWidth::Translated {
+                maximum_target_cell_count: 3,
+                maximum_growth_over_source_cell_count: 2,
+            }
         );
     }
 

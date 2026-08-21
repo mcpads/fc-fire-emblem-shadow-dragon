@@ -19,6 +19,9 @@
 
 use anyhow::{Context, Result};
 
+use super::super::dynamic_composition::{
+    PAGE_RECIPE_HEADER_BYTE_COUNT, REUSE_RESIDENT_PAGE_RECIPE_REFERENCE,
+};
 use super::super::runtime_cursor_storage::{
     CURSOR_ENTRY_HIGH, CURSOR_ENTRY_LOW, CURSOR_OVERLAY_TILES, CURSOR_PHASE, CURSOR_RECIPE_PAGE,
     CURSOR_REMAINING_TILES, PUBLISHED_SOURCE_DIRECTORY_SELECTOR, PUBLISHED_SOURCE_ENTRY_INDEX,
@@ -28,7 +31,10 @@ use super::super::runtime_state_storage::{
     CANDIDATE_START, CURRENT_PAGE_RESIDENCY, DIALOGUE_RUNTIME_STATE_END, RECORD_INDEX_HIGH,
     RECORD_INDEX_LOW, REQUEST_STATE, VISIBLE_PAGE_INDEX,
 };
-use super::transport::{PHASE_RESTORE, RESTORE_CHUNK_COUNT, STATE_COMPLETED_PAGE_SUSPENDED};
+use super::resolved_page_publication::NO_RESIDENT_PAGE_RECIPE;
+use super::transport::{
+    PHASE_RESTORE, RESTORE_CHUNK_COUNT, STATE_COMPLETED_PAGE_SUSPENDED, STATE_READY,
+};
 use super::{RuntimeRoutine, next_address};
 use crate::rp2a03::{Instruction, assemble_at};
 
@@ -44,7 +50,10 @@ pub(super) const SOURCE_ENTRY_INDEX: u16 = 0x77F1;
 /// 식별표에서 «없는 선택자»를 뜻하는 값이다.
 const MISSING_TABLE: u8 = 0xFF;
 /// 새 대사 수명에서 살아 있는 원본 selector/index를 현재 레코드로 해석한다.
+#[cfg(test)]
 pub(super) const LOOKUP_LIVE_SOURCE_IDENTITY: u8 = 1;
+/// 독립 수명은 살아 있는 원문 정체성을 쓰되 이전 상주 그룹은 재사용하지 않는다.
+pub(super) const LOOKUP_INITIAL_SOURCE_IDENTITY: u8 = 2;
 /// 연속 대사에서 직전에 게시한 선행 조회값을 현재 레코드로 승격한다.
 pub(super) const LOOKUP_PUBLISHED_SOURCE_IDENTITY: u8 = 0;
 
@@ -93,7 +102,16 @@ pub(in crate::full_translation_install) struct MaterialLayout {
 }
 
 /// 주 흐름에서 빌려 쓰는 제로 페이지다. 밀고 되돌린다.
-const BORROWED_SCRATCH: [u8; 6] = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05];
+const PREVIOUS_RESIDENT_PAGE_RECIPE: u8 = 0x06;
+const BORROWED_SCRATCH: [u8; 7] = [
+    0x00,
+    0x01,
+    0x02,
+    0x03,
+    0x04,
+    0x05,
+    PREVIOUS_RESIDENT_PAGE_RECIPE,
+];
 
 /// 빌린 제로 페이지를 민 순서의 반대로 되돌린다. 캐리는 건드리지 않는다.
 fn restore_scratch(instructions: &mut Vec<Instruction>) {
@@ -167,6 +185,11 @@ fn append_new_record_line_buffer_reset(
     Ok(())
 }
 
+struct PageRequestResolutionBranches {
+    page_exhausted: Vec<usize>,
+    resident_recipe_reuse: Vec<usize>,
+}
+
 pub(super) fn contains_new_record_line_buffer_reset(routine: &RuntimeRoutine) -> Result<bool> {
     let origin = 0x8000;
     let reset = assemble_at(origin, &new_record_line_buffer_reset(origin)?)?;
@@ -184,8 +207,10 @@ fn append_page_request_resolution(
     failure_branches: &mut Vec<usize>,
     origin: u16,
     layout: MaterialLayout,
-) -> Result<Vec<usize>> {
+    allow_resident_recipe_reuse: bool,
+) -> Result<PageRequestResolutionBranches> {
     let mut page_exhausted_branches = Vec::new();
+    let mut resident_recipe_reuse_branches = Vec::new();
     instructions.extend(map_page(Instruction::LdaImmediate(layout.scan_index_page)));
     instructions.extend([
         // 레코드 색인 × 2가 디렉터리 안의 자리다.
@@ -266,6 +291,36 @@ fn append_page_request_resolution(
         Instruction::Iny,
         Instruction::LdaIndirectY(0x00),
         Instruction::StaZeroPage(0x03),
+    ]);
+
+    // 같은 레코드의 직전 페이지와 레시피가 같으면 생성기가 FFFF를 쓴다. 최초
+    // 페이지에는 이 표식이 금지되어 있고, 다음 페이지 resolver만 현재 CHR-RAM을
+    // 그대로 준비 상태로 승격할 수 있다.
+    instructions.extend([
+        Instruction::LdaZeroPage(0x02),
+        Instruction::CmpImmediate(REUSE_RESIDENT_PAGE_RECIPE_REFERENCE as u8),
+    ]);
+    let concrete_low = instructions.len();
+    let concrete_low_branch = next_address(origin, instructions)?;
+    instructions.push(Instruction::BneAbsolute(
+        concrete_low_branch
+            .checked_add(2)
+            .context("resident recipe branch address overflow")?,
+    ));
+    instructions.extend([
+        Instruction::LdaZeroPage(0x03),
+        Instruction::CmpImmediate((REUSE_RESIDENT_PAGE_RECIPE_REFERENCE >> 8) as u8),
+    ]);
+    let reuse_branch = branch_to_failure(instructions, origin, Instruction::BneAbsolute)?;
+    if allow_resident_recipe_reuse {
+        resident_recipe_reuse_branches.push(reuse_branch);
+    } else {
+        failure_branches.push(reuse_branch);
+    }
+    let concrete_recipe = next_address(origin, instructions)?;
+    instructions[concrete_low] = Instruction::BneAbsolute(concrete_recipe);
+
+    instructions.extend([
         // 덩이의 용기 안 자리를 만든다.
         Instruction::Clc,
         Instruction::LdaZeroPage(0x02),
@@ -298,6 +353,19 @@ fn append_page_request_resolution(
         Instruction::StaZeroPage(0x01),
         Instruction::LdyImmediate(0),
         Instruction::LdaIndirectY(0x00),
+        // 덩이 머리의 상주 그룹을 먼저 게시하고 직전 그룹과 비교한다.
+        Instruction::StaAbsolute(CURRENT_PAGE_RESIDENCY),
+        Instruction::CmpZeroPage(PREVIOUS_RESIDENT_PAGE_RECIPE),
+    ]);
+    let same_resident_group = branch_to_failure(instructions, origin, Instruction::BneAbsolute)?;
+    if allow_resident_recipe_reuse {
+        resident_recipe_reuse_branches.push(same_resident_group);
+    } else {
+        failure_branches.push(same_resident_group);
+    }
+    instructions.extend([
+        Instruction::Iny,
+        Instruction::LdaIndirectY(0x00),
         // 덮기 몫은 보관해 둔다. 먼저 도는 것은 복원 단계다.
         Instruction::StaAbsolute(CURSOR_OVERLAY_TILES),
     ]);
@@ -307,13 +375,9 @@ fn append_page_request_resolution(
         Instruction::BneAbsolute,
     )?);
     instructions.extend([
-        // 이 바이트는 정확한 그룹 번호가 아니라 완성 페이지 상주권의 존재를 뜻한다.
-        // 새 레시피는 실제로 쓰는 코드를 전부 다시 덮으므로 그룹 정체성은 불필요하다.
-        Instruction::LdaImmediate(0),
-        Instruction::StaAbsolute(CURRENT_PAGE_RESIDENCY),
         Instruction::Clc,
         Instruction::LdaZeroPage(0x02),
-        Instruction::AdcImmediate(1),
+        Instruction::AdcImmediate(PAGE_RECIPE_HEADER_BYTE_COUNT as u8),
         Instruction::StaAbsolute(CURSOR_ENTRY_LOW),
         Instruction::LdaZeroPage(0x03),
         Instruction::AdcImmediate(0),
@@ -323,7 +387,10 @@ fn append_page_request_resolution(
         Instruction::LdaImmediate(RESTORE_CHUNK_COUNT),
         Instruction::StaAbsolute(CURSOR_REMAINING_TILES),
     ]);
-    Ok(page_exhausted_branches)
+    Ok(PageRequestResolutionBranches {
+        page_exhausted: page_exhausted_branches,
+        resident_recipe_reuse: resident_recipe_reuse_branches,
+    })
 }
 
 fn finish_resolver(
@@ -331,11 +398,25 @@ fn finish_resolver(
     mut instructions: Vec<Instruction>,
     failure_branches: Vec<usize>,
     page_exhausted_branches: Vec<usize>,
+    resident_recipe_reuse_branches: Vec<usize>,
     role: &'static str,
 ) -> Result<RuntimeRoutine> {
     instructions.push(Instruction::Sec);
     restore_scratch(&mut instructions);
     instructions.push(Instruction::Rts);
+
+    let resident_recipe_reuse = next_address(origin, &instructions)?;
+    if !resident_recipe_reuse_branches.is_empty() {
+        instructions.extend([
+            // 레시피가 동일하면 기존 CHR-RAM이 이미 완성 결과다. `carry clear`로
+            // 공통 발행기의 합성 경로를 건너뛰되, ready 상태는 먼저 게시한다.
+            Instruction::LdaImmediate(STATE_READY),
+            Instruction::StaAbsolute(REQUEST_STATE),
+            Instruction::Clc,
+        ]);
+        restore_scratch(&mut instructions);
+        instructions.push(Instruction::Rts);
+    }
 
     let page_exhausted = next_address(origin, &instructions)?;
     if !page_exhausted_branches.is_empty() {
@@ -354,6 +435,9 @@ fn finish_resolver(
     }
     for index in page_exhausted_branches {
         instructions[index] = Instruction::JmpAbsolute(page_exhausted);
+    }
+    for index in resident_recipe_reuse_branches {
+        instructions[index] = Instruction::JmpAbsolute(resident_recipe_reuse);
     }
     instructions.push(Instruction::Clc);
     restore_scratch(&mut instructions);
@@ -381,6 +465,28 @@ pub(in crate::full_translation_install) fn build_resolve_request(
     let mut instructions = Vec::new();
     let mut failure_branches = Vec::new();
     save_scratch(&mut instructions);
+
+    // 독립 진입은 휘발 RAM의 과거 값을 절대 재사용하지 않는다. 연결 레코드 진입은
+    // 현재 상주 그룹을 빌린 제로 페이지에 보존한 뒤 공통 상태 초기화를 거친다.
+    instructions.push(Instruction::CpxImmediate(LOOKUP_INITIAL_SOURCE_IDENTITY));
+    let continuing_lifetime = instructions.len();
+    let continuing_lifetime_branch = next_address(origin, &instructions)?;
+    instructions.push(Instruction::BneAbsolute(
+        continuing_lifetime_branch
+            .checked_add(2)
+            .context("resident group selection branch overflow")?,
+    ));
+    instructions.push(Instruction::LdaImmediate(NO_RESIDENT_PAGE_RECIPE));
+    let previous_group_selected = instructions.len();
+    instructions.push(Instruction::JmpAbsolute(origin));
+
+    let load_previous_group = next_address(origin, &instructions)?;
+    instructions[continuing_lifetime] = Instruction::BneAbsolute(load_previous_group);
+    instructions.push(Instruction::LdaAbsolute(CURRENT_PAGE_RESIDENCY));
+
+    let save_previous_group = next_address(origin, &instructions)?;
+    instructions[previous_group_selected] = Instruction::JmpAbsolute(save_previous_group);
+    instructions.push(Instruction::StaZeroPage(PREVIOUS_RESIDENT_PAGE_RECIPE));
 
     // 연속 수명에서는 게시 정체성도 아래 clear 범위에 들어 있다. 어느 정체성을
     // 해석할지 먼저 고른 뒤에만 휘발 상태를 지운다.
@@ -473,14 +579,20 @@ pub(in crate::full_translation_install) fn build_resolve_request(
         Instruction::BneAbsolute,
     )?);
 
-    let page_exhausted_branches =
-        append_page_request_resolution(&mut instructions, &mut failure_branches, origin, layout)?;
-    failure_branches.extend(page_exhausted_branches);
+    let page_resolution = append_page_request_resolution(
+        &mut instructions,
+        &mut failure_branches,
+        origin,
+        layout,
+        false,
+    )?;
+    failure_branches.extend(page_resolution.page_exhausted);
     finish_resolver(
         origin,
         instructions,
         failure_branches,
         Vec::new(),
+        page_resolution.resident_recipe_reuse,
         INITIAL_PAGE_REQUEST_RESOLVER_ROLE,
     )
 }
@@ -504,19 +616,27 @@ pub(in crate::full_translation_install) fn build_resolve_next_page_request(
     let mut failure_branches = Vec::new();
     save_scratch(&mut instructions);
     instructions.extend([
+        Instruction::LdaAbsolute(CURRENT_PAGE_RESIDENCY),
+        Instruction::StaZeroPage(PREVIOUS_RESIDENT_PAGE_RECIPE),
         Instruction::IncAbsolute(VISIBLE_PAGE_INDEX),
         Instruction::LdaAbsolute(RECORD_INDEX_LOW),
         Instruction::StaZeroPage(0x02),
         Instruction::LdaAbsolute(RECORD_INDEX_HIGH),
         Instruction::StaZeroPage(0x03),
     ]);
-    let page_exhausted_branches =
-        append_page_request_resolution(&mut instructions, &mut failure_branches, origin, layout)?;
+    let page_resolution = append_page_request_resolution(
+        &mut instructions,
+        &mut failure_branches,
+        origin,
+        layout,
+        true,
+    )?;
     finish_resolver(
         origin,
         instructions,
         failure_branches,
-        page_exhausted_branches,
+        page_resolution.page_exhausted,
+        page_resolution.resident_recipe_reuse,
         NEXT_PAGE_REQUEST_RESOLVER_ROLE,
     )
 }
@@ -858,6 +978,36 @@ mod tests {
                 "next-page resolution overwrites record identity {identity:04X}"
             );
         }
+    }
+
+    /// 생성 자료가 직전 페이지와 같은 레시피를 가리키면 다음 페이지는 이미 완성된
+    /// CHR-RAM을 다시 쓰지 않는다. 최초 페이지에는 상주 기반이 없으므로 같은 표식을
+    /// 받아도 ready로 승격해서는 안 된다.
+    #[test]
+    fn only_next_page_can_publish_resident_recipe_reuse_as_ready() {
+        let initial = build_resolve_request(0xA400, layout()).unwrap();
+        let next = build_resolve_next_page_request(0xA700, layout()).unwrap();
+        let ready_without_transport = assemble_at(
+            0x8000,
+            &[
+                Instruction::LdaImmediate(STATE_READY),
+                Instruction::StaAbsolute(REQUEST_STATE),
+                Instruction::Clc,
+            ],
+        )
+        .unwrap();
+
+        assert!(
+            next.bytes
+                .windows(ready_without_transport.len())
+                .any(|window| window == ready_without_transport)
+        );
+        assert!(
+            !initial
+                .bytes
+                .windows(ready_without_transport.len())
+                .any(|window| window == ready_without_transport)
+        );
     }
 
     /// 레코드 디렉터리의 다음 16비트 항목이 현재 레코드의 끝이다. 다음 페이지

@@ -152,6 +152,7 @@ impl Instruction {
     /// vblank 안에서 도는 코드의 예산을 세우는 데만 쓴다. 그래서 페이지 경계를
     /// 넘는 색인 접근과 분기 성립을 전부 «일어난다»로 본다. 실제보다 크게 잡히는
     /// 쪽이라 예산이 낙관적으로 기울지 않는다.
+    #[cfg(test)]
     pub fn worst_case_cycles(self) -> u8 {
         match self {
             Self::AslAccumulator

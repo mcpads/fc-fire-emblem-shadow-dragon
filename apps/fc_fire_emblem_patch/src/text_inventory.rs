@@ -35,6 +35,13 @@ use source_spec::*;
 pub(crate) use source_spec::{DIALOGUE_CONTROL_SPECS, DIALOGUE_SCRIPT_CONTROL_CODES};
 use table_analysis::*;
 
+/// The dialogue renderer consumes dakuten and handakuten as overlay marks on the
+/// preceding source glyph. They occupy storage bytes, but do not advance the
+/// rendered text cursor by another cell.
+pub(crate) fn dialogue_literal_display_cell_count(code: u8) -> usize {
+    usize::from(!COMPOSITE_TEXT_LAYOUT_CODES.contains(&code))
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct TextTableBudget {
     pub(crate) id: &'static str,

@@ -48,7 +48,7 @@ use super::super::runtime_cursor_storage::{
 use super::super::runtime_nmi_contract::PPU_CONTROL_SHADOW;
 use super::super::runtime_state_storage::CURRENT_PAGE_RESIDENCY;
 use super::lifecycle::E7_CALLER_RESUME_FLAG;
-use super::resolve_request::LOOKUP_LIVE_SOURCE_IDENTITY;
+use super::resolve_request::LOOKUP_INITIAL_SOURCE_IDENTITY;
 #[cfg(test)]
 use super::resolve_request::LOOKUP_PUBLISHED_SOURCE_IDENTITY;
 use super::resolve_request::{SOURCE_DIRECTORY_SELECTOR, SOURCE_ENTRY_INDEX};
@@ -67,9 +67,6 @@ pub(super) const SOURCE_IDENTITY_PUBLISHER_TAIL_CAVE_END: u16 = WRITE_TRANSLATED
 pub(super) const SOURCE_IDENTITY_REQUEST_PUBLISHER_ROLE: &str =
     "dialogue source-identity request publisher";
 pub(super) const INITIAL_REQUEST_PUBLISHER_ROLE: &str = "dialogue initial-entry request publisher";
-pub(in crate::full_translation_install) const EXPECTED_RECLAIMED_GATE_CAVE_SHA1: &str =
-    "7ad92984b55ad0cdfc465743a52002420d3ae394";
-
 const BANK_VALUE_REGISTER: u16 = 0x8001;
 const PPU_CONTROL: u16 = 0x2000;
 const NMI_ENABLE_MASK: u8 = 0x80;
@@ -78,8 +75,9 @@ const PAIRED_BANK_HELPER: u16 = 0xFA20;
 
 /// 합성을 기다리는 중이라는 요청이다.
 pub(in crate::full_translation_install) const STATE_COLD_REQUESTED: u8 = 1;
-/// 완성된 이전 페이지 위에 새 가시 페이지 레시피를 덮는 요청이다. 원본 4 KiB 복원은
-/// 생략하지만 새 페이지가 실제로 쓰는 글리프는 전부 다시 써 이전 페이지와 독립시킨다.
+/// 완성된 이전 그룹 위에 다른 상주 그룹의 레시피를 덮는 요청이다. 원본 4 KiB 복원은
+/// 생략하지만 새 그룹이 쓸 글리프 코드는 전부 다시 쓴다. 같은 그룹 전이는 resolver가
+/// 이 상태를 만들지 않고 즉시 `ready`로 승격한다.
 pub(in crate::full_translation_install) const STATE_RESIDENT_PAGE_OVERLAY_REQUESTED: u8 = 2;
 
 /// 대사 뱅크다.
@@ -254,7 +252,7 @@ pub(super) fn build_source_identity_request_publisher(
         Instruction::LdaImmediate(NO_RESIDENT_PAGE_RECIPE),
         // 새 수명에는 게시된 선행 조회값이 없으므로 살아 있는 원본 정체성이 현재
         // 레코드다.
-        Instruction::LdxImmediate(LOOKUP_LIVE_SOURCE_IDENTITY),
+        Instruction::LdxImmediate(LOOKUP_INITIAL_SOURCE_IDENTITY),
     ]);
     let preserve_resident_group = instructions.len();
     instructions.push(Instruction::JmpAbsolute(origin));
@@ -329,7 +327,7 @@ pub(super) fn build_initial_request_publisher(
 ) -> Result<RuntimeRoutine> {
     let mut instructions = vec![
         Instruction::LdaImmediate(NO_RESIDENT_PAGE_RECIPE),
-        Instruction::LdxImmediate(LOOKUP_LIVE_SOURCE_IDENTITY),
+        Instruction::LdxImmediate(LOOKUP_INITIAL_SOURCE_IDENTITY),
     ];
     append_guarded_resolver_publication(
         &mut instructions,
@@ -854,7 +852,7 @@ mod tests {
             0xA9,
             NO_RESIDENT_PAGE_RECIPE,
             0xA2,
-            LOOKUP_LIVE_SOURCE_IDENTITY,
+            LOOKUP_INITIAL_SOURCE_IDENTITY,
             0x4C,
         ];
         assert!(
@@ -880,7 +878,7 @@ mod tests {
             routine
                 .bytes
                 .windows(2)
-                .filter(|window| *window == [0xA2, LOOKUP_LIVE_SOURCE_IDENTITY])
+                .filter(|window| *window == [0xA2, LOOKUP_INITIAL_SOURCE_IDENTITY])
                 .count(),
             1,
             "only a new lifetime hard-codes live identity; ready lifetimes use their boundary mode"
@@ -905,7 +903,7 @@ mod tests {
                 0xA9,
                 NO_RESIDENT_PAGE_RECIPE,
                 0xA2,
-                LOOKUP_LIVE_SOURCE_IDENTITY,
+                LOOKUP_INITIAL_SOURCE_IDENTITY,
             ]
         );
         assert!(

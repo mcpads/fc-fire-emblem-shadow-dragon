@@ -71,11 +71,19 @@ pub(crate) struct FixedTextPlannedEntry {
     pub(crate) alias_indices: Vec<usize>,
     pub(crate) file_offset: usize,
     pub(crate) source_storage_byte_count: usize,
+    pub(crate) source_display_cell_count: usize,
     pub(crate) review_complete: bool,
     pub(crate) logical_bytes: Vec<FixedTextLogicalByte>,
 }
 
 impl FixedTextPlannedEntry {
+    /// Every logical byte copied into an `{EC}` slot occupies one rendered text
+    /// cell. This intentionally counts repeated glyphs and layout blanks; a
+    /// unique-glyph count is a font-capacity metric, not a string-width metric.
+    pub(crate) fn display_cell_count(&self) -> usize {
+        self.logical_bytes.len()
+    }
+
     pub(crate) fn unique_glyphs(&self) -> BTreeSet<char> {
         self.logical_bytes
             .iter()
@@ -235,6 +243,14 @@ fn plan_workspace(
             let logical_bytes = encode_target_markup(&entry.korean_markup)
                 .with_context(|| format!("encode {}", entry.id))?;
             let source_len = entry.source_bytes_hex.split_whitespace().count();
+            let source_display_cell_count = entry
+                .source_bytes_hex
+                .split_whitespace()
+                .map(|encoded| u8::from_str_radix(encoded, 16).context("decode source byte"))
+                .collect::<Result<Vec<_>>>()?
+                .into_iter()
+                .map(dialogue_literal_display_cell_count)
+                .sum();
             ensure!(
                 logical_bytes.len() <= source_len,
                 "{} needs {} bytes but owns only {}",
@@ -258,6 +274,7 @@ fn plan_workspace(
                 alias_indices: entry.alias_indices.clone(),
                 file_offset,
                 source_storage_byte_count: source_len,
+                source_display_cell_count,
                 review_complete: entry.status == "complete",
                 logical_bytes,
             })
@@ -473,13 +490,21 @@ fn validate_translation(entry: &FixedTextEntry) -> Result<()> {
             "Korean fixed text still contains Japanese for {}",
             entry.id
         );
-        let protected = entry
-            .japanese_markup
+        const LAYOUT_SPACE_TOKEN: &str = "{FF}";
+        let source_layout_space_count = entry.japanese_markup.matches(LAYOUT_SPACE_TOKEN).count();
+        let target_layout_space_count = entry.korean_markup.matches(LAYOUT_SPACE_TOKEN).count();
+        ensure!(
+            target_layout_space_count >= source_layout_space_count,
+            "fixed-text translation removed a source layout space for {}",
+            entry.id
+        );
+        let source_markup = entry.japanese_markup.replace(LAYOUT_SPACE_TOKEN, "");
+        let target_markup = entry.korean_markup.replace(LAYOUT_SPACE_TOKEN, "");
+        let protected = source_markup
             .chars()
             .filter(|c| c.is_ascii())
             .collect::<String>();
-        let retained = entry
-            .korean_markup
+        let retained = target_markup
             .chars()
             .filter(|c| c.is_ascii())
             .collect::<String>();
@@ -576,6 +601,63 @@ mod tests {
         ));
         assert!(matches!(encoded[1], FixedTextLogicalByte::Encoded(0xFF)));
         assert_eq!(encoded.len(), 2);
+    }
+
+    #[test]
+    fn display_width_counts_repeated_glyphs_and_layout_spaces() {
+        let entry = FixedTextPlannedEntry {
+            id: "item-names:000".to_owned(),
+            table_id: "item-names".to_owned(),
+            source_index: 0,
+            alias_indices: Vec::new(),
+            file_offset: 0,
+            source_storage_byte_count: 4,
+            source_display_cell_count: 3,
+            review_complete: true,
+            logical_bytes: encode_target_markup("가가{FF}검").unwrap(),
+        };
+
+        assert_eq!(entry.unique_glyphs().len(), 2);
+        assert_eq!(entry.display_cell_count(), 4);
+    }
+
+    #[test]
+    fn battle_message_translation_may_add_but_not_remove_layout_spaces() {
+        let mut entry = FixedTextEntry {
+            id: "battle-message-templates:011".to_owned(),
+            table_id: "battle-message-templates".to_owned(),
+            source_index: 11,
+            alias_indices: vec![11],
+            pointer_cpu_address_hex: "0x0000".to_owned(),
+            source_file_offset_hex: Some("0x00000".to_owned()),
+            source_bytes_hex: String::new(),
+            source_sha1: String::new(),
+            japanese_markup: "は{FF}こうげきをふうじられた".to_owned(),
+            korean_markup: "{FF}공격이{FF}봉인됐다".to_owned(),
+            status: "needs_human_review".to_owned(),
+        };
+        validate_translation(&entry).unwrap();
+
+        entry.korean_markup = "공격이봉인됐다".to_owned();
+        assert!(validate_translation(&entry).is_err());
+    }
+
+    #[test]
+    fn fixed_text_translation_may_add_layout_spaces() {
+        let entry = FixedTextEntry {
+            id: "class-names:000".to_owned(),
+            table_id: "class-names".to_owned(),
+            source_index: 0,
+            alias_indices: vec![],
+            pointer_cpu_address_hex: "0x0000".to_owned(),
+            source_file_offset_hex: None,
+            source_bytes_hex: String::new(),
+            source_sha1: String::new(),
+            japanese_markup: "Sナイト".to_owned(),
+            korean_markup: "S{FF}나이트".to_owned(),
+            status: "needs_human_review".to_owned(),
+        };
+        validate_translation(&entry).unwrap();
     }
 
     #[test]

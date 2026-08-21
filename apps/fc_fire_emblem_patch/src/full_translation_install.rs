@@ -47,6 +47,7 @@ mod cross_domain_material;
 mod current_candidate;
 mod dialogue_bank_layout;
 mod dialogue_item_worksets;
+mod dialogue_line_layout;
 mod dynamic_composition;
 mod dynamic_input_producers;
 mod dynamic_inputs;
@@ -74,6 +75,8 @@ mod storage_residency;
 mod transition_residency;
 mod unit_selection_help_residency;
 
+pub(crate) use storage_residency::STORAGE_CHOICE_DIALOGUE_RECORD_ID;
+
 use chapter_intro_residency::plan_chapter_intro_residency;
 use chapter_save_projection::{
     ChapterSaveProjectionInputs, ChapterSaveProjectionPlan, plan_chapter_save_projection,
@@ -87,6 +90,7 @@ use consumer_installation::{
 };
 use cross_domain_material::{CrossDomainMaterialInputs, plan_cross_domain_material};
 use current_candidate::{CurrentCandidateInputs, inspect_dialogue_page_pool_capacity};
+use dialogue_line_layout::audit_main_dialogue_line_layout;
 use dynamic_composition::plan_dialogue_runtime_composition;
 use dynamic_input_producers::{DynamicInputProducerPlan, inspect_dynamic_input_producers};
 use dynamic_inputs::{
@@ -196,7 +200,8 @@ pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) output_will_be_emitted: bool,
 }
 
-pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 36;
+pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 40;
+const CURRENT_TRANSLATION_BASELINE_ACCEPTED: bool = true;
 
 pub(crate) struct FullTranslationInstallSummary {
     pub(crate) report_sha1: String,
@@ -330,6 +335,8 @@ pub(crate) fn plan_full_translation_installation(
         &locations.entries,
         &transition_lifetimes,
     )?;
+    let dialogue_line_layout =
+        audit_main_dialogue_line_layout(&dialogue.line_layout, &dynamic_inputs)?;
     let shop_item_workset_residency =
         plan_shop_item_workset_residency(ShopItemWorksetResidencyInputs {
             source: &rom,
@@ -677,6 +684,7 @@ pub(crate) fn plan_full_translation_installation(
     let dialogue_runtime_code = plan_dialogue_runtime_code(
         &rom,
         &current_candidate,
+        &page_capacity.maximum_dialogue_font_group_selector_range_sha1,
         runtime_material.runtime_code_cpu_start()?,
         page(atlas_offset)?,
         runtime_material.runtime_code_mmc3_page(),
@@ -740,9 +748,12 @@ pub(crate) fn plan_full_translation_installation(
         selected_runtime_state_cpu_range,
         runtime_code_routines_assembled,
         assembled_hook_roles: &assembled_hook_roles,
-        chr_restore_callee_cycles: dialogue_runtime_code.chr_restore_callee_cycles,
         canonical_dynamic_codes_are_page_physical_codes: dynamic_page_codes
             .canonical_codes_are_page_physical_codes,
+        maximum_dialogue_font_group_selector_range_sha1: &page_capacity
+            .maximum_dialogue_font_group_selector_range_sha1,
+        maximum_dialogue_initial_selector_range_sha1: &page_capacity
+            .maximum_dialogue_initial_selector_range_sha1,
     })?;
     let required_target_unit_counts = BTreeMap::from([
         (
@@ -957,7 +968,7 @@ pub(crate) fn plan_full_translation_installation(
         carried_domain_reinspection_complete: carried_ui_domains_complete
             && carried_battle_domains_complete,
         technical_installation_complete,
-        review_complete,
+        translation_baseline_accepted: CURRENT_TRANSLATION_BASELINE_ACCEPTED,
         output_will_be_emitted: inputs.output_will_be_emitted,
         dynamic_verification_started,
         declared_consumer_runtime_observation_complete,
@@ -1027,9 +1038,11 @@ pub(crate) fn plan_full_translation_installation(
             location_name_count: locations.entries.len(),
             translation_input_complete,
             review_complete,
+            translation_baseline_accepted: CURRENT_TRANSLATION_BASELINE_ACCEPTED,
         },
         fixed_string_consumers: fixed_string_consumers.census,
         fixed_string_ownership,
+        dialogue_line_layout,
         dialogue_codebook: dialogue_codebook_report,
         chapter_intro_residency: chapter_intro_residency_report,
         choice_residency,

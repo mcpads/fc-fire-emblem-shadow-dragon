@@ -285,9 +285,10 @@ fn shadow_operand_census_uses_typed_direct_indexed_and_pointer_semantics() {
 }
 
 #[test]
-fn final_contract_accepts_only_its_exact_nmi_trampoline_call() {
-    let candidate = synthetic_installed_candidate(0xF400);
+fn final_contract_requires_both_original_nmi_calls() {
+    let candidate = synthetic_installed_candidate(SOURCE_NMI_DISPLACED_CALL);
+    verify_final_installed_contract(&candidate).unwrap();
 
-    verify_final_installed_contract(&candidate, 0xF400).unwrap();
-    assert!(verify_final_installed_contract(&candidate, SOURCE_NMI_DISPLACED_CALL).is_err());
+    let hooked = synthetic_installed_candidate(0xF400);
+    assert!(verify_final_installed_contract(&hooked).is_err());
 }

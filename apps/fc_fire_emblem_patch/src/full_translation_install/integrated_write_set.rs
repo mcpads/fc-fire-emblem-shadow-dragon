@@ -251,7 +251,7 @@ pub(super) fn plan_integrated_write_set(
             .get(offset..offset + capacity)
             .ok_or_else(|| anyhow::anyhow!("{} is outside the candidate", routine.role))?;
         ensure!(
-            crate::sha1_hex(existing) == reclaimed.expected_source_sha1,
+            crate::sha1_hex(existing) == reclaimed.expected_source_sha1.as_str(),
             "{} source digest changed",
             routine.role
         );
@@ -312,10 +312,7 @@ pub(super) fn plan_integrated_write_set(
     let actual_mutations = image.mutation_identities().to_vec();
     let output = image.into_data();
     let output_rom = Rom::parse(output.clone()).context("parse integrated mapper output")?;
-    crate::mapper165::selector_safety::verify_final_installed_contract(
-        &output_rom,
-        super::runtime_code::trampoline::TRAMPOLINE_ORIGIN,
-    )?;
+    crate::mapper165::selector_safety::verify_final_installed_contract(&output_rom)?;
     super::runtime_code::verify_installed_chr_ram_ownership_gate(&output_rom)?;
     verify_installed_dialogue(&output, inputs.encoded_dialogue)?;
     verify_installed_chapter_titles(&output, inputs.candidate, inputs.encoded_chapter_titles)?;

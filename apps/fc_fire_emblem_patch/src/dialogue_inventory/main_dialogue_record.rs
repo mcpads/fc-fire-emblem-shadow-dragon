@@ -1,5 +1,47 @@
 use super::*;
 
+/// Returns the visible text width established by this record's fixed four-byte
+/// window header. Transition-only views deliberately return `None`: their
+/// caller keeps the already-open window, so treating the bytes at the target
+/// address as a fresh header would invent a width that the runtime never loads.
+pub(crate) fn inspect_main_dialogue_fixed_text_width(
+    source: &[u8],
+    record: &MainDialogueStorageRecord,
+) -> Result<Option<usize>> {
+    const MAXIMUM_RENDERER_WIDTH: u8 = 0x1F;
+
+    let bank_end = switchable_bank_file_start(record.source_prg_bank)
+        .checked_add(PRG_BANK_SIZE)
+        .context("main-dialogue fixed-width source-bank range overflow")?;
+    let direct_prefix = inspect_main_record_prefix(
+        source,
+        record.file_offset,
+        bank_end,
+        record.table_id,
+        record.canonical_entry_index,
+    )?;
+    if record.prefix_byte_count != direct_prefix.total_prefix_byte_count
+        || direct_prefix.fixed_record_header_byte_count != FIXED_RECORD_HEADER_BYTE_COUNT
+    {
+        return Ok(None);
+    }
+
+    let width_offset = direct_prefix
+        .fixed_record_header_file_offset
+        .checked_add(2)
+        .context("main-dialogue fixed-width operand offset overflow")?;
+    let width = *source
+        .get(width_offset)
+        .context("main-dialogue fixed-width operand is outside the source")?;
+    ensure!(
+        (1..=MAXIMUM_RENDERER_WIDTH).contains(&width),
+        "{}:{:03} fixed text width {width} is outside the renderer's 1..=31 range",
+        record.table_id,
+        record.canonical_entry_index
+    );
+    Ok(Some(usize::from(width)))
+}
+
 pub(super) fn inspect_main_record_prefix(
     source: &[u8],
     entry_file_offset: usize,

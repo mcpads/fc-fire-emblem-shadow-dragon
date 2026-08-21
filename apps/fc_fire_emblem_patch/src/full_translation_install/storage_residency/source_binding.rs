@@ -69,6 +69,22 @@ const FACILITY_EXIT_STATES: [u8; 6] = [0x00, 0x08, 0x08, 0x00, 0x10, 0x08];
 const FACILITY_ITEM_LIST_COMPOSITION_STATE: u8 = 0x06;
 const FACILITY_ITEM_LIST_SETTLED_STATE: u8 = 0x07;
 const FACILITY_ITEM_LIST_DIALOGUE_RECORD: u8 = 0x2A;
+const FACILITY_CHOICE_DIALOGUE_RECORD: u8 = 0x2D;
+const FACILITY_CHOICE_COMPOSER: u16 = 0x9B7A;
+const FACILITY_CHOICE_COMPOSER_BYTES: [u8; 12] = [
+    0x20,
+    0x5A,
+    0x9C,
+    0xA9,
+    crate::choice_labels::CHOICE_LABEL_COMPOSITE_STATE,
+    0x20,
+    0x90,
+    0xE6,
+    0xEE,
+    0xDB,
+    0x05,
+    0x60,
+];
 const FACILITY_ITEM_LIST_COMPOSITE_STATE: u8 = 0x07;
 const FACILITY_ITEM_LIST_COMPOSER: u16 = 0x9EAC;
 const FACILITY_ITEM_LIST_COMPOSER_BYTES: [u8; 21] = [
@@ -156,6 +172,7 @@ pub(super) struct StorageSourceBinding {
     pub(super) facility_overlay_root_record_index: usize,
     pub(super) overflow_overlay_root_record_index: usize,
     pub(super) facility_item_list_overlay_root_record_index: usize,
+    pub(super) facility_choice_record_index: usize,
     pub(super) overflow_item_list_overlay_root_record_index: usize,
     pub(super) item_list_settled_state: u8,
     pub(super) item_list_route: super::StorageItemListRuntimeRoute,
@@ -239,6 +256,12 @@ pub(super) fn bind_storage_dialogue_sources(source: &Rom) -> Result<StorageSourc
     )?;
     bind_exact_code(
         source,
+        FACILITY_CHOICE_COMPOSER,
+        &FACILITY_CHOICE_COMPOSER_BYTES,
+        "storage facility shared yes-no composer",
+    )?;
+    bind_exact_code(
+        source,
         OVERFLOW_ITEM_LIST_COMPOSER,
         &OVERFLOW_ITEM_LIST_COMPOSER_BYTES,
         "storage overflow dialogue-retaining item-list composer",
@@ -257,6 +280,16 @@ pub(super) fn bind_storage_dialogue_sources(source: &Rom) -> Result<StorageSourc
             && FACILITY_ITEM_LIST_SETTLED_STATE
                 == FACILITY_ITEM_LIST_COMPOSITION_STATE.wrapping_add(1),
         "storage item-list state no longer follows dialogue record 0x2A and advance into state 0x07"
+    );
+    ensure!(
+        FACILITY_HANDLER_TARGETS[0x0E] == FACILITY_CHOICE_COMPOSER
+            && FACILITY_IMMEDIATE_RECORD_WRITES
+                .iter()
+                .filter(|(_, record)| *record == FACILITY_CHOICE_DIALOGUE_RECORD)
+                .map(|(address, _)| *address)
+                .collect::<BTreeSet<_>>()
+                == BTreeSet::from([0x9ECC, 0x9FB4]),
+        "storage yes-no choice no longer follows both source selections of dialogue record 0x2D"
     );
     ensure!(
         OVERFLOW_HANDLER_TARGETS[usize::from(FACILITY_ITEM_LIST_COMPOSITION_STATE)]
@@ -371,6 +404,7 @@ pub(super) fn bind_storage_dialogue_sources(source: &Rom) -> Result<StorageSourc
         facility_item_list_overlay_root_record_index: usize::from(
             FACILITY_ITEM_LIST_DIALOGUE_RECORD,
         ),
+        facility_choice_record_index: usize::from(FACILITY_CHOICE_DIALOGUE_RECORD),
         overflow_item_list_overlay_root_record_index: usize::from(
             OVERFLOW_ITEM_LIST_DIALOGUE_RECORD,
         ),

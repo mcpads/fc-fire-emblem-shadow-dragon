@@ -175,6 +175,7 @@ mod tests {
             alias_indices: Vec::new(),
             file_offset: source_index,
             source_storage_byte_count: 1,
+            source_display_cell_count: 1,
             review_complete: true,
             logical_bytes: vec![FixedTextLogicalByte::TargetGlyph(glyph)],
         }

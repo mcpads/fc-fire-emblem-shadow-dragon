@@ -34,6 +34,7 @@ pub(crate) struct MainDialogueBundlePlan {
     pub(crate) preserved_source_codes: BTreeSet<u8>,
     pub(crate) source_reclaimable_active_codes: BTreeSet<u8>,
     pub(crate) page_worksets: Vec<MainDialoguePageWorkset>,
+    pub(crate) line_layout: MainDialogueLineLayoutPlan,
     target_records: Vec<LogicalDialogueRecord>,
     visible_page_ranges_by_record_id: BTreeMap<String, Vec<Range<usize>>>,
     regions: Vec<LogicalBundleRegion>,
@@ -162,7 +163,15 @@ pub(crate) fn plan_main_dialogue_bundle(
         "main dialogue bundle contains an unknown record ID"
     );
     validate_target_records(&workspace, &source_records, &requested)?;
-    validate_transition_closure(rom, &source_records, &requested)?;
+    let dialogue_graph = inspect_main_dialogue_graph(rom.data())?;
+    validate_transition_closure(&dialogue_graph, &source_records, &requested)?;
+    let line_layout = build_main_dialogue_line_layout_plan(
+        rom.data(),
+        &source_records,
+        &workspace,
+        &dialogue_graph,
+        &requested,
+    )?;
 
     let target_indices = requested
         .iter()
@@ -306,6 +315,7 @@ pub(crate) fn plan_main_dialogue_bundle(
         preserved_source_codes,
         source_reclaimable_active_codes,
         page_worksets,
+        line_layout,
         target_records,
         visible_page_ranges_by_record_id,
         regions,

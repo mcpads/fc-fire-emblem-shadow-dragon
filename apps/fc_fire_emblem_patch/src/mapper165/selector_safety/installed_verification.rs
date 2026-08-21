@@ -11,20 +11,14 @@ use super::{
 };
 
 pub(super) fn verify_installed_contract(candidate: &Rom) -> Result<()> {
-    verify_installed_contract_with_first_nmi_call(candidate, SOURCE_NMI_DISPLACED_CALL)
+    verify_installed_contract_body(candidate)
 }
 
-pub(super) fn verify_final_installed_contract(
-    candidate: &Rom,
-    first_nmi_call_target: u16,
-) -> Result<()> {
-    verify_installed_contract_with_first_nmi_call(candidate, first_nmi_call_target)
+pub(super) fn verify_final_installed_contract(candidate: &Rom) -> Result<()> {
+    verify_installed_contract_body(candidate)
 }
 
-fn verify_installed_contract_with_first_nmi_call(
-    candidate: &Rom,
-    first_nmi_call_target: u16,
-) -> Result<()> {
+fn verify_installed_contract_body(candidate: &Rom) -> Result<()> {
     bind_fixed_instructions(
         candidate,
         super::super::RESET_INITIALIZER_ADDRESS,
@@ -96,10 +90,10 @@ fn verify_installed_contract_with_first_nmi_call(
         candidate,
         SOURCE_NMI_FIRST_CALL,
         &[
-            Instruction::JsrAbsolute(first_nmi_call_target),
+            Instruction::JsrAbsolute(SOURCE_NMI_DISPLACED_CALL),
             Instruction::JsrAbsolute(SOURCE_NMI_SECOND_CALL),
         ],
-        "NMI consumer-hook and preserved second call",
+        "preserved original NMI calls",
     )?;
     bind_fixed_instructions(
         candidate,

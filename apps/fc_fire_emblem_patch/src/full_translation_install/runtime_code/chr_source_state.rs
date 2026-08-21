@@ -16,8 +16,6 @@ use crate::{
     typed_source::decode_rp2a03_sequence,
 };
 
-use super::fixed_cfg_cycles::worst_case_fixed_subroutine_cycles;
-
 /// 중앙 `$1000` FD 기록기가 보존하는 원천 페이지다.
 pub(in crate::full_translation_install) const RIGHT_FD_SOURCE_SHADOW: u8 = 0x5B;
 /// 중앙 `$1000` FE 기록기가 보존하는 원천 페이지다.
@@ -43,36 +41,11 @@ const CENTRAL_RIGHT_FE_WRITER: u16 = 0xC9C6;
 const CENTRAL_RIGHT_FD_SELECTOR: u16 = 0xFF1D;
 const CENTRAL_RIGHT_FE_SELECTOR: u16 = 0xFAB8;
 
-/// 전송 이탈이 부르는 후보 helper의 source-bound 사이클 상한이다. 호출자의 `JSR`
-/// 6사이클은 이 값 바깥에서 방출 명령과 함께 센다.
-#[derive(Clone, Copy, Debug)]
-pub(super) struct ChrSourceStateContract {
-    fd_restore_callee_cycles: u32,
-    fe_restore_callee_cycles: u32,
-}
-
-impl ChrSourceStateContract {
-    pub(super) fn restore_callee_cycles(self) -> [(u16, u32); 2] {
-        [
-            (RIGHT_FD_HELPER, self.fd_restore_callee_cycles),
-            (RIGHT_FE_HELPER, self.fe_restore_callee_cycles),
-        ]
-    }
-
-    #[cfg(test)]
-    pub(super) const fn with_restore_callee_cycles(fd: u32, fe: u32) -> Self {
-        Self {
-            fd_restore_callee_cycles: fd,
-            fe_restore_callee_cycles: fe,
-        }
-    }
-}
-
 /// 대사 소비자가 기대하는 mapper165 생산자 구조를 후보 ROM에 묶는다.
 ///
 /// helper 두 곳만 확인하면 `$5B/$5C`가 무엇인지 증명되지 않는다. 중앙 기록기가
 /// 각 값을 먼저 보존한 뒤 현재 selector 사슬로 넘기는 바이트까지 함께 확인한다.
-pub(super) fn bind_chr_source_state(candidate: &Rom) -> Result<ChrSourceStateContract> {
+pub(super) fn bind_chr_source_state(candidate: &Rom) -> Result<()> {
     for (address, expected, role) in expected_source_state_regions()? {
         let actual = fixed_bytes(candidate, address, expected.len())?;
         ensure!(
@@ -81,34 +54,7 @@ pub(super) fn bind_chr_source_state(candidate: &Rom) -> Result<ChrSourceStateCon
         );
         decode_rp2a03_sequence(&expected, address, role)?;
     }
-    const BATTLE_ACTIVE_RANGE: (u16, u16) = (0xFE90, 0xFEC3);
-    const SELECT_REGISTER_RANGE: (u16, u16) = (0xFA58, 0xFA5E);
-    const RIGHT_FD_ENTRY_RANGE: (u16, u16) = (RIGHT_FD_HELPER, RIGHT_FD_HELPER + 3);
-    const RIGHT_FD_RANGE: (u16, u16) = (0xFEEE, 0xFF2D);
-    const RIGHT_FE_ENTRY_RANGE: (u16, u16) = (RIGHT_FE_HELPER, RIGHT_FE_HELPER + 3);
-    const RIGHT_FE_RANGE: (u16, u16) = (0xFF43, 0xFF80);
-    Ok(ChrSourceStateContract {
-        fd_restore_callee_cycles: worst_case_fixed_subroutine_cycles(
-            candidate,
-            RIGHT_FD_HELPER,
-            &[
-                RIGHT_FD_ENTRY_RANGE,
-                SELECT_REGISTER_RANGE,
-                BATTLE_ACTIVE_RANGE,
-                RIGHT_FD_RANGE,
-            ],
-        )?,
-        fe_restore_callee_cycles: worst_case_fixed_subroutine_cycles(
-            candidate,
-            RIGHT_FE_HELPER,
-            &[
-                RIGHT_FE_ENTRY_RANGE,
-                SELECT_REGISTER_RANGE,
-                BATTLE_ACTIVE_RANGE,
-                RIGHT_FE_RANGE,
-            ],
-        )?,
-    })
+    Ok(())
 }
 
 fn expected_source_state_regions() -> Result<[(u16, Vec<u8>, &'static str); 4]> {

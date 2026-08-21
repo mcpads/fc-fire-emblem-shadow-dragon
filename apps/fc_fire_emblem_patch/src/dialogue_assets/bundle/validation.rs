@@ -2,10 +2,7 @@ use std::collections::BTreeSet;
 
 use anyhow::{Context, Result, ensure};
 
-use crate::{
-    dialogue_inventory::{MainDialogueStorageRecord, inspect_main_dialogue_graph},
-    rom::Rom,
-};
+use crate::dialogue_inventory::{MainDialogueGraphReport, MainDialogueStorageRecord};
 
 use super::{MainDialogueWorkspace, TranslationStatus};
 
@@ -67,7 +64,7 @@ pub(super) fn validate_target_records(
 }
 
 pub(super) fn validate_transition_closure(
-    rom: &Rom,
+    graph: &MainDialogueGraphReport,
     source_records: &[MainDialogueStorageRecord],
     requested: &BTreeSet<&str>,
 ) -> Result<()> {
@@ -80,7 +77,7 @@ pub(super) fn validate_transition_closure(
         })
         .map(|record| (record.table_id, record.canonical_entry_index))
         .collect::<BTreeSet<_>>();
-    for edge in inspect_main_dialogue_graph(rom.data())?.transition_edges {
+    for edge in &graph.transition_edges {
         if requested_keys.contains(&(edge.source_table_id, edge.source_canonical_entry_index)) {
             ensure!(
                 requested_keys.contains(&(edge.target_table_id, edge.target_canonical_entry_index)),

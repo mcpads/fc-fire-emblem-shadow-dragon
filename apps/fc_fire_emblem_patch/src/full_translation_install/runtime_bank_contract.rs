@@ -72,8 +72,6 @@ const BANK_SHADOW_RESTORE_ADDRESS: u16 = 0xC1FB;
 /// 단일 출처이므로 여기서 다시 나르지 않는다.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct BankRestoreContract {
-    pub(super) prg_8000_register: u8,
-    pub(super) prg_a000_register: u8,
     pub(super) prg_bank_shadow: u8,
     /// `$FA20`으로 닿을 수 있는 8 KiB 페이지의 개수다. 실행 코드 페이지가 이보다
     /// 크면 소비자는 레지스터를 직접 써야 한다.
@@ -102,8 +100,6 @@ pub(super) fn bind_bank_restore_contract(candidate: &Rom) -> Result<BankRestoreC
     );
     selector_safety::verify_installed_contract(candidate)?;
     Ok(BankRestoreContract {
-        prg_8000_register: PRG_8000_REGISTER,
-        prg_a000_register: PRG_A000_REGISTER,
         prg_bank_shadow: PRG_BANK_SHADOW,
         helper_reachable_page_count: u16::from(BANK_INDEX_MASK).wrapping_add(1) * 2,
     })

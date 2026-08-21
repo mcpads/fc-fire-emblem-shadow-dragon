@@ -21,6 +21,7 @@ mod bundle;
 mod display_plan;
 mod glyph_workset;
 mod layout_packing;
+mod line_layout;
 mod markup;
 mod model;
 mod slice;
@@ -49,6 +50,10 @@ pub(crate) use glyph_workset::{
     load_maximum_dialogue_runtime_evidence,
 };
 use layout_packing::*;
+#[cfg(test)]
+pub(crate) use line_layout::MainDialogueLineLayout;
+pub(crate) use line_layout::MainDialogueLineLayoutPlan;
+use line_layout::build_main_dialogue_line_layout_plan;
 use markup::*;
 use model::*;
 pub use model::{

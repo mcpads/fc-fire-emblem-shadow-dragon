@@ -46,6 +46,8 @@ pub(super) struct MaximumDialogueStageOutput {
     pub(super) tracked_write_count: usize,
     pub(super) initial_selector_byte_count: usize,
     pub(super) font_group_selector_byte_count: usize,
+    pub(super) initial_selector_range_sha1: String,
+    pub(super) font_group_selector_range_sha1: String,
     pub(super) completed_page_transition_byte_count: usize,
 }
 
@@ -174,6 +176,22 @@ pub(super) fn install_maximum_dialogue_stage(
         &completed_page_hook,
         central_fallback_address,
     )?;
+    let font_group_selector_range_sha1 = sha1_hex(
+        output
+            .get(
+                active_fixed_bank_file_offset(&prior_rom, FONT_GROUP_SELECTOR_ADDRESS)?
+                    ..active_fixed_bank_file_offset(&prior_rom, FONT_GROUP_SELECTOR_END)?,
+            )
+            .context("maximum-dialogue font-group selector range is outside output")?,
+    );
+    let initial_selector_range_sha1 = sha1_hex(
+        output
+            .get(
+                active_fixed_bank_file_offset(&prior_rom, INITIAL_PAGE_SELECTOR_ADDRESS)?
+                    ..active_fixed_bank_file_offset(&prior_rom, INITIAL_PAGE_SELECTOR_CAVE_END)?,
+            )
+            .context("maximum-dialogue initial selector range is outside output")?,
+    );
 
     Ok(MaximumDialogueStageOutput {
         output_sha1: sha1_hex(&output),
@@ -182,6 +200,8 @@ pub(super) fn install_maximum_dialogue_stage(
         tracked_write_count,
         initial_selector_byte_count: initial_selector.len(),
         font_group_selector_byte_count: font_group_selector.len(),
+        initial_selector_range_sha1,
+        font_group_selector_range_sha1,
         completed_page_transition_byte_count: completed_page_hook.len(),
     })
 }

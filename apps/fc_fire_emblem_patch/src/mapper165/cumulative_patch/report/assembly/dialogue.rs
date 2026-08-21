@@ -146,6 +146,10 @@ pub(super) fn main_dialogue_report(
                 .collect(),
             initial_selector_byte_count: maximum_dialogue_stage.initial_selector_byte_count,
             font_group_selector_byte_count: maximum_dialogue_stage.font_group_selector_byte_count,
+            initial_selector_range_sha1: maximum_dialogue_stage.initial_selector_range_sha1.clone(),
+            font_group_selector_range_sha1: maximum_dialogue_stage
+                .font_group_selector_range_sha1
+                .clone(),
             completed_page_transition_byte_count: maximum_dialogue_stage
                 .completed_page_transition_byte_count,
             completed_page_reload_installed: true,

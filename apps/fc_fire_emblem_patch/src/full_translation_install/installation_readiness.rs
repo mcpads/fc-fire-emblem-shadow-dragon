@@ -6,7 +6,7 @@ pub(super) enum InstallationReadinessStage {
     RuntimeStateStorage,
     DeclaredConsumerProjection,
     TechnicalInstallation,
-    HumanReview,
+    TranslationBaseline,
     ArtifactEmission,
     RuntimeEvidence,
     RuntimeEvidenceInProgress,
@@ -20,7 +20,7 @@ pub(super) struct InstallationReadinessInputs {
     pub(super) all_declared_consumers_statically_accounted: bool,
     pub(super) carried_domain_reinspection_complete: bool,
     pub(super) technical_installation_complete: bool,
-    pub(super) review_complete: bool,
+    pub(super) translation_baseline_accepted: bool,
     pub(super) output_will_be_emitted: bool,
     pub(super) dynamic_verification_started: bool,
     pub(super) declared_consumer_runtime_observation_complete: bool,
@@ -49,8 +49,8 @@ impl InstallationReadiness {
             || !inputs.technical_installation_complete
         {
             InstallationReadinessStage::TechnicalInstallation
-        } else if !inputs.review_complete {
-            InstallationReadinessStage::HumanReview
+        } else if !inputs.translation_baseline_accepted {
+            InstallationReadinessStage::TranslationBaseline
         } else if inputs.declared_consumer_runtime_observation_complete {
             InstallationReadinessStage::WholeGameRegression
         } else if inputs.dynamic_verification_started {
@@ -78,8 +78,8 @@ impl InstallationReadiness {
             InstallationReadinessStage::TechnicalInstallation => {
                 "finish final-artifact installation and carried-domain reinspection before review or artifact-bound runtime evidence"
             }
-            InstallationReadinessStage::HumanReview => {
-                "finish human review, rebuild the exact integrated artifact, and reserve development runs for defect discovery before binding final runtime evidence"
+            InstallationReadinessStage::TranslationBaseline => {
+                "accept or revise one complete translation baseline before artifact-bound runtime regression"
             }
             InstallationReadinessStage::ArtifactEmission => {
                 "materialize the exact integrated ROM, then bind representative and worst-case declared consumer paths to that artifact before returning to the separate whole-game census"
@@ -113,7 +113,7 @@ mod tests {
             all_declared_consumers_statically_accounted: true,
             carried_domain_reinspection_complete: true,
             technical_installation_complete: true,
-            review_complete: true,
+            translation_baseline_accepted: true,
             output_will_be_emitted: true,
             dynamic_verification_started: false,
             declared_consumer_runtime_observation_complete: false,
@@ -121,27 +121,33 @@ mod tests {
     }
 
     #[test]
-    fn human_review_precedes_final_artifact_runtime_evidence() {
+    fn unaccepted_translation_baseline_precedes_final_artifact_runtime_evidence() {
         let mut inputs = ready_inputs();
-        inputs.review_complete = false;
+        inputs.translation_baseline_accepted = false;
 
         let readiness = InstallationReadiness::evaluate(inputs).unwrap();
 
-        assert_eq!(readiness.stage(), InstallationReadinessStage::HumanReview);
-        assert!(readiness.next_gate().contains("finish human review"));
+        assert_eq!(
+            readiness.stage(),
+            InstallationReadinessStage::TranslationBaseline
+        );
+        assert!(readiness.next_gate().contains("accept or revise"));
     }
 
     #[test]
-    fn development_runtime_observations_do_not_bypass_human_review() {
+    fn development_runtime_observations_do_not_bypass_baseline_acceptance() {
         let mut inputs = ready_inputs();
-        inputs.review_complete = false;
+        inputs.translation_baseline_accepted = false;
         inputs.dynamic_verification_started = true;
         inputs.declared_consumer_runtime_observation_complete = true;
 
         let readiness = InstallationReadiness::evaluate(inputs).unwrap();
 
-        assert_eq!(readiness.stage(), InstallationReadinessStage::HumanReview);
-        assert!(readiness.next_gate().contains("defect discovery"));
+        assert_eq!(
+            readiness.stage(),
+            InstallationReadinessStage::TranslationBaseline
+        );
+        assert!(readiness.next_gate().contains("accept or revise"));
     }
 
     #[test]
@@ -183,9 +189,9 @@ mod tests {
     }
 
     #[test]
-    fn incomplete_static_work_precedes_review_and_runtime() {
+    fn incomplete_static_work_precedes_baseline_acceptance_and_runtime() {
         let mut inputs = ready_inputs();
-        inputs.review_complete = false;
+        inputs.translation_baseline_accepted = false;
         inputs.all_declared_consumers_statically_accounted = false;
 
         let readiness = InstallationReadiness::evaluate(inputs).unwrap();

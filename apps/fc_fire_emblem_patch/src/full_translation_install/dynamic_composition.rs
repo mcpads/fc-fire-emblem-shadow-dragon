@@ -19,8 +19,13 @@ use super::dynamic_inputs::DynamicStringPageCodePlan;
 const MMC3_PAGE_BYTE_COUNT: usize = 8 * 1024;
 /// 가시 페이지 레시피 항목 하나의 크기다. 코드 하나와 atlas CPU 주소 둘이다.
 const PAGE_RECIPE_ENTRY_BYTE_COUNT: usize = 3;
+/// 레시피 덩이 머리의 그룹 정체성과 항목 수다.
+pub(in crate::full_translation_install) const PAGE_RECIPE_HEADER_BYTE_COUNT: usize = 2;
 /// atlas가 타일 하나에 쓰는 바이트다. 1bpp 8×8.
 const GLYPH_ATLAS_TILE_BYTE_COUNT: usize = 8;
+/// 같은 레코드의 직전 페이지와 레시피가 같아 현재 CHR-RAM을 그대로 쓸 수 있다는
+/// 16비트 참조값이다. 실제 레시피 덩이 오프셋으로는 이 값을 쓰지 않는다.
+pub(in crate::full_translation_install) const REUSE_RESIDENT_PAGE_RECIPE_REFERENCE: u16 = u16::MAX;
 
 pub(super) struct DialogueRuntimeCompositionPlan {
     pub(super) glyph_atlas: Vec<u8>,
@@ -371,9 +376,9 @@ pub(super) fn plan_dialogue_runtime_composition(
     })
 }
 
-/// 가시 대사 본문뿐 아니라 같은 수명에 머무는 이름·장 제목·선택지·결과 화면의
-/// 글리프까지 페이지 레시피에 넣는다. 정적 그룹 전체를 싣지는 않지만, 최종 상주권
-/// 계획이 요구한 글리프를 하나라도 줄여서는 안 된다.
+/// 같은 상주 그룹의 어느 페이지·연결 레코드로 넘어가도 CHR-RAM을 다시 만들지 않게
+/// 그룹 전체를 한 레시피로 만든다. 최초 진입 비용은 그룹 상한까지 한 번 지불하지만,
+/// 그 뒤의 같은 그룹 전이는 정확한 그룹 정체성 비교만으로 재사용할 수 있다.
 fn build_visible_page_recipes(
     runtime_worksets: &[GlyphWorkset],
     workset_page_indices: &[usize],
@@ -400,7 +405,7 @@ fn build_visible_page_recipes(
             );
             Ok(VisiblePageRecipe {
                 static_page_group_index: *static_page_group_index,
-                target_glyphs: workset.target_glyphs.iter().copied().collect(),
+                target_glyphs: group_assignments.keys().copied().collect(),
             })
         })
         .collect()
@@ -640,6 +645,7 @@ fn encode_scan_material(
         workset_recipe_indices.len() == dialogue.page_worksets.len(),
         "dialogue scan material lost visible-page recipe references"
     );
+    let mut expected_recipe_indices = Vec::with_capacity(dialogue.page_worksets.len());
     for record_id in &dialogue.record_ids {
         directory.extend_from_slice(
             &u16::try_from(references.len() / 2)
@@ -649,12 +655,20 @@ fn encode_scan_material(
         let indices = record_worksets
             .get(record_id.as_str())
             .with_context(|| format!("{record_id} has no runtime page recipes"))?;
+        let mut previous_recipe_index = None;
         for workset_index in indices {
             let recipe_index = workset_recipe_indices[*workset_index];
             let recipe_offset = recipe_offsets.get(recipe_index).with_context(|| {
                 format!("workset {workset_index} selects missing recipe {recipe_index}")
             })?;
-            references.extend_from_slice(&recipe_offset.to_le_bytes());
+            let reference = if previous_recipe_index == Some(recipe_index) {
+                REUSE_RESIDENT_PAGE_RECIPE_REFERENCE
+            } else {
+                *recipe_offset
+            };
+            references.extend_from_slice(&reference.to_le_bytes());
+            expected_recipe_indices.push(recipe_index);
+            previous_recipe_index = Some(recipe_index);
         }
     }
     directory.extend_from_slice(
@@ -686,6 +700,11 @@ fn encode_scan_material(
         &recipe_offsets,
         &recipe_blocks,
         &record_page_counts,
+        &expected_recipe_indices,
+        &unique_recipes
+            .iter()
+            .map(|recipe| recipe.static_page_group_index)
+            .collect::<Vec<_>>(),
     )?;
     encoded.extend_from_slice(&references);
     encoded.extend_from_slice(&directory);
@@ -712,6 +731,8 @@ fn verify_visible_page_recipe_material(
     recipe_offsets: &[u16],
     recipe_blocks: &[u8],
     record_page_counts: &[usize],
+    expected_recipe_indices: &[usize],
+    recipe_group_indices: &[usize],
 ) -> Result<()> {
     ensure!(
         references.len().is_multiple_of(2),
@@ -722,8 +743,16 @@ fn verify_visible_page_recipe_material(
         "visible-page recipe record directory length changed"
     );
     ensure!(
+        expected_recipe_indices.len() == references.len() / 2,
+        "visible-page recipe expectations do not cover every reference"
+    );
+    ensure!(
         recipe_offsets.windows(2).all(|pair| pair[0] < pair[1]),
         "visible-page recipe block offsets are not strictly increasing"
+    );
+    ensure!(
+        recipe_group_indices.len() == recipe_offsets.len(),
+        "visible-page recipe groups do not cover every block"
     );
 
     let block_starts = recipe_offsets.iter().copied().collect::<BTreeSet<_>>();
@@ -733,13 +762,23 @@ fn verify_visible_page_recipe_material(
     );
     for (index, offset) in recipe_offsets.iter().copied().enumerate() {
         let start = usize::from(offset);
-        let count = usize::from(
+        let group = usize::from(
             *recipe_blocks
                 .get(start)
                 .with_context(|| format!("visible-page recipe {index} starts outside its pool"))?,
         );
+        ensure!(
+            group == recipe_group_indices[index],
+            "visible-page recipe {index} publishes group {group}, expected {}",
+            recipe_group_indices[index]
+        );
+        let count = usize::from(
+            *recipe_blocks
+                .get(start + 1)
+                .with_context(|| format!("visible-page recipe {index} has no entry count"))?,
+        );
         let end = start
-            .checked_add(1 + count * PAGE_RECIPE_ENTRY_BYTE_COUNT)
+            .checked_add(PAGE_RECIPE_HEADER_BYTE_COUNT + count * PAGE_RECIPE_ENTRY_BYTE_COUNT)
             .context("visible-page recipe block length overflow")?;
         ensure!(
             end <= recipe_blocks.len(),
@@ -766,6 +805,7 @@ fn verify_visible_page_recipe_material(
     let referenced_offsets = references
         .chunks_exact(2)
         .map(|entry| u16::from_le_bytes([entry[0], entry[1]]))
+        .filter(|offset| *offset != REUSE_RESIDENT_PAGE_RECIPE_REFERENCE)
         .collect::<BTreeSet<_>>();
     ensure!(
         referenced_offsets == block_starts,
@@ -783,6 +823,27 @@ fn verify_visible_page_recipe_material(
             actual_page_start == expected_page_start,
             "visible-page recipe directory record {record_index} starts at {actual_page_start}, expected {expected_page_start}"
         );
+        for page_index in 0..page_count {
+            let reference_index = expected_page_start + page_index;
+            let expected_recipe_index = expected_recipe_indices[reference_index];
+            let expected_reference = if page_index > 0
+                && expected_recipe_indices[reference_index - 1] == expected_recipe_index
+            {
+                REUSE_RESIDENT_PAGE_RECIPE_REFERENCE
+            } else {
+                *recipe_offsets.get(expected_recipe_index).with_context(|| {
+                    format!(
+                        "visible-page reference {reference_index} selects missing recipe {expected_recipe_index}"
+                    )
+                })?
+            };
+            let offset = reference_index * 2;
+            let actual_reference = u16::from_le_bytes([references[offset], references[offset + 1]]);
+            ensure!(
+                actual_reference == expected_reference,
+                "visible-page reference {reference_index} is {actual_reference:04X}, expected {expected_reference:04X}"
+            );
+        }
         expected_page_start = expected_page_start
             .checked_add(page_count)
             .context("visible-page recipe page count overflow")?;
@@ -801,8 +862,8 @@ fn verify_visible_page_recipe_material(
 
 /// 가시 페이지 하나가 런타임에 필요한 전부를 한 덩이로 묶는다.
 ///
-/// 덩이는 `[항목 수][코드, atlas 주소 하위, atlas 주소 상위] × n`이다. atlas 주소를
-/// 그대로 담는 이유는 소비자가 계산을 하나도 하지 않게 하려는 것이다.
+/// 덩이는 `[상주 그룹][항목 수][코드, atlas 주소 하위, atlas 주소 상위] × n`이다.
+/// atlas 주소를 그대로 담는 이유는 소비자가 계산을 하나도 하지 않게 하려는 것이다.
 ///
 /// 조밀 조회표를 쓰지 않는 이유가 여기 있다. 그 표는 atlas 색인의 상위 두 비트를
 /// 코드 4개당 1바이트에 packing해 두는데, 런타임이 그걸 풀려면 타일마다 가변 시프트를
@@ -856,7 +917,8 @@ fn encode_visible_page_recipe_blocks(
             entries.windows(2).all(|pair| pair[0].0 != pair[1].0),
             "visible-page recipe {recipe_index} assigns one code more than once"
         );
-        let block_length = 1 + entries.len() * PAGE_RECIPE_ENTRY_BYTE_COUNT;
+        let block_length =
+            PAGE_RECIPE_HEADER_BYTE_COUNT + entries.len() * PAGE_RECIPE_ENTRY_BYTE_COUNT;
         ensure!(
             block_length <= MMC3_PAGE_BYTE_COUNT,
             "visible-page recipe {recipe_index} needs {block_length} bytes and cannot fit one MMC3 page"
@@ -869,6 +931,14 @@ fn encode_visible_page_recipe_blocks(
         offsets.push(
             u16::try_from(blocks.len())
                 .context("visible-page recipe block offset exceeds a 16-bit offset")?,
+        );
+        ensure!(
+            offsets.last().copied() != Some(REUSE_RESIDENT_PAGE_RECIPE_REFERENCE),
+            "visible-page recipe block offset collides with the resident-reuse marker"
+        );
+        blocks.push(
+            u8::try_from(recipe.static_page_group_index)
+                .context("visible-page recipe group does not fit u8")?,
         );
         blocks.push(
             u8::try_from(entries.len())
@@ -934,7 +1004,7 @@ mod tests {
     }
 
     #[test]
-    fn visible_page_recipe_keeps_every_runtime_lifetime_glyph() {
+    fn visible_page_recipe_keeps_the_complete_resident_group() {
         let worksets = [GlyphWorkset {
             target_glyphs: BTreeSet::from(['대', '사', '시', '더', '장']),
             preserved_active_codes: BTreeSet::new(),
@@ -946,14 +1016,17 @@ mod tests {
             ('시', 3),
             ('더', 4),
             ('장', 5),
-            // 같은 정적 그룹의 다른 화면 글자는 현재 레시피에 들어오지 않는다.
+            // 같은 상주 그룹의 다른 화면 글자도 한 번 올려 전이 때 재사용한다.
             ('외', 6),
         ])];
 
         let recipes = build_visible_page_recipes(&worksets, &[0], &assignments).unwrap();
 
         assert_eq!(recipes.len(), 1);
-        assert_eq!(recipes[0].target_glyphs, vec!['대', '더', '사', '시', '장']);
+        assert_eq!(
+            recipes[0].target_glyphs,
+            vec!['대', '더', '사', '시', '외', '장']
+        );
     }
 
     #[test]
@@ -1024,9 +1097,17 @@ mod tests {
         assert_eq!(offsets.len(), recipes.len());
         for (recipe_index, expected) in [vec![0x42], vec![0x80]].iter().enumerate() {
             let start = usize::from(offsets[recipe_index]);
-            let count = usize::from(blocks[start]);
+            assert_eq!(
+                usize::from(blocks[start]),
+                recipes[recipe_index].static_page_group_index
+            );
+            let count = usize::from(blocks[start + 1]);
             let codes: Vec<u8> = (0..count)
-                .map(|entry| blocks[start + 1 + entry * PAGE_RECIPE_ENTRY_BYTE_COUNT])
+                .map(|entry| {
+                    blocks[start
+                        + PAGE_RECIPE_HEADER_BYTE_COUNT
+                        + entry * PAGE_RECIPE_ENTRY_BYTE_COUNT]
+                })
                 .collect();
             assert_eq!(&codes, expected);
         }
@@ -1046,7 +1127,7 @@ mod tests {
         let (_, blocks) =
             encode_visible_page_recipe_blocks(&recipes, &assignments, &atlas, 0x802E, 0).unwrap();
 
-        let address = u16::from_le_bytes([blocks[2], blocks[3]]);
+        let address = u16::from_le_bytes([blocks[3], blocks[4]]);
         assert_eq!(address, 0x802E + 7 * GLYPH_ATLAS_TILE_BYTE_COUNT as u16);
     }
 
@@ -1060,7 +1141,7 @@ mod tests {
             static_page_group_index: 0,
             target_glyphs: vec!['가', '나'],
         }];
-        // 덩이가 일곱 바이트이므로 페이지 끝 세 바이트 앞에서는 걸친다.
+        // 덩이가 여덟 바이트이므로 페이지 끝 세 바이트 앞에서는 걸친다.
         let section_offset = MMC3_PAGE_BYTE_COUNT - 3;
 
         let (offsets, blocks) = encode_visible_page_recipe_blocks(
@@ -1079,28 +1160,72 @@ mod tests {
 
     #[test]
     fn recipe_index_covers_every_workset_and_exact_block_start() {
-        let references = [0u8, 0, 4, 0, 0, 0];
+        let references = [0u8, 0, 5, 0, 0, 0];
         let directory = [0u8, 0, 2, 0, 3, 0];
-        let offsets = [0u16, 4];
-        let blocks = [1u8, 0x42, 0x2E, 0x80, 1, 0x43, 0x36, 0x80];
+        let offsets = [0u16, 5];
+        let blocks = [0u8, 1, 0x42, 0x2E, 0x80, 1, 1, 0x43, 0x36, 0x80];
 
-        verify_visible_page_recipe_material(&references, &directory, &offsets, &blocks, &[2, 1])
-            .unwrap();
+        verify_visible_page_recipe_material(
+            &references,
+            &directory,
+            &offsets,
+            &blocks,
+            &[2, 1],
+            &[0, 1, 0],
+            &[0, 1],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn unchanged_page_recipe_is_encoded_as_resident_reuse() {
+        let reuse = REUSE_RESIDENT_PAGE_RECIPE_REFERENCE.to_le_bytes();
+        let references = [0u8, 0, reuse[0], reuse[1], 5, 0];
+        let directory = [0u8, 0, 2, 0, 3, 0];
+        let offsets = [0u16, 5];
+        let blocks = [0u8, 1, 0x42, 0x2E, 0x80, 1, 1, 0x43, 0x36, 0x80];
+
+        verify_visible_page_recipe_material(
+            &references,
+            &directory,
+            &offsets,
+            &blocks,
+            &[2, 1],
+            &[0, 0, 1],
+            &[0, 1],
+        )
+        .unwrap();
+
+        assert!(
+            verify_visible_page_recipe_material(
+                &references,
+                &directory,
+                &offsets,
+                &blocks,
+                &[2, 1],
+                &[0, 1, 1],
+                &[0, 1],
+            )
+            .is_err(),
+            "a reuse marker must not hide a changed recipe"
+        );
     }
 
     #[test]
     fn recipe_index_rejects_an_interior_reference_or_missing_block() {
         let directory = [0u8, 0, 2, 0];
-        let offsets = [0u16, 4];
-        let blocks = [1u8, 0x42, 0x2E, 0x80, 1, 0x43, 0x36, 0x80];
+        let offsets = [0u16, 5];
+        let blocks = [0u8, 1, 0x42, 0x2E, 0x80, 1, 1, 0x43, 0x36, 0x80];
 
         assert!(
             verify_visible_page_recipe_material(
-                &[0, 0, 5, 0],
+                &[0, 0, 6, 0],
                 &directory,
                 &offsets,
                 &blocks,
                 &[2],
+                &[0, 1],
+                &[0, 1],
             )
             .is_err()
         );
@@ -1111,6 +1236,8 @@ mod tests {
                 &offsets,
                 &blocks,
                 &[2],
+                &[0, 1],
+                &[0, 1],
             )
             .is_err()
         );
@@ -1118,9 +1245,9 @@ mod tests {
 
     #[test]
     fn recipe_index_rejects_a_record_directory_gap() {
-        let references = [0u8, 0, 4, 0];
-        let offsets = [0u16, 4];
-        let blocks = [1u8, 0x42, 0x2E, 0x80, 1, 0x43, 0x36, 0x80];
+        let references = [0u8, 0, 5, 0];
+        let offsets = [0u16, 5];
+        let blocks = [0u8, 1, 0x42, 0x2E, 0x80, 1, 1, 0x43, 0x36, 0x80];
 
         assert!(
             verify_visible_page_recipe_material(
@@ -1129,6 +1256,8 @@ mod tests {
                 &offsets,
                 &blocks,
                 &[2, 0],
+                &[0, 1],
+                &[0, 1],
             )
             .is_err()
         );
