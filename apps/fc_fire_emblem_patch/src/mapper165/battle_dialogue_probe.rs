@@ -11,10 +11,11 @@ use crate::{
 };
 
 use super::{
-    OUTPUT_MAPPER, assemble_mapper165_parity_bytes,
+    OUTPUT_MAPPER,
     dialogue_probe_font::{
         SOURCE_FONT_PHYSICAL_PAGE, assign_glyph_codes, assignment_sha1, install_font_glyphs,
     },
+    install_mapper165_parity_bytes,
 };
 
 #[derive(Debug, Serialize)]
@@ -70,7 +71,7 @@ pub(crate) fn build_battle_dialogue_probe(
         "battle-dialogue probe record count changed"
     );
 
-    let parity_base = assemble_mapper165_parity_bytes(&source_rom)?;
+    let parity_base = install_mapper165_parity_bytes(&source_rom)?;
     let parity_rom = Rom::parse(parity_base.clone()).context("parse mapper 165 battle base")?;
     ensure!(
         parity_rom.mapper() == OUTPUT_MAPPER,

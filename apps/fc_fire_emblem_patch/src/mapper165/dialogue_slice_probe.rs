@@ -13,13 +13,14 @@ use crate::{
 };
 
 use super::{
-    OUTPUT_MAPPER, SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS, assemble_mapper165_parity_bytes,
+    OUTPUT_MAPPER, SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
     dialogue_lifetime_page::{
         CENTRAL_RIGHT_FD_SELECTOR_CALL_ADDRESS, OUTPUT_CHR_BANK_COUNT, PAGE_ROUTINE_ADDRESS,
         PAGE_ROUTINE_END, PHYSICAL_CHR_PAGE, SCREEN_ROLE, build_page_routine,
         central_right_fd_selector_call, plan_dialogue_lifetime_page,
     },
     dialogue_probe_font::assignment_sha1,
+    install_mapper165_parity_bytes,
 };
 
 #[derive(Debug, Serialize)]
@@ -87,7 +88,7 @@ pub(crate) fn build_dialogue_slice_probe(
     let plan = plan_main_dialogue_slice(&source_rom, workspace_path, record_id)?;
     let glyphs = plan.unique_glyphs();
 
-    let parity_base = assemble_mapper165_parity_bytes(&source_rom)?;
+    let parity_base = install_mapper165_parity_bytes(&source_rom)?;
     let parity_rom = Rom::parse(parity_base.clone()).context("parse mapper 165 dialogue base")?;
     ensure!(
         parity_rom.mapper() == OUTPUT_MAPPER,

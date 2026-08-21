@@ -241,6 +241,15 @@ struct AssembledParityImage {
     absolute_chr_writer_census: AbsoluteChrWriterCensus,
 }
 
+struct InstalledParityImage {
+    output: Vec<u8>,
+    trigger_variant_plan: TriggerVariantPlan,
+    cave_file_start: usize,
+    direct_code_cave_transfer_count: usize,
+    routines: Vec<runtime::AssembledRoutine>,
+    tracked_writes: Vec<TrackedWrite>,
+}
+
 pub fn build_mapper165_parity_probe(
     source_path: &Path,
     output_path: &Path,
@@ -248,7 +257,7 @@ pub fn build_mapper165_parity_probe(
 ) -> Result<BuildSummary> {
     let source_rom = Rom::from_path(source_path)?;
     source_rom.verify_supported_japanese()?;
-    let assembled = assemble_mapper165_parity_image(&source_rom)?;
+    let assembled = analyze_and_install_mapper165_parity_image(&source_rom)?;
     let output_rom =
         Rom::parse(assembled.output.clone()).context("parse mapper 165 parity probe")?;
     let output_sha1 = sha1_hex(&assembled.output);
@@ -351,12 +360,37 @@ pub fn build_mapper165_parity_probe(
     })
 }
 
-fn assemble_mapper165_parity_image(source_rom: &Rom) -> Result<AssembledParityImage> {
+fn analyze_and_install_mapper165_parity_image(source_rom: &Rom) -> Result<AssembledParityImage> {
     verify_complete_prg_writer_inventory(source_rom)?;
     let source_mapper_write_audit = audit_source_mapper_writes(source_rom)?;
     let source_indexed_mapper_alias_safety = bind_source_indexed_mapper_aliases(source_rom)?;
     let absolute_chr_writer_census = bind_absolute_chr_writer_census(source_rom)?;
     selector_safety::bind_source_contract(source_rom)?;
+
+    let InstalledParityImage {
+        output,
+        trigger_variant_plan,
+        cave_file_start,
+        direct_code_cave_transfer_count,
+        routines,
+        tracked_writes,
+    } = install_mapper165_parity_image(source_rom)?;
+
+    Ok(AssembledParityImage {
+        output,
+        trigger_variant_plan,
+        cave_file_start,
+        direct_code_cave_transfer_count,
+        routines,
+        tracked_writes,
+        source_mapper_write_audit,
+        source_indexed_mapper_alias_safety,
+        absolute_chr_writer_census,
+    })
+}
+
+fn install_mapper165_parity_image(source_rom: &Rom) -> Result<InstalledParityImage> {
+    source_rom.verify_supported_japanese()?;
 
     let (base, trigger_variant_plan) = create_chr_relocated_image(source_rom)?;
     let cave_file_start = fixed_bank_file_offset(CODE_CAVE_START_ADDRESS)?;
@@ -449,21 +483,18 @@ fn assemble_mapper165_parity_image(source_rom: &Rom) -> Result<AssembledParityIm
     selector_safety::verify_parity_nonindexed_absolute_mapper_select_store(&output_rom)?;
     verify_installed_guarded_indexed_menu_stores(&output_rom)?;
 
-    Ok(AssembledParityImage {
+    Ok(InstalledParityImage {
         output,
         trigger_variant_plan,
         cave_file_start,
         direct_code_cave_transfer_count,
         routines,
         tracked_writes,
-        source_mapper_write_audit,
-        source_indexed_mapper_alias_safety,
-        absolute_chr_writer_census,
     })
 }
 
-pub(super) fn assemble_mapper165_parity_bytes(source_rom: &Rom) -> Result<Vec<u8>> {
-    Ok(assemble_mapper165_parity_image(source_rom)?.output)
+pub(super) fn install_mapper165_parity_bytes(source_rom: &Rom) -> Result<Vec<u8>> {
+    Ok(install_mapper165_parity_image(source_rom)?.output)
 }
 
 fn create_chr_relocated_image(source_rom: &Rom) -> Result<(Vec<u8>, TriggerVariantPlan)> {

@@ -13,9 +13,8 @@ use crate::{
 };
 
 use super::{
-    OUTPUT_MAPPER, assemble_mapper165_parity_bytes,
-    battle_codebook_plan::plan_battle_cache_composition_material,
-    dialogue_probe_font::SOURCE_FONT_PHYSICAL_PAGE,
+    OUTPUT_MAPPER, battle_codebook_plan::plan_battle_cache_composition_material,
+    dialogue_probe_font::SOURCE_FONT_PHYSICAL_PAGE, install_mapper165_parity_bytes,
 };
 
 const EXPANDED_PRG_SIZE: usize = 512 * 1024;
@@ -117,7 +116,7 @@ pub(crate) fn build_battle_text_cache_base(
         "battle recipe blob exceeds one MMC3 PRG page"
     );
 
-    let parity = assemble_mapper165_parity_bytes(&source_rom)?;
+    let parity = install_mapper165_parity_bytes(&source_rom)?;
     let parity_rom = Rom::parse(parity).context("parse mapper 165 battle cache base")?;
     let source_page_start = SOURCE_FONT_PHYSICAL_PAGE * FONT_PAGE_SIZE;
     let source_page = parity_rom

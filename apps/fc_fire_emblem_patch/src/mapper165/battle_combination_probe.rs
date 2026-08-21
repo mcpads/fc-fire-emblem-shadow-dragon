@@ -15,10 +15,11 @@ use crate::{
 };
 
 use super::{
-    OUTPUT_MAPPER, assemble_mapper165_parity_bytes,
+    OUTPUT_MAPPER,
     battle_cache_coverage::BattleTextCoverage,
     battle_codebook_plan::{ScreenCodeConstraint, plan_constrained_battle_codebook},
     dialogue_probe_font::{SOURCE_FONT_PHYSICAL_PAGE, install_font_glyphs},
+    install_mapper165_parity_bytes,
 };
 
 pub(super) struct GameplayBattleCombinationImage {
@@ -250,7 +251,7 @@ pub(super) fn assemble_gameplay_battle_combination(
         "stable battle codebook overwrites a preserved chapter-one tile"
     );
 
-    let parity = assemble_mapper165_parity_bytes(&source_rom)?;
+    let parity = install_mapper165_parity_bytes(&source_rom)?;
     let mut image = TrackedImage::new(parity.clone());
     for entry in selected_fixed {
         let mut replacement = entry.encoded_bytes(&assignments)?;

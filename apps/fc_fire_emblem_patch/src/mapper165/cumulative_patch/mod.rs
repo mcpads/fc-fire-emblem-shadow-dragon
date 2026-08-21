@@ -13,10 +13,11 @@ use crate::{
 };
 
 use super::{
-    OUTPUT_MAPPER, SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS, assemble_mapper165_parity_bytes,
+    OUTPUT_MAPPER, SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
     bind_cumulative_font_page_fallback_graph,
     dialogue_lifetime_page::{SCREEN_ROLE, build_page_routine_at, plan_dialogue_lifetime_page},
     hangul_page_probe::build_mapper165_hangul_page_probe_from_parity,
+    install_mapper165_parity_bytes,
     roster_page::{
         PAGE_REGISTERS as ROSTER_PAGE_REGISTERS, PAGE_ROUTINE_ADDRESS as ROSTER_SELECTOR_ADDRESS,
         build_page_routine as build_roster_selector,
@@ -157,7 +158,7 @@ pub(crate) fn build_cumulative_patch(
         ref maximum_dialogue_plan,
         ..
     } = input_plan;
-    let parity = assemble_mapper165_parity_bytes(source_rom)?;
+    let parity = install_mapper165_parity_bytes(source_rom)?;
     let ui_stage_rom_path = inputs.stage_directory.join(UI_STAGE_ROM_NAME);
     let ui_stage_report_path = inputs.stage_directory.join(UI_STAGE_REPORT_NAME);
     let ui_stage = build_mapper165_hangul_page_probe_from_parity(

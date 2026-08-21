@@ -19,8 +19,8 @@ use crate::{
 };
 
 use super::{
-    FIRST_EXTENSION_CHR_PAGE, SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
-    assemble_mapper165_parity_bytes, encode_chr_page_register,
+    FIRST_EXTENSION_CHR_PAGE, SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS, encode_chr_page_register,
+    install_mapper165_parity_bytes,
     options_lifetime::inspect_options_lifetime,
     options_page::{
         OPTIONS_COMPOSITE_STATE, OPTIONS_COMPOSITE_STATE_ADDRESS,
@@ -201,7 +201,7 @@ pub(crate) fn build_mapper165_hangul_page_probe(
     report_path: &Path,
 ) -> Result<HangulPageProbeSummary> {
     let source_rom = Rom::from_path(source_path)?;
-    let parity_base = assemble_mapper165_parity_bytes(&source_rom)?;
+    let parity_base = install_mapper165_parity_bytes(&source_rom)?;
     build_mapper165_hangul_page_probe_from_parity(
         &source_rom,
         &parity_base,

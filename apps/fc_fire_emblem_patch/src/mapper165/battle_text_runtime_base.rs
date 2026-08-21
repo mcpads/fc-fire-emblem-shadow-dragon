@@ -17,7 +17,7 @@ use crate::{
 };
 
 use super::{
-    OUTPUT_MAPPER, assemble_mapper165_parity_bytes,
+    OUTPUT_MAPPER,
     battle_codebook_plan::{
         plan_battle_cache_composition_material, plan_canonical_battle_codebook,
         surface_constraints::select_observed_battle_surfaces,
@@ -32,6 +32,7 @@ use super::{
         expand_prg_with_material, rasterize_atlas,
     },
     dialogue_probe_font::SOURCE_FONT_PHYSICAL_PAGE,
+    install_mapper165_parity_bytes,
 };
 
 #[cfg(test)]
@@ -139,7 +140,7 @@ pub(crate) fn build_battle_text_runtime_base(
     report_path: &Path,
 ) -> Result<BattleTextRuntimeBaseSummary> {
     let source_rom = Rom::from_path(source_path)?;
-    let parity = assemble_mapper165_parity_bytes(&source_rom)?;
+    let parity = install_mapper165_parity_bytes(&source_rom)?;
     build_battle_text_runtime_base_on_parity(
         &source_rom,
         source_path,
