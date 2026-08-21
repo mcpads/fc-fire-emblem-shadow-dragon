@@ -2,7 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, ensure};
 
-use crate::dialogue_inventory::MainDialogueGraphReport;
+use crate::{
+    dialogue_inventory::MainDialogueGraphReport, game_over_dialogue::GameOverDialogueSourceBinding,
+};
 
 use super::{DialogueRecordKey, report::ObservedScreenLifetimeReport};
 
@@ -11,9 +13,6 @@ mod game_over;
 mod shop;
 
 pub(crate) use epilogue::ending_character_epilogue_preserved_active_codes;
-#[cfg(test)]
-pub(super) use game_over::test_game_over_dialogue_source_binding;
-pub(super) use game_over::{GameOverDialogueSourceBinding, bind_game_over_dialogue_source};
 
 pub(super) fn observed_screen_lifetime_reports(
     filled_glyphs_by_record: &BTreeMap<DialogueRecordKey, BTreeSet<char>>,

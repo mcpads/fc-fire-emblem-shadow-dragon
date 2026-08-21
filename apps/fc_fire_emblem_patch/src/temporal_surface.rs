@@ -170,7 +170,7 @@ struct RouteReport {
     distinct_oam_count: usize,
     distinct_palette_count: usize,
     memory_expectation_count: usize,
-    game_over_dialogue_selector_hex: Option<&'static str>,
+    game_over_dialogue_selector_hex: Option<String>,
     game_over_dialogue_selector_sample_count: usize,
     screen_role_variants: Vec<ScreenRoleVariantReport>,
     chr_pairs: Vec<ChrPairReport>,

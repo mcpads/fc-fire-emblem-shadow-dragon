@@ -208,7 +208,7 @@ fn observed_game_over_budget_uses_the_complete_source_selected_family() {
             })
             .collect(),
     );
-    let source_binding = screen_lifetimes::test_game_over_dialogue_source_binding();
+    let source_binding = crate::game_over_dialogue::test_game_over_dialogue_source_binding();
 
     let report = build_glyph_workset_report(
         &workspace,

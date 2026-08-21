@@ -16,6 +16,7 @@ mod font;
 mod font_slots;
 mod front_end_menu;
 mod full_translation_install;
+mod game_over_dialogue;
 mod glyph_demand;
 mod hangul_page_plan;
 mod item_flow;

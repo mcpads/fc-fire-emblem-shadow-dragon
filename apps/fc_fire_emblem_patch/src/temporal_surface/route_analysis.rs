@@ -1,8 +1,11 @@
 use super::*;
 
+use crate::game_over_dialogue::{
+    is_source_selected_game_over_dialogue, source_selected_game_over_dialogue_family_hex,
+};
+
 pub(super) const GAME_OVER_DIALOGUE_DIRECTORY_SELECTOR_ADDRESS: usize = 0x77F4;
 pub(super) const GAME_OVER_DIALOGUE_ENTRY_SELECTOR_ADDRESS: usize = 0x77F1;
-const GAME_OVER_DIALOGUE_SELECTOR_HEX: &str = "B0:0A";
 
 pub(super) fn validate_route_contract(route: &RouteInput) -> Result<()> {
     ensure!(!route.route_role.is_empty(), "temporal route role is empty");
@@ -91,7 +94,7 @@ pub(super) fn analyze_route(route: &RouteInput, manifest_root: &Path) -> Result<
     let mut screen_role_variants = BTreeMap::<String, ScreenRoleVariantAccumulator>::new();
     let mut producer_frame_counts = Vec::new();
     let mut capture_dirs = BTreeSet::new();
-    let mut game_over_dialogue_selector_sample_count = 0;
+    let mut game_over_dialogue_selectors_hex = BTreeSet::new();
 
     for sample in &route.samples {
         validate_screen_role(&route.route_role, &sample.screen_role)?;
@@ -111,8 +114,7 @@ pub(super) fn analyze_route(route: &RouteInput, manifest_root: &Path) -> Result<
         let files = read_capture_files(&capture_dir)?;
         validate_memory_expectations(sample, &files)?;
         if route.route_role == "gameplay_battle_defeat" && sample.screen_role == "game_over" {
-            validate_game_over_dialogue_selector(&files)?;
-            game_over_dialogue_selector_sample_count += 1;
+            game_over_dialogue_selectors_hex.insert(validate_game_over_dialogue_selector(&files)?);
         }
         let state = parse_capture_state(&files.state)?;
         let screenshot_sha1 = sha1_hex(&files.screenshot);
@@ -172,10 +174,27 @@ pub(super) fn analyze_route(route: &RouteInput, manifest_root: &Path) -> Result<
     validate_producer_frame_deltas(&route.route_role, &frame_offsets, &producer_frame_counts)?;
     if route.route_role == "gameplay_battle_defeat" {
         ensure!(
-            game_over_dialogue_selector_sample_count > 0,
+            !game_over_dialogue_selectors_hex.is_empty(),
             "defeat route has no game-over dialogue-selector samples"
         );
+        ensure!(
+            game_over_dialogue_selectors_hex.len() == 1,
+            "one defeat route selected multiple game-over dialogues: {}",
+            game_over_dialogue_selectors_hex
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
     }
+    let game_over_dialogue_selector_sample_count = route
+        .samples
+        .iter()
+        .filter(|sample| {
+            route.route_role == "gameplay_battle_defeat" && sample.screen_role == "game_over"
+        })
+        .count();
+    let game_over_dialogue_selector_hex = game_over_dialogue_selectors_hex.into_iter().next();
     if route.route_role == "sound_test_automatic_ending" {
         let observed_roles = screen_role_variants
             .keys()
@@ -227,8 +246,7 @@ pub(super) fn analyze_route(route: &RouteInput, manifest_root: &Path) -> Result<
         distinct_oam_count: oam_sha1s.len(),
         distinct_palette_count: palette_sha1s.len(),
         memory_expectation_count,
-        game_over_dialogue_selector_hex: (game_over_dialogue_selector_sample_count > 0)
-            .then_some(GAME_OVER_DIALOGUE_SELECTOR_HEX),
+        game_over_dialogue_selector_hex,
         game_over_dialogue_selector_sample_count,
         screen_role_variants,
         chr_pairs: chr_pairs.into_iter().collect(),
@@ -238,7 +256,7 @@ pub(super) fn analyze_route(route: &RouteInput, manifest_root: &Path) -> Result<
     })
 }
 
-pub(super) fn validate_game_over_dialogue_selector(files: &CaptureFiles) -> Result<()> {
+pub(super) fn validate_game_over_dialogue_selector(files: &CaptureFiles) -> Result<String> {
     let prg_ram_byte = |address: usize, role: &str| {
         let offset = address
             .checked_sub(MemoryRegion::PrgRam.base_address())
@@ -258,10 +276,11 @@ pub(super) fn validate_game_over_dialogue_selector(files: &CaptureFiles) -> Resu
         "dialogue entry selector",
     )?;
     ensure!(
-        (directory_selector, entry_selector) == (0xB0, 0x0A),
-        "game-over dialogue selector changed from {GAME_OVER_DIALOGUE_SELECTOR_HEX} to {directory_selector:02X}:{entry_selector:02X}"
+        is_source_selected_game_over_dialogue(directory_selector, entry_selector),
+        "game-over dialogue selector {directory_selector:02X}:{entry_selector:02X} is outside source-selected family {}",
+        source_selected_game_over_dialogue_family_hex()
     );
-    Ok(())
+    Ok(format!("{directory_selector:02X}:{entry_selector:02X}"))
 }
 
 pub(super) fn validate_producer_frame_deltas(

@@ -169,7 +169,7 @@ fn battle_runtime_input_projects_selector_62_before_the_late_write() {
 }
 
 #[test]
-fn game_over_samples_bind_the_exact_dialogue_record() {
+fn game_over_samples_accept_every_source_selected_dialogue_record() {
     let mut files = CaptureFiles {
         screenshot: b"\x89PNG\r\n\x1A\n".to_vec(),
         state: Vec::new(),
@@ -180,13 +180,24 @@ fn game_over_samples_bind_the_exact_dialogue_record() {
         palette: vec![0; PALETTE_BYTE_COUNT],
     };
     files.prg_ram[GAME_OVER_DIALOGUE_DIRECTORY_SELECTOR_ADDRESS - 0x6000] = 0xB0;
-    files.prg_ram[GAME_OVER_DIALOGUE_ENTRY_SELECTOR_ADDRESS - 0x6000] = 0x0A;
+    for entry_selector in [0x06, 0x07, 0x08, 0x09, 0x0A] {
+        files.prg_ram[GAME_OVER_DIALOGUE_ENTRY_SELECTOR_ADDRESS - 0x6000] = entry_selector;
+        assert_eq!(
+            validate_game_over_dialogue_selector(&files).unwrap(),
+            format!("B0:{entry_selector:02X}")
+        );
+    }
 
-    validate_game_over_dialogue_selector(&files).unwrap();
-
-    files.prg_ram[GAME_OVER_DIALOGUE_ENTRY_SELECTOR_ADDRESS - 0x6000] = 0x09;
+    files.prg_ram[GAME_OVER_DIALOGUE_ENTRY_SELECTOR_ADDRESS - 0x6000] = 0x05;
     let error = validate_game_over_dialogue_selector(&files)
         .unwrap_err()
         .to_string();
-    assert!(error.contains("B0:0A"));
+    assert!(error.contains("outside source-selected family"));
+
+    files.prg_ram[GAME_OVER_DIALOGUE_DIRECTORY_SELECTOR_ADDRESS - 0x6000] = 0xAF;
+    files.prg_ram[GAME_OVER_DIALOGUE_ENTRY_SELECTOR_ADDRESS - 0x6000] = 0x06;
+    let error = validate_game_over_dialogue_selector(&files)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("AF:06"));
 }

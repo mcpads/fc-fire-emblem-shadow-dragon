@@ -6,6 +6,7 @@ use crate::dialogue_inventory::MainDialogueGraphReport;
 #[cfg(test)]
 use crate::dialogue_inventory::MainDialogueTransitionEdgeReport;
 use crate::font_slots::active_hangul_codes;
+use crate::game_over_dialogue::{GameOverDialogueSourceBinding, bind_game_over_dialogue_source};
 
 use super::*;
 
@@ -57,7 +58,7 @@ pub(crate) fn analyze_main_dialogue_glyph_workset(
     validate_workspace_translations(&workspace)?;
 
     let graph = inspect_main_dialogue_graph(rom.data())?;
-    let game_over_source_binding = screen_lifetimes::bind_game_over_dialogue_source(&rom)?;
+    let game_over_source_binding = bind_game_over_dialogue_source(&rom)?;
     let workspace_sha1 = sha1_hex(&workspace_bytes);
     let preliminary = build_glyph_workset_report(
         &workspace,
@@ -130,7 +131,7 @@ fn build_glyph_workset_report(
     graph: &MainDialogueGraphReport,
     workspace_sha1: String,
     maximum_source_binding: Option<maximum_source::MaximumDialogueSourceBinding>,
-    game_over_source_binding: Option<&screen_lifetimes::GameOverDialogueSourceBinding>,
+    game_over_source_binding: Option<&GameOverDialogueSourceBinding>,
 ) -> Result<MainDialogueGlyphWorksetReport> {
     let mut status_counts = GlyphWorksetStatusCounts::default();
     let mut filled_glyphs = BTreeSet::new();
