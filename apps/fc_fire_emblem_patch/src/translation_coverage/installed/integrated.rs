@@ -174,6 +174,7 @@ struct CarriedUiDomainPreservation {
     all_storage_regions_rebound: bool,
     all_font_regions_rebound: bool,
     all_consumer_routes_rebound: bool,
+    all_final_semantic_bindings_verified: bool,
     complete: bool,
 }
 
@@ -183,11 +184,21 @@ struct CarriedUiDomain {
     target_unit_count: usize,
     screen_roles: Vec<String>,
     translation_input_bound: bool,
+    final_semantic_binding: FinalSemanticBinding,
+    stored_target_content_matches_translation_input: bool,
+    final_visual_material_matches_target_content: bool,
     storage_regions: Vec<CarriedUiRegion>,
     font_regions: Vec<CarriedUiRegion>,
     consumer_regions: Vec<CarriedUiRegion>,
     consumer_route_binding_ids: Vec<String>,
     complete_for_declared_domain_plan: bool,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+enum FinalSemanticBinding {
+    PreservedStorageAndVisualMaterial,
+    ReencodedStorageAndVisualMaterial,
 }
 
 #[derive(Debug, Deserialize)]
@@ -446,6 +457,9 @@ fn bind_integrated_installation(
             && report
                 .carried_ui_domain_preservation
                 .all_consumer_routes_rebound
+            && report
+                .carried_ui_domain_preservation
+                .all_final_semantic_bindings_verified
             && report.carried_ui_domain_preservation.complete
             && report
                 .carried_battle_domain_preservation
@@ -916,20 +930,30 @@ fn bind_carried_ui_domains(
             roles == *canonical_roles
                 && domain.target_unit_count == expected_counts[domain.id.as_str()]
                 && domain.translation_input_bound
+                && domain.stored_target_content_matches_translation_input
+                && domain.final_visual_material_matches_target_content
                 && domain.complete_for_declared_domain_plan
                 && !route_ids.is_empty(),
             "carried UI domain {} does not close its exact final plan",
             domain.id
         );
+        let storage_and_visual_binding_kinds = match domain.final_semantic_binding {
+            FinalSemanticBinding::PreservedStorageAndVisualMaterial => {
+                &["cumulative_bytes_preserved"][..]
+            }
+            FinalSemanticBinding::ReencodedStorageAndVisualMaterial => {
+                &["integrated_route_replacement"][..]
+            }
+        };
         bind_carried_regions(
             &domain.storage_regions,
             "carried UI storage",
-            &["cumulative_bytes_preserved"],
+            storage_and_visual_binding_kinds,
         )?;
         bind_carried_regions(
             &domain.font_regions,
             "carried UI font supply",
-            &["cumulative_bytes_preserved"],
+            storage_and_visual_binding_kinds,
         )?;
         bind_carried_regions(
             &domain.consumer_regions,
@@ -1170,6 +1194,9 @@ mod tests {
             "screen_roles": screen_roles,
             "translation_input_bound": true,
             "review_complete": false,
+            "final_semantic_binding": "preserved_storage_and_visual_material",
+            "stored_target_content_matches_translation_input": true,
+            "final_visual_material_matches_target_content": true,
             "storage_regions": [region("storage", "0x001000", "cumulative_bytes_preserved")],
             "font_regions": [region("font", "0x002000", "cumulative_bytes_preserved")],
             "consumer_regions": [region("consumer", "0x003000", "integrated_route_replacement")],
@@ -1266,6 +1293,7 @@ mod tests {
                 "all_storage_regions_rebound": true,
                 "all_font_regions_rebound": true,
                 "all_consumer_routes_rebound": true,
+                "all_final_semantic_bindings_verified": true,
                 "human_review_complete": false,
                 "complete": true
             },
@@ -1452,6 +1480,24 @@ mod tests {
         serde_json::to_vec(&value).unwrap()
     }
 
+    fn reencode_carried_storage_and_visual_material(
+        value: &mut serde_json::Value,
+        domain_id: &str,
+    ) {
+        let domain = value["carried_ui_domain_preservation"]["domains"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|domain| domain["id"] == domain_id)
+            .unwrap();
+        domain["final_semantic_binding"] = "reencoded_storage_and_visual_material".into();
+        for region_family in ["storage_regions", "font_regions"] {
+            for region in domain[region_family].as_array_mut().unwrap() {
+                region["binding_kind"] = "integrated_route_replacement".into();
+            }
+        }
+    }
+
     #[test]
     fn exact_final_report_replaces_declared_domain_installation() {
         let report = report_json(Some("map_menu"));
@@ -1572,6 +1618,42 @@ mod tests {
         assert_eq!(terrain.installed_target_unit_count, 16);
         assert_eq!(terrain.consumer_complete_screen_roles, ["battle_animation"]);
         assert!(terrain.runtime_bound_screen_roles.is_empty());
+    }
+
+    #[test]
+    fn semantically_reencoded_carried_storage_and_visual_material_is_accepted() {
+        let mut value: serde_json::Value = serde_json::from_slice(&report_json(None)).unwrap();
+        reencode_carried_storage_and_visual_material(&mut value, "roster_header");
+        let report = serde_json::to_vec(&value).unwrap();
+
+        let evidence =
+            bind_integrated_installation(&report, b"final", "base-output", "base-report").unwrap();
+
+        assert_eq!(
+            evidence.domains["roster_header"].consumer_complete_screen_roles,
+            ["unit_roster"]
+        );
+    }
+
+    #[test]
+    fn carried_reencoding_without_final_semantic_proof_fails_closed() {
+        let mut value: serde_json::Value = serde_json::from_slice(&report_json(None)).unwrap();
+        reencode_carried_storage_and_visual_material(&mut value, "roster_header");
+        let domain = value["carried_ui_domain_preservation"]["domains"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|domain| domain["id"] == "roster_header")
+            .unwrap();
+        domain["stored_target_content_matches_translation_input"] = false.into();
+        let report = serde_json::to_vec(&value).unwrap();
+
+        assert!(
+            bind_integrated_installation(&report, b"final", "base-output", "base-report")
+                .unwrap_err()
+                .to_string()
+                .contains("does not close its exact final plan")
+        );
     }
 
     #[test]

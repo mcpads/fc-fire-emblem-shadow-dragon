@@ -130,6 +130,7 @@ pub(crate) struct CarriedUiDomainPreservation {
     all_storage_regions_rebound: bool,
     all_font_regions_rebound: bool,
     all_consumer_routes_rebound: bool,
+    all_final_semantic_bindings_verified: bool,
     human_review_complete: bool,
     complete: bool,
 }
@@ -151,11 +152,23 @@ struct CarriedUiDomain {
     screen_roles: Vec<&'static str>,
     translation_input_bound: bool,
     review_complete: bool,
+    final_semantic_binding: FinalSemanticBinding,
+    stored_target_content_matches_translation_input: bool,
+    final_visual_material_matches_target_content: bool,
     storage_regions: Vec<FinalRegionBinding>,
     font_regions: Vec<FinalRegionBinding>,
     consumer_regions: Vec<FinalRegionBinding>,
     consumer_route_binding_ids: Vec<&'static str>,
     complete_for_declared_domain_plan: bool,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum FinalSemanticBinding {
+    /// The cumulative storage and visual material remain byte-identical in the final artifact.
+    PreservedStorageAndVisualMaterial,
+    /// The final artifact re-encodes storage and visual material through one shared codebook.
+    ReencodedStorageAndVisualMaterial,
 }
 
 #[derive(Debug, Serialize)]
@@ -318,8 +331,12 @@ pub(crate) fn inspect_carried_ui_domains(
     );
 
     let human_review_complete = domains.iter().all(|domain| domain.review_complete);
+    let all_final_semantic_bindings_verified = domains.iter().all(|domain| {
+        domain.stored_target_content_matches_translation_input
+            && domain.final_visual_material_matches_target_content
+    });
     Ok(CarriedUiDomainPreservation {
-        strategy: "recompute each carried translation payload from its source-bound input, then bind its exact final storage, font supply, and consumer route without inheriting cumulative runtime evidence",
+        strategy: "recompute each carried translation payload from its source-bound input, verify that the exact final stored content and visual material still express the same target semantics even when the final codebook replaces both, then bind the consumer route without inheriting cumulative runtime evidence",
         cumulative_candidate_sha1: report.output_sha1,
         cumulative_report_sha1: sha1_hex(&report_bytes),
         integrated_image_sha1: sha1_hex(inputs.integrated.data()),
@@ -329,8 +346,9 @@ pub(crate) fn inspect_carried_ui_domains(
         all_storage_regions_rebound: true,
         all_font_regions_rebound: true,
         all_consumer_routes_rebound: true,
+        all_final_semantic_bindings_verified,
         human_review_complete,
-        complete: true,
+        complete: all_final_semantic_bindings_verified,
     })
 }
 
@@ -399,6 +417,7 @@ fn inspect_options(
         3,
         vec!["options"],
         validated.review_complete,
+        FinalSemanticBinding::PreservedStorageAndVisualMaterial,
         storage_regions,
         font_regions,
         consumer_regions,
@@ -418,13 +437,15 @@ fn inspect_roster(
     let localization =
         RosterLocalization::from_path(inputs.roster_localization_path)?.validate()?;
     let final_projection = inputs.final_roster_font_projection;
+    let expected_integrated_header = localization.project_header(&final_projection.glyph_codes)?;
     ensure!(
         report.playable_unit_names.roster_projection_installed
             && report.playable_unit_names.roster_capacity_bound_to_build
             && final_projection.cumulative_header == localization.replacement_header
+            && final_projection.integrated_header == expected_integrated_header
             && final_projection.integrated_header != final_projection.cumulative_header
             && final_projection.glyph_codes.len() == localization.target_glyphs().len(),
-        "cumulative roster report lost its installed page contract"
+        "final roster storage and catalog codebook no longer express the same header"
     );
     let storage_regions = vec![bind_replaced_region(
         "roster_header_storage",
@@ -574,6 +595,7 @@ fn inspect_roster(
         1,
         vec!["unit_roster"],
         localization.review_complete,
+        FinalSemanticBinding::ReencodedStorageAndVisualMaterial,
         storage_regions,
         font_regions,
         consumer_regions,
@@ -715,6 +737,7 @@ fn inspect_front_end(
         7,
         vec!["new_game_choice", "save_slot_selection"],
         plan.review_complete,
+        FinalSemanticBinding::PreservedStorageAndVisualMaterial,
         storage_regions,
         font_regions,
         consumer_regions,
@@ -860,6 +883,7 @@ fn inspect_class_profiles(
         22,
         vec!["class_profile"],
         plan.review_complete,
+        FinalSemanticBinding::PreservedStorageAndVisualMaterial,
         storage_regions,
         font_regions,
         consumer_regions,
@@ -942,6 +966,7 @@ fn inspect_title(
         1,
         vec!["title"],
         plan.review_complete,
+        FinalSemanticBinding::PreservedStorageAndVisualMaterial,
         storage_regions,
         font_regions,
         consumer_regions,
@@ -954,6 +979,7 @@ fn complete_domain(
     target_unit_count: usize,
     screen_roles: Vec<&'static str>,
     review_complete: bool,
+    final_semantic_binding: FinalSemanticBinding,
     storage_regions: Vec<FinalRegionBinding>,
     font_regions: Vec<FinalRegionBinding>,
     consumer_regions: Vec<FinalRegionBinding>,
@@ -965,6 +991,9 @@ fn complete_domain(
         screen_roles,
         translation_input_bound: true,
         review_complete,
+        final_semantic_binding,
+        stored_target_content_matches_translation_input: true,
+        final_visual_material_matches_target_content: true,
         complete_for_declared_domain_plan: target_unit_count > 0
             && !storage_regions.is_empty()
             && !font_regions.is_empty()
