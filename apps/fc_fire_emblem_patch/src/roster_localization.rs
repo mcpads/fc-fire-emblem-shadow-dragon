@@ -191,6 +191,47 @@ impl ValidatedRosterLocalization {
     pub(crate) fn glyph_assignments(&self) -> BTreeMap<u8, char> {
         self.characters_by_code.clone()
     }
+
+    /// Returns the semantic glyph set used by the roster header, independent of the
+    /// cumulative roster page's historical byte assignments.
+    pub(crate) fn target_glyphs(&self) -> BTreeSet<char> {
+        self.characters_by_code.values().copied().collect()
+    }
+
+    /// Re-encodes the already validated roster header for the codebook that will actually
+    /// remain resident while the roster is visible.
+    ///
+    /// The cumulative mapper-165 stage stores the header with its dedicated roster-page codes.
+    /// A later integrated consumer may use a different codebook for the names on the same
+    /// screen. Keeping the old bytes in that case makes two locally valid plans disagree at the
+    /// final renderer. This projection preserves the original LV/HP suffix and changes only the
+    /// translated name field.
+    pub(crate) fn project_header(
+        &self,
+        assignments: &BTreeMap<char, u8>,
+    ) -> Result<[u8; SOURCE_ROSTER_HEADER.len()]> {
+        let mut projected = self.replacement_header;
+        for code in &mut projected[..ROSTER_HEADER_JAPANESE_FIELD_LEN] {
+            if *code == 0xFF {
+                continue;
+            }
+            let glyph = self
+                .characters_by_code
+                .get(code)
+                .copied()
+                .with_context(|| format!("roster header code {code:02X} has no target glyph"))?;
+            *code = assignments
+                .get(&glyph)
+                .copied()
+                .with_context(|| format!("active roster codebook has no glyph {glyph:?}"))?;
+        }
+        ensure!(
+            projected[ROSTER_HEADER_JAPANESE_FIELD_LEN..]
+                == self.replacement_header[ROSTER_HEADER_JAPANESE_FIELD_LEN..],
+            "roster header projection changed the protected LV/HP suffix"
+        );
+        Ok(projected)
+    }
 }
 
 pub(crate) fn roster_visible_codes() -> BTreeSet<u8> {
@@ -269,6 +310,30 @@ mod tests {
             validated.tiles.keys().copied().collect::<Vec<_>>(),
             [0x15, 0x20]
         );
+    }
+
+    #[test]
+    fn projects_the_header_into_the_final_screen_codebook() {
+        let validated = roster_localization().validate().unwrap();
+        let assignments = BTreeMap::from([('이', 0x0E), ('름', 0x34)]);
+
+        assert_eq!(
+            validated.project_header(&assignments).unwrap(),
+            [
+                0x0E, 0x34, 0xFF, 0xFF, 0xFF, 0xFF, 0x75, 0x7F, 0xFF, 0x71, 0x79, 0xED,
+            ]
+        );
+        assert_eq!(validated.target_glyphs(), BTreeSet::from(['름', '이']));
+    }
+
+    #[test]
+    fn rejects_a_final_codebook_that_cannot_render_the_whole_header() {
+        let validated = roster_localization().validate().unwrap();
+        let error = validated
+            .project_header(&BTreeMap::from([('이', 0x0E)]))
+            .unwrap_err();
+
+        assert!(error.to_string().contains("'름'"));
     }
 
     #[test]

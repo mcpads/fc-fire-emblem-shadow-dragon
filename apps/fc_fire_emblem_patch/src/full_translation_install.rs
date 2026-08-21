@@ -30,6 +30,7 @@ use crate::{
         inspect_carried_battle_domains, inspect_carried_ui_domains,
     },
     rom::{EXPECTED_SOURCE_SHA1, Rom},
+    roster_localization::RosterLocalization,
     sha1_hex,
     text_inventory::{plan_fixed_text, plan_location_name_text},
     unit_names::plan_unit_names,
@@ -287,6 +288,8 @@ pub(crate) fn plan_full_translation_installation(
             && options_glyph_codes.len() == options_localization.glyphs.len(),
         "options localization no longer has three labels with one code per glyph"
     );
+    let roster_localization = RosterLocalization::from_path(inputs.roster_localization_path)?;
+    let validated_roster = roster_localization.validate()?;
     let transitions = plan_transition_labels(&rom, inputs.transition_label_localization_path)?;
     let locations = plan_location_name_text(&rom, inputs.location_name_localization_path)?;
 
@@ -460,11 +463,14 @@ pub(crate) fn plan_full_translation_installation(
         preserved_unit_ui_display_codes: &preserved_unit_ui_display_codes(rom.data())?,
         resident_front_end_glyph_codes: front_end_result_menu_residency
             .installed_menu_glyph_codes(),
+        roster: &validated_roster,
         fixed: &fixed,
         unit_names: &unit_names,
         unit_ui: &unit_ui,
         item_actions: &item_actions,
     })?;
+    let final_roster_font_projection =
+        consumer_catalog.final_roster_font_projection(&validated_roster)?;
     let screen_font_residency_draft = plan_screen_font_residency(ScreenFontResidencyInputs {
         source: &rom,
         fixed_string_consumers: &fixed_string_consumers,
@@ -527,6 +533,7 @@ pub(crate) fn plan_full_translation_installation(
         map_menu: &map_menu,
         consumer_codebook: &consumer_codebook,
         consumer_catalog: &consumer_catalog,
+        roster: &final_roster_font_projection,
     })?;
     let font_page_pack = build_glyph_workset_font_page_pack(source_font_page, &codebook)?;
     ensure!(
@@ -825,6 +832,10 @@ pub(crate) fn plan_full_translation_installation(
         ] {
             add_roles(domain, fixed_ui_projection.projected_screen_roles(domain));
         }
+        add_roles(
+            "unit_names",
+            fixed_ui_projection.projected_screen_roles("unit_names"),
+        );
         for domain in ["unit_names", "enemy_names", "class_names"] {
             add_roles(domain, &["unit_summary", "unit_status"]);
         }
@@ -908,6 +919,7 @@ pub(crate) fn plan_full_translation_installation(
         title_graphics_localization_path: inputs.title_graphics_localization_path,
         title_logo_asset_path: inputs.title_logo_asset_path,
         final_roster_consumer_route: &final_roster_consumer_route,
+        final_roster_font_projection: &final_roster_font_projection,
     })?;
     let carried_ui_domains_complete = carried_ui_domain_preservation.complete();
     ensure!(

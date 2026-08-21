@@ -40,7 +40,8 @@ pub(crate) use carried_battle_domains::{
 };
 pub(crate) use carried_ui_domains::{
     CarriedUiDomainInputs, CarriedUiDomainPreservation, FinalConsumerRouteRegion,
-    FinalRosterConsumerRoute, inspect_carried_ui_domains,
+    FinalRosterConsumerRoute, FinalRosterFontPage, FinalRosterFontProjection,
+    inspect_carried_ui_domains,
 };
 pub(crate) use final_font_page_forwarders::BoundFontPageSelector;
 pub(crate) use final_font_page_forwarders::{

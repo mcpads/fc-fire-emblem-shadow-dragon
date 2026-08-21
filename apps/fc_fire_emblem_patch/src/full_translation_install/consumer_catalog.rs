@@ -18,11 +18,13 @@ use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
-    font_slots::{ACTIVE_HANGUL_SLOT_COUNT, FONT_PAGE_SIZE, active_hangul_codes},
+    font_slots::{ACTIVE_HANGUL_SLOT_COUNT, FONT_PAGE_SIZE, FONT_TILE_SIZE, active_hangul_codes},
     mapper165::{
+        FinalRosterFontPage, FinalRosterFontProjection,
         dialogue_probe_font::build_font_page_by_code, encode_chr_page_register,
         font_pair_projection::RightFontPageProjection,
     },
+    roster_localization::ValidatedRosterLocalization,
     semantic_translation::SemanticTranslationPlan,
     sha1_hex,
     text_inventory::{FixedTextLogicalByte, FixedTextPlan, FixedTextPlannedEntry},
@@ -39,6 +41,7 @@ pub(super) struct ConsumerCatalogInputs<'a> {
     pub(super) available_page_count: usize,
     pub(super) preserved_unit_ui_display_codes: &'a BTreeSet<u8>,
     pub(super) resident_front_end_glyph_codes: &'a BTreeMap<char, u8>,
+    pub(super) roster: &'a ValidatedRosterLocalization,
     pub(super) fixed: &'a FixedTextPlan,
     pub(super) unit_names: &'a UnitNamePlan,
     pub(super) unit_ui: &'a SemanticTranslationPlan,
@@ -51,6 +54,7 @@ pub(super) struct ConsumerCatalogPlan {
     strategy: &'static str,
     base_glyph_count: usize,
     resident_front_end_glyph_count: usize,
+    roster_header_glyph_count: usize,
     resident_front_end_assignment_sha1: String,
     preserved_active_code_count: usize,
     per_page_name_slot_count: usize,
@@ -65,6 +69,7 @@ pub(super) struct ConsumerCatalogPlan {
     identity_pages: Vec<CatalogIdentityPage>,
     every_base_glyph_has_one_stable_code: bool,
     every_page_preserves_the_record_action_menu_codes: bool,
+    every_page_preserves_the_roster_header_glyphs: bool,
     every_name_identity_fits_one_page: bool,
     every_page_fits_active_codes: bool,
     pages_fit_reclaimable_tail: bool,
@@ -79,6 +84,60 @@ impl ConsumerCatalogPlan {
 
     pub(super) fn base_assignments(&self) -> &BTreeMap<char, u8> {
         &self.base_assignments
+    }
+
+    pub(super) fn final_roster_font_projection(
+        &self,
+        roster: &ValidatedRosterLocalization,
+    ) -> Result<FinalRosterFontProjection> {
+        let integrated_header = roster.project_header(&self.base_assignments)?;
+        let glyph_codes = roster
+            .target_glyphs()
+            .into_iter()
+            .map(|glyph| {
+                self.base_assignments
+                    .get(&glyph)
+                    .copied()
+                    .map(|code| (glyph, code))
+                    .with_context(|| format!("consumer catalog lost roster glyph {glyph:?}"))
+            })
+            .collect::<Result<BTreeMap<_, _>>>()?;
+        ensure!(
+            !self.pages.is_empty()
+                && self.pages.iter().all(|page| {
+                    glyph_codes
+                        .iter()
+                        .all(|(glyph, code)| page.assignments.get(glyph) == Some(code))
+                }),
+            "consumer catalog pages disagree on the roster header codebook"
+        );
+        for (cumulative_code, glyph) in roster.glyph_assignments() {
+            let integrated_code = glyph_codes[&glyph];
+            let expected_tile = roster
+                .tiles
+                .get(&cumulative_code)
+                .with_context(|| format!("roster glyph {glyph:?} lost its raster tile"))?;
+            let start = usize::from(integrated_code) * FONT_TILE_SIZE;
+            ensure!(
+                self.pages.iter().all(|page| {
+                    page.bytes.get(start..start + FONT_TILE_SIZE) == Some(expected_tile.as_slice())
+                }),
+                "consumer catalog pages do not render roster glyph {glyph:?} at code {integrated_code:02X}"
+            );
+        }
+        Ok(FinalRosterFontProjection {
+            cumulative_header: roster.replacement_header,
+            integrated_header,
+            glyph_codes,
+            pages: self
+                .pages
+                .iter()
+                .map(|page| FinalRosterFontPage {
+                    physical_page: page.physical_page,
+                    bytes: page.bytes.clone(),
+                })
+                .collect(),
+        })
     }
 
     pub(super) fn mapper_routes(&self) -> Result<[u8; 2]> {
@@ -208,6 +267,7 @@ pub(super) fn plan_consumer_catalog(
         "consumer catalog has no resident front-end menu glyphs"
     );
     base_glyphs.extend(inputs.resident_front_end_glyph_codes.keys().copied());
+    base_glyphs.extend(inputs.roster.target_glyphs());
 
     let mut all_logical = base_logical.clone();
     all_logical.extend(
@@ -265,6 +325,14 @@ pub(super) fn plan_consumer_catalog(
                 .iter()
                 .all(|(glyph, code)| assignments.get(glyph) == Some(code)),
             "catalog page {page_index} lost a front-end menu assignment"
+        );
+        ensure!(
+            inputs
+                .roster
+                .target_glyphs()
+                .iter()
+                .all(|glyph| assignments.get(glyph) == base_assignments.get(glyph)),
+            "catalog page {page_index} lost or re-encoded a roster header glyph"
         );
         ensure!(
             assignments.len() + preserved_active_codes.len() <= ACTIVE_HANGUL_SLOT_COUNT,
@@ -359,6 +427,7 @@ pub(super) fn plan_consumer_catalog(
         strategy: "preserve source-bound direct unit-UI glyphs and every installed front-end menu code; keep item, class, summary/status, and item-action glyphs at stable codes on every page; partition mutually exclusive unit and enemy name identities across deterministic best-fit pages",
         base_glyph_count: base_glyphs.len(),
         resident_front_end_glyph_count: inputs.resident_front_end_glyph_codes.len(),
+        roster_header_glyph_count: inputs.roster.target_glyphs().len(),
         resident_front_end_assignment_sha1: assignment_sha1(inputs.resident_front_end_glyph_codes),
         preserved_active_code_count: preserved_active_codes.len(),
         per_page_name_slot_count: extra_codes.len(),
@@ -373,6 +442,7 @@ pub(super) fn plan_consumer_catalog(
         identity_pages,
         every_base_glyph_has_one_stable_code: true,
         every_page_preserves_the_record_action_menu_codes: true,
+        every_page_preserves_the_roster_header_glyphs: true,
         every_name_identity_fits_one_page: true,
         every_page_fits_active_codes: true,
         pages_fit_reclaimable_tail: true,

@@ -87,11 +87,29 @@ pub(crate) struct CarriedUiDomainInputs<'a> {
     pub(crate) title_graphics_localization_path: &'a Path,
     pub(crate) title_logo_asset_path: &'a Path,
     pub(crate) final_roster_consumer_route: &'a FinalRosterConsumerRoute,
+    pub(crate) final_roster_font_projection: &'a FinalRosterFontProjection,
 }
 
 pub(crate) struct FinalRosterConsumerRoute {
     pub(crate) central_fallback_target: u16,
     pub(crate) regions: Vec<FinalConsumerRouteRegion>,
+}
+
+/// Final, shared codebook material for every glyph that remains visible on the unit roster.
+///
+/// The cumulative build's roster pages are an input-stage implementation detail. The integrated
+/// image may replace that codebook, so the carried-domain audit receives the final header bytes
+/// and the exact pages that decode them as one indivisible projection.
+pub(crate) struct FinalRosterFontProjection {
+    pub(crate) cumulative_header: [u8; 12],
+    pub(crate) integrated_header: [u8; 12],
+    pub(crate) glyph_codes: BTreeMap<char, u8>,
+    pub(crate) pages: Vec<FinalRosterFontPage>,
+}
+
+pub(crate) struct FinalRosterFontPage {
+    pub(crate) physical_page: u8,
+    pub(crate) bytes: Vec<u8>,
 }
 
 pub(crate) struct FinalConsumerRouteRegion {
@@ -399,45 +417,59 @@ fn inspect_roster(
     bind_roster_header_composite_route(inputs.source)?;
     let localization =
         RosterLocalization::from_path(inputs.roster_localization_path)?.validate()?;
+    let final_projection = inputs.final_roster_font_projection;
     ensure!(
         report.playable_unit_names.roster_projection_installed
-            && report.playable_unit_names.roster_capacity_bound_to_build,
+            && report.playable_unit_names.roster_capacity_bound_to_build
+            && final_projection.cumulative_header == localization.replacement_header
+            && final_projection.integrated_header != final_projection.cumulative_header
+            && final_projection.glyph_codes.len() == localization.target_glyphs().len(),
         "cumulative roster report lost its installed page contract"
     );
-    let storage_regions = vec![bind_expected_region(
+    let storage_regions = vec![bind_replaced_region(
         "roster_header_storage",
         switchable_bank_file_offset(ROSTER_TEXT_PRG_BANK, ROSTER_HEADER_CPU_ADDRESS)?,
-        &localization.replacement_header,
+        &final_projection.cumulative_header,
+        &final_projection.integrated_header,
         inputs.cumulative,
         inputs.integrated,
     )?];
     let page_pack_offset = chr_file_offset(inputs.cumulative, ROSTER_PHYSICAL_CHR_PAGES[0])?;
     let page_pack = inputs
-        .integrated
+        .cumulative
         .data()
         .get(page_pack_offset..page_pack_offset + 2 * FONT_PAGE_SIZE)
-        .context("roster page pair is outside the integrated artifact")?;
+        .context("cumulative roster page pair is outside the artifact")?;
     ensure!(
         sha1_hex(page_pack) == report.playable_unit_names.roster_page_pack_sha1,
-        "integrated roster page pair no longer matches the cumulative report"
+        "cumulative roster page pair no longer matches its report"
     );
-    for page in page_pack.chunks_exact(FONT_PAGE_SIZE) {
-        for (code, expected) in &localization.tiles {
-            let start = usize::from(*code) * FONT_TILE_SIZE;
+    ensure!(
+        final_projection.pages.len() == 2,
+        "final roster catalog projection must contain both name pages"
+    );
+    let font_regions = final_projection
+        .pages
+        .iter()
+        .enumerate()
+        .map(|(index, page)| {
             ensure!(
-                page[start..start + FONT_TILE_SIZE] == *expected,
-                "integrated roster header glyph {code:02X} changed"
+                page.bytes.len() == FONT_PAGE_SIZE,
+                "final roster catalog page {index} is not 4 KiB"
             );
-        }
-    }
-    let font_regions = vec![bind_preserved_region(
-        "roster_font_page_pair",
-        page_pack_offset,
-        2 * FONT_PAGE_SIZE,
-        inputs.cumulative,
-        inputs.integrated,
-        Some(&report.playable_unit_names.roster_page_pack_sha1),
-    )?];
+            verify_glyph_tiles(&page.bytes, &final_projection.glyph_codes)?;
+            bind_final_expected_region(
+                if index == 0 {
+                    "roster_catalog_font_page_0"
+                } else {
+                    "roster_catalog_font_page_1"
+                },
+                chr_file_offset(inputs.integrated, page.physical_page)?,
+                &page.bytes,
+                inputs.integrated,
+            )
+        })
+        .collect::<Result<Vec<_>>>()?;
     let header_call_offset = switchable_bank_file_offset(
         ROSTER_OWNER_CONSTRUCTOR_PRG_BANK,
         ROSTER_HEADER_CALL_ADDRESS,

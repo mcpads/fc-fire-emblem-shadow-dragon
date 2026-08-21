@@ -18,7 +18,9 @@ use crate::{
     },
     item_flow::ITEM_ACTION_LABELS,
     map_menu::MapMenuPlan,
+    mapper165::FinalRosterFontProjection,
     rom::Rom,
+    roster_localization::{ROSTER_HEADER_CPU_ADDRESS, ROSTER_TEXT_PRG_BANK},
     semantic_translation::SemanticTranslationPlan,
     sha1_hex,
     unit_ui_text::{
@@ -48,6 +50,7 @@ pub(super) struct FixedUiProjectionInputs<'a> {
     pub(super) map_menu: &'a MapMenuPlan,
     pub(super) consumer_codebook: &'a ConsumerCodebookPlan,
     pub(super) consumer_catalog: &'a ConsumerCatalogPlan,
+    pub(super) roster: &'a FinalRosterFontProjection,
 }
 
 #[derive(Serialize)]
@@ -57,6 +60,7 @@ pub(super) struct FixedUiProjectionPlan {
     source_slot_count: usize,
     projected_pointer_entry_count: usize,
     projected_map_menu_entry_count: usize,
+    projected_roster_header_count: usize,
     projected_summary_status_label_count: usize,
     projected_fixed_menu_text_count: usize,
     projected_inline_fixed_menu_text_count: usize,
@@ -75,6 +79,7 @@ pub(super) struct FixedUiProjectionPlan {
     every_summary_status_label_preserves_source_display_cell_count: bool,
     every_pointer_source_bound: bool,
     every_map_menu_entry_fits_owned_storage: bool,
+    every_roster_header_glyph_uses_the_active_catalog_codebook: bool,
     #[serde(skip)]
     writes: Vec<FixedUiExpectedWrite>,
 }
@@ -97,6 +102,7 @@ impl FixedUiProjectionPlan {
 
     pub(super) fn projected_screen_roles(&self, domain: &str) -> &'static [&'static str] {
         match domain {
+            "unit_names" => &["unit_roster"],
             "unit_ui_labels" => &["unit_command_menu", "unit_status", "unit_summary"],
             "item_action_labels" => &["item_action_menu"],
             "map_menu_labels" => &["map_menu", "map_funds_summary"],
@@ -342,6 +348,28 @@ pub(super) fn plan_fixed_ui_projection(
         });
     }
 
+    let roster_header_offset =
+        switchable_cpu_to_file_offset(ROSTER_TEXT_PRG_BANK, ROSTER_HEADER_CPU_ADDRESS)?;
+    bind_candidate(
+        inputs.candidate,
+        roster_header_offset,
+        &inputs.roster.cumulative_header,
+        "cumulative roster header storage",
+    )?;
+    ensure!(
+        inputs.roster.integrated_header != inputs.roster.cumulative_header,
+        "roster header already uses the active catalog codebook; the cumulative boundary changed"
+    );
+    assignment_identity.extend_from_slice(b"unit roster header catalog projection");
+    assignment_identity.extend_from_slice(&inputs.roster.integrated_header);
+    writes.push(FixedUiExpectedWrite {
+        domain: "unit_names",
+        role: "unit roster header catalog projection".to_owned(),
+        file_offset: roster_header_offset,
+        expected: inputs.roster.cumulative_header.to_vec(),
+        replacement: inputs.roster.integrated_header.to_vec(),
+    });
+
     ensure_disjoint_writes(&writes)?;
     let source_slot_capacity_byte_count = slots.iter().map(|slot| slot.expected.len()).sum();
     let inline_source_storage_byte_count = UNIT_SELECTION_HELP_LINE_SPECS
@@ -359,11 +387,12 @@ pub(super) fn plan_fixed_ui_projection(
         .map_or(0, |target| target.bytes.len())
         .max(longest_inline_projected_string_byte_count);
     Ok(FixedUiProjectionPlan {
-        strategy: "preserve each summary/status label's source display-cell span, match every encoded Japanese pointer-label target to one source-owned slot by descending storage length, project the six source-bound unit-selection help lines in place, then project the map-menu block in place",
+        strategy: "preserve each summary/status label's source display-cell span, match every encoded Japanese pointer-label target to one source-owned slot by descending storage length, project the six source-bound unit-selection help lines and map-menu block in place, then re-encode the roster header for the catalog page that renders the names beside it",
         pointer_table_cpu_address_hex: "0x8FC2",
         source_slot_count: slots.len(),
         projected_pointer_entry_count: targets.len(),
         projected_map_menu_entry_count: inputs.map_menu.entries.len(),
+        projected_roster_header_count: 1,
         projected_summary_status_label_count: SUMMARY_AND_STATUS_LABEL_SPECS
             .iter()
             .filter(|spec| spec.translation_scope == JAPANESE_ONLY)
@@ -385,6 +414,7 @@ pub(super) fn plan_fixed_ui_projection(
         every_summary_status_label_preserves_source_display_cell_count: true,
         every_pointer_source_bound: true,
         every_map_menu_entry_fits_owned_storage: true,
+        every_roster_header_glyph_uses_the_active_catalog_codebook: true,
         writes,
     })
 }
