@@ -42,9 +42,7 @@ use super::{
         CHR_RAM_BANK_VALUE, CHR_SOURCE_HIGH_BITS, DIALOGUE_FD_SOURCE_PAGE, RIGHT_FD_SOURCE_SHADOW,
     },
     consumer_font_page::COMPOSITE_STATE,
-    dispatcher_gate::{
-        DISPATCHER_STATE, STATE_COLD_REQUESTED, STATE_RESIDENT_PAGE_OVERLAY_REQUESTED,
-    },
+    dispatcher_gate::{DISPATCHER_STATE, STATE_COLD_REQUESTED},
     lifecycle::{E7_CALLER_RESUME_FLAG, TERMINAL_STATE},
     next_address,
     transport::{REQUEST_STATE, STATE_COMPLETED_PAGE_SUSPENDED, STATE_READY},
@@ -143,19 +141,16 @@ pub(super) fn build_chr_selector(
         Instruction::Php,
         Instruction::Pha,
         Instruction::LdaAbsolute(REQUEST_STATE),
-        Instruction::CmpImmediate(STATE_READY),
+        // 1..=3은 아직 표시 수명이 살아 있는 연속 상태이고, 4만 저장소의
+        // 완료 대사 overlay에서 별도로 판정한다. 개별 상태를 하나씩 비교하면
+        // 같은 수명 집합이 늘어날 때 분기가 서로 드리프트한다.
+        Instruction::CmpImmediate(STATE_COLD_REQUESTED),
     ];
-    let ready_placeholder = instructions.len();
-    instructions.push(Instruction::BeqAbsolute(origin));
-    instructions.push(Instruction::CmpImmediate(STATE_COLD_REQUESTED));
-    let cold_state_placeholder = instructions.len();
-    instructions.push(Instruction::BeqAbsolute(origin));
-    instructions.push(Instruction::CmpImmediate(
-        STATE_RESIDENT_PAGE_OVERLAY_REQUESTED,
-    ));
-    let resident_overlay_state_placeholder = instructions.len();
-    instructions.push(Instruction::BeqAbsolute(origin));
+    let inactive_state_placeholder = instructions.len();
+    instructions.push(Instruction::BccAbsolute(origin));
     instructions.push(Instruction::CmpImmediate(STATE_COMPLETED_PAGE_SUSPENDED));
+    let active_request_range_placeholder = instructions.len();
+    instructions.push(Instruction::BccAbsolute(origin));
     let completed_page_suspended_placeholder = instructions.len();
     instructions.push(Instruction::BeqAbsolute(origin));
     let unsupported_state_placeholder = instructions.len();
@@ -179,9 +174,7 @@ pub(super) fn build_chr_selector(
     instructions.push(Instruction::BneAbsolute(origin));
 
     let eligible_state = next_address(origin, &instructions)?;
-    instructions[ready_placeholder] = Instruction::BeqAbsolute(eligible_state);
-    instructions[cold_state_placeholder] = Instruction::BeqAbsolute(eligible_state);
-    instructions[resident_overlay_state_placeholder] = Instruction::BeqAbsolute(eligible_state);
+    instructions[active_request_range_placeholder] = Instruction::BccAbsolute(eligible_state);
     instructions.push(Instruction::LdaAbsolute(E7_CALLER_RESUME_FLAG));
     let e7_external_caller_placeholder = instructions.len();
     instructions.push(Instruction::BneAbsolute(origin));
@@ -245,6 +238,7 @@ pub(super) fn build_chr_selector(
         Instruction::Rts,
     ]);
     let unsupported_state = next_address(origin, &instructions)?;
+    instructions[inactive_state_placeholder] = Instruction::BccAbsolute(unsupported_state);
     instructions[unsupported_state_placeholder] = Instruction::BneAbsolute(unsupported_state);
     instructions[suspended_outside_storage_placeholder] =
         Instruction::BneAbsolute(unsupported_state);
@@ -348,6 +342,7 @@ pub(super) fn build_cold_request_presentation_selector(
 
 #[cfg(test)]
 mod tests {
+    use super::super::dispatcher_gate::STATE_RESIDENT_PAGE_OVERLAY_REQUESTED;
     use super::*;
 
     const PROJECT_DIALOGUE_PAGE: u16 = 0xF480;
@@ -739,60 +734,26 @@ mod tests {
 
     #[test]
     fn cold_request_selection_uses_chr_rom_instead_of_partial_chr_ram() {
-        let routine =
-            build_chr_selector(0xF4A0, 0xC8, SELECTOR_CHAIN_FALLBACK, PROJECT_DIALOGUE_PAGE)
-                .unwrap();
-
         assert_eq!(
-            &routine.bytes[2..7],
-            [
-                0xAD,
-                REQUEST_STATE as u8,
-                (REQUEST_STATE >> 8) as u8,
-                0xC9,
-                STATE_READY,
-            ]
+            run_selector(STATE_COLD_REQUESTED, TERMINAL_STATE - 1, 0, 0, 0,),
+            SelectorOutcome::Projected(0xC8),
+            "a cold request must show the complete CHR-ROM presentation, not partial CHR-RAM"
         );
-        assert_eq!(routine.bytes[7], 0xF0, "ready must enter the guarded path");
-        assert_eq!(
-            &routine.bytes[9..11],
-            [0xC9, STATE_COLD_REQUESTED],
-            "the same state load must next admit cold_requested"
-        );
-        assert!(routine.bytes.windows(5).any(|window| {
-            window
-                == [
-                    0xA9,
-                    0xC8,
-                    0x20,
-                    PROJECT_DIALOGUE_PAGE as u8,
-                    (PROJECT_DIALOGUE_PAGE >> 8) as u8,
-                ]
-        }));
     }
 
     #[test]
     fn resident_group_overlay_uses_the_same_safe_presentation() {
-        let routine =
-            build_chr_selector(0xF4A0, 0xC8, SELECTOR_CHAIN_FALLBACK, PROJECT_DIALOGUE_PAGE)
-                .unwrap();
-
-        assert!(
-            routine
-                .bytes
-                .windows(3)
-                .any(|window| { window == [0xC9, STATE_RESIDENT_PAGE_OVERLAY_REQUESTED, 0xF0] })
+        assert_eq!(
+            run_selector(
+                STATE_RESIDENT_PAGE_OVERLAY_REQUESTED,
+                TERMINAL_STATE - 1,
+                0,
+                0,
+                0,
+            ),
+            SelectorOutcome::Projected(0xC8),
+            "a resident-group overlay must use the same complete presentation as a cold request"
         );
-        assert!(routine.bytes.windows(5).any(|window| {
-            window
-                == [
-                    0xA9,
-                    0xC8,
-                    0x20,
-                    PROJECT_DIALOGUE_PAGE as u8,
-                    (PROJECT_DIALOGUE_PAGE >> 8) as u8,
-                ]
-        }));
     }
 
     #[test]

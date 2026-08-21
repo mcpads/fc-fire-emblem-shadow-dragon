@@ -8,6 +8,9 @@ use crate::{
         ITEM_ACTION_COMPOSITE_STATE, STORAGE_ITEM_DETAIL_COMPOSITE_STATE,
         UNIT_STATUS_COMPOSITE_STATE, UNIT_SUMMARY_COMPOSITE_STATE,
     },
+    full_translation_install::storage_residency::{
+        STORAGE_ACTION_MENU_COMPOSITE_STATE, STORAGE_OVERFLOW_ACTION_COMPOSITE_STATE,
+    },
     shop_flow::SHOP_ITEM_COMPOSITE_STATE,
 };
 
@@ -172,6 +175,12 @@ impl TestCpu {
                 }
                 0xC9 => {
                     let value = self.read_pc();
+                    self.set_zero(self.a == value);
+                    self.set_carry(self.a >= value);
+                }
+                0xCD => {
+                    let address = self.read_word_pc();
+                    let value = self.memory[usize::from(address)];
                     self.set_zero(self.a == value);
                     self.set_carry(self.a >= value);
                 }
@@ -557,7 +566,49 @@ fn unit_status_retains_the_page_published_by_unit_summary() {
 }
 
 #[test]
-fn dialogue_owned_composites_reenter_the_central_fd_selector_after_clearing_static_residency() {
+fn shop_item_composite_reenters_the_central_fd_selector_after_clearing_static_residency() {
+    let pages = pages();
+    let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
+    let publisher_origin = ORIGIN + u16::try_from(activation.bytes.len()).unwrap();
+    let publisher = build_composite_font_page_publisher(
+        publisher_origin,
+        activation.address,
+        pages,
+        storage_item_list_route(),
+    )
+    .unwrap()
+    .routine;
+
+    for request_state in [0, super::super::transport::STATE_COMPLETED_PAGE_SUSPENDED] {
+        let mut memory: Box<[u8; 0x10000]> =
+            vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
+        memory[usize::from(CONSUMER_FONT_PAGE)] = pages.unit_command;
+        memory[usize::from(super::super::transport::REQUEST_STATE)] = request_state;
+
+        let (memory, result) = run_routines(
+            memory,
+            &[&activation, &publisher],
+            publisher.address,
+            SHOP_ITEM_COMPOSITE_STATE,
+            0xA5,
+        );
+
+        assert_eq!(
+            memory[usize::from(COMPOSITE_STATE)],
+            SHOP_ITEM_COMPOSITE_STATE
+        );
+        assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], 0);
+        assert_eq!(
+            memory[usize::from(super::super::transport::REQUEST_STATE)],
+            request_state
+        );
+        assert_eq!(result.applied_route, None);
+        assert_eq!(result.central_writer_value, Some(0));
+    }
+}
+
+#[test]
+fn completed_storage_dialogue_composites_keep_inactive_pages_and_reselect_live_requests() {
     let pages = pages();
     let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
     let publisher_origin = ORIGIN + u16::try_from(activation.bytes.len()).unwrap();
@@ -571,36 +622,47 @@ fn dialogue_owned_composites_reenter_the_central_fd_selector_after_clearing_stat
     .routine;
 
     for state in [
-        SHOP_ITEM_COMPOSITE_STATE,
         STORAGE_ACTION_MENU_COMPOSITE_STATE,
         STORAGE_OVERFLOW_ACTION_COMPOSITE_STATE,
     ] {
-        for request_state in [0, super::super::transport::STATE_COMPLETED_PAGE_SUSPENDED] {
-            let mut memory: Box<[u8; 0x10000]> =
-                vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
-            memory[usize::from(CONSUMER_FONT_PAGE)] = pages.unit_command;
-            memory[usize::from(super::super::transport::REQUEST_STATE)] = request_state;
+        for request_state in [
+            0,
+            super::super::dispatcher_gate::STATE_COLD_REQUESTED,
+            super::super::dispatcher_gate::STATE_RESIDENT_PAGE_OVERLAY_REQUESTED,
+            super::super::transport::STATE_READY,
+            super::super::transport::STATE_COMPLETED_PAGE_SUSPENDED,
+        ] {
+            for retained_route in [0, pages.unit_command] {
+                let mut memory: Box<[u8; 0x10000]> =
+                    vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
+                memory[usize::from(CONSUMER_FONT_PAGE)] = retained_route;
+                memory[usize::from(super::super::transport::REQUEST_STATE)] = request_state;
 
-            let (memory, result) = run_routines(
-                memory,
-                &[&activation, &publisher],
-                publisher.address,
-                state,
-                0xA5,
-            );
+                let (memory, result) = run_routines(
+                    memory,
+                    &[&activation, &publisher],
+                    publisher.address,
+                    state,
+                    0xA5,
+                );
 
-            assert_eq!(memory[usize::from(COMPOSITE_STATE)], state);
-            assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], 0);
-            assert_eq!(
-                memory[usize::from(super::super::transport::REQUEST_STATE)],
-                request_state
-            );
-            assert_eq!(result.applied_route, None);
-            assert_eq!(
-                result.central_writer_value,
-                Some(0),
-                "dialogue-owned state {state:02X} did not re-enter the central right-FD selector"
-            );
+                assert_eq!(memory[usize::from(COMPOSITE_STATE)], state);
+                assert_eq!(
+                    memory[usize::from(CONSUMER_FONT_PAGE)],
+                    0,
+                    "storage overlay state {state:02X} retained a stale static route from {retained_route:02X}"
+                );
+                assert_eq!(
+                    memory[usize::from(super::super::transport::REQUEST_STATE)],
+                    request_state
+                );
+                assert_eq!(result.applied_route, None);
+                assert_eq!(
+                    result.central_writer_value,
+                    (request_state != 0).then_some(0),
+                    "storage overlay state {state:02X} did not hand request state {request_state:02X} to the correct physical-page owner"
+                );
+            }
         }
     }
 }
@@ -794,10 +856,11 @@ fn every_direct_composite_state_follows_its_declared_page_action() {
             } else if matches!(
                 policy,
                 ScreenFontResidencyPolicy::SourcePageSelected
-                    | ScreenFontResidencyPolicy::CompletedDialoguePageRetained
                     | ScreenFontResidencyPolicy::ActiveDialogueCallerRestored
             ) {
                 (0, None, Some(0))
+            } else if policy == ScreenFontResidencyPolicy::CompletedDialoguePageRetained {
+                (0, None, None)
             } else {
                 (retained_route, None, None)
             };
@@ -912,13 +975,12 @@ fn screen_open_reapplies_and_retains_the_page_until_close() {
         memory,
         &[&activation, &publisher.routine, &open],
         open.address,
-        0x55,
+        0,
         0xA4,
     );
 
     assert_eq!(result.applied_route, Some(pages.unit_command));
     assert_eq!(result.central_writer_value, None);
-    assert_eq!(result.a, 0);
     assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], pages.unit_command);
     assert_eq!(memory[usize::from(RIGHT_FD_SOURCE_SHADOW)], 0);
 }
@@ -949,7 +1011,7 @@ fn empty_page_uses_the_source_writer_without_calling_activation() {
         memory,
         &[&activation, &publisher.routine, &open],
         open.address,
-        0x11,
+        0,
         0xA4,
     );
 

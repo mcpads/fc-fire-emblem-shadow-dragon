@@ -239,15 +239,19 @@ pub(super) fn plan_storage_dialogue_residency(
         .union(&overflow_item_list_record_ids)
         .cloned()
         .collect::<BTreeSet<_>>();
-    // The store list returns to the action menu on B without selecting a new dialogue record.
-    // The completed store prompt therefore remains under the fixed labels and must use the same
-    // label codes as the entry prompt. The withdraw list instead selects record 0x2D, so it needs
-    // item-name residency but not the action-menu label overlay.
+    // Every result dialogue written together with state 0x0C reaches the shared yes-no path.
+    // Choosing yes sets state 0x03 without replacing that dialogue record, so all such records must
+    // retain the facility labels when the action menu is redrawn.
     let facility_action_menu_return_record_ids = transition_record_ids(
         graph,
-        &BTreeSet::from([source_binding.facility_action_menu_return_root_record_index]),
-        "storage facility item-list action-menu return overlay",
+        &source_binding.facility_action_menu_return_root_record_indices,
+        "storage facility result-dialogue action-menu return overlay",
     )?;
+    ensure!(
+        !facility_action_menu_return_record_ids.is_empty()
+            && facility_action_menu_return_record_ids.is_subset(&facility_selected_record_ids),
+        "storage result-dialogue action-menu return escaped its source-selected state machine"
+    );
     let facility_overlay_record_ids = facility_entry_overlay_record_ids
         .union(&facility_action_menu_return_record_ids)
         .cloned()
@@ -261,8 +265,9 @@ pub(super) fn plan_storage_dialogue_residency(
         .cloned()
         .collect::<BTreeSet<_>>();
     ensure!(
-        overlay_record_ids.len() == 4,
-        "storage entry and item-list cancel overlay population changed"
+        facility_overlay_record_ids.is_subset(&facility_selected_record_ids)
+            && overflow_overlay_record_ids.is_subset(&overflow_selected_record_ids),
+        "storage fixed-label overlay escaped its source-selected state machine"
     );
 
     let item_source_indices = (0..SHOP_ITEM_ENTRY_COUNT).collect::<BTreeSet<_>>();
@@ -313,7 +318,7 @@ pub(super) fn plan_storage_dialogue_residency(
     );
 
     Ok(StorageDialogueResidencyPlan {
-        strategy: "give storage dialogue pages one compatible code assignment for fixed action labels at entry and after the store-list cancellation plus every item name synthesized over source-bound facility records 0x2A/0x2C or overflow record 0x44; retain the canonical dialogue item encoding instead of replacing a completed dialogue page with the generic catalog page",
+        strategy: "derive every facility result dialogue that can return through the shared yes-no path to the action menu, then give those dialogue pages and the entry page one compatible assignment for fixed action labels; retain canonical item-name codes over source-bound facility records 0x2A/0x2C and overflow record 0x44",
         dialogue_table_id: DIALOGUE_TABLE_ID,
         dialogue_composite_states: STORAGE_DIALOGUE_OVERLAY_COMPOSITE_STATES,
         resident_fixed_label_indices: STORAGE_DIALOGUE_LABEL_INDICES,

@@ -66,8 +66,12 @@ const FACILITY_EXIT: [u8; 27] = [
 ];
 const FACILITY_EXIT_RECORDS: [u8; 6] = [0x06, 0x06, 0x0D, 0x06, 0x06, 0x4D];
 const FACILITY_EXIT_STATES: [u8; 6] = [0x00, 0x08, 0x08, 0x00, 0x10, 0x08];
+const FACILITY_ACTION_MENU_ENTRY_STATE: u8 = 0x03;
 const FACILITY_ITEM_LIST_COMPOSITION_STATE: u8 = 0x06;
 const FACILITY_ITEM_LIST_SETTLED_STATE: u8 = 0x07;
+const FACILITY_RESULT_DIALOGUE_STATE: u8 = 0x0C;
+const FACILITY_CHOICE_COMPOSITION_STATE: u8 = 0x0E;
+const FACILITY_CHOICE_INPUT_STATE: u8 = 0x0F;
 /// Both branches of the storage action menu feed the same item-list composer.
 /// The store branch publishes record 0x2A, while the withdraw branch publishes
 /// record 0x2C before entering the shared composition state.
@@ -87,6 +91,33 @@ const FACILITY_CHOICE_COMPOSER_BYTES: [u8; 12] = [
     0xDB,
     0x05,
     0x60,
+];
+const FACILITY_CHOICE_INPUT: u16 = 0xA07D;
+const FACILITY_CHOICE_INPUT_BYTES: [u8; 24] = [
+    0x20,
+    0x5A,
+    0x9C,
+    0x20,
+    0x5C,
+    0xE6,
+    0xAD,
+    0xEB,
+    0x05,
+    0xC9,
+    0x01,
+    0xD0,
+    0x08,
+    0xA9,
+    FACILITY_ACTION_MENU_ENTRY_STATE,
+    0x8D,
+    0xDB,
+    0x05,
+    0x4C,
+    0x6E,
+    0xE6,
+    0x4C,
+    0x95,
+    0xA0,
 ];
 const FACILITY_ITEM_LIST_COMPOSITE_STATE: u8 = 0x07;
 const FACILITY_ITEM_LIST_COMPOSER: u16 = 0x9EAC;
@@ -175,7 +206,7 @@ pub(super) struct StorageSourceBinding {
     pub(super) facility_overlay_root_record_index: usize,
     pub(super) overflow_overlay_root_record_index: usize,
     pub(super) facility_item_list_root_record_indices: BTreeSet<usize>,
-    pub(super) facility_action_menu_return_root_record_index: usize,
+    pub(super) facility_action_menu_return_root_record_indices: BTreeSet<usize>,
     pub(super) facility_choice_record_index: usize,
     pub(super) overflow_item_list_overlay_root_record_index: usize,
     pub(super) item_list_settled_state: u8,
@@ -266,6 +297,12 @@ pub(super) fn bind_storage_dialogue_sources(source: &Rom) -> Result<StorageSourc
     )?;
     bind_exact_code(
         source,
+        FACILITY_CHOICE_INPUT,
+        &FACILITY_CHOICE_INPUT_BYTES,
+        "storage facility yes-no return to action menu",
+    )?;
+    bind_exact_code(
+        source,
         OVERFLOW_ITEM_LIST_COMPOSER,
         &OVERFLOW_ITEM_LIST_COMPOSER_BYTES,
         "storage overflow dialogue-retaining item-list composer",
@@ -287,14 +324,19 @@ pub(super) fn bind_storage_dialogue_sources(source: &Rom) -> Result<StorageSourc
         "storage item-list state no longer follows both store record 0x2A and withdraw record 0x2C before advancing into state 0x07"
     );
     ensure!(
-        FACILITY_HANDLER_TARGETS[0x0E] == FACILITY_CHOICE_COMPOSER
+        FACILITY_HANDLER_TARGETS[usize::from(FACILITY_ACTION_MENU_ENTRY_STATE)] == 0x9E07
+            && FACILITY_HANDLER_TARGETS[usize::from(FACILITY_RESULT_DIALOGUE_STATE)] == 0x9C02
+            && FACILITY_HANDLER_TARGETS[usize::from(FACILITY_CHOICE_COMPOSITION_STATE)]
+                == FACILITY_CHOICE_COMPOSER
+            && FACILITY_HANDLER_TARGETS[usize::from(FACILITY_CHOICE_INPUT_STATE)]
+                == FACILITY_CHOICE_INPUT
             && FACILITY_IMMEDIATE_RECORD_WRITES
                 .iter()
                 .filter(|(_, record)| *record == FACILITY_CHOICE_DIALOGUE_RECORD)
                 .map(|(address, _)| *address)
                 .collect::<BTreeSet<_>>()
                 == BTreeSet::from([0x9ECC, 0x9FB4]),
-        "storage yes-no choice no longer follows both source selections of dialogue record 0x2D"
+        "storage result dialogue no longer reaches the shared yes-no choice and action-menu return"
     );
     ensure!(
         OVERFLOW_HANDLER_TARGETS[usize::from(FACILITY_ITEM_LIST_COMPOSITION_STATE)]
@@ -316,6 +358,30 @@ pub(super) fn bind_storage_dialogue_sources(source: &Rom) -> Result<StorageSourc
     ensure!(
         facility_immediate == FACILITY_IMMEDIATE_RECORD_WRITES.into_iter().collect(),
         "storage facility immediate dialogue-record writers changed: {facility_immediate:04X?}"
+    );
+    let facility_state_writes = scan_immediate_byte_writes(
+        facility_region,
+        FACILITY_STATE_MACHINE_START,
+        CALLER_STATE_ADDRESS,
+        "storage facility immediate state writer",
+    )?;
+    ensure!(
+        facility_state_writes
+            .values()
+            .all(|state| usize::from(*state) < FACILITY_HANDLER_TARGETS.len()),
+        "storage facility writes a caller state outside its dispatch domain"
+    );
+    let facility_action_menu_return_root_record_indices = records_immediately_entering_state(
+        &facility_immediate,
+        &facility_state_writes,
+        FACILITY_RESULT_DIALOGUE_STATE,
+    )?
+    .into_iter()
+    .map(usize::from)
+    .collect::<BTreeSet<_>>();
+    ensure!(
+        !facility_action_menu_return_root_record_indices.is_empty(),
+        "storage facility has no result dialogue capable of returning to the action menu"
     );
     bind_direct_store_denominator(
         facility_region,
@@ -410,9 +476,7 @@ pub(super) fn bind_storage_dialogue_sources(source: &Rom) -> Result<StorageSourc
             .iter()
             .map(|(_, record)| usize::from(*record))
             .collect(),
-        // Only the store list returns directly to 보관/찾기 without selecting a
-        // new dialogue record. The withdraw list returns through record 0x2D.
-        facility_action_menu_return_root_record_index: 0x2A,
+        facility_action_menu_return_root_record_indices,
         facility_choice_record_index: usize::from(FACILITY_CHOICE_DIALOGUE_RECORD),
         overflow_item_list_overlay_root_record_index: usize::from(
             OVERFLOW_ITEM_LIST_DIALOGUE_RECORD,
@@ -488,6 +552,20 @@ fn scan_immediate_record_writes(
     origin: u16,
     target_address: u16,
 ) -> Result<BTreeMap<u16, u8>> {
+    scan_immediate_byte_writes(
+        region,
+        origin,
+        target_address,
+        "immediate dialogue-record writer",
+    )
+}
+
+fn scan_immediate_byte_writes(
+    region: &[u8],
+    origin: u16,
+    target_address: u16,
+    role: &str,
+) -> Result<BTreeMap<u16, u8>> {
     let [target_low, target_high] = target_address.to_le_bytes();
     let mut writes = BTreeMap::new();
     for (offset, window) in region.windows(5).enumerate() {
@@ -496,14 +574,40 @@ fn scan_immediate_record_writes(
         }
         let address = origin
             .checked_add(offset as u16)
-            .context("immediate dialogue-record writer address overflow")?;
-        decode_rp2a03_sequence(window, address, "immediate dialogue-record writer")?;
+            .with_context(|| format!("{role} address overflow"))?;
+        decode_rp2a03_sequence(window, address, role)?;
         ensure!(
             writes.insert(address, window[1]).is_none(),
-            "duplicate immediate dialogue-record writer at ${address:04X}"
+            "duplicate {role} at ${address:04X}"
         );
     }
     Ok(writes)
+}
+
+/// Returns every dialogue record that is immediately followed by a write of the requested caller
+/// state. The source uses this pair to publish a result dialogue and enter the shared yes-no path;
+/// choosing yes later returns to the action menu without replacing the record.
+fn records_immediately_entering_state(
+    record_writes: &BTreeMap<u16, u8>,
+    state_writes: &BTreeMap<u16, u8>,
+    target_state: u8,
+) -> Result<BTreeSet<u8>> {
+    let mut records = BTreeSet::new();
+    for (state_address, _) in state_writes
+        .iter()
+        .filter(|(_, state)| **state == target_state)
+    {
+        let record_address = state_address
+            .checked_sub(5)
+            .context("immediate state write has no preceding instruction slot")?;
+        let record = record_writes.get(&record_address).with_context(|| {
+            format!(
+                "caller state {target_state:02X} at ${state_address:04X} has no immediately preceding dialogue-record write"
+            )
+        })?;
+        records.insert(*record);
+    }
+    Ok(records)
 }
 
 fn bind_exact_code(source: &Rom, address: u16, expected: &[u8], role: &str) -> Result<()> {
@@ -563,6 +667,29 @@ mod tests {
             "synthetic storage",
         )
         .unwrap();
+    }
+
+    #[test]
+    fn action_menu_return_population_includes_every_result_dialogue_state_entry() {
+        let records = BTreeMap::from([(0x9000, 0x2D), (0x9010, 0x3B), (0x9020, 0x2A)]);
+        let states = BTreeMap::from([(0x9005, 0x0C), (0x9015, 0x0C), (0x9025, 0x06)]);
+
+        assert_eq!(
+            records_immediately_entering_state(&records, &states, 0x0C).unwrap(),
+            BTreeSet::from([0x2D, 0x3B])
+        );
+    }
+
+    #[test]
+    fn action_menu_return_population_rejects_an_unbound_state_entry() {
+        let error = records_immediately_entering_state(
+            &BTreeMap::from([(0x9000, 0x2D)]),
+            &BTreeMap::from([(0x9015, 0x0C)]),
+            0x0C,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("no immediately preceding"));
     }
 
     #[test]

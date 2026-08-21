@@ -1,3 +1,4 @@
+use super::super::transport::REQUEST_STATE;
 use super::*;
 
 /// 원본 `STA $05E8`를 같은 길이의 호출로 바꾼다. 호출 뒤의 `LDA #$01`이 A와
@@ -167,8 +168,10 @@ pub(in crate::full_translation_install::runtime_code) struct CompositeFontPagePu
 
 /// 이번 합성이 바꾸는 페이지 수명을 게시한다. 요약은 route를 직접 바꾸지 않고
 /// source-bound unit/enemy appender가 첫 글자를 쓰기 전에 실제 페이지를 게시하게
-/// 하며, 상태는 요약이 게시한 route를 그대로 유지한다. 저장소 overlay는 완료 대사
-/// selector로 명시적으로 넘긴다.
+/// 하며, 상태는 요약이 게시한 route를 그대로 유지한다. 저장소 overlay는 이전 정적
+/// 화면의 게시값을 해제한다. 완료 대사가 inactive 상태로 공용 선택지에 넘어온 경우에는
+/// 이미 보이는 CHR 매핑을 유지하고, live/suspended 요청이 있는 재진입에서는 직전에
+/// 합성된 map-menu 페이지를 대사 페이지로 되돌리도록 중앙 selector를 다시 호출한다.
 ///
 /// 그 밖의 합성 상태는 **현재 화면의 보조 합성**일 수 있으므로 게시값을 바꾸지 않는다.
 /// 실제 화면 이탈은 별도 close/gameplay-handoff 경계가 소유한다. 합성기 번호 하나를
@@ -201,8 +204,9 @@ pub(in crate::full_translation_install::runtime_code) fn build_composite_font_pa
     instructions.extend([
         Instruction::LdaImmediate(0),
         Instruction::StaAbsolute(CONSUMER_FONT_PAGE),
-        Instruction::JmpAbsolute(CENTRAL_RIGHT_FD_WRITER),
     ]);
+    let cleared_source_page_selection = next_address(origin, &instructions)?;
+    instructions.push(Instruction::JmpAbsolute(CENTRAL_RIGHT_FD_WRITER));
     let ordinary_state_target = next_address(origin, &instructions)?;
     instructions[non_item_list_state] = Instruction::BneAbsolute(ordinary_state_target);
     let mut route_jumps = Vec::with_capacity(COMPOSITE_FONT_RESIDENCY_POLICIES.len());
@@ -230,16 +234,11 @@ pub(in crate::full_translation_install::runtime_code) fn build_composite_font_pa
     // Their source-bound appenders publish the exact catalog page only when they emit the dynamic
     // name; unit status then inherits the unit-summary page. Clearing here would be both redundant
     // and a transient source-page selection.
-    instructions.push(Instruction::CmpImmediate(
-        STORAGE_ACTION_MENU_COMPOSITE_STATE,
-    ));
-    let clear_for_storage_action_jump = instructions.len();
-    instructions.push(Instruction::BeqAbsolute(origin));
-    instructions.push(Instruction::CmpImmediate(
-        STORAGE_OVERFLOW_ACTION_COMPOSITE_STATE,
-    ));
-    let clear_for_storage_overflow_jump = instructions.len();
-    instructions.push(Instruction::BeqAbsolute(origin));
+    // Completed storage-dialogue overlays drop a stale static-screen route. An inactive request
+    // keeps the already visible completed page, while every live request re-enters the central
+    // selector after the stale route has been cleared. The compact classifier below owns that
+    // cross-state handoff together with source-only and default retained states so it cannot drift
+    // into a second state table.
     // States $13 and $14 are adjacent and share the map-menu page.  The following
     // state $15 is the source-bound shop item composer: it must discard the prior
     // unit-command route so the active E7 caller can restore its dialogue page.
@@ -257,19 +256,34 @@ pub(in crate::full_translation_install::runtime_code) fn build_composite_font_pa
         source_page_states == [0x08, 0x10],
         "source-page composite state family changed"
     );
-    // A now holds `state - $13`. Source-only states $08/$10 become $F5/$FD;
-    // clearing bit 3 maps exactly those two values to $F5 across the complete
-    // direct-state domain. This replaces two independent CMP/BEQ pairs and
-    // keeps the publisher inside its already-owned cave.
-    instructions.extend([
-        Instruction::AndImmediate(0xF7),
-        Instruction::CmpImmediate(0xF5),
-    ]);
+    // A now holds `state - $13`. Clearing bit 3 maps source-only states $08/$10 to $F5,
+    // delegated state $1B to zero, and the two completed-storage states $1D/$23 to $02/$10.
+    // After the source and zero-retain exits, mask $ED maps exactly those storage values to zero
+    // across the remaining direct-state domain. The zero can be stored directly, avoiding a
+    // second mapper write and a second hand-maintained state table.
+    instructions.push(Instruction::AndImmediate(0xF7));
+    let retain_zero_state_jump = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(origin));
+    instructions.push(Instruction::CmpImmediate(0xF5));
     let source_page_pair_jump = instructions.len();
     instructions.push(Instruction::BeqAbsolute(origin));
+    instructions.push(Instruction::AndImmediate(0xED));
+    let retain_non_storage_state_jump = instructions.len();
+    instructions.push(Instruction::BneAbsolute(origin));
+    instructions.extend([
+        Instruction::StaAbsolute(CONSUMER_FONT_PAGE),
+        // A is still zero. Comparing it with REQUEST_STATE distinguishes the inactive
+        // carry-over path without destroying the zero that the central writer expects.
+        Instruction::CmpAbsolute(REQUEST_STATE),
+    ]);
+    let reselect_live_storage_dialogue_jump = instructions.len();
+    instructions.push(Instruction::BneAbsolute(origin));
+    let retain_current_page = next_address(origin, &instructions)?;
+    instructions[retain_zero_state_jump] = Instruction::BeqAbsolute(retain_current_page);
+    instructions[retain_non_storage_state_jump] = Instruction::BneAbsolute(retain_current_page);
+    instructions[reselect_live_storage_dialogue_jump] =
+        Instruction::BneAbsolute(cleared_source_page_selection);
     instructions.push(Instruction::Rts);
-    instructions[clear_for_storage_action_jump] = Instruction::BeqAbsolute(source_page_selection);
-    instructions[clear_for_storage_overflow_jump] = Instruction::BeqAbsolute(source_page_selection);
     instructions[shop_dialogue_restore_jump] = Instruction::BeqAbsolute(source_page_selection);
     instructions[source_page_pair_jump] = Instruction::BeqAbsolute(source_page_selection);
     for page in [
@@ -311,22 +325,23 @@ pub(in crate::full_translation_install::runtime_code) fn build_composite_font_pa
     })
 }
 
-/// bank 0B의 복합 UI 열기에서 현재 route를 다시 적용한다. 게시값은 닫기 경계까지
-/// 유지하며, 유효한 route가 없으면 원본 `LDA #0; JSR $C9BE` 의미로 돌아간다.
+/// bank 0B의 복합 UI 열기에서 현재 route를 다시 적용한다. 원본은 A=0으로 이 호출에
+/// 들어오며 후속 `$93E0`이 A를 읽기 전에 `TYA`로 덮는다. 그 결속된 0을 먼저 source
+/// shadow에 저장해 두면 별도의 `LDA #0` 없이도 게시 route를 적용할 수 있다. 게시값은
+/// 닫기 경계까지 유지하며, 유효한 route가 없으면 원본 `LDA #0; JSR $C9BE` 의미로
+/// 돌아간다.
 pub(in crate::full_translation_install::runtime_code) fn build_consumer_font_page_open(
     origin: u16,
     activation: u16,
     source_page_selection: u16,
 ) -> Result<RuntimeRoutine> {
-    let mut instructions = vec![Instruction::LdaAbsolute(CONSUMER_FONT_PAGE)];
+    let mut instructions = vec![
+        Instruction::StaZeroPage(RIGHT_FD_SOURCE_SHADOW),
+        Instruction::LdaAbsolute(CONSUMER_FONT_PAGE),
+    ];
     let no_page = instructions.len();
     instructions.push(Instruction::BeqAbsolute(origin));
-    instructions.extend([
-        Instruction::JsrAbsolute(activation),
-        Instruction::LdaImmediate(0),
-        Instruction::StaZeroPage(RIGHT_FD_SOURCE_SHADOW),
-        Instruction::Rts,
-    ]);
+    instructions.extend([Instruction::JsrAbsolute(activation), Instruction::Rts]);
     instructions[no_page] = Instruction::BeqAbsolute(source_page_selection);
 
     Ok(RuntimeRoutine {

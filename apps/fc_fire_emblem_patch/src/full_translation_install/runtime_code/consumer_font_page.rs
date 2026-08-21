@@ -34,10 +34,7 @@ use crate::{
             ScreenFontResidencyPolicy, UNIT_ITEM_LIST_COMPOSITE_STATE,
             composite_font_residency_policy,
         },
-        storage_residency::{
-            STORAGE_ACTION_MENU_COMPOSITE_STATE, STORAGE_OVERFLOW_ACTION_COMPOSITE_STATE,
-            StorageItemListRuntimeRoute,
-        },
+        storage_residency::StorageItemListRuntimeRoute,
     },
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
@@ -63,9 +60,9 @@ const JMP_ABSOLUTE_OPCODE: u8 = 0x4C;
 const SCREEN_OPEN_RIGHT_FD_CALL: u16 = 0x928A;
 const SCREEN_CLOSE_RIGHT_FD_CALL: u16 = 0x9324;
 const SCREEN_OPEN_SEQUENCE_ADDRESS: u16 = 0x927B;
-const SCREEN_OPEN_SEQUENCE: [u8; 18] = [
+const SCREEN_OPEN_SEQUENCE: [u8; 24] = [
     0xA9, 0x06, 0x85, 0x44, 0x20, 0xFA, 0xC9, 0x20, 0xF5, 0xE6, 0x20, 0x0D, 0xC7, 0xA9, 0x00, 0x20,
-    0xBE, 0xC9,
+    0xBE, 0xC9, 0xAC, 0xCD, 0x05, 0x20, 0xE0, 0x93,
 ];
 const SCREEN_CLOSE_SEQUENCE_ADDRESS: u16 = 0x931C;
 const SCREEN_CLOSE_SEQUENCE: [u8; 14] = [
