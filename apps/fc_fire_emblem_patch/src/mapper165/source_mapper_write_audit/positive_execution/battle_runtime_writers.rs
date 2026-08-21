@@ -13,6 +13,121 @@ use crate::{
 
 const PRG_BANK_BYTE_COUNT: usize = 0x4000;
 const FIXED_PRG_BANK: u8 = 0x0F;
+const GAMEPLAY_MAIN_STATE_TABLE: u16 = 0x8967;
+const BATTLE_REWARD_PUBLICATION_STATE: u8 = 0x17;
+const BATTLE_REWARD_CONSUMER_STATE: u8 = 0x18;
+const BATTLE_REWARD_PUBLICATION_HANDLER: u16 = 0x9316;
+const BATTLE_REWARD_CONSUMER_HANDLER: u16 = 0xB10A;
+const BATTLE_REWARD_PUBLICATION_END: u16 = 0x9390;
+const BATTLE_REWARD_PUBLICATION_SHA1: &str = "5a6b342481eab76a3773ef97fd520bbddad40c05";
+
+#[derive(Clone, Copy)]
+struct ExpectedInstruction {
+    address: u16,
+    mnemonic: Mnemonic,
+    mode: AddressingMode,
+    operand: Operand,
+}
+
+impl ExpectedInstruction {
+    const fn immediate(address: u16, mnemonic: Mnemonic, value: u8) -> Self {
+        Self::new(
+            address,
+            mnemonic,
+            AddressingMode::Immediate,
+            Operand::Byte(value),
+        )
+    }
+
+    const fn zero_page(address: u16, mnemonic: Mnemonic, target: u8) -> Self {
+        Self::new(
+            address,
+            mnemonic,
+            AddressingMode::ZeroPage,
+            Operand::Byte(target),
+        )
+    }
+
+    const fn absolute(address: u16, mnemonic: Mnemonic, target: u16) -> Self {
+        Self::new(
+            address,
+            mnemonic,
+            AddressingMode::Absolute,
+            Operand::Word(target),
+        )
+    }
+
+    const fn absolute_x(address: u16, mnemonic: Mnemonic, target: u16) -> Self {
+        Self::new(
+            address,
+            mnemonic,
+            AddressingMode::AbsoluteX,
+            Operand::Word(target),
+        )
+    }
+
+    const fn relative(address: u16, mnemonic: Mnemonic, displacement: i8) -> Self {
+        Self::new(
+            address,
+            mnemonic,
+            AddressingMode::Relative,
+            Operand::Relative(displacement),
+        )
+    }
+
+    const fn indirect_indexed_y(address: u16, mnemonic: Mnemonic, pointer: u8) -> Self {
+        Self::new(
+            address,
+            mnemonic,
+            AddressingMode::ZeroPageIndirectIndexedY,
+            Operand::Byte(pointer),
+        )
+    }
+
+    const fn new(address: u16, mnemonic: Mnemonic, mode: AddressingMode, operand: Operand) -> Self {
+        Self {
+            address,
+            mnemonic,
+            mode,
+            operand,
+        }
+    }
+}
+
+const BATTLE_REWARD_HANDOFF_INSTRUCTIONS: &[ExpectedInstruction] = &[
+    ExpectedInstruction::immediate(0xAD7F, Mnemonic::Ldy, 0x14),
+    ExpectedInstruction::indirect_indexed_y(0xAD81, Mnemonic::Lda, 0x00),
+    ExpectedInstruction::absolute(0xAD83, Mnemonic::Sta, 0x0328),
+    ExpectedInstruction::absolute(0x935E, Mnemonic::Lda, 0x0328),
+    ExpectedInstruction::relative(0x9361, Mnemonic::Beq, 0x14),
+    ExpectedInstruction::absolute(0x9363, Mnemonic::Sta, 0x77B0),
+    ExpectedInstruction::immediate(0x9377, Mnemonic::Lda, 0x00),
+    ExpectedInstruction::absolute(0x9379, Mnemonic::Sta, 0x77B0),
+    ExpectedInstruction::zero_page(0x937C, Mnemonic::Inc, 0x84),
+    ExpectedInstruction::zero_page(0x938D, Mnemonic::Inc, 0x84),
+    ExpectedInstruction::absolute(0xB10A, Mnemonic::Jsr, 0xE65C),
+    ExpectedInstruction::absolute(0xB10D, Mnemonic::Lda, 0x05DB),
+    ExpectedInstruction::absolute(0xB110, Mnemonic::Jsr, 0xC34C),
+    ExpectedInstruction::absolute(0xB125, Mnemonic::Jsr, 0xB29F),
+    ExpectedInstruction::absolute(0xB128, Mnemonic::Sty, 0x77B1),
+    ExpectedInstruction::relative(0xB12B, Mnemonic::Bcc, 0x27),
+    ExpectedInstruction::absolute(0xB132, Mnemonic::Lda, 0x77B0),
+    ExpectedInstruction::immediate(0xB140, Mnemonic::Lda, 0x40),
+    ExpectedInstruction::absolute(0xB142, Mnemonic::Sta, 0x77F1),
+    ExpectedInstruction::absolute(0xB14F, Mnemonic::Inc, 0x05DB),
+    ExpectedInstruction::absolute(0xB15C, Mnemonic::Ldy, 0x77B1),
+    ExpectedInstruction::absolute(0xB15F, Mnemonic::Lda, 0x77B0),
+    ExpectedInstruction::indirect_indexed_y(0xB162, Mnemonic::Sta, 0x00),
+    ExpectedInstruction::absolute_x(0xB166, Mnemonic::Lda, 0xD87F),
+    ExpectedInstruction::indirect_indexed_y(0xB16D, Mnemonic::Sta, 0x00),
+    ExpectedInstruction::immediate(0xB29F, Mnemonic::Lda, 0xF4),
+    ExpectedInstruction::immediate(0xB2A3, Mnemonic::Lda, 0x76),
+    ExpectedInstruction::immediate(0xB2AC, Mnemonic::Lda, 0x15),
+    ExpectedInstruction::immediate(0xB2B0, Mnemonic::Lda, 0x77),
+    ExpectedInstruction::immediate(0xB2B4, Mnemonic::Ldy, 0x13),
+    ExpectedInstruction::immediate(0xB2BD, Mnemonic::Cpy, 0x17),
+    ExpectedInstruction::relative(0xB2BF, Mnemonic::Bcc, -9),
+];
 
 #[derive(Clone, Copy)]
 struct TypedRegion {
@@ -205,6 +320,7 @@ pub(super) fn bind_battle_runtime_write_destinations(
 ) -> Result<BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>> {
     source.verify_supported_japanese()?;
     bind_source_regions(source)?;
+    bind_battle_reward_handoff(source)?;
     let expected_sites = all_writer_sites();
     for &(bank, address, pointer) in &expected_sites {
         ensure_indirect_store(source, bank, address, pointer)?;
@@ -253,6 +369,55 @@ pub(super) fn bind_battle_runtime_write_destinations(
         "battle runtime destination owner omitted or invented an indirect writer"
     );
     Ok(destinations)
+}
+
+fn bind_battle_reward_handoff(source: &Rom) -> Result<()> {
+    let publication = source_bytes(
+        source,
+        0x06,
+        BATTLE_REWARD_PUBLICATION_HANDLER,
+        BATTLE_REWARD_PUBLICATION_END - BATTLE_REWARD_PUBLICATION_HANDLER,
+    )?;
+    ensure!(
+        sha1_hex(publication) == BATTLE_REWARD_PUBLICATION_SHA1,
+        "battle reward publication handler changed"
+    );
+    decode_rp2a03_sequence(
+        publication,
+        BATTLE_REWARD_PUBLICATION_HANDLER,
+        "publish a battle reward to the overflow consumer",
+    )?;
+
+    ensure!(
+        gameplay_main_state_target(source, BATTLE_REWARD_PUBLICATION_STATE)?
+            == BATTLE_REWARD_PUBLICATION_HANDLER,
+        "battle reward publication state no longer selects its source-bound handler"
+    );
+    ensure!(
+        gameplay_main_state_target(source, BATTLE_REWARD_CONSUMER_STATE)?
+            == BATTLE_REWARD_CONSUMER_HANDLER,
+        "battle reward consumer state no longer selects the overflow entry"
+    );
+
+    for expected in BATTLE_REWARD_HANDOFF_INSTRUCTIONS {
+        ensure_instruction(
+            source,
+            0x06,
+            expected.address,
+            expected.mnemonic,
+            expected.mode,
+            expected.operand,
+        )?;
+    }
+    Ok(())
+}
+
+fn gameplay_main_state_target(source: &Rom, state: u8) -> Result<u16> {
+    let address = GAMEPLAY_MAIN_STATE_TABLE
+        .checked_add(u16::from(state) * 2)
+        .context("battle reward main-state table address overflow")?;
+    let bytes = source_bytes(source, 0x06, address, 2)?;
+    Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
 }
 
 fn bind_source_regions(source: &Rom) -> Result<()> {
