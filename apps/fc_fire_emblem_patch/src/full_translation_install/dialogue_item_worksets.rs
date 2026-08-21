@@ -17,6 +17,7 @@ pub(super) struct DialogueItemWorksetInputs<'a> {
     pub(super) fixed: &'a FixedTextPlan,
     pub(super) dialogue_worksets: &'a [GlyphWorkset],
     pub(super) canonical_item_codes: &'a BTreeMap<char, u8>,
+    pub(super) item_name_appender_display_codes: &'a BTreeSet<u8>,
     pub(super) item_source_indices: &'a BTreeSet<usize>,
     pub(super) target_record_ids: &'a BTreeSet<String>,
 }
@@ -67,12 +68,21 @@ pub(super) fn augment_dialogue_item_worksets(
 
     let (item_glyphs, preserved_item_codes) =
         collect_item_name_glyphs(inputs.role, inputs.fixed, inputs.item_source_indices)?;
+    let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
     ensure!(
         !item_glyphs.is_empty()
             && item_glyphs
                 .iter()
                 .all(|glyph| inputs.canonical_item_codes.contains_key(glyph)),
         "{} item glyphs are not a subset of the canonical item encoding",
+        inputs.role
+    );
+    ensure!(
+        !inputs.item_name_appender_display_codes.is_empty()
+            && inputs
+                .item_name_appender_display_codes
+                .is_subset(&active_codes),
+        "{} item-name appender display codes escaped the active font domain",
         inputs.role
     );
 
@@ -105,6 +115,9 @@ pub(super) fn augment_dialogue_item_worksets(
         workset
             .preserved_active_codes
             .extend(preserved_item_codes.iter().copied());
+        workset
+            .preserved_active_codes
+            .extend(inputs.item_name_appender_display_codes.iter().copied());
         for glyph in &item_glyphs {
             let code = inputs.canonical_item_codes[glyph];
             let conflicting_glyph =
@@ -221,6 +234,7 @@ mod tests {
             fixed: &fixed,
             dialogue_worksets: &original,
             canonical_item_codes: &BTreeMap::from([('검', 0xA1), ('창', 0xA2)]),
+            item_name_appender_display_codes: &BTreeSet::from([0xAD]),
             item_source_indices: &BTreeSet::from([0, 1]),
             target_record_ids: &BTreeSet::from(["target:000".to_owned()]),
         })
@@ -236,6 +250,11 @@ mod tests {
         assert_eq!(
             augmented.augmented_worksets[0].fixed_glyph_codes,
             BTreeMap::from([('검', 0xA1), ('창', 0xA2)])
+        );
+        assert!(
+            augmented.augmented_worksets[0]
+                .preserved_active_codes
+                .contains(&0xAD)
         );
         assert_eq!(
             augmented.augmented_worksets[1].target_glyphs,
@@ -275,6 +294,7 @@ mod tests {
             fixed: &fixed,
             dialogue_worksets: &[preserved],
             canonical_item_codes: &canonical,
+            item_name_appender_display_codes: &BTreeSet::from([0xAD]),
             item_source_indices: &indices,
             target_record_ids: &targets,
         })
@@ -290,11 +310,41 @@ mod tests {
             fixed: &fixed,
             dialogue_worksets: &[assigned],
             canonical_item_codes: &canonical,
+            item_name_appender_display_codes: &BTreeSet::from([0xAD]),
             item_source_indices: &indices,
             target_record_ids: &targets,
         })
         .err()
         .expect("fixed-code collision unexpectedly passed");
         assert!(error.to_string().contains("already belongs to"));
+    }
+
+    #[test]
+    fn canonical_item_code_cannot_claim_the_appender_slash_tile() {
+        let display = MainDialogueDisplayPlan {
+            canonical_record_count: 1,
+            page_worksets: vec![page("target:000")],
+            record_ids: vec!["target:000".to_owned()],
+        };
+        let fixed = FixedTextPlan {
+            workspace_sha1: "fixed".to_owned(),
+            review_complete: true,
+            entries: vec![fixed_entry(0, '요')],
+        };
+
+        let error = augment_dialogue_item_worksets(DialogueItemWorksetInputs {
+            role: "test item lifetime",
+            display: &display,
+            fixed: &fixed,
+            dialogue_worksets: &[workset()],
+            canonical_item_codes: &BTreeMap::from([('요', 0xAD)]),
+            item_name_appender_display_codes: &BTreeSet::from([0xAD]),
+            item_source_indices: &BTreeSet::from([0]),
+            target_record_ids: &BTreeSet::from(["target:000".to_owned()]),
+        })
+        .err()
+        .expect("appender slash collision unexpectedly passed");
+
+        assert!(error.to_string().contains("preserved dialogue-page code"));
     }
 }

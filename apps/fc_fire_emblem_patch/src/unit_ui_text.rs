@@ -236,9 +236,37 @@ pub(crate) fn preserved_unit_ui_display_codes(source: &[u8]) -> Result<BTreeSet<
         .context("supported source does not contain the complete PRG region")?;
     validate_code_regions(prg)?;
 
-    let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
-    let preserved = CODE_REGION_SPECS
+    let preserved = directly_written_active_display_codes(CODE_REGION_SPECS.iter());
+    ensure!(
+        preserved == BTreeSet::from([0xAD, 0xAF, 0xBF]),
+        "unit-UI direct display-code contract changed"
+    );
+    Ok(preserved)
+}
+
+/// 아이템명 뒤에 원천 appender가 직접 쓰는 화면 코드를 반환한다. 이 코드는 번역
+/// 문자열 자료에 나타나지 않으므로, 아이템명을 대사 글꼴 페이지에서 합성하는 모든
+/// 수명이 별도로 보존해야 한다.
+pub(crate) fn item_name_appender_display_codes(source: &[u8]) -> Result<BTreeSet<u8>> {
+    let all_direct_codes = preserved_unit_ui_display_codes(source)?;
+    let appender = CODE_REGION_SPECS
         .iter()
+        .find(|spec| spec.role == "append_item_name_and_uses")
+        .context("unit-UI source contract lost the item-name appender")?;
+    let codes = directly_written_active_display_codes(std::iter::once(appender));
+    ensure!(
+        codes == BTreeSet::from([0xAD]) && codes.is_subset(&all_direct_codes),
+        "item-name appender direct display-code contract changed"
+    );
+    Ok(codes)
+}
+
+fn directly_written_active_display_codes<'a>(
+    regions: impl IntoIterator<Item = &'a CodeRegionSpec>,
+) -> BTreeSet<u8> {
+    let active_codes = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
+    regions
+        .into_iter()
         .flat_map(|spec| spec.expected.windows(5))
         .filter_map(|window| {
             let writes_composite_buffer = window[2..] == [0x9D, 0x51, 0x04];
@@ -247,12 +275,7 @@ pub(crate) fn preserved_unit_ui_display_codes(source: &[u8]) -> Result<BTreeSet<
                 .then_some(window[1])
         })
         .filter(|code| active_codes.contains(code))
-        .collect::<BTreeSet<_>>();
-    ensure!(
-        preserved == BTreeSet::from([0xAD, 0xAF, 0xBF]),
-        "unit-UI direct display-code contract changed"
-    );
-    Ok(preserved)
+        .collect()
 }
 
 pub(crate) fn preserved_codes_for_unit_name_projection(source: &[u8]) -> Result<BTreeSet<u8>> {

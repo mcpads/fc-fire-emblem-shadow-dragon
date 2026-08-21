@@ -20,6 +20,55 @@ const SHOP_STOCK_GROUP_COUNT: usize = 20;
 const SHOP_STOCK_DATA_ADDRESS: u16 = 0xA6EA;
 const SHOP_STOCK_DATA_END: u16 = 0xA766;
 const SHOP_STOCK_TERMINATOR: u8 = 0xF0;
+const SHOP_DIALOGUE_TABLE_BANK: u8 = 0x06;
+
+#[derive(Clone, Copy)]
+struct ShopDialogueEntryTableSpec {
+    role: &'static str,
+    address: u16,
+}
+
+/// Every facility-indexed dialogue table read by the item-selling shop state machine. The table
+/// cells are source data: record identities are derived through the three selling facility
+/// selectors rather than copied from the previously observed weapon-shop-only bundle.
+const SHOP_DIALOGUE_ENTRY_TABLES: [ShopDialogueEntryTableSpec; 9] = [
+    ShopDialogueEntryTableSpec {
+        role: "initial facility dialogue",
+        address: 0x99EB,
+    },
+    ShopDialogueEntryTableSpec {
+        role: "purchasable-item question",
+        address: 0x9A99,
+    },
+    ShopDialogueEntryTableSpec {
+        role: "item-restriction warning",
+        address: 0x9A9F,
+    },
+    ShopDialogueEntryTableSpec {
+        role: "insufficient-funds branch",
+        address: 0x9AA5,
+    },
+    ShopDialogueEntryTableSpec {
+        role: "inventory-full branch",
+        address: 0x9AAB,
+    },
+    ShopDialogueEntryTableSpec {
+        role: "post-purchase follow-up",
+        address: 0x9BF0,
+    },
+    ShopDialogueEntryTableSpec {
+        role: "declined-purchase follow-up",
+        address: 0x9BF6,
+    },
+    ShopDialogueEntryTableSpec {
+        role: "accepted-purchase result",
+        address: 0x9BFC,
+    },
+    ShopDialogueEntryTableSpec {
+        role: "shop exit",
+        address: 0xA0B0,
+    },
+];
 
 #[derive(Clone, Debug)]
 pub(crate) struct ShopItemCompositionSource {
@@ -33,6 +82,7 @@ pub(crate) struct ShopItemCompositionSource {
     non_selling_facilities: [u8; 2],
     stock_group_ids: BTreeSet<u8>,
     item_source_indices: BTreeSet<usize>,
+    dialogue_lifetime_record_indices: BTreeSet<usize>,
 }
 
 impl ShopItemCompositionSource {
@@ -74,6 +124,10 @@ impl ShopItemCompositionSource {
 
     pub(crate) fn item_source_indices(&self) -> &BTreeSet<usize> {
         &self.item_source_indices
+    }
+
+    pub(crate) fn dialogue_lifetime_record_indices(&self) -> &BTreeSet<usize> {
+        &self.dialogue_lifetime_record_indices
     }
 }
 
@@ -124,6 +178,8 @@ pub(crate) fn bind_shop_item_composition_source(rom: &Rom) -> Result<ShopItemCom
     );
     let (stock_group_ids, item_source_indices) =
         bind_shop_stock_sources(rom, &map_facilities, &selling_facilities)?;
+    let dialogue_lifetime_record_indices =
+        bind_shop_dialogue_lifetime_records(rom, &selling_facilities)?;
     ensure!(
         SHOP_STATE_HANDLERS.get(usize::from(SHOP_ITEM_COMPOSITION_STATE))
             == Some(&SHOP_ITEM_COMPOSITION_HANDLER),
@@ -156,7 +212,131 @@ pub(crate) fn bind_shop_item_composition_source(rom: &Rom) -> Result<ShopItemCom
         non_selling_facilities,
         stock_group_ids,
         item_source_indices,
+        dialogue_lifetime_record_indices,
     })
+}
+
+fn bind_shop_dialogue_lifetime_records(
+    rom: &Rom,
+    selling_facilities: &[u8; 3],
+) -> Result<BTreeSet<usize>> {
+    let dialogue_table = inspect_shop_dialogue_table(rom.data())?;
+    let source_bank = switchable_slice(
+        rom,
+        SHOP_DIALOGUE_TABLE_BANK,
+        SWITCHABLE_CPU_START,
+        PRG_BANK_SIZE,
+    )?;
+    let maximum_facility = selling_facilities
+        .iter()
+        .copied()
+        .max()
+        .context("selling facility population is empty")?;
+    let mut indexed_tables = Vec::with_capacity(SHOP_DIALOGUE_ENTRY_TABLES.len());
+
+    for spec in SHOP_DIALOGUE_ENTRY_TABLES {
+        let [low, high] = spec.address.to_le_bytes();
+        let indexed_load = [0xBD, low, high];
+        let references = source_bank
+            .windows(indexed_load.len())
+            .enumerate()
+            .filter_map(|(offset, bytes)| (bytes == indexed_load).then_some(offset))
+            .collect::<Vec<_>>();
+        ensure!(
+            references.len() == 1,
+            "shop {} table has {} indexed source consumers",
+            spec.role,
+            references.len()
+        );
+        let consumer_address = SWITCHABLE_CPU_START
+            .checked_add(
+                u16::try_from(references[0])
+                    .context("shop dialogue consumer offset exceeds u16")?,
+            )
+            .context("shop dialogue consumer address overflow")?;
+        decode_rp2a03_sequence(
+            &indexed_load,
+            consumer_address,
+            &format!("shop {} table indexed consumer", spec.role),
+        )?;
+
+        let cells = switchable_slice(
+            rom,
+            SHOP_DIALOGUE_TABLE_BANK,
+            spec.address,
+            usize::from(maximum_facility) + 1,
+        )?;
+        indexed_tables.push((spec.role, cells));
+    }
+    collect_shop_dialogue_lifetime_record_indices(
+        selling_facilities,
+        dialogue_table.pointer_count,
+        &indexed_tables,
+    )
+}
+
+fn collect_shop_dialogue_lifetime_record_indices(
+    selling_facilities: &[u8],
+    dialogue_record_count: usize,
+    indexed_tables: &[(&str, &[u8])],
+) -> Result<BTreeSet<usize>> {
+    ensure!(
+        !selling_facilities.is_empty() && !indexed_tables.is_empty(),
+        "selling-facility dialogue census has no facility or source table"
+    );
+    let mut record_indices = BTreeSet::new();
+    for (role, cells) in indexed_tables {
+        for facility in selling_facilities {
+            let record_index =
+                usize::from(*cells.get(usize::from(*facility)).with_context(|| {
+                    format!("shop {role} table has no facility {facility:02X}")
+                })?);
+            ensure!(
+                record_index < dialogue_record_count,
+                "shop {role} facility {facility:02X} selects dialogue record {record_index}, outside the {dialogue_record_count}-record table"
+            );
+            ensure!(
+                record_indices.insert(record_index),
+                "shop {role} facility {facility:02X} aliases an earlier selling-facility dialogue record {record_index}"
+            );
+        }
+    }
+    ensure!(
+        record_indices.len() == indexed_tables.len() * selling_facilities.len(),
+        "selling-facility dialogue census lost a source table or facility"
+    );
+    Ok(record_indices)
+}
+
+#[cfg(test)]
+mod dialogue_lifetime_tests {
+    use super::*;
+
+    #[test]
+    fn census_includes_every_selling_facility_from_every_source_table() {
+        let initial = [0, 10, 20, 0, 0, 30];
+        let follow_up = [0, 11, 21, 0, 0, 31];
+
+        let records = collect_shop_dialogue_lifetime_record_indices(
+            &[1, 2, 5],
+            64,
+            &[("initial", &initial), ("follow-up", &follow_up)],
+        )
+        .unwrap();
+
+        assert_eq!(records, BTreeSet::from([10, 11, 20, 21, 30, 31]));
+    }
+
+    #[test]
+    fn census_rejects_a_facility_record_alias() {
+        let table = [0, 10, 10];
+
+        let error =
+            collect_shop_dialogue_lifetime_record_indices(&[1, 2], 64, &[("aliased", &table)])
+                .unwrap_err();
+
+        assert!(error.to_string().contains("aliases an earlier"));
+    }
 }
 
 fn bind_shop_stock_sources(

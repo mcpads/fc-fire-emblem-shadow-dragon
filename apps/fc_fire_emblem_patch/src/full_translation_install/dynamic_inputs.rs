@@ -85,6 +85,7 @@ pub(super) fn plan_dynamic_dialogue_inputs(
     fixed_text: &[FixedTextPlannedEntry],
     unit_names: &[FixedTextPlannedEntry],
     location_names: &[FixedTextPlannedEntry],
+    item_name_appender_display_codes: &BTreeSet<u8>,
     transition_lifetimes: &[TransitionLifetimeWorksets],
 ) -> Result<DynamicDialogueInputPlan> {
     let item_name_domain = domain_glyphs(fixed_text, "item-names")?;
@@ -107,6 +108,11 @@ pub(super) fn plan_dynamic_dialogue_inputs(
     ensure!(
         translated_dynamic_glyphs.len() <= active_codes.len(),
         "dynamic dialogue canonical domain exceeds one physical codebook"
+    );
+    ensure!(
+        !item_name_appender_display_codes.is_empty()
+            && item_name_appender_display_codes.is_subset(&active_codes),
+        "item-name appender display codes escaped the active font domain"
     );
 
     let mut augmented_worksets = Vec::with_capacity(dialogue.page_worksets.len());
@@ -233,6 +239,8 @@ pub(super) fn plan_dynamic_dialogue_inputs(
     // 고정 조건으로 받으므로 생산자가 쓴 canonical 바이트가 곧 소비 바이트다.
     let forbidden_codes_by_glyph = forbidden_dynamic_codes_across_transition_lifetimes(
         &translated_dynamic_glyphs,
+        &domains[&DynamicStringDomain::ItemName].glyphs,
+        item_name_appender_display_codes,
         &augmented_worksets,
         &dynamic_glyphs_by_workset,
         transition_lifetimes,
@@ -297,6 +305,8 @@ pub(super) fn plan_dynamic_dialogue_inputs(
 
 fn forbidden_dynamic_codes_across_transition_lifetimes(
     translated_dynamic_glyphs: &BTreeSet<char>,
+    item_name_glyphs: &BTreeSet<char>,
+    item_name_appender_display_codes: &BTreeSet<u8>,
     worksets: &[GlyphWorkset],
     dynamic_glyphs_by_workset: &[BTreeSet<char>],
     transition_lifetimes: &[TransitionLifetimeWorksets],
@@ -345,6 +355,16 @@ fn forbidden_dynamic_codes_across_transition_lifetimes(
         covered_worksets.len() == worksets.len(),
         "dynamic dialogue transition lifetimes do not cover every visible page"
     );
+    ensure!(
+        item_name_glyphs.is_subset(translated_dynamic_glyphs),
+        "item-name glyphs escaped the canonical dynamic domain"
+    );
+    for glyph in item_name_glyphs {
+        forbidden_codes_by_glyph
+            .get_mut(glyph)
+            .expect("item-name glyph was validated against the dynamic domain")
+            .extend(item_name_appender_display_codes.iter().copied());
+    }
     Ok(forbidden_codes_by_glyph)
 }
 
@@ -743,6 +763,7 @@ mod tests {
                 fixed_entry("unit-names", 1, "치키"),
             ],
             &[fixed_entry("location-names", 0, "아리티아")],
+            &BTreeSet::from([0xAD]),
             &[TransitionLifetimeWorksets {
                 record_indices: vec![0],
                 workset_indices: vec![0],
@@ -791,6 +812,7 @@ mod tests {
             &[expanded_name, fixed_entry("item-names", 1, "나")],
             &[fixed_entry("unit-names", 0, "마르스")],
             &[fixed_entry("location-names", 0, "아리티아")],
+            &BTreeSet::from([0xAD]),
             &[TransitionLifetimeWorksets {
                 record_indices: vec![0],
                 workset_indices: vec![0],
@@ -861,6 +883,8 @@ mod tests {
         ];
         let forbidden = forbidden_dynamic_codes_across_transition_lifetimes(
             &dynamic_glyphs,
+            &BTreeSet::new(),
+            &BTreeSet::from([0xAD]),
             &worksets,
             &[dynamic_glyphs.clone(), BTreeSet::new()],
             &[TransitionLifetimeWorksets {
@@ -878,6 +902,39 @@ mod tests {
             )
             .unwrap()[&'훈'],
             0x03
+        );
+    }
+
+    #[test]
+    fn item_name_canonical_code_avoids_the_appender_slash_code() {
+        let dynamic_glyphs = BTreeSet::from(['요', '훈']);
+        let worksets = vec![GlyphWorkset {
+            target_glyphs: dynamic_glyphs.clone(),
+            preserved_active_codes: BTreeSet::new(),
+            fixed_glyph_codes: BTreeMap::new(),
+        }];
+        let forbidden = forbidden_dynamic_codes_across_transition_lifetimes(
+            &dynamic_glyphs,
+            &BTreeSet::from(['요']),
+            &BTreeSet::from([0xAD]),
+            &worksets,
+            &[dynamic_glyphs.clone()],
+            &[TransitionLifetimeWorksets {
+                record_indices: vec![0],
+                workset_indices: vec![0],
+            }],
+        )
+        .unwrap();
+
+        assert!(forbidden[&'요'].contains(&0xAD));
+        assert!(!forbidden[&'훈'].contains(&0xAD));
+        assert_ne!(
+            assign_canonical_dynamic_codes(
+                &forbidden,
+                &active_hangul_codes().into_iter().collect()
+            )
+            .unwrap()[&'요'],
+            0xAD
         );
     }
 }

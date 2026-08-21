@@ -68,7 +68,10 @@ const FACILITY_EXIT_RECORDS: [u8; 6] = [0x06, 0x06, 0x0D, 0x06, 0x06, 0x4D];
 const FACILITY_EXIT_STATES: [u8; 6] = [0x00, 0x08, 0x08, 0x00, 0x10, 0x08];
 const FACILITY_ITEM_LIST_COMPOSITION_STATE: u8 = 0x06;
 const FACILITY_ITEM_LIST_SETTLED_STATE: u8 = 0x07;
-const FACILITY_ITEM_LIST_DIALOGUE_RECORD: u8 = 0x2A;
+/// Both branches of the storage action menu feed the same item-list composer.
+/// The store branch publishes record 0x2A, while the withdraw branch publishes
+/// record 0x2C before entering the shared composition state.
+const FACILITY_ITEM_LIST_DIALOGUE_RECORD_WRITES: [(u16, u8); 2] = [(0x9E75, 0x2A), (0x9E90, 0x2C)];
 const FACILITY_CHOICE_DIALOGUE_RECORD: u8 = 0x2D;
 const FACILITY_CHOICE_COMPOSER: u16 = 0x9B7A;
 const FACILITY_CHOICE_COMPOSER_BYTES: [u8; 12] = [
@@ -171,7 +174,8 @@ pub(super) struct StorageSourceBinding {
     pub(super) overflow_root_record_indices: BTreeSet<usize>,
     pub(super) facility_overlay_root_record_index: usize,
     pub(super) overflow_overlay_root_record_index: usize,
-    pub(super) facility_item_list_overlay_root_record_index: usize,
+    pub(super) facility_item_list_root_record_indices: BTreeSet<usize>,
+    pub(super) facility_action_menu_return_root_record_index: usize,
     pub(super) facility_choice_record_index: usize,
     pub(super) overflow_item_list_overlay_root_record_index: usize,
     pub(super) item_list_settled_state: u8,
@@ -275,11 +279,12 @@ pub(super) fn bind_storage_dialogue_sources(source: &Rom) -> Result<StorageSourc
     ensure!(
         FACILITY_HANDLER_TARGETS[usize::from(FACILITY_ITEM_LIST_COMPOSITION_STATE)]
             == FACILITY_ITEM_LIST_COMPOSER
-            && FACILITY_IMMEDIATE_RECORD_WRITES
-                .contains(&(0x9E75, FACILITY_ITEM_LIST_DIALOGUE_RECORD))
+            && FACILITY_ITEM_LIST_DIALOGUE_RECORD_WRITES
+                .iter()
+                .all(|write| FACILITY_IMMEDIATE_RECORD_WRITES.contains(write))
             && FACILITY_ITEM_LIST_SETTLED_STATE
                 == FACILITY_ITEM_LIST_COMPOSITION_STATE.wrapping_add(1),
-        "storage item-list state no longer follows dialogue record 0x2A and advance into state 0x07"
+        "storage item-list state no longer follows both store record 0x2A and withdraw record 0x2C before advancing into state 0x07"
     );
     ensure!(
         FACILITY_HANDLER_TARGETS[0x0E] == FACILITY_CHOICE_COMPOSER
@@ -401,9 +406,13 @@ pub(super) fn bind_storage_dialogue_sources(source: &Rom) -> Result<StorageSourc
             FACILITY_INITIAL_RECORDS[usize::from(STORAGE_FACILITY_INDEX)],
         ),
         overflow_overlay_root_record_index: 0x40,
-        facility_item_list_overlay_root_record_index: usize::from(
-            FACILITY_ITEM_LIST_DIALOGUE_RECORD,
-        ),
+        facility_item_list_root_record_indices: FACILITY_ITEM_LIST_DIALOGUE_RECORD_WRITES
+            .iter()
+            .map(|(_, record)| usize::from(*record))
+            .collect(),
+        // Only the store list returns directly to 보관/찾기 without selecting a
+        // new dialogue record. The withdraw list returns through record 0x2D.
+        facility_action_menu_return_root_record_index: 0x2A,
         facility_choice_record_index: usize::from(FACILITY_CHOICE_DIALOGUE_RECORD),
         overflow_item_list_overlay_root_record_index: usize::from(
             OVERFLOW_ITEM_LIST_DIALOGUE_RECORD,
@@ -554,5 +563,24 @@ mod tests {
             "synthetic storage",
         )
         .unwrap();
+    }
+
+    #[test]
+    fn store_and_withdraw_records_feed_the_shared_item_list_consumer() {
+        let records = FACILITY_ITEM_LIST_DIALOGUE_RECORD_WRITES
+            .iter()
+            .map(|(_, record)| *record)
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(records, BTreeSet::from([0x2A, 0x2C]));
+        assert!(
+            FACILITY_ITEM_LIST_DIALOGUE_RECORD_WRITES
+                .iter()
+                .all(|write| FACILITY_IMMEDIATE_RECORD_WRITES.contains(write))
+        );
+        assert_eq!(
+            FACILITY_HANDLER_TARGETS[usize::from(FACILITY_ITEM_LIST_COMPOSITION_STATE)],
+            FACILITY_ITEM_LIST_COMPOSER
+        );
     }
 }

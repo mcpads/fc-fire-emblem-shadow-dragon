@@ -118,6 +118,13 @@ fn binds_active_display_codes_emitted_directly_by_unit_ui_composers() {
 }
 
 #[test]
+fn item_name_appender_binds_its_slash_display_code() {
+    let preserved = item_name_appender_display_codes(&contract_source_fixture()).unwrap();
+
+    assert_eq!(preserved, BTreeSet::from([0xAD]));
+}
+
+#[test]
 fn rejects_changed_direct_unit_ui_display_code_contracts() {
     for (role, code, store) in [
         ("compose_unit_summary_header", 0xAD, [0x9D, 0x51, 0x04]),

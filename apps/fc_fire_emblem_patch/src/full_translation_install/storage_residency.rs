@@ -83,9 +83,9 @@ pub(super) struct StorageDialogueResidencyPlan {
     facility_overlay_record_ids: Vec<String>,
     overflow_overlay_record_ids: Vec<String>,
     overlay_record_ids: Vec<String>,
-    facility_item_list_overlay_record_ids: Vec<String>,
-    overflow_item_list_overlay_record_ids: Vec<String>,
-    item_list_overlay_record_ids: Vec<String>,
+    facility_item_list_record_ids: Vec<String>,
+    overflow_item_list_record_ids: Vec<String>,
+    item_list_record_ids: Vec<String>,
     item_list_composition_state: u8,
     item_list_settled_state: u8,
     item_list_composite_states: [u8; 2],
@@ -166,6 +166,7 @@ pub(super) fn plan_storage_dialogue_residency(
     fixed_menu_labels: &SemanticTranslationPlan,
     dialogue_worksets: &[GlyphWorkset],
     canonical_item_codes: &BTreeMap<char, u8>,
+    item_name_appender_display_codes: &BTreeSet<u8>,
 ) -> Result<StorageDialogueResidencyPlan> {
     ensure!(
         display.page_worksets.len() == dialogue_worksets.len(),
@@ -210,43 +211,49 @@ pub(super) fn plan_storage_dialogue_residency(
             && overflow_entry_overlay_record_ids.is_subset(&overflow_selected_record_ids),
         "storage overlay dialogue escaped its source-selected state machine"
     );
-    let facility_item_list_overlay_record_ids = transition_record_ids(
+    let facility_item_list_record_ids = transition_record_ids(
         graph,
-        &BTreeSet::from([source_binding.facility_item_list_overlay_root_record_index]),
+        &source_binding.facility_item_list_root_record_indices,
         "storage facility item-list dialogue overlay",
     )?;
     ensure!(
-        !facility_item_list_overlay_record_ids.is_empty()
-            && facility_item_list_overlay_record_ids.is_subset(&facility_selected_record_ids),
+        !facility_item_list_record_ids.is_empty()
+            && facility_item_list_record_ids.is_subset(&facility_selected_record_ids),
         "storage facility item-list dialogue escaped its source-selected state machine"
     );
-    let overflow_item_list_overlay_record_ids = transition_record_ids(
+    let overflow_item_list_record_ids = transition_record_ids(
         graph,
         &BTreeSet::from([source_binding.overflow_item_list_overlay_root_record_index]),
         "storage overflow item-list dialogue overlay",
     )?;
     ensure!(
-        !overflow_item_list_overlay_record_ids.is_empty()
-            && overflow_item_list_overlay_record_ids.is_subset(&overflow_selected_record_ids),
+        !overflow_item_list_record_ids.is_empty()
+            && overflow_item_list_record_ids.is_subset(&overflow_selected_record_ids),
         "storage overflow item-list dialogue escaped its source-selected state machine"
     );
     ensure!(
-        facility_item_list_overlay_record_ids.is_disjoint(&overflow_item_list_overlay_record_ids),
+        facility_item_list_record_ids.is_disjoint(&overflow_item_list_record_ids),
         "storage facility and overflow item-list dialogue populations overlap"
     );
-    let item_list_overlay_record_ids = facility_item_list_overlay_record_ids
-        .union(&overflow_item_list_overlay_record_ids)
+    let item_list_record_ids = facility_item_list_record_ids
+        .union(&overflow_item_list_record_ids)
         .cloned()
         .collect::<BTreeSet<_>>();
-    // Both item lists return to their action menu on B without selecting a new dialogue record.
-    // The completed list prompt therefore remains under the fixed labels and must use the same
-    // label codes as the entry prompt.
+    // The store list returns to the action menu on B without selecting a new dialogue record.
+    // The completed store prompt therefore remains under the fixed labels and must use the same
+    // label codes as the entry prompt. The withdraw list instead selects record 0x2D, so it needs
+    // item-name residency but not the action-menu label overlay.
+    let facility_action_menu_return_record_ids = transition_record_ids(
+        graph,
+        &BTreeSet::from([source_binding.facility_action_menu_return_root_record_index]),
+        "storage facility item-list action-menu return overlay",
+    )?;
     let facility_overlay_record_ids = facility_entry_overlay_record_ids
-        .union(&facility_item_list_overlay_record_ids)
+        .union(&facility_action_menu_return_record_ids)
         .cloned()
         .collect::<BTreeSet<_>>();
     let overflow_overlay_record_ids = overflow_entry_overlay_record_ids
-        .union(&overflow_item_list_overlay_record_ids)
+        .union(&overflow_item_list_record_ids)
         .cloned()
         .collect::<BTreeSet<_>>();
     let overlay_record_ids = facility_overlay_record_ids
@@ -278,6 +285,7 @@ pub(super) fn plan_storage_dialogue_residency(
         &required_glyphs_by_workset,
         canonical_item_codes,
         &item_name_glyphs,
+        item_name_appender_display_codes,
     )?;
     let (label_augmented_worksets, resident_workset_count, _) = augment_storage_worksets(
         display,
@@ -291,8 +299,9 @@ pub(super) fn plan_storage_dialogue_residency(
         fixed,
         dialogue_worksets: &label_augmented_worksets,
         canonical_item_codes,
+        item_name_appender_display_codes,
         item_source_indices: &item_source_indices,
-        target_record_ids: &item_list_overlay_record_ids,
+        target_record_ids: &item_list_record_ids,
     })?;
     let maximum_demand = maximum_workset_demand_components(
         "storage dialogue residency",
@@ -304,7 +313,7 @@ pub(super) fn plan_storage_dialogue_residency(
     );
 
     Ok(StorageDialogueResidencyPlan {
-        strategy: "give storage dialogue pages one compatible code assignment for fixed action labels at entry and after item-list cancellation plus every item name synthesized over facility record 0x2A or overflow record 0x44; retain the canonical dialogue item encoding instead of replacing either completed dialogue page with the generic catalog page",
+        strategy: "give storage dialogue pages one compatible code assignment for fixed action labels at entry and after the store-list cancellation plus every item name synthesized over source-bound facility records 0x2A/0x2C or overflow record 0x44; retain the canonical dialogue item encoding instead of replacing a completed dialogue page with the generic catalog page",
         dialogue_table_id: DIALOGUE_TABLE_ID,
         dialogue_composite_states: STORAGE_DIALOGUE_OVERLAY_COMPOSITE_STATES,
         resident_fixed_label_indices: STORAGE_DIALOGUE_LABEL_INDICES,
@@ -317,13 +326,9 @@ pub(super) fn plan_storage_dialogue_residency(
         facility_overlay_record_ids: facility_overlay_record_ids.into_iter().collect(),
         overflow_overlay_record_ids: overflow_overlay_record_ids.into_iter().collect(),
         overlay_record_ids: overlay_record_ids.into_iter().collect(),
-        facility_item_list_overlay_record_ids: facility_item_list_overlay_record_ids
-            .into_iter()
-            .collect(),
-        overflow_item_list_overlay_record_ids: overflow_item_list_overlay_record_ids
-            .into_iter()
-            .collect(),
-        item_list_overlay_record_ids: item_list_overlay_record_ids.into_iter().collect(),
+        facility_item_list_record_ids: facility_item_list_record_ids.into_iter().collect(),
+        overflow_item_list_record_ids: overflow_item_list_record_ids.into_iter().collect(),
+        item_list_record_ids: item_list_record_ids.into_iter().collect(),
         item_list_composition_state: source_binding.item_list_route.composition_state,
         item_list_settled_state: source_binding.item_list_settled_state,
         item_list_composite_states: source_binding
@@ -483,6 +488,7 @@ fn assign_storage_label_codes(
     required_glyphs_by_workset: &BTreeMap<usize, BTreeSet<char>>,
     canonical_item_codes: &BTreeMap<char, u8>,
     item_name_glyphs: &BTreeSet<char>,
+    item_name_appender_display_codes: &BTreeSet<u8>,
 ) -> Result<BTreeMap<char, u8>> {
     let fixed_glyphs = required_glyphs_by_workset
         .values()
@@ -497,6 +503,7 @@ fn assign_storage_label_codes(
             .context("storage dialogue workset index is outside the workset population")?;
         lifetime_preserved_codes.extend(workset.preserved_active_codes.iter().copied());
     }
+    lifetime_preserved_codes.extend(item_name_appender_display_codes.iter().copied());
 
     let mut forbidden_codes_by_glyph = fixed_glyphs
         .iter()
@@ -727,6 +734,7 @@ mod tests {
             &requirements,
             &BTreeMap::new(),
             &BTreeSet::new(),
+            &BTreeSet::new(),
         )
         .unwrap();
 
@@ -748,6 +756,7 @@ mod tests {
             &[first, second],
             &BTreeMap::from([(0, BTreeSet::from(['보'])), (1, BTreeSet::from(['관']))]),
             &BTreeMap::new(),
+            &BTreeSet::new(),
             &BTreeSet::new(),
         )
         .unwrap();
@@ -872,6 +881,7 @@ mod tests {
             ]),
             &BTreeMap::from([('기', 0xA7)]),
             &BTreeSet::from(['기']),
+            &BTreeSet::from([0xAD]),
         )
         .unwrap();
 
@@ -886,10 +896,12 @@ mod tests {
             &BTreeMap::from([(0, BTreeSet::from(['관'])), (1, BTreeSet::from(['관']))]),
             &BTreeMap::from([('후', 0x01), ('검', 0x02)]),
             &BTreeSet::from(['후', '검']),
+            &BTreeSet::from([0xAD]),
         )
         .unwrap();
 
         assert_ne!(assignment.get(&'관'), Some(&0x01));
         assert_ne!(assignment.get(&'관'), Some(&0x02));
+        assert_ne!(assignment.get(&'관'), Some(&0xAD));
     }
 }

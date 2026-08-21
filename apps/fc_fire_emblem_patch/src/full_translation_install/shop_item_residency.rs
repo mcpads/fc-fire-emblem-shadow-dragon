@@ -6,7 +6,7 @@
 //! 모든 상점 대사 수명에 같은 canonical 아이템 코드를 추가하고, 그 결과를 런타임
 //! 카탈로그·E7 페이지 선택 계약까지 이어 준다.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Result, ensure};
 use serde::Serialize;
@@ -31,6 +31,7 @@ pub(super) struct ShopItemWorksetResidencyInputs<'a> {
     pub(super) fixed: &'a FixedTextPlan,
     pub(super) dialogue_worksets: &'a [GlyphWorkset],
     pub(super) canonical_dynamic_codes: &'a BTreeMap<char, u8>,
+    pub(super) item_name_appender_display_codes: &'a std::collections::BTreeSet<u8>,
 }
 
 pub(super) struct ShopItemWorksetResidencyPlan {
@@ -46,6 +47,7 @@ pub(super) struct ShopItemWorksetResidencyPlan {
     stock_group_count: usize,
     stocked_item_entry_count: usize,
     target_record_count: usize,
+    target_record_ids: BTreeSet<String>,
     target_workset_count: usize,
     stocked_item_glyph_count: usize,
     preserved_item_code_count: usize,
@@ -96,6 +98,7 @@ pub(super) struct ShopItemResidencyPlan {
     source_stock_group_count: usize,
     stocked_item_entry_count: usize,
     target_dialogue_record_count: usize,
+    target_dialogue_record_ids: BTreeSet<String>,
     target_dialogue_workset_count: usize,
     stocked_item_glyph_count: usize,
     preserved_item_code_count: usize,
@@ -190,7 +193,7 @@ pub(super) fn plan_shop_item_residency(
 
     Ok(ShopItemResidencyPlan {
         schema: 2,
-        strategy: "derive every weapon, tool, and secret-shop stock group from map facility records; reserve every stocked Korean item glyph at its canonical dynamic code across all eight shop dialogue lifetimes; then bind the 91-entry dialogue material, catalog fallback, and E7 page route",
+        strategy: "derive every weapon, tool, and secret-shop stock group and dialogue lifetime from the source facility-indexed tables; reserve every stocked Korean item glyph at its canonical dynamic code across that complete selling-facility population; then bind the 91-entry dialogue material, catalog fallback, and E7 page route",
         source_composition_state: runtime.composition_state,
         source_composite_state: runtime.composite_state,
         item_selling_facilities: runtime.selling_facilities,
@@ -199,6 +202,7 @@ pub(super) fn plan_shop_item_residency(
         source_stock_group_count: worksets.stock_group_count,
         stocked_item_entry_count: worksets.stocked_item_entry_count,
         target_dialogue_record_count: worksets.target_record_count,
+        target_dialogue_record_ids: worksets.target_record_ids.clone(),
         target_dialogue_workset_count: worksets.target_workset_count,
         stocked_item_glyph_count: worksets.stocked_item_glyph_count,
         preserved_item_code_count: worksets.preserved_item_code_count,

@@ -33,7 +33,9 @@ use crate::{
     sha1_hex,
     text_inventory::{plan_fixed_text, plan_location_name_text},
     unit_names::plan_unit_names,
-    unit_ui_text::{plan_unit_ui_labels, preserved_unit_ui_display_codes},
+    unit_ui_text::{
+        item_name_appender_display_codes, plan_unit_ui_labels, preserved_unit_ui_display_codes,
+    },
 };
 
 mod chapter_intro_residency;
@@ -309,12 +311,14 @@ pub(crate) fn plan_full_translation_installation(
 
     let dialogue_graph = inspect_main_dialogue_graph(rom.data())?;
     let transition_lifetimes = bind_transition_lifetime_worksets(&display, &dialogue_graph)?;
+    let item_name_appender_display_codes = item_name_appender_display_codes(rom.data())?;
 
     let baseline_dynamic_inputs = plan_dynamic_dialogue_inputs(
         &display,
         &fixed.entries,
         &unit_names.entries,
         &locations.entries,
+        &item_name_appender_display_codes,
         &transition_lifetimes,
     )?;
     let baseline_codebook =
@@ -333,6 +337,7 @@ pub(crate) fn plan_full_translation_installation(
         &fixed.entries,
         &unit_names.entries,
         &locations.entries,
+        &item_name_appender_display_codes,
         &transition_lifetimes,
     )?;
     let dialogue_line_layout =
@@ -344,6 +349,7 @@ pub(crate) fn plan_full_translation_installation(
             fixed: &fixed,
             dialogue_worksets: &dynamic_inputs.augmented_worksets,
             canonical_dynamic_codes: dynamic_inputs.canonical_dynamic_codes(),
+            item_name_appender_display_codes: &item_name_appender_display_codes,
         })?;
     let dynamic_input_producers = inspect_dynamic_input_producers(&rom)?;
     let mut dynamic_producer_encoding = bind_dynamic_producer_encoding(
@@ -430,6 +436,7 @@ pub(crate) fn plan_full_translation_installation(
         &fixed_menu_labels,
         &unit_selection_help_residency.augmented_worksets,
         dynamic_inputs.canonical_dynamic_codes(),
+        &item_name_appender_display_codes,
     )?;
     let chapter_save_projection = plan_chapter_save_projection(ChapterSaveProjectionInputs {
         candidate: &current_candidate,

@@ -18,7 +18,10 @@ mod source_spec;
 #[cfg(test)]
 mod tests;
 
-pub(crate) const SHOP_DIALOGUE_LIFETIME_RECORD_IDS: [&str; 8] = [
+/// The historical mapper165 proof bundle is intentionally scoped to the observed weapon-shop
+/// surfaces. Full-translation residency must derive every selling facility's dialogue records
+/// from the source dispatch tables instead of reusing this narrower evidence population.
+pub(crate) const WEAPON_SHOP_DIALOGUE_LIFETIME_RECORD_IDS: [&str; 8] = [
     "shop-and-item-dialogue:000",
     "shop-and-item-dialogue:001",
     "shop-and-item-dialogue:002",

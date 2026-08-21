@@ -9,9 +9,7 @@ use crate::{
     full_translation_install::dialogue_item_worksets::{
         DialogueItemWorksetInputs, augment_dialogue_item_worksets,
     },
-    shop_flow::{
-        SHOP_DIALOGUE_LIFETIME_RECORD_IDS, SHOP_ITEM_ENTRY_COUNT, bind_shop_item_composition_source,
-    },
+    shop_flow::{SHOP_ITEM_ENTRY_COUNT, bind_shop_item_composition_source},
 };
 
 pub(in crate::full_translation_install) fn plan_shop_item_workset_residency(
@@ -28,9 +26,10 @@ pub(in crate::full_translation_install) fn plan_shop_item_workset_residency(
             == SHOP_ITEM_ENTRY_COUNT,
         "shop item worksets lost the 91-entry translated item-name population"
     );
-    let target_record_ids = SHOP_DIALOGUE_LIFETIME_RECORD_IDS
-        .into_iter()
-        .map(str::to_owned)
+    let target_record_ids = source
+        .dialogue_lifetime_record_indices()
+        .iter()
+        .map(|index| format!("shop-and-item-dialogue:{index:03}"))
         .collect::<BTreeSet<_>>();
     let augmentation = augment_dialogue_item_worksets(DialogueItemWorksetInputs {
         role: "shop item residency",
@@ -38,6 +37,7 @@ pub(in crate::full_translation_install) fn plan_shop_item_workset_residency(
         fixed: inputs.fixed,
         dialogue_worksets: inputs.dialogue_worksets,
         canonical_item_codes: inputs.canonical_dynamic_codes,
+        item_name_appender_display_codes: inputs.item_name_appender_display_codes,
         item_source_indices: source.item_source_indices(),
         target_record_ids: &target_record_ids,
     })?;
@@ -55,6 +55,7 @@ pub(in crate::full_translation_install) fn plan_shop_item_workset_residency(
         stock_group_count: source.stock_group_ids().len(),
         stocked_item_entry_count: source.item_source_indices().len(),
         target_record_count: augmentation.target_record_count,
+        target_record_ids,
         target_workset_count: augmentation.target_workset_count,
         stocked_item_glyph_count: augmentation.item_glyph_count,
         preserved_item_code_count: augmentation.preserved_item_code_count,
