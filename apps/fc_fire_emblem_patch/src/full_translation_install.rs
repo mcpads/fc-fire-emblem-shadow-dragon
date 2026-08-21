@@ -196,7 +196,7 @@ pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) output_will_be_emitted: bool,
 }
 
-pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 35;
+pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 36;
 
 pub(crate) struct FullTranslationInstallSummary {
     pub(crate) report_sha1: String,

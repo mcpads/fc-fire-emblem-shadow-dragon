@@ -10,6 +10,10 @@ use sha2::{Digest, Sha256};
 
 use crate::sha1_hex;
 
+mod route_progression;
+
+use route_progression::{RuntimeRoute, verify_route};
+
 const MINIMUM_IRREGULAR_SAMPLE_COUNT: usize = 3;
 const MULTI_PAGE_MAIN_DIALOGUE_ROLE: &str = "chapter_intro_title_dialogue_composite";
 const CHAPTER_CLEAR_EPILOGUE_DIALOGUE_ROLE: &str = "chapter_clear_epilogue_dialogue";
@@ -21,6 +25,8 @@ pub(super) struct FinalArtifactRuntimeEvidence {
     manifest_sha1: String,
     artifact_sha1: String,
     run_count: usize,
+    route_count: usize,
+    route_checkpoint_count: usize,
     observation_count: usize,
     sample_count: usize,
     representative_role_count: usize,
@@ -44,7 +50,10 @@ struct RuntimeRun {
     run_id: String,
     started_from_cold_boot: bool,
     savestate_used: bool,
+    #[serde(default)]
     observations: Vec<ScreenObservation>,
+    #[serde(default)]
+    routes: Vec<RuntimeRoute>,
 }
 
 #[derive(Deserialize)]
@@ -107,6 +116,8 @@ impl FinalArtifactRuntimeEvidence {
             manifest_sha1: String::new(),
             artifact_sha1: artifact_sha1.to_owned(),
             run_count: 0,
+            route_count: 0,
+            route_checkpoint_count: 0,
             observation_count: 0,
             sample_count: 0,
             representative_role_count: 0,
@@ -168,6 +179,9 @@ pub(super) fn load_final_artifact_runtime_evidence(
     let mut bound_screen_roles = BTreeSet::new();
     let mut representative_roles = BTreeSet::new();
     let mut worst_case_roles = BTreeSet::new();
+    let mut route_ids = BTreeSet::new();
+    let mut route_count = 0usize;
+    let mut route_checkpoint_count = 0usize;
     let mut observation_count = 0usize;
     let mut sample_count = 0usize;
 
@@ -192,8 +206,8 @@ pub(super) fn load_final_artifact_runtime_evidence(
             run.run_id
         );
         ensure!(
-            !run.observations.is_empty(),
-            "runtime evidence run {} has no screen observations",
+            !run.observations.is_empty() || !run.routes.is_empty(),
+            "runtime evidence run {} has no screen observations or routes",
             run.run_id
         );
 
@@ -211,6 +225,35 @@ pub(super) fn load_final_artifact_runtime_evidence(
                 }
             }
         }
+
+        for route in &run.routes {
+            ensure!(
+                !route.id().trim().is_empty(),
+                "runtime evidence run {} has an empty route ID",
+                run.run_id
+            );
+            ensure!(
+                route_ids.insert((run.run_id.as_str(), route.id())),
+                "runtime evidence run {} repeats route ID {}",
+                run.run_id,
+                route.id()
+            );
+            let route_roles = verify_route(route, manifest_directory, &run.run_id)?;
+            route_count += 1;
+            route_checkpoint_count += route.checkpoint_count();
+            sample_count += route.checkpoint_count();
+            for (screen_role, kind) in route_roles {
+                bound_screen_roles.insert(screen_role.to_owned());
+                match kind {
+                    ObservationKind::Representative => {
+                        representative_roles.insert(screen_role.to_owned());
+                    }
+                    ObservationKind::WorstCase => {
+                        worst_case_roles.insert(screen_role.to_owned());
+                    }
+                }
+            }
+        }
     }
 
     Ok(FinalArtifactRuntimeEvidence {
@@ -218,6 +261,8 @@ pub(super) fn load_final_artifact_runtime_evidence(
         manifest_sha1: sha1_hex(&manifest_bytes),
         artifact_sha1: artifact_sha1.to_owned(),
         run_count: manifest.runs.len(),
+        route_count,
+        route_checkpoint_count,
         observation_count,
         sample_count,
         representative_role_count: representative_roles.len(),
@@ -404,25 +449,30 @@ fn verify_observation(
     );
 
     for sample in &observation.samples {
-        ensure!(
-            !sample.image.is_absolute(),
-            "runtime sample image must be relative to its private manifest"
-        );
-        ensure!(
-            is_hex_digest(&sample.image_sha256, 64),
-            "runtime sample image SHA-256 is malformed for {}",
-            sample.image.display()
-        );
-        let image_path = manifest_directory.join(&sample.image);
-        let image_bytes = fs::read(&image_path)
-            .with_context(|| format!("read runtime sample image {}", image_path.display()))?;
-        let actual_sha256 = format!("{:x}", Sha256::digest(&image_bytes));
-        ensure!(
-            actual_sha256.eq_ignore_ascii_case(&sample.image_sha256),
-            "runtime sample image digest mismatch for {}",
-            image_path.display()
-        );
+        verify_runtime_image(&sample.image, &sample.image_sha256, manifest_directory)?;
     }
+    Ok(())
+}
+
+fn verify_runtime_image(image: &Path, image_sha256: &str, manifest_directory: &Path) -> Result<()> {
+    ensure!(
+        !image.is_absolute(),
+        "runtime sample image must be relative to its private manifest"
+    );
+    ensure!(
+        is_hex_digest(image_sha256, 64),
+        "runtime sample image SHA-256 is malformed for {}",
+        image.display()
+    );
+    let image_path = manifest_directory.join(image);
+    let image_bytes = fs::read(&image_path)
+        .with_context(|| format!("read runtime sample image {}", image_path.display()))?;
+    let actual_sha256 = format!("{:x}", Sha256::digest(&image_bytes));
+    ensure!(
+        actual_sha256.eq_ignore_ascii_case(image_sha256),
+        "runtime sample image digest mismatch for {}",
+        image_path.display()
+    );
     Ok(())
 }
 

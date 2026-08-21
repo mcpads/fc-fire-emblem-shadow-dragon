@@ -283,6 +283,153 @@ fn repeated_completed_page_images_cannot_bind_maximum_dialogue_progression() {
     assert!(format!("{error:#}").contains("1 distinct completed-page images instead of 15"));
 }
 
+#[test]
+fn one_ordered_chapter_transition_route_binds_all_observed_screen_roles() {
+    let fixture = RuntimeFixture::new();
+    let artifact_sha1 = "11".repeat(20);
+    fixture.write_manifest(json!({
+        "artifact_sha1": artifact_sha1,
+        "runs": [{
+            "run_id": "chapter-seven-to-eight",
+            "started_from_cold_boot": true,
+            "savestate_used": false,
+            "routes": [{
+                "route_id": "chapter-clear-to-next-map",
+                "kind": "chapter_clear_to_next_map",
+                "checkpoints": fixture.chapter_clear_to_next_map_checkpoints()
+            }]
+        }]
+    }));
+
+    let evidence =
+        load_final_artifact_runtime_evidence(Some(&fixture.manifest_path), &artifact_sha1).unwrap();
+
+    assert_eq!(evidence.route_count, 1);
+    assert_eq!(evidence.route_checkpoint_count, 25);
+    assert_eq!(evidence.observation_count, 0);
+    assert_eq!(
+        evidence.bound_screen_roles(),
+        BTreeSet::from([
+            CHAPTER_CLEAR_EPILOGUE_DIALOGUE_ROLE.to_owned(),
+            "chapter_save_complete_continue_prompt".to_owned(),
+            "chapter_save_offer".to_owned(),
+            MULTI_PAGE_MAIN_DIALOGUE_ROLE.to_owned(),
+            "unit_roster".to_owned(),
+        ])
+    );
+}
+
+#[test]
+fn missing_route_checkpoint_cannot_be_hidden_by_the_remaining_images() {
+    let fixture = RuntimeFixture::new();
+    let artifact_sha1 = "11".repeat(20);
+    let mut checkpoints = fixture.chapter_clear_to_next_map_checkpoints();
+    checkpoints.remove(16);
+    fixture.write_manifest(json!({
+        "artifact_sha1": artifact_sha1,
+        "runs": [{
+            "run_id": "missing-save-offer",
+            "started_from_cold_boot": true,
+            "savestate_used": false,
+            "routes": [{
+                "route_id": "chapter-clear-to-next-map",
+                "kind": "chapter_clear_to_next_map",
+                "checkpoints": checkpoints
+            }]
+        }]
+    }));
+
+    let error = load_final_artifact_runtime_evidence(Some(&fixture.manifest_path), &artifact_sha1)
+        .err()
+        .unwrap();
+
+    assert!(format!("{error:#}").contains("does not follow"));
+}
+
+#[test]
+fn reordered_route_checkpoint_is_rejected_even_when_every_image_exists() {
+    let fixture = RuntimeFixture::new();
+    let artifact_sha1 = "11".repeat(20);
+    let mut checkpoints = fixture.chapter_clear_to_next_map_checkpoints();
+    checkpoints.swap(16, 17);
+    fixture.write_manifest(json!({
+        "artifact_sha1": artifact_sha1,
+        "runs": [{
+            "run_id": "reordered-save-result",
+            "started_from_cold_boot": true,
+            "savestate_used": false,
+            "routes": [{
+                "route_id": "chapter-clear-to-next-map",
+                "kind": "chapter_clear_to_next_map",
+                "checkpoints": checkpoints
+            }]
+        }]
+    }));
+
+    let error = load_final_artifact_runtime_evidence(Some(&fixture.manifest_path), &artifact_sha1)
+        .err()
+        .unwrap();
+
+    assert!(format!("{error:#}").contains("does not follow"));
+}
+
+#[test]
+fn route_checkpoint_image_digest_is_rebound_to_the_private_image() {
+    let fixture = RuntimeFixture::new();
+    let artifact_sha1 = "11".repeat(20);
+    let mut checkpoints = fixture.chapter_clear_to_next_map_checkpoints();
+    checkpoints[0]["image_sha256"] = "22".repeat(32).into();
+    fixture.write_manifest(json!({
+        "artifact_sha1": artifact_sha1,
+        "runs": [{
+            "run_id": "wrong-route-image",
+            "started_from_cold_boot": true,
+            "savestate_used": false,
+            "routes": [{
+                "route_id": "chapter-clear-to-next-map",
+                "kind": "chapter_clear_to_next_map",
+                "checkpoints": checkpoints
+            }]
+        }]
+    }));
+
+    let error = load_final_artifact_runtime_evidence(Some(&fixture.manifest_path), &artifact_sha1)
+        .err()
+        .unwrap();
+
+    assert!(format!("{error:#}").contains("digest mismatch"));
+}
+
+#[test]
+fn repeated_chapter_intro_page_cannot_complete_the_ordered_route() {
+    let fixture = RuntimeFixture::new();
+    let artifact_sha1 = "11".repeat(20);
+    let mut checkpoints = fixture.chapter_clear_to_next_map_checkpoints();
+    let repeated_image = checkpoints[20]["image"].clone();
+    let repeated_digest = checkpoints[20]["image_sha256"].clone();
+    checkpoints[21]["image"] = repeated_image;
+    checkpoints[21]["image_sha256"] = repeated_digest;
+    fixture.write_manifest(json!({
+        "artifact_sha1": artifact_sha1,
+        "runs": [{
+            "run_id": "repeated-intro-page",
+            "started_from_cold_boot": true,
+            "savestate_used": false,
+            "routes": [{
+                "route_id": "chapter-clear-to-next-map",
+                "kind": "chapter_clear_to_next_map",
+                "checkpoints": checkpoints
+            }]
+        }]
+    }));
+
+    let error = load_final_artifact_runtime_evidence(Some(&fixture.manifest_path), &artifact_sha1)
+        .err()
+        .unwrap();
+
+    assert!(format!("{error:#}").contains("3 distinct chapter-intro pages instead of 4"));
+}
+
 struct RuntimeFixture {
     directory: PathBuf,
     manifest_path: PathBuf,
@@ -338,6 +485,50 @@ impl RuntimeFixture {
                 fs::write(self.directory.join(&image), image_bytes.as_bytes()).unwrap();
                 json!({
                     "frame_offset": frame_offset,
+                    "image": image,
+                    "image_sha256": format!("{:x}", Sha256::digest(image_bytes.as_bytes())),
+                })
+            })
+            .collect()
+    }
+
+    fn chapter_clear_to_next_map_checkpoints(&self) -> Vec<serde_json::Value> {
+        let mut kinds = vec!["chapter_clear_page"; MAXIMUM_DIALOGUE_COMPLETED_PAGE_COUNT];
+        kinds.extend([
+            "next_story",
+            "chapter_save_offer",
+            "chapter_save_complete_continue_prompt",
+            "chapter_intro_page",
+            "chapter_intro_page",
+            "chapter_intro_page",
+            "chapter_intro_page",
+            "next_chapter_map",
+            "unit_roster",
+            "map_return",
+        ]);
+        kinds
+            .into_iter()
+            .enumerate()
+            .map(|(index, kind)| {
+                let image = format!("route-{index:02}.png");
+                let image_bytes = format!("synthetic route frame {index}");
+                fs::write(self.directory.join(&image), image_bytes.as_bytes()).unwrap();
+                let text_result = match kind {
+                    "next_story" => "preserved_original_only",
+                    "next_chapter_map" | "map_return" => "no_target_text",
+                    _ => "translated_hangul",
+                };
+                json!({
+                    "kind": kind,
+                    "frame_offset": index as u64 * 173 + (index % 3) as u64 * 11,
+                    "text_result": text_result,
+                    "japanese_target_text_absent": true,
+                    "protected_original_text": if text_result == "no_target_text" {
+                        "not_present"
+                    } else {
+                        "preserved"
+                    },
+                    "visible_frame_glitch_absent": true,
                     "image": image,
                     "image_sha256": format!("{:x}", Sha256::digest(image_bytes.as_bytes())),
                 })

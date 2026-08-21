@@ -241,6 +241,8 @@ struct FinalArtifactRuntimeEvidence {
     manifest_sha1: String,
     artifact_sha1: String,
     run_count: usize,
+    route_count: usize,
+    route_checkpoint_count: usize,
     observation_count: usize,
     sample_count: usize,
     bound_screen_roles: Vec<String>,
@@ -984,7 +986,8 @@ fn bind_runtime_evidence(
         ensure!(
             !evidence.manifest_sha1.is_empty()
                 && evidence.run_count > 0
-                && evidence.observation_count > 0
+                && (evidence.observation_count > 0 || evidence.route_count > 0)
+                && (evidence.route_count == 0 || evidence.route_checkpoint_count > 0)
                 && evidence.sample_count > 0
                 && evidence.every_run_started_from_cold_boot
                 && evidence.savestate_free
@@ -995,6 +998,8 @@ fn bind_runtime_evidence(
         ensure!(
             evidence.manifest_sha1.is_empty()
                 && evidence.run_count == 0
+                && evidence.route_count == 0
+                && evidence.route_checkpoint_count == 0
                 && evidence.observation_count == 0
                 && evidence.sample_count == 0
                 && roles.is_empty()
@@ -1266,6 +1271,8 @@ mod tests {
                 "manifest_sha1": runtime_role.map(|_| "runtime").unwrap_or(""),
                 "artifact_sha1": sha1_hex(b"final"),
                 "run_count": usize::from(runtime_role.is_some()),
+                "route_count": 0,
+                "route_checkpoint_count": 0,
                 "observation_count": usize::from(runtime_role.is_some()),
                 "sample_count": usize::from(runtime_role.is_some()),
                 "bound_screen_roles": runtime_roles,
