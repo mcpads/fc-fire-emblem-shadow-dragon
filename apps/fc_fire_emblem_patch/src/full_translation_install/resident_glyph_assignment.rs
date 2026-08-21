@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 
 use crate::{
     font_slots::{ACTIVE_HANGUL_SLOT_COUNT, active_hangul_codes},
@@ -13,6 +13,42 @@ pub(super) struct ResidentGlyphWorksetPlan {
     pub(super) glyph_codes: BTreeMap<char, u8>,
     pub(super) augmented_worksets: Vec<GlyphWorkset>,
     pub(super) maximum_augmented_workset_slot_demand: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct WorksetDemandComponents {
+    pub(super) target_glyph_count: usize,
+    pub(super) preserved_active_code_count: usize,
+    pub(super) total_slot_demand: usize,
+}
+
+/// 설치된 작업집합 가운데 실제 슬롯 합이 가장 큰 하나의 구성요소를 돌려준다.
+/// 서로 다른 작업집합의 최대 target/preserved 값을 합쳐 존재하지 않는 화면을 만들지 않는다.
+pub(super) fn maximum_workset_demand_components(
+    role: &str,
+    worksets: &[GlyphWorkset],
+) -> Result<WorksetDemandComponents> {
+    let maximum = worksets
+        .iter()
+        .map(|workset| WorksetDemandComponents {
+            target_glyph_count: workset.target_glyphs.len(),
+            preserved_active_code_count: workset.preserved_active_codes.len(),
+            total_slot_demand: workset.target_glyphs.len() + workset.preserved_active_codes.len(),
+        })
+        .max_by_key(|demand| {
+            (
+                demand.total_slot_demand,
+                demand.target_glyph_count,
+                demand.preserved_active_code_count,
+            )
+        })
+        .with_context(|| format!("{role} has no installed worksets"))?;
+    ensure!(
+        maximum.total_slot_demand <= ACTIVE_HANGUL_SLOT_COUNT,
+        "{role} needs {} active slots but only {ACTIVE_HANGUL_SLOT_COUNT} exist",
+        maximum.total_slot_demand
+    );
+    Ok(maximum)
 }
 
 /// 같은 글리프 집합이 여러 대사 작업집합 위에 계속 보일 때 한 코드 배정을 고르고
@@ -267,6 +303,21 @@ mod tests {
             .unwrap_err();
 
         assert!(error.to_string().contains("no injective code assignment"));
+    }
+
+    #[test]
+    fn maximum_components_come_from_one_real_workset() {
+        let active = active_hangul_codes();
+        let worksets = vec![
+            workset("가나다", &active[..1], &[]),
+            workset("라", &active[..5], &[]),
+        ];
+
+        let demand = maximum_workset_demand_components("fixture", &worksets).unwrap();
+
+        assert_eq!(demand.target_glyph_count, 1);
+        assert_eq!(demand.preserved_active_code_count, 5);
+        assert_eq!(demand.total_slot_demand, 6);
     }
 
     #[test]

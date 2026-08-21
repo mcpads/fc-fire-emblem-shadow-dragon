@@ -5,12 +5,13 @@ use serde::Deserialize;
 
 use crate::{font_slots::ACTIVE_HANGUL_SLOT_COUNT, rom::EXPECTED_SOURCE_SHA1, sha1_hex};
 
-use super::installed::InstalledIntroDialogueCapacity;
+use super::installed::{InstalledFixedMenuLifetime, InstalledIntroDialogueCapacity};
 use super::report::{StrongestLifetimeReport, TranslationLifetimeDemandReport};
 
 mod chapter_intro_composite;
 mod chapter_save;
 mod ending_chapter_record;
+mod fixed_menu;
 mod front_end_menu;
 mod full_page_bound;
 mod intro_dialogue;
@@ -71,6 +72,7 @@ pub(super) struct LifetimeInputBindings<'a> {
     pub(super) battle_dialogue_workspace_sha1: &'a str,
     pub(super) battle_temporal_manifest_sha1: &'a str,
     pub(super) intro_dialogue_capacities: &'a [InstalledIntroDialogueCapacity],
+    pub(super) fixed_menu_lifetime: &'a InstalledFixedMenuLifetime,
 }
 
 pub(super) struct TranslationLifetimeInventory {
@@ -99,6 +101,7 @@ struct ConsumerLifetimeDemands {
     ending_chapter_record: TranslationLifetimeDemandReport,
     intro_dialogue: Vec<TranslationLifetimeDemandReport>,
     chapter_intro_composite: TranslationLifetimeDemandReport,
+    fixed_menu: Vec<TranslationLifetimeDemandReport>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -295,6 +298,7 @@ pub(super) fn inspect_translation_lifetimes(
             main_dialogue_workspace_sha1: bindings.main_dialogue_workspace_sha1,
             chapter_title_workspace_sha1: bindings.chapter_title_workspace_sha1,
         })?;
+    let fixed_menu_demands = fixed_menu::inspect(bindings.fixed_menu_lifetime)?;
 
     build_translation_lifetime_inventory(
         LifetimeReports {
@@ -317,6 +321,7 @@ pub(super) fn inspect_translation_lifetimes(
             ending_chapter_record: ending_chapter_record_demand,
             intro_dialogue: intro_dialogue_demands,
             chapter_intro_composite: chapter_intro_composite_demand,
+            fixed_menu: fixed_menu_demands,
         },
         japanese_bearing_screen_roles,
     )
@@ -378,6 +383,7 @@ fn build_translation_lifetime_inventory(
     demands.push(consumer_demands.ending_chapter_record);
     demands.extend(consumer_demands.intro_dialogue);
     demands.push(consumer_demands.chapter_intro_composite);
+    demands.extend(consumer_demands.fixed_menu);
     for lifetime in main.observed_screen_lifetimes {
         ensure!(
             lifetime.filled_unique_glyph_count
@@ -469,7 +475,7 @@ fn build_translation_lifetime_inventory(
             main_dialogue_maximum_target_glyph_count: main.max_transition_chain_unique_glyph_count,
             main_dialogue_maximum_screen_bound: main.maximum_source_binding.screen_lifetime_bound,
             next_gate: if all_lifetimes_measured {
-                "install the remaining translated domains and verify zero target Japanese on one final ROM"
+                "bind grouped final-artifact runtime evidence and complete translation review on one exact ROM"
             } else {
                 "compare the remaining unmeasured screen lifetimes"
             },
@@ -482,6 +488,7 @@ fn build_translation_lifetime_inventory(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::translation_coverage::installed::InstalledLifetimeDemand;
 
     #[test]
     fn full_page_map_menu_bound_can_become_the_strongest_lifetime() {
@@ -561,6 +568,29 @@ mod tests {
         };
         let mut map_funds_summary_demand = map_menu_demand.clone();
         map_funds_summary_demand.screen_role = "map_funds_summary";
+        let fixed_menu_lifetime = InstalledFixedMenuLifetime {
+            screen_roles: crate::fixed_menu_labels::fixed_menu_screen_roles()
+                .iter()
+                .map(|role| (*role).to_owned())
+                .collect(),
+            shared_static_page: InstalledLifetimeDemand {
+                target_glyph_count: 86,
+                preserved_active_code_count: 0,
+                total_slot_demand: 86,
+            },
+            unit_selection_help_dialogue: InstalledLifetimeDemand {
+                target_glyph_count: 155,
+                preserved_active_code_count: 40,
+                total_slot_demand: 195,
+            },
+            storage_dialogue: InstalledLifetimeDemand {
+                target_glyph_count: 143,
+                preserved_active_code_count: 52,
+                total_slot_demand: 195,
+            },
+            evidence_report_sha1: "exact-final-report".to_owned(),
+        };
+        let fixed_menu_demands = fixed_menu::inspect(&fixed_menu_lifetime).unwrap();
         let mut roles = [
             "battle_animation",
             "class_profile",
@@ -588,6 +618,12 @@ mod tests {
                 .iter()
                 .map(|demand| demand.screen_role.to_owned()),
         );
+        roles.extend(
+            fixed_menu_demands
+                .iter()
+                .map(|demand| demand.screen_role.to_owned()),
+        );
+        let expected_role_count = roles.len();
 
         let inventory = build_translation_lifetime_inventory(
             LifetimeReports {
@@ -642,6 +678,7 @@ mod tests {
                 battle_dialogue_workspace_sha1: "battle",
                 battle_temporal_manifest_sha1: "temporal",
                 intro_dialogue_capacities: &[],
+                fixed_menu_lifetime: &fixed_menu_lifetime,
             },
             ConsumerLifetimeDemands {
                 unit_ui: unit_ui_demands,
@@ -684,12 +721,13 @@ mod tests {
                     fits_active_page: true,
                     evidence_report_sha1: "chapter-intro-evidence".to_owned(),
                 },
+                fixed_menu: fixed_menu_demands,
             },
             &roles,
         )
         .unwrap();
 
-        assert_eq!(inventory.demands.len(), 32);
+        assert_eq!(inventory.demands.len(), expected_role_count);
         assert_eq!(inventory.strongest.state, "complete");
         assert_eq!(inventory.strongest.selected_screen_role, Some("map_menu"));
         assert_eq!(inventory.strongest.selected_slot_demand, Some(203));

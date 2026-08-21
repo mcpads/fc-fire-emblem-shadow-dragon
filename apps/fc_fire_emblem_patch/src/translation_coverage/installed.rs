@@ -245,6 +245,23 @@ pub(crate) struct CurrentInstallation {
     pub(crate) battle_dialogue_workspace_sha1: String,
     pub(crate) battle_temporal_manifest_sha1: String,
     pub(crate) intro_dialogue_capacities: Vec<InstalledIntroDialogueCapacity>,
+    pub(crate) fixed_menu_lifetime: Option<InstalledFixedMenuLifetime>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct InstalledLifetimeDemand {
+    pub(crate) target_glyph_count: usize,
+    pub(crate) preserved_active_code_count: usize,
+    pub(crate) total_slot_demand: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct InstalledFixedMenuLifetime {
+    pub(crate) screen_roles: Vec<String>,
+    pub(crate) shared_static_page: InstalledLifetimeDemand,
+    pub(crate) unit_selection_help_dialogue: InstalledLifetimeDemand,
+    pub(crate) storage_dialogue: InstalledLifetimeDemand,
+    pub(crate) evidence_report_sha1: String,
 }
 
 pub(crate) fn inspect_current_installation(
@@ -337,6 +354,7 @@ pub(crate) fn inspect_current_installation(
         battle_dialogue_workspace_sha1: report.battle_text.dialogue_workspace_sha1,
         battle_temporal_manifest_sha1: report.battle_text.temporal_manifest_sha1,
         intro_dialogue_capacities,
+        fixed_menu_lifetime: None,
     })
 }
 

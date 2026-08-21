@@ -377,6 +377,10 @@ pub(crate) fn analyze_translation_coverage(
             battle_dialogue_workspace_sha1: &installation.battle_dialogue_workspace_sha1,
             battle_temporal_manifest_sha1: &installation.battle_temporal_manifest_sha1,
             intro_dialogue_capacities: &installation.intro_dialogue_capacities,
+            fixed_menu_lifetime: installation
+                .fixed_menu_lifetime
+                .as_ref()
+                .context("exact integrated installation has no fixed-menu lifetime evidence")?,
         },
         &japanese_bearing_screen_roles,
     )?;

@@ -30,7 +30,9 @@ use super::{
     dialogue_item_worksets::{
         DialogueItemWorksetInputs, augment_dialogue_item_worksets, collect_item_name_glyphs,
     },
-    resident_glyph_assignment::{assign_resident_glyph_codes, assignment_sha1},
+    resident_glyph_assignment::{
+        assign_resident_glyph_codes, assignment_sha1, maximum_workset_demand_components,
+    },
 };
 
 mod source_binding;
@@ -92,6 +94,8 @@ pub(super) struct StorageDialogueResidencyPlan {
     resident_workset_count: usize,
     fixed_glyph_count: usize,
     fixed_code_count: usize,
+    maximum_augmented_workset_target_glyph_count: usize,
+    maximum_augmented_workset_preserved_active_code_count: usize,
     maximum_augmented_workset_slot_demand: usize,
     fixed_assignment_sha1: String,
     every_storage_label_glyph_uses_its_installed_code: bool,
@@ -276,6 +280,14 @@ pub(super) fn plan_storage_dialogue_residency(
         item_source_indices: &item_source_indices,
         target_record_ids: &item_list_overlay_record_ids,
     })?;
+    let maximum_demand = maximum_workset_demand_components(
+        "storage dialogue residency",
+        &item_augmentation.augmented_worksets,
+    )?;
+    ensure!(
+        maximum_demand.total_slot_demand == item_augmentation.maximum_augmented_workset_slot_demand,
+        "storage dialogue maximum workset components changed"
+    );
 
     Ok(StorageDialogueResidencyPlan {
         strategy: "give storage dialogue pages one compatible code assignment for fixed action labels at entry and after item-list cancellation plus every item name synthesized over facility record 0x2A or overflow record 0x44; retain the canonical dialogue item encoding instead of replacing either completed dialogue page with the generic catalog page",
@@ -309,6 +321,9 @@ pub(super) fn plan_storage_dialogue_residency(
         resident_workset_count,
         fixed_glyph_count: fixed_glyph_codes.len(),
         fixed_code_count: fixed_glyph_codes.len(),
+        maximum_augmented_workset_target_glyph_count: maximum_demand.target_glyph_count,
+        maximum_augmented_workset_preserved_active_code_count: maximum_demand
+            .preserved_active_code_count,
         maximum_augmented_workset_slot_demand: item_augmentation
             .maximum_augmented_workset_slot_demand,
         fixed_assignment_sha1: assignment_sha1(&fixed_glyph_codes),

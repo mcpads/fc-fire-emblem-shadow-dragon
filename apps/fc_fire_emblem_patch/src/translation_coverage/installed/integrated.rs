@@ -16,8 +16,15 @@ use std::{
 use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 
-use super::{CurrentInstallation, inspect_current_installation};
+use super::{
+    CurrentInstallation, InstalledFixedMenuLifetime, InstalledLifetimeDemand,
+    inspect_current_installation,
+};
 use crate::{
+    fixed_menu_labels::{
+        FIXED_MENU_LABEL_SPECS, UNIT_SELECTION_HELP_LINE_SPECS, fixed_menu_screen_roles,
+    },
+    font_slots::ACTIVE_HANGUL_SLOT_COUNT,
     full_translation_install::FULL_TRANSLATION_REPORT_SCHEMA,
     rom::EXPECTED_SOURCE_SHA1,
     sha1_hex,
@@ -48,9 +55,63 @@ struct IntegratedBuildReport {
     carried_ui_domain_preservation: CarriedUiDomainPreservation,
     carried_battle_domain_preservation: CarriedBattleDomainPreservation,
     integrated_write_set: IntegratedWriteSet,
+    consumer_codebook: IntegratedConsumerCodebook,
+    unit_selection_help_residency: IntegratedUnitSelectionHelpResidency,
+    storage_dialogue_residency: IntegratedStorageDialogueResidency,
     final_artifact_runtime_evidence: FinalArtifactRuntimeEvidence,
     installation_gates: IntegratedInstallationGates,
     rom_emitted: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct IntegratedConsumerCodebook {
+    schema: u8,
+    static_page_count: usize,
+    pages: Vec<IntegratedStaticConsumerPage>,
+    page_bytes_planned: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct IntegratedStaticConsumerPage {
+    id: String,
+    variant: String,
+    screen_roles: Vec<String>,
+    domain_ids: Vec<String>,
+    target_glyph_count: usize,
+    preserved_active_code_count: usize,
+    slot_demand: usize,
+    assignment_sha1: String,
+    page_sha1: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct IntegratedUnitSelectionHelpResidency {
+    resident_workset_count: usize,
+    help_line_count: usize,
+    help_glyph_count: usize,
+    fixed_code_count: usize,
+    maximum_augmented_workset_target_glyph_count: usize,
+    maximum_augmented_workset_preserved_active_code_count: usize,
+    maximum_augmented_workset_slot_demand: usize,
+    source_lifecycle_bound: bool,
+    codes_selected_by_the_global_consumer_codebook: bool,
+    every_help_glyph_keeps_one_code_through_the_dialogue_handoff: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct IntegratedStorageDialogueResidency {
+    source_dispatch_count: usize,
+    source_direct_record_store_count: usize,
+    fixed_glyph_count: usize,
+    fixed_code_count: usize,
+    maximum_augmented_workset_target_glyph_count: usize,
+    maximum_augmented_workset_preserved_active_code_count: usize,
+    maximum_augmented_workset_slot_demand: usize,
+    every_storage_label_glyph_uses_its_installed_code: bool,
+    every_overlay_dialogue_page_contains_its_visible_storage_label_glyphs: bool,
+    storage_dialogue_does_not_reselect_the_static_menu_page: bool,
+    capacity_notice_keeps_its_standalone_static_page: bool,
+    item_list_dialogue_pages_use_canonical_item_codes: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -214,6 +275,7 @@ struct IntegratedInstallationEvidence {
     report_sha1: String,
     final_static_domain_ids: BTreeSet<String>,
     domains: BTreeMap<String, DomainInstallation>,
+    fixed_menu_lifetime: InstalledFixedMenuLifetime,
 }
 
 pub(crate) fn inspect_integrated_installation(
@@ -383,6 +445,14 @@ fn bind_integrated_installation(
             )
         })
         .collect::<BTreeMap<_, _>>();
+    let report_sha1 = sha1_hex(report_bytes);
+    let fixed_menu_lifetime = bind_fixed_menu_lifetime(
+        &report.consumer_codebook,
+        &report.unit_selection_help_residency,
+        &report.storage_dialogue_residency,
+        &canonical_targets,
+        &report_sha1,
+    )?;
     let observed_screen_roles =
         bind_runtime_evidence(&report.final_artifact_runtime_evidence, &output_sha1)?;
     let carried_domains =
@@ -481,6 +551,24 @@ fn bind_integrated_installation(
     );
     domains.extend(carried_domains);
     domains.extend(carried_battle_domains);
+    let fixed_menu_installation = domains
+        .get("fixed_menu_labels")
+        .context("integrated installation omitted the fixed-menu domain")?;
+    let fixed_menu_roles = fixed_menu_screen_roles()
+        .iter()
+        .map(|role| (*role).to_owned())
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        fixed_menu_installation.installed_target_unit_count
+            == FIXED_MENU_LABEL_SPECS.len() + UNIT_SELECTION_HELP_LINE_SPECS.len()
+            && fixed_menu_installation
+                .consumer_complete_screen_roles
+                .iter()
+                .cloned()
+                .collect::<BTreeSet<_>>()
+                == fixed_menu_roles,
+        "integrated fixed-menu lifetime is not attached to its complete installed domain"
+    );
     let final_static_domain_ids = domains.keys().cloned().collect::<BTreeSet<_>>();
 
     let declared_screen_roles = domains
@@ -510,9 +598,10 @@ fn bind_integrated_installation(
 
     Ok(IntegratedInstallationEvidence {
         output_sha1,
-        report_sha1: sha1_hex(report_bytes),
+        report_sha1,
         final_static_domain_ids,
         domains,
+        fixed_menu_lifetime,
     })
 }
 
@@ -541,7 +630,144 @@ fn apply_integrated_installation(
     }
     current.build_output_sha1 = evidence.output_sha1;
     current.build_report_sha1 = evidence.report_sha1;
+    current.fixed_menu_lifetime = Some(evidence.fixed_menu_lifetime);
     Ok(())
+}
+
+fn bind_fixed_menu_lifetime(
+    codebook: &IntegratedConsumerCodebook,
+    unit_selection: &IntegratedUnitSelectionHelpResidency,
+    storage: &IntegratedStorageDialogueResidency,
+    canonical_targets: &BTreeMap<&'static str, BTreeSet<String>>,
+    report_sha1: &str,
+) -> Result<InstalledFixedMenuLifetime> {
+    ensure!(
+        codebook.schema == 1
+            && codebook.static_page_count == codebook.pages.len()
+            && codebook.page_bytes_planned,
+        "integrated consumer codebook is incomplete"
+    );
+    let page_ids = codebook
+        .pages
+        .iter()
+        .map(|page| page.id.as_str())
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        page_ids.len() == codebook.pages.len(),
+        "integrated consumer codebook repeats a static page"
+    );
+    let shared_pages = codebook
+        .pages
+        .iter()
+        .filter(|page| page.id == "unit_command_menu")
+        .collect::<Vec<_>>();
+    ensure!(
+        shared_pages.len() == 1,
+        "integrated consumer codebook must contain one unit-command/fixed-menu page"
+    );
+    let shared_page = shared_pages[0];
+    let shared_roles = shared_page
+        .screen_roles
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    let shared_domains = shared_page
+        .domain_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        shared_page.variant == "commands_fixed_menus_and_options_parent"
+            && shared_roles == BTreeSet::from(["options", "unit_command_menu"])
+            && shared_domains.contains("fixed_menu_labels")
+            && !shared_page.assignment_sha1.is_empty()
+            && !shared_page.page_sha1.is_empty(),
+        "integrated fixed-menu static page lost its installed parent lifetime"
+    );
+    let shared_static_page = installed_lifetime_demand(
+        "fixed-menu shared static page",
+        shared_page.target_glyph_count,
+        shared_page.preserved_active_code_count,
+        shared_page.slot_demand,
+    )?;
+
+    ensure!(
+        unit_selection.resident_workset_count > 0
+            && unit_selection.help_line_count == UNIT_SELECTION_HELP_LINE_SPECS.len()
+            && unit_selection.help_glyph_count > 0
+            && unit_selection.fixed_code_count == unit_selection.help_glyph_count
+            && unit_selection.source_lifecycle_bound
+            && unit_selection.codes_selected_by_the_global_consumer_codebook
+            && unit_selection.every_help_glyph_keeps_one_code_through_the_dialogue_handoff,
+        "integrated unit-selection help lifetime is incomplete"
+    );
+    let unit_selection_help_dialogue = installed_lifetime_demand(
+        "unit-selection help dialogue handoff",
+        unit_selection.maximum_augmented_workset_target_glyph_count,
+        unit_selection.maximum_augmented_workset_preserved_active_code_count,
+        unit_selection.maximum_augmented_workset_slot_demand,
+    )?;
+
+    ensure!(
+        storage.source_dispatch_count > 0
+            && storage.source_direct_record_store_count > 0
+            && storage.fixed_glyph_count > 0
+            && storage.fixed_code_count == storage.fixed_glyph_count
+            && storage.every_storage_label_glyph_uses_its_installed_code
+            && storage.every_overlay_dialogue_page_contains_its_visible_storage_label_glyphs
+            && storage.storage_dialogue_does_not_reselect_the_static_menu_page
+            && storage.capacity_notice_keeps_its_standalone_static_page
+            && storage.item_list_dialogue_pages_use_canonical_item_codes,
+        "integrated storage dialogue lifetime is incomplete"
+    );
+    let storage_dialogue = installed_lifetime_demand(
+        "storage dialogue and fixed-label overlay",
+        storage.maximum_augmented_workset_target_glyph_count,
+        storage.maximum_augmented_workset_preserved_active_code_count,
+        storage.maximum_augmented_workset_slot_demand,
+    )?;
+
+    let canonical_roles = canonical_targets
+        .get("fixed_menu_labels")
+        .context("fixed-menu labels have no canonical screen roles")?;
+    let owner_roles = fixed_menu_screen_roles()
+        .iter()
+        .map(|role| (*role).to_owned())
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        canonical_roles == &owner_roles && !report_sha1.is_empty(),
+        "fixed-menu lifetime roles or exact-final report identity changed"
+    );
+
+    Ok(InstalledFixedMenuLifetime {
+        screen_roles: canonical_roles.iter().cloned().collect(),
+        shared_static_page,
+        unit_selection_help_dialogue,
+        storage_dialogue,
+        evidence_report_sha1: report_sha1.to_owned(),
+    })
+}
+
+fn installed_lifetime_demand(
+    role: &str,
+    target_glyph_count: usize,
+    preserved_active_code_count: usize,
+    total_slot_demand: usize,
+) -> Result<InstalledLifetimeDemand> {
+    let component_total = target_glyph_count
+        .checked_add(preserved_active_code_count)
+        .with_context(|| format!("{role} slot demand overflow"))?;
+    ensure!(
+        target_glyph_count > 0
+            && component_total == total_slot_demand
+            && total_slot_demand <= ACTIVE_HANGUL_SLOT_COUNT,
+        "{role} components or active-page fit changed"
+    );
+    Ok(InstalledLifetimeDemand {
+        target_glyph_count,
+        preserved_active_code_count,
+        total_slot_demand,
+    })
 }
 
 fn bind_carried_ui_domains(
@@ -877,23 +1103,47 @@ mod tests {
         serde_json::to_vec(&serde_json::json!({
             "schema": FULL_TRANSLATION_REPORT_SCHEMA,
             "source_sha1": EXPECTED_SOURCE_SHA1,
-            "declared_installation_domain_count": 1,
-            "declared_installation_domains": ["map_menu_labels"],
+            "declared_installation_domain_count": 2,
+            "declared_installation_domains": ["fixed_menu_labels", "map_menu_labels"],
             "consumer_installation": {
                 "current_candidate_sha1": "base-output",
                 "current_build_report_sha1": "base-report",
-                "declared_domain_count": 1,
-                "domains": [{
-                    "id": "map_menu_labels",
-                    "target_unit_count": 8,
-                    "globally_planned_target_unit_count": 8,
-                    "declared_screen_roles": ["map_funds_summary", "map_menu"],
-                    "statically_accounted_declared_screen_roles": ["map_funds_summary", "map_menu"],
-                    "unaccounted_declared_screen_roles": [],
-                    "runtime_observed_declared_screen_roles": runtime_roles,
-                    "all_declared_consumers_statically_accounted": true
-                }],
-                "statically_accounted_declared_domain_count": 1,
+                "declared_domain_count": 2,
+                "domains": [
+                    {
+                        "id": "map_menu_labels",
+                        "target_unit_count": 8,
+                        "globally_planned_target_unit_count": 8,
+                        "declared_screen_roles": ["map_funds_summary", "map_menu"],
+                        "statically_accounted_declared_screen_roles": ["map_funds_summary", "map_menu"],
+                        "unaccounted_declared_screen_roles": [],
+                        "runtime_observed_declared_screen_roles": runtime_roles,
+                        "all_declared_consumers_statically_accounted": true
+                    },
+                    {
+                        "id": "fixed_menu_labels",
+                        "target_unit_count": 13,
+                        "globally_planned_target_unit_count": 13,
+                        "declared_screen_roles": [
+                            "game_speed_selection",
+                            "storage_action_menu",
+                            "storage_capacity_notice",
+                            "storage_overflow_action",
+                            "unit_selection"
+                        ],
+                        "statically_accounted_declared_screen_roles": [
+                            "game_speed_selection",
+                            "storage_action_menu",
+                            "storage_capacity_notice",
+                            "storage_overflow_action",
+                            "unit_selection"
+                        ],
+                        "unaccounted_declared_screen_roles": [],
+                        "runtime_observed_declared_screen_roles": [],
+                        "all_declared_consumers_statically_accounted": true
+                    }
+                ],
+                "statically_accounted_declared_domain_count": 2,
                 "declared_domain_with_unaccounted_consumers_count": 0,
                 "all_declared_consumers_statically_accounted": true,
                 "current_candidate_runtime_evidence_inherited": false
@@ -929,20 +1179,33 @@ mod tests {
                 "complete": true
             },
             "integrated_write_set": {
-                "declared_domain_count": 1,
-                "domains": [{
-                    "id": "map_menu_labels",
-                    "expected_write_count": 1,
-                    "translation_input_loaded": true,
-                    "glyph_lifetime_bound": true,
-                    "storage_and_address_writes_contributed": true,
-                    "runtime_material_writes_contributed": true,
-                    "font_supply_writes_contributed": true,
-                    "all_declared_consumer_writes_contributed": true,
-                    "complete_for_declared_domain_plan": true
-                }],
-                "declared_domain_with_expected_writes_count": 1,
-                "statically_accounted_declared_domain_count": 1,
+                "declared_domain_count": 2,
+                "domains": [
+                    {
+                        "id": "map_menu_labels",
+                        "expected_write_count": 1,
+                        "translation_input_loaded": true,
+                        "glyph_lifetime_bound": true,
+                        "storage_and_address_writes_contributed": true,
+                        "runtime_material_writes_contributed": true,
+                        "font_supply_writes_contributed": true,
+                        "all_declared_consumer_writes_contributed": true,
+                        "complete_for_declared_domain_plan": true
+                    },
+                    {
+                        "id": "fixed_menu_labels",
+                        "expected_write_count": 1,
+                        "translation_input_loaded": true,
+                        "glyph_lifetime_bound": true,
+                        "storage_and_address_writes_contributed": true,
+                        "runtime_material_writes_contributed": true,
+                        "font_supply_writes_contributed": true,
+                        "all_declared_consumer_writes_contributed": true,
+                        "complete_for_declared_domain_plan": true
+                    }
+                ],
+                "declared_domain_with_expected_writes_count": 2,
+                "statically_accounted_declared_domain_count": 2,
                 "original_candidate_sha1": "base-output",
                 "planned_final_image_byte_count": 5,
                 "integrated_image_sha1": sha1_hex(b"final"),
@@ -955,6 +1218,48 @@ mod tests {
                 "one_shared_image": true,
                 "all_declared_domains_contribute_expected_writes": true,
                 "rom_emitted": true
+            },
+            "consumer_codebook": {
+                "schema": 1,
+                "static_page_count": 1,
+                "pages": [{
+                    "id": "unit_command_menu",
+                    "variant": "commands_fixed_menus_and_options_parent",
+                    "screen_roles": ["unit_command_menu", "options"],
+                    "domain_ids": ["unit_ui_labels", "fixed_menu_labels", "options_menu"],
+                    "target_glyph_count": 86,
+                    "preserved_active_code_count": 0,
+                    "slot_demand": 86,
+                    "assignment_sha1": "assignment",
+                    "page_sha1": "page"
+                }],
+                "page_bytes_planned": true
+            },
+            "unit_selection_help_residency": {
+                "resident_workset_count": 1,
+                "help_line_count": 6,
+                "help_glyph_count": 40,
+                "fixed_code_count": 40,
+                "maximum_augmented_workset_target_glyph_count": 155,
+                "maximum_augmented_workset_preserved_active_code_count": 40,
+                "maximum_augmented_workset_slot_demand": 195,
+                "source_lifecycle_bound": true,
+                "codes_selected_by_the_global_consumer_codebook": true,
+                "every_help_glyph_keeps_one_code_through_the_dialogue_handoff": true
+            },
+            "storage_dialogue_residency": {
+                "source_dispatch_count": 2,
+                "source_direct_record_store_count": 17,
+                "fixed_glyph_count": 8,
+                "fixed_code_count": 8,
+                "maximum_augmented_workset_target_glyph_count": 143,
+                "maximum_augmented_workset_preserved_active_code_count": 52,
+                "maximum_augmented_workset_slot_demand": 195,
+                "every_storage_label_glyph_uses_its_installed_code": true,
+                "every_overlay_dialogue_page_contains_its_visible_storage_label_glyphs": true,
+                "storage_dialogue_does_not_reselect_the_static_menu_page": true,
+                "capacity_notice_keeps_its_standalone_static_page": true,
+                "item_list_dialogue_pages_use_canonical_item_codes": true
             },
             "final_artifact_runtime_evidence": {
                 "provided": runtime_role.is_some(),
@@ -1019,6 +1324,60 @@ mod tests {
         );
         assert_eq!(domain.runtime_bound_screen_roles, ["map_menu"]);
         assert_eq!(evidence.output_sha1, sha1_hex(b"final"));
+        assert_eq!(
+            evidence.fixed_menu_lifetime.screen_roles,
+            [
+                "game_speed_selection",
+                "storage_action_menu",
+                "storage_capacity_notice",
+                "storage_overflow_action",
+                "unit_selection",
+            ]
+        );
+        assert_eq!(
+            evidence
+                .fixed_menu_lifetime
+                .unit_selection_help_dialogue
+                .total_slot_demand,
+            195
+        );
+        assert_eq!(
+            evidence
+                .fixed_menu_lifetime
+                .storage_dialogue
+                .total_slot_demand,
+            195
+        );
+    }
+
+    #[test]
+    fn fixed_menu_lifetime_component_or_role_drift_fails_closed() {
+        let mut value: serde_json::Value = serde_json::from_slice(&report_json(None)).unwrap();
+        value["unit_selection_help_residency"]["maximum_augmented_workset_target_glyph_count"] =
+            154.into();
+        let report = serde_json::to_vec(&value).unwrap();
+        assert!(
+            bind_integrated_installation(&report, b"final", "base-output", "base-report")
+                .unwrap_err()
+                .to_string()
+                .contains("components")
+        );
+
+        let mut value: serde_json::Value = serde_json::from_slice(&report_json(None)).unwrap();
+        value["consumer_installation"]["domains"][1]["statically_accounted_declared_screen_roles"] =
+            serde_json::json!([
+                "game_speed_selection",
+                "storage_action_menu",
+                "storage_overflow_action",
+                "unit_selection"
+            ]);
+        let report = serde_json::to_vec(&value).unwrap();
+        assert!(
+            bind_integrated_installation(&report, b"final", "base-output", "base-report")
+                .unwrap_err()
+                .to_string()
+                .contains("does not close its declared consumer plan")
+        );
     }
 
     #[test]

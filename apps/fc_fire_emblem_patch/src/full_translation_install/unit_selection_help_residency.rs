@@ -19,7 +19,9 @@ use crate::{
     semantic_translation::SemanticTranslationPlan, text_inventory::FixedTextLogicalByte,
 };
 
-use super::resident_glyph_assignment::{assignment_sha1, augment_resident_worksets};
+use super::resident_glyph_assignment::{
+    assignment_sha1, augment_resident_worksets, maximum_workset_demand_components,
+};
 
 const EXPECTED_HELP_DIALOGUE_RECORD_ID: &str = "shop-and-item-dialogue:082";
 type GlyphCodeConstraints = (BTreeMap<char, BTreeSet<u8>>, BTreeMap<char, u8>);
@@ -58,6 +60,8 @@ pub(super) struct UnitSelectionHelpResidencyPlan {
     help_line_count: usize,
     help_glyph_count: usize,
     fixed_code_count: usize,
+    maximum_augmented_workset_target_glyph_count: usize,
+    maximum_augmented_workset_preserved_active_code_count: usize,
     maximum_augmented_workset_slot_demand: usize,
     fixed_assignment_sha1: String,
     source_lifecycle_bound: bool,
@@ -147,6 +151,14 @@ pub(super) fn finalize_unit_selection_help_residency(
         &lifetime.resident_workset_indices,
         dialogue_worksets,
     )?;
+    let maximum_demand = maximum_workset_demand_components(
+        "unit-selection help dialogue residency",
+        &augmented_worksets,
+    )?;
+    ensure!(
+        maximum_demand.total_slot_demand == maximum_augmented_workset_slot_demand,
+        "unit-selection help maximum workset components changed"
+    );
 
     Ok(UnitSelectionHelpResidencyPlan {
         strategy: "bind the source state-25 help overlay and its B1:52 dialogue handoff, let the global consumer conflict graph select the inline codes, then keep those codes in every visible page of the dialogue record",
@@ -157,6 +169,9 @@ pub(super) fn finalize_unit_selection_help_residency(
         help_line_count: UNIT_SELECTION_HELP_LINE_SPECS.len(),
         help_glyph_count: lifetime.help_glyphs.len(),
         fixed_code_count: installed_help_glyph_codes.len(),
+        maximum_augmented_workset_target_glyph_count: maximum_demand.target_glyph_count,
+        maximum_augmented_workset_preserved_active_code_count: maximum_demand
+            .preserved_active_code_count,
         maximum_augmented_workset_slot_demand,
         fixed_assignment_sha1: assignment_sha1(&installed_help_glyph_codes),
         source_lifecycle_bound: true,
