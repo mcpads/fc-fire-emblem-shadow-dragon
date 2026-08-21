@@ -68,6 +68,7 @@ pub enum Instruction {
     BeqAbsolute(u16),
     BccAbsolute(u16),
     BcsAbsolute(u16),
+    BmiAbsolute(u16),
     BneAbsolute(u16),
     Rts,
     Rti,
@@ -125,6 +126,7 @@ impl Instruction {
             | Self::BeqAbsolute(_)
             | Self::BccAbsolute(_)
             | Self::BcsAbsolute(_)
+            | Self::BmiAbsolute(_)
             | Self::BneAbsolute(_) => 2,
             Self::LdaAbsolute(_)
             | Self::LdaAbsoluteX(_)
@@ -218,6 +220,7 @@ impl Instruction {
             Self::BeqAbsolute(_)
             | Self::BccAbsolute(_)
             | Self::BcsAbsolute(_)
+            | Self::BmiAbsolute(_)
             | Self::BneAbsolute(_) => 4,
         }
     }
@@ -295,6 +298,7 @@ impl Instruction {
             Self::BeqAbsolute(target) => relative(Mnemonic::Beq, "BEQ", pc, target)?,
             Self::BccAbsolute(target) => relative(Mnemonic::Bcc, "BCC", pc, target)?,
             Self::BcsAbsolute(target) => relative(Mnemonic::Bcs, "BCS", pc, target)?,
+            Self::BmiAbsolute(target) => relative(Mnemonic::Bmi, "BMI", pc, target)?,
             Self::BneAbsolute(target) => relative(Mnemonic::Bne, "BNE", pc, target)?,
             Self::Rts => implied(Mnemonic::Rts, AddressingMode::Implied),
             Self::Rti => implied(Mnemonic::Rti, AddressingMode::Implied),
@@ -389,6 +393,15 @@ mod tests {
             [0xAC, 0x74, 0x76]
         );
         assert_eq!(Instruction::LdyAbsolute(0x7674).worst_case_cycles(), 4);
+    }
+
+    #[test]
+    fn encodes_checked_negative_branch() {
+        assert_eq!(
+            assemble_at(0x8000, &[Instruction::BmiAbsolute(0x8004)]).unwrap(),
+            [0x30, 0x02]
+        );
+        assert_eq!(Instruction::BmiAbsolute(0x8004).worst_case_cycles(), 4);
     }
 
     #[test]

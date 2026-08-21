@@ -42,17 +42,17 @@ use dynamic_assignment::{
     build_dynamic_assignment_routines, build_dynamic_assignment_routines_for_layout,
 };
 use runtime::{
-    RuntimeRoutine, battle_central_right_fd_selector_for_layout, battle_surface_active_for_layout,
-    build_runtime_routines, build_runtime_routines_for_layout, composition_dispatch_for_layout,
-    parse_recipe_directories,
+    RuntimeRoutine, battle_central_right_fd_selector_for_layout, build_runtime_routines,
+    build_runtime_routines_for_layout, composition_dispatch_for_layout, parse_recipe_directories,
+    shared_battle_phase_active_for_layout,
 };
 
 pub(crate) fn cumulative_battle_composition_dispatch_bytes() -> Result<Vec<u8>> {
     composition_dispatch_for_layout(CUMULATIVE_RUNTIME_LAYOUT)
 }
 
-pub(crate) fn cumulative_battle_surface_active_bytes() -> Result<Vec<u8>> {
-    battle_surface_active_for_layout(CUMULATIVE_RUNTIME_LAYOUT)
+pub(crate) fn cumulative_shared_battle_phase_active_bytes() -> Result<Vec<u8>> {
+    shared_battle_phase_active_for_layout(CUMULATIVE_RUNTIME_LAYOUT)
 }
 
 pub(crate) fn cumulative_battle_central_right_fd_selector(fallback_target: u16) -> Result<Vec<u8>> {
@@ -84,9 +84,9 @@ const APPLY_RECIPE_ADDRESS: u16 = 0xFC60;
 const APPLY_DIRECTORY_ADDRESS: u16 = 0xFCE0;
 const APPLY_PARTICIPANT_ADDRESS: u16 = 0xFD00;
 const PROJECT_DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFD30;
-const BATTLE_SURFACE_ACTIVE_ADDRESS: u16 = 0xFD50;
+const SHARED_BATTLE_PHASE_ACTIVE_ADDRESS: u16 = 0xFD50;
 const INITIALIZE_SOUND_TEST_BATTLE_REMAP_ADDRESS: u16 = 0xFD80;
-const CLEAR_REMAP_STATE_AFTER_BATTLE_ADDRESS: u16 = 0xFE50;
+const CLEAR_REMAP_STATE_OUTSIDE_SHARED_BATTLE_ADDRESS: u16 = 0xFE50;
 const BATTLE_RIGHT_FD_SELECTOR_ADDRESS: u16 = 0xFEA0;
 const BATTLE_CENTRAL_RIGHT_FD_SELECTOR_ADDRESS: u16 = 0xFEE0;
 const BATTLE_RIGHT_FE_SELECTOR_ADDRESS: u16 = 0xFF20;
@@ -102,9 +102,9 @@ pub(crate) struct BattleCompositionRuntimeLayout {
     pub(crate) apply_directory: u16,
     pub(crate) apply_participant: u16,
     pub(crate) project_dialogue_selector: u16,
-    pub(crate) battle_surface_active: u16,
+    pub(crate) shared_battle_phase_active: u16,
     pub(crate) initialize_sound_test_battle_remap: u16,
-    pub(crate) clear_remap_state_after_battle: u16,
+    pub(crate) clear_remap_state_outside_shared_battle: u16,
     pub(crate) text_projection_wrapper: u16,
     pub(crate) battle_right_fd_selector: u16,
     pub(crate) battle_central_right_fd_selector: u16,
@@ -121,9 +121,9 @@ pub(crate) const PROBE_RUNTIME_LAYOUT: BattleCompositionRuntimeLayout =
         apply_directory: APPLY_DIRECTORY_ADDRESS,
         apply_participant: APPLY_PARTICIPANT_ADDRESS,
         project_dialogue_selector: PROJECT_DIALOGUE_SELECTOR_ADDRESS,
-        battle_surface_active: BATTLE_SURFACE_ACTIVE_ADDRESS,
+        shared_battle_phase_active: SHARED_BATTLE_PHASE_ACTIVE_ADDRESS,
         initialize_sound_test_battle_remap: INITIALIZE_SOUND_TEST_BATTLE_REMAP_ADDRESS,
-        clear_remap_state_after_battle: CLEAR_REMAP_STATE_AFTER_BATTLE_ADDRESS,
+        clear_remap_state_outside_shared_battle: CLEAR_REMAP_STATE_OUTSIDE_SHARED_BATTLE_ADDRESS,
         text_projection_wrapper: TEXT_PROJECTION_WRAPPER_ADDRESS,
         battle_right_fd_selector: BATTLE_RIGHT_FD_SELECTOR_ADDRESS,
         battle_central_right_fd_selector: BATTLE_CENTRAL_RIGHT_FD_SELECTOR_ADDRESS,
@@ -140,9 +140,9 @@ pub(crate) const CUMULATIVE_RUNTIME_LAYOUT: BattleCompositionRuntimeLayout =
         apply_directory: 0xFE3C,
         apply_participant: 0xFE4C,
         project_dialogue_selector: 0xFE75,
-        battle_surface_active: 0xFE90,
+        shared_battle_phase_active: 0xFE90,
         initialize_sound_test_battle_remap: 0xFEB3,
-        clear_remap_state_after_battle: 0xFEC0,
+        clear_remap_state_outside_shared_battle: 0xFEC0,
         text_projection_wrapper: 0xFECE,
         battle_right_fd_selector: 0xFEEE,
         battle_central_right_fd_selector: 0xFF1D,
@@ -156,14 +156,8 @@ const PPU_CONTROL_SHADOW: u16 = 0x00CD;
 const PRG_BANK_SHADOW: u8 = 0x29;
 const RIGHT_FE_SHADOW: u8 = 0x5C;
 const CHR_HIGH_BITS_SHADOW: u8 = 0x52;
-pub(crate) const MAIN_STATE_ADDRESS: u16 = 0x0084;
-pub(crate) const PLAYER_INITIATED_BATTLE_STATE: u8 = 0x16;
-pub(crate) const ENEMY_INITIATED_BATTLE_STATE: u8 = 0x32;
-pub(crate) const SOUND_TEST_MAIN_STATE: u8 = 0x04;
-pub(crate) const DIALOGUE_SUBSTATE_ADDRESS: u16 = 0x05EE;
-pub(crate) const SOUND_TEST_BATTLE_SUBSTATE: u8 = 0x0D;
-pub(crate) const SOUND_TEST_BATTLE_PHASE_ADDRESS: u16 = 0x7730;
-pub(crate) const SOUND_TEST_SHARED_BATTLE_PHASE: u8 = 0x05;
+pub(crate) const SHARED_BATTLE_PHASE_ADDRESS: u16 = 0x047C;
+pub(crate) const SHARED_BATTLE_PHASE_COUNT: u8 = 0x20;
 pub(crate) const BATTLE_ACTIVE_FLAG: u16 = 0x047D;
 const CACHE_UPLOADED_MARKER: u8 = 0x80;
 const UPLOAD_RENDER_MASK: u8 = 0x06;
@@ -650,7 +644,7 @@ fn validate_base_contract(
     actual_sha1: &str,
 ) -> Result<()> {
     ensure!(
-        contract.schema == 3
+        contract.schema == 4
             && contract.source_sha1 == EXPECTED_SOURCE_SHA1
             && contract.output_sha1 == actual_sha1
             && contract.output_mapper == OUTPUT_MAPPER

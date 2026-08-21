@@ -155,7 +155,10 @@ mod tests {
 
     #[test]
     fn every_observed_sample_uses_the_runtime_dynamic_assignment() {
-        let glyphs = (0..212)
+        let glyphs = (0..u32::try_from(
+            crate::mapper165::battle_text_cache_probe::CANONICAL_ABSTRACT_COLOR_COUNT,
+        )
+        .unwrap())
             .map(|offset| char::from_u32(0xAC00 + offset).unwrap())
             .collect::<BTreeSet<_>>();
         let coloring = plan_stable_coloring(

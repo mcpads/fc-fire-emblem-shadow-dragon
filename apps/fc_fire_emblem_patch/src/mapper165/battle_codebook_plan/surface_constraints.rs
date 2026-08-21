@@ -376,7 +376,7 @@ pub(crate) fn analyze_battle_surface_constraints(
         "observed battle remap demand exceeds the modeled collision bound"
     );
     let report = BattleSurfaceConstraintReport {
-        schema: 13,
+        schema: 14,
         source_sha1: EXPECTED_SOURCE_SHA1,
         fixed_workspace_sha1: sha1_hex(&fs::read(fixed_workspace_path)?),
         dialogue_workspace_sha1: sha1_hex(&fs::read(dialogue_workspace_path)?),
@@ -531,7 +531,7 @@ mod tests {
     #[test]
     fn serialized_report_omits_translation_content_and_private_paths() {
         let report = BattleSurfaceConstraintReport {
-            schema: 13,
+            schema: 14,
             source_sha1: EXPECTED_SOURCE_SHA1,
             fixed_workspace_sha1: "fixed".to_owned(),
             dialogue_workspace_sha1: "dialogue".to_owned(),

@@ -7,8 +7,10 @@ use crate::{rom::Rom, sha1_hex, text_inventory::FixedTextPlan};
 
 use super::item_domain::battle_item_source_index;
 
+mod arena_opponents;
 mod source_records;
 
+use arena_opponents::{ArenaOpponentDomainBinding, bind_arena_opponent_domain};
 #[cfg(test)]
 pub(super) use source_records::test_hp_bound;
 use source_records::{
@@ -21,6 +23,7 @@ pub(super) struct EnemyBattleDomain {
     pub(super) participant_glyph_sets: Vec<BTreeSet<char>>,
     pub(super) participant_inputs: Vec<EnemyParticipantInput>,
     pub(super) enemy_name_source_indices: BTreeSet<usize>,
+    pub(super) item_source_indices: BTreeSet<usize>,
     pub(super) binding: EnemyBattleDomainBinding,
 }
 
@@ -48,6 +51,9 @@ pub(super) struct EnemyBattleDomainBinding {
     initial_record_builder: SourceRoutineBinding,
     reinforcement_selector: SourceRoutineBinding,
     reinforcement_record_builder: SourceRoutineBinding,
+    arena_opponent_generation: ArenaOpponentDomainBinding,
+    map_participant_candidate_count: usize,
+    arena_participant_candidate_count: usize,
     combined_record_count: usize,
     unique_enemy_name_entry_count: usize,
     unique_enemy_class_entry_count: usize,
@@ -60,7 +66,8 @@ pub(super) struct EnemyBattleDomainBinding {
     enemy_class_write_sites_enumerated: bool,
     renderer_complete_class_upper_bound: bool,
     participant_candidates_are_necessary_condition_superset: bool,
-    item_candidates_filtered_by_runtime_eligibility: bool,
+    map_item_candidates_filtered_by_runtime_eligibility: bool,
+    arena_item_candidates_bound_to_generator_tables: bool,
     item_slot_mutation_bound: bool,
     enemy_class_mutation_bound: bool,
     actual_enemy_battle_reachability_proven: bool,
@@ -81,11 +88,27 @@ pub(super) fn bind_enemy_battle_domain(
     let source = bind_enemy_source_domain(rom)?;
     let records = source.records;
     let renderer_class_ids = renderer_class_ids(fixed)?;
-    let candidates = participant_candidates(
+    let map_candidates = participant_candidates(
         &records,
         eligible_enemy_class_item_pairs,
         &renderer_class_ids,
     )?;
+    let arena = bind_arena_opponent_domain(rom)?;
+    for candidate in &arena.candidates {
+        ensure!(
+            renderer_class_ids.contains(&candidate.class_id),
+            "arena opponent class {:02X} is outside the renderer class domain",
+            candidate.class_id
+        );
+        enemy_name_source_index(candidate.identity)?;
+        if candidate.item_id != 0 {
+            battle_item_source_index(candidate.item_id)?;
+        }
+    }
+    let candidates = map_candidates
+        .union(&arena.candidates)
+        .copied()
+        .collect::<BTreeSet<_>>();
 
     let mut name_indices = BTreeSet::new();
     let mut class_indices = BTreeSet::new();
@@ -131,6 +154,7 @@ pub(super) fn bind_enemy_battle_domain(
         participant_glyph_sets,
         participant_inputs,
         enemy_name_source_indices: name_indices,
+        item_source_indices: item_indices.clone(),
         binding: EnemyBattleDomainBinding {
             chapter_count: CHAPTER_COUNT,
             compact_record_byte_count: ENEMY_RECORD_BYTE_COUNT,
@@ -147,6 +171,9 @@ pub(super) fn bind_enemy_battle_domain(
             initial_record_builder: source.initial_record_builder,
             reinforcement_selector: source.reinforcement_selector,
             reinforcement_record_builder: source.reinforcement_record_builder,
+            arena_opponent_generation: arena.binding,
+            map_participant_candidate_count: map_candidates.len(),
+            arena_participant_candidate_count: arena.candidates.len(),
             combined_record_count: records.len(),
             unique_enemy_name_entry_count,
             unique_enemy_class_entry_count: class_indices.len(),
@@ -159,7 +186,8 @@ pub(super) fn bind_enemy_battle_domain(
             enemy_class_write_sites_enumerated: false,
             renderer_complete_class_upper_bound: true,
             participant_candidates_are_necessary_condition_superset: true,
-            item_candidates_filtered_by_runtime_eligibility: true,
+            map_item_candidates_filtered_by_runtime_eligibility: true,
+            arena_item_candidates_bound_to_generator_tables: true,
             item_slot_mutation_bound: true,
             enemy_class_mutation_bound: true,
             actual_enemy_battle_reachability_proven: false,
@@ -286,6 +314,9 @@ pub(super) fn test_binding() -> EnemyBattleDomainBinding {
         initial_record_builder: source_records::test_routine("initial builder"),
         reinforcement_selector: source_records::test_routine("reinforcement selector"),
         reinforcement_record_builder: source_records::test_routine("reinforcement builder"),
+        arena_opponent_generation: arena_opponents::test_binding(),
+        map_participant_candidate_count: 1,
+        arena_participant_candidate_count: 1,
         combined_record_count: 2,
         unique_enemy_name_entry_count: 1,
         unique_enemy_class_entry_count: 1,
@@ -298,7 +329,8 @@ pub(super) fn test_binding() -> EnemyBattleDomainBinding {
         enemy_class_write_sites_enumerated: false,
         renderer_complete_class_upper_bound: true,
         participant_candidates_are_necessary_condition_superset: true,
-        item_candidates_filtered_by_runtime_eligibility: true,
+        map_item_candidates_filtered_by_runtime_eligibility: true,
+        arena_item_candidates_bound_to_generator_tables: true,
         item_slot_mutation_bound: true,
         enemy_class_mutation_bound: true,
         actual_enemy_battle_reachability_proven: false,

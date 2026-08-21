@@ -11,7 +11,8 @@ use super::super::runtime_state_storage::REQUEST_STATE;
 use super::{RuntimeRoutine, next_address};
 use crate::{
     mapper165::battle_composition_loader_probe::{
-        BATTLE_ACTIVE_FLAG, CUMULATIVE_RUNTIME_LAYOUT, cumulative_battle_surface_active_bytes,
+        CUMULATIVE_RUNTIME_LAYOUT, SHARED_BATTLE_PHASE_ADDRESS,
+        cumulative_shared_battle_phase_active_bytes,
     },
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
@@ -42,18 +43,18 @@ pub(super) fn bind_shared_chr_ram_ownership_boundary(candidate: &Rom) -> Result<
         BATTLE_COMPOSITION_GATE,
         "battle composition arbitration gate",
     )?;
-    let surface_predicate = cumulative_battle_surface_active_bytes()?;
+    let surface_predicate = cumulative_shared_battle_phase_active_bytes()?;
     ensure!(
         fixed_bytes(
             candidate,
-            CUMULATIVE_RUNTIME_LAYOUT.battle_surface_active,
+            CUMULATIVE_RUNTIME_LAYOUT.shared_battle_phase_active,
             surface_predicate.len(),
         )? == surface_predicate,
         "battle composition surface predicate changed"
     );
     decode_rp2a03_sequence(
         &surface_predicate,
-        CUMULATIVE_RUNTIME_LAYOUT.battle_surface_active,
+        CUMULATIVE_RUNTIME_LAYOUT.shared_battle_phase_active,
         "battle composition surface predicate",
     )?;
 
@@ -90,8 +91,8 @@ fn battle_composition_gate() -> Result<Vec<u8>> {
     assemble_at(
         BATTLE_COMPOSITION_GATE,
         &[
-            Instruction::LdaAbsolute(BATTLE_ACTIVE_FLAG),
-            Instruction::BeqAbsolute(BATTLE_COMPOSITION_SKIP),
+            Instruction::LdaAbsolute(SHARED_BATTLE_PHASE_ADDRESS),
+            Instruction::BmiAbsolute(BATTLE_COMPOSITION_SKIP),
             Instruction::LdaZeroPage(PPU_MASK_SHADOW),
             Instruction::CmpImmediate(UPLOAD_RENDER_MASK),
             Instruction::BneAbsolute(BATTLE_COMPOSITION_SKIP),
@@ -224,7 +225,7 @@ mod tests {
         let release = chr_ram_ownership_rom();
         let mut bytes = release.data().to_vec();
         let offset = crate::test_support::synthetic_fixed_bank_file_offset(
-            CUMULATIVE_RUNTIME_LAYOUT.battle_surface_active,
+            CUMULATIVE_RUNTIME_LAYOUT.shared_battle_phase_active,
         );
         bytes[offset] ^= 0x01;
         let mutated = Rom::parse(bytes).unwrap();
@@ -275,9 +276,9 @@ mod tests {
             crate::test_support::synthetic_fixed_bank_file_offset(BATTLE_COMPOSITION_GATE);
         bytes[composition_offset..composition_offset + composition_gate.len()]
             .copy_from_slice(&composition_gate);
-        let surface_predicate = cumulative_battle_surface_active_bytes().unwrap();
+        let surface_predicate = cumulative_shared_battle_phase_active_bytes().unwrap();
         let surface_offset = crate::test_support::synthetic_fixed_bank_file_offset(
-            CUMULATIVE_RUNTIME_LAYOUT.battle_surface_active,
+            CUMULATIVE_RUNTIME_LAYOUT.shared_battle_phase_active,
         );
         bytes[surface_offset..surface_offset + surface_predicate.len()]
             .copy_from_slice(&surface_predicate);

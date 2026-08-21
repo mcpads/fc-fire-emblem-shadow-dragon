@@ -223,7 +223,7 @@ pub(crate) fn analyze_battle_codebook_plan(
     let fixed_workspace_sha1 = sha1_hex(&fs::read(fixed_workspace_path)?);
     let dialogue_workspace_sha1 = sha1_hex(&fs::read(dialogue_workspace_path)?);
     let report = BattleCodebookPlanReport {
-        schema: 3,
+        schema: 4,
         source_sha1: EXPECTED_SOURCE_SHA1,
         fixed_workspace_sha1,
         dialogue_workspace_sha1,
@@ -432,8 +432,13 @@ fn plan_battle_codebook_model(
         participant_glyph_sets: enemy_participants,
         participant_inputs: enemy_participant_inputs,
         enemy_name_source_indices,
+        item_source_indices: enemy_item_source_indices,
         binding: enemy_domain,
     } = bind_enemy_battle_domain(rom, fixed, &enemy_class_item_pairs)?;
+    let runtime_item_source_indices = equip_candidate_item_source_indices
+        .union(&enemy_item_source_indices)
+        .copied()
+        .collect::<BTreeSet<_>>();
     let terrains = entry_glyph_sets(fixed, "terrain-names");
     for (role, entries) in [
         ("battle message", &message_templates),
@@ -505,7 +510,7 @@ fn plan_battle_codebook_model(
         fixed,
         dialogue,
         &coloring,
-        &equip_candidate_item_source_indices,
+        &runtime_item_source_indices,
         &enemy_name_source_indices,
         player_participants.len(),
         enemy_participants.len(),
@@ -571,7 +576,7 @@ mod tests {
     #[test]
     fn report_does_not_emit_translation_content_or_private_paths() {
         let report = BattleCodebookPlanReport {
-            schema: 3,
+            schema: 4,
             source_sha1: EXPECTED_SOURCE_SHA1,
             fixed_workspace_sha1: "fixed".to_owned(),
             dialogue_workspace_sha1: "dialogue".to_owned(),

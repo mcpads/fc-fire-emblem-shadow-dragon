@@ -180,8 +180,8 @@ fn dispatch_and_composer_restore_post_scan_registers_and_borrowed_scratch() {
         window
             == [
                 0x20,
-                CLEAR_REMAP_STATE_AFTER_BATTLE_ADDRESS as u8,
-                (CLEAR_REMAP_STATE_AFTER_BATTLE_ADDRESS >> 8) as u8,
+                CLEAR_REMAP_STATE_OUTSIDE_SHARED_BATTLE_ADDRESS as u8,
+                (CLEAR_REMAP_STATE_OUTSIDE_SHARED_BATTLE_ADDRESS >> 8) as u8,
             ]
     }));
 
@@ -233,57 +233,44 @@ fn dispatch_and_composer_restore_post_scan_registers_and_borrowed_scratch() {
 }
 
 #[test]
-fn remap_state_clear_is_limited_to_the_two_battle_exit_states() {
-    let clear = clear_remap_state_after_battle().unwrap();
-    assert!(clear.starts_with(&[0xC9, PLAYER_INITIATED_BATTLE_STATE + 1, 0xF0,]));
-    assert!(
-        clear
-            .windows(3)
-            .any(|window| { window == [0xC9, ENEMY_INITIATED_BATTLE_STATE + 1, 0xD0,] })
-    );
+fn remap_cleanup_preserves_active_phases_and_clears_inactive_phases() {
     assert_eq!(
-        clear
-            .windows(5)
-            .filter(|window| {
-                *window
-                    == [
-                        0xA9,
-                        0x00,
-                        0x8D,
-                        REMAP_STATE_ADDRESS as u8,
-                        (REMAP_STATE_ADDRESS >> 8) as u8,
-                    ]
-            })
-            .count(),
-        1
+        clear_remap_state_outside_shared_battle().unwrap(),
+        [
+            0xC9,
+            SHARED_BATTLE_PHASE_COUNT,
+            0x90,
+            0x05,
+            0xA9,
+            0x00,
+            0x8D,
+            REMAP_STATE_ADDRESS as u8,
+            (REMAP_STATE_ADDRESS >> 8) as u8,
+            0x60,
+        ]
     );
-    assert_eq!(clear.last(), Some(&0x60));
 }
 
 #[test]
-fn battle_surface_predicate_includes_the_shared_sound_test_lifetime() {
-    let predicate = battle_surface_active().unwrap();
-    for address in [
-        MAIN_STATE_ADDRESS,
-        DIALOGUE_SUBSTATE_ADDRESS,
-        SOUND_TEST_BATTLE_PHASE_ADDRESS,
-    ] {
-        assert!(
-            predicate
-                .windows(3)
-                .any(|window| window == [0xAD, address as u8, (address >> 8) as u8])
-        );
-    }
-    for state in [
-        PLAYER_INITIATED_BATTLE_STATE,
-        ENEMY_INITIATED_BATTLE_STATE,
-        SOUND_TEST_MAIN_STATE,
-        SOUND_TEST_BATTLE_SUBSTATE,
-        SOUND_TEST_SHARED_BATTLE_PHASE,
-    ] {
-        assert!(predicate.windows(2).any(|window| window == [0xC9, state]));
-    }
-    assert!(predicate.ends_with(&[0xA9, 0x00, 0x60]));
+fn shared_battle_phase_predicate_covers_the_complete_engine_lifetime() {
+    assert_eq!(
+        shared_battle_phase_active().unwrap(),
+        [
+            0xAD,
+            SHARED_BATTLE_PHASE_ADDRESS as u8,
+            (SHARED_BATTLE_PHASE_ADDRESS >> 8) as u8,
+            0xC9,
+            SHARED_BATTLE_PHASE_COUNT,
+            0x90,
+            0x03,
+            0xA9,
+            0x00,
+            0x60,
+            0xA9,
+            0x01,
+            0x60,
+        ]
+    );
 }
 
 #[test]
@@ -334,7 +321,7 @@ fn recipe_upload_and_shared_text_use_the_same_remap_projection() {
 }
 
 #[test]
-fn runtime_consumers_require_a_supported_battle_surface_and_persistent_remap_state() {
+fn runtime_consumers_require_an_active_shared_battle_phase_and_persistent_remap_state() {
     for bytes in [
         battle_right_selector(BATTLE_RIGHT_FD_SELECTOR_ADDRESS, 2).unwrap(),
         battle_right_selector(BATTLE_RIGHT_FE_SELECTOR_ADDRESS, 4).unwrap(),
@@ -345,8 +332,8 @@ fn runtime_consumers_require_a_supported_battle_surface_and_persistent_remap_sta
             window
                 == [
                     0x20,
-                    BATTLE_SURFACE_ACTIVE_ADDRESS as u8,
-                    (BATTLE_SURFACE_ACTIVE_ADDRESS >> 8) as u8,
+                    SHARED_BATTLE_PHASE_ACTIVE_ADDRESS as u8,
+                    (SHARED_BATTLE_PHASE_ACTIVE_ADDRESS >> 8) as u8,
                 ]
         }));
         assert!(bytes.windows(3).any(|window| {

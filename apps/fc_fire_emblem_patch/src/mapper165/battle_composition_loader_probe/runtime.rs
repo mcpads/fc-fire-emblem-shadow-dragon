@@ -87,9 +87,9 @@ pub(crate) fn build_runtime_routines_for_layout(
             bytes: project_dialogue_selector_for_layout(layout)?,
         },
         RuntimeRoutine {
-            role: "gameplay and sound-test battle-surface predicate",
-            address: layout.battle_surface_active,
-            bytes: battle_surface_active_for_layout(layout)?,
+            role: "shared-battle phase predicate",
+            address: layout.shared_battle_phase_active,
+            bytes: shared_battle_phase_active_for_layout(layout)?,
         },
         RuntimeRoutine {
             role: "sound-test battle remap-state initializer",
@@ -97,9 +97,9 @@ pub(crate) fn build_runtime_routines_for_layout(
             bytes: initialize_sound_test_battle_remap_for_layout(layout)?,
         },
         RuntimeRoutine {
-            role: "battle-exit remap-state clear",
-            address: layout.clear_remap_state_after_battle,
-            bytes: clear_remap_state_after_battle_for_layout(layout)?,
+            role: "inactive shared-battle remap-state clear",
+            address: layout.clear_remap_state_outside_shared_battle,
+            bytes: clear_remap_state_outside_shared_battle_for_layout(layout)?,
         },
         RuntimeRoutine {
             role: "battle text projection wrapper",
@@ -163,13 +163,13 @@ pub(super) fn composition_dispatch_for_layout(
         Instruction::Pha,
         Instruction::Tya,
         Instruction::Pha,
-        Instruction::JsrAbsolute(layout.battle_surface_active),
+        Instruction::JsrAbsolute(layout.shared_battle_phase_active),
     ];
     let battle_placeholder = instructions.len();
     instructions.push(Instruction::BneAbsolute(layout.dispatch));
     instructions.extend([
-        Instruction::LdaAbsolute(MAIN_STATE_ADDRESS),
-        Instruction::JsrAbsolute(layout.clear_remap_state_after_battle),
+        Instruction::LdaAbsolute(SHARED_BATTLE_PHASE_ADDRESS),
+        Instruction::JsrAbsolute(layout.clear_remap_state_outside_shared_battle),
         Instruction::JmpAbsolute(layout.dispatch),
     ]);
     let non_battle_restore_placeholder = instructions.len() - 1;
@@ -181,9 +181,9 @@ pub(super) fn composition_dispatch_for_layout(
     ]);
     let uploaded_placeholder = instructions.len();
     instructions.push(Instruction::BneAbsolute(layout.dispatch));
-    instructions.push(Instruction::LdaAbsolute(BATTLE_ACTIVE_FLAG));
-    let inactive_placeholder = instructions.len();
-    instructions.push(Instruction::BeqAbsolute(layout.dispatch));
+    instructions.push(Instruction::LdaAbsolute(SHARED_BATTLE_PHASE_ADDRESS));
+    let inactive_phase_placeholder = instructions.len();
+    instructions.push(Instruction::BmiAbsolute(layout.dispatch));
     instructions.extend([
         Instruction::LdaZeroPage(PPU_MASK_SHADOW),
         Instruction::CmpImmediate(UPLOAD_RENDER_MASK),
@@ -196,7 +196,7 @@ pub(super) fn composition_dispatch_for_layout(
     ]);
     let restore = next_address(layout.dispatch, &instructions)?;
     instructions[non_battle_restore_placeholder] = Instruction::JmpAbsolute(restore);
-    instructions[inactive_placeholder] = Instruction::BeqAbsolute(restore);
+    instructions[inactive_phase_placeholder] = Instruction::BmiAbsolute(restore);
     instructions[uploaded_placeholder] = Instruction::BneAbsolute(restore);
     instructions[wrong_render_state_placeholder] = Instruction::BneAbsolute(restore);
     instructions.extend([
@@ -356,32 +356,31 @@ fn compose_page_for_layout(
 }
 
 #[cfg(test)]
-pub(super) fn clear_remap_state_after_battle() -> Result<Vec<u8>> {
-    clear_remap_state_after_battle_for_layout(PROBE_RUNTIME_LAYOUT)
+pub(super) fn clear_remap_state_outside_shared_battle() -> Result<Vec<u8>> {
+    clear_remap_state_outside_shared_battle_for_layout(PROBE_RUNTIME_LAYOUT)
 }
 
-fn clear_remap_state_after_battle_for_layout(
+fn clear_remap_state_outside_shared_battle_for_layout(
     layout: BattleCompositionRuntimeLayout,
 ) -> Result<Vec<u8>> {
     let mut instructions = vec![
-        Instruction::CmpImmediate(PLAYER_INITIATED_BATTLE_STATE + 1),
-        Instruction::BeqAbsolute(layout.clear_remap_state_after_battle),
-        Instruction::CmpImmediate(ENEMY_INITIATED_BATTLE_STATE + 1),
-    ];
-    let not_exit_placeholder = instructions.len();
-    instructions.push(Instruction::BneAbsolute(
-        layout.clear_remap_state_after_battle,
-    ));
-    let clear = next_address(layout.clear_remap_state_after_battle, &instructions)?;
-    instructions[1] = Instruction::BeqAbsolute(clear);
-    instructions.extend([
+        Instruction::CmpImmediate(SHARED_BATTLE_PHASE_COUNT),
+        Instruction::BccAbsolute(layout.clear_remap_state_outside_shared_battle),
         Instruction::LdaImmediate(0),
         Instruction::StaAbsolute(REMAP_STATE_ADDRESS),
-    ]);
-    let done = next_address(layout.clear_remap_state_after_battle, &instructions)?;
-    instructions[not_exit_placeholder] = Instruction::BneAbsolute(done);
-    instructions.push(Instruction::Rts);
-    assemble_at(layout.clear_remap_state_after_battle, &instructions)
+        Instruction::Rts,
+    ];
+    let done = next_address(
+        layout.clear_remap_state_outside_shared_battle,
+        &instructions,
+    )?
+    .checked_sub(1)
+    .context("inactive shared-battle cleanup return address underflow")?;
+    instructions[1] = Instruction::BccAbsolute(done);
+    assemble_at(
+        layout.clear_remap_state_outside_shared_battle,
+        &instructions,
+    )
 }
 
 #[cfg(test)]
@@ -548,47 +547,24 @@ fn project_dialogue_selector_for_layout(layout: BattleCompositionRuntimeLayout) 
 }
 
 #[cfg(test)]
-pub(super) fn battle_surface_active() -> Result<Vec<u8>> {
-    battle_surface_active_for_layout(PROBE_RUNTIME_LAYOUT)
+pub(super) fn shared_battle_phase_active() -> Result<Vec<u8>> {
+    shared_battle_phase_active_for_layout(PROBE_RUNTIME_LAYOUT)
 }
 
-pub(super) fn battle_surface_active_for_layout(
+pub(super) fn shared_battle_phase_active_for_layout(
     layout: BattleCompositionRuntimeLayout,
 ) -> Result<Vec<u8>> {
     let mut instructions = vec![
-        Instruction::LdaAbsolute(MAIN_STATE_ADDRESS),
-        Instruction::CmpImmediate(PLAYER_INITIATED_BATTLE_STATE),
+        Instruction::LdaAbsolute(SHARED_BATTLE_PHASE_ADDRESS),
+        Instruction::CmpImmediate(SHARED_BATTLE_PHASE_COUNT),
     ];
-    let player_battle_placeholder = instructions.len();
-    instructions.push(Instruction::BeqAbsolute(layout.battle_surface_active));
-    instructions.push(Instruction::CmpImmediate(ENEMY_INITIATED_BATTLE_STATE));
-    let enemy_battle_placeholder = instructions.len();
-    instructions.push(Instruction::BeqAbsolute(layout.battle_surface_active));
-    instructions.push(Instruction::CmpImmediate(SOUND_TEST_MAIN_STATE));
-    let inactive_main_state_placeholder = instructions.len();
-    instructions.push(Instruction::BneAbsolute(layout.battle_surface_active));
-    instructions.extend([
-        Instruction::LdaAbsolute(DIALOGUE_SUBSTATE_ADDRESS),
-        Instruction::CmpImmediate(SOUND_TEST_BATTLE_SUBSTATE),
-    ]);
-    let inactive_substate_placeholder = instructions.len();
-    instructions.push(Instruction::BneAbsolute(layout.battle_surface_active));
-    instructions.extend([
-        Instruction::LdaAbsolute(SOUND_TEST_BATTLE_PHASE_ADDRESS),
-        Instruction::CmpImmediate(SOUND_TEST_SHARED_BATTLE_PHASE),
-    ]);
-    let inactive_phase_placeholder = instructions.len();
-    instructions.push(Instruction::BneAbsolute(layout.battle_surface_active));
-    let active = next_address(layout.battle_surface_active, &instructions)?;
-    instructions[player_battle_placeholder] = Instruction::BeqAbsolute(active);
-    instructions[enemy_battle_placeholder] = Instruction::BeqAbsolute(active);
-    instructions.extend([Instruction::LdaImmediate(1), Instruction::Rts]);
-    let inactive = next_address(layout.battle_surface_active, &instructions)?;
-    instructions[inactive_main_state_placeholder] = Instruction::BneAbsolute(inactive);
-    instructions[inactive_substate_placeholder] = Instruction::BneAbsolute(inactive);
-    instructions[inactive_phase_placeholder] = Instruction::BneAbsolute(inactive);
+    let active_placeholder = instructions.len();
+    instructions.push(Instruction::BccAbsolute(layout.shared_battle_phase_active));
     instructions.extend([Instruction::LdaImmediate(0), Instruction::Rts]);
-    assemble_at(layout.battle_surface_active, &instructions)
+    let active = next_address(layout.shared_battle_phase_active, &instructions)?;
+    instructions[active_placeholder] = Instruction::BccAbsolute(active);
+    instructions.extend([Instruction::LdaImmediate(1), Instruction::Rts]);
+    assemble_at(layout.shared_battle_phase_active, &instructions)
 }
 
 #[cfg(test)]
@@ -625,7 +601,7 @@ fn text_projection_wrapper_for_layout(layout: BattleCompositionRuntimeLayout) ->
         Instruction::Pha,
         Instruction::LdaIndirectY(RECIPE_POINTER_LOW),
         Instruction::StaZeroPage(PHYSICAL_TILE_CODE),
-        Instruction::JsrAbsolute(layout.battle_surface_active),
+        Instruction::JsrAbsolute(layout.shared_battle_phase_active),
     ];
     let natural_state_placeholder = instructions.len();
     instructions.push(Instruction::BeqAbsolute(layout.text_projection_wrapper));
@@ -700,7 +676,7 @@ fn battle_right_selector_for_layout(
     let mut instructions = vec![
         Instruction::Php,
         Instruction::Pha,
-        Instruction::JsrAbsolute(layout.battle_surface_active),
+        Instruction::JsrAbsolute(layout.shared_battle_phase_active),
     ];
     let inactive_surface_placeholder = instructions.len();
     instructions.push(Instruction::BeqAbsolute(address));
@@ -768,7 +744,7 @@ pub(super) fn battle_central_right_fd_selector_for_layout(
     let mut instructions = vec![
         Instruction::Php,
         Instruction::Pha,
-        Instruction::JsrAbsolute(layout.battle_surface_active),
+        Instruction::JsrAbsolute(layout.shared_battle_phase_active),
     ];
     let inactive_surface_placeholder = instructions.len();
     instructions.push(Instruction::BeqAbsolute(address));

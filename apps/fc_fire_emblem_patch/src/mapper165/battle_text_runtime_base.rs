@@ -300,7 +300,7 @@ pub(crate) fn build_battle_text_runtime_base_on_parity(
 
     let output_sha1 = sha1_hex(&output);
     let report = BattleTextRuntimeBaseReport {
-        schema: 3,
+        schema: 4,
         source_sha1: EXPECTED_SOURCE_SHA1,
         fixed_workspace_sha1: sha1_hex(&fs::read(fixed_workspace_path)?),
         dialogue_workspace_sha1: sha1_hex(&fs::read(dialogue_workspace_path)?),
@@ -565,7 +565,7 @@ mod tests {
     #[test]
     fn report_omits_translation_content_and_private_paths() {
         let report = BattleTextRuntimeBaseReport {
-            schema: 3,
+            schema: 4,
             source_sha1: EXPECTED_SOURCE_SHA1,
             fixed_workspace_sha1: "fixed".to_owned(),
             dialogue_workspace_sha1: "dialogue".to_owned(),
@@ -593,7 +593,7 @@ mod tests {
             observed_runtime_tuple_count: 5,
             maximum_observed_overlay_count: 88,
             stable_color_count: CANONICAL_ABSTRACT_COLOR_COUNT,
-            borrowed_logical_code_count: 2,
+            borrowed_logical_code_count: 3,
             abstract_assignment_sha1: "abstract".to_owned(),
             canonical_assignment_sha1: "canonical".to_owned(),
             canonical_code_table_byte_count: CANONICAL_ABSTRACT_COLOR_COUNT,

@@ -27,7 +27,7 @@ mod unit_ui;
 mod weapon_shop;
 
 const MAIN_DIALOGUE_REPORT_SCHEMA: u8 = 6;
-const BATTLE_REPORT_SCHEMA: u8 = 13;
+const BATTLE_REPORT_SCHEMA: u8 = 14;
 
 pub(super) struct LifetimeInputBindings<'a> {
     pub(super) source_path: &'a Path,
