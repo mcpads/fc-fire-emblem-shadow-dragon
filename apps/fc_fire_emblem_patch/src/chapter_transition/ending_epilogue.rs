@@ -4,8 +4,8 @@ use anyhow::{Context, Result, ensure};
 use retro_rp2a03::decode_bytes;
 use serde::Serialize;
 
+mod observation_plan;
 mod observed_variants;
-mod probe_plan;
 
 use crate::{
     dialogue_inventory::{
@@ -27,8 +27,10 @@ use super::{
         ROSTER_RECORD_CAPACITY, ROSTER_RECORD_STRIDE,
     },
 };
+use observation_plan::{
+    EndingEpilogueVariantObservationPlan, ending_epilogue_variant_observation_plan,
+};
 use observed_variants::{EndingEpilogueVariantObservation, ending_epilogue_variant_observation};
-use probe_plan::{EndingEpilogueVariantObservationPlan, ending_epilogue_variant_observation_plan};
 
 const INITIAL_CURSOR: u8 = 0x35;
 const FIRST_CANDIDATE_ID: u8 = 0x35;

@@ -6,8 +6,6 @@ use serde::Serialize;
 use crate::{
     hangul_page_plan::assemble_hangul_page_pack,
     localization::OptionsLocalization,
-    mmc5_chr::switchable_bank_file_offset,
-    mmc5_prg::{count_direct_transfers_to_range, fixed_bank_file_offset},
     options::{OPTIONS_TABLE_OFFSET, SOURCE_OPTIONS_TABLE},
     rom::{EXPECTED_SOURCE_SHA1, PRG_SIZE, Rom},
     roster_localization::{
@@ -15,6 +13,8 @@ use crate::{
         build_roster_page_pair,
     },
     sha1_hex,
+    source_prg::switchable_bank_file_offset,
+    source_prg::{count_direct_transfers_to_range, fixed_bank_file_offset},
     tracked::TrackedImage,
 };
 

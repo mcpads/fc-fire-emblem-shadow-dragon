@@ -13,6 +13,8 @@ use crate::{
     front_end_menu::FRONT_END_RESULT_DIALOGUE_RECORD_IDS,
     mapper165::battle_codebook_plan::GlyphWorkset,
     rom::Rom,
+    shop_flow::bind_shop_item_composition_source,
+    translation_coverage::CHOICE_LABEL_SCREEN_ROLES,
 };
 
 use super::{
@@ -27,10 +29,13 @@ use super::{
 pub(super) struct ChoiceResidencyPlan {
     strategy: &'static str,
     composite_state: u8,
-    continue_prompt_record_id: &'static str,
-    front_end_result_record_ids: [&'static str; 4],
+    chapter_save_retained_record_ids: [&'static str; 2],
+    chapter_save_retained_record_count: usize,
+    front_end_choice_record_id: &'static str,
     storage_choice_record_id: String,
     direct_choice_composite_producer_count: usize,
+    selling_facilities: [u8; 3],
+    shop_choice_record_ids: Vec<String>,
     resident_record_ids: Vec<String>,
     resident_workset_count: usize,
     choice_glyph_count: usize,
@@ -41,6 +46,8 @@ pub(super) struct ChoiceResidencyPlan {
     storage_follow_up_preserved_active_code_count: usize,
     storage_follow_up_total_slot_demand: usize,
     fixed_assignment_sha1: String,
+    every_shop_choice_record_resident: bool,
+    every_retained_chapter_save_record_resident: bool,
     every_choice_glyph_has_one_stable_code: bool,
     every_resident_page_contains_every_choice_glyph: bool,
     #[serde(skip)]
@@ -52,6 +59,10 @@ pub(super) struct ChoiceResidencyPlan {
 impl ChoiceResidencyPlan {
     pub(super) fn composite_state(&self) -> u8 {
         self.composite_state
+    }
+
+    pub(super) fn projected_shop_screen_roles(&self) -> &'static [&'static str] {
+        &CHOICE_LABEL_SCREEN_ROLES
     }
 }
 
@@ -75,17 +86,34 @@ pub(super) fn plan_choice_residency(
         direct_choice_composite_producers.len() == 3,
         "shared yes-no composite producer population changed"
     );
+    let shop = bind_shop_item_composition_source(rom)?;
+    let shop_choice_record_ids = shop
+        .shared_yes_no_record_indices()
+        .iter()
+        .map(|index| format!("shop-and-item-dialogue:{index:03}"))
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        shop.selling_facilities() == [0x01, 0x02, 0x05] && shop_choice_record_ids.len() == 12,
+        "selling-facility shared yes-no population changed"
+    );
     let choice_glyphs = choices.unique_glyphs();
     ensure!(
         !choice_glyphs.is_empty(),
         "choice residency has no translated glyphs"
     );
 
-    let resident_record_ids = FRONT_END_RESULT_DIALOGUE_RECORD_IDS
-        .into_iter()
-        .map(str::to_owned)
+    let chapter_save_retained_record_ids = records.retained_presentation_path();
+    let front_end_choice_record_id = FRONT_END_RESULT_DIALOGUE_RECORD_IDS[0];
+    let resident_record_ids = shop_choice_record_ids
+        .iter()
+        .cloned()
+        .chain(
+            chapter_save_retained_record_ids
+                .into_iter()
+                .map(str::to_owned),
+        )
         .chain([
-            records.continue_prompt.to_owned(),
+            front_end_choice_record_id.to_owned(),
             storage_choice_record_id.clone(),
         ])
         .collect::<BTreeSet<_>>();
@@ -116,12 +144,15 @@ pub(super) fn plan_choice_residency(
     );
 
     Ok(ChoiceResidencyPlan {
-        strategy: "assign one injective fallback choice-label codebook across chapter save completion, storage follow-up, and front-end copy/delete/error results; keep shop questions on their separately routed weapon-shop string cave and codebook",
+        strategy: "derive every shared yes-no dialogue from the three source producer sites, extend chapter-save ownership through the source-bound retained prompt-to-notice presentation path, and assign one canonical codebook across every weapon-shop, tool-shop, secret-shop, storage, front-end confirmation, and chapter-save record",
         composite_state: CHOICE_LABEL_COMPOSITE_STATE,
-        continue_prompt_record_id: records.continue_prompt,
-        front_end_result_record_ids: FRONT_END_RESULT_DIALOGUE_RECORD_IDS,
+        chapter_save_retained_record_ids,
+        chapter_save_retained_record_count: chapter_save_retained_record_ids.len(),
+        front_end_choice_record_id,
         storage_choice_record_id,
         direct_choice_composite_producer_count: direct_choice_composite_producers.len(),
+        selling_facilities: shop.selling_facilities(),
+        shop_choice_record_ids: shop_choice_record_ids.into_iter().collect(),
         resident_record_ids: resident_record_ids.into_iter().collect(),
         resident_workset_count: resident_workset_indices.len(),
         choice_glyph_count: choice_glyphs.len(),
@@ -133,6 +164,8 @@ pub(super) fn plan_choice_residency(
             .preserved_active_code_count,
         storage_follow_up_total_slot_demand: storage_follow_up_demand.total_slot_demand,
         fixed_assignment_sha1: assignment_sha1(&choice_glyph_codes),
+        every_shop_choice_record_resident: true,
+        every_retained_chapter_save_record_resident: true,
         every_choice_glyph_has_one_stable_code: true,
         every_resident_page_contains_every_choice_glyph: true,
         augmented_worksets,
@@ -227,11 +260,27 @@ mod tests {
     }
 
     fn resident_record_ids(storage_record_id: &str) -> BTreeSet<String> {
-        FRONT_END_RESULT_DIALOGUE_RECORD_IDS
-            .into_iter()
-            .chain(["victory-and-defeat-dialogue:000", storage_record_id])
-            .map(str::to_owned)
-            .collect()
+        [
+            FRONT_END_RESULT_DIALOGUE_RECORD_IDS[0],
+            "shop-and-item-dialogue:001",
+            "shop-and-item-dialogue:004",
+            "shop-and-item-dialogue:008",
+            "shop-and-item-dialogue:011",
+            "shop-and-item-dialogue:052",
+            "shop-and-item-dialogue:053",
+            "shop-and-item-dialogue:054",
+            "shop-and-item-dialogue:055",
+            "shop-and-item-dialogue:072",
+            "shop-and-item-dialogue:075",
+            "shop-and-item-dialogue:078",
+            "shop-and-item-dialogue:079",
+            "victory-and-defeat-dialogue:000",
+            "victory-and-defeat-dialogue:001",
+            storage_record_id,
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
     }
 
     #[test]

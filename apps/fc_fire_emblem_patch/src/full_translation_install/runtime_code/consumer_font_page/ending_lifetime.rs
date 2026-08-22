@@ -17,7 +17,11 @@ use super::super::{
     },
 };
 use crate::{
-    chapter_transition::ENDING_RECORD_PHASE_ADDRESS,
+    chapter_transition::{
+        ENDING_BRIDGE_CLEAR_CALL_SITE, ENDING_BRIDGE_CLEAR_CALL_SOURCE,
+        ENDING_BRIDGE_DRAW_CALL_SITE, ENDING_BRIDGE_DRAW_CALL_SOURCE, ENDING_BRIDGE_SOURCE_CLEAR,
+        ENDING_BRIDGE_SOURCE_RENDERER, ENDING_RECORD_PHASE_ADDRESS,
+    },
     dialogue_inventory::switchable_cpu_to_file_offset,
     full_translation_install::runtime_state_storage::{CONSUMER_FONT_PAGE, CURRENT_PAGE_RESIDENCY},
     rom::Rom,
@@ -31,6 +35,8 @@ const ENDING_BANK: u8 = 0x04;
 const ENDING_RECORD_ENTER_SITE: u16 = 0xA3DC;
 const ENDING_RECORD_EXIT_SITE: u16 = 0xA48F;
 const ENDING_CHARACTER_EPILOGUE_FONT_RESIDENCY_EXIT_SITE: u16 = 0xA27A;
+const ENDING_BRIDGE_FONT_SUPPORT_ORIGIN: u16 = 0xBD82;
+const ENDING_BRIDGE_FONT_SUPPORT_END: u16 = 0xBD97;
 
 const ENDING_RECORD_ENTER_ANCHOR_ADDRESS: u16 = 0xA3D9;
 const ENDING_RECORD_ENTER_ANCHOR: [u8; 7] = [0xCA, 0x10, 0xEE, 0xEE, 0x31, 0x77, 0x60];
@@ -115,6 +121,9 @@ pub(in crate::full_translation_install) struct EndingFontLifetimeRuntime {
     pub(in crate::full_translation_install) enter_ending_record: RuntimeRoutine,
     pub(in crate::full_translation_install) exit_tail: RuntimeRoutine,
     pub(in crate::full_translation_install) exit_head: RuntimeRoutine,
+    pub(in crate::full_translation_install) bridge_support: RuntimeRoutine,
+    bridge_draw: u16,
+    bridge_clear: u16,
 }
 
 impl EndingFontLifetimeRuntime {
@@ -124,8 +133,8 @@ impl EndingFontLifetimeRuntime {
         [&self.restore_source_pair, &self.enter_ending_record]
     }
 
-    pub(in crate::full_translation_install) fn hooks(&self) -> Result<[DialogueRuntimeHook; 3]> {
-        Ok([
+    pub(in crate::full_translation_install) fn hooks(&self) -> Result<Vec<DialogueRuntimeHook>> {
+        Ok(vec![
             hook(
                 DialogueRuntimeHookRole::EndingRecordFontPageEnter,
                 "ending record font-page entry hook",
@@ -137,6 +146,23 @@ impl EndingFontLifetimeRuntime {
                 "ending record font-page exit hook",
                 ENDING_RECORD_EXIT_SITE,
                 self.exit_head.address,
+            )?,
+            switchable_routine_installation_hook(
+                DialogueRuntimeHookRole::EndingBridgeFontPageSupport,
+                "ending bridge font-page support routine",
+                &self.bridge_support,
+            ),
+            hook(
+                DialogueRuntimeHookRole::EndingBridgeFontPageEnter,
+                "ending bridge font-page entry hook",
+                ENDING_BRIDGE_DRAW_CALL_SITE,
+                self.bridge_draw,
+            )?,
+            hook(
+                DialogueRuntimeHookRole::EndingBridgeFontPageExit,
+                "ending bridge font-page exit hook",
+                ENDING_BRIDGE_CLEAR_CALL_SITE,
+                self.bridge_clear,
             )?,
             hook(
                 DialogueRuntimeHookRole::EndingCharacterEpilogueFontPageExit,
@@ -214,6 +240,27 @@ pub(in crate::full_translation_install) fn bind_ending_font_lifetime(
         decode_rp2a03_sequence(expected, address, role)?;
     }
 
+    for (address, expected, role) in [
+        (
+            ENDING_BRIDGE_DRAW_CALL_SITE,
+            ENDING_BRIDGE_DRAW_CALL_SOURCE.as_slice(),
+            "draw the ending bridge text",
+        ),
+        (
+            ENDING_BRIDGE_CLEAR_CALL_SITE,
+            ENDING_BRIDGE_CLEAR_CALL_SOURCE.as_slice(),
+            "clear the ending bridge text",
+        ),
+    ] {
+        for (image_role, rom) in [("source", source), ("candidate", candidate)] {
+            ensure!(
+                switchable_slice(rom, ENDING_BANK, address, expected.len())? == expected,
+                "{image_role} ending bridge lifetime changed while trying to {role} at {ENDING_BANK:02X}:{address:04X}"
+            );
+        }
+        decode_rp2a03_sequence(expected, address, role)?;
+    }
+
     for (bank, address, expected, role) in [
         (
             EXIT_CAVE_FALSE_TRANSFER_ONE_BANK,
@@ -254,6 +301,17 @@ pub(in crate::full_translation_install) fn bind_ending_font_lifetime(
             .all(|byte| *byte == 0xFF),
             "{image_role} ending font exit-tail cave is not exact FF"
         );
+        ensure!(
+            switchable_slice(
+                rom,
+                ENDING_BANK,
+                ENDING_BRIDGE_FONT_SUPPORT_ORIGIN,
+                usize::from(ENDING_BRIDGE_FONT_SUPPORT_END - ENDING_BRIDGE_FONT_SUPPORT_ORIGIN),
+            )?
+            .iter()
+            .all(|byte| *byte == 0xFF),
+            "{image_role} ending bridge font-support cave is not exact FF"
+        );
     }
     ensure!(
         raw_direct_transfer_candidates_to_range(
@@ -272,6 +330,16 @@ pub(in crate::full_translation_install) fn bind_ending_font_lifetime(
         .is_empty(),
         "source raw transfer candidates into the ending font exit-tail cave changed"
     );
+    ensure!(
+        reachable_direct_transfer_candidates_to_switchable_range(
+            source,
+            ENDING_BANK,
+            ENDING_BRIDGE_FONT_SUPPORT_ORIGIN,
+            ENDING_BRIDGE_FONT_SUPPORT_END,
+        )?
+        .is_empty(),
+        "source raw transfer candidates into the ending bridge font-support cave changed"
+    );
     Ok(())
 }
 
@@ -287,6 +355,11 @@ pub(in crate::full_translation_install) fn build_ending_font_lifetime(
         build_enter_ending_record(enter_origin, consumer_page_activation, ending_record_route)?;
     let exit_tail = build_exit_tail(ENDING_FONT_EXIT_TAIL_ORIGIN, restore_source_pair.address)?;
     let exit_head = build_exit_head(exit_tail.address)?;
+    let (bridge_support, bridge_draw, bridge_clear) = build_bridge_support(
+        consumer_page_activation,
+        ending_record_route,
+        restore_source_pair.address,
+    )?;
 
     ensure!(
         end_address(&exit_head)? == ENDING_FONT_EXIT_HEAD_END,
@@ -301,7 +374,57 @@ pub(in crate::full_translation_install) fn build_ending_font_lifetime(
         enter_ending_record,
         exit_tail,
         exit_head,
+        bridge_support,
+        bridge_draw,
+        bridge_clear,
     })
+}
+
+fn build_bridge_support(
+    consumer_page_activation: u16,
+    ending_record_route: u8,
+    restore_source_pair: u16,
+) -> Result<(RuntimeRoutine, u16, u16)> {
+    let bridge_draw = ENDING_BRIDGE_FONT_SUPPORT_ORIGIN;
+    let draw = assemble_at(
+        bridge_draw,
+        &[
+            Instruction::Pha,
+            Instruction::LdaImmediate(ending_record_route),
+            Instruction::JsrAbsolute(consumer_page_activation),
+            Instruction::Pla,
+            Instruction::JmpAbsolute(ENDING_BRIDGE_SOURCE_RENDERER),
+        ],
+    )?;
+    let bridge_clear = bridge_draw
+        .checked_add(u16::try_from(draw.len()).context("ending bridge draw length overflow")?)
+        .context("ending bridge clear address overflow")?;
+    let clear = assemble_at(
+        bridge_clear,
+        &[
+            Instruction::JsrAbsolute(ENDING_BRIDGE_SOURCE_CLEAR),
+            Instruction::LdaImmediate(0),
+            Instruction::StaAbsolute(CONSUMER_FONT_PAGE),
+            Instruction::JmpAbsolute(restore_source_pair),
+        ],
+    )?;
+    let mut bytes = draw;
+    bytes.extend_from_slice(&clear);
+    ensure!(
+        bridge_draw
+            + u16::try_from(bytes.len()).context("ending bridge support length overflow")?
+            == ENDING_BRIDGE_FONT_SUPPORT_END,
+        "ending bridge font support no longer exactly fills its owned cave"
+    );
+    Ok((
+        RuntimeRoutine {
+            role: "ending bridge font-page support",
+            address: ENDING_BRIDGE_FONT_SUPPORT_ORIGIN,
+            bytes,
+        },
+        bridge_draw,
+        bridge_clear,
+    ))
 }
 
 fn build_restore_source_pair(origin: u16) -> Result<RuntimeRoutine> {
@@ -400,6 +523,22 @@ fn hook(
     })
 }
 
+fn switchable_routine_installation_hook(
+    role: DialogueRuntimeHookRole,
+    write_role: &'static str,
+    routine: &RuntimeRoutine,
+) -> DialogueRuntimeHook {
+    DialogueRuntimeHook {
+        role,
+        write_role,
+        site: DialogueRuntimeHookSite::Switchable {
+            bank: ENDING_BANK,
+            address: routine.address,
+        },
+        bytes: routine.bytes.clone(),
+    }
+}
+
 fn end_address(routine: &RuntimeRoutine) -> Result<u16> {
     routine
         .address
@@ -453,6 +592,63 @@ fn raw_direct_transfer_candidates_to_range(
     Ok(candidates)
 }
 
+/// 한 스위처블 뱅크의 동굴은 그 뱅크 자체와 항상 실행 가능한 마지막 고정 뱅크에서
+/// 들어오는 직접 전이만 소유권 후보가 된다. 다른 스위처블 뱅크의 같은 CPU 주소는
+/// 서로 다른 물리 PRG이고, 그 명령이 실행되는 동안 대상도 그 다른 뱅크에 남는다.
+fn reachable_direct_transfer_candidates_to_switchable_range(
+    rom: &Rom,
+    owner_bank: u8,
+    start: u16,
+    end: u16,
+) -> Result<Vec<RawExitCaveTransferCandidate>> {
+    const BANK_BYTE_COUNT: usize = 16 * 1024;
+    ensure!(
+        start >= 0x8000 && end <= 0xC000 && start < end,
+        "switchable direct-transfer target range is invalid"
+    );
+    ensure!(
+        rom.prg().len().is_multiple_of(BANK_BYTE_COUNT),
+        "PRG is not a whole number of 16 KiB banks"
+    );
+    let bank_count = rom.prg().len() / BANK_BYTE_COUNT;
+    let owner_index = usize::from(owner_bank);
+    ensure!(
+        owner_index < bank_count,
+        "switchable cave owner bank is outside PRG"
+    );
+    let fixed_index = bank_count - 1;
+    let mut candidates = Vec::new();
+    for bank_index in [owner_index, fixed_index]
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>()
+    {
+        let bank = &rom.prg()[bank_index * BANK_BYTE_COUNT..(bank_index + 1) * BANK_BYTE_COUNT];
+        for (offset, window) in bank.windows(3).enumerate() {
+            if !matches!(window[0], 0x20 | 0x4C) {
+                continue;
+            }
+            let target = u16::from_le_bytes([window[1], window[2]]);
+            if !(start..end).contains(&target) {
+                continue;
+            }
+            let window_base = if bank_index == fixed_index {
+                0xC000
+            } else {
+                0x8000
+            };
+            candidates.push(RawExitCaveTransferCandidate {
+                bank: u8::try_from(bank_index)
+                    .context("switchable-cave candidate bank exceeds u8")?,
+                cpu_address: window_base
+                    + u16::try_from(offset)
+                        .context("switchable-cave candidate offset exceeds u16")?,
+                target,
+            });
+        }
+    }
+    Ok(candidates)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -486,6 +682,8 @@ mod tests {
         pc: u16,
         activation_route: Option<u8>,
         restored_pages: Vec<(u16, u8)>,
+        common_text_render_count: usize,
+        ending_bridge_clear_count: usize,
         local_restore: u16,
         local_exit_head: u16,
     }
@@ -506,14 +704,16 @@ mod tests {
                 pc: entry,
                 activation_route: None,
                 restored_pages: Vec::new(),
+                common_text_render_count: 0,
+                ending_bridge_clear_count: 0,
                 local_restore: runtime.restore_source_pair.address,
                 local_exit_head: runtime.exit_head.address,
             };
-            for routine in runtime
-                .reclaimed_support_routines()
-                .into_iter()
-                .chain([&runtime.exit_tail, &runtime.exit_head])
-            {
+            for routine in runtime.reclaimed_support_routines().into_iter().chain([
+                &runtime.exit_tail,
+                &runtime.exit_head,
+                &runtime.bridge_support,
+            ]) {
                 let start = usize::from(routine.address);
                 cpu.memory[start..start + routine.bytes.len()].copy_from_slice(&routine.bytes);
             }
@@ -533,6 +733,8 @@ mod tests {
                             cpu.memory[usize::from(CONSUMER_FONT_PAGE)] = cpu.a;
                         } else if [RIGHT_FD_HELPER, RIGHT_FE_HELPER].contains(&target) {
                             cpu.restored_pages.push((target, cpu.a));
+                        } else if target == ENDING_BRIDGE_SOURCE_CLEAR {
+                            cpu.ending_bridge_clear_count += 1;
                         } else if [cpu.local_restore, cpu.local_exit_head].contains(&target) {
                             let return_address = cpu.pc.wrapping_sub(1);
                             cpu.push((return_address >> 8) as u8);
@@ -547,7 +749,14 @@ mod tests {
                     }
                     0x28 => cpu.p = cpu.pop(),
                     0x48 => cpu.push(cpu.a),
-                    0x4C => cpu.pc = cpu.read_word_pc(),
+                    0x4C => {
+                        let target = cpu.read_word_pc();
+                        if target == ENDING_BRIDGE_SOURCE_RENDERER {
+                            cpu.common_text_render_count += 1;
+                            return cpu;
+                        }
+                        cpu.pc = target;
+                    }
                     0x60 => {
                         if cpu.sp == 0xFD {
                             return cpu;
@@ -661,6 +870,29 @@ mod tests {
         assert_eq!(cpu.activation_route, Some(ENDING_ROUTE));
         assert_eq!(cpu.a, 0xA6);
         assert_eq!(cpu.p, 0x21);
+    }
+
+    #[test]
+    fn phase_0b_bridge_selects_the_ending_page_for_draw_and_releases_it_after_clear() {
+        let runtime = runtime();
+        let memory = vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
+        let drawn = TestCpu::run(&runtime, runtime.bridge_draw, memory, 7, 0x21);
+        assert_eq!(drawn.activation_route, Some(ENDING_ROUTE));
+        assert_eq!(drawn.memory[usize::from(CONSUMER_FONT_PAGE)], ENDING_ROUTE);
+        assert_eq!(drawn.common_text_render_count, 1);
+        assert_eq!(drawn.a, 7);
+
+        let mut memory = drawn.memory;
+        memory[usize::from(RIGHT_FD_SOURCE_SHADOW)] = 0x12;
+        memory[usize::from(RIGHT_FE_SOURCE_SHADOW)] = 0x17;
+        memory[usize::from(CHR_SOURCE_HIGH_BITS)] = 0x20;
+        let cleared = TestCpu::run(&runtime, runtime.bridge_clear, memory, 0x55, 0x21);
+        assert_eq!(cleared.ending_bridge_clear_count, 1);
+        assert_eq!(cleared.memory[usize::from(CONSUMER_FONT_PAGE)], 0);
+        assert_eq!(
+            cleared.restored_pages,
+            [(RIGHT_FD_HELPER, 0x32), (RIGHT_FE_HELPER, 0x37)]
+        );
     }
 
     #[test]
@@ -842,6 +1074,13 @@ mod tests {
             end_address(&runtime.exit_head).unwrap(),
             ENDING_FONT_EXIT_HEAD_END
         );
+        assert_eq!(
+            runtime.bridge_support.address,
+            ENDING_BRIDGE_FONT_SUPPORT_ORIGIN
+        );
+        assert_eq!(runtime.bridge_support.bytes.len(), 21);
+        assert_eq!(runtime.bridge_draw, ENDING_BRIDGE_FONT_SUPPORT_ORIGIN);
+        assert_eq!(runtime.bridge_clear, ENDING_BRIDGE_FONT_SUPPORT_ORIGIN + 10);
     }
 
     #[test]
@@ -878,6 +1117,50 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("exit-tail cave is not exact FF"));
+    }
+
+    #[test]
+    fn switchable_cave_transfer_census_excludes_other_switchable_banks() {
+        let mut bytes = synthetic_image();
+        let unrelated = switchable_offset(0x06, 0x8100);
+        bytes[unrelated..unrelated + 3].copy_from_slice(&[
+            0x20,
+            ENDING_BRIDGE_FONT_SUPPORT_ORIGIN as u8,
+            (ENDING_BRIDGE_FONT_SUPPORT_ORIGIN >> 8) as u8,
+        ]);
+        let unrelated_rom = Rom::parse(bytes.clone()).unwrap();
+        assert!(
+            reachable_direct_transfer_candidates_to_switchable_range(
+                &unrelated_rom,
+                ENDING_BANK,
+                ENDING_BRIDGE_FONT_SUPPORT_ORIGIN,
+                ENDING_BRIDGE_FONT_SUPPORT_END,
+            )
+            .unwrap()
+            .is_empty()
+        );
+
+        let owner = switchable_offset(ENDING_BANK, 0x8100);
+        bytes[owner..owner + 3].copy_from_slice(&[
+            0x20,
+            ENDING_BRIDGE_FONT_SUPPORT_ORIGIN as u8,
+            (ENDING_BRIDGE_FONT_SUPPORT_ORIGIN >> 8) as u8,
+        ]);
+        let owner_rom = Rom::parse(bytes).unwrap();
+        assert_eq!(
+            reachable_direct_transfer_candidates_to_switchable_range(
+                &owner_rom,
+                ENDING_BANK,
+                ENDING_BRIDGE_FONT_SUPPORT_ORIGIN,
+                ENDING_BRIDGE_FONT_SUPPORT_END,
+            )
+            .unwrap(),
+            [RawExitCaveTransferCandidate {
+                bank: ENDING_BANK,
+                cpu_address: 0x8100,
+                target: ENDING_BRIDGE_FONT_SUPPORT_ORIGIN,
+            }]
+        );
     }
 
     fn synthetic_image() -> Vec<u8> {
@@ -932,6 +1215,16 @@ mod tests {
                 ENDING_BANK,
                 ENDING_CHARACTER_EPILOGUE_EXIT_ANCHOR_ADDRESS,
                 ENDING_CHARACTER_EPILOGUE_EXIT_ANCHOR.as_slice(),
+            ),
+            (
+                ENDING_BANK,
+                ENDING_BRIDGE_DRAW_CALL_SITE,
+                ENDING_BRIDGE_DRAW_CALL_SOURCE.as_slice(),
+            ),
+            (
+                ENDING_BANK,
+                ENDING_BRIDGE_CLEAR_CALL_SITE,
+                ENDING_BRIDGE_CLEAR_CALL_SOURCE.as_slice(),
             ),
             (
                 EXIT_CAVE_FALSE_TRANSFER_ONE_BANK,

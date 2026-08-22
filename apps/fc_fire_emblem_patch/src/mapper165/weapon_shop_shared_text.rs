@@ -21,6 +21,7 @@ pub(crate) use selectors::{
     SELECTED_ITEM_POINTER_LOAD_PRG_BANK, SELECTED_ITEM_SELECTOR_ADDRESS,
     build_choice_pointer_load_call, build_choice_pointer_selector,
     build_item_list_pointer_load_call, build_item_list_pointer_selector,
+    build_original_choice_pointer_load, build_original_selected_item_pointer_load,
     build_selected_item_pointer_load_call, build_selected_item_pointer_selector,
     build_weapon_shop_lifetime_identity_predicate,
 };

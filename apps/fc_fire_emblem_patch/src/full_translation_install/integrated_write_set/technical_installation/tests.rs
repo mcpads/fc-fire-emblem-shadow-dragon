@@ -1,5 +1,6 @@
 use super::*;
 use crate::full_translation_install::runtime_code::RuntimeRoutine;
+use crate::mapper165::BoundFontPageRuntimeTakeover;
 use crate::rom::HEADER_SIZE;
 
 fn check_inputs<'a>(
@@ -290,6 +291,13 @@ fn runtime_material_production_wiring_emits_every_routine_as_its_own_identity() 
         fixed_routines: Vec::new(),
         reclaimed_fixed_routines: Vec::new(),
         hooks: Vec::new(),
+        font_page_runtime_takeover: BoundFontPageRuntimeTakeover {
+            owner_cpu_address: 0xFF1D,
+            hook_cpu_address: 0xFF3A,
+            superseded_selector_cpu_address: 0xF990,
+            inactive_fallback_cpu_address: 0xFB80,
+            expected_hook_bytes: [0x4C, 0x90, 0xF9],
+        },
     };
 
     let required =

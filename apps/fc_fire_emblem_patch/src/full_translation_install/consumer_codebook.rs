@@ -199,6 +199,22 @@ impl ConsumerCodebookPlan {
         Ok(())
     }
 
+    pub(super) fn preserves_source_codes(
+        &self,
+        page_id: &str,
+        required_codes: &BTreeSet<u8>,
+    ) -> Result<bool> {
+        let page = self
+            .pages
+            .iter()
+            .find(|page| page.id == page_id)
+            .with_context(|| format!("consumer codebook lost the {page_id} page"))?;
+        Ok(page
+            .assignments
+            .values()
+            .all(|code| !required_codes.contains(code)))
+    }
+
     fn encode_for(
         &self,
         page_id: &str,

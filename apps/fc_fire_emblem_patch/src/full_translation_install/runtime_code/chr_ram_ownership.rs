@@ -12,7 +12,7 @@ use super::{RuntimeRoutine, next_address};
 use crate::{
     battle_runtime_state::BATTLE_RUNTIME_STATE,
     mapper165::battle_composition_runtime::{
-        CUMULATIVE_RUNTIME_LAYOUT, cumulative_shared_battle_phase_active_bytes,
+        CUMULATIVE_RUNTIME_LAYOUT, cumulative_battle_surface_active_bytes,
     },
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
@@ -28,9 +28,6 @@ const BATTLE_COMPOSITION_SKIP: u16 = 0xFC4F;
 pub(super) const BATTLE_COMPOSITION_CALL_SITE: u16 = 0xFC49;
 const PPU_MASK_SHADOW: u8 = 0xCC;
 const UPLOAD_RENDER_MASK: u8 = 0x06;
-/// 누적 후보에서 CHR-RAM 뱅크 값 0을 직접 고르는 세 경로다.
-const DIRECT_CHR_RAM_SELECTION_SITES: [u16; 3] = [0xFCE4, 0xFCEE, 0xFF36];
-
 /// 전투 합성 진입과 후보의 직접 CHR-RAM 선택자 전수를 현재 누적 롬에 결속한다.
 pub(super) fn bind_shared_chr_ram_ownership_boundary(candidate: &Rom) -> Result<()> {
     let expected_gate = battle_composition_gate()?;
@@ -43,18 +40,18 @@ pub(super) fn bind_shared_chr_ram_ownership_boundary(candidate: &Rom) -> Result<
         BATTLE_COMPOSITION_GATE,
         "battle composition arbitration gate",
     )?;
-    let surface_predicate = cumulative_shared_battle_phase_active_bytes()?;
+    let surface_predicate = cumulative_battle_surface_active_bytes()?;
     ensure!(
         fixed_bytes(
             candidate,
-            CUMULATIVE_RUNTIME_LAYOUT.shared_battle_phase_active,
+            CUMULATIVE_RUNTIME_LAYOUT.battle_surface_active,
             surface_predicate.len(),
         )? == surface_predicate,
         "battle composition surface predicate changed"
     );
     decode_rp2a03_sequence(
         &surface_predicate,
-        CUMULATIVE_RUNTIME_LAYOUT.shared_battle_phase_active,
+        CUMULATIVE_RUNTIME_LAYOUT.battle_surface_active,
         "battle composition surface predicate",
     )?;
 
@@ -77,11 +74,37 @@ pub(super) fn bind_shared_chr_ram_ownership_boundary(candidate: &Rom) -> Result<
                 .and_then(|relative| 0xC000_u16.checked_add(relative))
         })
         .collect::<Option<Vec<_>>>();
+    let actual_sites = actual_sites.context(
+        "candidate has a direct CHR-RAM selection outside the active fixed-bank runtime",
+    )?;
+    let owner_ranges = [
+        (
+            "battle page composition",
+            CUMULATIVE_RUNTIME_LAYOUT.compose_page,
+            CUMULATIVE_RUNTIME_LAYOUT.apply_recipe,
+            2,
+        ),
+        (
+            "central battle FD selection",
+            CUMULATIVE_RUNTIME_LAYOUT.battle_central_right_fd_selector,
+            CUMULATIVE_RUNTIME_LAYOUT.central_right_fe_resupply_natural_tail,
+            1,
+        ),
+    ];
     ensure!(
-        actual_sites.as_deref() == Some(DIRECT_CHR_RAM_SELECTION_SITES.as_slice()),
-        "candidate direct CHR-RAM selection inventory changed: expected {:?}, found {:?}",
-        DIRECT_CHR_RAM_SELECTION_SITES,
-        actual_sites
+        actual_sites.len()
+            == owner_ranges
+                .iter()
+                .map(|(_, _, _, count)| count)
+                .sum::<usize>()
+            && owner_ranges.iter().all(|(_, start, end, expected_count)| {
+                actual_sites
+                    .iter()
+                    .filter(|site| (*start..*end).contains(site))
+                    .count()
+                    == *expected_count
+            }),
+        "candidate direct CHR-RAM selection inventory escaped its generated owners: {actual_sites:?}"
     );
     Ok(())
 }
@@ -224,7 +247,7 @@ mod tests {
         let release = chr_ram_ownership_rom();
         let mut bytes = release.data().to_vec();
         let offset = crate::test_support::synthetic_fixed_bank_file_offset(
-            CUMULATIVE_RUNTIME_LAYOUT.shared_battle_phase_active,
+            CUMULATIVE_RUNTIME_LAYOUT.battle_surface_active,
         );
         bytes[offset] ^= 0x01;
         let mutated = Rom::parse(bytes).unwrap();
@@ -238,13 +261,17 @@ mod tests {
         let release = chr_ram_ownership_rom();
         let mut bytes = release.data().to_vec();
         let offset = crate::test_support::synthetic_fixed_bank_file_offset(
-            DIRECT_CHR_RAM_SELECTION_SITES[0],
+            CUMULATIVE_RUNTIME_LAYOUT.compose_page,
         );
         bytes[offset] ^= 0x01;
         let mutated = Rom::parse(bytes).unwrap();
 
         let error = bind_shared_chr_ram_ownership_boundary(&mutated).unwrap_err();
-        assert!(error.to_string().contains("selection inventory changed"));
+        assert!(
+            error
+                .to_string()
+                .contains("selection inventory escaped its generated owners")
+        );
     }
 
     #[test]
@@ -275,15 +302,19 @@ mod tests {
             crate::test_support::synthetic_fixed_bank_file_offset(BATTLE_COMPOSITION_GATE);
         bytes[composition_offset..composition_offset + composition_gate.len()]
             .copy_from_slice(&composition_gate);
-        let surface_predicate = cumulative_shared_battle_phase_active_bytes().unwrap();
+        let surface_predicate = cumulative_battle_surface_active_bytes().unwrap();
         let surface_offset = crate::test_support::synthetic_fixed_bank_file_offset(
-            CUMULATIVE_RUNTIME_LAYOUT.shared_battle_phase_active,
+            CUMULATIVE_RUNTIME_LAYOUT.battle_surface_active,
         );
         bytes[surface_offset..surface_offset + surface_predicate.len()]
             .copy_from_slice(&surface_predicate);
 
         let direct_selection = direct_chr_ram_selection().unwrap();
-        for address in DIRECT_CHR_RAM_SELECTION_SITES {
+        for address in [
+            CUMULATIVE_RUNTIME_LAYOUT.compose_page,
+            CUMULATIVE_RUNTIME_LAYOUT.compose_page + u16::try_from(direct_selection.len()).unwrap(),
+            CUMULATIVE_RUNTIME_LAYOUT.battle_central_right_fd_selector,
+        ] {
             let offset = crate::test_support::synthetic_fixed_bank_file_offset(address);
             bytes[offset..offset + direct_selection.len()].copy_from_slice(&direct_selection);
         }

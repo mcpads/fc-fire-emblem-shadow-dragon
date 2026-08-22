@@ -12,6 +12,7 @@ use super::{
     battle_translation::{
         BattleAnimationTranslationSurface, bind_battle_animation_translation_surface,
     },
+    ending_bridge::{EndingBridgeTranslationSurface, bind_ending_bridge_translation_surface},
     ending_epilogue::{EndingCharacterEpilogueTranslationSurface, bind_ending_character_epilogue},
     ending_scroll::{
         EndingChapterRecordTranslationSurface, bind_ending_chapter_record_translation_surface,
@@ -21,6 +22,7 @@ use super::{
 #[derive(Debug, Serialize)]
 pub(super) struct TranslationSurfaceContracts {
     battle_animation: BattleAnimationTranslationSurface,
+    ending_bridge: EndingBridgeTranslationSurface,
     ending_chapter_record_scroll: EndingChapterRecordTranslationSurface,
     ending_character_epilogue: EndingCharacterEpilogueTranslationSurface,
     dialogue_tables: Vec<TranslationSurfaceDialogueTableBinding>,
@@ -36,9 +38,10 @@ pub(super) fn bind_translation_surfaces(rom: &Rom) -> Result<TranslationSurfaceC
 
     Ok(TranslationSurfaceContracts {
         battle_animation: bind_battle_animation_translation_surface(rom, &dialogue_tables)?,
+        ending_bridge: bind_ending_bridge_translation_surface(rom)?,
         ending_chapter_record_scroll: bind_ending_chapter_record_translation_surface(rom)?,
         ending_character_epilogue: bind_ending_character_epilogue(rom, &dialogue_tables)?,
         dialogue_tables,
-        proof_boundary: "the supported Japanese ROM binds the common battle engine to five fixed text tables, twenty-two short message templates, one inline forecast label, and the separate battle-dialogue loader; it also binds the ending record stream and automatic character epilogue selectors 0x40 and 0x41; only code sets and structural counts are emitted",
+        proof_boundary: "the supported Japanese ROM binds the common battle engine to five fixed text tables, twenty-two short message templates, one inline forecast label, and the separate battle-dialogue loader; it also binds the ending record stream, the phase-0x0B ending bridge, and automatic character epilogue selectors 0x40 and 0x41; only code sets and structural counts are emitted",
     })
 }

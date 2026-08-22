@@ -6,9 +6,9 @@
 //! 정적·카탈로그 페이지를 다시 고르면 대사 타일이 깨지고, 반대로 대사 페이지에
 //! 겹쳐 보이는 라벨이나 품목 이름의 코드가 없으면 합성된 글자가 깨진다.
 //!
-//! 레코드 전환 잔여물은 여기서 코드북 합집합으로 숨기지 않는다. 최초·E4·E6·E7
-//! 새 레코드 진입이 공통 resolver에서 여섯 물리 줄을 비우므로, 이 단계는 실제로
-//! 겹쳐 보이는 고정 라벨만 대사 페이지와 같은 코드 배정으로 묶는다.
+//! 레코드 전환 뒤 PPU 네임테이블에 남는 행은 별도의 호출자 인계 수명 계획이 맡는다.
+//! 이 단계는 같은 원본 상태기계 결속을 재사용해 실제로 겹쳐 보이는 고정 라벨과 품목
+//! 이름을 대사 페이지의 코드 배정에 더한다.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -38,7 +38,7 @@ use super::{
 
 mod source_binding;
 
-use source_binding::bind_storage_dialogue_sources;
+use source_binding::{StorageSourceBinding, bind_storage_dialogue_sources};
 
 const DIALOGUE_TABLE_ID: &str = "shop-and-item-dialogue";
 pub(crate) const STORAGE_CHOICE_DIALOGUE_RECORD_ID: &str = "shop-and-item-dialogue:045";
@@ -98,7 +98,6 @@ pub(super) struct StorageDialogueResidencyPlan {
     fixed_assignment_sha1: String,
     every_storage_label_glyph_uses_its_installed_code: bool,
     every_overlay_dialogue_page_contains_its_visible_storage_label_glyphs: bool,
-    record_transition_line_residue_included_in_codebook: bool,
     storage_dialogue_does_not_reselect_the_static_menu_page: bool,
     capacity_notice_keeps_its_standalone_static_page: bool,
     item_list_dialogue_pages_use_canonical_item_codes: bool,
@@ -106,6 +105,57 @@ pub(super) struct StorageDialogueResidencyPlan {
     pub(super) augmented_worksets: Vec<GlyphWorkset>,
     #[serde(skip)]
     fixed_glyph_codes: BTreeMap<char, u8>,
+}
+
+pub(super) struct StorageDialogueSourcePlan {
+    binding: StorageSourceBinding,
+    facility_selected_record_ids: BTreeSet<String>,
+    overflow_selected_record_ids: BTreeSet<String>,
+}
+
+impl StorageDialogueSourcePlan {
+    pub(super) fn caller_handoff_record_groups(&self) -> [(&'static str, &BTreeSet<String>); 2] {
+        [
+            (
+                "storage facility caller handoff",
+                &self.facility_selected_record_ids,
+            ),
+            (
+                "storage overflow caller handoff",
+                &self.overflow_selected_record_ids,
+            ),
+        ]
+    }
+}
+
+pub(super) fn bind_storage_dialogue_source_plan(
+    source: &Rom,
+    graph: &MainDialogueGraphReport,
+) -> Result<StorageDialogueSourcePlan> {
+    let binding = bind_storage_dialogue_sources(source)?;
+    let facility_selected_record_ids = transition_record_ids(
+        graph,
+        &binding.facility_root_record_indices,
+        "storage facility",
+    )?;
+    let overflow_selected_record_ids = transition_record_ids(
+        graph,
+        &binding.overflow_root_record_indices,
+        "storage overflow",
+    )?;
+    ensure!(
+        facility_selected_record_ids.is_disjoint(&overflow_selected_record_ids),
+        "storage facility and overflow dialogue populations unexpectedly overlap"
+    );
+    ensure!(
+        facility_selected_record_ids.len() + overflow_selected_record_ids.len() == 19,
+        "storage dialogue state-machine population changed"
+    );
+    Ok(StorageDialogueSourcePlan {
+        binding,
+        facility_selected_record_ids,
+        overflow_selected_record_ids,
+    })
 }
 
 impl StorageDialogueResidencyPlan {
@@ -154,7 +204,7 @@ pub(super) fn bind_storage_choice_dialogue_record_id(source: &Rom) -> Result<Str
 }
 
 pub(super) struct StorageDialogueResidencyInputs<'a> {
-    pub(super) source: &'a Rom,
+    pub(super) source_plan: &'a StorageDialogueSourcePlan,
     pub(super) graph: &'a MainDialogueGraphReport,
     pub(super) display: &'a MainDialogueDisplayPlan,
     pub(super) fixed: &'a FixedTextPlan,
@@ -168,7 +218,7 @@ pub(super) fn plan_storage_dialogue_residency(
     inputs: StorageDialogueResidencyInputs<'_>,
 ) -> Result<StorageDialogueResidencyPlan> {
     let StorageDialogueResidencyInputs {
-        source,
+        source_plan,
         graph,
         display,
         fixed,
@@ -181,25 +231,9 @@ pub(super) fn plan_storage_dialogue_residency(
         display.page_worksets.len() == dialogue_worksets.len(),
         "storage dialogue residency lost visible dialogue worksets"
     );
-    let source_binding = bind_storage_dialogue_sources(source)?;
-    let facility_selected_record_ids = transition_record_ids(
-        graph,
-        &source_binding.facility_root_record_indices,
-        "storage facility",
-    )?;
-    let overflow_selected_record_ids = transition_record_ids(
-        graph,
-        &source_binding.overflow_root_record_indices,
-        "storage overflow",
-    )?;
-    ensure!(
-        facility_selected_record_ids.is_disjoint(&overflow_selected_record_ids),
-        "storage facility and overflow dialogue populations unexpectedly overlap"
-    );
-    ensure!(
-        facility_selected_record_ids.len() + overflow_selected_record_ids.len() == 19,
-        "storage dialogue state-machine population changed"
-    );
+    let source_binding = &source_plan.binding;
+    let facility_selected_record_ids = &source_plan.facility_selected_record_ids;
+    let overflow_selected_record_ids = &source_plan.overflow_selected_record_ids;
 
     let facility_entry_overlay_record_ids = transition_record_ids(
         graph,
@@ -216,8 +250,8 @@ pub(super) fn plan_storage_dialogue_residency(
         "storage action-menu dialogue populations unexpectedly overlap"
     );
     ensure!(
-        facility_entry_overlay_record_ids.is_subset(&facility_selected_record_ids)
-            && overflow_entry_overlay_record_ids.is_subset(&overflow_selected_record_ids),
+        facility_entry_overlay_record_ids.is_subset(facility_selected_record_ids)
+            && overflow_entry_overlay_record_ids.is_subset(overflow_selected_record_ids),
         "storage overlay dialogue escaped its source-selected state machine"
     );
     let facility_item_list_record_ids = transition_record_ids(
@@ -227,7 +261,7 @@ pub(super) fn plan_storage_dialogue_residency(
     )?;
     ensure!(
         !facility_item_list_record_ids.is_empty()
-            && facility_item_list_record_ids.is_subset(&facility_selected_record_ids),
+            && facility_item_list_record_ids.is_subset(facility_selected_record_ids),
         "storage facility item-list dialogue escaped its source-selected state machine"
     );
     let overflow_item_list_record_ids = transition_record_ids(
@@ -237,7 +271,7 @@ pub(super) fn plan_storage_dialogue_residency(
     )?;
     ensure!(
         !overflow_item_list_record_ids.is_empty()
-            && overflow_item_list_record_ids.is_subset(&overflow_selected_record_ids),
+            && overflow_item_list_record_ids.is_subset(overflow_selected_record_ids),
         "storage overflow item-list dialogue escaped its source-selected state machine"
     );
     ensure!(
@@ -258,7 +292,7 @@ pub(super) fn plan_storage_dialogue_residency(
     )?;
     ensure!(
         !facility_action_menu_return_record_ids.is_empty()
-            && facility_action_menu_return_record_ids.is_subset(&facility_selected_record_ids),
+            && facility_action_menu_return_record_ids.is_subset(facility_selected_record_ids),
         "storage result-dialogue action-menu return escaped its source-selected state machine"
     );
     let facility_overlay_record_ids = facility_entry_overlay_record_ids
@@ -274,8 +308,8 @@ pub(super) fn plan_storage_dialogue_residency(
         .cloned()
         .collect::<BTreeSet<_>>();
     ensure!(
-        facility_overlay_record_ids.is_subset(&facility_selected_record_ids)
-            && overflow_overlay_record_ids.is_subset(&overflow_selected_record_ids),
+        facility_overlay_record_ids.is_subset(facility_selected_record_ids)
+            && overflow_overlay_record_ids.is_subset(overflow_selected_record_ids),
         "storage fixed-label overlay escaped its source-selected state machine"
     );
 
@@ -334,7 +368,7 @@ pub(super) fn plan_storage_dialogue_residency(
         standalone_static_label_index: STANDALONE_CAPACITY_LABEL_INDEX,
         source_dispatch_count: source_binding.source_dispatch_count,
         source_direct_record_store_count: source_binding.source_direct_record_store_count,
-        source_binding_sha1: source_binding.source_binding_sha1,
+        source_binding_sha1: source_binding.source_binding_sha1.clone(),
         source_selected_facility_record_count: facility_selected_record_ids.len(),
         source_selected_overflow_record_count: overflow_selected_record_ids.len(),
         facility_overlay_record_ids: facility_overlay_record_ids.into_iter().collect(),
@@ -358,7 +392,6 @@ pub(super) fn plan_storage_dialogue_residency(
         fixed_assignment_sha1: assignment_sha1(&fixed_glyph_codes),
         every_storage_label_glyph_uses_its_installed_code: true,
         every_overlay_dialogue_page_contains_its_visible_storage_label_glyphs: true,
-        record_transition_line_residue_included_in_codebook: false,
         storage_dialogue_does_not_reselect_the_static_menu_page: true,
         capacity_notice_keeps_its_standalone_static_page: true,
         item_list_dialogue_pages_use_canonical_item_codes: true,

@@ -28,6 +28,11 @@ fn installed_candidate() -> Rom {
         CUMULATIVE_RUNTIME_LAYOUT.battle_central_right_fd_selector,
         &central,
     );
+    install_fixed(
+        &mut bytes,
+        CUMULATIVE_RUNTIME_LAYOUT.central_right_fe_resupply_natural_tail,
+        &cumulative_battle_central_right_fe_resupply_natural_tail().unwrap(),
+    );
     let maximum =
         build_initial_page_selector(ROSTER_SELECTOR_ADDRESS, MAXIMUM_INITIAL_POINTER).unwrap();
     install_fixed(&mut bytes, INITIAL_PAGE_SELECTOR_ADDRESS, &maximum);
@@ -112,6 +117,20 @@ fn binds_the_branching_cumulative_fallback_graph() {
     assert_eq!(graph.terminal_fallback_count, 1);
     assert_eq!(graph.unit_name_selector().mapper_register, 0xB0);
     assert_eq!(graph.front_end_selector().mapper_register, 0xA8);
+    assert_eq!(
+        graph.integrated_dialogue_runtime_takeover().unwrap(),
+        BoundFontPageRuntimeTakeover {
+            owner_cpu_address: CUMULATIVE_RUNTIME_LAYOUT.battle_central_right_fd_selector,
+            hook_cpu_address: CUMULATIVE_RUNTIME_LAYOUT.central_right_fe_resupply_natural_tail - 3,
+            superseded_selector_cpu_address: INITIAL_PAGE_SELECTOR_ADDRESS,
+            inactive_fallback_cpu_address: ROSTER_SELECTOR_ADDRESS,
+            expected_hook_bytes: [
+                0x4C,
+                INITIAL_PAGE_SELECTOR_ADDRESS as u8,
+                (INITIAL_PAGE_SELECTOR_ADDRESS >> 8) as u8,
+            ],
+        }
+    );
     assert_eq!(
         graph
             .routes

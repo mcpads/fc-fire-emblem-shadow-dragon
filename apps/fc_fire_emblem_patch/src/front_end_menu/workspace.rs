@@ -10,10 +10,10 @@ use serde::{Deserialize, Serialize};
 use crate::{
     font_slots::active_hangul_codes,
     japanese_encoding::japanese_text_glyph,
-    mmc5_chr::switchable_bank_file_offset,
-    mmc5_prg::fixed_bank_file_offset,
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
+    source_prg::fixed_bank_file_offset,
+    source_prg::switchable_bank_file_offset,
     text_inventory::{
         FixedTextLogicalByte, encode_target_markup, is_japanese_character,
         protected_alphanumeric_glyph,

@@ -5,9 +5,9 @@ use anyhow::{Context, Result, ensure};
 use crate::{
     dialogue_assets::{MainDialogueSlicePlan, plan_main_dialogue_slice},
     font_slots::{ACTIVE_HANGUL_SLOT_COUNT, FONT_PAGE_SIZE},
-    mmc5_prg::{count_direct_transfers_to_range, fixed_bank_file_offset},
     rom::Rom,
     sha1_hex,
+    source_prg::{count_direct_transfers_to_range, fixed_bank_file_offset},
     title_graphics::install_title_logo_asset,
     tracked::TrackedImage,
 };

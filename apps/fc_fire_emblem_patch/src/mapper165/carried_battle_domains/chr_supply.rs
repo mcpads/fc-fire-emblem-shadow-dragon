@@ -7,9 +7,9 @@ use serde::Serialize;
 
 use crate::{
     font_slots::FONT_PAGE_SIZE,
-    mmc5_chr::switchable_bank_file_offset,
     rom::{HEADER_SIZE, Rom},
     sha1_hex,
+    source_prg::switchable_bank_file_offset,
 };
 
 use super::super::{

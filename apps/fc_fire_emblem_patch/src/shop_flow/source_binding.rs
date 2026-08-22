@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeMap;
 
 const SHOP_ITEM_COMPOSITION_STATE: u8 = 0x03;
 pub(crate) const SHOP_ITEM_COMPOSITE_STATE: u8 = 0x15;
@@ -26,6 +27,7 @@ const SHOP_DIALOGUE_TABLE_BANK: u8 = 0x06;
 struct ShopDialogueEntryTableSpec {
     role: &'static str,
     address: u16,
+    retains_shared_yes_no: bool,
 }
 
 /// Every facility-indexed dialogue table read by the item-selling shop state machine. The table
@@ -35,40 +37,56 @@ const SHOP_DIALOGUE_ENTRY_TABLES: [ShopDialogueEntryTableSpec; 9] = [
     ShopDialogueEntryTableSpec {
         role: "initial facility dialogue",
         address: 0x99EB,
+        retains_shared_yes_no: false,
     },
     ShopDialogueEntryTableSpec {
         role: "purchasable-item question",
         address: 0x9A99,
+        retains_shared_yes_no: true,
     },
     ShopDialogueEntryTableSpec {
         role: "item-restriction warning",
         address: 0x9A9F,
+        retains_shared_yes_no: true,
     },
     ShopDialogueEntryTableSpec {
         role: "insufficient-funds branch",
         address: 0x9AA5,
+        retains_shared_yes_no: false,
     },
     ShopDialogueEntryTableSpec {
         role: "inventory-full branch",
         address: 0x9AAB,
+        retains_shared_yes_no: false,
     },
     ShopDialogueEntryTableSpec {
         role: "post-purchase follow-up",
         address: 0x9BF0,
+        retains_shared_yes_no: true,
     },
     ShopDialogueEntryTableSpec {
         role: "declined-purchase follow-up",
         address: 0x9BF6,
+        retains_shared_yes_no: true,
     },
     ShopDialogueEntryTableSpec {
         role: "accepted-purchase result",
         address: 0x9BFC,
+        retains_shared_yes_no: false,
     },
     ShopDialogueEntryTableSpec {
         role: "shop exit",
         address: 0xA0B0,
+        retains_shared_yes_no: false,
     },
 ];
+
+#[derive(Debug)]
+struct ShopDialogueLifetimeRecords {
+    all: BTreeSet<usize>,
+    shared_yes_no: BTreeSet<usize>,
+    by_facility: BTreeMap<u8, BTreeSet<usize>>,
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct ShopItemCompositionSource {
@@ -83,6 +101,8 @@ pub(crate) struct ShopItemCompositionSource {
     stock_group_ids: BTreeSet<u8>,
     item_source_indices: BTreeSet<usize>,
     dialogue_lifetime_record_indices: BTreeSet<usize>,
+    shared_yes_no_record_indices: BTreeSet<usize>,
+    dialogue_lifetime_record_indices_by_facility: BTreeMap<u8, BTreeSet<usize>>,
 }
 
 impl ShopItemCompositionSource {
@@ -128,6 +148,16 @@ impl ShopItemCompositionSource {
 
     pub(crate) fn dialogue_lifetime_record_indices(&self) -> &BTreeSet<usize> {
         &self.dialogue_lifetime_record_indices
+    }
+
+    pub(crate) fn shared_yes_no_record_indices(&self) -> &BTreeSet<usize> {
+        &self.shared_yes_no_record_indices
+    }
+
+    pub(crate) fn dialogue_lifetime_record_indices_by_facility(
+        &self,
+    ) -> &BTreeMap<u8, BTreeSet<usize>> {
+        &self.dialogue_lifetime_record_indices_by_facility
     }
 }
 
@@ -178,8 +208,7 @@ pub(crate) fn bind_shop_item_composition_source(rom: &Rom) -> Result<ShopItemCom
     );
     let (stock_group_ids, item_source_indices) =
         bind_shop_stock_sources(rom, &map_facilities, &selling_facilities)?;
-    let dialogue_lifetime_record_indices =
-        bind_shop_dialogue_lifetime_records(rom, &selling_facilities)?;
+    let dialogue_records = bind_shop_dialogue_lifetime_records(rom, &selling_facilities)?;
     ensure!(
         SHOP_STATE_HANDLERS.get(usize::from(SHOP_ITEM_COMPOSITION_STATE))
             == Some(&SHOP_ITEM_COMPOSITION_HANDLER),
@@ -212,14 +241,16 @@ pub(crate) fn bind_shop_item_composition_source(rom: &Rom) -> Result<ShopItemCom
         non_selling_facilities,
         stock_group_ids,
         item_source_indices,
-        dialogue_lifetime_record_indices,
+        dialogue_lifetime_record_indices: dialogue_records.all,
+        shared_yes_no_record_indices: dialogue_records.shared_yes_no,
+        dialogue_lifetime_record_indices_by_facility: dialogue_records.by_facility,
     })
 }
 
 fn bind_shop_dialogue_lifetime_records(
     rom: &Rom,
     selling_facilities: &[u8; 3],
-) -> Result<BTreeSet<usize>> {
+) -> Result<ShopDialogueLifetimeRecords> {
     let dialogue_table = inspect_shop_dialogue_table(rom.data())?;
     let source_bank = switchable_slice(
         rom,
@@ -266,7 +297,7 @@ fn bind_shop_dialogue_lifetime_records(
             spec.address,
             usize::from(maximum_facility) + 1,
         )?;
-        indexed_tables.push((spec.role, cells));
+        indexed_tables.push((spec.role, cells, spec.retains_shared_yes_no));
     }
     collect_shop_dialogue_lifetime_record_indices(
         selling_facilities,
@@ -278,14 +309,19 @@ fn bind_shop_dialogue_lifetime_records(
 fn collect_shop_dialogue_lifetime_record_indices(
     selling_facilities: &[u8],
     dialogue_record_count: usize,
-    indexed_tables: &[(&str, &[u8])],
-) -> Result<BTreeSet<usize>> {
+    indexed_tables: &[(&str, &[u8], bool)],
+) -> Result<ShopDialogueLifetimeRecords> {
     ensure!(
         !selling_facilities.is_empty() && !indexed_tables.is_empty(),
         "selling-facility dialogue census has no facility or source table"
     );
     let mut record_indices = BTreeSet::new();
-    for (role, cells) in indexed_tables {
+    let mut shared_yes_no_record_indices = BTreeSet::new();
+    let mut record_indices_by_facility = BTreeMap::new();
+    let mut shared_yes_no_record_indices_by_facility = BTreeMap::new();
+    let mut shared_yes_no_table_count = 0;
+    for (role, cells, retains_shared_yes_no) in indexed_tables {
+        shared_yes_no_table_count += usize::from(*retains_shared_yes_no);
         for facility in selling_facilities {
             let record_index =
                 usize::from(*cells.get(usize::from(*facility)).with_context(|| {
@@ -299,13 +335,48 @@ fn collect_shop_dialogue_lifetime_record_indices(
                 record_indices.insert(record_index),
                 "shop {role} facility {facility:02X} aliases an earlier selling-facility dialogue record {record_index}"
             );
+            record_indices_by_facility
+                .entry(*facility)
+                .or_insert_with(BTreeSet::new)
+                .insert(record_index);
+            if *retains_shared_yes_no {
+                ensure!(
+                    shared_yes_no_record_indices.insert(record_index),
+                    "shop {role} facility {facility:02X} aliases an earlier shared-choice dialogue record {record_index}"
+                );
+                shared_yes_no_record_indices_by_facility
+                    .entry(*facility)
+                    .or_insert_with(BTreeSet::new)
+                    .insert(record_index);
+            }
         }
     }
     ensure!(
         record_indices.len() == indexed_tables.len() * selling_facilities.len(),
         "selling-facility dialogue census lost a source table or facility"
     );
-    Ok(record_indices)
+    ensure!(
+        record_indices_by_facility.len() == selling_facilities.len()
+            && record_indices_by_facility
+                .values()
+                .all(|records| records.len() == indexed_tables.len()),
+        "selling-facility dialogue lifetimes lost a source table or facility"
+    );
+    ensure!(
+        shared_yes_no_table_count == 4
+            && shared_yes_no_record_indices.len()
+                == shared_yes_no_table_count * selling_facilities.len()
+            && shared_yes_no_record_indices_by_facility.len() == selling_facilities.len()
+            && shared_yes_no_record_indices_by_facility
+                .values()
+                .all(|records| records.len() == shared_yes_no_table_count),
+        "selling-facility shared yes-no dialogue census changed"
+    );
+    Ok(ShopDialogueLifetimeRecords {
+        all: record_indices,
+        shared_yes_no: shared_yes_no_record_indices,
+        by_facility: record_indices_by_facility,
+    })
 }
 
 #[cfg(test)]
@@ -320,20 +391,47 @@ mod dialogue_lifetime_tests {
         let records = collect_shop_dialogue_lifetime_record_indices(
             &[1, 2, 5],
             64,
-            &[("initial", &initial), ("follow-up", &follow_up)],
+            &[
+                ("initial", &initial, false),
+                ("question-a", &follow_up, true),
+                ("question-b", &[0, 12, 22, 0, 0, 32], true),
+                ("follow-up-a", &[0, 13, 23, 0, 0, 33], true),
+                ("follow-up-b", &[0, 14, 24, 0, 0, 34], true),
+            ],
         )
         .unwrap();
 
-        assert_eq!(records, BTreeSet::from([10, 11, 20, 21, 30, 31]));
+        assert_eq!(
+            records.all,
+            BTreeSet::from([10, 11, 12, 13, 14, 20, 21, 22, 23, 24, 30, 31, 32, 33, 34])
+        );
+        assert_eq!(
+            records.shared_yes_no,
+            BTreeSet::from([11, 12, 13, 14, 21, 22, 23, 24, 31, 32, 33, 34])
+        );
+        assert_eq!(
+            records.by_facility,
+            BTreeMap::from([
+                (1, BTreeSet::from([10, 11, 12, 13, 14])),
+                (2, BTreeSet::from([20, 21, 22, 23, 24])),
+                (5, BTreeSet::from([30, 31, 32, 33, 34])),
+            ])
+        );
     }
 
     #[test]
     fn census_rejects_a_facility_record_alias() {
         let table = [0, 10, 10];
+        let other_tables = [
+            ("question-b", &[0, 11, 12][..], true),
+            ("follow-up-a", &[0, 13, 14][..], true),
+            ("follow-up-b", &[0, 15, 16][..], true),
+        ];
+        let mut tables = vec![("aliased", &table[..], true)];
+        tables.extend(other_tables);
 
         let error =
-            collect_shop_dialogue_lifetime_record_indices(&[1, 2], 64, &[("aliased", &table)])
-                .unwrap_err();
+            collect_shop_dialogue_lifetime_record_indices(&[1, 2], 64, &tables).unwrap_err();
 
         assert!(error.to_string().contains("aliases an earlier"));
     }

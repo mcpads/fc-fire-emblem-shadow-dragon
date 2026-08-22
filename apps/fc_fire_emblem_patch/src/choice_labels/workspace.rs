@@ -11,9 +11,9 @@ use crate::{
     fixed_string_consumers::inspect_fixed_string_consumers,
     font_slots::active_hangul_codes,
     japanese_encoding::is_japanese_text_code,
-    mmc5_chr::switchable_bank_file_offset,
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
+    source_prg::switchable_bank_file_offset,
     text_inventory::{
         FixedTextLogicalByte, decode_source_markup, encode_target_markup, is_japanese_character,
     },

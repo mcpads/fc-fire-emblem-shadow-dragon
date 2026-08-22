@@ -20,7 +20,9 @@
 use anyhow::{Context, Result};
 
 use super::super::dynamic_composition::{
-    PAGE_RECIPE_HEADER_BYTE_COUNT, REUSE_RESIDENT_PAGE_RECIPE_REFERENCE,
+    CALLER_HANDOFF_REPLACES_ROWS_DIRECTORY_FLAG, DIRECT_ENTRY_REPLACES_ROWS_DIRECTORY_FLAG,
+    PAGE_RECIPE_HEADER_BYTE_COUNT, PUBLISHED_TRANSITION_REPLACES_ROWS_DIRECTORY_FLAG,
+    RECORD_PAGE_INDEX_MASK, REUSE_RESIDENT_PAGE_RECIPE_REFERENCE,
 };
 use super::super::runtime_cursor_storage::{
     CURSOR_ENTRY_HIGH, CURSOR_ENTRY_LOW, CURSOR_OVERLAY_TILES, CURSOR_PHASE, CURSOR_RECIPE_PAGE,
@@ -54,7 +56,6 @@ pub(super) const SOURCE_ENTRY_INDEX: u16 = MAIN_DIALOGUE_RUNTIME_STATE.entry_ind
 /// 식별표에서 «없는 선택자»를 뜻하는 값이다.
 const MISSING_TABLE: u8 = 0xFF;
 /// 새 대사 수명에서 살아 있는 원본 selector/index를 현재 레코드로 해석한다.
-#[cfg(test)]
 pub(super) const LOOKUP_LIVE_SOURCE_IDENTITY: u8 = 1;
 /// 독립 수명은 살아 있는 원문 정체성을 쓰되 이전 상주 그룹은 재사용하지 않는다.
 pub(super) const LOOKUP_INITIAL_SOURCE_IDENTITY: u8 = 2;
@@ -67,12 +68,10 @@ const PRG_8000_REGISTER: u8 = 6;
 const DATA_WINDOW_BASE: u16 = 0x8000;
 /// MMC3 페이지 하나가 자료 창에서 차지하는 크기다.
 const DATA_WINDOW_SIZE: u16 = 0x2000;
-
-/// 원본 대사 상태기가 쓰는 여섯 32바이트 물리 줄 버퍼다. 새 레코드는 이 범위
-/// 전체를 `FF`로 비우고, 같은 레코드의 다음 페이지는 현재 줄 수명을 이어 간다.
-const LINE_BUFFER_START: u16 = 0x7832;
-const LINE_BUFFER_BYTE_COUNT: u8 = 6 * 0x20;
-const LINE_BUFFER_BLANK: u8 = 0xFF;
+/// 가시 페이지 색인의 상위 비트는 새 레코드가 직전 물리 줄을 대체한다는 게시
+/// 정책이다. 실제 페이지 번호는 항상 하위 7비트에 남는다.
+pub(super) const REPLACE_PREVIOUS_ROWS_PENDING: u8 = 0x80;
+const VISIBLE_PAGE_INDEX_MASK: u8 = !REPLACE_PREVIOUS_ROWS_PENDING;
 
 /// 빌드가 아는 재료 배치다. 런타임은 이 값들을 상수로 받는다.
 #[derive(Debug, Clone, Copy)]
@@ -166,41 +165,69 @@ fn clear_runtime_state(instructions: &mut Vec<Instruction>) {
     }
 }
 
-fn new_record_line_buffer_reset(origin: u16) -> Result<Vec<Instruction>> {
-    let mut instructions = vec![
-        Instruction::LdaImmediate(LINE_BUFFER_BLANK),
-        Instruction::LdyImmediate(LINE_BUFFER_BYTE_COUNT),
-    ];
-    let loop_address = next_address(origin, &instructions)?;
-    instructions.extend([
-        Instruction::Dey,
-        Instruction::StaAbsoluteY(LINE_BUFFER_START),
-        Instruction::BneAbsolute(loop_address),
-    ]);
-    Ok(instructions)
-}
-
-fn append_new_record_line_buffer_reset(
-    instructions: &mut Vec<Instruction>,
-    routine_origin: u16,
-) -> Result<()> {
-    let reset_origin = next_address(routine_origin, instructions)?;
-    instructions.extend(new_record_line_buffer_reset(reset_origin)?);
-    Ok(())
-}
-
 struct PageRequestResolutionBranches {
     page_exhausted: Vec<usize>,
     resident_recipe_reuse: Vec<usize>,
 }
 
-pub(super) fn contains_new_record_line_buffer_reset(routine: &RuntimeRoutine) -> Result<bool> {
-    let origin = 0x8000;
-    let reset = assemble_at(origin, &new_record_line_buffer_reset(origin)?)?;
-    Ok(routine
-        .bytes
-        .windows(reset.len())
-        .any(|window| window == reset))
+/// 보존해 둔 조회 모드와 현재 레코드 디렉터리의 상위 바이트를 결합해, 완료 뒤
+/// 물리 행을 교체할 때만 `$07F2`의 게시 비트를 세운다. 세 조회 모드 중 어느 것도
+/// 아니면 실패 경계로 보내므로 로더가 새 진입 방식을 임의의 기본값으로 받아들이지
+/// 않는다.
+fn append_record_line_policy_selection(
+    instructions: &mut Vec<Instruction>,
+    failure_branches: &mut Vec<usize>,
+    origin: u16,
+) -> Result<()> {
+    instructions.extend([
+        Instruction::LdaAbsolute(VISIBLE_PAGE_INDEX),
+        Instruction::CmpImmediate(LOOKUP_INITIAL_SOURCE_IDENTITY),
+    ]);
+    let direct_entry = instructions.len();
+    let direct_entry_placeholder = next_address(origin, instructions)?;
+    instructions.push(Instruction::BeqAbsolute(direct_entry_placeholder));
+    instructions.push(Instruction::CmpImmediate(LOOKUP_LIVE_SOURCE_IDENTITY));
+    let caller_handoff = instructions.len();
+    let caller_handoff_placeholder = next_address(origin, instructions)?;
+    instructions.push(Instruction::BeqAbsolute(caller_handoff_placeholder));
+    instructions.push(Instruction::CmpImmediate(LOOKUP_PUBLISHED_SOURCE_IDENTITY));
+    failure_branches.push(branch_to_failure(
+        instructions,
+        origin,
+        Instruction::BeqAbsolute,
+    )?);
+
+    instructions.extend([
+        Instruction::LdaZeroPage(0x05),
+        Instruction::AndImmediate((PUBLISHED_TRANSITION_REPLACES_ROWS_DIRECTORY_FLAG >> 8) as u8),
+        Instruction::AslAccumulator,
+        Instruction::AslAccumulator,
+    ]);
+    let published_policy_selected = instructions.len();
+    instructions.push(Instruction::JmpAbsolute(origin));
+
+    let caller_handoff_policy = next_address(origin, instructions)?;
+    instructions[caller_handoff] = Instruction::BeqAbsolute(caller_handoff_policy);
+    instructions.extend([
+        Instruction::LdaZeroPage(0x05),
+        Instruction::AndImmediate((CALLER_HANDOFF_REPLACES_ROWS_DIRECTORY_FLAG >> 8) as u8),
+        Instruction::AslAccumulator,
+    ]);
+    let caller_handoff_policy_selected = instructions.len();
+    instructions.push(Instruction::JmpAbsolute(origin));
+
+    let direct_entry_policy = next_address(origin, instructions)?;
+    instructions[direct_entry] = Instruction::BeqAbsolute(direct_entry_policy);
+    instructions.extend([
+        Instruction::LdaZeroPage(0x05),
+        Instruction::AndImmediate((DIRECT_ENTRY_REPLACES_ROWS_DIRECTORY_FLAG >> 8) as u8),
+    ]);
+
+    let policy_selected = next_address(origin, instructions)?;
+    instructions[published_policy_selected] = Instruction::JmpAbsolute(policy_selected);
+    instructions[caller_handoff_policy_selected] = Instruction::JmpAbsolute(policy_selected);
+    instructions.push(Instruction::StaAbsolute(VISIBLE_PAGE_INDEX));
+    Ok(())
 }
 
 /// 영속 레코드 색인 `$07F0/1`과 가시 페이지 색인 `$07F2`를 사용해 페이지 그룹과
@@ -212,9 +239,18 @@ fn append_page_request_resolution(
     origin: u16,
     layout: MaterialLayout,
     allow_resident_recipe_reuse: bool,
+    classify_new_record_line_policy: bool,
 ) -> Result<PageRequestResolutionBranches> {
     let mut page_exhausted_branches = Vec::new();
     let mut resident_recipe_reuse_branches = Vec::new();
+    if classify_new_record_line_policy {
+        // 디렉터리를 읽는 동안 제로 페이지가 덮이므로 조회 모드를 가시 페이지 자리에
+        // 잠시 보존한다. 아래 정책 선택이 반드시 0 또는 교체 게시 비트로 바꾼다.
+        instructions.extend([
+            Instruction::LdaZeroPage(0x04),
+            Instruction::StaAbsolute(VISIBLE_PAGE_INDEX),
+        ]);
+    }
     instructions.extend(map_page(Instruction::LdaImmediate(layout.scan_index_page)));
     instructions.extend([
         // 레코드 색인 × 2가 디렉터리 안의 자리다.
@@ -237,10 +273,20 @@ fn append_page_request_resolution(
         Instruction::Iny,
         Instruction::LdaIndirectY(0x00),
         Instruction::StaZeroPage(0x05),
+    ]);
+    if classify_new_record_line_policy {
+        append_record_line_policy_selection(instructions, failure_branches, origin)?;
+    }
+    instructions.extend([
+        // 정책 비트는 페이지 구간의 일부가 아니다.
+        Instruction::LdaZeroPage(0x05),
+        Instruction::AndImmediate((RECORD_PAGE_INDEX_MASK >> 8) as u8),
+        Instruction::StaZeroPage(0x05),
         // 현재 가시 페이지를 더한다.
         Instruction::Clc,
-        Instruction::LdaZeroPage(0x04),
-        Instruction::AdcAbsolute(VISIBLE_PAGE_INDEX),
+        Instruction::LdaAbsolute(VISIBLE_PAGE_INDEX),
+        Instruction::AndImmediate(VISIBLE_PAGE_INDEX_MASK),
+        Instruction::AdcZeroPage(0x04),
         Instruction::StaZeroPage(0x04),
         Instruction::LdaZeroPage(0x05),
         Instruction::AdcImmediate(0),
@@ -251,6 +297,7 @@ fn append_page_request_resolution(
         Instruction::StaZeroPage(0x02),
         Instruction::Iny,
         Instruction::LdaIndirectY(0x00),
+        Instruction::AndImmediate((RECORD_PAGE_INDEX_MASK >> 8) as u8),
         Instruction::StaZeroPage(0x03),
         Instruction::LdaZeroPage(0x05),
         Instruction::CmpZeroPage(0x03),
@@ -403,13 +450,15 @@ fn finish_resolver(
     failure_branches: Vec<usize>,
     page_exhausted_branches: Vec<usize>,
     resident_recipe_reuse_branches: Vec<usize>,
+    completed_record_line_policy: u16,
     role: &'static str,
 ) -> Result<RuntimeRoutine> {
     instructions.push(Instruction::Sec);
-    restore_scratch(&mut instructions);
-    instructions.push(Instruction::Rts);
+    let successful_resolution = instructions.len();
+    instructions.push(Instruction::JmpAbsolute(origin));
 
     let resident_recipe_reuse = next_address(origin, &instructions)?;
+    let mut reused_resolution = None;
     if !resident_recipe_reuse_branches.is_empty() {
         instructions.extend([
             // 레시피가 동일하면 기존 CHR-RAM이 이미 완성 결과다. `carry clear`로
@@ -418,8 +467,8 @@ fn finish_resolver(
             Instruction::StaAbsolute(REQUEST_STATE),
             Instruction::Clc,
         ]);
-        restore_scratch(&mut instructions);
-        instructions.push(Instruction::Rts);
+        reused_resolution = Some(instructions.len());
+        instructions.push(Instruction::JmpAbsolute(origin));
     }
 
     let page_exhausted = next_address(origin, &instructions)?;
@@ -444,6 +493,16 @@ fn finish_resolver(
         instructions[index] = Instruction::JmpAbsolute(resident_recipe_reuse);
     }
     instructions.push(Instruction::Clc);
+
+    let completed = next_address(origin, &instructions)?;
+    instructions[successful_resolution] = Instruction::JmpAbsolute(completed);
+    if let Some(reused_resolution) = reused_resolution {
+        instructions[reused_resolution] = Instruction::JmpAbsolute(completed);
+    }
+    // resolver가 실행되는 동안에는 런타임 코드 페이지가 이미 `$A000`에 있다.
+    // 실패·동일 상주권 재사용·새 요청 모두 이 완료 지점을 거치되, 정책은 ready와
+    // 레코드 비트를 함께 검사하므로 전송 없이 완성된 경우에만 여기서 줄을 지운다.
+    instructions.push(Instruction::JsrAbsolute(completed_record_line_policy));
     restore_scratch(&mut instructions);
     instructions.push(Instruction::Rts);
 
@@ -465,10 +524,13 @@ fn finish_resolver(
 pub(in crate::full_translation_install) fn build_resolve_request(
     origin: u16,
     layout: MaterialLayout,
+    completed_record_line_policy: u16,
 ) -> Result<RuntimeRoutine> {
     let mut instructions = Vec::new();
     let mut failure_branches = Vec::new();
     save_scratch(&mut instructions);
+    // selector로 X를 다시 쓰기 전에 direct/E4/E6/E7 조회 모드를 보존한다.
+    instructions.push(Instruction::StxZeroPage(0x04));
 
     // 독립 진입은 휘발 RAM의 과거 값을 절대 재사용하지 않는다. 연결 레코드 진입은
     // 현재 상주 그룹을 빌린 제로 페이지에 보존한 뒤 공통 상태 초기화를 거친다.
@@ -516,10 +578,6 @@ pub(in crate::full_translation_install) fn build_resolve_request(
     let resolve_identity = next_address(origin, &instructions)?;
     instructions[identity_selected] = Instruction::JmpAbsolute(resolve_identity);
     clear_runtime_state(&mut instructions);
-    // 최초 진입뿐 아니라 E4/E6 lookahead와 E7 caller-resume도 모두 여기서 새 레코드
-    // 수명을 연다. 원본 state-1만 갖고 있던 0x00C0-byte fill을 이 공통 경계로 올려,
-    // 어느 외부 상태기가 레코드를 골라도 직전 레코드의 물리 줄을 재해석하지 않는다.
-    append_new_record_line_buffer_reset(&mut instructions, origin)?;
     instructions.extend([
         Instruction::LdaAbsolute(SOURCE_DIRECTORY_SELECTOR),
         Instruction::StaAbsolute(REQUEST_SOURCE_DIRECTORY_SELECTOR),
@@ -588,7 +646,8 @@ pub(in crate::full_translation_install) fn build_resolve_request(
         &mut failure_branches,
         origin,
         layout,
-        false,
+        true,
+        true,
     )?;
     failure_branches.extend(page_resolution.page_exhausted);
     finish_resolver(
@@ -597,6 +656,7 @@ pub(in crate::full_translation_install) fn build_resolve_request(
         failure_branches,
         Vec::new(),
         page_resolution.resident_recipe_reuse,
+        completed_record_line_policy,
         INITIAL_PAGE_REQUEST_RESOLVER_ROLE,
     )
 }
@@ -608,6 +668,7 @@ pub(in crate::full_translation_install) fn build_resolve_request(
 pub(in crate::full_translation_install) fn build_resolve_next_page_request(
     origin: u16,
     layout: MaterialLayout,
+    completed_record_line_policy: u16,
 ) -> Result<RuntimeRoutine> {
     let mut instructions = vec![
         Instruction::LdaAbsolute(PUBLISHED_SOURCE_DIRECTORY_SELECTOR),
@@ -634,6 +695,7 @@ pub(in crate::full_translation_install) fn build_resolve_next_page_request(
         origin,
         layout,
         true,
+        false,
     )?;
     finish_resolver(
         origin,
@@ -641,6 +703,7 @@ pub(in crate::full_translation_install) fn build_resolve_next_page_request(
         failure_branches,
         page_resolution.page_exhausted,
         page_resolution.resident_recipe_reuse,
+        completed_record_line_policy,
         NEXT_PAGE_REQUEST_RESOLVER_ROLE,
     )
 }
@@ -649,6 +712,8 @@ pub(in crate::full_translation_install) fn build_resolve_next_page_request(
 mod tests {
     use super::*;
     use crate::full_translation_install::runtime_state_storage::CONSUMER_FONT_PAGE;
+
+    const COMPLETED_RECORD_LINE_POLICY: u16 = 0xA300;
 
     fn layout() -> MaterialLayout {
         MaterialLayout {
@@ -676,96 +741,140 @@ mod tests {
         assemble_at(0x8000, &instructions).unwrap()
     }
 
-    fn execute_line_buffer_reset(bytes: &[u8], origin: u16, memory: &mut [u8; 0x10000]) -> usize {
-        let mut pc = origin;
+    fn build_record_line_policy_selector_for_test(origin: u16) -> RuntimeRoutine {
+        let mut instructions = Vec::new();
+        let mut failure_branches = Vec::new();
+        append_record_line_policy_selection(&mut instructions, &mut failure_branches, origin)
+            .unwrap();
+        instructions.push(Instruction::Rts);
+        let failure = next_address(origin, &instructions).unwrap();
+        instructions.extend([
+            Instruction::LdaImmediate(0x7F),
+            Instruction::StaAbsolute(VISIBLE_PAGE_INDEX),
+            Instruction::Rts,
+        ]);
+        for branch in failure_branches {
+            instructions[branch] = Instruction::JmpAbsolute(failure);
+        }
+        RuntimeRoutine {
+            role: "test record-line policy selector",
+            address: origin,
+            bytes: assemble_at(origin, &instructions).unwrap(),
+        }
+    }
+
+    fn execute_record_line_policy_selector(lookup_mode: u8, directory_high: u8) -> u8 {
+        let runtime = build_record_line_policy_selector_for_test(0x9000);
+        let mut memory = [0u8; 0x10000];
+        memory[usize::from(VISIBLE_PAGE_INDEX)] = lookup_mode;
+        memory[0x05] = directory_high;
+        let mut pc = runtime.address;
         let mut a = 0;
-        let mut y = 0;
-        let mut write_count = 0;
-        let end = origin + u16::try_from(bytes.len()).unwrap();
-        for _ in 0..1_000 {
-            if pc == end {
-                return write_count;
-            }
-            let offset = usize::from(pc - origin);
-            match bytes[offset] {
+        let mut zero = false;
+        for _ in 0..200 {
+            let offset = usize::from(pc - runtime.address);
+            match runtime.bytes[offset] {
+                0xA5 => {
+                    a = memory[usize::from(runtime.bytes[offset + 1])];
+                    zero = a == 0;
+                    pc += 2;
+                }
                 0xA9 => {
-                    a = bytes[offset + 1];
+                    a = runtime.bytes[offset + 1];
+                    zero = a == 0;
                     pc += 2;
                 }
-                0xA0 => {
-                    y = bytes[offset + 1];
-                    pc += 2;
-                }
-                0x88 => {
-                    y = y.wrapping_sub(1);
-                    pc += 1;
-                }
-                0x99 => {
-                    let base = u16::from_le_bytes([bytes[offset + 1], bytes[offset + 2]]);
-                    memory[usize::from(base.wrapping_add(u16::from(y)))] = a;
-                    write_count += 1;
+                0xAD => {
+                    let address =
+                        u16::from_le_bytes([runtime.bytes[offset + 1], runtime.bytes[offset + 2]]);
+                    a = memory[usize::from(address)];
+                    zero = a == 0;
                     pc += 3;
                 }
-                0xD0 => {
-                    let displacement = bytes[offset + 1] as i8;
+                0x29 => {
+                    a &= runtime.bytes[offset + 1];
+                    zero = a == 0;
                     pc += 2;
-                    if y != 0 {
+                }
+                0x0A => {
+                    a <<= 1;
+                    zero = a == 0;
+                    pc += 1;
+                }
+                0xC9 => {
+                    zero = a == runtime.bytes[offset + 1];
+                    pc += 2;
+                }
+                0x8D => {
+                    let address =
+                        u16::from_le_bytes([runtime.bytes[offset + 1], runtime.bytes[offset + 2]]);
+                    memory[usize::from(address)] = a;
+                    pc += 3;
+                }
+                0xF0 => {
+                    let displacement = runtime.bytes[offset + 1] as i8;
+                    pc += 2;
+                    if zero {
                         pc = pc.wrapping_add_signed(i16::from(displacement));
                     }
                 }
-                opcode => panic!("unsupported line-buffer reset opcode {opcode:02X}"),
+                0x4C => {
+                    pc = u16::from_le_bytes([runtime.bytes[offset + 1], runtime.bytes[offset + 2]]);
+                }
+                0x60 => return memory[usize::from(VISIBLE_PAGE_INDEX)],
+                opcode => panic!("unsupported record-line policy opcode {opcode:02X}"),
             }
         }
-        panic!("line-buffer reset did not terminate");
+        panic!("record-line policy selector did not terminate")
     }
 
     #[test]
-    fn a_new_record_clears_all_six_physical_rows_without_touching_neighbors() {
-        let origin = 0x9000;
-        let instructions = new_record_line_buffer_reset(origin).unwrap();
-        let bytes = assemble_at(origin, &instructions).unwrap();
-        let mut memory = [0x5A; 0x10000];
-
-        let write_count = execute_line_buffer_reset(&bytes, origin, &mut memory);
-
-        let end = LINE_BUFFER_START + u16::from(LINE_BUFFER_BYTE_COUNT);
-        assert_eq!(write_count, usize::from(LINE_BUFFER_BYTE_COUNT));
-        assert!(
-            memory[usize::from(LINE_BUFFER_START)..usize::from(end)]
-                .iter()
-                .all(|byte| *byte == LINE_BUFFER_BLANK)
-        );
-        assert_eq!(memory[usize::from(LINE_BUFFER_START - 1)], 0x5A);
-        assert_eq!(memory[usize::from(end)], 0x5A);
+    fn every_entry_mode_reads_only_its_explicit_directory_policy() {
+        let page_index_bits = 0x1F;
+        for (lookup_mode, own_flag) in [
+            (
+                LOOKUP_INITIAL_SOURCE_IDENTITY,
+                (DIRECT_ENTRY_REPLACES_ROWS_DIRECTORY_FLAG >> 8) as u8,
+            ),
+            (
+                LOOKUP_LIVE_SOURCE_IDENTITY,
+                (CALLER_HANDOFF_REPLACES_ROWS_DIRECTORY_FLAG >> 8) as u8,
+            ),
+            (
+                LOOKUP_PUBLISHED_SOURCE_IDENTITY,
+                (PUBLISHED_TRANSITION_REPLACES_ROWS_DIRECTORY_FLAG >> 8) as u8,
+            ),
+        ] {
+            assert_eq!(
+                execute_record_line_policy_selector(lookup_mode, page_index_bits),
+                0
+            );
+            assert_eq!(
+                execute_record_line_policy_selector(lookup_mode, page_index_bits | own_flag),
+                REPLACE_PREVIOUS_ROWS_PENDING
+            );
+            assert_eq!(
+                execute_record_line_policy_selector(
+                    lookup_mode,
+                    page_index_bits | (0xE0 ^ own_flag)
+                ),
+                0,
+                "an entry mode consumed another mode's policy bit"
+            );
+        }
     }
 
     #[test]
-    fn only_new_record_resolution_owns_the_physical_row_reset() {
-        let reset = assemble_at(0x9000, &new_record_line_buffer_reset(0x9000).unwrap()).unwrap();
-        let initial = build_resolve_request(0xA400, layout()).unwrap();
-        let next = build_resolve_next_page_request(0xA700, layout()).unwrap();
-
-        assert!(
-            initial
-                .bytes
-                .windows(reset.len())
-                .any(|window| window == reset),
-            "new-record resolution never clears the physical rows"
-        );
-        assert!(
-            !next
-                .bytes
-                .windows(reset.len())
-                .any(|window| window == reset),
-            "same-record page advance must preserve the current row lifetime"
-        );
+    fn an_unknown_entry_mode_is_rejected_instead_of_getting_a_default_policy() {
+        assert_eq!(execute_record_line_policy_selector(0x7E, 0xE0), 0x7F);
     }
 
     /// 새 대사 수명은 조회 성공 여부와 관계없이 이전 정체성과 전송 커서를 모두
     /// 지운다. 단, 연속 수명의 게시 정체성은 그 전에 읽어야 한다.
     #[test]
     fn an_initial_request_selects_its_identity_before_clearing_dialogue_state() {
-        let routine = build_resolve_request(0xA400, layout()).unwrap();
+        let routine =
+            build_resolve_request(0xA400, layout(), COMPLETED_RECORD_LINE_POLICY).unwrap();
         let published = assemble_at(
             0x8000,
             &[
@@ -800,7 +909,8 @@ mod tests {
 
     #[test]
     fn a_request_freezes_the_live_lookahead_identity_for_the_next_transition() {
-        let routine = build_resolve_request(0xA400, layout()).unwrap();
+        let routine =
+            build_resolve_request(0xA400, layout(), COMPLETED_RECORD_LINE_POLICY).unwrap();
         let capture = assemble_at(
             0x8000,
             &[
@@ -822,7 +932,8 @@ mod tests {
 
     #[test]
     fn a_continuing_request_resolves_the_previously_published_identity() {
-        let routine = build_resolve_request(0xA400, layout()).unwrap();
+        let routine =
+            build_resolve_request(0xA400, layout(), COMPLETED_RECORD_LINE_POLICY).unwrap();
         let selection = assemble_at(
             0x8000,
             &[
@@ -879,7 +990,8 @@ mod tests {
     /// 니블을 버리면 아이템 결과뿐 아니라 30/40/71/80/B0/C0 계열도 모두 실패한다.
     #[test]
     fn both_identity_paths_use_the_full_directory_selector_byte() {
-        let routine = build_resolve_request(0xA400, layout()).unwrap();
+        let routine =
+            build_resolve_request(0xA400, layout(), COMPLETED_RECORD_LINE_POLICY).unwrap();
 
         for selector in [
             SOURCE_DIRECTORY_SELECTOR,
@@ -900,7 +1012,8 @@ mod tests {
     /// `BNE`로 합류하면 0번만 게시 정체성 경로로 잘못 떨어진다.
     #[test]
     fn the_live_identity_path_joins_unconditionally_for_entry_zero() {
-        let routine = build_resolve_request(0xA400, layout()).unwrap();
+        let routine =
+            build_resolve_request(0xA400, layout(), COMPLETED_RECORD_LINE_POLICY).unwrap();
         let mut live_identity = assemble_at(
             0x8000,
             &[
@@ -923,7 +1036,8 @@ mod tests {
 
     #[test]
     fn identity_entry_offsets_are_relative_to_the_mapped_material_base() {
-        let routine = build_resolve_request(0xA400, layout()).unwrap();
+        let routine =
+            build_resolve_request(0xA400, layout(), COMPLETED_RECORD_LINE_POLICY).unwrap();
         let address = assemble_at(
             0x8000,
             &[
@@ -948,7 +1062,9 @@ mod tests {
 
     #[test]
     fn a_next_page_request_keeps_the_published_record_identity() {
-        let routine = build_resolve_next_page_request(0xA700, layout()).unwrap();
+        let routine =
+            build_resolve_next_page_request(0xA700, layout(), COMPLETED_RECORD_LINE_POLICY)
+                .unwrap();
         let capture = assemble_at(
             0x8000,
             &[
@@ -967,7 +1083,9 @@ mod tests {
     /// 레코드 색인을 덮으면 디렉터리의 다른 레코드를 읽게 된다.
     #[test]
     fn a_next_page_request_advances_only_the_visible_page_identity() {
-        let routine = build_resolve_next_page_request(0xA700, layout()).unwrap();
+        let routine =
+            build_resolve_next_page_request(0xA700, layout(), COMPLETED_RECORD_LINE_POLICY)
+                .unwrap();
         let increment = [
             0xEE,
             VISIBLE_PAGE_INDEX as u8,
@@ -984,13 +1102,15 @@ mod tests {
         }
     }
 
-    /// 생성 자료가 직전 페이지와 같은 레시피를 가리키면 다음 페이지는 이미 완성된
-    /// CHR-RAM을 다시 쓰지 않는다. 최초 페이지에는 상주 기반이 없으므로 같은 표식을
-    /// 받아도 ready로 승격해서는 안 된다.
+    /// 생성 자료가 직전 페이지와 같은 상주 그룹을 가리키면 새 레코드와 다음 페이지
+    /// 모두 이미 완성된 CHR-RAM을 다시 쓰지 않는다. 진짜 직접 진입은 이전 그룹을
+    /// `FF`로 넘기므로 이 경로에 들어오지 않는다.
     #[test]
-    fn only_next_page_can_publish_resident_recipe_reuse_as_ready() {
-        let initial = build_resolve_request(0xA400, layout()).unwrap();
-        let next = build_resolve_next_page_request(0xA700, layout()).unwrap();
+    fn every_continuing_request_can_publish_resident_recipe_reuse_as_ready() {
+        let initial =
+            build_resolve_request(0xA400, layout(), COMPLETED_RECORD_LINE_POLICY).unwrap();
+        let next = build_resolve_next_page_request(0xA700, layout(), COMPLETED_RECORD_LINE_POLICY)
+            .unwrap();
         let ready_without_transport = assemble_at(
             0x8000,
             &[
@@ -1007,7 +1127,7 @@ mod tests {
                 .any(|window| window == ready_without_transport)
         );
         assert!(
-            !initial
+            initial
                 .bytes
                 .windows(ready_without_transport.len())
                 .any(|window| window == ready_without_transport)
@@ -1019,8 +1139,9 @@ mod tests {
     #[test]
     fn both_resolvers_bound_the_page_against_the_next_directory_entry() {
         for routine in [
-            build_resolve_request(0xA400, layout()).unwrap(),
-            build_resolve_next_page_request(0xA700, layout()).unwrap(),
+            build_resolve_request(0xA400, layout(), COMPLETED_RECORD_LINE_POLICY).unwrap(),
+            build_resolve_next_page_request(0xA700, layout(), COMPLETED_RECORD_LINE_POLICY)
+                .unwrap(),
         ] {
             assert!(
                 routine
@@ -1047,8 +1168,10 @@ mod tests {
 
     #[test]
     fn only_next_page_exhaustion_suspends_the_completed_page() {
-        let initial = build_resolve_request(0xA400, layout()).unwrap();
-        let next = build_resolve_next_page_request(0xA700, layout()).unwrap();
+        let initial =
+            build_resolve_request(0xA400, layout(), COMPLETED_RECORD_LINE_POLICY).unwrap();
+        let next = build_resolve_next_page_request(0xA700, layout(), COMPLETED_RECORD_LINE_POLICY)
+            .unwrap();
         let suspension = [
             0xA9,
             STATE_COMPLETED_PAGE_SUSPENDED,
@@ -1071,7 +1194,12 @@ mod tests {
             .position(|window| window == suspension)
             .expect("next-page exhaustion never suspends the completed page");
         let suspension_address = next.address + u16::try_from(suspension_offset).unwrap();
-        let mut ordinary_failure_tail = vec![0x18];
+        let mut ordinary_failure_tail = vec![
+            0x18,
+            0x20,
+            COMPLETED_RECORD_LINE_POLICY as u8,
+            (COMPLETED_RECORD_LINE_POLICY >> 8) as u8,
+        ];
         for address in BORROWED_SCRATCH.iter().rev() {
             ordinary_failure_tail.extend([0x68, 0x85, *address]);
         }
@@ -1104,10 +1232,16 @@ mod tests {
     /// 쓰레기 요청을 발행하고 소비자가 남의 자료를 CHR RAM에 올린다.
     #[test]
     fn every_failure_path_clears_carry_without_publishing_a_request() {
-        let routine = build_resolve_request(0xA400, layout()).unwrap();
+        let routine =
+            build_resolve_request(0xA400, layout(), COMPLETED_RECORD_LINE_POLICY).unwrap();
 
         // 실패 꼬리는 캐리를 지우고, 빌린 제로 페이지를 되돌리고, 돌아간다.
-        let mut expected = vec![0x18];
+        let mut expected = vec![
+            0x18,
+            0x20,
+            COMPLETED_RECORD_LINE_POLICY as u8,
+            (COMPLETED_RECORD_LINE_POLICY >> 8) as u8,
+        ];
         for address in BORROWED_SCRATCH.iter().rev() {
             expected.extend([0x68, 0x85, *address]);
         }
@@ -1122,7 +1256,8 @@ mod tests {
     /// 성공은 캐리를 세우고 돌아간다. 생산자는 그 캐리만 보고 요청을 발행한다.
     #[test]
     fn the_success_path_sets_carry_after_writing_every_cursor_byte() {
-        let routine = build_resolve_request(0xA400, layout()).unwrap();
+        let routine =
+            build_resolve_request(0xA400, layout(), COMPLETED_RECORD_LINE_POLICY).unwrap();
         // `SEC` 뒤에 되돌리기가 오고 `RTS`로 끝난다. `PLA`는 캐리를 건드리지 않는다.
         let success_end = routine
             .bytes
@@ -1155,8 +1290,10 @@ mod tests {
     /// 남의 자료를 표로 읽는다.
     #[test]
     fn the_resolver_maps_every_page_it_reads() {
-        let initial = build_resolve_request(0xA400, layout()).unwrap();
-        let next = build_resolve_next_page_request(0xA700, layout()).unwrap();
+        let initial =
+            build_resolve_request(0xA400, layout(), COMPLETED_RECORD_LINE_POLICY).unwrap();
+        let next = build_resolve_next_page_request(0xA700, layout(), COMPLETED_RECORD_LINE_POLICY)
+            .unwrap();
 
         for (routine, page) in [
             (&initial, layout().identity_page),

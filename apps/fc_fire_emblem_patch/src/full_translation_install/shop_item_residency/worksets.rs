@@ -9,13 +9,13 @@ use crate::{
     full_translation_install::dialogue_item_worksets::{
         DialogueItemWorksetInputs, augment_dialogue_item_worksets,
     },
-    shop_flow::{SHOP_ITEM_ENTRY_COUNT, bind_shop_item_composition_source},
+    shop_flow::SHOP_ITEM_ENTRY_COUNT,
 };
 
 pub(in crate::full_translation_install) fn plan_shop_item_workset_residency(
     inputs: ShopItemWorksetResidencyInputs<'_>,
 ) -> Result<ShopItemWorksetResidencyPlan> {
-    let source = bind_shop_item_composition_source(inputs.source)?;
+    let source = inputs.source;
     ensure!(
         inputs
             .fixed

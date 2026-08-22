@@ -13,7 +13,10 @@ use crate::{
     mapper165::battle_codebook_plan::{GlyphWorkset, GlyphWorksetPagePlan},
 };
 
-use super::dynamic_inputs::DynamicStringPageCodePlan;
+use super::{
+    caller_handoff_residency::{PreviousPhysicalRows, RecordLinePolicy, RecordLinePolicyBindings},
+    dynamic_inputs::DynamicStringPageCodePlan,
+};
 
 /// MMC3 뱅크 한 장이다. 레시피 덩이는 이 경계를 걸치면 안 된다.
 const MMC3_PAGE_BYTE_COUNT: usize = 8 * 1024;
@@ -26,6 +29,33 @@ const GLYPH_ATLAS_TILE_BYTE_COUNT: usize = 8;
 /// 같은 레코드의 직전 페이지와 레시피가 같아 현재 CHR-RAM을 그대로 쓸 수 있다는
 /// 16비트 참조값이다. 실제 레시피 덩이 오프셋으로는 이 값을 쓰지 않는다.
 pub(in crate::full_translation_install) const REUSE_RESIDENT_PAGE_RECIPE_REFERENCE: u16 = u16::MAX;
+/// 직접 진입에서 직전 물리 행을 교체하는 레코드 정책이다.
+pub(in crate::full_translation_install) const DIRECT_ENTRY_REPLACES_ROWS_DIRECTORY_FLAG: u16 =
+    0x8000;
+/// E7 호출자 인계에서 직전 물리 행을 교체하는 레코드 정책이다.
+pub(in crate::full_translation_install) const CALLER_HANDOFF_REPLACES_ROWS_DIRECTORY_FLAG: u16 =
+    0x4000;
+/// E4/E6 게시 전이에서 직전 물리 행을 교체하는 레코드 정책이다.
+pub(in crate::full_translation_install) const PUBLISHED_TRANSITION_REPLACES_ROWS_DIRECTORY_FLAG:
+    u16 = 0x2000;
+pub(in crate::full_translation_install) const RECORD_PAGE_INDEX_MASK: u16 =
+    !(DIRECT_ENTRY_REPLACES_ROWS_DIRECTORY_FLAG
+        | CALLER_HANDOFF_REPLACES_ROWS_DIRECTORY_FLAG
+        | PUBLISHED_TRANSITION_REPLACES_ROWS_DIRECTORY_FLAG);
+
+fn encode_record_line_policy(policy: RecordLinePolicy) -> u16 {
+    let mut flags = 0;
+    if policy.direct_entry == PreviousPhysicalRows::Replace {
+        flags |= DIRECT_ENTRY_REPLACES_ROWS_DIRECTORY_FLAG;
+    }
+    if policy.caller_handoff == PreviousPhysicalRows::Replace {
+        flags |= CALLER_HANDOFF_REPLACES_ROWS_DIRECTORY_FLAG;
+    }
+    if policy.published_transition == PreviousPhysicalRows::Replace {
+        flags |= PUBLISHED_TRANSITION_REPLACES_ROWS_DIRECTORY_FLAG;
+    }
+    flags
+}
 
 pub(super) struct DialogueRuntimeCompositionPlan {
     pub(super) glyph_atlas: Vec<u8>,
@@ -76,6 +106,21 @@ pub(super) struct DialogueRuntimeCompositionPlan {
     pub(super) dynamic_string_control_count: usize,
     pub(super) dynamic_string_page_count: usize,
     pub(super) dynamic_string_selector_count: usize,
+    caller_handoff_replacement_record_count: usize,
+    direct_entry_retention_record_count: usize,
+    published_transition_replacement_record_count: usize,
+    record_line_policy_record_count: usize,
+    record_line_policy_encoded: bool,
+}
+
+impl DialogueRuntimeCompositionPlan {
+    pub(super) fn record_line_policy_complete(&self) -> bool {
+        self.caller_handoff_replacement_record_count > 0
+            && self.direct_entry_retention_record_count > 0
+            && self.published_transition_replacement_record_count == 0
+            && self.record_line_policy_record_count > 0
+            && self.record_line_policy_encoded
+    }
 }
 
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
@@ -93,6 +138,7 @@ pub(super) struct DialogueRuntimeCompositionInputs<'a> {
     pub(super) source_font_page: &'a [u8],
     pub(super) static_page_pack: &'a [u8],
     pub(super) additional_target_glyphs: &'a BTreeSet<char>,
+    pub(super) record_line_policies: &'a RecordLinePolicyBindings,
 }
 
 pub(super) fn plan_dialogue_runtime_composition(
@@ -107,6 +153,7 @@ pub(super) fn plan_dialogue_runtime_composition(
         source_font_page,
         static_page_pack,
         additional_target_glyphs,
+        record_line_policies,
     } = inputs;
     ensure!(
         source_font_page.len() == FONT_PAGE_SIZE,
@@ -307,19 +354,20 @@ pub(super) fn plan_dialogue_runtime_composition(
     let atlas_cpu_base = u16::try_from(0x8000 + atlas_container_offset)
         .context("glyph atlas CPU base does not fit the 8000 window")?;
     let scan_section_container_offset = atlas_container_offset + glyph_atlas.len();
-    let encoded_scan = encode_scan_material(
+    let encoded_scan = encode_scan_material(ScanMaterialInputs {
         dialogue,
         codebook,
         dynamic_page_codes,
-        &record_worksets,
-        ScanRecipeCatalog {
+        record_worksets: &record_worksets,
+        recipes: ScanRecipeCatalog {
             glyph_atlas_indices: &glyph_atlas_indices,
             workset_recipe_indices: &workset_recipe_indices,
             unique_recipes: &unique_recipes.iter().cloned().collect::<Vec<_>>(),
         },
         atlas_cpu_base,
-        scan_section_container_offset,
-    )?;
+        section_container_offset: scan_section_container_offset,
+        record_line_policies,
+    })?;
     let scan_material = encoded_scan.bytes;
     let page_recipe_reference_offset = encoded_scan.page_recipe_reference_offset;
     let record_recipe_directory_offset = encoded_scan.record_recipe_directory_offset;
@@ -389,6 +437,13 @@ pub(super) fn plan_dialogue_runtime_composition(
         dynamic_string_control_count,
         dynamic_string_page_count,
         dynamic_string_selector_count,
+        caller_handoff_replacement_record_count: record_line_policies
+            .caller_handoff_replacement_count(),
+        direct_entry_retention_record_count: record_line_policies.direct_entry_retention_count(),
+        published_transition_replacement_record_count: record_line_policies
+            .published_transition_replacement_count(),
+        record_line_policy_record_count: record_line_policies.by_record_id().len(),
+        record_line_policy_encoded: true,
     })
 }
 
@@ -622,15 +677,28 @@ struct ScanRecipeCatalog<'a> {
     unique_recipes: &'a [VisiblePageRecipe],
 }
 
-fn encode_scan_material(
-    dialogue: &MainDialogueDisplayPlan,
-    codebook: &GlyphWorksetPagePlan,
-    dynamic_page_codes: &DynamicStringPageCodePlan,
-    record_worksets: &BTreeMap<&str, Vec<usize>>,
-    recipes: ScanRecipeCatalog<'_>,
+struct ScanMaterialInputs<'a> {
+    dialogue: &'a MainDialogueDisplayPlan,
+    codebook: &'a GlyphWorksetPagePlan,
+    dynamic_page_codes: &'a DynamicStringPageCodePlan,
+    record_worksets: &'a BTreeMap<&'a str, Vec<usize>>,
+    recipes: ScanRecipeCatalog<'a>,
     atlas_cpu_base: u16,
     section_container_offset: usize,
-) -> Result<EncodedScanMaterial> {
+    record_line_policies: &'a RecordLinePolicyBindings,
+}
+
+fn encode_scan_material(inputs: ScanMaterialInputs<'_>) -> Result<EncodedScanMaterial> {
+    let ScanMaterialInputs {
+        dialogue,
+        codebook,
+        dynamic_page_codes,
+        record_worksets,
+        recipes,
+        atlas_cpu_base,
+        section_container_offset,
+        record_line_policies,
+    } = inputs;
     let ScanRecipeCatalog {
         glyph_atlas_indices,
         workset_recipe_indices,
@@ -671,12 +739,32 @@ fn encode_scan_material(
         "dialogue scan material lost visible-page recipe references"
     );
     let mut expected_recipe_indices = Vec::with_capacity(dialogue.page_worksets.len());
+    let dialogue_record_ids = dialogue.record_ids.iter().cloned().collect::<BTreeSet<_>>();
+    let policy_record_ids = record_line_policies
+        .by_record_id()
+        .keys()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    ensure!(
+        policy_record_ids == dialogue_record_ids
+            && record_line_policies.by_record_id().len() == dialogue.record_ids.len(),
+        "record-line policy must cover every dialogue record exactly once"
+    );
+    let mut encoded_record_line_policies = Vec::with_capacity(dialogue.record_ids.len());
     for record_id in &dialogue.record_ids {
-        directory.extend_from_slice(
-            &u16::try_from(references.len() / 2)
-                .context("dialogue page-recipe material exceeds a 16-bit index")?
-                .to_le_bytes(),
+        let page_start = u16::try_from(references.len() / 2)
+            .context("dialogue page-recipe material exceeds a 16-bit index")?;
+        ensure!(
+            page_start <= RECORD_PAGE_INDEX_MASK,
+            "dialogue page-recipe material uses a record-line policy bit"
         );
+        let policy = *record_line_policies
+            .by_record_id()
+            .get(record_id)
+            .with_context(|| format!("{record_id} has no record-line policy"))?;
+        let directory_entry = page_start | encode_record_line_policy(policy);
+        directory.extend_from_slice(&directory_entry.to_le_bytes());
+        encoded_record_line_policies.push(policy);
         let indices = record_worksets
             .get(record_id.as_str())
             .with_context(|| format!("{record_id} has no runtime page recipes"))?;
@@ -696,11 +784,13 @@ fn encode_scan_material(
             previous_recipe_index = Some(recipe_index);
         }
     }
-    directory.extend_from_slice(
-        &u16::try_from(references.len() / 2)
-            .context("dialogue page-recipe end exceeds a 16-bit index")?
-            .to_le_bytes(),
+    let page_end = u16::try_from(references.len() / 2)
+        .context("dialogue page-recipe end exceeds a 16-bit index")?;
+    ensure!(
+        page_end <= RECORD_PAGE_INDEX_MASK,
+        "dialogue page-recipe end uses a record-line policy bit"
     );
+    directory.extend_from_slice(&page_end.to_le_bytes());
     ensure!(
         references.len() == reference_byte_count,
         "dialogue scan material did not serialize every page recipe exactly once"
@@ -719,18 +809,19 @@ fn encode_scan_material(
                 .with_context(|| format!("{record_id} has no runtime page recipes"))
         })
         .collect::<Result<Vec<_>>>()?;
-    verify_visible_page_recipe_material(
-        &references,
-        &directory,
-        &recipe_offsets,
-        &recipe_blocks,
-        &record_page_counts,
-        &expected_recipe_indices,
-        &unique_recipes
+    verify_visible_page_recipe_material(VisiblePageRecipeMaterial {
+        references: &references,
+        directory: &directory,
+        recipe_offsets: &recipe_offsets,
+        recipe_blocks: &recipe_blocks,
+        record_page_counts: &record_page_counts,
+        expected_recipe_indices: &expected_recipe_indices,
+        recipe_group_indices: &unique_recipes
             .iter()
             .map(|recipe| recipe.static_page_group_index)
             .collect::<Vec<_>>(),
-    )?;
+        record_line_policies: &encoded_record_line_policies,
+    })?;
     encoded.extend_from_slice(&references);
     encoded.extend_from_slice(&directory);
     ensure!(
@@ -750,15 +841,28 @@ fn encode_scan_material(
 /// 직렬화 코드는 이 자료를 같은 함수에서 만들지만, 소비자는 서로 다른 PRG 창에서
 /// 읽는다. 따라서 참조 하나가 덩이 중간이나 정렬 여백을 가리키는 회귀도 빌드에서
 /// 닫아야 한다.
-fn verify_visible_page_recipe_material(
-    references: &[u8],
-    directory: &[u8],
-    recipe_offsets: &[u16],
-    recipe_blocks: &[u8],
-    record_page_counts: &[usize],
-    expected_recipe_indices: &[usize],
-    recipe_group_indices: &[usize],
-) -> Result<()> {
+struct VisiblePageRecipeMaterial<'a> {
+    references: &'a [u8],
+    directory: &'a [u8],
+    recipe_offsets: &'a [u16],
+    recipe_blocks: &'a [u8],
+    record_page_counts: &'a [usize],
+    expected_recipe_indices: &'a [usize],
+    recipe_group_indices: &'a [usize],
+    record_line_policies: &'a [RecordLinePolicy],
+}
+
+fn verify_visible_page_recipe_material(material: VisiblePageRecipeMaterial<'_>) -> Result<()> {
+    let VisiblePageRecipeMaterial {
+        references,
+        directory,
+        recipe_offsets,
+        recipe_blocks,
+        record_page_counts,
+        expected_recipe_indices,
+        recipe_group_indices,
+        record_line_policies,
+    } = material;
     ensure!(
         references.len().is_multiple_of(2),
         "visible-page recipe reference table has a partial entry"
@@ -766,6 +870,10 @@ fn verify_visible_page_recipe_material(
     ensure!(
         directory.len() == (record_page_counts.len() + 1) * 2,
         "visible-page recipe record directory length changed"
+    );
+    ensure!(
+        record_line_policies.len() == record_page_counts.len(),
+        "visible-page record-line policy does not cover every record"
     );
     ensure!(
         expected_recipe_indices.len() == references.len() / 2,
@@ -840,10 +948,14 @@ fn verify_visible_page_recipe_material(
     let mut expected_page_start = 0usize;
     for (record_index, page_count) in record_page_counts.iter().copied().enumerate() {
         let directory_offset = record_index * 2;
-        let actual_page_start = usize::from(u16::from_le_bytes([
-            directory[directory_offset],
-            directory[directory_offset + 1],
-        ]));
+        let raw_page_start =
+            u16::from_le_bytes([directory[directory_offset], directory[directory_offset + 1]]);
+        ensure!(
+            raw_page_start & !RECORD_PAGE_INDEX_MASK
+                == encode_record_line_policy(record_line_policies[record_index]),
+            "visible-page recipe directory record {record_index} line policy changed"
+        );
+        let actual_page_start = usize::from(raw_page_start & RECORD_PAGE_INDEX_MASK);
         ensure!(
             actual_page_start == expected_page_start,
             "visible-page recipe directory record {record_index} starts at {actual_page_start}, expected {expected_page_start}"
@@ -874,10 +986,12 @@ fn verify_visible_page_recipe_material(
             .context("visible-page recipe page count overflow")?;
     }
     let final_offset = record_page_counts.len() * 2;
-    let actual_page_end = usize::from(u16::from_le_bytes([
-        directory[final_offset],
-        directory[final_offset + 1],
-    ]));
+    let raw_page_end = u16::from_le_bytes([directory[final_offset], directory[final_offset + 1]]);
+    ensure!(
+        raw_page_end & !RECORD_PAGE_INDEX_MASK == 0,
+        "visible-page recipe directory end has a record-line policy flag"
+    );
+    let actual_page_end = usize::from(raw_page_end);
     ensure!(
         actual_page_end == references.len() / 2 && actual_page_end == expected_page_start,
         "visible-page recipe directory end does not cover every workset"
@@ -1018,6 +1132,26 @@ fn delta_ppu_write_count(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn line_policy(
+        direct_entry: PreviousPhysicalRows,
+        caller_handoff: PreviousPhysicalRows,
+        published_transition: PreviousPhysicalRows,
+    ) -> RecordLinePolicy {
+        RecordLinePolicy {
+            direct_entry,
+            caller_handoff,
+            published_transition,
+        }
+    }
+
+    fn retain_rows_in_every_entry_mode() -> RecordLinePolicy {
+        line_policy(
+            PreviousPhysicalRows::Retain,
+            PreviousPhysicalRows::Retain,
+            PreviousPhysicalRows::Retain,
+        )
+    }
 
     #[test]
     fn tile_delta_counts_only_changed_sixteen_byte_tiles() {
@@ -1186,19 +1320,62 @@ mod tests {
     #[test]
     fn recipe_index_covers_every_workset_and_exact_block_start() {
         let references = [0u8, 0, 5, 0, 0, 0];
-        let directory = [0u8, 0, 2, 0, 3, 0];
+        let directory = [0u8, 0x80, 2, 0, 3, 0];
         let offsets = [0u16, 5];
         let blocks = [0u8, 1, 0x42, 0x2E, 0x80, 1, 1, 0x43, 0x36, 0x80];
 
-        verify_visible_page_recipe_material(
-            &references,
-            &directory,
-            &offsets,
-            &blocks,
-            &[2, 1],
-            &[0, 1, 0],
-            &[0, 1],
-        )
+        verify_visible_page_recipe_material(VisiblePageRecipeMaterial {
+            references: &references,
+            directory: &directory,
+            recipe_offsets: &offsets,
+            recipe_blocks: &blocks,
+            record_page_counts: &[2, 1],
+            expected_recipe_indices: &[0, 1, 0],
+            recipe_group_indices: &[0, 1],
+            record_line_policies: &[
+                line_policy(
+                    PreviousPhysicalRows::Replace,
+                    PreviousPhysicalRows::Retain,
+                    PreviousPhysicalRows::Retain,
+                ),
+                retain_rows_in_every_entry_mode(),
+            ],
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn record_directory_encodes_every_entry_mode_without_a_runtime_default() {
+        let references = [0u8; 6];
+        let directory = [0, 0x80, 1, 0x40, 2, 0x20, 3, 0];
+        let policies = [
+            line_policy(
+                PreviousPhysicalRows::Replace,
+                PreviousPhysicalRows::Retain,
+                PreviousPhysicalRows::Retain,
+            ),
+            line_policy(
+                PreviousPhysicalRows::Retain,
+                PreviousPhysicalRows::Replace,
+                PreviousPhysicalRows::Retain,
+            ),
+            line_policy(
+                PreviousPhysicalRows::Retain,
+                PreviousPhysicalRows::Retain,
+                PreviousPhysicalRows::Replace,
+            ),
+        ];
+
+        verify_visible_page_recipe_material(VisiblePageRecipeMaterial {
+            references: &references,
+            directory: &directory,
+            recipe_offsets: &[0],
+            recipe_blocks: &[0, 1, 0x42, 0x2E, 0x80],
+            record_page_counts: &[1, 1, 1],
+            expected_recipe_indices: &[0, 0, 0],
+            recipe_group_indices: &[0],
+            record_line_policies: &policies,
+        })
         .unwrap();
     }
 
@@ -1210,27 +1387,35 @@ mod tests {
         let offsets = [0u16, 5];
         let blocks = [0u8, 1, 0x42, 0x2E, 0x80, 1, 1, 0x43, 0x36, 0x80];
 
-        verify_visible_page_recipe_material(
-            &references,
-            &directory,
-            &offsets,
-            &blocks,
-            &[2, 1],
-            &[0, 0, 1],
-            &[0, 1],
-        )
+        verify_visible_page_recipe_material(VisiblePageRecipeMaterial {
+            references: &references,
+            directory: &directory,
+            recipe_offsets: &offsets,
+            recipe_blocks: &blocks,
+            record_page_counts: &[2, 1],
+            expected_recipe_indices: &[0, 0, 1],
+            recipe_group_indices: &[0, 1],
+            record_line_policies: &[
+                retain_rows_in_every_entry_mode(),
+                retain_rows_in_every_entry_mode(),
+            ],
+        })
         .unwrap();
 
         assert!(
-            verify_visible_page_recipe_material(
-                &references,
-                &directory,
-                &offsets,
-                &blocks,
-                &[2, 1],
-                &[0, 1, 1],
-                &[0, 1],
-            )
+            verify_visible_page_recipe_material(VisiblePageRecipeMaterial {
+                references: &references,
+                directory: &directory,
+                recipe_offsets: &offsets,
+                recipe_blocks: &blocks,
+                record_page_counts: &[2, 1],
+                expected_recipe_indices: &[0, 1, 1],
+                recipe_group_indices: &[0, 1],
+                record_line_policies: &[
+                    retain_rows_in_every_entry_mode(),
+                    retain_rows_in_every_entry_mode(),
+                ],
+            })
             .is_err(),
             "a reuse marker must not hide a changed recipe"
         );
@@ -1243,27 +1428,29 @@ mod tests {
         let blocks = [0u8, 1, 0x42, 0x2E, 0x80, 1, 1, 0x43, 0x36, 0x80];
 
         assert!(
-            verify_visible_page_recipe_material(
-                &[0, 0, 6, 0],
-                &directory,
-                &offsets,
-                &blocks,
-                &[2],
-                &[0, 1],
-                &[0, 1],
-            )
+            verify_visible_page_recipe_material(VisiblePageRecipeMaterial {
+                references: &[0, 0, 6, 0],
+                directory: &directory,
+                recipe_offsets: &offsets,
+                recipe_blocks: &blocks,
+                record_page_counts: &[2],
+                expected_recipe_indices: &[0, 1],
+                recipe_group_indices: &[0, 1],
+                record_line_policies: &[retain_rows_in_every_entry_mode()],
+            })
             .is_err()
         );
         assert!(
-            verify_visible_page_recipe_material(
-                &[0, 0, 0, 0],
-                &directory,
-                &offsets,
-                &blocks,
-                &[2],
-                &[0, 1],
-                &[0, 1],
-            )
+            verify_visible_page_recipe_material(VisiblePageRecipeMaterial {
+                references: &[0, 0, 0, 0],
+                directory: &directory,
+                recipe_offsets: &offsets,
+                recipe_blocks: &blocks,
+                record_page_counts: &[2],
+                expected_recipe_indices: &[0, 1],
+                recipe_group_indices: &[0, 1],
+                record_line_policies: &[retain_rows_in_every_entry_mode()],
+            })
             .is_err()
         );
     }
@@ -1275,15 +1462,19 @@ mod tests {
         let blocks = [0u8, 1, 0x42, 0x2E, 0x80, 1, 1, 0x43, 0x36, 0x80];
 
         assert!(
-            verify_visible_page_recipe_material(
-                &references,
-                &[0, 0, 1, 0, 3, 0],
-                &offsets,
-                &blocks,
-                &[2, 0],
-                &[0, 1],
-                &[0, 1],
-            )
+            verify_visible_page_recipe_material(VisiblePageRecipeMaterial {
+                references: &references,
+                directory: &[0, 0, 1, 0, 3, 0],
+                recipe_offsets: &offsets,
+                recipe_blocks: &blocks,
+                record_page_counts: &[2, 0],
+                expected_recipe_indices: &[0, 1],
+                recipe_group_indices: &[0, 1],
+                record_line_policies: &[
+                    retain_rows_in_every_entry_mode(),
+                    retain_rows_in_every_entry_mode(),
+                ],
+            })
             .is_err()
         );
     }

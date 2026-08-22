@@ -27,7 +27,7 @@ fn global_dialogue_plan_advances_only_proven_cross_domain_consumers() {
         ("chapter_titles", 25),
         ("choice_labels", 2),
         ("class_names", 22),
-        ("ending_record_labels", 1),
+        ("ending_record_labels", 2),
         ("enemy_names", 69),
         ("item_action_labels", 4),
         ("item_names", 91),
@@ -165,6 +165,61 @@ fn exact_additional_consumer_roles_close_only_the_named_domain_screens() {
 }
 
 #[test]
+fn a_global_owner_replaces_the_same_candidate_role_instead_of_double_counting_it() {
+    let required = ["choice_labels"];
+    let target_unit_counts = BTreeMap::from([("choice_labels", 2)]);
+    let targets = BTreeMap::from([(
+        "choice_labels",
+        vec!["weapon_shop_purchase_confirmation".to_owned()],
+    )]);
+    let current = BTreeMap::from([(
+        "choice_labels",
+        installation_with_complete_screens(
+            2,
+            &["weapon_shop_purchase_confirmation"],
+            &["weapon_shop_purchase_confirmation"],
+        ),
+    )]);
+    let additional = BTreeMap::from([(
+        "choice_labels",
+        BTreeSet::from(["weapon_shop_purchase_confirmation".to_owned()]),
+    )]);
+
+    let domains = assemble_domain_consumers(DomainConsumerAssemblyInputs {
+        required_domains: &required,
+        target_unit_counts: &target_unit_counts,
+        targets: &targets,
+        current: &current,
+        all_chapter_titles_encoded: false,
+        global_dialogue_runtime_planned: false,
+        dynamic_dialogue_producers_bound: false,
+        additional_globally_planned_roles: &additional,
+    })
+    .unwrap();
+    let domain = &domains[0];
+
+    assert_eq!(
+        domain.current_candidate_reported_declared_screen_roles,
+        ["weapon_shop_purchase_confirmation"]
+    );
+    assert!(
+        domain
+            .current_candidate_carried_declared_screen_roles
+            .is_empty()
+    );
+    assert_eq!(
+        domain.current_candidate_replaced_declared_screen_roles,
+        ["weapon_shop_purchase_confirmation"]
+    );
+    assert!(domain.newly_planned_declared_screen_roles.is_empty());
+    assert_eq!(
+        domain.statically_accounted_declared_screen_roles,
+        ["weapon_shop_purchase_confirmation"]
+    );
+    assert!(domain.all_declared_consumers_statically_accounted);
+}
+
+#[test]
 fn declared_runtime_roles_bind_to_every_domain_that_declares_the_screen() {
     let mut plan = ConsumerInstallationPlan {
         strategy: "test",
@@ -178,7 +233,9 @@ fn declared_runtime_roles_bind_to_every_domain_that_declares_the_screen() {
                 current_candidate_installed_target_unit_count: 1,
                 globally_planned_target_unit_count: 1,
                 declared_screen_roles: vec!["shared_screen".to_owned()],
+                current_candidate_reported_declared_screen_roles: vec![],
                 current_candidate_carried_declared_screen_roles: vec![],
+                current_candidate_replaced_declared_screen_roles: vec![],
                 globally_planned_declared_screen_roles: vec!["shared_screen".to_owned()],
                 newly_planned_declared_screen_roles: vec!["shared_screen".to_owned()],
                 statically_accounted_declared_screen_roles: vec!["shared_screen".to_owned()],
@@ -193,7 +250,9 @@ fn declared_runtime_roles_bind_to_every_domain_that_declares_the_screen() {
                 current_candidate_installed_target_unit_count: 1,
                 globally_planned_target_unit_count: 1,
                 declared_screen_roles: vec!["shared_screen".to_owned()],
+                current_candidate_reported_declared_screen_roles: vec![],
                 current_candidate_carried_declared_screen_roles: vec![],
+                current_candidate_replaced_declared_screen_roles: vec![],
                 globally_planned_declared_screen_roles: vec!["shared_screen".to_owned()],
                 newly_planned_declared_screen_roles: vec!["shared_screen".to_owned()],
                 statically_accounted_declared_screen_roles: vec!["shared_screen".to_owned()],

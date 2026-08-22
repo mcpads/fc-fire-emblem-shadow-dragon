@@ -5,10 +5,10 @@ use anyhow::{Context, Result, ensure};
 use crate::{
     dialogue_assets::MainDialogueSlicePlan,
     font_slots::FONT_PAGE_SIZE,
-    mmc5_chr::switchable_bank_file_offset,
-    mmc5_prg::{count_direct_transfers_to_range, fixed_bank_file_offset},
     rom::{HEADER_SIZE, Rom},
     sha1_hex,
+    source_prg::switchable_bank_file_offset,
+    source_prg::{count_direct_transfers_to_range, fixed_bank_file_offset},
     tracked::TrackedImage,
 };
 
@@ -88,11 +88,17 @@ pub(super) fn install_maximum_dialogue_stage(
     validate_caves(inputs.source_rom, &prior_rom)?;
 
     let central_selector_start = CUMULATIVE_RUNTIME_LAYOUT.battle_central_right_fd_selector;
-    let central_selector_end = CUMULATIVE_RUNTIME_LAYOUT.battle_right_fe_selector;
     let central_selector =
-        active_fixed_bank_slice(&prior_rom, central_selector_start, central_selector_end)?;
+        super::super::battle_composition_runtime::cumulative_battle_central_right_fd_selector(
+            ROSTER_SELECTOR_ADDRESS,
+        )?;
+    let central_selector_end = central_selector_start
+        .checked_add(u16::try_from(central_selector.len())?)
+        .context("battle-aware central selector end overflow")?;
     ensure!(
-        central_selector.ends_with(&[0x68, 0x28, 0x4C, 0x80, 0xFB]),
+        active_fixed_bank_slice(&prior_rom, central_selector_start, central_selector_end)?
+            == central_selector
+            && central_selector.ends_with(&[0x68, 0x28, 0x4C, 0x80, 0xFB]),
         "battle-aware central selector no longer falls back to the roster selector"
     );
     let central_fallback_address = central_selector_end - 3;

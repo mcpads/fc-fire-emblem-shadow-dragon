@@ -4,9 +4,9 @@ use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
-    mmc5_prg::fixed_bank_file_offset,
     rom::{HEADER_SIZE, Rom},
     sha1_hex,
+    source_prg::fixed_bank_file_offset,
     text_inventory::FixedTextPlan,
     typed_source::decode_rp2a03_sequence,
 };

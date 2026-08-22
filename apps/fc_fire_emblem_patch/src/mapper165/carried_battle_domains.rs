@@ -25,9 +25,9 @@ use crate::{
     },
     dialogue_assets::plan_battle_dialogue_records,
     font_slots::FONT_PAGE_SIZE,
-    mmc5_chr::switchable_bank_file_offset,
     rom::{EXPECTED_SOURCE_SHA1, HEADER_SIZE, Rom},
     sha1_hex,
+    source_prg::switchable_bank_file_offset,
     text_inventory::plan_fixed_text,
 };
 
@@ -38,6 +38,9 @@ use super::{
     },
     battle_composition_runtime::{
         CUMULATIVE_RUNTIME_LAYOUT, cumulative_battle_central_right_fd_selector,
+        cumulative_battle_central_right_fe_resupply_natural_tail,
+        cumulative_battle_central_right_fe_resupply_selector,
+        emitted_hp_bar_payload_length_publication, hp_bar_queue_length_publication_file_offset,
     },
     battle_text_material::{
         COLOR_BIT_MASKS, COLOR_BIT_MASKS_PRG_OFFSET, DYNAMIC_ASSIGNMENT_CODE_PRG_OFFSET,
@@ -327,9 +330,13 @@ pub(crate) fn inspect_carried_battle_domains(
         "0F:C191:dispatch_battle_composition".to_owned(),
         "0F:E57F:project_shared_battle_text_code".to_owned(),
         "0F:FA80:select_battle_right_fd_page".to_owned(),
+        "0F:FAB8:select_battle_central_right_fe_resupply_page".to_owned(),
         "0F:FAA0:select_battle_right_fe_page".to_owned(),
         "0F:FC20:compose_shared_battle_page".to_owned(),
         "0F:FF1D:select_battle_or_integrated_fallback_page".to_owned(),
+        "0F:FF3D:restore_natural_central_right_fe_resupply".to_owned(),
+        "0F:FFA8:select_battle_central_right_fe_resupply_page".to_owned(),
+        "05:8B6D:publish_emitted_hp_bar_payload_length".to_owned(),
         "integrated:battle_composer_invalidates_dialogue_residency".to_owned(),
     ];
 
@@ -610,9 +617,23 @@ fn bind_shared_consumer_route(
     let central_end = central_start
         .checked_add(u16::try_from(central.len())?)
         .context("integrated battle central selector address overflow")?;
+    let central_fe_resupply_tail = cumulative_battle_central_right_fe_resupply_natural_tail()?;
+    let central_fe_resupply_tail_start =
+        CUMULATIVE_RUNTIME_LAYOUT.central_right_fe_resupply_natural_tail;
+    let central_fe_resupply_tail_end = central_fe_resupply_tail_start
+        .checked_add(u16::try_from(central_fe_resupply_tail.len())?)
+        .context("integrated battle central FE resupply tail address overflow")?;
+    let central_fe_resupply = cumulative_battle_central_right_fe_resupply_selector()?;
+    let central_fe_resupply_start = CUMULATIVE_RUNTIME_LAYOUT.central_right_fe_resupply_selector;
+    let central_fe_resupply_end = central_fe_resupply_start
+        .checked_add(u16::try_from(central_fe_resupply.len())?)
+        .context("integrated battle central FE resupply selector address overflow")?;
     ensure!(
-        central_end <= fixed_end,
-        "integrated battle central selector exceeds its cave"
+        central_end == central_fe_resupply_tail_start
+            && central_fe_resupply_tail_end <= CUMULATIVE_RUNTIME_LAYOUT.battle_right_fe_selector
+            && central_fe_resupply_start >= fixed_end
+            && central_fe_resupply_end <= CUMULATIVE_RUNTIME_LAYOUT.post_data_cave_end,
+        "integrated battle selector exceeds its owned cave"
     );
     let [before_front_end, after_front_end] = bind_preserved_battle_runtime_around_front_end(
         route.composition_call_address + 3,
@@ -643,10 +664,24 @@ fn bind_shared_consumer_route(
             &central,
             inputs.integrated,
         )?,
+        bind_expected_region(
+            "battle_central_right_fe_resupply_natural_tail",
+            active_fixed_file_offset(inputs.cumulative, central_fe_resupply_tail_start)?,
+            &central_fe_resupply_tail,
+            inputs.cumulative,
+            inputs.integrated,
+        )?,
         bind_preserved_region(
             "battle_fixed_runtime_after_fallback_selector",
-            active_fixed_file_offset(inputs.cumulative, central_end)?,
-            usize::from(fixed_end - central_end),
+            active_fixed_file_offset(inputs.cumulative, central_fe_resupply_tail_end)?,
+            usize::from(fixed_end - central_fe_resupply_tail_end),
+            inputs.cumulative,
+            inputs.integrated,
+        )?,
+        bind_expected_region(
+            "battle_central_right_fe_resupply_selector",
+            active_fixed_file_offset(inputs.cumulative, central_fe_resupply_start)?,
+            &central_fe_resupply,
             inputs.cumulative,
             inputs.integrated,
         )?,
@@ -676,6 +711,7 @@ fn bind_shared_consumer_route(
         ("battle_shared_text_projection_hook", 0xE57F, 4),
         ("battle_direct_right_fd_redirect", 0xFA80, 3),
         ("battle_right_fe_redirect", 0xFAA0, 3),
+        ("battle_central_fe_resupply_call", 0xFAB8, 3),
         ("battle_central_fe_refresh_call", 0xFABB, 3),
     ] {
         regions.push(bind_preserved_region(
@@ -710,6 +746,13 @@ fn bind_shared_consumer_route(
             inputs.integrated,
         )?);
     }
+    regions.push(bind_expected_region(
+        "battle_hp_bar_queue_emitted_length_publication",
+        hp_bar_queue_length_publication_file_offset()?,
+        &emitted_hp_bar_payload_length_publication()?,
+        inputs.cumulative,
+        inputs.integrated,
+    )?);
     Ok(regions)
 }
 

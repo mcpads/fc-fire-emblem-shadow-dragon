@@ -1,3 +1,4 @@
+use super::save_dialogue::SaveCompleteDialogueRecords;
 use super::*;
 
 #[test]
@@ -87,6 +88,22 @@ fn transition_routes_separate_each_observed_screen_lifetime() {
         .find(|screen| screen.screen_role == "chapter_transition_blackout")
         .unwrap();
     assert_eq!(blackout.input_behavior, "automatic");
+}
+
+#[test]
+fn save_complete_notice_retains_the_prompt_presentation_path() {
+    let records = SaveCompleteDialogueRecords {
+        continue_prompt: "victory-and-defeat-dialogue:000",
+        power_off_notice: "victory-and-defeat-dialogue:001",
+    };
+
+    assert_eq!(
+        records.retained_presentation_path(),
+        [
+            "victory-and-defeat-dialogue:000",
+            "victory-and-defeat-dialogue:001",
+        ]
+    );
 }
 
 #[test]

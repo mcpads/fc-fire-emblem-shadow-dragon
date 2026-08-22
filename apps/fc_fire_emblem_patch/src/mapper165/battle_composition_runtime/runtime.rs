@@ -61,7 +61,7 @@ pub(crate) fn build_runtime_routines_for_layout(
     layout: BattleCompositionRuntimeLayout,
     central_fallback_target: u16,
 ) -> Result<Vec<RuntimeRoutine>> {
-    let routines = vec![
+    let mut routines = vec![
         RuntimeRoutine {
             role: "NMI post-mask composition dispatch",
             address: layout.dispatch,
@@ -93,9 +93,9 @@ pub(crate) fn build_runtime_routines_for_layout(
             bytes: project_dialogue_selector_for_layout(layout)?,
         },
         RuntimeRoutine {
-            role: "shared-battle phase predicate",
-            address: layout.shared_battle_phase_active,
-            bytes: shared_battle_phase_active_for_layout(layout)?,
+            role: "battle-surface activity predicate",
+            address: layout.battle_surface_active,
+            bytes: battle_surface_active_for_layout(layout)?,
         },
         RuntimeRoutine {
             role: "battle remap-state initializer",
@@ -123,6 +123,11 @@ pub(crate) fn build_runtime_routines_for_layout(
             bytes: battle_central_right_fd_selector_for_layout(layout, central_fallback_target)?,
         },
         RuntimeRoutine {
+            role: "natural central right FE resupply tail",
+            address: layout.central_right_fe_resupply_natural_tail,
+            bytes: central_right_fe_resupply_natural_tail_for_layout(layout)?,
+        },
+        RuntimeRoutine {
             role: "battle-aware right FE selection",
             address: layout.battle_right_fe_selector,
             bytes: battle_right_selector_for_layout(layout.battle_right_fe_selector, 4, layout)?,
@@ -132,7 +137,13 @@ pub(crate) fn build_runtime_routines_for_layout(
             address: layout.project_color,
             bytes: project_color_for_layout(layout)?,
         },
+        RuntimeRoutine {
+            role: "battle-aware central right FE resupply selection",
+            address: layout.central_right_fe_resupply_selector,
+            bytes: central_right_fe_resupply_selector_for_layout(layout)?,
+        },
     ];
+    routines.sort_by_key(|routine| routine.address);
     for pair in routines.windows(2) {
         ensure!(
             pair[0].address as usize + pair[0].bytes.len() <= pair[1].address as usize,
@@ -143,12 +154,23 @@ pub(crate) fn build_runtime_routines_for_layout(
             pair[1].address,
         );
     }
-    let last = routines
-        .last()
-        .context("battle composition has no runtime routines")?;
+    let primary_last = routines
+        .iter()
+        .find(|routine| routine.address == layout.project_color)
+        .context("battle composition has no primary-cave tail routine")?;
     ensure!(
-        last.address as usize + last.bytes.len() <= layout.fixed_cave_end as usize,
+        primary_last.address as usize + primary_last.bytes.len() <= layout.fixed_cave_end as usize,
         "battle composition runtime reaches fixed-bank data"
+    );
+    let post_data = routines
+        .last()
+        .context("battle composition has no post-data runtime routine")?;
+    ensure!(
+        post_data.address == layout.central_right_fe_resupply_selector
+            && post_data.address >= POST_DATA_CAVE_START_ADDRESS
+            && post_data.address as usize + post_data.bytes.len()
+                <= layout.post_data_cave_end as usize,
+        "battle composition central resupply runtime exceeds the post-data cave"
     );
     Ok(routines)
 }
@@ -169,7 +191,7 @@ pub(crate) fn composition_dispatch_for_layout(
         Instruction::Pha,
         Instruction::Tya,
         Instruction::Pha,
-        Instruction::JsrAbsolute(layout.shared_battle_phase_active),
+        Instruction::JsrAbsolute(layout.battle_surface_active),
     ];
     let battle_placeholder = instructions.len();
     instructions.push(Instruction::BneAbsolute(layout.dispatch));
@@ -607,24 +629,24 @@ fn project_dialogue_selector_for_layout(layout: BattleCompositionRuntimeLayout) 
 }
 
 #[cfg(test)]
-pub(super) fn shared_battle_phase_active() -> Result<Vec<u8>> {
-    shared_battle_phase_active_for_layout(PROBE_RUNTIME_LAYOUT)
+pub(super) fn battle_surface_active() -> Result<Vec<u8>> {
+    battle_surface_active_for_layout(PROBE_RUNTIME_LAYOUT)
 }
 
-pub(super) fn shared_battle_phase_active_for_layout(
+pub(super) fn battle_surface_active_for_layout(
     layout: BattleCompositionRuntimeLayout,
 ) -> Result<Vec<u8>> {
     let mut instructions = vec![
         Instruction::LdaAbsolute(BATTLE_RUNTIME_STATE.shared_phase_address),
-        Instruction::CmpImmediate(BATTLE_RUNTIME_STATE.shared_phase_count),
+        Instruction::CmpImmediate(BATTLE_RUNTIME_STATE.terminal_shared_phase()),
     ];
     let active_placeholder = instructions.len();
-    instructions.push(Instruction::BccAbsolute(layout.shared_battle_phase_active));
+    instructions.push(Instruction::BccAbsolute(layout.battle_surface_active));
     instructions.extend([Instruction::LdaImmediate(0), Instruction::Rts]);
-    let active = next_address(layout.shared_battle_phase_active, &instructions)?;
+    let active = next_address(layout.battle_surface_active, &instructions)?;
     instructions[active_placeholder] = Instruction::BccAbsolute(active);
     instructions.extend([Instruction::LdaImmediate(1), Instruction::Rts]);
-    assemble_at(layout.shared_battle_phase_active, &instructions)
+    assemble_at(layout.battle_surface_active, &instructions)
 }
 
 #[cfg(test)]
@@ -659,7 +681,7 @@ fn text_projection_wrapper_for_layout(layout: BattleCompositionRuntimeLayout) ->
         Instruction::Pha,
         Instruction::LdaIndirectY(RECIPE_POINTER_LOW),
         Instruction::StaZeroPage(PHYSICAL_TILE_CODE),
-        Instruction::JsrAbsolute(layout.shared_battle_phase_active),
+        Instruction::JsrAbsolute(layout.battle_surface_active),
     ];
     let natural_state_placeholder = instructions.len();
     instructions.push(Instruction::BeqAbsolute(layout.text_projection_wrapper));
@@ -734,7 +756,7 @@ fn battle_right_selector_for_layout(
     let mut instructions = vec![
         Instruction::Php,
         Instruction::Pha,
-        Instruction::JsrAbsolute(layout.shared_battle_phase_active),
+        Instruction::JsrAbsolute(layout.battle_surface_active),
     ];
     let inactive_surface_placeholder = instructions.len();
     instructions.push(Instruction::BeqAbsolute(address));
@@ -802,7 +824,7 @@ pub(super) fn battle_central_right_fd_selector_for_layout(
     let mut instructions = vec![
         Instruction::Php,
         Instruction::Pha,
-        Instruction::JsrAbsolute(layout.shared_battle_phase_active),
+        Instruction::JsrAbsolute(layout.battle_surface_active),
     ];
     let inactive_surface_placeholder = instructions.len();
     instructions.push(Instruction::BeqAbsolute(address));
@@ -812,13 +834,6 @@ pub(super) fn battle_central_right_fd_selector_for_layout(
     ]);
     let cache_missing_placeholder = instructions.len();
     instructions.push(Instruction::BeqAbsolute(address));
-    instructions.extend([
-        Instruction::Pla,
-        Instruction::Pha,
-        Instruction::AndImmediate(0x1F),
-    ]);
-    let nonzero_page_placeholder = instructions.len();
-    instructions.push(Instruction::BneAbsolute(address));
     instructions.extend([
         Instruction::LdaImmediate(2),
         crate::mapper165::selector_safety::select_register_instruction(),
@@ -831,13 +846,55 @@ pub(super) fn battle_central_right_fd_selector_for_layout(
     let natural = next_address(address, &instructions)?;
     instructions[inactive_surface_placeholder] = Instruction::BeqAbsolute(natural);
     instructions[cache_missing_placeholder] = Instruction::BeqAbsolute(natural);
-    instructions[nonzero_page_placeholder] = Instruction::BneAbsolute(natural);
     instructions.extend([
         Instruction::Pla,
         Instruction::Plp,
         Instruction::JmpAbsolute(fallback_target),
     ]);
     assemble_at(address, &instructions)
+}
+
+pub(super) fn central_right_fe_resupply_selector_for_layout(
+    layout: BattleCompositionRuntimeLayout,
+) -> Result<Vec<u8>> {
+    let address = layout.central_right_fe_resupply_selector;
+    let natural = layout.central_right_fe_resupply_natural_tail;
+    let mut instructions = vec![
+        Instruction::Php,
+        Instruction::Pha,
+        Instruction::JsrAbsolute(layout.battle_surface_active),
+    ];
+    let inactive_surface_placeholder = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(address));
+    instructions.extend([
+        Instruction::LdaAbsolute(REMAP_STATE_ADDRESS),
+        Instruction::AndImmediate(CACHE_UPLOADED_MARKER),
+    ]);
+    let cache_missing_placeholder = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(address));
+    instructions.extend([
+        Instruction::LdaImmediate(0),
+        Instruction::JsrAbsolute(layout.battle_right_fe_selector),
+        Instruction::Pla,
+        Instruction::Plp,
+        Instruction::Rts,
+    ]);
+    instructions[inactive_surface_placeholder] = Instruction::BeqAbsolute(natural);
+    instructions[cache_missing_placeholder] = Instruction::BeqAbsolute(natural);
+    assemble_at(address, &instructions)
+}
+
+pub(super) fn central_right_fe_resupply_natural_tail_for_layout(
+    layout: BattleCompositionRuntimeLayout,
+) -> Result<Vec<u8>> {
+    assemble_at(
+        layout.central_right_fe_resupply_natural_tail,
+        &[
+            Instruction::Pla,
+            Instruction::Plp,
+            Instruction::JmpAbsolute(layout.battle_right_fe_selector),
+        ],
+    )
 }
 
 fn set_directory(instructions: &mut Vec<Instruction>, address: u16) {

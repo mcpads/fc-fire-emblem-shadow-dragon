@@ -8,6 +8,7 @@ use super::super::{
     ending_record_projection::EndingRecordProjectionPlan,
     fixed_ui_projection::FixedUiProjectionPlan,
     screen_font_residency::FontPageSelectorForwarderPlan,
+    shop_text_consumers::ShopTextConsumerPlan,
 };
 
 #[derive(Serialize)]
@@ -34,6 +35,7 @@ pub(super) struct DomainContributionInputs<'a> {
     pub(super) chapter_save_projection: &'a ChapterSaveProjectionPlan,
     pub(super) ending_record_projection: &'a EndingRecordProjectionPlan,
     pub(super) font_page_selector_forwarders: &'a FontPageSelectorForwarderPlan,
+    pub(super) shop_text_consumers: &'a ShopTextConsumerPlan,
     pub(super) consumer_installation: &'a ConsumerInstallationPlan,
 }
 
@@ -49,6 +51,7 @@ pub(super) fn domain_contributions(
         chapter_save_projection,
         ending_record_projection,
         font_page_selector_forwarders,
+        shop_text_consumers,
         consumer_installation,
     } = inputs;
     ensure!(
@@ -86,6 +89,7 @@ pub(super) fn domain_contributions(
             let ending_record_write_count = ending_record_projection.write_count_for_domain(id);
             let selector_forwarder_write_count =
                 font_page_selector_forwarders.write_count_for_domain(id);
+            let shop_text_consumer_write_count = shop_text_consumers.write_count_for_domain(id);
             let all_declared_consumers_statically_accounted =
                 consumer_installation.domain_has_all_declared_consumers_statically_accounted(id);
             DomainWriteContribution {
@@ -98,6 +102,7 @@ pub(super) fn domain_contributions(
                     || chapter_save_write_count != 0
                     || ending_record_write_count != 0
                     || selector_forwarder_write_count != 0
+                    || shop_text_consumer_write_count != 0
                     || all_declared_consumers_statically_accounted,
                 runtime_material_writes_contributed: dialogue || material,
                 font_supply_writes_contributed: true,
@@ -112,6 +117,7 @@ pub(super) fn domain_contributions(
                     + chapter_save_write_count
                     + ending_record_write_count
                     + selector_forwarder_write_count
+                    + shop_text_consumer_write_count
                     + if dialogue {
                         expected_dialogue_write_count
                     } else if chapter_titles {

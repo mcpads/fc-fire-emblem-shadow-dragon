@@ -49,7 +49,9 @@ struct DomainConsumerInstallation {
     current_candidate_installed_target_unit_count: usize,
     globally_planned_target_unit_count: usize,
     declared_screen_roles: Vec<String>,
+    current_candidate_reported_declared_screen_roles: Vec<String>,
     current_candidate_carried_declared_screen_roles: Vec<String>,
+    current_candidate_replaced_declared_screen_roles: Vec<String>,
     globally_planned_declared_screen_roles: Vec<String>,
     newly_planned_declared_screen_roles: Vec<String>,
     statically_accounted_declared_screen_roles: Vec<String>,
@@ -93,12 +95,7 @@ impl ConsumerInstallationPlan {
         self.domains
             .iter()
             .find(|domain| domain.id == domain_id)
-            .is_some_and(|domain| {
-                !domain.globally_planned_declared_screen_roles.is_empty()
-                    && (!domain.newly_planned_declared_screen_roles.is_empty()
-                        || domain.current_candidate_installed_target_unit_count
-                            < domain.target_unit_count)
-            })
+            .is_some_and(|domain| !domain.globally_planned_declared_screen_roles.is_empty())
     }
 
     pub(super) fn bind_declared_consumer_runtime_roles(
@@ -177,12 +174,7 @@ pub(super) fn plan_consumer_installation(
         .count();
     let declared_domain_with_global_plan_count = domains
         .iter()
-        .filter(|domain| {
-            !domain.globally_planned_declared_screen_roles.is_empty()
-                && (!domain.newly_planned_declared_screen_roles.is_empty()
-                    || domain.current_candidate_installed_target_unit_count
-                        < domain.target_unit_count)
-        })
+        .filter(|domain| !domain.globally_planned_declared_screen_roles.is_empty())
         .count();
     let statically_accounted_declared_domain_count = domains
         .iter()
@@ -200,7 +192,7 @@ pub(super) fn plan_consumer_installation(
         .sum();
 
     Ok(ConsumerInstallationPlan {
-        strategy: "bind the exact cumulative candidate first, union only source-bound runtime and storage-projection consumers within the declared domain plan, and report every remaining declared screen role as unaccounted without implying a whole-game census",
+        strategy: "bind the exact cumulative candidate first, separate candidate roles retained by the final artifact from roles replaced by a global owner, then account each declared screen exactly once without inheriting candidate runtime evidence",
         current_candidate_sha1: current.build_output_sha1,
         current_build_report_sha1: current.build_report_sha1,
         declared_domain_count: inputs.required_domains.len(),
@@ -274,12 +266,12 @@ fn assemble_domain_consumers(
                 installation.installed_target_unit_count <= target_unit_count,
                 "current candidate installs more {id} units than the current translation input"
             );
-            let current_candidate_carried_screen_roles = installation
+            let current_candidate_reported_screen_roles = installation
                 .consumer_complete_screen_roles
                 .into_iter()
                 .collect::<BTreeSet<_>>();
             ensure!(
-                current_candidate_carried_screen_roles.is_subset(&declared_screen_roles),
+                current_candidate_reported_screen_roles.is_subset(&declared_screen_roles),
                 "current candidate installs {id} outside its canonical consumer set"
             );
             let current_candidate_historical_runtime_roles = installation
@@ -288,7 +280,7 @@ fn assemble_domain_consumers(
                 .collect::<BTreeSet<_>>();
             ensure!(
                 current_candidate_historical_runtime_roles
-                    .is_subset(&current_candidate_carried_screen_roles),
+                    .is_subset(&current_candidate_reported_screen_roles),
                 "current candidate runtime-binds an uninstalled {id} consumer"
             );
 
@@ -323,11 +315,19 @@ fn assemble_domain_consumers(
                 "global dialogue runtime plans {id} outside its canonical consumer set"
             );
 
-            let newly_planned_screen_roles = globally_planned_screen_roles
-                .difference(&current_candidate_carried_screen_roles)
+            let replaced_candidate_screen_roles = current_candidate_reported_screen_roles
+                .intersection(&globally_planned_screen_roles)
                 .cloned()
                 .collect::<BTreeSet<_>>();
-            let statically_accounted_screen_roles = current_candidate_carried_screen_roles
+            let retained_candidate_screen_roles = current_candidate_reported_screen_roles
+                .difference(&globally_planned_screen_roles)
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            let newly_planned_screen_roles = globally_planned_screen_roles
+                .difference(&current_candidate_reported_screen_roles)
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            let statically_accounted_screen_roles = retained_candidate_screen_roles
                 .union(&globally_planned_screen_roles)
                 .cloned()
                 .collect::<BTreeSet<_>>();
@@ -347,8 +347,16 @@ fn assemble_domain_consumers(
                     target_unit_count
                 },
                 declared_screen_roles: declared_screen_roles.into_iter().collect(),
-                current_candidate_carried_declared_screen_roles:
-                    current_candidate_carried_screen_roles.into_iter().collect(),
+                current_candidate_reported_declared_screen_roles:
+                    current_candidate_reported_screen_roles
+                        .into_iter()
+                        .collect(),
+                current_candidate_carried_declared_screen_roles: retained_candidate_screen_roles
+                    .into_iter()
+                    .collect(),
+                current_candidate_replaced_declared_screen_roles: replaced_candidate_screen_roles
+                    .into_iter()
+                    .collect(),
                 globally_planned_declared_screen_roles: globally_planned_screen_roles
                     .into_iter()
                     .collect(),

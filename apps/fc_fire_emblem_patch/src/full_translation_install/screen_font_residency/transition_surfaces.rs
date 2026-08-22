@@ -35,6 +35,7 @@ pub(super) struct TransitionSurfacePlan {
     ending_chapter_title_count: usize,
     ending_required_title_glyph_count: usize,
     ending_required_label_glyph_count: usize,
+    ending_bridge_preserved_code_count: usize,
     chapter_save_policy_matches_static_page: bool,
     chapter_save_page_contains_the_offer_and_both_choices: bool,
     ending_page_contains_every_chapter_title_and_record_label: bool,
@@ -72,7 +73,8 @@ pub(super) fn plan_transition_surfaces(
         inputs.choices.entries.len() == 2
             && inputs.transitions.save_offer.entry_count == 1
             && inputs.chapter_titles.entries.len() == 25
-            && inputs.transitions.ending_record.entry_count == 1,
+            && inputs.transitions.ending_record.entry_count == 1
+            && inputs.transitions.ending_bridge.entry_count == 1,
         "chapter-save or ending screen font population changed"
     );
 
@@ -90,21 +92,42 @@ pub(super) fn plan_transition_surfaces(
     )?;
 
     let ending_title_glyphs = inputs.chapter_titles.unique_glyphs();
-    let ending_label_glyphs = inputs.transitions.ending_record.target_glyphs.clone();
+    let ending_label_glyphs = inputs
+        .transitions
+        .ending_record
+        .target_glyphs
+        .union(&inputs.transitions.ending_bridge.target_glyphs)
+        .copied()
+        .collect::<BTreeSet<_>>();
     inputs.consumer_codebook.validate_static_page_residency(
         ENDING_RECORD_PAGE_ID,
         &ending_label_glyphs,
         &ending_title_glyphs,
     )?;
+    ensure!(
+        inputs.consumer_codebook.preserves_source_codes(
+            ENDING_RECORD_PAGE_ID,
+            &inputs
+                .transitions
+                .ending_bridge
+                .preserved_visible_active_codes,
+        )?,
+        "ending bridge preserved period code is overwritten by the ending page"
+    );
 
     Ok(TransitionSurfacePlan {
         schema: 1,
-        strategy: "bind chapter-save and ending-record simultaneous text surfaces to their central static consumer pages",
+        strategy: "bind chapter-save, ending-record, and the phase-0x0B bridge surfaces to their central static consumer pages",
         chapter_save_choice_count: inputs.choices.entries.len(),
         chapter_save_required_glyph_count: chapter_save_glyphs.len(),
         ending_chapter_title_count: inputs.chapter_titles.entries.len(),
         ending_required_title_glyph_count: ending_title_glyphs.len(),
         ending_required_label_glyph_count: ending_label_glyphs.len(),
+        ending_bridge_preserved_code_count: inputs
+            .transitions
+            .ending_bridge
+            .preserved_visible_active_codes
+            .len(),
         chapter_save_policy_matches_static_page: true,
         chapter_save_page_contains_the_offer_and_both_choices: true,
         ending_page_contains_every_chapter_title_and_record_label: true,

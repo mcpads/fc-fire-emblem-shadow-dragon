@@ -27,12 +27,25 @@ fn runtime_routines_fit_the_fixed_cave_without_overlap() {
     })
     .unwrap();
 
-    assert_eq!(routines.len(), 14);
+    assert_eq!(routines.len(), 16);
     assert!(routines.windows(2).all(|pair| {
         pair[0].address as usize + pair[0].bytes.len() <= pair[1].address as usize
     }));
-    let last = routines.last().unwrap();
-    assert!(last.address as usize + last.bytes.len() <= FIXED_CAVE_END_ADDRESS as usize);
+    let primary_last = routines
+        .iter()
+        .find(|routine| routine.address == PROJECT_COLOR_ADDRESS)
+        .unwrap();
+    assert!(
+        primary_last.address as usize + primary_last.bytes.len() <= FIXED_CAVE_END_ADDRESS as usize
+    );
+    let post_data = routines.last().unwrap();
+    assert_eq!(
+        post_data.address,
+        CENTRAL_RIGHT_FE_RESUPPLY_SELECTOR_ADDRESS
+    );
+    assert!(
+        post_data.address as usize + post_data.bytes.len() <= POST_DATA_CAVE_END_ADDRESS as usize
+    );
 }
 
 #[test]
@@ -63,8 +76,17 @@ fn cumulative_layout_preserves_existing_selector_ranges() {
             end <= *protected_start || start >= *protected_end
         })
     }));
-    let last = routines.last().unwrap();
-    assert_eq!(usize::from(last.address) + last.bytes.len(), 0xFF8F);
+    let primary_last = routines
+        .iter()
+        .find(|routine| routine.address == layout.project_color)
+        .unwrap();
+    assert_eq!(
+        usize::from(primary_last.address) + primary_last.bytes.len(),
+        0xFF8F
+    );
+    let post_data = routines.last().unwrap();
+    assert_eq!(post_data.address, layout.central_right_fe_resupply_selector);
+    assert!(usize::from(post_data.address) + post_data.bytes.len() <= 0xFFC0);
 }
 
 #[test]
@@ -348,25 +370,82 @@ fn remap_cleanup_preserves_active_phases_and_clears_inactive_phases() {
 }
 
 #[test]
-fn shared_battle_phase_predicate_covers_the_complete_engine_lifetime() {
+fn battle_surface_excludes_the_terminal_handoff_phase() {
+    assert_eq!(run_battle_surface_predicate(0x00), 1);
+    assert_eq!(run_battle_surface_predicate(0x08), 1);
     assert_eq!(
-        shared_battle_phase_active().unwrap(),
-        [
-            0xAD,
-            BATTLE_RUNTIME_STATE.shared_phase_address as u8,
-            (BATTLE_RUNTIME_STATE.shared_phase_address >> 8) as u8,
-            0xC9,
-            BATTLE_RUNTIME_STATE.shared_phase_count,
-            0x90,
-            0x03,
-            0xA9,
-            0x00,
-            0x60,
-            0xA9,
-            0x01,
-            0x60,
-        ]
+        run_battle_surface_predicate(BATTLE_RUNTIME_STATE.terminal_shared_phase() - 1),
+        1
     );
+    assert_eq!(
+        run_battle_surface_predicate(BATTLE_RUNTIME_STATE.terminal_shared_phase()),
+        0
+    );
+    assert_eq!(
+        run_battle_surface_predicate(BATTLE_RUNTIME_STATE.shared_phase_count),
+        0
+    );
+    assert_eq!(run_battle_surface_predicate(0xFF), 0);
+}
+
+fn run_battle_surface_predicate(phase: u8) -> u8 {
+    const ZERO: u8 = 0x02;
+    const CARRY: u8 = 0x01;
+
+    let bytes = battle_surface_active().unwrap();
+    let origin = PROBE_RUNTIME_LAYOUT.battle_surface_active;
+    let mut a = 0;
+    let mut status = 0;
+    let mut pc = origin;
+
+    for _ in 0..16 {
+        let offset = usize::from(pc - origin);
+        let opcode = bytes[offset];
+        pc += 1;
+        match opcode {
+            0x60 => return a,
+            0x90 | 0xF0 => {
+                let displacement = bytes[usize::from(pc - origin)] as i8;
+                pc += 1;
+                let taken = if opcode == 0x90 {
+                    status & CARRY == 0
+                } else {
+                    status & ZERO != 0
+                };
+                if taken {
+                    pc = pc.wrapping_add_signed(i16::from(displacement));
+                }
+            }
+            0xA9 => {
+                a = bytes[usize::from(pc - origin)];
+                pc += 1;
+                status = (status & !ZERO) | if a == 0 { ZERO } else { 0 };
+            }
+            0xAD => {
+                let operand = usize::from(pc - origin);
+                let address = u16::from_le_bytes([bytes[operand], bytes[operand + 1]]);
+                pc += 2;
+                a = match address {
+                    address if address == BATTLE_RUNTIME_STATE.shared_phase_address => phase,
+                    _ => panic!("unexpected predicate input ${address:04X}"),
+                };
+                status = (status & !ZERO) | if a == 0 { ZERO } else { 0 };
+            }
+            0xC9 => {
+                let expected = bytes[usize::from(pc - origin)];
+                pc += 1;
+                status &= !(CARRY | ZERO);
+                if a >= expected {
+                    status |= CARRY;
+                }
+                if a == expected {
+                    status |= ZERO;
+                }
+            }
+            _ => panic!("unexpected predicate opcode ${opcode:02X}"),
+        }
+    }
+    panic!("battle-surface predicate did not return")
 }
 
 #[test]
@@ -483,19 +562,20 @@ fn recipe_upload_and_shared_text_use_the_same_remap_projection() {
 }
 
 #[test]
-fn runtime_consumers_require_an_active_shared_battle_phase_and_persistent_remap_state() {
+fn runtime_consumers_require_a_visible_shared_battle_phase_and_persistent_remap_state() {
     for bytes in [
         battle_right_selector(BATTLE_RIGHT_FD_SELECTOR_ADDRESS, 2).unwrap(),
         battle_right_selector(BATTLE_RIGHT_FE_SELECTOR_ADDRESS, 4).unwrap(),
         battle_central_right_fd_selector().unwrap(),
+        central_right_fe_resupply_selector_for_layout(PROBE_RUNTIME_LAYOUT).unwrap(),
         text_projection_wrapper().unwrap(),
     ] {
         assert!(bytes.windows(3).any(|window| {
             window
                 == [
                     0x20,
-                    SHARED_BATTLE_PHASE_ACTIVE_ADDRESS as u8,
-                    (SHARED_BATTLE_PHASE_ACTIVE_ADDRESS >> 8) as u8,
+                    BATTLE_SURFACE_ACTIVE_ADDRESS as u8,
+                    (BATTLE_SURFACE_ACTIVE_ADDRESS >> 8) as u8,
                 ]
         }));
         assert!(bytes.windows(3).any(|window| {
@@ -512,6 +592,45 @@ fn runtime_consumers_require_an_active_shared_battle_phase_and_persistent_remap_
                 .any(|window| window == [0x29, CACHE_UPLOADED_MARKER])
         );
     }
+}
+
+#[test]
+fn central_resupply_keeps_both_composed_right_pages_until_the_battle_surface_releases_them() {
+    let fd = battle_central_right_fd_selector().unwrap();
+    assert!(
+        fd.windows(5)
+            .any(|window| window == [0xA9, 0x02, 0x20, 0x58, 0xFA])
+    );
+    assert!(
+        fd.windows(5)
+            .any(|window| window == [0xA9, 0x00, 0x8D, 0x01, 0x80])
+    );
+    assert!(!fd.windows(2).any(|window| window == [0x29, 0x1F]));
+
+    let fe = central_right_fe_resupply_selector_for_layout(PROBE_RUNTIME_LAYOUT).unwrap();
+    assert!(fe.windows(5).any(|window| {
+        window
+            == [
+                0xA9,
+                0x00,
+                0x20,
+                BATTLE_RIGHT_FE_SELECTOR_ADDRESS as u8,
+                (BATTLE_RIGHT_FE_SELECTOR_ADDRESS >> 8) as u8,
+            ]
+    }));
+    assert!(fe.ends_with(&[0x68, 0x28, 0x60]));
+    let natural_tail =
+        central_right_fe_resupply_natural_tail_for_layout(PROBE_RUNTIME_LAYOUT).unwrap();
+    assert_eq!(
+        natural_tail,
+        [
+            0x68,
+            0x28,
+            0x4C,
+            BATTLE_RIGHT_FE_SELECTOR_ADDRESS as u8,
+            (BATTLE_RIGHT_FE_SELECTOR_ADDRESS >> 8) as u8,
+        ]
+    );
 }
 
 #[test]
@@ -574,7 +693,10 @@ fn composition_report_omits_translation_content_and_private_paths() {
         fixed_cave_start_cpu_address_hex: "0xFAF3".to_owned(),
         fixed_cave_end_cpu_address_exclusive_hex: "0xFFA0".to_owned(),
         fixed_cave_byte_count: 1197,
-        fixed_runtime_routine_count: 11,
+        post_data_cave_start_cpu_address_hex: "0xFFA8".to_owned(),
+        post_data_cave_end_cpu_address_exclusive_hex: "0xFFC0".to_owned(),
+        post_data_cave_byte_count: 24,
+        fixed_runtime_routine_count: 16,
         fixed_runtime_routine_byte_count: 700,
         material_runtime_start_cpu_address_hex: "0x95C0".to_owned(),
         material_runtime_end_cpu_address_exclusive_hex: "0x986A".to_owned(),
@@ -610,8 +732,10 @@ fn composition_report_omits_translation_content_and_private_paths() {
         sound_test_shared_battle_activation_installed: true,
         sound_test_battle_recomposition_boundary_installed: true,
         battle_zero_right_page_uses_chr_ram_after_success: true,
+        central_battle_resupply_keeps_composed_page: true,
         non_battle_right_pages_use_natural_selection: true,
         dynamic_assignment_source_contract_complete: true,
+        hp_bar_queue_publishes_emitted_payload_length: true,
         runtime_cycle_budget_measured: false,
         runtime_verified: false,
         release_eligible: false,

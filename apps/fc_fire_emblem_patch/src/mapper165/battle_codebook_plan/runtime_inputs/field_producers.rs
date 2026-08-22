@@ -4,8 +4,8 @@ use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
-    battle_runtime_state::BATTLE_RUNTIME_STATE, mmc5_prg::fixed_bank_file_offset, rom::Rom,
-    sha1_hex, typed_source::decode_rp2a03_sequence,
+    battle_runtime_state::BATTLE_RUNTIME_STATE, rom::Rom, sha1_hex,
+    source_prg::fixed_bank_file_offset, typed_source::decode_rp2a03_sequence,
 };
 
 use super::{RoutineSpec, SourceRoutineBinding, bind_routine};

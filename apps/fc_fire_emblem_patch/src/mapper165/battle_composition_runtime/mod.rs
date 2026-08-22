@@ -9,8 +9,6 @@ use crate::{
         SOUND_TEST_BATTLE_COMPOSITION_LIFETIME_START_WRITE,
     },
     font_slots::FONT_PAGE_SIZE,
-    mmc5_chr::switchable_bank_file_offset,
-    mmc5_prg::count_direct_transfers_to_range,
     rom::{EXPECTED_SOURCE_SHA1, HEADER_SIZE, Rom},
     rp2a03::{Instruction, assemble_at},
     runtime_storage_layout::{
@@ -18,12 +16,14 @@ use crate::{
         BATTLE_REMAP_STATE_ADDRESS, bind_integrated_runtime_storage_layout,
     },
     sha1_hex,
+    source_prg::count_direct_transfers_to_range,
+    source_prg::switchable_bank_file_offset,
     temporal_surface::load_observed_battle_temporal_evidence,
     tracked::TrackedImage,
 };
 
 use super::{
-    OUTPUT_MAPPER,
+    OUTPUT_MAPPER, SELECT_CENTRAL_RIGHT_FE_CHR_BANK_ADDRESS,
     battle_codebook_plan::{BattleRuntimeRecipeInput, inspect_runtime_recipe_input},
     battle_text_material::{
         COLOR_BIT_MASKS_CPU_ADDRESS, DYNAMIC_ASSIGNMENT_CODE_CPU_ADDRESS,
@@ -36,6 +36,7 @@ use super::{
 
 mod dialogue_cache_refresh;
 mod dynamic_assignment;
+mod hp_bar_queue_publication;
 mod runtime;
 mod runtime_recipe_fields;
 
@@ -49,11 +50,18 @@ use dialogue_cache_refresh::{
 use dynamic_assignment::{
     build_dynamic_assignment_routines, build_dynamic_assignment_routines_for_layout,
 };
+use hp_bar_queue_publication::{
+    bind_hp_bar_queue_publication_source, install_emitted_hp_bar_payload_length,
+};
+pub(crate) use hp_bar_queue_publication::{
+    emitted_hp_bar_payload_length_publication, hp_bar_queue_length_publication_file_offset,
+};
 pub(crate) use runtime::composition_dispatch_for_layout;
 use runtime::{
-    RuntimeRoutine, battle_central_right_fd_selector_for_layout, build_runtime_routines,
-    build_runtime_routines_for_layout, parse_recipe_directories,
-    shared_battle_phase_active_for_layout,
+    RuntimeRoutine, battle_central_right_fd_selector_for_layout, battle_surface_active_for_layout,
+    build_runtime_routines, build_runtime_routines_for_layout,
+    central_right_fe_resupply_natural_tail_for_layout,
+    central_right_fe_resupply_selector_for_layout, parse_recipe_directories,
 };
 use runtime_recipe_fields::runtime_recipe_fields;
 
@@ -61,12 +69,20 @@ pub(crate) fn cumulative_battle_composition_dispatch_bytes() -> Result<Vec<u8>> 
     composition_dispatch_for_layout(CUMULATIVE_RUNTIME_LAYOUT)
 }
 
-pub(crate) fn cumulative_shared_battle_phase_active_bytes() -> Result<Vec<u8>> {
-    shared_battle_phase_active_for_layout(CUMULATIVE_RUNTIME_LAYOUT)
+pub(crate) fn cumulative_battle_surface_active_bytes() -> Result<Vec<u8>> {
+    battle_surface_active_for_layout(CUMULATIVE_RUNTIME_LAYOUT)
 }
 
 pub(crate) fn cumulative_battle_central_right_fd_selector(fallback_target: u16) -> Result<Vec<u8>> {
     battle_central_right_fd_selector_for_layout(CUMULATIVE_RUNTIME_LAYOUT, fallback_target)
+}
+
+pub(crate) fn cumulative_battle_central_right_fe_resupply_selector() -> Result<Vec<u8>> {
+    central_right_fe_resupply_selector_for_layout(CUMULATIVE_RUNTIME_LAYOUT)
+}
+
+pub(crate) fn cumulative_battle_central_right_fe_resupply_natural_tail() -> Result<Vec<u8>> {
+    central_right_fe_resupply_natural_tail_for_layout(CUMULATIVE_RUNTIME_LAYOUT)
 }
 
 const EXPANDED_PRG_SIZE: usize = 512 * 1024;
@@ -91,7 +107,7 @@ const APPLY_RECIPE_ADDRESS: u16 = 0xFC60;
 const APPLY_DIRECTORY_ADDRESS: u16 = 0xFCE0;
 const APPLY_PARTICIPANT_ADDRESS: u16 = 0xFD00;
 const PROJECT_DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFD30;
-const SHARED_BATTLE_PHASE_ACTIVE_ADDRESS: u16 = 0xFD50;
+const BATTLE_SURFACE_ACTIVE_ADDRESS: u16 = 0xFD50;
 const INITIALIZE_BATTLE_REMAP_ADDRESS: u16 = 0xFD80;
 const CLEAR_REMAP_STATE_OUTSIDE_SHARED_BATTLE_ADDRESS: u16 = 0xFE50;
 const BATTLE_RIGHT_FD_SELECTOR_ADDRESS: u16 = 0xFEA0;
@@ -100,6 +116,10 @@ const BATTLE_RIGHT_FE_SELECTOR_ADDRESS: u16 = 0xFF20;
 const TEXT_PROJECTION_WRAPPER_ADDRESS: u16 = 0xFE60;
 const PROJECT_COLOR_ADDRESS: u16 = 0xFF78;
 const FIXED_CAVE_END_ADDRESS: u16 = 0xFFA0;
+const POST_DATA_CAVE_START_ADDRESS: u16 = 0xFFA8;
+const CENTRAL_RIGHT_FE_RESUPPLY_SELECTOR_ADDRESS: u16 = POST_DATA_CAVE_START_ADDRESS;
+const CENTRAL_RIGHT_FE_RESUPPLY_NATURAL_TAIL_ADDRESS: u16 = 0xFF70;
+const POST_DATA_CAVE_END_ADDRESS: u16 = 0xFFC0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct BattleCompositionRuntimeLayout {
@@ -109,15 +129,18 @@ pub(crate) struct BattleCompositionRuntimeLayout {
     pub(crate) apply_directory: u16,
     pub(crate) apply_participant: u16,
     pub(crate) project_dialogue_selector: u16,
-    pub(crate) shared_battle_phase_active: u16,
+    pub(crate) battle_surface_active: u16,
     pub(crate) initialize_battle_remap: u16,
     pub(crate) clear_remap_state_outside_shared_battle: u16,
     pub(crate) text_projection_wrapper: u16,
     pub(crate) battle_right_fd_selector: u16,
     pub(crate) battle_central_right_fd_selector: u16,
+    pub(crate) central_right_fe_resupply_natural_tail: u16,
     pub(crate) battle_right_fe_selector: u16,
     pub(crate) project_color: u16,
     pub(crate) fixed_cave_end: u16,
+    pub(crate) central_right_fe_resupply_selector: u16,
+    pub(crate) post_data_cave_end: u16,
 }
 
 pub(crate) const PROBE_RUNTIME_LAYOUT: BattleCompositionRuntimeLayout =
@@ -128,15 +151,18 @@ pub(crate) const PROBE_RUNTIME_LAYOUT: BattleCompositionRuntimeLayout =
         apply_directory: APPLY_DIRECTORY_ADDRESS,
         apply_participant: APPLY_PARTICIPANT_ADDRESS,
         project_dialogue_selector: PROJECT_DIALOGUE_SELECTOR_ADDRESS,
-        shared_battle_phase_active: SHARED_BATTLE_PHASE_ACTIVE_ADDRESS,
+        battle_surface_active: BATTLE_SURFACE_ACTIVE_ADDRESS,
         initialize_battle_remap: INITIALIZE_BATTLE_REMAP_ADDRESS,
         clear_remap_state_outside_shared_battle: CLEAR_REMAP_STATE_OUTSIDE_SHARED_BATTLE_ADDRESS,
         text_projection_wrapper: TEXT_PROJECTION_WRAPPER_ADDRESS,
         battle_right_fd_selector: BATTLE_RIGHT_FD_SELECTOR_ADDRESS,
         battle_central_right_fd_selector: BATTLE_CENTRAL_RIGHT_FD_SELECTOR_ADDRESS,
+        central_right_fe_resupply_natural_tail: CENTRAL_RIGHT_FE_RESUPPLY_NATURAL_TAIL_ADDRESS,
         battle_right_fe_selector: BATTLE_RIGHT_FE_SELECTOR_ADDRESS,
         project_color: PROJECT_COLOR_ADDRESS,
         fixed_cave_end: FIXED_CAVE_END_ADDRESS,
+        central_right_fe_resupply_selector: CENTRAL_RIGHT_FE_RESUPPLY_SELECTOR_ADDRESS,
+        post_data_cave_end: POST_DATA_CAVE_END_ADDRESS,
     };
 
 pub(crate) const CUMULATIVE_RUNTIME_LAYOUT: BattleCompositionRuntimeLayout =
@@ -147,15 +173,18 @@ pub(crate) const CUMULATIVE_RUNTIME_LAYOUT: BattleCompositionRuntimeLayout =
         apply_directory: 0xFE3C,
         apply_participant: 0xFE4C,
         project_dialogue_selector: 0xFE75,
-        shared_battle_phase_active: 0xFE90,
+        battle_surface_active: 0xFE90,
         initialize_battle_remap: 0xFEB3,
         clear_remap_state_outside_shared_battle: 0xFEC0,
         text_projection_wrapper: 0xFECE,
         battle_right_fd_selector: 0xFEEE,
         battle_central_right_fd_selector: 0xFF1D,
+        central_right_fe_resupply_natural_tail: 0xFF3D,
         battle_right_fe_selector: 0xFF43,
         project_color: 0xFF72,
         fixed_cave_end: FIXED_CAVE_END_ADDRESS,
+        central_right_fe_resupply_selector: CENTRAL_RIGHT_FE_RESUPPLY_SELECTOR_ADDRESS,
+        post_data_cave_end: POST_DATA_CAVE_END_ADDRESS,
     };
 
 const PPU_MASK_SHADOW: u8 = 0xCC;
@@ -240,6 +269,9 @@ struct BattleCompositionRuntimeReport {
     fixed_cave_start_cpu_address_hex: String,
     fixed_cave_end_cpu_address_exclusive_hex: String,
     fixed_cave_byte_count: usize,
+    post_data_cave_start_cpu_address_hex: String,
+    post_data_cave_end_cpu_address_exclusive_hex: String,
+    post_data_cave_byte_count: usize,
     fixed_runtime_routine_count: usize,
     fixed_runtime_routine_byte_count: usize,
     material_runtime_start_cpu_address_hex: String,
@@ -276,8 +308,10 @@ struct BattleCompositionRuntimeReport {
     sound_test_shared_battle_activation_installed: bool,
     sound_test_battle_recomposition_boundary_installed: bool,
     battle_zero_right_page_uses_chr_ram_after_success: bool,
+    central_battle_resupply_keeps_composed_page: bool,
     non_battle_right_pages_use_natural_selection: bool,
     dynamic_assignment_source_contract_complete: bool,
+    hp_bar_queue_publishes_emitted_payload_length: bool,
     runtime_cycle_budget_measured: bool,
     runtime_verified: bool,
     release_eligible: bool,
@@ -343,6 +377,7 @@ pub(crate) fn build_battle_composition_runtime(
     let source_rom = Rom::from_path(source_path)?;
     source_rom.verify_supported_japanese()?;
     bind_final_dialogue_cache_refresh_source(&source_rom)?;
+    bind_hp_bar_queue_publication_source(&source_rom)?;
     let base = fs::read(base_path).with_context(|| format!("read {}", base_path.display()))?;
     let base_sha1 = sha1_hex(&base);
     let base_report_bytes = fs::read(base_report_path)
@@ -501,8 +536,16 @@ pub(crate) fn build_battle_composition_runtime(
         central_fallback_target,
         layout.battle_central_right_fd_selector,
     )?;
+    redirect_call(
+        &mut image,
+        "battle composition central right FE resupply selector",
+        SELECT_CENTRAL_RIGHT_FE_CHR_BANK_ADDRESS,
+        SOURCE_RIGHT_FE_SELECTOR,
+        layout.central_right_fe_resupply_selector,
+    )?;
     install_battle_lifetime_remap_initializers(&mut image, layout)?;
     install_final_dialogue_cache_refresh(&mut image, layout)?;
+    install_emitted_hp_bar_payload_length(&mut image)?;
     image.verify_all_changes_tracked(&base)?;
     let runtime_tracked_write_count = image.writes().len();
     let output = image.into_data();
@@ -555,6 +598,17 @@ pub(crate) fn build_battle_composition_runtime(
         fixed_cave_start_cpu_address_hex: format!("0x{:04X}", layout.dispatch),
         fixed_cave_end_cpu_address_exclusive_hex: format!("0x{:04X}", layout.fixed_cave_end),
         fixed_cave_byte_count: usize::from(layout.fixed_cave_end - layout.dispatch),
+        post_data_cave_start_cpu_address_hex: format!(
+            "0x{:04X}",
+            layout.central_right_fe_resupply_selector
+        ),
+        post_data_cave_end_cpu_address_exclusive_hex: format!(
+            "0x{:04X}",
+            layout.post_data_cave_end
+        ),
+        post_data_cave_byte_count: usize::from(
+            layout.post_data_cave_end - layout.central_right_fe_resupply_selector,
+        ),
         fixed_runtime_routine_count: routines.len(),
         fixed_runtime_routine_byte_count,
         material_runtime_start_cpu_address_hex: format!(
@@ -605,8 +659,10 @@ pub(crate) fn build_battle_composition_runtime(
         sound_test_shared_battle_activation_installed: true,
         sound_test_battle_recomposition_boundary_installed: true,
         battle_zero_right_page_uses_chr_ram_after_success: true,
+        central_battle_resupply_keeps_composed_page: true,
         non_battle_right_pages_use_natural_selection: true,
         dynamic_assignment_source_contract_complete: true,
+        hp_bar_queue_publishes_emitted_payload_length: true,
         runtime_cycle_budget_measured: false,
         runtime_verified: false,
         release_eligible: false,

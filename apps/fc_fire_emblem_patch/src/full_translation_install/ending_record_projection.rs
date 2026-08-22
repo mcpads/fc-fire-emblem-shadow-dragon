@@ -5,8 +5,9 @@ use serde::Serialize;
 
 use crate::{
     chapter_transition::{
-        ChapterTitlePlan, EndingChapterRecordStorageSource, EndingChapterRowStorageSource,
-        TransitionTranslationPlans, bind_ending_chapter_record_storage_source,
+        ChapterTitlePlan, EndingBridgeStorageSource, EndingChapterRecordStorageSource,
+        EndingChapterRowStorageSource, TransitionTranslationPlans,
+        bind_ending_bridge_storage_source, bind_ending_chapter_record_storage_source,
     },
     rom::Rom,
     sha1_hex,
@@ -20,6 +21,7 @@ const TURN_INTERPOLATION: u8 = 0xED;
 const AGGREGATE_TURN_SLOT: u8 = 0x19;
 const TURN_UNIT_GLYPH: char = '턴';
 const PADDING: u8 = 0xFF;
+const ENDING_BRIDGE_TERMINATOR: u8 = 0xEF;
 
 pub(super) struct EndingRecordProjectionInputs<'a> {
     pub(super) source: &'a Rom,
@@ -37,6 +39,8 @@ pub(super) struct EndingRecordProjectionPlan {
     chapter_title_write_count: usize,
     turn_suffix_write_count: usize,
     aggregate_label_write_count: usize,
+    bridge_label_write_count: usize,
+    bridge_source_sha1: String,
     storage_write_count: usize,
     projected_byte_count: usize,
     projection_sha1: String,
@@ -84,10 +88,12 @@ pub(super) fn plan_ending_record_projection(
     inputs: EndingRecordProjectionInputs<'_>,
 ) -> Result<EndingRecordProjectionPlan> {
     let storage = bind_ending_chapter_record_storage_source(inputs.source)?;
+    let bridge = bind_ending_bridge_storage_source(inputs.source)?;
     ensure!(
         storage.chapter_rows.len() == 25
             && inputs.chapter_titles.entries.len() == storage.chapter_rows.len()
-            && inputs.transitions.ending_record.entry_count == 1,
+            && inputs.transitions.ending_record.entry_count == 1
+            && inputs.transitions.ending_bridge.entry_count == 1,
         "ending-record projection input population changed"
     );
     ensure!(
@@ -102,7 +108,7 @@ pub(super) fn plan_ending_record_projection(
         "approved ending aggregate translation no longer contains one turn-unit glyph"
     );
 
-    let mut writes = Vec::with_capacity(storage.chapter_rows.len() * 2 + 1);
+    let mut writes = Vec::with_capacity(storage.chapter_rows.len() * 2 + 2);
     let mut identity = Vec::new();
     for row in &storage.chapter_rows {
         let title = inputs.chapter_titles.entry(row.chapter_index)?;
@@ -174,6 +180,29 @@ pub(super) fn plan_ending_record_projection(
         },
     );
 
+    bind_candidate(
+        inputs.candidate,
+        bridge.file_offset,
+        &bridge.source_storage,
+        "ending bridge source storage",
+    )?;
+    let bridge_replacement = encode_bridge(
+        &bridge,
+        &inputs.transitions.ending_bridge.logical_bytes,
+        inputs.consumer_codebook,
+    )?;
+    push_write(
+        &mut writes,
+        &mut identity,
+        EndingRecordExpectedWrite {
+            domain: "ending_record_labels",
+            role: "ending phase-0x0B bridge projection".to_owned(),
+            file_offset: bridge.file_offset,
+            expected: bridge.source_storage.clone(),
+            replacement: bridge_replacement,
+        },
+    );
+
     ensure_disjoint(&writes)?;
     let chapter_title_write_count = writes
         .iter()
@@ -184,17 +213,19 @@ pub(super) fn plan_ending_record_projection(
         .filter(|write| write.domain == "ending_record_labels")
         .count();
     ensure!(
-        chapter_title_write_count == 25 && ending_label_write_count == 26,
+        chapter_title_write_count == 25 && ending_label_write_count == 27,
         "ending-record projection write population changed"
     );
 
     Ok(EndingRecordProjectionPlan {
-        strategy: "keep every ending record and interpolation slot in place; encode the twenty-five duplicated titles with their intro-resident codes, replace each Japanese turn suffix with the approved Korean turn glyph, and project the aggregate label around its fixed runtime slot",
+        strategy: "keep every ending record and interpolation slot in place; encode the twenty-five duplicated titles with their intro-resident codes, replace each Japanese turn suffix with the approved Korean turn glyph, project the aggregate label around its fixed runtime slot, and replace the source-bound phase-0x0B bridge within its exact nine-byte extent",
         source_stream_sha1: storage.stream_sha1,
         chapter_row_count: storage.chapter_rows.len(),
         chapter_title_write_count,
         turn_suffix_write_count: storage.chapter_rows.len(),
         aggregate_label_write_count: 1,
+        bridge_label_write_count: 1,
+        bridge_source_sha1: bridge.source_sha1,
         storage_write_count: writes.len(),
         projected_byte_count: writes.iter().map(|write| write.replacement.len()).sum(),
         projection_sha1: sha1_hex(&identity),
@@ -204,6 +235,27 @@ pub(super) fn plan_ending_record_projection(
         turn_unit_comes_from_approved_aggregate_translation: true,
         writes,
     })
+}
+
+fn encode_bridge(
+    source: &EndingBridgeStorageSource,
+    logical_bytes: &[FixedTextLogicalByte],
+    consumer_codebook: &ConsumerCodebookPlan,
+) -> Result<Vec<u8>> {
+    ensure!(
+        source.source_storage.last() == Some(&ENDING_BRIDGE_TERMINATOR),
+        "ending bridge source terminator changed"
+    );
+    let visible_capacity = source.source_storage.len() - 1;
+    let mut replacement = consumer_codebook.encode_fixed_ui_for(ENDING_PAGE_ID, logical_bytes)?;
+    ensure!(
+        replacement.len() <= visible_capacity,
+        "ending bridge translation needs {} cells but owns only {visible_capacity}",
+        replacement.len()
+    );
+    replacement.resize(visible_capacity, PADDING);
+    replacement.push(ENDING_BRIDGE_TERMINATOR);
+    Ok(replacement)
 }
 
 fn bind_row_source(candidate: &Rom, row: &EndingChapterRowStorageSource) -> Result<()> {

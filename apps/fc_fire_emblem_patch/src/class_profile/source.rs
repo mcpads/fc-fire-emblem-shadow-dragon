@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, ensure};
 
 use crate::{
-    mmc5_chr::switchable_bank_file_offset, rom::Rom, text_inventory::decode_source_markup,
+    rom::Rom, source_prg::switchable_bank_file_offset, text_inventory::decode_source_markup,
 };
 
 pub(super) const PROFILE_COUNT: usize = 22;

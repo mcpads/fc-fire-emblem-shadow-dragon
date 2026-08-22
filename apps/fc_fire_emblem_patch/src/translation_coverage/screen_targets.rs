@@ -26,7 +26,7 @@ pub(crate) const DOMAIN_SEEDS: &[TranslationDomainSeed] = &[
     domain("choice_labels", "choice_label"),
     domain("class_names", "class_name"),
     domain("class_profiles", "class_profile"),
-    domain("ending_record_labels", "ending_aggregate_record"),
+    domain("ending_record_labels", "ending_fixed_label"),
     domain("enemy_names", "enemy_name"),
     domain("front_end_menu_labels", "menu_label"),
     domain("fixed_menu_labels", "fixed_menu_label"),

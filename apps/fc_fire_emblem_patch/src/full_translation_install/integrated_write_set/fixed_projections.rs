@@ -1,6 +1,9 @@
 use anyhow::{Result, ensure};
 
 use crate::rom::Rom;
+use crate::{
+    dialogue_inventory::switchable_cpu_to_file_offset, mapper165::FontPageFallbackNodeRole,
+};
 
 use super::{
     super::{
@@ -8,6 +11,7 @@ use super::{
         ending_record_projection::EndingRecordProjectionPlan,
         fixed_ui_projection::FixedUiProjectionPlan,
         screen_font_residency::FontPageSelectorForwarderPlan,
+        shop_text_consumers::ShopTextConsumerPlan,
     },
     FIXED_BANK_SIZE,
     technical_installation::IntegratedImage,
@@ -96,7 +100,7 @@ pub(super) fn install_ending_record_projection(
     plan: &EndingRecordProjectionPlan,
 ) -> Result<()> {
     ensure!(
-        plan.write_count() == 51,
+        plan.write_count() == 52,
         "ending-record projection must install twenty-five title spans, twenty-five turn suffixes, and one aggregate label"
     );
     for write in plan.writes() {
@@ -116,8 +120,10 @@ pub(super) fn install_font_page_selector_forwarders(
     plan: &FontPageSelectorForwarderPlan,
 ) -> Result<()> {
     ensure!(
-        plan.write_count() == 2,
-        "screen residency must replace exactly the migrated unit-name and front-end selectors"
+        plan.write_count() != 0
+            && plan.replaces_source_role(FontPageFallbackNodeRole::WeaponShopDialogue)
+            && plan.replaces_source_role(FontPageFallbackNodeRole::ChapterIntroDialogue),
+        "screen residency did not replace every obsolete final-codebook selector"
     );
     for write in plan.writes() {
         ensure!(
@@ -130,6 +136,45 @@ pub(super) fn install_font_page_selector_forwarders(
             &write.expected,
             &write.replacement,
         )?;
+    }
+    Ok(())
+}
+
+pub(super) fn install_shop_text_consumers(
+    image: &mut IntegratedImage,
+    plan: &ShopTextConsumerPlan,
+) -> Result<()> {
+    ensure!(
+        plan.write_count() != 0,
+        "shop text consumer ownership has no pointer restorations"
+    );
+    for write in plan.writes() {
+        ensure!(
+            write.file_offset == switchable_cpu_to_file_offset(write.prg_bank, write.cpu_address)?,
+            "shop text consumer file and CPU addresses disagree"
+        );
+        image.write_expected(
+            write.role,
+            write.file_offset,
+            &write.expected,
+            &write.replacement,
+        )?;
+    }
+    Ok(())
+}
+
+pub(super) fn verify_installed_shop_text_consumers(
+    installed: &[u8],
+    plan: &ShopTextConsumerPlan,
+) -> Result<()> {
+    for write in plan.writes() {
+        ensure!(
+            write.file_offset == switchable_cpu_to_file_offset(write.prg_bank, write.cpu_address)?
+                && installed.get(write.file_offset..write.file_offset + write.replacement.len())
+                    == Some(write.replacement.as_slice()),
+            "installed shop text consumer ownership does not match {}",
+            write.role
+        );
     }
     Ok(())
 }

@@ -2,10 +2,10 @@ use anyhow::{Context, Result, ensure};
 
 use crate::{
     battle_runtime_state::BATTLE_RUNTIME_STATE,
-    mmc5_chr::switchable_bank_file_offset,
-    mmc5_prg::count_direct_transfers_to_range,
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
+    source_prg::count_direct_transfers_to_range,
+    source_prg::switchable_bank_file_offset,
     tracked::TrackedImage,
     typed_source::decode_rp2a03_sequence,
 };

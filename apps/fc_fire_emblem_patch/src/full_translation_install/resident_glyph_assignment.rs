@@ -82,6 +82,11 @@ pub(super) fn assign_and_augment_resident_worksets(
         .filter(|(glyph, _)| resident_glyphs.contains(glyph))
         .map(|(glyph, code)| (*glyph, BTreeSet::from([*code])))
         .collect::<BTreeMap<_, _>>();
+    let mut preassignment_origins_by_glyph = prior_glyph_codes
+        .iter()
+        .filter(|(glyph, _)| resident_glyphs.contains(glyph))
+        .map(|(glyph, code)| (*glyph, vec![("prior".to_owned(), *code)]))
+        .collect::<BTreeMap<_, _>>();
     for workset_index in resident_workset_indices {
         let workset = &dialogue_worksets[*workset_index];
         for glyph in resident_glyphs {
@@ -95,11 +100,22 @@ pub(super) fn assign_and_augment_resident_worksets(
                         .entry(*glyph)
                         .or_default()
                         .insert(*fixed_code);
+                    preassignment_origins_by_glyph
+                        .entry(*glyph)
+                        .or_default()
+                        .push((format!("workset:{workset_index}"), *fixed_code));
                 } else {
                     forbidden.insert(*fixed_code);
                 }
             }
         }
+    }
+    for (glyph, codes) in &preassigned_codes_by_glyph {
+        ensure!(
+            codes.len() == 1,
+            "{role} glyph {glyph:?} has conflicting preassigned codes {codes:02X?} from {:?}",
+            preassignment_origins_by_glyph.get(glyph)
+        );
     }
     let glyph_codes = assign_resident_glyph_codes(
         role,

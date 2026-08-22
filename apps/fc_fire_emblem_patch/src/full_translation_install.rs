@@ -32,6 +32,7 @@ use crate::{
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     roster_localization::RosterLocalization,
     sha1_hex,
+    shop_flow::bind_shop_item_composition_source,
     text_inventory::{plan_fixed_text, plan_location_name_text},
     unit_names::plan_unit_names,
     unit_ui_text::{
@@ -39,6 +40,7 @@ use crate::{
     },
 };
 
+mod caller_handoff_residency;
 mod chapter_intro_residency;
 mod chapter_save_projection;
 mod choice_residency;
@@ -74,12 +76,17 @@ mod runtime_nmi_contract;
 mod runtime_state_storage;
 mod screen_font_residency;
 mod shop_item_residency;
+mod shop_text_consumers;
 mod storage_residency;
 mod transition_residency;
 mod unit_selection_help_residency;
 
 pub(crate) use storage_residency::STORAGE_CHOICE_DIALOGUE_RECORD_ID;
 
+use caller_handoff_residency::{
+    CallerHandoffResidencyPlan, bind_caller_handoff_lifetime_worksets,
+    plan_caller_handoff_residency,
+};
 use chapter_intro_residency::plan_chapter_intro_residency;
 use chapter_save_projection::{
     ChapterSaveProjectionInputs, ChapterSaveProjectionPlan, plan_chapter_save_projection,
@@ -97,8 +104,8 @@ use dialogue_line_layout::audit_main_dialogue_line_layout;
 use dynamic_composition::{DialogueRuntimeCompositionInputs, plan_dialogue_runtime_composition};
 use dynamic_input_producers::{DynamicInputProducerPlan, inspect_dynamic_input_producers};
 use dynamic_inputs::{
-    DynamicProducerEncodingPlan, bind_dynamic_producer_encoding, bind_dynamic_string_page_codes,
-    plan_dynamic_dialogue_inputs,
+    DynamicDialogueInputs, DynamicProducerEncodingPlan, bind_dynamic_producer_encoding,
+    bind_dynamic_string_page_codes, plan_dynamic_dialogue_inputs,
 };
 use ending_record_projection::{
     EndingRecordProjectionInputs, EndingRecordProjectionPlan, plan_ending_record_projection,
@@ -117,7 +124,8 @@ use integrated_write_set::{
     IntegratedWriteSetInputs, IntegratedWriteSetPlan, plan_integrated_write_set,
 };
 use main_dialogue_route_population::{
-    MainDialogueRoutePopulationPlan, plan_main_dialogue_route_population,
+    MainDialogueRoutePopulationInputs, MainDialogueRoutePopulationPlan,
+    plan_main_dialogue_route_population,
 };
 use report::{
     DialogueCodebookReportInputs, DialogueRuntimeCompositionReportInputs,
@@ -145,8 +153,10 @@ use shop_item_residency::{
     ShopItemResidencyInputs, ShopItemWorksetResidencyInputs, plan_shop_item_residency,
     plan_shop_item_workset_residency,
 };
+use shop_text_consumers::{ShopTextConsumerInputs, ShopTextConsumerPlan, plan_shop_text_consumers};
 use storage_residency::{
-    StorageDialogueResidencyInputs, StorageDialogueResidencyPlan, plan_storage_dialogue_residency,
+    StorageDialogueResidencyInputs, StorageDialogueResidencyPlan,
+    bind_storage_dialogue_source_plan, plan_storage_dialogue_residency,
 };
 use transition_residency::{bind_transition_lifetime_worksets, plan_transition_residency};
 use unit_selection_help_residency::{
@@ -207,7 +217,7 @@ pub(crate) struct FullTranslationInstallInputs<'a> {
     pub(crate) output_will_be_emitted: bool,
 }
 
-pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 41;
+pub(crate) const FULL_TRANSLATION_REPORT_SCHEMA: u8 = 42;
 const CURRENT_TRANSLATION_BASELINE_ACCEPTED: bool = true;
 
 pub(crate) struct FullTranslationInstallSummary {
@@ -312,24 +322,47 @@ pub(crate) fn plan_full_translation_installation(
             && fixed_menu_labels.entry_count == FIXED_MENU_TRANSLATION_ENTRY_COUNT
             && transitions.save_offer.entry_count == 1
             && transitions.ending_record.entry_count == 1
+            && transitions.ending_bridge.entry_count == 1
             && locations.entries.len() == 24,
         "full translation installation input population changed"
     );
 
     let dialogue_graph = inspect_main_dialogue_graph(rom.data())?;
     let transition_lifetimes = bind_transition_lifetime_worksets(&display, &dialogue_graph)?;
-    let item_name_appender_display_codes = item_name_appender_display_codes(rom.data())?;
-
-    let baseline_dynamic_inputs = plan_dynamic_dialogue_inputs(
+    let shop_item_composition_source = bind_shop_item_composition_source(&rom)?;
+    let storage_dialogue_source_plan = bind_storage_dialogue_source_plan(&rom, &dialogue_graph)?;
+    let caller_handoff_lifetimes = bind_caller_handoff_lifetime_worksets(
+        &rom,
         &display,
-        &fixed.entries,
-        &unit_names.entries,
-        &locations.entries,
-        &item_name_appender_display_codes,
-        &transition_lifetimes,
+        &shop_item_composition_source,
+        &storage_dialogue_source_plan,
     )?;
+    let item_name_appender_display_codes = item_name_appender_display_codes(rom.data())?;
+    let installed_front_end_glyph_codes =
+        front_end.bind_installed_glyph_codes(current_candidate.data())?;
+    let choice_glyphs = choices.unique_glyphs();
+    let shared_choice_menu_glyph_codes = installed_front_end_glyph_codes
+        .iter()
+        .filter(|(glyph, _)| choice_glyphs.contains(glyph))
+        .map(|(glyph, code)| (*glyph, *code))
+        .collect::<BTreeMap<_, _>>();
+    ensure!(
+        !shared_choice_menu_glyph_codes.is_empty(),
+        "front-end menu and shared choices no longer have a common visible glyph"
+    );
+
+    let dynamic_inputs = plan_dynamic_dialogue_inputs(DynamicDialogueInputs {
+        dialogue: &display,
+        fixed_text: &fixed.entries,
+        unit_names: &unit_names.entries,
+        location_names: &locations.entries,
+        item_name_appender_display_codes: &item_name_appender_display_codes,
+        transition_lifetimes: &transition_lifetimes,
+        caller_handoff_lifetimes: caller_handoff_lifetimes.lifetimes(),
+        canonical_preassigned_codes: &shared_choice_menu_glyph_codes,
+    })?;
     let baseline_codebook =
-        plan_glyph_workset_page_upper_bound(&baseline_dynamic_inputs.augmented_worksets)?;
+        plan_glyph_workset_page_upper_bound(&dynamic_inputs.augmented_worksets)?;
     let baseline_encoded = dialogue.encoded_by_page_groups(
         &baseline_codebook.workset_page_indices,
         &baseline_codebook.page_assignments,
@@ -339,19 +372,11 @@ pub(crate) fn plan_full_translation_installation(
         "baseline dialogue encoded layout changed"
     );
 
-    let dynamic_inputs = plan_dynamic_dialogue_inputs(
-        &display,
-        &fixed.entries,
-        &unit_names.entries,
-        &locations.entries,
-        &item_name_appender_display_codes,
-        &transition_lifetimes,
-    )?;
     let dialogue_line_layout =
         audit_main_dialogue_line_layout(&dialogue.line_layout, &dynamic_inputs)?;
     let shop_item_workset_residency =
         plan_shop_item_workset_residency(ShopItemWorksetResidencyInputs {
-            source: &rom,
+            source: &shop_item_composition_source,
             display: &display,
             fixed: &fixed,
             dialogue_worksets: &dynamic_inputs.augmented_worksets,
@@ -437,7 +462,7 @@ pub(crate) fn plan_full_translation_installation(
     )?;
     let storage_dialogue_residency =
         plan_storage_dialogue_residency(StorageDialogueResidencyInputs {
-            source: &rom,
+            source_plan: &storage_dialogue_source_plan,
             graph: &dialogue_graph,
             display: &display,
             fixed: &fixed,
@@ -507,7 +532,13 @@ pub(crate) fn plan_full_translation_installation(
         &dialogue_graph,
         &front_end_result_residency.augmented_worksets,
     )?;
-    let codebook = plan_glyph_workset_page_upper_bound(&transition_residency.augmented_worksets)?;
+    let mut caller_handoff_residency = plan_caller_handoff_residency(
+        &transition_residency.augmented_worksets,
+        &caller_handoff_lifetimes,
+    )?;
+    let codebook =
+        plan_glyph_workset_page_upper_bound(&caller_handoff_residency.augmented_worksets)?;
+    caller_handoff_residency.bind_selected_codebook(&codebook)?;
     let screen_font_residency = finalize_screen_font_residency(
         screen_font_residency_draft,
         DialogueSurfaceInputs {
@@ -519,10 +550,14 @@ pub(crate) fn plan_full_translation_installation(
             storage_dialogue: &storage_dialogue_residency.augmented_worksets,
             front_end_result: &front_end_result_residency.augmented_worksets,
             transition_lifetime: &transition_residency.augmented_worksets,
+            caller_handoff_lifetime: &caller_handoff_residency.augmented_worksets,
             codebook: &codebook,
         },
         &current_candidate,
     )?;
+    let font_page_runtime_takeover = screen_font_residency
+        .selector_forwarders()
+        .dialogue_runtime_takeover()?;
     let dynamic_page_codes = bind_dynamic_string_page_codes(&dynamic_inputs, &codebook)?;
     ensure!(
         codebook.workset_count == display.page_worksets.len()
@@ -547,7 +582,7 @@ pub(crate) fn plan_full_translation_installation(
     );
     verify_glyph_workset_font_page_pack(
         source_font_page,
-        &transition_residency.augmented_worksets,
+        &caller_handoff_residency.augmented_worksets,
         &codebook,
         &font_page_pack,
     )?;
@@ -565,16 +600,18 @@ pub(crate) fn plan_full_translation_installation(
     cross_domain_target_glyphs.extend(fixed_menu_labels.unique_target_glyphs());
     cross_domain_target_glyphs.extend(transitions.save_offer.target_glyphs.iter().copied());
     cross_domain_target_glyphs.extend(transitions.ending_record.target_glyphs.iter().copied());
+    cross_domain_target_glyphs.extend(transitions.ending_bridge.target_glyphs.iter().copied());
     cross_domain_target_glyphs.extend(locations.unique_glyphs());
     let composition = plan_dialogue_runtime_composition(DialogueRuntimeCompositionInputs {
         dialogue: &display,
         transition_graph: &dialogue_graph,
-        runtime_worksets: &transition_residency.augmented_worksets,
+        runtime_worksets: &caller_handoff_residency.augmented_worksets,
         codebook: &codebook,
         dynamic_page_codes: &dynamic_page_codes,
         source_font_page,
         static_page_pack: &font_page_pack,
         additional_target_glyphs: &cross_domain_target_glyphs,
+        record_line_policies: caller_handoff_lifetimes.record_line_policies(),
     })?;
     ensure!(
         cross_domain_target_glyphs.iter().all(|glyph| composition
@@ -714,15 +751,22 @@ pub(crate) fn plan_full_translation_installation(
         storage_item_list: storage_dialogue_residency.item_list_runtime_route(),
         cold_request_mapper_register: cold_request_presentation.mapper_register,
         consumer_font_pages: screen_font_residency.routes(),
+        font_page_runtime_takeover,
     })?;
     let assembled_hook_roles = dialogue_runtime_code.hook_roles();
-    let new_record_line_buffer_reset_routes_bound =
-        dialogue_runtime_code.new_record_line_buffer_reset_routes_bound()?;
+    let record_entry_routes_bound = dialogue_runtime_code.record_entry_routes_bound()?;
     dynamic_producer_encoding.bind_runtime_hooks(&assembled_hook_roles)?;
     shop_item_residency.bind_runtime_routes(
         &dialogue_runtime_code,
         dynamic_producer_encoding.canonical_outputs_ready(),
     )?;
+    let shop_text_consumers = plan_shop_text_consumers(ShopTextConsumerInputs {
+        candidate: &current_candidate,
+        runtime_code: &dialogue_runtime_code,
+        choice_residency: &choice_residency,
+        shop_item_residency: &shop_item_residency,
+        selector_forwarders: screen_font_residency.selector_forwarders(),
+    })?;
     dialogue_runtime_code.verify_storage_item_residency_routes(
         &shop_item_residency.runtime_contract(),
         &storage_dialogue_residency.item_list_runtime_route(),
@@ -731,15 +775,19 @@ pub(crate) fn plan_full_translation_installation(
     let dynamic_string_producers_bound = dynamic_input_producers
         .every_record_selector_route_bound()
         && dynamic_producer_encoding.canonical_outputs_ready();
-    let main_dialogue_route_population = plan_main_dialogue_route_population(
-        &rom,
-        &display,
-        &encoded_display,
-        &dialogue_graph,
-        &dynamic_input_producers,
-        &assembled_hook_roles,
-        new_record_line_buffer_reset_routes_bound,
-    )?;
+    let main_dialogue_route_population =
+        plan_main_dialogue_route_population(MainDialogueRoutePopulationInputs {
+            source: &rom,
+            display: &display,
+            encoded: &encoded_display,
+            graph: &dialogue_graph,
+            dynamic_producers: &dynamic_input_producers,
+            assembled_hook_roles: &assembled_hook_roles,
+            record_entry_routes_bound,
+            caller_handoff_visible_rows_are_safe: caller_handoff_residency
+                .retained_rows_share_codebook()
+                && composition.record_line_policy_complete(),
+        })?;
     for routine in &dialogue_runtime_code.code_routines {
         runtime_material.place_runtime_code(routine.address, &routine.bytes)?;
     }
@@ -774,6 +822,7 @@ pub(crate) fn plan_full_translation_installation(
             .maximum_dialogue_font_group_selector_range_sha1,
         maximum_dialogue_initial_selector_range_sha1: &page_capacity
             .maximum_dialogue_initial_selector_range_sha1,
+        font_page_runtime_takeover,
     })?;
     let required_target_unit_counts = BTreeMap::from([
         (
@@ -792,7 +841,7 @@ pub(crate) fn plan_full_translation_installation(
         ),
         (
             "ending_record_labels",
-            transitions.ending_record.entry_count,
+            transitions.ending_record.entry_count + transitions.ending_bridge.entry_count,
         ),
         (
             "enemy_names",
@@ -854,6 +903,14 @@ pub(crate) fn plan_full_translation_installation(
                 "item_action_menu",
             ],
         );
+        add_roles(
+            "item_names",
+            shop_item_residency.projected_shop_screen_roles()?,
+        );
+        add_roles(
+            "choice_labels",
+            choice_residency.projected_shop_screen_roles(),
+        );
         for domain in ["chapter_save_offer_label", "choice_labels"] {
             add_roles(
                 domain,
@@ -905,6 +962,7 @@ pub(crate) fn plan_full_translation_installation(
             chapter_save_projection: &chapter_save_projection,
             ending_record_projection: &ending_record_projection,
             font_page_selector_forwarders: screen_font_residency.selector_forwarders(),
+            shop_text_consumers: &shop_text_consumers,
             consumer_installation: &consumer_installation,
             required_domains: &REQUIRED_DOMAINS,
             all_required_dialogue_runtime_hook_roles_assembled,
@@ -961,6 +1019,7 @@ pub(crate) fn plan_full_translation_installation(
         && fixed_menu_labels.review_complete
         && transitions.save_offer.review_complete
         && transitions.ending_record.review_complete
+        && transitions.ending_bridge.review_complete
         && locations.review_complete
         && carried_ui_domain_preservation.human_review_complete()
         && carried_battle_domain_preservation.human_review_complete()
@@ -1059,7 +1118,8 @@ pub(crate) fn plan_full_translation_installation(
             item_action_label_count: item_actions.entry_count,
             fixed_menu_text_count: fixed_menu_labels.entry_count,
             transition_label_count: transitions.save_offer.entry_count
-                + transitions.ending_record.entry_count,
+                + transitions.ending_record.entry_count
+                + transitions.ending_bridge.entry_count,
             location_name_count: locations.entries.len(),
             translation_input_complete,
             review_complete,
@@ -1074,8 +1134,10 @@ pub(crate) fn plan_full_translation_installation(
         unit_selection_help_residency,
         storage_dialogue_residency,
         shop_item_residency,
+        shop_text_consumers,
         screen_font_residency,
         front_end_result_residency,
+        caller_handoff_residency,
         chapter_save_projection,
         ending_record_projection,
         dialogue_page_pool: dialogue_page_pool_report,

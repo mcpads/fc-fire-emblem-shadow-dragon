@@ -76,11 +76,18 @@ pub(super) fn collect_section_inputs(
         section(
             "ending_record_labels",
             &inputs.transitions.ending_record.workspace_sha1,
-            vec![MaterialEntry {
-                id: "ending-total-turn-label".to_owned(),
-                source_binding: "ending-total-turn-label".to_owned(),
-                logical_bytes: inputs.transitions.ending_record.logical_bytes.clone(),
-            }],
+            vec![
+                MaterialEntry {
+                    id: "ending-total-turn-label".to_owned(),
+                    source_binding: "ending-total-turn-label".to_owned(),
+                    logical_bytes: inputs.transitions.ending_record.logical_bytes.clone(),
+                },
+                MaterialEntry {
+                    id: "ending-bridge-label".to_owned(),
+                    source_binding: "phase=0x0B:cpu=0x9FC1".to_owned(),
+                    logical_bytes: inputs.transitions.ending_bridge.logical_bytes.clone(),
+                },
+            ],
         ),
         section(
             "enemy_names",
@@ -147,7 +154,7 @@ pub(super) fn collect_section_inputs(
         25,
         2,
         22,
-        1,
+        2,
         69,
         FIXED_MENU_TRANSLATION_ENTRY_COUNT,
         4,

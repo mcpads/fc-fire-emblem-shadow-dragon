@@ -9,9 +9,11 @@ use crate::{
         SAVE_SLOT_SELECTION_COMPOSITE_STATE, START_MENU_COMPOSITE_STATE,
     },
     mapper165::{
-        BoundFontPageFallbackGraph, FontPageFallbackNodeRole, OPTIONS_FONT_PAGE_COMPOSITE_STATES,
+        BoundFontPageFallbackGraph, BoundFontPageFallbackNode, BoundFontPageRuntimeTakeover,
+        FontPageFallbackNodeRole, OPTIONS_FONT_PAGE_COMPOSITE_STATES,
         ROSTER_FONT_PAGE_COMPOSITE_STATE, bind_cumulative_font_page_fallback_graph,
-        build_front_end_font_page_forwarder, build_unit_name_font_page_forwarder,
+        build_font_page_fallback_forwarder, build_front_end_font_page_forwarder,
+        build_unit_name_font_page_forwarder,
     },
     rom::{HEADER_SIZE, Rom},
 };
@@ -30,6 +32,8 @@ const UNIT_NAME_PAGE_DOMAINS: &[&str] = &[
     "item_names",
     "unit_ui_labels",
 ];
+const WEAPON_SHOP_DOMAINS: &[&str] = &["choice_labels", "item_names", "main_dialogue"];
+const CHAPTER_INTRO_DOMAINS: &[&str] = &["chapter_titles", "main_dialogue"];
 const DELEGATED_DYNAMIC_SELECTOR_OWNERS: &[(
     DelegatedFontPageOwner,
     FontPageFallbackNodeRole,
@@ -127,12 +131,13 @@ impl FinalFontPageSelectorOwner {
         match role {
             FontPageFallbackNodeRole::UnitSummaryAndStatus
             | FontPageFallbackNodeRole::FrontEndMenu => Self::CentralScreenResidency,
-            FontPageFallbackNodeRole::OptionsMenu
-            | FontPageFallbackNodeRole::UnitRoster
-            | FontPageFallbackNodeRole::WeaponShopDialogue
-            | FontPageFallbackNodeRole::ChapterIntroDialogue => Self::RetainedDynamicSelector,
+            FontPageFallbackNodeRole::OptionsMenu | FontPageFallbackNodeRole::UnitRoster => {
+                Self::RetainedDynamicSelector
+            }
             FontPageFallbackNodeRole::BattleComposition
-            | FontPageFallbackNodeRole::MaximumDialogue => Self::IntegratedRuntime,
+            | FontPageFallbackNodeRole::MaximumDialogue
+            | FontPageFallbackNodeRole::WeaponShopDialogue
+            | FontPageFallbackNodeRole::ChapterIntroDialogue => Self::IntegratedRuntime,
         }
     }
 
@@ -164,6 +169,30 @@ impl FontPageSelectorForwarderPlan {
             .count()
     }
 
+    pub(in crate::full_translation_install) fn replaces_source_role(
+        &self,
+        role: FontPageFallbackNodeRole,
+    ) -> bool {
+        self.bound_source_graph
+            .nodes
+            .iter()
+            .find(|node| node.role == role)
+            .is_some_and(|node| {
+                self.writes.iter().any(|write| {
+                    write.cpu_address == node.cpu_address
+                        && write.expected == node.expected_bytes
+                        && write.replacement != node.expected_bytes
+                })
+            })
+    }
+
+    pub(in crate::full_translation_install) fn dialogue_runtime_takeover(
+        &self,
+    ) -> Result<BoundFontPageRuntimeTakeover> {
+        self.bound_source_graph
+            .integrated_dialogue_runtime_takeover()
+    }
+
     pub(in crate::full_translation_install) fn verify_retained_dynamic_selectors(
         &self,
         installed: &[u8],
@@ -179,7 +208,7 @@ impl FontPageSelectorForwarderPlan {
             })
             .collect::<Vec<_>>();
         ensure!(
-            retained.len() == 4,
+            retained.len() == DELEGATED_DYNAMIC_SELECTOR_OWNERS.len(),
             "final font-page plan lost a retained dynamic selector"
         );
         for node in retained {
@@ -217,6 +246,28 @@ pub(super) fn plan_font_page_selector_forwarders(
     let unit_replacement = build_unit_name_font_page_forwarder(unit_selector)?;
     let front_end_selector = bound_source_graph.front_end_selector();
     let front_end_replacement = build_front_end_font_page_forwarder(front_end_selector)?;
+    let weapon_shop_selector = node_for_role(
+        &bound_source_graph,
+        FontPageFallbackNodeRole::WeaponShopDialogue,
+    )?;
+    let weapon_shop_replacement = build_font_page_fallback_forwarder(
+        weapon_shop_selector.cpu_address,
+        weapon_shop_selector.cpu_end_exclusive,
+        weapon_shop_selector.fallback_target,
+        &weapon_shop_selector.expected_bytes,
+        weapon_shop_selector.role.id(),
+    )?;
+    let chapter_intro_selector = node_for_role(
+        &bound_source_graph,
+        FontPageFallbackNodeRole::ChapterIntroDialogue,
+    )?;
+    let chapter_intro_replacement = build_font_page_fallback_forwarder(
+        chapter_intro_selector.cpu_address,
+        chapter_intro_selector.cpu_end_exclusive,
+        chapter_intro_selector.fallback_target,
+        &chapter_intro_selector.expected_bytes,
+        chapter_intro_selector.role.id(),
+    )?;
     ensure!(
         unit_selector.cpu_end_exclusive <= front_end_selector.cpu_address,
         "migrated unit-name and front-end selector spans overlap"
@@ -230,12 +281,15 @@ pub(super) fn plan_font_page_selector_forwarders(
 
     Ok(FontPageSelectorForwarderPlan {
         schema: 5,
-        strategy: "bind the complete branching cumulative fallback graph before replacing a screen selector; centralize only decisions fully owned by the screen residency plan, preserve dynamic options, roster, shop, and chapter-dialogue selectors, and leave battle/maximum-dialogue rebinding to the integrated runtime owner",
+        strategy: "bind the complete branching cumulative fallback graph before replacing a screen selector; retain only the independently encoded options and roster selectors, forward the obsolete weapon-shop and chapter-intro selectors to their final shared fallbacks, and leave battle/maximum-dialogue rebinding to the integrated runtime owner",
         centralized_selector_count: source_fallback_graph.central_policy_forwarder_count,
         centrally_owned_composite_state_count: FRONT_END_FONT_STATES.len() + 2,
         centrally_owned_translation_domain_count: unique_domains.len(),
         direct_predecessor_count: 2,
-        installed_forwarder_byte_count: unit_replacement.len() + front_end_replacement.len(),
+        installed_forwarder_byte_count: unit_replacement.len()
+            + front_end_replacement.len()
+            + weapon_shop_replacement.len()
+            + chapter_intro_replacement.len(),
         retained_dynamic_selector_count: source_fallback_graph.retained_dynamic_selector_count,
         delegated_dynamic_selector_state_count: DELEGATED_DYNAMIC_SELECTOR_OWNERS
             .iter()
@@ -280,9 +334,45 @@ pub(super) fn plan_font_page_selector_forwarders(
                 expected: front_end_selector.expected_bytes.clone(),
                 replacement: front_end_replacement,
             },
+            FontPageSelectorExpectedWrite {
+                domains: WEAPON_SHOP_DOMAINS,
+                role: "replace the cumulative weapon-shop font selector with its final shared fallback",
+                file_offset: active_fixed_file_offset(candidate, weapon_shop_selector.cpu_address)?,
+                cpu_address: weapon_shop_selector.cpu_address,
+                expected: weapon_shop_selector.expected_bytes.clone(),
+                replacement: weapon_shop_replacement,
+            },
+            FontPageSelectorExpectedWrite {
+                domains: CHAPTER_INTRO_DOMAINS,
+                role: "replace the cumulative two-chapter font selector with the final chapter-aware fallback",
+                file_offset: active_fixed_file_offset(
+                    candidate,
+                    chapter_intro_selector.cpu_address,
+                )?,
+                cpu_address: chapter_intro_selector.cpu_address,
+                expected: chapter_intro_selector.expected_bytes.clone(),
+                replacement: chapter_intro_replacement,
+            },
         ],
         bound_source_graph,
     })
+}
+
+fn node_for_role(
+    graph: &BoundFontPageFallbackGraph,
+    role: FontPageFallbackNodeRole,
+) -> Result<&BoundFontPageFallbackNode> {
+    let matches = graph
+        .nodes
+        .iter()
+        .filter(|node| node.role == role)
+        .collect::<Vec<_>>();
+    ensure!(
+        matches.len() == 1,
+        "font-page fallback graph does not contain exactly one {} node",
+        role.id()
+    );
+    Ok(matches[0])
 }
 
 fn fallback_graph_migration_report(
@@ -543,8 +633,6 @@ mod tests {
             std::collections::BTreeSet::from([
                 FontPageFallbackNodeRole::OptionsMenu,
                 FontPageFallbackNodeRole::UnitRoster,
-                FontPageFallbackNodeRole::WeaponShopDialogue,
-                FontPageFallbackNodeRole::ChapterIntroDialogue,
             ])
         );
         assert_eq!(
@@ -552,6 +640,8 @@ mod tests {
             std::collections::BTreeSet::from([
                 FontPageFallbackNodeRole::BattleComposition,
                 FontPageFallbackNodeRole::MaximumDialogue,
+                FontPageFallbackNodeRole::WeaponShopDialogue,
+                FontPageFallbackNodeRole::ChapterIntroDialogue,
             ])
         );
     }

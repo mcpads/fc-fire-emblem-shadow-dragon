@@ -1,5 +1,6 @@
 mod battle_source;
 mod battle_translation;
+mod ending_bridge;
 mod ending_epilogue;
 mod ending_scroll;
 mod ending_source;
@@ -30,6 +31,11 @@ use crate::{
     typed_source::{TypedInstructionBinding, decode_rp2a03_sequence},
 };
 
+pub(crate) use ending_bridge::{
+    ENDING_BRIDGE_CLEAR_CALL_SITE, ENDING_BRIDGE_CLEAR_CALL_SOURCE, ENDING_BRIDGE_DRAW_CALL_SITE,
+    ENDING_BRIDGE_DRAW_CALL_SOURCE, ENDING_BRIDGE_SOURCE_CLEAR, ENDING_BRIDGE_SOURCE_RENDERER,
+    EndingBridgeStorageSource, bind_ending_bridge_storage_source,
+};
 pub(crate) use ending_epilogue::{
     ENDING_CHARACTER_ANIMATION_STATE_ADDRESS, ENDING_CHARACTER_EPILOGUE_FONT_RESIDENCY_PHASE_MASK,
     ENDING_CHARACTER_EPILOGUE_SELECTOR_PHASE, ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE_START,
@@ -73,6 +79,7 @@ pub(crate) struct ChapterIntroLifetimeContext {
 fn source_region_specs() -> impl Iterator<Item = SourceRegionSpec> {
     SOURCE_REGIONS
         .iter()
+        .chain(ending_bridge::SOURCE_REGIONS.iter())
         .chain(sound_test_source::SOURCE_REGIONS.iter())
         .chain(ending_source::SOURCE_REGIONS.iter())
         .chain(battle_source::SOURCE_REGIONS.iter())
@@ -94,7 +101,7 @@ pub struct ChapterTransitionSummary {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ChapterTransitionTranslationPopulation {
     pub(crate) save_offer_label_count: usize,
-    pub(crate) ending_record_additional_record_count: usize,
+    pub(crate) ending_fixed_label_count: usize,
     pub(crate) battle_forecast_label_count: usize,
 }
 
@@ -113,7 +120,7 @@ pub(crate) fn inspect_chapter_transition_translation_population(
     );
     Ok(ChapterTransitionTranslationPopulation {
         save_offer_label_count,
-        ending_record_additional_record_count: 1,
+        ending_fixed_label_count: 2,
         battle_forecast_label_count: 1,
     })
 }

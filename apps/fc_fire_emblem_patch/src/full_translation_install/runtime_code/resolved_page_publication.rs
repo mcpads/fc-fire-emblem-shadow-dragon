@@ -15,10 +15,10 @@ use anyhow::Result;
 use super::{RuntimeRoutine, next_address};
 use crate::rp2a03::{Instruction, assemble_at};
 
-use super::super::{
-    runtime_cursor_storage::{CURSOR_OVERLAY_TILES, CURSOR_PHASE, CURSOR_REMAINING_TILES},
-    runtime_nmi_contract::CONTROL_RESTORE_ADDRESS,
+use super::super::runtime_cursor_storage::{
+    CURSOR_OVERLAY_TILES, CURSOR_PHASE, CURSOR_REMAINING_TILES,
 };
+use super::super::runtime_nmi_contract::CONTROL_RESTORE_ADDRESS;
 use super::{
     dispatcher_gate::{STATE_COLD_REQUESTED, STATE_RESIDENT_PAGE_OVERLAY_REQUESTED},
     transport::{PHASE_OVERLAY, REQUEST_STATE},
@@ -66,7 +66,7 @@ pub(super) fn build_page_recipe_request_initializer(
     })
 }
 
-/// 해석 결과를 게시하고 성공·실패 경로를 각 복구 책임자에게 tail-call한다.
+/// 해석 결과를 게시하고 전송 유무별 완료 책임자에게 넘긴다.
 pub(super) fn build_resolved_page_publication(
     origin: u16,
     page_recipe_request_initializer: u16,
@@ -74,8 +74,8 @@ pub(super) fn build_resolved_page_publication(
 ) -> Result<RuntimeRoutine> {
     let mut instructions = Vec::new();
 
-    // 실패면 생산자가 미리 써 둔 inactive를 유지하고, 원본의 PPU control/mask
-    // 복구 루틴으로 곧장 돌아간다.
+    // 실패 또는 같은 상주 그룹 재사용이면 전송 없이 원본 PPU 복구로 돌아간다.
+    // resolver가 런타임 페이지에서 복귀하기 전에 줄 정책을 이미 적용했다.
     let restore_after_failure = instructions.len();
     instructions.push(Instruction::BccAbsolute(origin));
     // 입력 A는 resolver 호출 전에 저장해 둔 상주권이다. FF면 cold, 그 밖이면 현재
@@ -93,8 +93,8 @@ pub(super) fn build_resolved_page_publication(
     instructions.extend([
         Instruction::StaAbsolute(REQUEST_STATE),
         // NMI를 다시 켜기 전에 한 연속 render-off 구간에서 요청을 ready로 만든다.
-        // cold와 resident, 초기 진입과 다음 페이지가 모두 이 한 소비자를 쓴다. 합성기는
-        // PPU control과 호출자 상태를 복구한 뒤 이 routine의 호출자에게 직접 RTS한다.
+        // cold와 resident, 초기 진입과 다음 페이지가 모두 이 한 소비자를 쓴다. 합성기가
+        // 런타임 페이지에서 글꼴과 줄 정책을 모두 끝내고 호출자 상태를 복구한다.
         Instruction::JmpAbsolute(synchronous_composer),
     ]);
 

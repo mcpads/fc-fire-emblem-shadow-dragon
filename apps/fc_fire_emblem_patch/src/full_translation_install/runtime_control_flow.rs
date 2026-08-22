@@ -10,7 +10,10 @@ use super::{
 use crate::{
     dialogue_inventory::switchable_cpu_to_file_offset,
     font_slots::FONT_PAGE_SIZE,
-    mapper165::battle_composition_runtime::cumulative_battle_composition_dispatch_bytes,
+    mapper165::{
+        BoundFontPageRuntimeTakeover,
+        battle_composition_runtime::cumulative_battle_composition_dispatch_bytes,
+    },
     rom::{HEADER_SIZE, Rom},
     sha1_hex,
     typed_source::decode_rp2a03_sequence,
@@ -32,11 +35,10 @@ const SAMPLE_PAGE_RELOAD_START: u16 = 0xBDF2;
 const SAMPLE_PAGE_RELOAD_END: u16 = 0xBE14;
 const SAMPLE_INITIAL_SELECTOR_START: u16 = 0xF990;
 const SAMPLE_INITIAL_SELECTOR_END: u16 = 0xFA00;
-const CENTRAL_SELECTOR_FALLBACK: u16 = 0xFF40;
 /// 완성된 대사 수명이 원본 제어 흐름에 끼어들어야 하는 모든 역할이다.
 ///
 /// 주소의 개수가 아니다. 완료 판정은 이 역할 집합에서 빠진 것이 없는지를 본다.
-const PLANNED_HOOK_ROLES: [DialogueRuntimeHookRole; 33] = [
+const PLANNED_HOOK_ROLES: [DialogueRuntimeHookRole; 36] = [
     DialogueRuntimeHookRole::InitialDirectEntryRequest,
     DialogueRuntimeHookRole::E4TransitionEntryRequest,
     DialogueRuntimeHookRole::E6TransitionEntryRequest,
@@ -69,6 +71,9 @@ const PLANNED_HOOK_ROLES: [DialogueRuntimeHookRole; 33] = [
     DialogueRuntimeHookRole::DialogueSpeakerPrefixProjection,
     DialogueRuntimeHookRole::EndingRecordFontPageEnter,
     DialogueRuntimeHookRole::EndingRecordFontPageExit,
+    DialogueRuntimeHookRole::EndingBridgeFontPageSupport,
+    DialogueRuntimeHookRole::EndingBridgeFontPageEnter,
+    DialogueRuntimeHookRole::EndingBridgeFontPageExit,
     DialogueRuntimeHookRole::EndingCharacterEpilogueFontPageExit,
 ];
 use super::runtime_material::{
@@ -168,8 +173,10 @@ struct FontPageBuilder {
 
 #[derive(Serialize)]
 struct SelectorConsumer {
-    chain_owner_cpu_address_hex: &'static str,
-    current_fallback_cpu_address_hex: &'static str,
+    chain_owner_cpu_address_hex: String,
+    current_fallback_cpu_address_hex: String,
+    superseded_selector_cpu_address_hex: String,
+    inactive_fallback_cpu_address_hex: String,
     replacement_role: &'static str,
     selects_chr_ram_only_when_ready: bool,
     ready_fd_published_by_transport: bool,
@@ -230,6 +237,7 @@ pub(super) struct RuntimeControlFlowInputs<'a> {
     pub(super) canonical_dynamic_codes_are_page_physical_codes: bool,
     pub(super) maximum_dialogue_font_group_selector_range_sha1: &'a str,
     pub(super) maximum_dialogue_initial_selector_range_sha1: &'a str,
+    pub(super) font_page_runtime_takeover: BoundFontPageRuntimeTakeover,
 }
 
 fn classify_assembled_hook_roles(
@@ -443,12 +451,21 @@ pub(super) fn plan_dialogue_runtime_control_flow(
     ensure!(
         sha1_hex(sample_group) == inputs.maximum_dialogue_font_group_selector_range_sha1
             && sha1_hex(sample_initial) == inputs.maximum_dialogue_initial_selector_range_sha1
-            && fixed_bytes(inputs.candidate, CENTRAL_SELECTOR_FALLBACK, 3)?
+            && inputs
+                .font_page_runtime_takeover
+                .superseded_selector_cpu_address
+                == SAMPLE_INITIAL_SELECTOR_START
+            && inputs.font_page_runtime_takeover.expected_hook_bytes
                 == [
                     0x4C,
                     SAMPLE_INITIAL_SELECTOR_START as u8,
                     (SAMPLE_INITIAL_SELECTOR_START >> 8) as u8,
-                ],
+                ]
+            && fixed_bytes(
+                inputs.candidate,
+                inputs.font_page_runtime_takeover.hook_cpu_address,
+                inputs.font_page_runtime_takeover.expected_hook_bytes.len(),
+            )? == inputs.font_page_runtime_takeover.expected_hook_bytes,
         "current cumulative maximum-dialogue selector ownership changed"
     );
 
@@ -555,8 +572,26 @@ pub(super) fn plan_dialogue_runtime_control_flow(
             dynamic_values_covered_by_visible_page_recipe: true,
         },
         selector_consumer: SelectorConsumer {
-            chain_owner_cpu_address_hex: "0xFF1D",
-            current_fallback_cpu_address_hex: "0xFF40",
+            chain_owner_cpu_address_hex: format!(
+                "0x{:04X}",
+                inputs.font_page_runtime_takeover.owner_cpu_address
+            ),
+            current_fallback_cpu_address_hex: format!(
+                "0x{:04X}",
+                inputs.font_page_runtime_takeover.hook_cpu_address
+            ),
+            superseded_selector_cpu_address_hex: format!(
+                "0x{:04X}",
+                inputs
+                    .font_page_runtime_takeover
+                    .superseded_selector_cpu_address
+            ),
+            inactive_fallback_cpu_address_hex: format!(
+                "0x{:04X}",
+                inputs
+                    .font_page_runtime_takeover
+                    .inactive_fallback_cpu_address
+            ),
             replacement_role: "global_main_dialogue_ready_fd_selector_then_existing_roster_chain",
             selects_chr_ram_only_when_ready: true,
             ready_fd_published_by_transport: true,

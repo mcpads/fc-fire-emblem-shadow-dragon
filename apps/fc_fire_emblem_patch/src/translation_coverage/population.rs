@@ -242,20 +242,31 @@ pub(crate) fn inspect_translation_populations(
             ),
         )?;
     }
-    for (domain_id, plan) in [
-        ("chapter_save_offer_label", transition_labels.save_offer),
-        ("ending_record_labels", transition_labels.ending_record),
-    ] {
-        insert(
-            &mut populations,
-            domain_id,
-            completed_population(
-                plan.entry_count,
-                plan.review_complete,
-                Some(plan.workspace_sha1),
-            ),
-        )?;
-    }
+    insert(
+        &mut populations,
+        "chapter_save_offer_label",
+        completed_population(
+            transition_labels.save_offer.entry_count,
+            transition_labels.save_offer.review_complete,
+            Some(transition_labels.save_offer.workspace_sha1),
+        ),
+    )?;
+    ensure!(
+        transition_labels.ending_record.workspace_sha1
+            == transition_labels.ending_bridge.workspace_sha1,
+        "ending label translations do not share one workspace"
+    );
+    insert(
+        &mut populations,
+        "ending_record_labels",
+        completed_population(
+            transition_labels.ending_record.entry_count
+                + transition_labels.ending_bridge.entry_count,
+            transition_labels.ending_record.review_complete
+                && transition_labels.ending_bridge.review_complete,
+            Some(transition_labels.ending_record.workspace_sha1),
+        ),
+    )?;
     insert(
         &mut populations,
         "location_names",

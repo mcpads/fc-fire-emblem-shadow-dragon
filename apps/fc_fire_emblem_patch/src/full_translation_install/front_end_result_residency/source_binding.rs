@@ -3,8 +3,8 @@ use std::collections::BTreeSet;
 use anyhow::{Context, Result, ensure};
 
 use crate::{
-    dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE, mmc5_chr::switchable_bank_file_offset,
-    rom::Rom, sha1_hex, typed_source::decode_rp2a03_sequence,
+    dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE, rom::Rom, sha1_hex,
+    source_prg::switchable_bank_file_offset, typed_source::decode_rp2a03_sequence,
 };
 
 const SOURCE_PRG_BANK: u8 = 0x02;

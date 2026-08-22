@@ -3,10 +3,10 @@ use anyhow::{Context, Result, ensure};
 use crate::{
     choice_labels::ChoiceLabelPlan,
     font_slots::FONT_PAGE_SIZE,
-    mmc5_chr::switchable_bank_file_offset,
-    mmc5_prg::{count_direct_transfers_to_range, fixed_bank_file_offset},
     rom::{CHR_FILE_OFFSET, Rom},
     sha1_hex,
+    source_prg::switchable_bank_file_offset,
+    source_prg::{count_direct_transfers_to_range, fixed_bank_file_offset},
     text_inventory::FixedTextPlan,
     tracked::TrackedImage,
 };

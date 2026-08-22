@@ -38,7 +38,9 @@ pub use report::ShopFlowSummary;
 use report::*;
 use screen_roles::*;
 use source_binding::*;
-pub(crate) use source_binding::{SHOP_ITEM_COMPOSITE_STATE, bind_shop_item_composition_source};
+pub(crate) use source_binding::{
+    SHOP_ITEM_COMPOSITE_STATE, ShopItemCompositionSource, bind_shop_item_composition_source,
+};
 pub(crate) use source_binding::{SharedMenuControllerSource, bind_shared_menu_controller_source};
 use source_spec::*;
 

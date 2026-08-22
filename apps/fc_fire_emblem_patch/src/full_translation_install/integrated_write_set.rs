@@ -20,6 +20,7 @@ use super::{
     fixed_ui_projection::FixedUiProjectionPlan,
     runtime_code::{DialogueRuntimeCodePlan, DialogueRuntimeHookRole, DialogueRuntimeHookSite},
     screen_font_residency::FontPageSelectorForwarderPlan,
+    shop_text_consumers::ShopTextConsumerPlan,
 };
 use crate::dialogue_inventory::switchable_cpu_to_file_offset;
 
@@ -44,6 +45,7 @@ pub(super) struct IntegratedWriteSetInputs<'a> {
     pub(super) chapter_save_projection: &'a ChapterSaveProjectionPlan,
     pub(super) ending_record_projection: &'a EndingRecordProjectionPlan,
     pub(super) font_page_selector_forwarders: &'a FontPageSelectorForwarderPlan,
+    pub(super) shop_text_consumers: &'a ShopTextConsumerPlan,
     pub(super) consumer_installation: &'a ConsumerInstallationPlan,
     pub(super) required_domains: &'a [&'static str],
     pub(super) all_required_dialogue_runtime_hook_roles_assembled: bool,
@@ -92,6 +94,7 @@ pub(super) struct IntegratedWriteSetPlan {
     chapter_save_projection_write_count: usize,
     ending_record_projection_write_count: usize,
     font_page_selector_forwarder_write_count: usize,
+    shop_text_consumer_write_count: usize,
     installed_cold_request_presentation_matches_plan: bool,
     installed_static_consumer_font_pages_match_plan: bool,
     installed_catalog_consumer_font_pages_match_plan: bool,
@@ -137,8 +140,9 @@ use domain_contributions::{
 use fixed_projections::{
     fixed_file_offset, install_chapter_save_projection, install_ending_record_projection,
     install_fixed_ui_projection, install_font_page_selector_forwarders,
-    verify_installed_chapter_save_projection, verify_installed_ending_record_projection,
-    verify_installed_fixed_ui_projection, verify_installed_font_page_selector_forwarders,
+    install_shop_text_consumers, verify_installed_chapter_save_projection,
+    verify_installed_ending_record_projection, verify_installed_fixed_ui_projection,
+    verify_installed_font_page_selector_forwarders, verify_installed_shop_text_consumers,
 };
 use font_pages::{
     cold_request_presentation_file_offset, install_catalog_consumer_font_pages,
@@ -305,6 +309,7 @@ pub(super) fn plan_integrated_write_set(
         inputs.candidate,
         inputs.font_page_selector_forwarders,
     )?;
+    install_shop_text_consumers(&mut image, inputs.shop_text_consumers)?;
 
     let expected_write_count_before_cross_domain = image.writes().len();
     install_cross_domain_material(&mut image, inputs.candidate, inputs.cross_domain_material)?;
@@ -342,6 +347,7 @@ pub(super) fn plan_integrated_write_set(
         inputs.candidate,
         inputs.font_page_selector_forwarders,
     )?;
+    verify_installed_shop_text_consumers(&output, inputs.shop_text_consumers)?;
     let runtime_state_initializer = verify_runtime_state_initializer_installation(
         &required_mutations,
         &actual_mutations,
@@ -378,6 +384,7 @@ pub(super) fn plan_integrated_write_set(
         chapter_save_projection: inputs.chapter_save_projection,
         ending_record_projection: inputs.ending_record_projection,
         font_page_selector_forwarders: inputs.font_page_selector_forwarders,
+        shop_text_consumers: inputs.shop_text_consumers,
         consumer_installation: inputs.consumer_installation,
     })?;
     let declared_domain_with_expected_writes_count = domains
@@ -460,6 +467,7 @@ pub(super) fn plan_integrated_write_set(
             font_page_selector_forwarder_write_count: inputs
                 .font_page_selector_forwarders
                 .write_count(),
+            shop_text_consumer_write_count: inputs.shop_text_consumers.write_count(),
             installed_cold_request_presentation_matches_plan: true,
             installed_static_consumer_font_pages_match_plan: true,
             installed_catalog_consumer_font_pages_match_plan: true,

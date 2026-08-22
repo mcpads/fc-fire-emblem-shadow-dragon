@@ -137,7 +137,7 @@ impl AnalyzeTranslationCoverageCommand {
 #[derive(Debug, Args)]
 pub(crate) struct PlanFullTranslationInstallationCommand {
     source: PathBuf,
-    #[arg(long, alias = "transport-probe")]
+    #[arg(long)]
     output: Option<PathBuf>,
     #[arg(long, default_value = "private/dialogue/main-workspace.json")]
     main_dialogue_workspace: PathBuf,
@@ -433,12 +433,12 @@ mod tests {
     }
 
     #[test]
-    fn final_install_cli_preserves_the_output_alias_and_artifact_inputs() {
+    fn final_install_cli_keeps_output_and_artifact_inputs_separate() {
         let cli = Cli::try_parse_from([
             "fc-fire-emblem-patch",
             "plan-full-translation-installation",
             "source.nes",
-            "--transport-probe",
+            "--output",
             "final.nes",
             "--current-candidate",
             "cumulative.nes",

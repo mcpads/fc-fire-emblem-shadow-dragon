@@ -5,9 +5,9 @@ use anyhow::{Context, Result, ensure};
 use crate::{
     font_slots::FONT_PAGE_SIZE,
     front_end_menu::FrontEndMenuPlan,
-    mmc5_prg::{count_direct_transfers_to_range, fixed_bank_file_offset},
     rom::Rom,
     sha1_hex,
+    source_prg::{count_direct_transfers_to_range, fixed_bank_file_offset},
     tracked::TrackedImage,
 };
 

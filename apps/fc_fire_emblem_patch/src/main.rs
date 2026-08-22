@@ -27,14 +27,6 @@ mod localization;
 mod map_dialogue_lifecycle;
 mod map_menu;
 mod mapper165;
-mod mmc4_latch;
-mod mmc5_chr;
-mod mmc5_expanded_chr;
-mod mmc5_exram_probe;
-mod mmc5_nametable_shadow;
-mod mmc5_prg;
-mod mmc5_queue_runtime;
-mod mmc5_queue_shadow;
 mod options;
 mod release_image;
 mod rom;
@@ -47,6 +39,7 @@ mod shop_flow;
 mod source_direct_memory_writers;
 mod source_font_page;
 mod source_literals;
+mod source_prg;
 mod static_analysis;
 mod suspend_message;
 mod temporal_surface;
@@ -362,16 +355,6 @@ enum Command {
         #[arg(long, default_value = "private/dialogue/battle-layout.json")]
         report: PathBuf,
     },
-    /// Build every translated battle-dialogue record as a mapper 165 development probe.
-    BuildBattleDialogueProbe {
-        source: PathBuf,
-        #[arg(long, default_value = "private/dialogue/battle-workspace.json")]
-        workspace: PathBuf,
-        #[arg(long, default_value = "out/battle-dialogue-probe.nes")]
-        output: PathBuf,
-        #[arg(long, default_value = "out/battle-dialogue-probe.json")]
-        report: PathBuf,
-    },
     /// Validate private translations without encoding or writing a ROM.
     ValidateMainDialogueWorkspace {
         source: PathBuf,
@@ -440,18 +423,6 @@ enum Command {
         #[arg(long, default_value = "out/title-logo-asset.json")]
         report: PathBuf,
     },
-    /// Build the Japanese-options Hangul visibility proof.
-    BuildOptionsPoc {
-        source: PathBuf,
-        #[arg(long, default_value = "assets/translation/options.ko.json")]
-        localization: PathBuf,
-        #[arg(long, default_value = "out/fire-emblem-fe1-options-poc.nes")]
-        output: PathBuf,
-        #[arg(long, default_value = "out/fire-emblem-fe1-options-poc.png")]
-        preview: PathBuf,
-        #[arg(long, default_value_t = 8)]
-        preview_scale: u32,
-    },
     /// Convert FE1 to the MMC2+MMC3 hybrid mapper 165 without translation assets.
     BuildMapper165ParityProbe {
         source: PathBuf,
@@ -492,26 +463,6 @@ enum Command {
     },
     /// Build the cumulative mapper 165 Korean patch lineage from the supported source.
     BuildKrPatch(BuildCumulativePatchCommand),
-    /// Build one reviewed main-dialogue record as an end-to-end mapper 165 development probe.
-    BuildMainDialogueSliceProbe {
-        source: PathBuf,
-        #[arg(long, default_value = "private/dialogue/main-workspace.json")]
-        workspace: PathBuf,
-        #[arg(
-            long,
-            default_value = "evidence/private/dialogue-lifetime/chapter-1-intro-screen.json"
-        )]
-        screen_evidence: PathBuf,
-        #[arg(long, default_value = "chapter-intro-dialogue:000")]
-        record_id: String,
-        #[arg(
-            long,
-            default_value = "out/fire-emblem-fe1-main-dialogue-slice-probe.nes"
-        )]
-        output: PathBuf,
-        #[arg(long, default_value = "out/main-dialogue-slice-probe.json")]
-        report: PathBuf,
-    },
     /// Compare MMC4 and mapper 165 FD-trigger tile planes for observed CHR pairs.
     AnalyzeMapper165TriggerPlanes {
         source: PathBuf,
@@ -522,93 +473,6 @@ enum Command {
     AnalyzeMapper165DirectChrPairs {
         source: PathBuf,
         #[arg(long, default_value = "out/mapper165-direct-chr-pairs.json")]
-        report: PathBuf,
-    },
-    /// Build the static MMC5 PRG and SRAM conversion probe without translation assets.
-    BuildMmc5PrgProbe {
-        source: PathBuf,
-        #[arg(long, default_value = "out/fire-emblem-fe1-mmc5-prg-probe.nes")]
-        output: PathBuf,
-        #[arg(long, default_value = "out/mmc5-prg-probe.json")]
-        report: PathBuf,
-    },
-    /// Project runtime-proven MMC4 CHR writers onto MMC5 4 KiB banks.
-    BuildMmc5ChrWriterProbe {
-        source: PathBuf,
-        #[arg(long, default_value = "out/fire-emblem-fe1-mmc5-chr-writer-probe.nes")]
-        output: PathBuf,
-        #[arg(long, default_value = "out/mmc5-chr-writer-probe.json")]
-        report: PathBuf,
-    },
-    /// Build a 256 KiB CHR copy and serve the Korean options proof from its upper half.
-    BuildMmc5ExpandedChrOptionsProbe {
-        source: PathBuf,
-        #[arg(long, default_value = "assets/translation/options.ko.json")]
-        localization: PathBuf,
-        #[arg(
-            long,
-            default_value = "out/fire-emblem-fe1-mmc5-expanded-chr-options-probe.nes"
-        )]
-        output: PathBuf,
-        #[arg(long, default_value = "out/mmc5-expanded-chr-options-probe.json")]
-        report: PathBuf,
-    },
-    /// Embed one proven dialogue-screen latch projection and load it through MMC5 ExRAM.
-    BuildMmc5DialogueExramProbe {
-        source: PathBuf,
-        attributes: PathBuf,
-        #[arg(
-            long,
-            default_value = "out/fire-emblem-fe1-mmc5-dialogue-exram-probe.nes"
-        )]
-        output: PathBuf,
-        #[arg(long, default_value = "out/mmc5-dialogue-exram-probe.json")]
-        report: PathBuf,
-    },
-    /// Mirror every direct PPU address/data store into isolated MMC5 PRG RAM.
-    BuildMmc5NametableShadowProbe {
-        source: PathBuf,
-        #[arg(
-            long,
-            default_value = "out/fire-emblem-fe1-mmc5-nametable-shadow-probe.nes"
-        )]
-        output: PathBuf,
-        #[arg(long, default_value = "out/mmc5-nametable-shadow-probe.json")]
-        report: PathBuf,
-    },
-    /// Replay confirmed PPU queues at their publish boundaries into MMC5 PRG RAM.
-    BuildMmc5QueueShadowProbe {
-        source: PathBuf,
-        #[arg(
-            long,
-            default_value = "out/fire-emblem-fe1-mmc5-queue-shadow-probe.nes"
-        )]
-        output: PathBuf,
-        #[arg(long, default_value = "out/mmc5-queue-shadow-probe.json")]
-        report: PathBuf,
-    },
-    /// Project one zero-scroll MMC4 nametable into MMC5 extended attributes.
-    ProjectMmc4LatchNametable {
-        input: PathBuf,
-        #[arg(long, default_value_t = 0)]
-        nametable_index: usize,
-        #[arg(long)]
-        fd_bank: u8,
-        #[arg(long)]
-        fe_bank: u8,
-        #[arg(long, value_enum)]
-        initial_latch: mmc4_latch::Mmc4Latch,
-        #[arg(long, default_value = "out/mmc5-exram-attributes.bin")]
-        output: PathBuf,
-        #[arg(long, default_value = "out/mmc4-latch-nametable.json")]
-        report: PathBuf,
-    },
-    /// Replay captured PPU transfers into mirrored nametables and project one viewport.
-    ReplayMmc4LatchPpuTransfers {
-        input: PathBuf,
-        #[arg(long, default_value = "out/mmc5-exram-transfer-replay.bin")]
-        output: PathBuf,
-        #[arg(long, default_value = "out/mmc4-latch-transfer-replay.json")]
         report: PathBuf,
     },
 }

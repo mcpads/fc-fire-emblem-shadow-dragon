@@ -4,9 +4,9 @@ use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
-    mmc5_prg::fixed_bank_file_offset,
     rom::{HEADER_SIZE, PRG_SIZE, Rom},
     rp2a03::{Instruction, assemble_at},
+    source_prg::fixed_bank_file_offset,
 };
 
 use super::writer_sites::{CENTRAL_CHR_WRITERS, DIRECT_CHR_WRITERS, WriterLocation};

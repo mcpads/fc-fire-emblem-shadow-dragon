@@ -3,8 +3,8 @@ use anyhow::{Context, Result, ensure};
 use crate::{
     chapter_transition::ChapterTitlePlannedEntry,
     dialogue_assets::MainDialogueSlicePlan,
-    mmc5_prg::fixed_bank_file_offset,
     rom::{PRG_SIZE, Rom},
+    source_prg::fixed_bank_file_offset,
     tracked::TrackedImage,
 };
 

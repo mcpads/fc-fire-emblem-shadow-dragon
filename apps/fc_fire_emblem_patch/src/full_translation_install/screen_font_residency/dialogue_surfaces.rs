@@ -14,7 +14,7 @@ use crate::{
     mapper165::battle_codebook_plan::{GlyphWorkset, GlyphWorksetPagePlan},
 };
 
-const RESIDENCY_STAGE_NAMES: [&str; 8] = [
+const RESIDENCY_STAGE_NAMES: [&str; 9] = [
     "dynamic_inputs",
     "shop_items",
     "chapter_intro",
@@ -23,6 +23,7 @@ const RESIDENCY_STAGE_NAMES: [&str; 8] = [
     "storage_dialogue",
     "front_end_result",
     "transition_lifetime",
+    "caller_handoff_lifetime",
 ];
 
 pub(in crate::full_translation_install) struct DialogueSurfaceInputs<'a> {
@@ -34,6 +35,7 @@ pub(in crate::full_translation_install) struct DialogueSurfaceInputs<'a> {
     pub(in crate::full_translation_install) storage_dialogue: &'a [GlyphWorkset],
     pub(in crate::full_translation_install) front_end_result: &'a [GlyphWorkset],
     pub(in crate::full_translation_install) transition_lifetime: &'a [GlyphWorkset],
+    pub(in crate::full_translation_install) caller_handoff_lifetime: &'a [GlyphWorkset],
     pub(in crate::full_translation_install) codebook: &'a GlyphWorksetPagePlan,
 }
 
@@ -64,6 +66,7 @@ pub(super) fn plan_dialogue_surfaces(
         inputs.storage_dialogue,
         inputs.front_end_result,
         inputs.transition_lifetime,
+        inputs.caller_handoff_lifetime,
     ];
     let visible_workset_count = stages[0].len();
     ensure!(
@@ -101,7 +104,7 @@ pub(super) fn plan_dialogue_surfaces(
     );
 
     let mut all_target_glyphs = BTreeSet::new();
-    for (workset_index, workset) in inputs.transition_lifetime.iter().enumerate() {
+    for (workset_index, workset) in inputs.caller_handoff_lifetime.iter().enumerate() {
         let page_index = inputs.codebook.workset_page_indices[workset_index];
         let assignments = inputs
             .codebook
@@ -141,7 +144,7 @@ pub(super) fn plan_dialogue_surfaces(
     );
 
     Ok(DialogueSurfacePlan {
-        strategy: "carry every visible dialogue workset monotonically through dynamic strings, externally composed shop items, chapter titles, choices, the unit-selection help handoff, storage overlays, retained front-end results, and transition lifetimes; then rebind each final workset to its selected codebook page",
+        strategy: "carry every visible dialogue workset monotonically through dynamic strings, externally composed shop items, chapter titles, choices, the unit-selection help handoff, storage overlays, retained front-end results, explicit transitions, and source-derived caller handoffs; then rebind each final workset to its selected codebook page",
         residency_stage_count: RESIDENCY_STAGE_NAMES.len(),
         visible_workset_count,
         target_glyph_count: all_target_glyphs.len(),
@@ -209,7 +212,7 @@ mod tests {
     }
 
     fn inputs<'a>(
-        stages: [&'a [GlyphWorkset]; 8],
+        stages: [&'a [GlyphWorkset]; 9],
         codebook: &'a GlyphWorksetPagePlan,
     ) -> DialogueSurfaceInputs<'a> {
         DialogueSurfaceInputs {
@@ -221,6 +224,7 @@ mod tests {
             storage_dialogue: stages[5],
             front_end_result: stages[6],
             transition_lifetime: stages[7],
+            caller_handoff_lifetime: stages[8],
             codebook,
         }
     }
@@ -235,6 +239,7 @@ mod tests {
         let storage = vec![workset("가나다라마바", &[0xA0], &[('나', 0xA1)])];
         let result = vec![workset("가나다라마바사", &[0xA0], &[('나', 0xA1)])];
         let transition = vec![workset("가나다라마바사아", &[0xA0], &[('나', 0xA1)])];
+        let caller = vec![workset("가나다라마바사아자", &[0xA0], &[('나', 0xA1)])];
         let codebook = codebook(BTreeMap::from([
             ('가', 0xA2),
             ('나', 0xA1),
@@ -244,6 +249,7 @@ mod tests {
             ('바', 0xA6),
             ('사', 0xA7),
             ('아', 0xA8),
+            ('자', 0xA9),
         ]));
 
         let plan = plan_dialogue_surfaces(inputs(
@@ -256,13 +262,14 @@ mod tests {
                 &storage,
                 &result,
                 &transition,
+                &caller,
             ],
             &codebook,
         ))
         .unwrap();
 
         assert_eq!(plan.visible_workset_count, 1);
-        assert_eq!(plan.target_glyph_count, 8);
+        assert_eq!(plan.target_glyph_count, 9);
         assert_eq!(plan.codebook_page_count, 1);
     }
 
@@ -274,7 +281,7 @@ mod tests {
 
         let error = plan_dialogue_surfaces(inputs(
             [
-                &earlier, &later, &later, &later, &later, &later, &later, &later,
+                &earlier, &later, &later, &later, &later, &later, &later, &later, &later,
             ],
             &codebook,
         ))
@@ -290,7 +297,7 @@ mod tests {
 
         let error = plan_dialogue_surfaces(inputs(
             [
-                &stage, &stage, &stage, &stage, &stage, &stage, &stage, &stage,
+                &stage, &stage, &stage, &stage, &stage, &stage, &stage, &stage, &stage,
             ],
             &codebook,
         ))

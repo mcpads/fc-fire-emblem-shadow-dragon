@@ -80,6 +80,7 @@ pub(super) fn save_complete_no_branch_contract() -> SaveCompleteNoBranchContract
         committed_result_address_hex: "0x05EB",
         no_committed_result: 0x02,
         next_role: "chapter_save_complete_power_off_notice",
+        choice_input_closes_while_window_tiles_remain: true,
         notice_chr_pair: chr_pair(0x1C, 0x1C, 0x00, 0x18),
         notice_draw_sample_offsets_frames: [1, 11, 30, 67, 130, 259, 516, 900],
         settled_notice_sample_offsets_frames: [130, 259, 516, 900],
@@ -91,6 +92,6 @@ pub(super) fn save_complete_no_branch_contract() -> SaveCompleteNoBranchContract
         hidden_unlock_next_role: "sound_test",
         sound_test_chr_pair: chr_pair(0x1C, 0x1C, 0x00, 0x18),
         sound_test_translation_handling: "preserve original English labels and digits",
-        runtime_evidence: "with menu depth 03, Down changed active selection slot 0x7FF5 from 01 to 02; A committed 02 to 0x05EB and advanced dialogue substates 07->08->09->0A while outer state 0E and main state 04 remained; the Japanese data-loss power-off notice settled by frame 130 and remained pixel-stable through frame 900; the source-bound up, down, left, right, up, A sequence advanced 0x775B and entered substate 0C, where the original-English sound test became visible",
+        runtime_evidence: "with menu depth 03, Down changed active selection slot 0x7FF5 from 01 to 02; A committed 02 to 0x05EB and advanced dialogue substates 07->08->09->0A while outer state 0E and main state 04 remained; choice input closed but the prompt's choice-window tiles and portrait remained physically visible while the Japanese data-loss power-off notice settled by frame 130 and stayed pixel-stable through frame 900; the source-bound up, down, left, right, up, A sequence advanced 0x775B and entered substate 0C, where the original-English sound test became visible",
     }
 }

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use anyhow::{Context, Result, ensure};
 
 use crate::{
-    choice_labels::ChoiceLabelPlan, mmc5_prg::fixed_bank_file_offset, rom::Rom,
+    choice_labels::ChoiceLabelPlan, rom::Rom, source_prg::fixed_bank_file_offset,
     text_inventory::FixedTextPlannedEntry,
 };
 

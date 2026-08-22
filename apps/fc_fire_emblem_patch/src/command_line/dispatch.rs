@@ -547,28 +547,6 @@ pub(super) fn execute(command: Command) -> Result<()> {
                 summary.remaining_storage_byte_count
             );
         }
-        Command::BuildBattleDialogueProbe {
-            source,
-            workspace,
-            output,
-            report,
-        } => {
-            let summary = mapper165::battle_dialogue_probe::build_battle_dialogue_probe(
-                &source, &workspace, &output, &report,
-            )?;
-            println!("wrote {}", output.display());
-            println!("output SHA-1: {}", summary.output_sha1);
-            println!("wrote {}", report.display());
-            println!("report SHA-1: {}", summary.report_sha1);
-            println!(
-                "battle dialogue probe: {} records, {} translated lines, {} pointer writes, {} unique glyphs, {} tracked writes",
-                summary.record_count,
-                summary.translated_line_count,
-                summary.pointer_write_count,
-                summary.unique_glyph_count,
-                summary.tracked_write_count
-            );
-        }
         Command::ValidateMainDialogueWorkspace { source, workspace } => {
             let summary = dialogue_assets::validate_main_dialogue_workspace(&source, &workspace)?;
             println!("validated {}", workspace.display());
@@ -712,30 +690,6 @@ pub(super) fn execute(command: Command) -> Result<()> {
                 summary.target_unique_nonblank_tile_count, summary.source_owned_tile_count
             );
         }
-        Command::BuildOptionsPoc {
-            source,
-            localization,
-            output,
-            preview,
-            preview_scale,
-        } => {
-            let report = options::build_options_poc(
-                &source,
-                &localization,
-                &output,
-                &preview,
-                preview_scale,
-            )?;
-            println!("wrote {}", output.display());
-            println!("output SHA-1: {}", report.output_sha1);
-            println!("wrote {}", preview.display());
-            for write in report.writes {
-                println!(
-                    "tracked write: {} at {:#08X} ({} bytes)",
-                    write.label, write.offset, write.len
-                );
-            }
-        }
         Command::BuildMapper165ParityProbe {
             source,
             output,
@@ -796,37 +750,6 @@ pub(super) fn execute(command: Command) -> Result<()> {
             println!("tracked ROM writes: {}", summary.tracked_write_count);
         }
         Command::BuildKrPatch(command) => command.execute()?,
-        Command::BuildMainDialogueSliceProbe {
-            source,
-            workspace,
-            screen_evidence,
-            record_id,
-            output,
-            report,
-        } => {
-            let summary = mapper165::dialogue_slice_probe::build_dialogue_slice_probe(
-                &source,
-                &workspace,
-                &screen_evidence,
-                &record_id,
-                &output,
-                &report,
-            )?;
-            println!("wrote {}", output.display());
-            println!("output SHA-1: {}", summary.output_sha1);
-            println!("wrote {}", report.display());
-            println!("report SHA-1: {}", summary.report_sha1);
-            println!(
-                "dialogue slice: {} lines, {} unique glyphs, {} planned bytes, {} bytes remaining, {} preserved active codes, {} temporal samples, {} tracked writes",
-                summary.translated_line_count,
-                summary.unique_glyph_count,
-                summary.planned_storage_byte_count,
-                summary.remaining_storage_byte_count,
-                summary.preserved_active_code_count,
-                summary.temporal_sample_count,
-                summary.tracked_write_count
-            );
-        }
         Command::AnalyzeMapper165TriggerPlanes { source, report } => {
             let summary =
                 mapper165::trigger_planes::analyze_mapper165_trigger_planes(&source, &report)?;
@@ -859,147 +782,6 @@ pub(super) fn execute(command: Command) -> Result<()> {
             println!(
                 "writers requiring runtime co-lifetime observation: {}",
                 summary.runtime_observation_writer_count
-            );
-        }
-        Command::BuildMmc5PrgProbe {
-            source,
-            output,
-            report,
-        } => {
-            let summary = mmc5_prg::build_mmc5_prg_probe(&source, &output, &report)?;
-            println!("wrote {}", output.display());
-            println!("output SHA-1: {}", summary.output_sha1);
-            println!("wrote {}", report.display());
-            println!("report SHA-1: {}", summary.report_sha1);
-            println!("tracked ROM writes: {}", summary.tracked_write_count);
-        }
-        Command::BuildMmc5ChrWriterProbe {
-            source,
-            output,
-            report,
-        } => {
-            let summary = mmc5_chr::build_mmc5_chr_writer_probe(&source, &output, &report)?;
-            println!("wrote {}", output.display());
-            println!("output SHA-1: {}", summary.output_sha1);
-            println!("wrote {}", report.display());
-            println!("report SHA-1: {}", summary.report_sha1);
-            println!(
-                "tracked writes after PRG probe: {}",
-                summary.tracked_delta_write_count
-            );
-        }
-        Command::BuildMmc5ExpandedChrOptionsProbe {
-            source,
-            localization,
-            output,
-            report,
-        } => {
-            let summary = mmc5_expanded_chr::build_mmc5_expanded_chr_options_probe(
-                &source,
-                &localization,
-                &output,
-                &report,
-            )?;
-            println!("wrote {}", output.display());
-            println!("output SHA-1: {}", summary.output_sha1);
-            println!("wrote {}", report.display());
-            println!("report SHA-1: {}", summary.report_sha1);
-            println!("tracked ROM writes: {}", summary.tracked_write_count);
-        }
-        Command::BuildMmc5DialogueExramProbe {
-            source,
-            attributes,
-            output,
-            report,
-        } => {
-            let summary = mmc5_exram_probe::build_mmc5_dialogue_exram_probe(
-                &source,
-                &attributes,
-                &output,
-                &report,
-            )?;
-            println!("wrote {}", output.display());
-            println!("output SHA-1: {}", summary.output_sha1);
-            println!("wrote {}", report.display());
-            println!("report SHA-1: {}", summary.report_sha1);
-            println!(
-                "tracked writes after CHR writer probe: {}",
-                summary.tracked_write_count
-            );
-        }
-        Command::BuildMmc5NametableShadowProbe {
-            source,
-            output,
-            report,
-        } => {
-            let summary = mmc5_nametable_shadow::build_mmc5_nametable_shadow_probe(
-                &source, &output, &report,
-            )?;
-            println!("wrote {}", output.display());
-            println!("output SHA-1: {}", summary.output_sha1);
-            println!("wrote {}", report.display());
-            println!("report SHA-1: {}", summary.report_sha1);
-            println!(
-                "hooked direct PPU stores: {}, tracked writes after CHR writer probe: {}",
-                summary.hooked_store_count, summary.tracked_write_count
-            );
-        }
-        Command::BuildMmc5QueueShadowProbe {
-            source,
-            output,
-            report,
-        } => {
-            let summary =
-                mmc5_queue_shadow::build_mmc5_queue_shadow_probe(&source, &output, &report)?;
-            println!("wrote {}", output.display());
-            println!("output SHA-1: {}", summary.output_sha1);
-            println!("wrote {}", report.display());
-            println!("report SHA-1: {}", summary.report_sha1);
-            println!(
-                "tracked writes after CHR writer probe: {}",
-                summary.tracked_write_count
-            );
-        }
-        Command::ProjectMmc4LatchNametable {
-            input,
-            nametable_index,
-            fd_bank,
-            fe_bank,
-            initial_latch,
-            output,
-            report,
-        } => {
-            let summary = mmc4_latch::project_mmc4_latch_nametable(
-                &input,
-                nametable_index,
-                fd_bank,
-                fe_bank,
-                initial_latch,
-                &output,
-                &report,
-            )?;
-            println!("wrote {}", output.display());
-            println!("output SHA-1: {}", summary.output_sha1);
-            println!("wrote {}", report.display());
-            println!("report SHA-1: {}", summary.report_sha1);
-            println!(
-                "MMC4 latch triggers: FD {}, FE {}, ending latch {}",
-                summary.fd_trigger_count, summary.fe_trigger_count, summary.ending_latch
-            );
-        }
-        Command::ReplayMmc4LatchPpuTransfers {
-            input,
-            output,
-            report,
-        } => {
-            let summary = mmc4_latch::replay_mmc4_latch_ppu_transfers(&input, &output, &report)?;
-            println!("wrote {}", output.display());
-            println!("output SHA-1: {}", summary.output_sha1);
-            println!("wrote {}", report.display());
-            println!("report SHA-1: {}", summary.report_sha1);
-            println!(
-                "applied nametable writes: {}",
-                summary.nametable_write_count
             );
         }
     }

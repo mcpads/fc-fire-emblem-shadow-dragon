@@ -4,11 +4,11 @@ use anyhow::{Context, Result, ensure};
 
 use crate::{
     font_slots::FONT_PAGE_SIZE,
-    mmc5_chr::switchable_bank_file_offset,
-    mmc5_prg::{count_direct_transfers_to_range, fixed_bank_file_offset},
     rom::{CHR_FILE_OFFSET, Rom},
     roster_localization::RosterLocalization,
     sha1_hex,
+    source_prg::switchable_bank_file_offset,
+    source_prg::{count_direct_transfers_to_range, fixed_bank_file_offset},
     tracked::TrackedImage,
     unit_names::UnitNamePlan,
 };

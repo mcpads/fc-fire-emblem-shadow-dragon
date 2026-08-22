@@ -316,6 +316,18 @@ pub(in crate::full_translation_install::integrated_write_set) fn plan_required_m
             &write.replacement,
         ));
     }
+    for write in inputs.shop_text_consumers.writes() {
+        ensure!(
+            write.file_offset == switchable_cpu_to_file_offset(write.prg_bank, write.cpu_address)?,
+            "shop text consumer file and CPU addresses disagree"
+        );
+        required.push(MutationIdentity::exact(
+            write.role,
+            write.file_offset,
+            &write.expected,
+            &write.replacement,
+        ));
+    }
     let recipes = inputs.cross_domain_material.dialogue_page_recipes();
     let expected = mutation_expected_slice(
         inputs.candidate.data(),

@@ -50,6 +50,7 @@ fn instructions(
     contract: BankRestoreContract,
     transport_entry: u16,
     runtime_code_page: u8,
+    completed_record_line_policy: u16,
 ) -> Result<Vec<Instruction>> {
     let origin = COMPOSER_ORIGIN;
     let mut instructions = vec![
@@ -93,6 +94,9 @@ fn instructions(
         // cold는 복원과 overlay 두 호출, resident는 overlay 한 호출로 끝난다.
         // 알 수 없는 상위 상태는 무한 루프 대신 호출자에게 돌려보낸다.
         Instruction::BccAbsolute(run_transport),
+        // `$A000`에는 아직 런타임 코드 페이지가 걸려 있다. 완성된 글꼴과 새 줄
+        // 정책을 같은 은행 수명에서 확정한 뒤에만 원본 대사 뱅크를 복원한다.
+        Instruction::JsrAbsolute(completed_record_line_policy),
         Instruction::LdaZeroPage(contract.prg_bank_shadow),
         Instruction::JsrAbsolute(PAIRED_BANK_HELPER),
     ]);
@@ -124,10 +128,16 @@ pub(super) fn build_synchronous_composer(
     contract: BankRestoreContract,
     transport_entry: u16,
     runtime_code_page: u8,
+    completed_record_line_policy: u16,
 ) -> Result<RuntimeRoutine> {
     let bytes = assemble_at(
         COMPOSER_ORIGIN,
-        &instructions(contract, transport_entry, runtime_code_page)?,
+        &instructions(
+            contract,
+            transport_entry,
+            runtime_code_page,
+            completed_record_line_policy,
+        )?,
     )?;
     ensure!(
         usize::from(COMPOSER_ORIGIN) + bytes.len() <= usize::from(COMPOSER_CAVE_END),
@@ -146,6 +156,8 @@ pub(super) fn build_synchronous_composer(
 mod tests {
     use super::*;
 
+    const COMPLETED_RECORD_LINE_POLICY: u16 = 0xA300;
+
     fn contract() -> BankRestoreContract {
         BankRestoreContract {
             prg_bank_shadow: 0x29,
@@ -155,7 +167,7 @@ mod tests {
 
     #[test]
     fn one_clean_render_off_interval_contains_the_entire_transport() {
-        let listing = instructions(contract(), 0xA000, 0x30).unwrap();
+        let listing = instructions(contract(), 0xA000, 0x30, COMPLETED_RECORD_LINE_POLICY).unwrap();
         let mask_off = listing
             .iter()
             .position(|instruction| *instruction == Instruction::StaAbsolute(PPU_MASK))
@@ -189,7 +201,7 @@ mod tests {
 
     #[test]
     fn the_transport_repeats_until_ready_and_then_restores_the_source_bank() {
-        let listing = instructions(contract(), 0xA000, 0x30).unwrap();
+        let listing = instructions(contract(), 0xA000, 0x30, COMPLETED_RECORD_LINE_POLICY).unwrap();
         let transport = listing
             .iter()
             .position(|instruction| *instruction == Instruction::JsrAbsolute(0xA000))
@@ -209,17 +221,21 @@ mod tests {
         ));
         assert_eq!(
             listing[transport + 4],
-            Instruction::LdaZeroPage(contract().prg_bank_shadow)
+            Instruction::JsrAbsolute(COMPLETED_RECORD_LINE_POLICY)
         );
         assert_eq!(
             listing[transport + 5],
+            Instruction::LdaZeroPage(contract().prg_bank_shadow)
+        );
+        assert_eq!(
+            listing[transport + 6],
             Instruction::JsrAbsolute(PAIRED_BANK_HELPER)
         );
     }
 
     #[test]
     fn caller_registers_flags_and_entry_pointer_are_balanced() {
-        let listing = instructions(contract(), 0xA000, 0x30).unwrap();
+        let listing = instructions(contract(), 0xA000, 0x30, COMPLETED_RECORD_LINE_POLICY).unwrap();
         let pushes = listing
             .iter()
             .filter(|instruction| matches!(instruction, Instruction::Pha | Instruction::Php))
@@ -245,7 +261,9 @@ mod tests {
 
     #[test]
     fn the_composer_fits_with_the_shared_publisher_in_the_owned_cave() {
-        let routine = build_synchronous_composer(contract(), 0xA000, 0x30).unwrap();
+        let routine =
+            build_synchronous_composer(contract(), 0xA000, 0x30, COMPLETED_RECORD_LINE_POLICY)
+                .unwrap();
         assert!(
             usize::from(routine.address) + routine.bytes.len() <= usize::from(COMPOSER_CAVE_END)
         );

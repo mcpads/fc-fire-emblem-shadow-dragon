@@ -4,9 +4,9 @@ use anyhow::{Context, Result, ensure};
 use retro_rp2a03::decode_bytes;
 
 use crate::{
-    mmc5_prg::fixed_bank_file_offset,
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
+    source_prg::fixed_bank_file_offset,
     tracked::TrackedImage,
     typed_source::{Rp2a03DirectControlFlow, rp2a03_direct_control_flow},
 };

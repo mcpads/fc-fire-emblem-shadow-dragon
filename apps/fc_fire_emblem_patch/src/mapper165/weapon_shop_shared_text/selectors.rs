@@ -199,6 +199,10 @@ pub(crate) fn build_choice_pointer_load_call() -> Result<Vec<u8>> {
     build_pointer_load_call(CHOICE_POINTER_LOAD_ADDRESS, CHOICE_SELECTOR_ADDRESS)
 }
 
+pub(crate) fn build_original_choice_pointer_load() -> Result<Vec<u8>> {
+    build_original_pointer_load(CHOICE_POINTER_LOAD_ADDRESS, 0x8FC2)
+}
+
 pub(crate) fn build_selected_item_pointer_load_call() -> Result<Vec<u8>> {
     build_pointer_load_call(
         SELECTED_ITEM_POINTER_LOAD_ADDRESS,
@@ -206,10 +210,29 @@ pub(crate) fn build_selected_item_pointer_load_call() -> Result<Vec<u8>> {
     )
 }
 
+pub(crate) fn build_original_selected_item_pointer_load() -> Result<Vec<u8>> {
+    build_original_pointer_load(
+        SELECTED_ITEM_POINTER_LOAD_ADDRESS,
+        ORIGINAL_ITEM_POINTER_TABLE_ADDRESS,
+    )
+}
+
 fn build_pointer_load_call(origin: u16, selector: u16) -> Result<Vec<u8>> {
     let mut call = assemble_at(origin, &[Instruction::JsrAbsolute(selector)])?;
     call.resize(10, assemble_at(origin, &[Instruction::Nop])?[0]);
     Ok(call)
+}
+
+fn build_original_pointer_load(origin: u16, pointer_table: u16) -> Result<Vec<u8>> {
+    assemble_at(
+        origin,
+        &[
+            Instruction::LdaAbsoluteY(pointer_table),
+            Instruction::StaZeroPage(0x00),
+            Instruction::LdaAbsoluteY(pointer_table + 1),
+            Instruction::StaZeroPage(0x01),
+        ],
+    )
 }
 
 #[cfg(test)]
@@ -286,5 +309,17 @@ mod tests {
         assert_eq!(&selected_item[..3], &[0x20, 0xDE, 0xF4]);
         assert_eq!(choice.len(), CHOICE_POINTER_LOAD_BYTES.len());
         assert_eq!(&choice[..3], &[0x20, 0xB0, 0xF4]);
+    }
+
+    #[test]
+    fn typed_original_pointer_loads_match_the_bound_source_sequences() {
+        assert_eq!(
+            build_original_choice_pointer_load().unwrap(),
+            CHOICE_POINTER_LOAD_BYTES
+        );
+        assert_eq!(
+            build_original_selected_item_pointer_load().unwrap(),
+            SELECTED_ITEM_POINTER_LOAD_BYTES
+        );
     }
 }

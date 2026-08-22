@@ -100,6 +100,10 @@ pub(crate) struct BattleRuntimeStateLayout {
 }
 
 impl BattleRuntimeStateLayout {
+    pub(crate) const fn terminal_shared_phase(self) -> u8 {
+        self.shared_phase_count - 1
+    }
+
     pub(crate) const fn recipe_fields(self) -> [BattleRecipeField; 9] {
         [
             BattleRecipeField {

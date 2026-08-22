@@ -149,18 +149,30 @@ pub(super) fn build_lifetimes(inputs: &ConsumerCodebookInputs<'_>) -> Result<Vec
             }),
     );
     lifetimes.push(save_offer_lifetime);
-    let ending_label = vec![inputs.transitions.ending_record.logical_bytes.clone()];
-    lifetimes.push(lifetime(
+    let ending_labels = vec![
+        inputs.transitions.ending_record.logical_bytes.clone(),
+        inputs.transitions.ending_bridge.logical_bytes.clone(),
+    ];
+    let mut ending_lifetime = lifetime(
         "ending_chapter_record",
-        "all_chapter_rows",
+        "all_chapter_rows_and_phase_0b_bridge",
         vec!["ending_chapter_record_scroll"],
         vec!["chapter_titles", "ending_record_labels"],
         &[
             (CodeOwner::ChapterTitle, chapter_titles.as_slice()),
-            (CodeOwner::FixedUi, ending_label.as_slice()),
+            (CodeOwner::FixedUi, ending_labels.as_slice()),
         ],
         true,
-    ));
+    );
+    ending_lifetime.preserved_active_codes.extend(
+        inputs
+            .transitions
+            .ending_bridge
+            .preserved_visible_active_codes
+            .iter()
+            .copied(),
+    );
+    lifetimes.push(ending_lifetime);
 
     // 대사 동적 문자열은 정적 페이지를 만들지 않지만, 이미 저장 바이트가 된 187개
     // 코드를 같은 선색칠 계약으로 계속 검증한다.

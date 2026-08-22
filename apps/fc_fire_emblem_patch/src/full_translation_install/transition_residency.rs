@@ -196,7 +196,9 @@ fn apply_transition_residency(
     })
 }
 
-fn merge_worksets<'a>(worksets: impl Iterator<Item = &'a GlyphWorkset>) -> Result<GlyphWorkset> {
+pub(super) fn merge_worksets<'a>(
+    worksets: impl Iterator<Item = &'a GlyphWorkset>,
+) -> Result<GlyphWorkset> {
     let mut target_glyphs = BTreeSet::new();
     let mut preserved_active_codes = BTreeSet::new();
     let mut fixed_glyph_codes = BTreeMap::new();

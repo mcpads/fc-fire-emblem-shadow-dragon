@@ -17,8 +17,11 @@ use super::{
     runtime_code::DialogueRuntimeCodePlan,
 };
 use crate::{
-    dialogue_assets::MainDialogueDisplayPlan, mapper165::battle_codebook_plan::GlyphWorkset,
-    rom::Rom, shop_flow::SHOP_ITEM_ENTRY_COUNT, text_inventory::FixedTextPlan,
+    dialogue_assets::MainDialogueDisplayPlan,
+    mapper165::battle_codebook_plan::GlyphWorkset,
+    shop_flow::{SHOP_ITEM_ENTRY_COUNT, ShopItemCompositionSource},
+    text_inventory::FixedTextPlan,
+    translation_coverage::ITEM_NAME_SCREEN_ROLES,
 };
 
 mod worksets;
@@ -26,7 +29,7 @@ mod worksets;
 pub(super) use worksets::plan_shop_item_workset_residency;
 
 pub(super) struct ShopItemWorksetResidencyInputs<'a> {
-    pub(super) source: &'a Rom,
+    pub(super) source: &'a ShopItemCompositionSource,
     pub(super) display: &'a MainDialogueDisplayPlan,
     pub(super) fixed: &'a FixedTextPlan,
     pub(super) dialogue_worksets: &'a [GlyphWorkset],
@@ -119,6 +122,14 @@ pub(super) struct ShopItemResidencyPlan {
 impl ShopItemResidencyPlan {
     pub(super) fn runtime_contract(&self) -> ShopItemResidencyRuntimeContract {
         self.runtime
+    }
+
+    pub(super) fn projected_shop_screen_roles(&self) -> Result<&'static [&'static str]> {
+        ensure!(
+            self.static_contract_complete,
+            "shop item screen roles were requested before the static route contract closed"
+        );
+        Ok(&ITEM_NAME_SCREEN_ROLES)
     }
 
     pub(super) fn bind_runtime_routes(

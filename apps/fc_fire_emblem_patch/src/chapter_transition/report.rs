@@ -181,6 +181,7 @@ pub(super) struct SaveCompleteNoBranchContract {
     pub(super) committed_result_address_hex: &'static str,
     pub(super) no_committed_result: u8,
     pub(super) next_role: &'static str,
+    pub(super) choice_input_closes_while_window_tiles_remain: bool,
     pub(super) notice_chr_pair: ChrPair,
     pub(super) notice_draw_sample_offsets_frames: [u16; 8],
     pub(super) settled_notice_sample_offsets_frames: [u16; 4],

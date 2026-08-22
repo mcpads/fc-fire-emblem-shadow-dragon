@@ -10,11 +10,11 @@ use crate::{
     front_end_menu::plan_front_end_menu,
     hangul_page_plan::assemble_hangul_page_pack,
     localization::OptionsLocalization,
-    mmc5_chr::switchable_bank_file_offset,
     options::OPTIONS_TABLE_OFFSET,
     rom::{EXPECTED_SOURCE_SHA1, HEADER_SIZE, Rom},
     roster_localization::{ROSTER_HEADER_CPU_ADDRESS, ROSTER_TEXT_PRG_BANK, RosterLocalization},
     sha1_hex,
+    source_prg::switchable_bank_file_offset,
     title_graphics::{
         TITLE_RUNTIME_COMPLETION_STREAM_BYTE_COUNT, TITLE_STREAM_BYTE_COUNT,
         bind_installed_title_consumer_route, plan_title_graphics, title_stream_file_offset,
@@ -27,7 +27,8 @@ use super::{
         CUMULATIVE_RUNTIME_LAYOUT, cumulative_battle_central_right_fd_selector,
     },
     bind_front_end_font_page_selector, bind_unit_name_font_page_selector,
-    build_front_end_font_page_forwarder, build_unit_name_font_page_forwarder,
+    build_font_page_fallback_forwarder, build_front_end_font_page_forwarder,
+    build_unit_name_font_page_forwarder,
     class_profile_page::{
         PROFILE_PAGE_SELECTOR_ADDRESS, TITLE_COMPOSER_HOOK_ADDRESS, build_profile_page_selector,
         build_title_composer_hook,
@@ -63,6 +64,7 @@ use super::{
     },
     shop_dialogue_page::{
         PAGE_ROUTINE_ADDRESS as SHOP_DIALOGUE_PAGE_ROUTINE_ADDRESS,
+        PAGE_ROUTINE_END as SHOP_DIALOGUE_PAGE_ROUTINE_END,
         SCREEN_ROLE as SHOP_DIALOGUE_SCREEN_ROLE,
         build_page_selector as build_shop_dialogue_page_selector,
     },
@@ -697,6 +699,17 @@ fn inspect_front_end(
         .find(|lifetime| lifetime.screen_role == SHOP_DIALOGUE_SCREEN_ROLE)
         .map(|lifetime| lifetime.font_mapper_register)
         .context("cumulative report lost the weapon-shop dialogue lifetime")?;
+    let cumulative_shop_selector = build_shop_dialogue_page_selector(
+        shop_dialogue_mapper_register,
+        FRONT_END_PAGE_ROUTINE_ADDRESS,
+    )?;
+    let final_shop_forwarder = build_font_page_fallback_forwarder(
+        SHOP_DIALOGUE_PAGE_ROUTINE_ADDRESS,
+        SHOP_DIALOGUE_PAGE_ROUTINE_END,
+        FRONT_END_PAGE_ROUTINE_ADDRESS,
+        &cumulative_shop_selector,
+        SHOP_DIALOGUE_SCREEN_ROLE,
+    )?;
     let consumer_regions = vec![
         bind_replaced_region(
             "front_end_page_forwarder",
@@ -714,13 +727,11 @@ fn inspect_front_end(
             inputs.cumulative,
             inputs.integrated,
         )?,
-        bind_expected_region(
-            "front_end_upstream_shop_dialogue_selector",
+        bind_replaced_region(
+            "front_end_upstream_shop_dialogue_forwarder",
             active_fixed_file_offset(inputs.cumulative, SHOP_DIALOGUE_PAGE_ROUTINE_ADDRESS)?,
-            &build_shop_dialogue_page_selector(
-                shop_dialogue_mapper_register,
-                FRONT_END_PAGE_ROUTINE_ADDRESS,
-            )?,
+            &cumulative_shop_selector,
+            &final_shop_forwarder,
             inputs.cumulative,
             inputs.integrated,
         )?,

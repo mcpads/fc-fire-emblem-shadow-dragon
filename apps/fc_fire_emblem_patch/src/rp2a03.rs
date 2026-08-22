@@ -17,10 +17,8 @@ pub enum Instruction {
     LdyImmediate(u8),
     LdyZeroPage(u8),
     LdyAbsolute(u16),
-    LdyAbsoluteX(u16),
     StaZeroPage(u8),
     StxZeroPage(u8),
-    StyZeroPage(u8),
     StaAbsolute(u16),
     StaAbsoluteX(u16),
     StaAbsoluteY(u16),
@@ -33,7 +31,6 @@ pub enum Instruction {
     AndZeroPage(u8),
     AdcImmediate(u8),
     AdcZeroPage(u8),
-    AdcAbsolute(u16),
     AdcAbsoluteX(u16),
     SbcImmediate(u8),
     SbcAbsolute(u16),
@@ -49,7 +46,6 @@ pub enum Instruction {
     Inx,
     Dex,
     Iny,
-    Dey,
     Tax,
     Txa,
     Tay,
@@ -87,7 +83,6 @@ impl Instruction {
             | Self::Inx
             | Self::Dex
             | Self::Iny
-            | Self::Dey
             | Self::Tax
             | Self::Txa
             | Self::Tay
@@ -107,7 +102,6 @@ impl Instruction {
             | Self::LdyZeroPage(_)
             | Self::StaZeroPage(_)
             | Self::StxZeroPage(_)
-            | Self::StyZeroPage(_)
             | Self::StaIndirectY(_)
             | Self::AslZeroPage(_)
             | Self::RolZeroPage(_)
@@ -131,13 +125,11 @@ impl Instruction {
             Self::LdaAbsolute(_)
             | Self::LdaAbsoluteX(_)
             | Self::LdaAbsoluteY(_)
-            | Self::AdcAbsolute(_)
             | Self::AdcAbsoluteX(_)
             | Self::LdxAbsolute(_)
             | Self::CmpAbsolute(_)
             | Self::SbcAbsolute(_)
             | Self::LdyAbsolute(_)
-            | Self::LdyAbsoluteX(_)
             | Self::StaAbsolute(_)
             | Self::StaAbsoluteX(_)
             | Self::StaAbsoluteY(_)
@@ -162,7 +154,6 @@ impl Instruction {
             | Self::Inx
             | Self::Dex
             | Self::Iny
-            | Self::Dey
             | Self::Tax
             | Self::Txa
             | Self::Tay
@@ -187,7 +178,6 @@ impl Instruction {
             | Self::LdyZeroPage(_)
             | Self::StaZeroPage(_)
             | Self::StxZeroPage(_)
-            | Self::StyZeroPage(_)
             | Self::AndZeroPage(_)
             | Self::AdcZeroPage(_)
             | Self::CmpZeroPage(_)
@@ -196,16 +186,12 @@ impl Instruction {
             Self::JmpAbsolute(_) => 3,
             Self::LdaAbsolute(_)
             | Self::StaAbsolute(_)
-            | Self::AdcAbsolute(_)
             | Self::LdxAbsolute(_)
             | Self::LdyAbsolute(_)
             | Self::CmpAbsolute(_)
             | Self::SbcAbsolute(_) => 4,
             // 색인 적재는 페이지 경계를 넘으면 한 사이클 더 쓴다.
-            Self::LdaAbsoluteX(_)
-            | Self::LdaAbsoluteY(_)
-            | Self::LdyAbsoluteX(_)
-            | Self::AdcAbsoluteX(_) => 5,
+            Self::LdaAbsoluteX(_) | Self::LdaAbsoluteY(_) | Self::AdcAbsoluteX(_) => 5,
             Self::StaAbsoluteX(_) | Self::StaAbsoluteY(_) => 5,
             Self::AslZeroPage(_) | Self::RolZeroPage(_) | Self::IncZeroPage(_) => 5,
             Self::LdaIndirectY(_) => 6,
@@ -243,10 +229,8 @@ impl Instruction {
             Self::LdyImmediate(value) => immediate(Mnemonic::Ldy, value),
             Self::LdyZeroPage(address) => zero_page(Mnemonic::Ldy, address),
             Self::LdyAbsolute(address) => absolute(Mnemonic::Ldy, address),
-            Self::LdyAbsoluteX(address) => absolute_x(Mnemonic::Ldy, address),
             Self::StaZeroPage(address) => zero_page(Mnemonic::Sta, address),
             Self::StxZeroPage(address) => zero_page(Mnemonic::Stx, address),
-            Self::StyZeroPage(address) => zero_page(Mnemonic::Sty, address),
             Self::StaAbsolute(address) => absolute(Mnemonic::Sta, address),
             Self::StaAbsoluteX(address) => absolute_x(Mnemonic::Sta, address),
             Self::StaAbsoluteY(address) => absolute_y(Mnemonic::Sta, address),
@@ -263,7 +247,6 @@ impl Instruction {
             Self::AndZeroPage(address) => zero_page(Mnemonic::And, address),
             Self::AdcImmediate(value) => immediate(Mnemonic::Adc, value),
             Self::AdcZeroPage(address) => zero_page(Mnemonic::Adc, address),
-            Self::AdcAbsolute(address) => absolute(Mnemonic::Adc, address),
             Self::AdcAbsoluteX(address) => absolute_x(Mnemonic::Adc, address),
             Self::SbcImmediate(value) => immediate(Mnemonic::Sbc, value),
             Self::SbcAbsolute(address) => absolute(Mnemonic::Sbc, address),
@@ -279,7 +262,6 @@ impl Instruction {
             Self::Inx => implied(Mnemonic::Inx, AddressingMode::Implied),
             Self::Dex => implied(Mnemonic::Dex, AddressingMode::Implied),
             Self::Iny => implied(Mnemonic::Iny, AddressingMode::Implied),
-            Self::Dey => implied(Mnemonic::Dey, AddressingMode::Implied),
             Self::Tax => implied(Mnemonic::Tax, AddressingMode::Implied),
             Self::Txa => implied(Mnemonic::Txa, AddressingMode::Implied),
             Self::Tay => implied(Mnemonic::Tay, AddressingMode::Implied),
@@ -405,77 +387,62 @@ mod tests {
     }
 
     #[test]
-    fn encodes_only_the_declared_addressing_forms() {
-        let bytes = assemble_at(
-            0x8000,
-            &[
-                Instruction::LdaImmediate(0x9F),
-                Instruction::LdaZeroPage(0x5B),
-                Instruction::LdaAbsolute(0x67F0),
-                Instruction::LdaAbsoluteX(0xFB00),
-                Instruction::LdaAbsoluteY(0xB700),
-                Instruction::LdxImmediate(0),
-                Instruction::LdyImmediate(0),
-                Instruction::LdyAbsoluteX(0x0103),
-                Instruction::StaZeroPage(0x29),
-                Instruction::StyZeroPage(0x21),
-                Instruction::StaAbsolute(0x5117),
-                Instruction::StaAbsoluteX(0x5C00),
-                Instruction::StaAbsoluteY(0x7FEE),
-                Instruction::StaIndirectY(0x00),
-                Instruction::AslAccumulator,
-                Instruction::AslZeroPage(0x02),
-                Instruction::RolZeroPage(0x03),
-                Instruction::LsrAccumulator,
-                Instruction::AndImmediate(0x3F),
-                Instruction::AdcImmediate(0x20),
-                Instruction::AdcZeroPage(0x01),
-                Instruction::SbcImmediate(0x10),
-                Instruction::CmpImmediate(0x18),
-                Instruction::CpxImmediate(0x20),
-                Instruction::CpyImmediate(2),
-                Instruction::IncAbsolute(0x67F4),
-                Instruction::DecAbsolute(0x67FC),
-                Instruction::Inx,
-                Instruction::Dex,
-                Instruction::Dey,
-                Instruction::Tax,
-                Instruction::Txa,
-                Instruction::Tay,
-                Instruction::Tya,
-                Instruction::Tsx,
-                Instruction::OraImmediate(0x80),
-                Instruction::OraZeroPage(0x52),
-                Instruction::Clc,
-                Instruction::Sec,
-                Instruction::Pha,
-                Instruction::Php,
-                Instruction::Pla,
-                Instruction::Plp,
-                Instruction::JsrAbsolute(0xFB30),
-                Instruction::BeqAbsolute(0x8000),
-                Instruction::BccAbsolute(0x8000),
-                Instruction::BcsAbsolute(0x8000),
-                Instruction::BneAbsolute(0x8000),
-                Instruction::JmpAbsolute(0xC075),
-                Instruction::Rts,
-                Instruction::Nop,
-            ],
-        )
-        .unwrap();
+    fn encodes_each_declared_addressing_form_independently() {
+        let cases: &[(Instruction, &[u8])] = &[
+            (Instruction::LdaImmediate(0x9F), &[0xA9, 0x9F]),
+            (Instruction::LdaZeroPage(0x5B), &[0xA5, 0x5B]),
+            (Instruction::LdaAbsolute(0x67F0), &[0xAD, 0xF0, 0x67]),
+            (Instruction::LdaAbsoluteX(0xFB00), &[0xBD, 0x00, 0xFB]),
+            (Instruction::LdaAbsoluteY(0xB700), &[0xB9, 0x00, 0xB7]),
+            (Instruction::LdxImmediate(0), &[0xA2, 0x00]),
+            (Instruction::LdyImmediate(0), &[0xA0, 0x00]),
+            (Instruction::StaZeroPage(0x29), &[0x85, 0x29]),
+            (Instruction::StaAbsolute(0x5117), &[0x8D, 0x17, 0x51]),
+            (Instruction::StaAbsoluteX(0x5C00), &[0x9D, 0x00, 0x5C]),
+            (Instruction::StaAbsoluteY(0x7FEE), &[0x99, 0xEE, 0x7F]),
+            (Instruction::StaIndirectY(0x00), &[0x91, 0x00]),
+            (Instruction::AslAccumulator, &[0x0A]),
+            (Instruction::AslZeroPage(0x02), &[0x06, 0x02]),
+            (Instruction::RolZeroPage(0x03), &[0x26, 0x03]),
+            (Instruction::LsrAccumulator, &[0x4A]),
+            (Instruction::AndImmediate(0x3F), &[0x29, 0x3F]),
+            (Instruction::AdcImmediate(0x20), &[0x69, 0x20]),
+            (Instruction::AdcZeroPage(0x01), &[0x65, 0x01]),
+            (Instruction::SbcImmediate(0x10), &[0xE9, 0x10]),
+            (Instruction::CmpImmediate(0x18), &[0xC9, 0x18]),
+            (Instruction::CpxImmediate(0x20), &[0xE0, 0x20]),
+            (Instruction::CpyImmediate(2), &[0xC0, 0x02]),
+            (Instruction::IncAbsolute(0x67F4), &[0xEE, 0xF4, 0x67]),
+            (Instruction::DecAbsolute(0x67FC), &[0xCE, 0xFC, 0x67]),
+            (Instruction::Inx, &[0xE8]),
+            (Instruction::Dex, &[0xCA]),
+            (Instruction::Tax, &[0xAA]),
+            (Instruction::Txa, &[0x8A]),
+            (Instruction::Tay, &[0xA8]),
+            (Instruction::Tya, &[0x98]),
+            (Instruction::Tsx, &[0xBA]),
+            (Instruction::OraImmediate(0x80), &[0x09, 0x80]),
+            (Instruction::OraZeroPage(0x52), &[0x05, 0x52]),
+            (Instruction::Clc, &[0x18]),
+            (Instruction::Sec, &[0x38]),
+            (Instruction::Pha, &[0x48]),
+            (Instruction::Php, &[0x08]),
+            (Instruction::Pla, &[0x68]),
+            (Instruction::Plp, &[0x28]),
+            (Instruction::JsrAbsolute(0xFB30), &[0x20, 0x30, 0xFB]),
+            (Instruction::BeqAbsolute(0x8000), &[0xF0, 0xFE]),
+            (Instruction::BccAbsolute(0x8000), &[0x90, 0xFE]),
+            (Instruction::BcsAbsolute(0x8000), &[0xB0, 0xFE]),
+            (Instruction::BneAbsolute(0x8000), &[0xD0, 0xFE]),
+            (Instruction::JmpAbsolute(0xC075), &[0x4C, 0x75, 0xC0]),
+            (Instruction::Rts, &[0x60]),
+            (Instruction::Nop, &[0xEA]),
+        ];
 
-        assert_eq!(
-            bytes,
-            [
-                0xA9, 0x9F, 0xA5, 0x5B, 0xAD, 0xF0, 0x67, 0xBD, 0x00, 0xFB, 0xB9, 0x00, 0xB7, 0xA2,
-                0x00, 0xA0, 0x00, 0xBC, 0x03, 0x01, 0x85, 0x29, 0x84, 0x21, 0x8D, 0x17, 0x51, 0x9D,
-                0x00, 0x5C, 0x99, 0xEE, 0x7F, 0x91, 0x00, 0x0A, 0x06, 0x02, 0x26, 0x03, 0x4A, 0x29,
-                0x3F, 0x69, 0x20, 0x65, 0x01, 0xE9, 0x10, 0xC9, 0x18, 0xE0, 0x20, 0xC0, 0x02, 0xEE,
-                0xF4, 0x67, 0xCE, 0xFC, 0x67, 0xE8, 0xCA, 0x88, 0xAA, 0x8A, 0xA8, 0x98, 0xBA, 0x09,
-                0x80, 0x05, 0x52, 0x18, 0x38, 0x48, 0x08, 0x68, 0x28, 0x20, 0x30, 0xFB, 0xF0, 0xAC,
-                0x90, 0xAA, 0xB0, 0xA8, 0xD0, 0xA6, 0x4C, 0x75, 0xC0, 0x60, 0xEA,
-            ]
-        );
+        for (instruction, expected) in cases {
+            let actual = assemble_at(0x8000, std::slice::from_ref(instruction)).unwrap();
+            assert_eq!(actual.as_slice(), *expected, "{instruction:?}");
+        }
     }
 
     #[test]

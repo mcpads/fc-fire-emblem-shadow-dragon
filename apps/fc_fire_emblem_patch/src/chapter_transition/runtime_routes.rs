@@ -203,7 +203,7 @@ pub(super) fn transition_screens() -> Vec<TransitionScreen> {
                 },
                 InputAction {
                     input: "A on the observed no choice",
-                    immediate_effect: "close the choice window, draw the data-loss power-off notice, and remain in outer state 0E",
+                    immediate_effect: "close choice input, retain the physical choice-window tiles and portrait, draw the data-loss power-off notice, and remain in outer state 0E",
                     may_cause_persistent_gameplay_mutation: false,
                     next_role: "chapter_save_complete_power_off_notice",
                 },
@@ -225,11 +225,12 @@ pub(super) fn transition_screens() -> Vec<TransitionScreen> {
             input_behavior: "terminal_instruction_with_hidden_unlock",
             visible_components: &[
                 "retained chapter map and unit sprites",
-                "portrait",
+                "retained portrait",
+                "retained yes and no choice window",
                 "large dialogue window with a Japanese data-loss power-off notice",
                 "completion marker",
             ],
-            translation_target: "Japanese notice only",
+            translation_target: "Japanese notice plus retained translated choice labels",
             preserved_original: &[],
             runtime_state: runtime_state(0x0E, "0x0E", 0x04, "0x04", None, Some(0x11)),
             observed_chr_pair: chr_pair(0x1C, 0x1C, 0x00, 0x18),

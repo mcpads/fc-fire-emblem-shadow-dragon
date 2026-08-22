@@ -3,9 +3,10 @@
 //! 전송이 타일을 올려도 화면이 CHR RAM을 보지 않으면 아무것도 바뀌지 않는다.
 //! 탐침에서 `$2007` 쓰기가 버려진 것이 그 증거였다.
 //!
-//! 자리는 원본 CHR selector 사슬의 `$FF40`이다. 지금 값은 폐기된 표본 selector로
-//! 넘기는 `JMP $F990`이다. 전역 selector는 그 표본을 대체하므로 준비되지 않았을
-//! 때는 표본 뒤의 실제 기존 소비자 `$FB80`으로 직접 넘긴다.
+//! 설치 자리는 누적 폰트 fallback 그래프가 결속한 중앙 선택기의 마지막 `JMP`다.
+//! 전역 selector는 그 명령이 가리키던 표본을 대체하므로 준비되지 않았을 때는 표본
+//! 뒤의 실제 기존 소비자로 직접 넘긴다. 중앙 선택기 길이와 이 `JMP` 위치를 별도
+//! 상수로 복제하지 않는다.
 //!
 //! 준비되지 않았을 때 CHR RAM을 고르면 아직 올라가지 않은 타일이 화면에 나온다.
 //! `cold_requested`는 한글 슬롯만 빈 전용 CHR-ROM 페이지를 고르고, 그 밖의 알 수 없는
@@ -53,23 +54,11 @@ use crate::{
         ENDING_CHARACTER_EPILOGUE_VISIBLE_PHASE_START, ENDING_RECORD_PHASE_ADDRESS,
     },
     full_translation_install::storage_residency::STORAGE_DIALOGUE_OVERLAY_COMPOSITE_STATES,
+    mapper165::BoundFontPageRuntimeTakeover,
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
     typed_source::decode_rp2a03_sequence,
 };
-
-/// selector 사슬에서 이 런타임이 가져가는 자리다.
-pub(in crate::full_translation_install) const SELECTOR_CHAIN_SITE: u16 = 0xFF40;
-/// 후보의 사슬 자리가 지금 넘기는 표본 selector다. 설치 선행 조건으로만 쓴다.
-const SELECTOR_CHAIN_SOURCE_TARGET: u16 = 0xF990;
-/// 표본 selector 뒤의 기존 소비자다. 전역 selector의 비활성 경로는 여기로 간다.
-pub(in crate::full_translation_install) const SELECTOR_CHAIN_FALLBACK: u16 = 0xFB80;
-/// `$FF40`: `JMP $F990`.
-const SELECTOR_CHAIN_CODE: [u8; 3] = [
-    0x4C,
-    SELECTOR_CHAIN_SOURCE_TARGET as u8,
-    (SELECTOR_CHAIN_SOURCE_TARGET >> 8) as u8,
-];
 
 /// 준비된 FD 표시 selector가 쓰는 별도 고정 뱅크 동굴이다. 요청 발행기와 한 동굴에
 /// 이어 붙이면 반복 요청 판정이 커질 때 서로를 침범하므로 역할별로 분리한다.
@@ -77,27 +66,31 @@ pub(super) const SELECTOR_CAVE_ORIGIN: u16 = 0xF558;
 pub(super) const SELECTOR_CAVE_END: u16 = 0xF700;
 /// selector가 그 자리를 가져가기 전에 아직 그대로인지 확인한다.
 ///
-/// 후보만 본다. `$FF40`의 사슬은 매퍼 165 변환이 세운 구조물이라 원본 일본어 ROM에는
+/// 후보만 본다. 이 사슬은 매퍼 165 누적 변환이 세운 구조물이라 원본 일본어 ROM에는
 /// 없다. 원본까지 보게 하면 없는 것을 있다고 요구하게 된다.
-pub(super) fn bind_selector_chain_site(candidate: &Rom) -> Result<()> {
+pub(super) fn bind_selector_chain_site(
+    candidate: &Rom,
+    takeover: BoundFontPageRuntimeTakeover,
+) -> Result<()> {
     {
         let prg = candidate.prg();
         let base = prg
             .len()
             .checked_sub(16 * 1024)
             .context("PRG is smaller than one fixed bank")?;
-        let offset = base + usize::from(SELECTOR_CHAIN_SITE) - 0xC000;
+        let offset = base + usize::from(takeover.hook_cpu_address) - 0xC000;
         let bytes = prg
-            .get(offset..offset + SELECTOR_CHAIN_CODE.len())
+            .get(offset..offset + takeover.expected_hook_bytes.len())
             .context("CHR selector chain site is outside ROM")?;
         ensure!(
-            bytes == SELECTOR_CHAIN_CODE,
-            "the CHR selector chain site at {SELECTOR_CHAIN_SITE:04X} no longer hands the existing chain control"
+            bytes == takeover.expected_hook_bytes,
+            "the CHR selector chain site at {:04X} no longer hands the existing chain control",
+            takeover.hook_cpu_address,
         );
     }
     decode_rp2a03_sequence(
-        &SELECTOR_CHAIN_CODE,
-        SELECTOR_CHAIN_SITE,
+        &takeover.expected_hook_bytes,
+        takeover.hook_cpu_address,
         "CHR selector chain site",
     )?;
     Ok(())
@@ -125,7 +118,7 @@ pub(super) fn bind_selector_cave(candidate: &Rom) -> Result<()> {
     Ok(())
 }
 
-/// `$FF40`에 쓸 세 바이트다.
+/// 그래프가 결속한 중앙 fallback 자리에 쓸 세 바이트다.
 pub(super) fn selector_hook_bytes(selector: u16) -> [u8; 3] {
     [0x4C, selector as u8, (selector >> 8) as u8]
 }
@@ -346,6 +339,7 @@ mod tests {
     use super::*;
 
     const PROJECT_DIALOGUE_PAGE: u16 = 0xF480;
+    const TEST_INACTIVE_FALLBACK: u16 = 0xFB80;
     const STATUS_CARRY: u8 = 0x01;
     const STATUS_ZERO: u8 = 0x02;
 
@@ -365,7 +359,7 @@ mod tests {
         e7_caller_resume: u8,
     ) -> SelectorOutcome {
         let routine =
-            build_chr_selector(0xF4A0, 0xC8, SELECTOR_CHAIN_FALLBACK, PROJECT_DIALOGUE_PAGE)
+            build_chr_selector(0xF4A0, 0xC8, TEST_INACTIVE_FALLBACK, PROJECT_DIALOGUE_PAGE)
                 .unwrap();
         let mut memory = vec![0u8; 0x10000];
         let start = usize::from(routine.address);
@@ -428,7 +422,7 @@ mod tests {
                 0x4C => {
                     let low = read_byte(&mut pc);
                     let high = read_byte(&mut pc);
-                    assert_eq!(u16::from_le_bytes([low, high]), SELECTOR_CHAIN_FALLBACK);
+                    assert_eq!(u16::from_le_bytes([low, high]), TEST_INACTIVE_FALLBACK);
                     return SelectorOutcome::Fallback;
                 }
                 0x60 => {
@@ -504,15 +498,15 @@ mod tests {
     #[test]
     fn an_unsupported_state_hands_the_existing_chain_control() {
         let routine =
-            build_chr_selector(0xF4A0, 0xC8, SELECTOR_CHAIN_FALLBACK, PROJECT_DIALOGUE_PAGE)
+            build_chr_selector(0xF4A0, 0xC8, TEST_INACTIVE_FALLBACK, PROJECT_DIALOGUE_PAGE)
                 .unwrap();
 
         assert_eq!(
             &routine.bytes[routine.bytes.len() - 3..],
             [
                 0x4C,
-                SELECTOR_CHAIN_FALLBACK as u8,
-                (SELECTOR_CHAIN_FALLBACK >> 8) as u8
+                TEST_INACTIVE_FALLBACK as u8,
+                (TEST_INACTIVE_FALLBACK >> 8) as u8
             ]
         );
     }
@@ -522,7 +516,7 @@ mod tests {
     #[test]
     fn prg_bank_shadow_is_not_used_as_the_dialogue_lifetime() {
         let routine =
-            build_chr_selector(0xF4A0, 0xC8, SELECTOR_CHAIN_FALLBACK, PROJECT_DIALOGUE_PAGE)
+            build_chr_selector(0xF4A0, 0xC8, TEST_INACTIVE_FALLBACK, PROJECT_DIALOGUE_PAGE)
                 .unwrap();
 
         assert!(!routine.bytes.windows(2).any(|window| window
@@ -547,7 +541,7 @@ mod tests {
     #[test]
     fn terminal_dialogue_state_is_retained_only_for_the_visible_epilogue_phase() {
         let routine =
-            build_chr_selector(0xF4A0, 0xC8, SELECTOR_CHAIN_FALLBACK, PROJECT_DIALOGUE_PAGE)
+            build_chr_selector(0xF4A0, 0xC8, TEST_INACTIVE_FALLBACK, PROJECT_DIALOGUE_PAGE)
                 .unwrap();
 
         assert!(routine.bytes.windows(18).any(|window| {
@@ -647,7 +641,7 @@ mod tests {
     #[test]
     fn ready_and_cold_paths_delegate_to_the_pair_projection() {
         let routine =
-            build_chr_selector(0xF4A0, 0xC8, SELECTOR_CHAIN_FALLBACK, PROJECT_DIALOGUE_PAGE)
+            build_chr_selector(0xF4A0, 0xC8, TEST_INACTIVE_FALLBACK, PROJECT_DIALOGUE_PAGE)
                 .unwrap();
 
         assert_eq!(
@@ -674,7 +668,7 @@ mod tests {
     #[test]
     fn the_ready_path_is_guarded_by_the_dialogue_fd_source_page() {
         let routine =
-            build_chr_selector(0xF4A0, 0xC8, SELECTOR_CHAIN_FALLBACK, PROJECT_DIALOGUE_PAGE)
+            build_chr_selector(0xF4A0, 0xC8, TEST_INACTIVE_FALLBACK, PROJECT_DIALOGUE_PAGE)
                 .unwrap();
 
         assert!(routine.bytes.windows(8).any(|window| {
@@ -697,7 +691,7 @@ mod tests {
     #[test]
     fn the_chain_accumulator_survives_both_paths() {
         let routine =
-            build_chr_selector(0xF4A0, 0xC8, SELECTOR_CHAIN_FALLBACK, PROJECT_DIALOGUE_PAGE)
+            build_chr_selector(0xF4A0, 0xC8, TEST_INACTIVE_FALLBACK, PROJECT_DIALOGUE_PAGE)
                 .unwrap();
 
         assert_eq!(&routine.bytes[..2], [0x08, 0x48]);
@@ -726,8 +720,8 @@ mod tests {
                 0x68,
                 0x28,
                 0x4C,
-                SELECTOR_CHAIN_FALLBACK as u8,
-                (SELECTOR_CHAIN_FALLBACK >> 8) as u8,
+                TEST_INACTIVE_FALLBACK as u8,
+                (TEST_INACTIVE_FALLBACK >> 8) as u8,
             ]
         );
     }
@@ -777,12 +771,21 @@ mod tests {
     #[test]
     fn a_changed_chain_site_refuses_installation() {
         let mut bytes = crate::test_support::synthetic_mapper165_rom_bytes(0xFF);
-        let chain = crate::test_support::synthetic_fixed_bank_file_offset(SELECTOR_CHAIN_SITE);
-        bytes[chain..chain + SELECTOR_CHAIN_CODE.len()].copy_from_slice(&SELECTOR_CHAIN_CODE);
+        let takeover = BoundFontPageRuntimeTakeover {
+            owner_cpu_address: 0xFF1D,
+            hook_cpu_address: 0xFF3A,
+            superseded_selector_cpu_address: 0xF990,
+            inactive_fallback_cpu_address: TEST_INACTIVE_FALLBACK,
+            expected_hook_bytes: [0x4C, 0x90, 0xF9],
+        };
+        let chain =
+            crate::test_support::synthetic_fixed_bank_file_offset(takeover.hook_cpu_address);
+        bytes[chain..chain + takeover.expected_hook_bytes.len()]
+            .copy_from_slice(&takeover.expected_hook_bytes);
         bytes[chain] = 0xEA;
         let mutated = Rom::parse(bytes).unwrap();
 
-        let error = bind_selector_chain_site(&mutated).unwrap_err();
+        let error = bind_selector_chain_site(&mutated, takeover).unwrap_err();
 
         assert!(
             error

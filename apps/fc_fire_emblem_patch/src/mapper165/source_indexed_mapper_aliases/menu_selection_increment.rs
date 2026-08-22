@@ -1,10 +1,10 @@
 use anyhow::{Result, ensure};
 
 use crate::{
-    mmc5_chr::switchable_bank_file_offset,
-    mmc5_prg::count_direct_transfers_to_range,
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
+    source_prg::count_direct_transfers_to_range,
+    source_prg::switchable_bank_file_offset,
     tracked::TrackedImage,
 };
 

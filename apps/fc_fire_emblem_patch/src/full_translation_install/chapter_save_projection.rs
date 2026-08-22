@@ -165,7 +165,7 @@ pub(super) fn plan_chapter_save_projection(
 
     ensure_disjoint(&writes)?;
     Ok(ChapterSaveProjectionPlan {
-        strategy: "keep weapon-shop choices in their existing lifetime-specific cave, project the original fallback choices with one code assignment shared by chapter-save and storage follow-up consumers, and use those same codes on a dedicated chapter-save page",
+        strategy: "project the source choice strings with one code assignment shared by every selling facility, chapter-save, and storage follow-up consumer, and use those same codes on the dedicated chapter-save page",
         choice_entry_count: inputs.choices.entries.len(),
         save_offer_entry_count: inputs.transitions.save_offer.entry_count,
         storage_write_count: writes.len(),

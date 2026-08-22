@@ -4,11 +4,11 @@ use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
-    mmc5_chr::switchable_bank_file_offset,
-    mmc5_prg::fixed_bank_file_offset,
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     rp2a03::{Instruction, assemble_at},
     sha1_hex,
+    source_prg::fixed_bank_file_offset,
+    source_prg::switchable_bank_file_offset,
 };
 
 use super::writer_sites::{DIRECT_CHR_WRITERS, WriterLocation};

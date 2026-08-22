@@ -188,36 +188,52 @@ pub(crate) fn bind_unit_name_font_page_selector(candidate: &Rom) -> Result<Bound
 pub(crate) fn build_front_end_font_page_forwarder(
     selector: &BoundFontPageSelector,
 ) -> Result<Vec<u8>> {
-    build_font_page_forwarder(selector, "front-end")
+    build_font_page_fallback_forwarder(
+        selector.cpu_address,
+        selector.cpu_end_exclusive,
+        selector.fallback_target,
+        &selector.expected_bytes,
+        "front-end",
+    )
 }
 
 pub(crate) fn build_unit_name_font_page_forwarder(
     selector: &BoundFontPageSelector,
 ) -> Result<Vec<u8>> {
-    build_font_page_forwarder(selector, "unit-name")
+    build_font_page_fallback_forwarder(
+        selector.cpu_address,
+        selector.cpu_end_exclusive,
+        selector.fallback_target,
+        &selector.expected_bytes,
+        "unit-name",
+    )
 }
 
-fn build_font_page_forwarder(
-    selector: &BoundFontPageSelector,
+pub(crate) fn build_font_page_fallback_forwarder(
+    cpu_address: u16,
+    cpu_end_exclusive: u16,
+    fallback_target: u16,
+    expected_bytes: &[u8],
     screen_role: &str,
 ) -> Result<Vec<u8>> {
-    let mut bytes = assemble_at(
-        selector.cpu_address,
-        &[Instruction::JmpAbsolute(selector.fallback_target)],
-    )?;
-    let capacity = usize::from(selector.cpu_end_exclusive - selector.cpu_address);
+    let mut bytes = assemble_at(cpu_address, &[Instruction::JmpAbsolute(fallback_target)])?;
+    let capacity = usize::from(
+        cpu_end_exclusive
+            .checked_sub(cpu_address)
+            .with_context(|| format!("{screen_role} selector span is reversed"))?,
+    );
     ensure!(
-        selector.expected_bytes.len() == capacity && bytes.len() <= capacity,
+        expected_bytes.len() == capacity && bytes.len() <= capacity,
         "{screen_role} selector forwarder does not own the complete source selector span"
     );
     bytes.resize(capacity, 0xEA);
     decode_rp2a03_sequence(
         &bytes,
-        selector.cpu_address,
+        cpu_address,
         "central-policy font-page fallback forwarder",
     )?;
     ensure!(
-        bytes != selector.expected_bytes,
+        bytes != expected_bytes,
         "{screen_role} selector was already replaced before final integration"
     );
     Ok(bytes)

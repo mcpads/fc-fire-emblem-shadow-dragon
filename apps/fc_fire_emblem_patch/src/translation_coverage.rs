@@ -20,6 +20,8 @@ mod report;
 mod screen_targets;
 mod weapon_shop;
 
+pub(crate) use weapon_shop::{CHOICE_LABEL_SCREEN_ROLES, ITEM_NAME_SCREEN_ROLES};
+
 use consumer_census::inspect_translation_consumer_evidence;
 pub(crate) use installed::inspect_current_installation;
 use lifetimes::{LifetimeInputBindings, inspect_translation_lifetimes};

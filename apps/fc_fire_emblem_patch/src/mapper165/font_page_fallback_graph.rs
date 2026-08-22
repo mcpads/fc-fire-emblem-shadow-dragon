@@ -23,6 +23,7 @@ use super::{
     SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
     battle_composition_runtime::{
         CUMULATIVE_RUNTIME_LAYOUT, cumulative_battle_central_right_fd_selector,
+        cumulative_battle_central_right_fe_resupply_natural_tail,
     },
     chapter_page_selector::{ChapterPageSequence, build_chapter_page_selector},
     cumulative_patch::{DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS, DIALOGUE_FONT_PAGE_SELECTOR_CAVE_END},
@@ -127,6 +128,20 @@ pub(crate) struct BoundFontPageFallbackGraph {
     front_end_selector: BoundFontPageSelector,
 }
 
+/// 누적 선택기 그래프에서 최종 대사 런타임이 넘겨받는 정확한 한 갈래다.
+///
+/// 중앙 전투 선택기의 fallback 명령 위치와, 폐기되는 최대 대사 선택기 뒤에 남길
+/// 비활성 경로를 한 번의 그래프 결속에서 함께 얻는다. 선택기 길이가 바뀌어 fallback
+/// 명령이 이동해도 최종 통합기가 과거 주소를 별도 상수로 기억하지 않게 한다.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct BoundFontPageRuntimeTakeover {
+    pub(crate) owner_cpu_address: u16,
+    pub(crate) hook_cpu_address: u16,
+    pub(crate) superseded_selector_cpu_address: u16,
+    pub(crate) inactive_fallback_cpu_address: u16,
+    pub(crate) expected_hook_bytes: [u8; 3],
+}
+
 impl BoundFontPageFallbackGraph {
     pub(crate) fn unit_name_selector(&self) -> &BoundFontPageSelector {
         &self.unit_name_selector
@@ -134,6 +149,61 @@ impl BoundFontPageFallbackGraph {
 
     pub(crate) fn front_end_selector(&self) -> &BoundFontPageSelector {
         &self.front_end_selector
+    }
+
+    pub(crate) fn integrated_dialogue_runtime_takeover(
+        &self,
+    ) -> Result<BoundFontPageRuntimeTakeover> {
+        let central = self
+            .nodes
+            .iter()
+            .find(|node| node.role == FontPageFallbackNodeRole::BattleComposition)
+            .context("font-page graph has no battle-composition owner")?;
+        let maximum = self
+            .nodes
+            .iter()
+            .find(|node| node.role == FontPageFallbackNodeRole::MaximumDialogue)
+            .context("font-page graph has no maximum-dialogue selector")?;
+        let routes = self
+            .routes
+            .iter()
+            .filter(|route| {
+                route.source_role == central.role.id()
+                    && route.target_role == maximum.role.id()
+                    && route.target_cpu_address == maximum.cpu_address
+            })
+            .collect::<Vec<_>>();
+        ensure!(
+            routes.len() == 1 && routes[0].transfer_kind == FontPageFallbackTransferKind::Jump,
+            "font-page graph does not have one jump from battle composition to maximum dialogue"
+        );
+        let route = routes[0];
+        let expected_hook_bytes = [
+            0x4C,
+            maximum.cpu_address as u8,
+            (maximum.cpu_address >> 8) as u8,
+        ];
+        let offset = usize::from(
+            route
+                .source_cpu_address
+                .checked_sub(central.cpu_address)
+                .context("font-page takeover starts before its battle owner")?,
+        );
+        ensure!(
+            route.source_cpu_address + 3 <= central.cpu_end_exclusive
+                && central
+                    .expected_bytes
+                    .get(offset..offset + expected_hook_bytes.len())
+                    == Some(expected_hook_bytes.as_slice()),
+            "font-page takeover is not the bound battle fallback instruction"
+        );
+        Ok(BoundFontPageRuntimeTakeover {
+            owner_cpu_address: central.cpu_address,
+            hook_cpu_address: route.source_cpu_address,
+            superseded_selector_cpu_address: maximum.cpu_address,
+            inactive_fallback_cpu_address: maximum.fallback_target,
+            expected_hook_bytes,
+        })
     }
 }
 
@@ -147,11 +217,40 @@ pub(crate) fn bind_cumulative_font_page_fallback_graph(
     let fixed = active_fixed_bank(candidate)?;
 
     let central_bytes = cumulative_battle_central_right_fd_selector(INITIAL_PAGE_SELECTOR_ADDRESS)?;
+    let central_end = CUMULATIVE_RUNTIME_LAYOUT
+        .battle_central_right_fd_selector
+        .checked_add(u16::try_from(central_bytes.len())?)
+        .context("battle-composition selector end overflow")?;
+    let central_resupply_tail = cumulative_battle_central_right_fe_resupply_natural_tail()?;
+    let central_resupply_tail_start =
+        CUMULATIVE_RUNTIME_LAYOUT.central_right_fe_resupply_natural_tail;
+    let central_resupply_tail_end = central_resupply_tail_start
+        .checked_add(u16::try_from(central_resupply_tail.len())?)
+        .context("central FE resupply tail end overflow")?;
+    ensure!(
+        central_end == central_resupply_tail_start
+            && central_resupply_tail_end <= CUMULATIVE_RUNTIME_LAYOUT.battle_right_fe_selector
+            && fixed_slice(
+                fixed,
+                central_resupply_tail_start,
+                central_resupply_tail.len(),
+            )? == central_resupply_tail
+            && fixed_slice(
+                fixed,
+                central_resupply_tail_end,
+                usize::from(
+                    CUMULATIVE_RUNTIME_LAYOUT.battle_right_fe_selector - central_resupply_tail_end,
+                ),
+            )?
+            .iter()
+            .all(|byte| *byte == 0xFF),
+        "battle-composition selector or central FE resupply tail changed"
+    );
     let central = bind_exact_node(
         fixed,
         FontPageFallbackNodeRole::BattleComposition,
         CUMULATIVE_RUNTIME_LAYOUT.battle_central_right_fd_selector,
-        CUMULATIVE_RUNTIME_LAYOUT.battle_right_fe_selector,
+        central_end,
         INITIAL_PAGE_SELECTOR_ADDRESS,
         Vec::new(),
         central_bytes,

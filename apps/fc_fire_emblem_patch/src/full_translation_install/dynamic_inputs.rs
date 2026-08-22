@@ -10,7 +10,11 @@ use crate::{
     text_inventory::FixedTextPlannedEntry,
 };
 
-use super::transition_residency::TransitionLifetimeWorksets;
+use super::caller_handoff_residency::CallerHandoffLifetimeKind;
+use super::{
+    caller_handoff_residency::CallerHandoffLifetimeWorksets,
+    transition_residency::TransitionLifetimeWorksets,
+};
 
 mod page_code_identity;
 mod producer_encoding;
@@ -80,14 +84,30 @@ impl DynamicDialogueInputPlan {
     }
 }
 
+pub(super) struct DynamicDialogueInputs<'a> {
+    pub(super) dialogue: &'a MainDialogueDisplayPlan,
+    pub(super) fixed_text: &'a [FixedTextPlannedEntry],
+    pub(super) unit_names: &'a [FixedTextPlannedEntry],
+    pub(super) location_names: &'a [FixedTextPlannedEntry],
+    pub(super) item_name_appender_display_codes: &'a BTreeSet<u8>,
+    pub(super) transition_lifetimes: &'a [TransitionLifetimeWorksets],
+    pub(super) caller_handoff_lifetimes: &'a [CallerHandoffLifetimeWorksets],
+    pub(super) canonical_preassigned_codes: &'a BTreeMap<char, u8>,
+}
+
 pub(super) fn plan_dynamic_dialogue_inputs(
-    dialogue: &MainDialogueDisplayPlan,
-    fixed_text: &[FixedTextPlannedEntry],
-    unit_names: &[FixedTextPlannedEntry],
-    location_names: &[FixedTextPlannedEntry],
-    item_name_appender_display_codes: &BTreeSet<u8>,
-    transition_lifetimes: &[TransitionLifetimeWorksets],
+    inputs: DynamicDialogueInputs<'_>,
 ) -> Result<DynamicDialogueInputPlan> {
+    let DynamicDialogueInputs {
+        dialogue,
+        fixed_text,
+        unit_names,
+        location_names,
+        item_name_appender_display_codes,
+        transition_lifetimes,
+        caller_handoff_lifetimes,
+        canonical_preassigned_codes,
+    } = inputs;
     let item_name_domain = domain_glyphs(fixed_text, "item-names")?;
     let unit_name_domain = domain_glyphs(unit_names, "unit-names")?;
     let location_name_domain = domain_glyphs(location_names, "location-names")?;
@@ -108,6 +128,12 @@ pub(super) fn plan_dynamic_dialogue_inputs(
     ensure!(
         translated_dynamic_glyphs.len() <= active_codes.len(),
         "dynamic dialogue canonical domain exceeds one physical codebook"
+    );
+    ensure!(
+        canonical_preassigned_codes
+            .keys()
+            .all(|glyph| translated_dynamic_glyphs.contains(glyph)),
+        "dynamic dialogue received a preassigned glyph outside its canonical domain"
     );
     ensure!(
         !item_name_appender_display_codes.is_empty()
@@ -237,16 +263,20 @@ pub(super) fn plan_dynamic_dialogue_inputs(
     // 나타날 수 있는 모든 페이지의 보존 코드를 먼저 모은 뒤, 그 어느 것과도
     // 충돌하지 않는 물리 코드를 하나씩 배정한다. 이후 페이지 packer가 이 배정을
     // 고정 조건으로 받으므로 생산자가 쓴 canonical 바이트가 곧 소비 바이트다.
-    let forbidden_codes_by_glyph = forbidden_dynamic_codes_across_transition_lifetimes(
+    let forbidden_codes_by_glyph = forbidden_dynamic_codes_across_visible_lifetimes(
         &translated_dynamic_glyphs,
         &domains[&DynamicStringDomain::ItemName].glyphs,
         item_name_appender_display_codes,
         &augmented_worksets,
         &dynamic_glyphs_by_workset,
         transition_lifetimes,
+        caller_handoff_lifetimes,
     )?;
-    let canonical_dynamic_codes =
-        assign_canonical_dynamic_codes(&forbidden_codes_by_glyph, &active_codes)?;
+    let canonical_dynamic_codes = assign_canonical_dynamic_codes(
+        &forbidden_codes_by_glyph,
+        &active_codes,
+        canonical_preassigned_codes,
+    )?;
     for (workset, dynamic_glyphs) in augmented_worksets
         .iter_mut()
         .zip(&dynamic_glyphs_by_workset)
@@ -303,13 +333,14 @@ pub(super) fn plan_dynamic_dialogue_inputs(
     })
 }
 
-fn forbidden_dynamic_codes_across_transition_lifetimes(
+fn forbidden_dynamic_codes_across_visible_lifetimes(
     translated_dynamic_glyphs: &BTreeSet<char>,
     item_name_glyphs: &BTreeSet<char>,
     item_name_appender_display_codes: &BTreeSet<u8>,
     worksets: &[GlyphWorkset],
     dynamic_glyphs_by_workset: &[BTreeSet<char>],
     transition_lifetimes: &[TransitionLifetimeWorksets],
+    caller_handoff_lifetimes: &[CallerHandoffLifetimeWorksets],
 ) -> Result<BTreeMap<char, BTreeSet<u8>>> {
     ensure!(
         worksets.len() == dynamic_glyphs_by_workset.len(),
@@ -355,6 +386,41 @@ fn forbidden_dynamic_codes_across_transition_lifetimes(
         covered_worksets.len() == worksets.len(),
         "dynamic dialogue transition lifetimes do not cover every visible page"
     );
+    for lifetime in caller_handoff_lifetimes {
+        if lifetime.kind == CallerHandoffLifetimeKind::ReplacePreviousRows {
+            continue;
+        }
+        ensure!(
+            !lifetime.workset_indices.is_empty(),
+            "dynamic dialogue {} has no visible page",
+            lifetime.role
+        );
+        let mut lifetime_preserved_codes = BTreeSet::new();
+        let mut lifetime_dynamic_glyphs = BTreeSet::new();
+        for workset_index in &lifetime.workset_indices {
+            ensure!(
+                *workset_index < worksets.len(),
+                "dynamic dialogue {} selects missing workset {workset_index}",
+                lifetime.role
+            );
+            lifetime_preserved_codes.extend(
+                worksets[*workset_index]
+                    .preserved_active_codes
+                    .iter()
+                    .copied(),
+            );
+            lifetime_dynamic_glyphs
+                .extend(dynamic_glyphs_by_workset[*workset_index].iter().copied());
+        }
+        for glyph in lifetime_dynamic_glyphs {
+            forbidden_codes_by_glyph
+                .get_mut(&glyph)
+                .with_context(|| {
+                    format!("{} contains unknown dynamic glyph {glyph:?}", lifetime.role)
+                })?
+                .extend(lifetime_preserved_codes.iter().copied());
+        }
+    }
     ensure!(
         item_name_glyphs.is_subset(translated_dynamic_glyphs),
         "item-name glyphs escaped the canonical dynamic domain"
@@ -371,6 +437,7 @@ fn forbidden_dynamic_codes_across_transition_lifetimes(
 fn assign_canonical_dynamic_codes(
     forbidden_codes_by_glyph: &BTreeMap<char, BTreeSet<u8>>,
     active_codes: &BTreeSet<u8>,
+    preassigned: &BTreeMap<char, u8>,
 ) -> Result<BTreeMap<char, u8>> {
     let candidates = forbidden_codes_by_glyph
         .iter()
@@ -386,14 +453,37 @@ fn assign_canonical_dynamic_codes(
             Ok((*glyph, allowed))
         })
         .collect::<Result<BTreeMap<_, _>>>()?;
+    let mut glyph_by_code = BTreeMap::<u8, char>::new();
+    for (glyph, code) in preassigned {
+        ensure!(
+            candidates
+                .get(glyph)
+                .is_some_and(|allowed| allowed.contains(code)),
+            "dynamic dialogue preassignment {glyph:?}={code:02X} is not valid across every visible page"
+        );
+        if let Some(other) = glyph_by_code.insert(*code, *glyph) {
+            ensure!(
+                other == *glyph,
+                "dynamic dialogue preassigns code {code:02X} to both {other:?} and {glyph:?}"
+            );
+        }
+    }
     let mut glyph_order = candidates.keys().copied().collect::<Vec<_>>();
     glyph_order.sort_by_key(|glyph| (candidates[glyph].len(), *glyph));
 
-    let mut glyph_by_code = BTreeMap::<u8, char>::new();
-    for glyph in glyph_order {
+    for glyph in glyph_order
+        .into_iter()
+        .filter(|glyph| !preassigned.contains_key(glyph))
+    {
         let mut visited_codes = BTreeSet::new();
         ensure!(
-            assign_dynamic_glyph_code(glyph, &candidates, &mut glyph_by_code, &mut visited_codes),
+            assign_dynamic_glyph_code(
+                glyph,
+                &candidates,
+                preassigned,
+                &mut glyph_by_code,
+                &mut visited_codes,
+            ),
             "dynamic dialogue glyphs have no injective code assignment across all pages"
         );
     }
@@ -403,6 +493,9 @@ fn assign_canonical_dynamic_codes(
         .collect::<BTreeMap<_, _>>();
     ensure!(
         assignments.len() == candidates.len()
+            && preassigned
+                .iter()
+                .all(|(glyph, code)| assignments.get(glyph) == Some(code))
             && assignments
                 .iter()
                 .all(|(glyph, code)| candidates[glyph].contains(code)),
@@ -414,6 +507,7 @@ fn assign_canonical_dynamic_codes(
 fn assign_dynamic_glyph_code(
     glyph: char,
     candidates: &BTreeMap<char, BTreeSet<u8>>,
+    preassigned: &BTreeMap<char, u8>,
     glyph_by_code: &mut BTreeMap<u8, char>,
     visited_codes: &mut BTreeSet<u8>,
 ) -> bool {
@@ -423,7 +517,14 @@ fn assign_dynamic_glyph_code(
         }
         let displaced = glyph_by_code.get(code).copied();
         if displaced.is_none_or(|other| {
-            assign_dynamic_glyph_code(other, candidates, glyph_by_code, visited_codes)
+            !preassigned.contains_key(&other)
+                && assign_dynamic_glyph_code(
+                    other,
+                    candidates,
+                    preassigned,
+                    glyph_by_code,
+                    visited_codes,
+                )
         }) {
             glyph_by_code.insert(*code, glyph);
             return true;
@@ -753,20 +854,28 @@ mod tests {
     #[test]
     fn ending_character_analysis_feeds_emitted_workset_constraints() {
         let preserved = ending_character_epilogue_preserved_active_codes();
-        let plan = plan_dynamic_dialogue_inputs(
-            &one_page_display("epilogue-dialogue:001", 0),
-            &[fixed_entry("item-names", 0, "검")],
-            &[
-                fixed_entry("unit-names", 0, "마르스"),
-                fixed_entry("unit-names", 1, "치키"),
-            ],
-            &[fixed_entry("location-names", 0, "아리티아")],
-            &BTreeSet::from([0xAD]),
-            &[TransitionLifetimeWorksets {
-                record_indices: vec![0],
-                workset_indices: vec![0],
-            }],
-        )
+        let display = one_page_display("epilogue-dialogue:001", 0);
+        let fixed_text = [fixed_entry("item-names", 0, "검")];
+        let unit_names = [
+            fixed_entry("unit-names", 0, "마르스"),
+            fixed_entry("unit-names", 1, "치키"),
+        ];
+        let location_names = [fixed_entry("location-names", 0, "아리티아")];
+        let item_name_appender_display_codes = BTreeSet::from([0xAD]);
+        let transition_lifetimes = [TransitionLifetimeWorksets {
+            record_indices: vec![0],
+            workset_indices: vec![0],
+        }];
+        let plan = plan_dynamic_dialogue_inputs(DynamicDialogueInputs {
+            dialogue: &display,
+            fixed_text: &fixed_text,
+            unit_names: &unit_names,
+            location_names: &location_names,
+            item_name_appender_display_codes: &item_name_appender_display_codes,
+            transition_lifetimes: &transition_lifetimes,
+            caller_handoff_lifetimes: &[],
+            canonical_preassigned_codes: &BTreeMap::new(),
+        })
         .unwrap();
         let installed_workset = &plan.augmented_worksets[0];
 
@@ -805,17 +914,25 @@ mod tests {
     fn dynamic_width_uses_rendered_cells_instead_of_unique_glyphs() {
         let mut expanded_name = fixed_entry("item-names", 0, "가가가");
         expanded_name.source_display_cell_count = 1;
-        let plan = plan_dynamic_dialogue_inputs(
-            &one_page_display("shop-and-item-dialogue:008", 0),
-            &[expanded_name, fixed_entry("item-names", 1, "나")],
-            &[fixed_entry("unit-names", 0, "마르스")],
-            &[fixed_entry("location-names", 0, "아리티아")],
-            &BTreeSet::from([0xAD]),
-            &[TransitionLifetimeWorksets {
-                record_indices: vec![0],
-                workset_indices: vec![0],
-            }],
-        )
+        let display = one_page_display("shop-and-item-dialogue:008", 0);
+        let fixed_text = [expanded_name, fixed_entry("item-names", 1, "나")];
+        let unit_names = [fixed_entry("unit-names", 0, "마르스")];
+        let location_names = [fixed_entry("location-names", 0, "아리티아")];
+        let item_name_appender_display_codes = BTreeSet::from([0xAD]);
+        let transition_lifetimes = [TransitionLifetimeWorksets {
+            record_indices: vec![0],
+            workset_indices: vec![0],
+        }];
+        let plan = plan_dynamic_dialogue_inputs(DynamicDialogueInputs {
+            dialogue: &display,
+            fixed_text: &fixed_text,
+            unit_names: &unit_names,
+            location_names: &location_names,
+            item_name_appender_display_codes: &item_name_appender_display_codes,
+            transition_lifetimes: &transition_lifetimes,
+            caller_handoff_lifetimes: &[],
+            canonical_preassigned_codes: &BTreeMap::new(),
+        })
         .unwrap();
 
         assert_eq!(
@@ -848,7 +965,8 @@ mod tests {
         let active = BTreeSet::from([1, 2]);
         let forbidden = BTreeMap::from([('가', BTreeSet::new()), ('나', BTreeSet::from([2]))]);
 
-        let assignments = assign_canonical_dynamic_codes(&forbidden, &active).unwrap();
+        let assignments =
+            assign_canonical_dynamic_codes(&forbidden, &active, &BTreeMap::new()).unwrap();
 
         assert_eq!(assignments[&'나'], 1);
         assert_eq!(assignments[&'가'], 2);
@@ -859,7 +977,8 @@ mod tests {
         let active = BTreeSet::from([1]);
         let forbidden = BTreeMap::from([('가', BTreeSet::new()), ('나', BTreeSet::new())]);
 
-        let error = assign_canonical_dynamic_codes(&forbidden, &active).unwrap_err();
+        let error =
+            assign_canonical_dynamic_codes(&forbidden, &active, &BTreeMap::new()).unwrap_err();
 
         assert!(error.to_string().contains("no injective code assignment"));
     }
@@ -879,7 +998,7 @@ mod tests {
                 fixed_glyph_codes: BTreeMap::new(),
             },
         ];
-        let forbidden = forbidden_dynamic_codes_across_transition_lifetimes(
+        let forbidden = forbidden_dynamic_codes_across_visible_lifetimes(
             &dynamic_glyphs,
             &BTreeSet::new(),
             &BTreeSet::from([0xAD]),
@@ -889,6 +1008,7 @@ mod tests {
                 record_indices: vec![0],
                 workset_indices: vec![0, 1],
             }],
+            &[],
         )
         .unwrap();
 
@@ -896,11 +1016,56 @@ mod tests {
         assert_ne!(
             assign_canonical_dynamic_codes(
                 &forbidden,
-                &active_hangul_codes().into_iter().collect()
+                &active_hangul_codes().into_iter().collect(),
+                &BTreeMap::new(),
             )
             .unwrap()[&'훈'],
             0x03
         );
+    }
+
+    #[test]
+    fn dynamic_code_avoids_codes_preserved_by_a_caller_selected_successor() {
+        let dynamic_glyphs = BTreeSet::from(['훈']);
+        let worksets = vec![
+            GlyphWorkset {
+                target_glyphs: dynamic_glyphs.clone(),
+                preserved_active_codes: BTreeSet::new(),
+                fixed_glyph_codes: BTreeMap::new(),
+            },
+            GlyphWorkset {
+                target_glyphs: BTreeSet::new(),
+                preserved_active_codes: BTreeSet::from([0x03]),
+                fixed_glyph_codes: BTreeMap::new(),
+            },
+        ];
+        let forbidden = forbidden_dynamic_codes_across_visible_lifetimes(
+            &dynamic_glyphs,
+            &BTreeSet::new(),
+            &BTreeSet::from([0xAD]),
+            &worksets,
+            &[dynamic_glyphs.clone(), BTreeSet::new()],
+            &[
+                TransitionLifetimeWorksets {
+                    record_indices: vec![0],
+                    workset_indices: vec![0],
+                },
+                TransitionLifetimeWorksets {
+                    record_indices: vec![1],
+                    workset_indices: vec![1],
+                },
+            ],
+            &[CallerHandoffLifetimeWorksets {
+                role: "synthetic caller handoff",
+                record_ids: vec!["record:000".into(), "record:001".into()],
+                workset_indices: vec![0, 1],
+                kind: CallerHandoffLifetimeKind::OrderedPath,
+                record_workset_indices: vec![vec![0], vec![1]],
+            }],
+        )
+        .unwrap();
+
+        assert_eq!(forbidden[&'훈'], BTreeSet::from([0x03]));
     }
 
     #[test]
@@ -911,7 +1076,7 @@ mod tests {
             preserved_active_codes: BTreeSet::new(),
             fixed_glyph_codes: BTreeMap::new(),
         }];
-        let forbidden = forbidden_dynamic_codes_across_transition_lifetimes(
+        let forbidden = forbidden_dynamic_codes_across_visible_lifetimes(
             &dynamic_glyphs,
             &BTreeSet::from(['요']),
             &BTreeSet::from([0xAD]),
@@ -921,6 +1086,7 @@ mod tests {
                 record_indices: vec![0],
                 workset_indices: vec![0],
             }],
+            &[],
         )
         .unwrap();
 
@@ -929,10 +1095,31 @@ mod tests {
         assert_ne!(
             assign_canonical_dynamic_codes(
                 &forbidden,
-                &active_hangul_codes().into_iter().collect()
+                &active_hangul_codes().into_iter().collect(),
+                &BTreeMap::new(),
             )
             .unwrap()[&'요'],
             0xAD
+        );
+    }
+
+    #[test]
+    fn canonical_matching_keeps_a_valid_shared_visible_preassignment() {
+        let active = BTreeSet::from([1, 2, 3]);
+        let forbidden = BTreeMap::from([
+            ('가', BTreeSet::new()),
+            ('나', BTreeSet::from([3])),
+            ('다', BTreeSet::new()),
+        ]);
+
+        let assignments =
+            assign_canonical_dynamic_codes(&forbidden, &active, &BTreeMap::from([('가', 2)]))
+                .unwrap();
+
+        assert_eq!(assignments[&'가'], 2);
+        assert_eq!(
+            assignments.values().copied().collect::<BTreeSet<_>>().len(),
+            3
         );
     }
 }

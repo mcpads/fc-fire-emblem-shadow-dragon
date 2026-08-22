@@ -1,6 +1,6 @@
 use crate::{
-    mmc5_chr::switchable_bank_file_offset,
     rp2a03::{Instruction, assemble_at},
+    source_prg::switchable_bank_file_offset,
 };
 
 use super::writer_sites::{DirectWriter, WriterLocation};

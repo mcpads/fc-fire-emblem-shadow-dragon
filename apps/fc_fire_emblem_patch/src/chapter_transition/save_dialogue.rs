@@ -15,6 +15,14 @@ pub(crate) struct SaveCompleteDialogueRecords {
     pub(crate) power_off_notice: &'static str,
 }
 
+impl SaveCompleteDialogueRecords {
+    /// 저장 완료 질문을 닫아도 네임테이블을 지우지 않으므로, 질문의 선택지와
+    /// 초상화는 전원 안내문이 그려진 뒤까지 같은 표시 수명에 남는다.
+    pub(crate) fn retained_presentation_path(&self) -> [&'static str; 2] {
+        [self.continue_prompt, self.power_off_notice]
+    }
+}
+
 pub(crate) fn bind_save_complete_dialogue_records(
     rom: &Rom,
 ) -> Result<SaveCompleteDialogueRecords> {

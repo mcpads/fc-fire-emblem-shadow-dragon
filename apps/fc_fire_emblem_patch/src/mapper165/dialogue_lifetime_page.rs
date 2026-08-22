@@ -16,17 +16,11 @@ use crate::{
 };
 
 use super::{
-    FIRST_EXTENSION_CHR_PAGE, SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
     dialogue_font_page::{assign_glyph_codes_excluding, build_font_page},
     encode_chr_page_register,
 };
 
 pub(super) const SCREEN_ROLE: &str = "chapter_1_intro_dialogue";
-pub(super) const PHYSICAL_CHR_PAGE: u8 = FIRST_EXTENSION_CHR_PAGE;
-pub(super) const OUTPUT_CHR_BANK_COUNT: u8 = 18;
-pub(super) const CENTRAL_RIGHT_FD_SELECTOR_CALL_ADDRESS: u16 = 0xC9C2;
-pub(super) const PAGE_ROUTINE_ADDRESS: u16 = 0xFB20;
-pub(super) const PAGE_ROUTINE_END: u16 = 0xFB68;
 
 const SOURCE_FONT_PHYSICAL_PAGE: usize = 2;
 const EXTENSION_PAGE_COUNT: usize = 2;
@@ -254,21 +248,6 @@ fn collect_preserved_screen_codes(nametable: &[u8], codes: &mut BTreeSet<u8>) {
     }
 }
 
-pub(super) fn central_right_fd_selector_call(target: u16) -> Result<Vec<u8>> {
-    assemble_at(
-        CENTRAL_RIGHT_FD_SELECTOR_CALL_ADDRESS,
-        &[Instruction::JsrAbsolute(target)],
-    )
-}
-
-pub(super) fn build_page_routine(mapper_register: u8) -> Result<Vec<u8>> {
-    build_page_routine_at(
-        PAGE_ROUTINE_ADDRESS,
-        mapper_register,
-        SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
-    )
-}
-
 pub(super) fn build_page_routine_at(
     routine_address: u16,
     mapper_register: u8,
@@ -328,38 +307,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn selector_uses_only_the_exact_observed_chapter_one_supplier_contract() {
-        let routine = build_page_routine(0x88).unwrap();
-
-        assert_eq!(
-            routine.len(),
-            usize::from(PAGE_ROUTINE_END - PAGE_ROUTINE_ADDRESS)
-        );
-        assert_eq!(&routine[..2], &[0x08, 0x48]);
-        assert_eq!(
-            &routine[routine.len() - 5..],
-            &[0x68, 0x28, 0x4C, 0xC0, 0xFA]
-        );
-        assert!(
-            routine
-                .windows(5)
-                .any(|bytes| bytes == [0xAD, 0xF7, 0x77, 0xC9, 0x03])
-        );
-        assert!(
-            routine
-                .windows(5)
-                .any(|bytes| bytes == [0xAD, 0x1D, 0x78, 0xC9, 0x00])
-        );
-    }
-
-    #[test]
     fn selector_can_move_without_changing_its_size_or_fallback_contract() {
         let routine = build_page_routine_at(0xFBD8, 0x98, 0xFAC0).unwrap();
 
-        assert_eq!(
-            routine.len(),
-            usize::from(PAGE_ROUTINE_END - PAGE_ROUTINE_ADDRESS)
-        );
+        assert_eq!(routine.len(), 0x48);
         assert_eq!(&routine[routine.len() - 3..], &[0x4C, 0xC0, 0xFA]);
         assert!(routine.windows(2).any(|bytes| bytes == [0xA9, 0x98]));
     }

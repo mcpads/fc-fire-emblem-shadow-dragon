@@ -4,9 +4,9 @@ use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
-    mmc5_prg::{SOURCE_RESET_ADDRESS, count_direct_transfers_to_range, fixed_bank_file_offset},
     rom::{CHR_FILE_OFFSET, EXPECTED_CHR_SHA1, EXPECTED_SOURCE_SHA1, PRG_SIZE, Rom},
     sha1_hex,
+    source_prg::{SOURCE_RESET_ADDRESS, count_direct_transfers_to_range, fixed_bank_file_offset},
     static_analysis::find_absolute_write_candidates,
     tracked::TrackedImage,
 };
@@ -14,7 +14,6 @@ pub(crate) mod banked_call_dispatch;
 pub(crate) mod battle_codebook_plan;
 pub(crate) mod battle_composition_runtime;
 pub(crate) mod battle_composition_runtime_verify;
-pub(crate) mod battle_dialogue_probe;
 pub(crate) mod battle_text_material;
 pub(crate) mod battle_text_runtime_base;
 mod carried_battle_domains;
@@ -24,7 +23,6 @@ mod class_profile_page;
 pub(crate) mod cumulative_patch;
 pub(crate) mod dialogue_font_page;
 mod dialogue_lifetime_page;
-pub(crate) mod dialogue_slice_probe;
 pub(crate) mod direct_chr_pairs;
 pub(crate) mod executable_mapper_writes;
 mod final_font_page_forwarders;
@@ -43,10 +41,12 @@ pub(crate) use carried_ui_domains::{
 pub(crate) use final_font_page_forwarders::BoundFontPageSelector;
 pub(crate) use final_font_page_forwarders::{
     bind_front_end_font_page_selector, bind_unit_name_font_page_selector,
-    build_front_end_font_page_forwarder, build_unit_name_font_page_forwarder,
+    build_font_page_fallback_forwarder, build_front_end_font_page_forwarder,
+    build_unit_name_font_page_forwarder,
 };
 pub(crate) use font_page_fallback_graph::{
-    BoundFontPageFallbackGraph, FontPageFallbackNodeRole, bind_cumulative_font_page_fallback_graph,
+    BoundFontPageFallbackGraph, BoundFontPageFallbackNode, BoundFontPageRuntimeTakeover,
+    FontPageFallbackNodeRole, bind_cumulative_font_page_fallback_graph,
 };
 pub(crate) use front_end_page::bind_installed_front_end_mapper_register;
 pub(crate) mod inline_pointer_dispatch;
@@ -75,8 +75,12 @@ mod writer_census;
 mod writer_sites;
 
 pub(crate) use weapon_shop_shared_text::{
-    ITEM_LIST_POINTER_LOAD_ADDRESS, ITEM_LIST_POINTER_LOAD_BYTES, ITEM_LIST_POINTER_LOAD_PRG_BANK,
-    build_item_list_pointer_load_call,
+    CHOICE_POINTER_LOAD_ADDRESS, CHOICE_POINTER_LOAD_PRG_BANK, ITEM_LIST_POINTER_LOAD_ADDRESS,
+    ITEM_LIST_POINTER_LOAD_BYTES, ITEM_LIST_POINTER_LOAD_PRG_BANK,
+    SELECTED_ITEM_POINTER_LOAD_ADDRESS, SELECTED_ITEM_POINTER_LOAD_PRG_BANK,
+    build_choice_pointer_load_call, build_item_list_pointer_load_call,
+    build_original_choice_pointer_load, build_original_selected_item_pointer_load,
+    build_selected_item_pointer_load_call,
 };
 
 pub(crate) const ROSTER_HEADER_FIXED_STRING_INDEX: u8 = roster_page::HEADER_RESOURCE_ID;

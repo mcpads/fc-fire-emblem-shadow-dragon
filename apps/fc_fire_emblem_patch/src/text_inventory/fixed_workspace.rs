@@ -11,8 +11,8 @@ use super::battle_message_templates::extract_battle_message_templates;
 use super::*;
 use crate::{
     japanese_encoding::japanese_text_glyph,
-    mmc5_prg::fixed_bank_file_offset,
     rom::{EXPECTED_SOURCE_SHA1, Rom},
+    source_prg::fixed_bank_file_offset,
 };
 
 const BATTLE_TABLE_IDS: [&str; 5] = [

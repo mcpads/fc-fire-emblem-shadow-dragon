@@ -22,6 +22,12 @@
       "japanese_markup": "せ゛んターンすう{ED}{19}",
       "korean_markup": "총턴수{ED}{19}",
       "status": "needs_human_review"
+    },
+    {
+      "id": "ending-bridge-label",
+      "japanese_markup": "そして.....",
+      "korean_markup": "그리고.....",
+      "status": "needs_human_review"
     }
   ]
 }

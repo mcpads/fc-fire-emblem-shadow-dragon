@@ -1,9 +1,9 @@
 use anyhow::{Result, ensure};
 
 use crate::{
-    mmc5_chr::switchable_bank_file_offset,
-    mmc5_prg::fixed_bank_file_offset,
     rp2a03::{Instruction, assemble_at},
+    source_prg::fixed_bank_file_offset,
+    source_prg::switchable_bank_file_offset,
     tracked::TrackedImage,
 };
 

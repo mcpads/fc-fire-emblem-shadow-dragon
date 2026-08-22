@@ -94,7 +94,9 @@ pub(super) struct MainDialogueRoutePopulationPlan {
     cross_family_transition_edge_count: usize,
     dynamic_string_control_count: usize,
     common_runtime_hook_roles: Vec<DialogueRuntimeHookRole>,
-    every_new_record_entry_clears_all_physical_line_buffers: bool,
+    direct_entries_defer_line_buffer_clear_until_font_ready: bool,
+    e4_e6_transitions_preserve_physical_line_buffers: bool,
+    e7_caller_handoffs_preserve_or_replace_visible_rows: bool,
     identity_lookup_boundary_partition: IdentityLookupBoundaryPartition,
     every_route_family_fully_installed: bool,
     every_transition_target_installed: bool,
@@ -146,15 +148,30 @@ struct JoinedRecord {
     installed_pointer_binding_count: usize,
 }
 
+pub(super) struct MainDialogueRoutePopulationInputs<'a> {
+    pub(super) source: &'a Rom,
+    pub(super) display: &'a MainDialogueDisplayPlan,
+    pub(super) encoded: &'a EncodedMainDialogueBundle,
+    pub(super) graph: &'a MainDialogueGraphReport,
+    pub(super) dynamic_producers: &'a DynamicInputProducerPlan,
+    pub(super) assembled_hook_roles: &'a [DialogueRuntimeHookRole],
+    pub(super) record_entry_routes_bound: bool,
+    pub(super) caller_handoff_visible_rows_are_safe: bool,
+}
+
 pub(super) fn plan_main_dialogue_route_population(
-    source: &Rom,
-    display: &MainDialogueDisplayPlan,
-    encoded: &EncodedMainDialogueBundle,
-    graph: &MainDialogueGraphReport,
-    dynamic_producers: &DynamicInputProducerPlan,
-    assembled_hook_roles: &[DialogueRuntimeHookRole],
-    new_record_line_buffer_reset_routes_bound: bool,
+    inputs: MainDialogueRoutePopulationInputs<'_>,
 ) -> Result<MainDialogueRoutePopulationPlan> {
+    let MainDialogueRoutePopulationInputs {
+        source,
+        display,
+        encoded,
+        graph,
+        dynamic_producers,
+        assembled_hook_roles,
+        record_entry_routes_bound,
+        caller_handoff_visible_rows_are_safe,
+    } = inputs;
     let identities = inspect_main_dialogue_runtime_identities(source.data())?;
     let storage = inspect_main_dialogue_storage(source.data())?;
     let joined = join_records(
@@ -170,7 +187,8 @@ pub(super) fn plan_main_dialogue_route_population(
         graph,
         dynamic_producers.every_record_selector_route_bound(),
         assembled_hook_roles,
-        new_record_line_buffer_reset_routes_bound,
+        record_entry_routes_bound,
+        caller_handoff_visible_rows_are_safe,
     )
 }
 
@@ -291,7 +309,8 @@ fn build_route_population(
     graph: &MainDialogueGraphReport,
     dynamic_producer_routes_bound: bool,
     assembled_hook_roles: &[DialogueRuntimeHookRole],
-    new_record_line_buffer_reset_routes_bound: bool,
+    record_entry_routes_bound: bool,
+    caller_handoff_visible_rows_are_safe: bool,
 ) -> Result<MainDialogueRoutePopulationPlan> {
     ensure!(
         !expected_families.is_empty(),
@@ -405,8 +424,12 @@ fn build_route_population(
         "main-dialogue route population lacks a common runtime entry hook"
     );
     ensure!(
-        new_record_line_buffer_reset_routes_bound,
-        "main-dialogue new-record routes do not share the physical line-buffer reset"
+        record_entry_routes_bound,
+        "main-dialogue routes do not bind every source record-entry publisher"
+    );
+    ensure!(
+        caller_handoff_visible_rows_are_safe,
+        "main-dialogue caller handoffs neither preserve retained rows nor replace stale rows after font composition"
     );
     ensure!(
         dynamic_producer_routes_bound,
@@ -554,7 +577,9 @@ fn build_route_population(
         cross_family_transition_edge_count,
         dynamic_string_control_count,
         common_runtime_hook_roles: REQUIRED_COMMON_HOOKS.to_vec(),
-        every_new_record_entry_clears_all_physical_line_buffers: true,
+        direct_entries_defer_line_buffer_clear_until_font_ready: true,
+        e4_e6_transitions_preserve_physical_line_buffers: true,
+        e7_caller_handoffs_preserve_or_replace_visible_rows: true,
         identity_lookup_boundary_partition: IdentityLookupBoundaryPartition {
             e4_published_lookahead_record_count: e4_lookahead_record_count,
             e6_published_lookahead_record_count: e6_lookahead_record_count,
@@ -654,6 +679,7 @@ mod tests {
             true,
             &[],
             true,
+            true,
         )
         .err()
         .expect("missing common runtime hook must fail");
@@ -661,7 +687,7 @@ mod tests {
     }
 
     #[test]
-    fn common_hooks_without_the_shared_physical_row_reset_are_not_complete_routes() {
+    fn common_hooks_without_bound_record_entry_routes_are_not_complete() {
         let expected = [family("table", 0x20, 1, 1, 0)];
         let records = [record("table:000", "table", 0x20, 1, 0, 0xEF)];
         let error = build_route_population(
@@ -680,11 +706,40 @@ mod tests {
             true,
             &REQUIRED_COMMON_HOOKS,
             false,
+            true,
         )
         .err()
-        .expect("missing shared physical row reset must fail");
+        .expect("missing record-entry route binding must fail");
 
-        assert!(error.to_string().contains("physical line-buffer reset"));
+        assert!(error.to_string().contains("record-entry publisher"));
+    }
+
+    #[test]
+    fn caller_handoffs_without_a_visible_row_policy_are_not_complete() {
+        let expected = [family("table", 0x20, 1, 1, 0)];
+        let records = [record("table:000", "table", 0x20, 1, 0, 0xEF)];
+        let error = build_route_population(
+            &expected,
+            &records,
+            &MainDialogueGraphReport {
+                node_count: 1,
+                transition_edge_count: 0,
+                terminal_reachable_node_count: 1,
+                caller_handoff_boundary_reachable_node_count: 0,
+                max_transition_edge_count_to_boundary: 0,
+                cycle_count: 0,
+                unresolved_node_count: 0,
+                transition_edges: vec![],
+            },
+            true,
+            &REQUIRED_COMMON_HOOKS,
+            true,
+            false,
+        )
+        .err()
+        .expect("missing caller-handoff row policy must fail");
+
+        assert!(error.to_string().contains("replace stale rows"));
     }
 
     #[test]
@@ -707,6 +762,7 @@ mod tests {
             &graph,
             true,
             &REQUIRED_COMMON_HOOKS,
+            true,
             true,
         )
         .err()
@@ -741,6 +797,7 @@ mod tests {
             true,
             &REQUIRED_COMMON_HOOKS,
             true,
+            true,
         )
         .err()
         .expect("handler hole reclassification must fail");
@@ -767,6 +824,7 @@ mod tests {
             &graph,
             false,
             &REQUIRED_COMMON_HOOKS,
+            true,
             true,
         )
         .err()

@@ -3,8 +3,8 @@ use std::path::Path;
 use anyhow::{Context, Result, ensure};
 
 use crate::{
-    class_profile::ClassProfilePlan, font_slots::FONT_PAGE_SIZE,
-    mmc5_chr::switchable_bank_file_offset, rom::Rom, sha1_hex, tracked::TrackedImage,
+    class_profile::ClassProfilePlan, font_slots::FONT_PAGE_SIZE, rom::Rom, sha1_hex,
+    source_prg::switchable_bank_file_offset, tracked::TrackedImage,
 };
 
 use super::super::{

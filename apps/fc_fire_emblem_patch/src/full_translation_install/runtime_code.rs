@@ -18,8 +18,8 @@ use super::{
 };
 use crate::{
     mapper165::{
-        FinalBattleConsumerRoute, FinalBattleConsumerRouteRegion, FinalConsumerRouteRegion,
-        FinalRosterConsumerRoute,
+        BoundFontPageRuntimeTakeover, FinalBattleConsumerRoute, FinalBattleConsumerRouteRegion,
+        FinalConsumerRouteRegion, FinalRosterConsumerRoute,
     },
     rom::Rom,
     typed_source::decode_rp2a03_sequence,
@@ -36,6 +36,7 @@ mod dynamic_producer;
 mod font_page_route;
 pub(in crate::full_translation_install) mod lifecycle;
 mod mapper_write_verification;
+mod record_line_replacement;
 pub(in crate::full_translation_install) mod resolve_request;
 mod resolved_page_publication;
 mod speaker_prefix;
@@ -85,6 +86,9 @@ pub(in crate::full_translation_install) enum DialogueRuntimeHookRole {
     DialogueSpeakerPrefixProjection,
     EndingRecordFontPageEnter,
     EndingRecordFontPageExit,
+    EndingBridgeFontPageSupport,
+    EndingBridgeFontPageEnter,
+    EndingBridgeFontPageExit,
     EndingCharacterEpilogueFontPageExit,
 }
 
@@ -126,6 +130,9 @@ pub(in crate::full_translation_install) struct DialogueRuntimeCodePlan {
         Vec<ReclaimedFixedRuntimeRoutine>,
     /// 원본에 실제로 설치할 훅이다. 역할과 주소와 바이트가 한 단위라 따로 세지 않는다.
     pub(in crate::full_translation_install) hooks: Vec<DialogueRuntimeHook>,
+    /// 누적 선택기 그래프에서 결속한 중앙 fallback 인계다.
+    pub(in crate::full_translation_install) font_page_runtime_takeover:
+        BoundFontPageRuntimeTakeover,
 }
 
 impl DialogueRuntimeCodePlan {
@@ -133,30 +140,15 @@ impl DialogueRuntimeCodePlan {
         self.hooks.iter().map(|hook| hook.role).collect()
     }
 
-    /// 네 종류의 새 레코드 진입이 하나의 물리 줄 초기화 경계를 공유하고, 같은
-    /// 레코드의 다음 페이지는 그 초기화를 우회하는지 조립 결과에서 다시 확인한다.
-    pub(in crate::full_translation_install) fn new_record_line_buffer_reset_routes_bound(
-        &self,
-    ) -> Result<bool> {
+    /// 직접 진입과 E4/E6/E7 진입이 의도한 정체성 게시자를 거쳐 새 레코드 resolver에
+    /// 도달하는지 조립 결과에서 확인한다. 화면에 남는 행의 글리프 수명은 최종 코드북
+    /// 계획이 별도로 검증한다.
+    pub(in crate::full_translation_install) fn record_entry_routes_bound(&self) -> Result<bool> {
         let resolver = self
             .code_routines
             .iter()
             .find(|routine| routine.role == resolve_request::INITIAL_PAGE_REQUEST_RESOLVER_ROLE)
             .context("new-record request resolver is missing")?;
-        ensure!(
-            resolve_request::contains_new_record_line_buffer_reset(resolver)?,
-            "new-record request resolver no longer clears the six physical dialogue rows"
-        );
-        let next_page_resolver = self
-            .code_routines
-            .iter()
-            .find(|routine| routine.role == resolve_request::NEXT_PAGE_REQUEST_RESOLVER_ROLE)
-            .context("same-record next-page resolver is missing")?;
-        ensure!(
-            !resolve_request::contains_new_record_line_buffer_reset(next_page_resolver)?,
-            "same-record next-page resolver unexpectedly clears the physical dialogue rows"
-        );
-
         let initial_publisher = self
             .fixed_routines
             .iter()
@@ -204,15 +196,28 @@ impl DialogueRuntimeCodePlan {
                 .collect::<Vec<_>>();
             ensure!(
                 matching.len() == 1,
-                "new-record line-buffer route has {} hooks for {role:?}",
+                "dialogue record-entry route has {} hooks for {role:?}",
                 matching.len()
             );
             let hook = matching[0];
+            let reaches_expected_target = hook.bytes.starts_with(&[
+                0x20,
+                expected_target as u8,
+                (expected_target >> 8) as u8,
+            ]);
+            let has_expected_extent = if role == DialogueRuntimeHookRole::InitialDirectEntryRequest
+            {
+                hook.bytes
+                    == dispatcher_gate::initial_request_hook_bytes(expected_target).as_slice()
+            } else {
+                hook.bytes == dispatcher_gate::request_hook_bytes(expected_target).as_slice()
+            };
             ensure!(
                 matches!(
                     hook.site,
                     DialogueRuntimeHookSite::Switchable { bank: 0x0A, .. }
-                ) && hook.bytes == [0x20, expected_target as u8, (expected_target >> 8) as u8,],
+                ) && reaches_expected_target
+                    && has_expected_extent,
                 "{role:?} no longer reaches its new-record request publisher"
             );
         }
@@ -239,6 +244,9 @@ impl DialogueRuntimeCodePlan {
             DialogueRuntimeHookRole::FixedMenuStorageCapacityAppender,
             DialogueRuntimeHookRole::EndingRecordFontPageEnter,
             DialogueRuntimeHookRole::EndingRecordFontPageExit,
+            DialogueRuntimeHookRole::EndingBridgeFontPageSupport,
+            DialogueRuntimeHookRole::EndingBridgeFontPageEnter,
+            DialogueRuntimeHookRole::EndingBridgeFontPageExit,
             DialogueRuntimeHookRole::EndingCharacterEpilogueFontPageExit,
         ]
         .iter()
@@ -317,7 +325,7 @@ impl DialogueRuntimeCodePlan {
             .find(|hook| hook.role == DialogueRuntimeHookRole::ChrRamSelector)
             .context("dialogue CHR selector hook is missing")?;
         ensure!(
-            matches!(hook.site, DialogueRuntimeHookSite::Fixed(address) if address == chr_selector::SELECTOR_CHAIN_SITE)
+            matches!(hook.site, DialogueRuntimeHookSite::Fixed(address) if address == self.font_page_runtime_takeover.hook_cpu_address)
                 && hook.bytes.len() == 3
                 && hook.bytes[0] == 0x4C,
             "dialogue CHR selector hook no longer replaces the central fallback with JMP absolute"
@@ -359,8 +367,12 @@ impl DialogueRuntimeCodePlan {
                 0x68,
                 0x28,
                 0x4C,
-                chr_selector::SELECTOR_CHAIN_FALLBACK as u8,
-                (chr_selector::SELECTOR_CHAIN_FALLBACK >> 8) as u8,
+                self.font_page_runtime_takeover
+                    .inactive_fallback_cpu_address as u8,
+                (self
+                    .font_page_runtime_takeover
+                    .inactive_fallback_cpu_address
+                    >> 8) as u8,
             ]),
             "integrated dialogue CHR selector no longer falls through to the roster selector"
         );
@@ -449,6 +461,7 @@ pub(super) struct DialogueRuntimeCodeInputs<'a> {
     pub(super) storage_item_list: StorageItemListRuntimeRoute,
     pub(super) cold_request_mapper_register: u8,
     pub(super) consumer_font_pages: ScreenFontPageRoutes,
+    pub(super) font_page_runtime_takeover: BoundFontPageRuntimeTakeover,
 }
 
 pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
@@ -467,13 +480,14 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         storage_item_list,
         cold_request_mapper_register,
         consumer_font_pages,
+        font_page_runtime_takeover,
     } = inputs;
     let bank_restore = bind_bank_restore_contract(candidate)?;
     bind_synchronous_composer_resume(source, candidate)?;
     dispatcher_gate::bind_dispatcher_entry(source, candidate)?;
     dispatcher_gate::bind_source_identity_publisher_tail_cave(source, candidate)?;
     lifecycle::bind_lifecycle_sites(source, candidate)?;
-    chr_selector::bind_selector_chain_site(candidate)?;
+    chr_selector::bind_selector_chain_site(candidate, font_page_runtime_takeover)?;
     chr_selector::bind_selector_cave(candidate)?;
     consumer_font_page::bind_consumer_font_page_lifetime(source, candidate)?;
     consumer_font_page::ending_lifetime::bind_ending_font_lifetime(source, candidate)?;
@@ -487,7 +501,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     let selector = chr_selector::build_chr_selector(
         font_page_routes.dialogue_selector,
         cold_request_mapper_register,
-        chr_selector::SELECTOR_CHAIN_FALLBACK,
+        font_page_runtime_takeover.inactive_fallback_cpu_address,
         font_page_routes.project_dialogue_page,
     )?;
     let cold_presentation_selector_origin = selector.address
@@ -519,17 +533,31 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         atlas_page,
         cold_request_mapper_register,
     )?;
-    let resolver_origin = transport.address
+    let record_line_replacement_origin = transport.address
         + u16::try_from(transport.bytes.len()).context("transport routine length overflow")?;
-    let resolver = resolve_request::build_resolve_request(resolver_origin, layout)?;
+    let record_line_replacement =
+        record_line_replacement::build_record_line_replacement(record_line_replacement_origin)?;
+    let record_line_replacement_entry = record_line_replacement.address;
+    let resolver_origin = record_line_replacement.address
+        + u16::try_from(record_line_replacement.bytes.len())
+            .context("record-line replacement length overflow")?;
+    let resolver = resolve_request::build_resolve_request(
+        resolver_origin,
+        layout,
+        record_line_replacement_entry,
+    )?;
     let next_page_resolver_origin = resolver.address
         + u16::try_from(resolver.bytes.len()).context("initial resolver length overflow")?;
-    let next_page_resolver =
-        resolve_request::build_resolve_next_page_request(next_page_resolver_origin, layout)?;
+    let next_page_resolver = resolve_request::build_resolve_next_page_request(
+        next_page_resolver_origin,
+        layout,
+        record_line_replacement_entry,
+    )?;
     let synchronous_composer = synchronous_composer::build_synchronous_composer(
         bank_restore,
         transport.address,
         code_page,
+        record_line_replacement_entry,
     )?;
 
     let gate = dispatcher_gate::build_dispatcher_gate(dispatcher_gate::RECLAIMED_GATE_CAVE_ORIGIN)?;
@@ -761,7 +789,12 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     ];
     fixed_routines.extend(dynamic_producers.fixed_routines);
     fixed_routines.extend(consumer_catalog.fixed_routines);
-    let mut code_routines = vec![transport, resolver, next_page_resolver];
+    let mut code_routines = vec![
+        transport,
+        record_line_replacement,
+        resolver,
+        next_page_resolver,
+    ];
     code_routines.extend(dynamic_producers.code_routines);
     code_routines.push(consumer_catalog.code_routine);
     let completed_page_entry = lifecycle.completed_page_entry;
@@ -786,7 +819,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         DialogueRuntimeHook {
             role: DialogueRuntimeHookRole::ChrRamSelector,
             write_role: "dialogue CHR RAM selector hook",
-            site: DialogueRuntimeHookSite::Fixed(chr_selector::SELECTOR_CHAIN_SITE),
+            site: DialogueRuntimeHookSite::Fixed(font_page_runtime_takeover.hook_cpu_address),
             bytes: chr_selector::selector_hook_bytes(font_page_routes.select_active_page).to_vec(),
         },
         DialogueRuntimeHook {
@@ -805,7 +838,8 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
                 bank: 0x0A,
                 address: dispatcher_gate::COLD_ENTRY,
             },
-            bytes: dispatcher_gate::request_hook_bytes(initial_request_publisher_address).to_vec(),
+            bytes: dispatcher_gate::initial_request_hook_bytes(initial_request_publisher_address)
+                .to_vec(),
         },
     ];
     for (role, write_role, address) in [
@@ -892,8 +926,9 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         fixed_routines,
         reclaimed_fixed_routines,
         hooks,
+        font_page_runtime_takeover,
     };
-    plan.new_record_line_buffer_reset_routes_bound()?;
+    plan.record_entry_routes_bound()?;
     verify_planned_mapper_select_writes(&plan)?;
     Ok(plan)
 }

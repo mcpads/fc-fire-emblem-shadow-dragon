@@ -25,9 +25,9 @@ use crate::{
         WRITE_TRANSLATED_CHR_PAGE_ADDRESS, WRITE_TRANSLATED_CHR_PAGE_END,
         build_translated_chr_page_writer,
     },
-    mmc5_prg::count_direct_transfers_to_range,
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
+    source_prg::count_direct_transfers_to_range,
     typed_source::decode_rp2a03_sequence,
 };
 
@@ -38,8 +38,10 @@ pub(in crate::full_translation_install) const DISPATCHER_STATE: u16 =
     MAIN_DIALOGUE_RUNTIME_STATE.state_address;
 /// 표 분기 호출이다. 게이트는 통과할 때 이 자리로 되돌린다.
 pub(in crate::full_translation_install) const DISPATCHER_TABLE_CALL: u16 = 0x8003;
-/// 대사 초기 진입이다. 요청 발행기가 이 세 바이트를 가져간다.
-pub(in crate::full_translation_install) const COLD_ENTRY: u16 = 0x809B;
+/// 직접 진입의 원본 줄 fill과 포인터 resolver다. 초기 요청 발행기가 여덟 바이트를
+/// 함께 가져가 fill을 글꼴 합성 완료 뒤로 옮긴다.
+pub(in crate::full_translation_install) const COLD_ENTRY: u16 = 0x8096;
+const COLD_ENTRY_CONTINUATION: u16 = 0x809E;
 /// 초기 진입이 부르는 원본 포인터 resolver다.
 pub(in crate::full_translation_install) const SOURCE_POINTER_RESOLVER: u16 = 0xE6B2;
 
@@ -87,6 +89,8 @@ const MAIN_DIALOGUE_BANK: u8 = 0x0A;
 /// `0A:$8000`: `LDA $77F7; JSR $C34C`. 게이트는 앞의 세 바이트만 가져가고 뒤의
 /// 표 분기는 그대로 실행시킨다.
 const DISPATCHER_ENTRY_CODE: [u8; 6] = [0xAD, 0xF7, 0x77, 0x20, 0x4C, 0xC3];
+/// `LDA #$FF; JSR $C225; JSR $E6B2`. 앞 호출은 여섯 물리 줄을 너무 일찍 지운다.
+const COLD_ENTRY_CODE: [u8; 8] = [0xA9, 0xFF, 0x20, 0x25, 0xC2, 0x20, 0xB2, 0xE6];
 /// The raw direct-transfer backstop sees the `20` operand of `LDA #$20` as a
 /// possible `JSR $F38D`.  This exact typed sequence proves that the window at
 /// `05:$84D0` is an instruction interior, not an executable transfer.
@@ -114,6 +118,22 @@ pub(super) fn bind_dispatcher_entry(source: &Rom, candidate: &Rom) -> Result<()>
         &DISPATCHER_ENTRY_CODE,
         DISPATCHER_ENTRY,
         "main-dialogue dispatcher entry",
+    )?;
+    for rom in [source, candidate] {
+        let offset = switchable_cpu_to_file_offset(MAIN_DIALOGUE_BANK, COLD_ENTRY)?;
+        let bytes = rom
+            .data()
+            .get(offset..offset + COLD_ENTRY_CODE.len())
+            .context("main-dialogue cold entry is outside ROM")?;
+        ensure!(
+            bytes == COLD_ENTRY_CODE,
+            "the main-dialogue cold-entry fill and resolver at 0A:{COLD_ENTRY:04X} changed"
+        );
+    }
+    decode_rp2a03_sequence(
+        &COLD_ENTRY_CODE,
+        COLD_ENTRY,
+        "main-dialogue cold-entry fill and resolver",
     )?;
     Ok(())
 }
@@ -189,6 +209,21 @@ pub(super) fn dispatcher_hook_bytes(gate: u16) -> [u8; 3] {
 /// `0A:$809B`에 쓸 세 바이트다.
 pub(super) fn request_hook_bytes(publisher: u16) -> [u8; 3] {
     [0x20, publisher as u8, (publisher >> 8) as u8]
+}
+
+/// 직접 진입의 조기 줄 fill과 원본 resolver를 한 번에 가져간다. 발행기는 원본
+/// resolver로 tail-call하고, 그 RTS는 아래 JMP로 돌아와 정확한 다음 명령을 잇는다.
+pub(super) fn initial_request_hook_bytes(publisher: u16) -> [u8; 8] {
+    [
+        0x20,
+        publisher as u8,
+        (publisher >> 8) as u8,
+        0x4C,
+        COLD_ENTRY_CONTINUATION as u8,
+        (COLD_ENTRY_CONTINUATION >> 8) as u8,
+        0xEA,
+        0xEA,
+    ]
 }
 
 /// 요청이 걸려 있으면 처리기를 돌리지 않고 그대로 돌아간다.
@@ -499,12 +534,31 @@ mod tests {
         assert_eq!(DISPATCHER_TABLE_CALL - DISPATCHER_ENTRY, 3);
     }
 
+    #[test]
+    fn the_initial_hook_replaces_the_early_fill_and_resumes_after_the_source_resolver() {
+        let publisher = 0xF620;
+        let hook = initial_request_hook_bytes(publisher);
+
+        assert_eq!(hook.len(), COLD_ENTRY_CODE.len());
+        assert_eq!(&hook[..3], request_hook_bytes(publisher));
+        assert_eq!(
+            &hook[3..6],
+            &[
+                0x4C,
+                COLD_ENTRY_CONTINUATION as u8,
+                (COLD_ENTRY_CONTINUATION >> 8) as u8,
+            ]
+        );
+    }
+
     /// 입구가 바뀌면 표 분기의 복귀 주소가 어긋나므로 설치를 막는다.
     #[test]
     fn a_changed_dispatcher_entry_refuses_installation() {
         let offset = switchable_cpu_to_file_offset(MAIN_DIALOGUE_BANK, DISPATCHER_ENTRY).unwrap();
+        let cold_offset = switchable_cpu_to_file_offset(MAIN_DIALOGUE_BANK, COLD_ENTRY).unwrap();
         let mut bytes = crate::test_support::synthetic_mapper165_rom_bytes(0xFF);
         bytes[offset..offset + DISPATCHER_ENTRY_CODE.len()].copy_from_slice(&DISPATCHER_ENTRY_CODE);
+        bytes[cold_offset..cold_offset + COLD_ENTRY_CODE.len()].copy_from_slice(&COLD_ENTRY_CODE);
         let source = Rom::parse(bytes.clone()).unwrap();
         bytes[offset + 3] = 0xEA;
         let mutated = Rom::parse(bytes).unwrap();
@@ -516,6 +570,24 @@ mod tests {
                 .to_string()
                 .contains("dispatcher entry at 0A:8000 changed")
         );
+    }
+
+    #[test]
+    fn a_changed_cold_entry_fill_refuses_installation() {
+        let entry_offset =
+            switchable_cpu_to_file_offset(MAIN_DIALOGUE_BANK, DISPATCHER_ENTRY).unwrap();
+        let cold_offset = switchable_cpu_to_file_offset(MAIN_DIALOGUE_BANK, COLD_ENTRY).unwrap();
+        let mut bytes = crate::test_support::synthetic_mapper165_rom_bytes(0xFF);
+        bytes[entry_offset..entry_offset + DISPATCHER_ENTRY_CODE.len()]
+            .copy_from_slice(&DISPATCHER_ENTRY_CODE);
+        bytes[cold_offset..cold_offset + COLD_ENTRY_CODE.len()].copy_from_slice(&COLD_ENTRY_CODE);
+        let source = Rom::parse(bytes.clone()).unwrap();
+        bytes[cold_offset + 2] = 0xEA;
+        let mutated = Rom::parse(bytes).unwrap();
+
+        let error = bind_dispatcher_entry(&source, &mutated).unwrap_err();
+
+        assert!(error.to_string().contains("cold-entry fill and resolver"));
     }
 
     /// 해석 결과의 성공·실패와 상주 그룹 비교는 고정 발행기 하나가 맡아야 한다.

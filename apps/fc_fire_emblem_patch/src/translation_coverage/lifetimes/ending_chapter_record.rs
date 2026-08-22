@@ -5,7 +5,8 @@ use serde::Serialize;
 
 use crate::{
     chapter_transition::{
-        bind_ending_chapter_record_lifetime_source, plan_chapter_titles, plan_transition_labels,
+        bind_ending_bridge_storage_source, bind_ending_chapter_record_lifetime_source,
+        plan_chapter_titles, plan_transition_labels,
     },
     font_slots::ACTIVE_HANGUL_SLOT_COUNT,
     rom::{EXPECTED_SOURCE_SHA1, Rom},
@@ -30,9 +31,11 @@ struct EvidenceDigest<'a> {
     transition_label_workspace_sha1: &'a str,
     stream_record_count: usize,
     target_record_count: usize,
+    bridge_record_count: usize,
     chapter_title_count: usize,
     source_reclaimable_active_code_count: usize,
     preserved_active_stream_code_count: usize,
+    bridge_preserved_visible_code_count: usize,
     target_glyph_count: usize,
     preservation_policy: &'static str,
 }
@@ -46,12 +49,16 @@ pub(super) fn inspect(bindings: InputBindings<'_>) -> Result<TranslationLifetime
         chapter_titles.workspace_sha1 == bindings.chapter_title_workspace_sha1
             && transition_labels.ending_record.workspace_sha1
                 == bindings.transition_label_workspace_sha1
+            && transition_labels.ending_bridge.workspace_sha1
+                == bindings.transition_label_workspace_sha1
             && chapter_titles.entry_count == 25
             && chapter_titles.translated_entry_count == 25
-            && transition_labels.ending_record.entry_count == 1,
+            && transition_labels.ending_record.entry_count == 1
+            && transition_labels.ending_bridge.entry_count == 1,
         "ending chapter-record lifetime translation input changed"
     );
     let source = bind_ending_chapter_record_lifetime_source(&rom)?;
+    let bridge_source = bind_ending_bridge_storage_source(&rom)?;
     ensure!(
         transition_labels
             .ending_record
@@ -59,10 +66,19 @@ pub(super) fn inspect(bindings: InputBindings<'_>) -> Result<TranslationLifetime
             .is_subset(&source.source_reclaimable_active_codes),
         "ending aggregate label is not contained in the chapter-record source lifetime"
     );
+    ensure!(
+        transition_labels
+            .ending_bridge
+            .source_reclaimable_active_codes
+            == bridge_source.source_reclaimable_active_codes,
+        "ending bridge translation is not contained in its source lifetime"
+    );
 
     let mut target_glyphs = chapter_titles.unique_glyphs();
     target_glyphs.extend(transition_labels.ending_record.target_glyphs);
-    let preserved_active_stream_codes = source.preserved_active_stream_codes;
+    target_glyphs.extend(transition_labels.ending_bridge.target_glyphs);
+    let mut preserved_active_stream_codes = source.preserved_active_stream_codes;
+    preserved_active_stream_codes.extend(bridge_source.preserved_visible_active_codes.iter());
     let total_slot_demand = target_glyphs
         .len()
         .checked_add(preserved_active_stream_codes.len())
@@ -79,18 +95,20 @@ pub(super) fn inspect(bindings: InputBindings<'_>) -> Result<TranslationLifetime
         transition_label_workspace_sha1: bindings.transition_label_workspace_sha1,
         stream_record_count: source.record_count,
         target_record_count: source.target_record_count,
+        bridge_record_count: 1,
         chapter_title_count: chapter_titles.entry_count,
         source_reclaimable_active_code_count: source.source_reclaimable_active_codes.len(),
         preserved_active_stream_code_count: preserved_active_stream_codes.len(),
+        bridge_preserved_visible_code_count: bridge_source.preserved_visible_active_codes.len(),
         target_glyph_count: target_glyphs.len(),
-        preservation_policy: "keep the complete twenty-five-title and total-turn Korean glyph union resident; preserve every active literal from the source-bound text-only scroll outside the translated records; chapter and turn digits remain globally reserved",
+        preservation_policy: "keep the complete twenty-five-title, total-turn, and phase-0x0B bridge Korean glyph union resident; preserve every active literal from the source-bound text-only scroll outside the translated records and the bridge period code; chapter and turn digits remain globally reserved",
     };
     let evidence_bytes = serde_json::to_vec(&evidence)
         .context("serialize ending chapter-record lifetime evidence")?;
 
     Ok(TranslationLifetimeDemandReport {
         screen_role: "ending_chapter_record_scroll",
-        measurement_basis: "complete twenty-five-title and total-turn Korean glyph union plus exact preserved active literals from the source-bound text-only scroll",
+        measurement_basis: "complete twenty-five-title, total-turn, and phase-0x0B bridge Korean glyph union plus exact preserved active literals from both source-bound surfaces",
         target_glyph_count: target_glyphs.len(),
         preserved_active_source_code_count: preserved_active_stream_codes.len(),
         additional_target_glyph_reservation_count: 0,

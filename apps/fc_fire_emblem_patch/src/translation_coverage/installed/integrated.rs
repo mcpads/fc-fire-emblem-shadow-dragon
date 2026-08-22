@@ -70,10 +70,12 @@ struct IntegratedBuildReport {
 #[derive(Debug, Deserialize)]
 struct IntegratedChoiceResidency {
     composite_state: u8,
-    continue_prompt_record_id: String,
-    front_end_result_record_ids: Vec<String>,
+    chapter_save_retained_record_ids: Vec<String>,
+    chapter_save_retained_record_count: usize,
+    front_end_choice_record_id: String,
     storage_choice_record_id: String,
     direct_choice_composite_producer_count: usize,
+    shop_choice_record_ids: Vec<String>,
     resident_record_ids: Vec<String>,
     resident_workset_count: usize,
     choice_glyph_count: usize,
@@ -84,6 +86,8 @@ struct IntegratedChoiceResidency {
     storage_follow_up_preserved_active_code_count: usize,
     storage_follow_up_total_slot_demand: usize,
     fixed_assignment_sha1: String,
+    every_shop_choice_record_resident: bool,
+    every_retained_chapter_save_record_resident: bool,
     every_choice_glyph_has_one_stable_code: bool,
     every_resident_page_contains_every_choice_glyph: bool,
 }
@@ -701,26 +705,46 @@ fn bind_choice_lifetime(
         choice.resident_record_ids.clone(),
         "integrated choice residency records",
     )?;
-    let front_end_record_ids = unique_strings(
-        choice.front_end_result_record_ids.clone(),
-        "integrated front-end choice residency records",
+    let shop_record_ids = unique_strings(
+        choice.shop_choice_record_ids.clone(),
+        "integrated shop choice residency records",
     )?;
+    let chapter_save_record_ids = unique_strings(
+        choice.chapter_save_retained_record_ids.clone(),
+        "integrated chapter-save retained presentation records",
+    )?;
+    let expected_resident_record_ids = shop_record_ids
+        .iter()
+        .cloned()
+        .chain(chapter_save_record_ids.iter().cloned())
+        .chain([
+            choice.front_end_choice_record_id.clone(),
+            choice.storage_choice_record_id.clone(),
+        ])
+        .collect::<BTreeSet<_>>();
     ensure!(
         choice.composite_state == crate::choice_labels::CHOICE_LABEL_COMPOSITE_STATE
             && choice.direct_choice_composite_producer_count == 3
             && choice.storage_choice_record_id == STORAGE_CHOICE_DIALOGUE_RECORD_ID
-            && !choice.continue_prompt_record_id.is_empty()
-            && front_end_record_ids.len() == 4
-            && resident_record_ids.len() == front_end_record_ids.len() + 2
-            && resident_record_ids.contains(&choice.continue_prompt_record_id)
-            && resident_record_ids.contains(STORAGE_CHOICE_DIALOGUE_RECORD_ID)
-            && front_end_record_ids.is_subset(&resident_record_ids)
+            && !choice.front_end_choice_record_id.is_empty()
+            && choice.chapter_save_retained_record_ids
+                == [
+                    "victory-and-defeat-dialogue:000".to_owned(),
+                    "victory-and-defeat-dialogue:001".to_owned(),
+                ]
+            && choice.chapter_save_retained_record_count == chapter_save_record_ids.len()
+            && shop_record_ids.len() == 12
+            && chapter_save_record_ids.len() == 2
+            && expected_resident_record_ids.len() == shop_record_ids.len() + 4
+            && resident_record_ids == expected_resident_record_ids
             && choice.resident_workset_count >= resident_record_ids.len()
             && choice.storage_follow_up_workset_count > 0
             && choice.storage_follow_up_workset_count <= choice.resident_workset_count
             && choice.choice_glyph_count > 0
             && choice.fixed_code_count == choice.choice_glyph_count
             && !choice.fixed_assignment_sha1.is_empty()
+            && choice.every_shop_choice_record_resident
+            && choice.every_retained_chapter_save_record_resident
             && choice.every_choice_glyph_has_one_stable_code
             && choice.every_resident_page_contains_every_choice_glyph,
         "integrated shared choice residency is incomplete"
@@ -1364,24 +1388,47 @@ mod tests {
             },
             "choice_residency": {
                 "composite_state": 12,
-                "continue_prompt_record_id": "victory-and-defeat-dialogue:000",
-                "front_end_result_record_ids": [
-                    "front-end-dialogue:000",
-                    "front-end-dialogue:001",
-                    "front-end-dialogue:002",
-                    "front-end-dialogue:003"
+                "chapter_save_retained_record_ids": [
+                    "victory-and-defeat-dialogue:000",
+                    "victory-and-defeat-dialogue:001"
                 ],
+                "chapter_save_retained_record_count": 2,
+                "front_end_choice_record_id": "shop-and-item-dialogue:083",
                 "storage_choice_record_id": "shop-and-item-dialogue:045",
                 "direct_choice_composite_producer_count": 3,
-                "resident_record_ids": [
-                    "front-end-dialogue:000",
-                    "front-end-dialogue:001",
-                    "front-end-dialogue:002",
-                    "front-end-dialogue:003",
-                    "shop-and-item-dialogue:045",
-                    "victory-and-defeat-dialogue:000"
+                "shop_choice_record_ids": [
+                    "shop-and-item-dialogue:001",
+                    "shop-and-item-dialogue:004",
+                    "shop-and-item-dialogue:008",
+                    "shop-and-item-dialogue:011",
+                    "shop-and-item-dialogue:052",
+                    "shop-and-item-dialogue:053",
+                    "shop-and-item-dialogue:054",
+                    "shop-and-item-dialogue:055",
+                    "shop-and-item-dialogue:072",
+                    "shop-and-item-dialogue:075",
+                    "shop-and-item-dialogue:078",
+                    "shop-and-item-dialogue:079"
                 ],
-                "resident_workset_count": 6,
+                "resident_record_ids": [
+                    "shop-and-item-dialogue:001",
+                    "shop-and-item-dialogue:004",
+                    "shop-and-item-dialogue:008",
+                    "shop-and-item-dialogue:011",
+                    "shop-and-item-dialogue:045",
+                    "shop-and-item-dialogue:052",
+                    "shop-and-item-dialogue:053",
+                    "shop-and-item-dialogue:054",
+                    "shop-and-item-dialogue:055",
+                    "shop-and-item-dialogue:072",
+                    "shop-and-item-dialogue:075",
+                    "shop-and-item-dialogue:078",
+                    "shop-and-item-dialogue:079",
+                    "shop-and-item-dialogue:083",
+                    "victory-and-defeat-dialogue:000",
+                    "victory-and-defeat-dialogue:001"
+                ],
+                "resident_workset_count": 16,
                 "choice_glyph_count": 4,
                 "fixed_code_count": 4,
                 "maximum_augmented_workset_slot_demand": 195,
@@ -1390,6 +1437,8 @@ mod tests {
                 "storage_follow_up_preserved_active_code_count": 52,
                 "storage_follow_up_total_slot_demand": 195,
                 "fixed_assignment_sha1": "choice-assignment",
+                "every_shop_choice_record_resident": true,
+                "every_retained_chapter_save_record_resident": true,
                 "every_choice_glyph_has_one_stable_code": true,
                 "every_resident_page_contains_every_choice_glyph": true
             },
@@ -1597,6 +1646,26 @@ mod tests {
         let mut value: serde_json::Value = serde_json::from_slice(&report_json(None)).unwrap();
         value["choice_residency"]["storage_choice_record_id"] = "shop-and-item-dialogue:044".into();
         let report = serde_json::to_vec(&value).unwrap();
+        assert!(
+            bind_integrated_installation(&report, b"final", "base-output", "base-report")
+                .unwrap_err()
+                .to_string()
+                .contains("incomplete")
+        );
+    }
+
+    #[test]
+    fn chapter_save_power_off_notice_cannot_leave_the_retained_choice_lifetime() {
+        let mut value: serde_json::Value = serde_json::from_slice(&report_json(None)).unwrap();
+        value["choice_residency"]["chapter_save_retained_record_ids"] =
+            serde_json::json!(["victory-and-defeat-dialogue:000"]);
+        value["choice_residency"]["chapter_save_retained_record_count"] = 1.into();
+        value["choice_residency"]["resident_record_ids"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|record_id| record_id != "victory-and-defeat-dialogue:001");
+        let report = serde_json::to_vec(&value).unwrap();
+
         assert!(
             bind_integrated_installation(&report, b"final", "base-output", "base-report")
                 .unwrap_err()
