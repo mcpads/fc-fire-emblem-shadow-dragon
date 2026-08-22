@@ -11,22 +11,19 @@ use crate::{
     tracked::TrackedImage,
 };
 pub(crate) mod banked_call_dispatch;
-mod battle_cache_coverage;
-pub(crate) mod battle_cache_upload_probe;
 pub(crate) mod battle_codebook_plan;
-pub(crate) mod battle_combination_probe;
-pub(crate) mod battle_composition_loader_probe;
+pub(crate) mod battle_composition_runtime;
 pub(crate) mod battle_composition_runtime_verify;
 pub(crate) mod battle_dialogue_probe;
-pub(crate) mod battle_text_cache_probe;
+pub(crate) mod battle_text_material;
 pub(crate) mod battle_text_runtime_base;
 mod carried_battle_domains;
 mod carried_ui_domains;
 mod chapter_page_selector;
 mod class_profile_page;
 pub(crate) mod cumulative_patch;
+pub(crate) mod dialogue_font_page;
 mod dialogue_lifetime_page;
-pub(crate) mod dialogue_probe_font;
 pub(crate) mod dialogue_slice_probe;
 pub(crate) mod direct_chr_pairs;
 pub(crate) mod executable_mapper_writes;
@@ -52,7 +49,6 @@ pub(crate) use font_page_fallback_graph::{
     BoundFontPageFallbackGraph, FontPageFallbackNodeRole, bind_cumulative_font_page_fallback_graph,
 };
 pub(crate) use front_end_page::bind_installed_front_end_mapper_register;
-pub(crate) mod hangul_page_probe;
 pub(crate) mod inline_pointer_dispatch;
 mod maximum_dialogue_boundary;
 mod maximum_dialogue_page;
@@ -71,38 +67,12 @@ mod source_mapper_write_audit;
 mod tests;
 pub(crate) mod trigger_planes;
 mod trigger_variants;
+pub(crate) mod ui_page_install;
 mod unit_name_page;
 mod unit_name_table;
 mod weapon_shop_shared_text;
 mod writer_census;
 mod writer_sites;
-
-/// Reactivates the next round inside an already composed battle.
-///
-/// This write can run with an unchanged participant/class/item/terrain tuple
-/// and is not followed by composition, so it must preserve the uploaded cache.
-pub(crate) const SAME_BATTLE_ROUND_ACTIVATION_WRITE: (u8, u16) = (0x05, 0x82BB);
-
-/// Every source site that stores the literal `1` in the battle-active flag.
-///
-/// This is a writer census, not a claim that all four sites start a new cache
-/// lifetime. The first site is the same-battle round activation above.
-pub(crate) const BATTLE_ACTIVE_ONE_WRITES: [(u8, u16); 4] = [
-    SAME_BATTLE_ROUND_ACTIVATION_WRITE,
-    (0x06, 0x9300),
-    (0x06, 0x9D52),
-    (0x07, 0xAC17),
-];
-
-/// Source writes that start a new shared battle-engine composition lifetime.
-///
-/// The main-state, arena-state, and sound-test producers store `1` in `$047D`
-/// after publishing the tuple consumed by the shared composer. The mapper-165
-/// runtime redirects only these stores through the cache initializer.
-pub(crate) const BATTLE_COMPOSITION_LIFETIME_START_WRITES: [(u8, u16); 3] =
-    [(0x06, 0x9300), (0x06, 0x9D52), (0x07, 0xAC17)];
-
-pub(crate) const SOUND_TEST_BATTLE_COMPOSITION_LIFETIME_START_WRITE: (u8, u16) = (0x07, 0xAC17);
 
 pub(crate) use weapon_shop_shared_text::{
     ITEM_LIST_POINTER_LOAD_ADDRESS, ITEM_LIST_POINTER_LOAD_BYTES, ITEM_LIST_POINTER_LOAD_PRG_BANK,

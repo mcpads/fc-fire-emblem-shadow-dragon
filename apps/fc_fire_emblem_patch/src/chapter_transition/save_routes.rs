@@ -1,4 +1,5 @@
 use super::*;
+use crate::dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE;
 
 pub(super) fn regular_save_reachability() -> RegularSaveReachability {
     RegularSaveReachability {
@@ -61,8 +62,11 @@ pub(super) fn save_complete_no_branch_contract() -> SaveCompleteNoBranchContract
         main_state_address_hex: "0x0084",
         main_state: 0x04,
         main_state_hex: "0x04",
-        dialogue_substate_address: 0x05EE,
-        dialogue_substate_address_hex: "0x05EE",
+        dialogue_substate_address: MAIN_DIALOGUE_RUNTIME_STATE.dialogue_or_sound_state_address,
+        dialogue_substate_address_hex: format!(
+            "0x{:04X}",
+            MAIN_DIALOGUE_RUNTIME_STATE.dialogue_or_sound_state_address
+        ),
         owned_dialogue_substate_sequence: [0x07, 0x08, 0x09, 0x0A],
         owned_dialogue_substate_sequence_hex: ["0x07", "0x08", "0x09", "0x0A"],
         menu_depth_address: 0x05CE,

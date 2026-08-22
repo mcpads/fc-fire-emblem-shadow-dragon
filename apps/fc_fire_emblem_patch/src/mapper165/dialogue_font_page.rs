@@ -31,7 +31,7 @@ pub(super) fn assign_glyph_codes_excluding(
         .collect::<Vec<_>>();
     ensure!(
         glyphs.len() <= available_codes.len(),
-        "dialogue probe needs {} glyphs but the screen-safe page owns only {} slots",
+        "dialogue font page needs {} glyphs but the screen-safe page owns only {} slots",
         glyphs.len(),
         available_codes.len()
     );
@@ -49,7 +49,7 @@ pub(super) fn install_font_glyphs(
         let offset = page_start + usize::from(*code) * FONT_TILE_SIZE;
         let expected = base
             .get(offset..offset + FONT_TILE_SIZE)
-            .context("dialogue probe font tile is outside the mapper base")?;
+            .context("dialogue font tile is outside the mapper base")?;
         let replacement = rasterize_glyph(&font, *character)?;
         image.write_expected(
             format!("mapper 165 dialogue glyph code {code:02X}"),

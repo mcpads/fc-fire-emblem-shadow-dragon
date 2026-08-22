@@ -197,7 +197,7 @@ pub(super) fn execute(command: Command) -> Result<()> {
             output,
             report,
         } => {
-            let summary = mapper165::battle_text_cache_probe::build_battle_text_cache_base(
+            let summary = mapper165::battle_text_material::build_battle_text_cache_base(
                 &source,
                 &fixed_workspace,
                 &dialogue_workspace,
@@ -247,7 +247,7 @@ pub(super) fn execute(command: Command) -> Result<()> {
             report,
         } => {
             let summary =
-                mapper165::battle_composition_loader_probe::build_battle_composition_loader_probe(
+                mapper165::battle_composition_runtime::build_battle_composition_loader_probe(
                     &source,
                     &temporal_manifest,
                     &base,
@@ -278,51 +278,6 @@ pub(super) fn execute(command: Command) -> Result<()> {
                 summary.actual_chr_ram_sha1,
                 summary.differing_byte_count,
                 summary.differing_tile_count
-            );
-        }
-        Command::BuildBattleCombinationProbe {
-            source,
-            fixed_workspace,
-            dialogue_workspace,
-            output,
-            report,
-        } => {
-            let summary =
-                mapper165::battle_combination_probe::build_gameplay_battle_combination_probe(
-                    &source,
-                    &fixed_workspace,
-                    &dialogue_workspace,
-                    &output,
-                    &report,
-                )?;
-            println!("wrote {}", output.display());
-            println!("output SHA-1: {}", summary.output_sha1);
-            println!("report SHA-1: {}", summary.report_sha1);
-            println!(
-                "gameplay battle combination: {} glyphs, {} tracked writes",
-                summary.glyph_count, summary.tracked_write_count
-            );
-        }
-        Command::BuildBattleCacheUploadProbe {
-            source,
-            fixed_workspace,
-            dialogue_workspace,
-            output,
-            report,
-        } => {
-            let summary = mapper165::battle_cache_upload_probe::build_battle_cache_upload_probe(
-                &source,
-                &fixed_workspace,
-                &dialogue_workspace,
-                &output,
-                &report,
-            )?;
-            println!("wrote {}", output.display());
-            println!("output SHA-1: {}", summary.output_sha1);
-            println!("report SHA-1: {}", summary.report_sha1);
-            println!(
-                "battle cache upload: {} glyphs, {} runtime writes",
-                summary.glyph_count, summary.runtime_tracked_write_count
             );
         }
         Command::AnalyzeDialogueStructure { source, report } => {
@@ -824,7 +779,7 @@ pub(super) fn execute(command: Command) -> Result<()> {
             output,
             report,
         } => {
-            let summary = mapper165::hangul_page_probe::build_mapper165_hangul_page_probe(
+            let summary = mapper165::ui_page_install::build_mapper165_hangul_page_probe(
                 &source,
                 &localization,
                 &roster_localization,

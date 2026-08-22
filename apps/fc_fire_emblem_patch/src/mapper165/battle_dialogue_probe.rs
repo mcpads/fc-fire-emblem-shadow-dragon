@@ -12,7 +12,7 @@ use crate::{
 
 use super::{
     OUTPUT_MAPPER,
-    dialogue_probe_font::{
+    dialogue_font_page::{
         SOURCE_FONT_PHYSICAL_PAGE, assign_glyph_codes, assignment_sha1, install_font_glyphs,
     },
     install_mapper165_parity_bytes,

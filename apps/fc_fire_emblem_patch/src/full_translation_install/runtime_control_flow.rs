@@ -10,7 +10,7 @@ use super::{
 use crate::{
     dialogue_inventory::switchable_cpu_to_file_offset,
     font_slots::FONT_PAGE_SIZE,
-    mapper165::battle_composition_loader_probe::cumulative_battle_composition_dispatch_bytes,
+    mapper165::battle_composition_runtime::cumulative_battle_composition_dispatch_bytes,
     rom::{HEADER_SIZE, Rom},
     sha1_hex,
     typed_source::decode_rp2a03_sequence,

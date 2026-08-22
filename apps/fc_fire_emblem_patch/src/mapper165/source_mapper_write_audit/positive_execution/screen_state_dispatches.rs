@@ -17,7 +17,8 @@ use crate::{
 };
 
 use super::{
-    chapter_map_loader::BoundChapterMapDimensions, control_state::MAIN_STATE,
+    chapter_map_loader::BoundChapterMapDimensions,
+    control_state::{MAIN_STATE, MAP_DIALOGUE_OUTER_STATE},
     unit_record_writers::BoundUnitRecordAddressDomain,
 };
 
@@ -216,7 +217,7 @@ pub(super) fn bind_source_screen_state_dispatches(
         &mut selector_memory_addresses,
         FRONT_END_RECORD_BANK,
         FRONT_END_RECORD_RESULT_DISPATCH_CALL,
-        0x05DB,
+        MAP_DIALOGUE_OUTER_STATE,
         "front-end record-result state dispatch",
     )?;
 
@@ -283,7 +284,7 @@ pub(super) fn bind_source_screen_state_dispatches(
         &mut selector_memory_addresses,
         0x06,
         map_dialogue_lifecycle.dispatch_call(),
-        0x05DB,
+        MAP_DIALOGUE_OUTER_STATE,
         "outer-screen map-dialogue state dispatch",
     )?;
 

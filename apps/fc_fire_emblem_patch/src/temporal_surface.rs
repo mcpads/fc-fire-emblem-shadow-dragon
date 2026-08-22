@@ -8,6 +8,7 @@ use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    battle_runtime_state::BATTLE_RUNTIME_STATE,
     font_slots::active_hangul_codes,
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
@@ -367,32 +368,47 @@ pub(crate) fn load_observed_battle_temporal_evidence(
 }
 
 fn observed_battle_runtime_input(files: &CaptureFiles) -> Result<ObservedBattleRuntimeInput> {
-    let pair = |address: usize, role: &str| {
-        files
-            .internal_ram
-            .get(address..address + 2)
-            .map(|bytes| [bytes[0], bytes[1]])
-            .with_context(|| format!("observed battle {role} is outside internal RAM"))
+    let runtime = BATTLE_RUNTIME_STATE;
+    let selector = runtime.dialogue_selector_projection;
+    let pair = |addresses: [u16; 2], role: &str| -> Result<[u8; 2]> {
+        let read = |address: u16| {
+            files
+                .internal_ram
+                .get(usize::from(address))
+                .copied()
+                .with_context(|| format!("observed battle {role} is outside internal RAM"))
+        };
+        Ok([read(addresses[0])?, read(addresses[1])?])
     };
     let observed_dialogue_selector = files
         .prg_ram
-        .get(0x7936 - MemoryRegion::PrgRam.base_address())
+        .get(usize::from(selector.observed_selector_address) - MemoryRegion::PrgRam.base_address())
         .copied()
         .context("observed battle dialogue selector is outside PRG RAM")?;
-    let selector_62_predicate_matched = [0x0334, 0x0479, 0x0335]
-        .into_iter()
-        .all(|address| files.internal_ram[address] != 0)
-        && files.internal_ram[0x05DF] == 0;
-    let projected_dialogue_selector = if selector_62_predicate_matched {
-        0x3E
-    } else {
-        observed_dialogue_selector
-    };
+    let (projected_dialogue_selector, selector_62_predicate_matched) =
+        selector.project(observed_dialogue_selector, |address| {
+            files
+                .internal_ram
+                .get(usize::from(address))
+                .copied()
+                .with_context(|| {
+                    format!("battle selector predicate address 0x{address:04X} is outside RAM")
+                })
+        })?;
     Ok(ObservedBattleRuntimeInput {
-        staged_participant_identities: pair(0x0304, "staged participant identities")?,
-        class_record_identities: pair(0x0306, "class identities")?,
-        item_source_indices: pair(0x0320, "item source indices")?,
-        terrain_source_indices: pair(0x0322, "terrain source indices")?,
+        staged_participant_identities: pair(
+            runtime.staged_participant_identity_addresses,
+            "staged participant identities",
+        )?,
+        class_record_identities: pair(runtime.staged_class_identity_addresses, "class identities")?,
+        item_source_indices: pair(
+            runtime.staged_item_source_index_addresses,
+            "item source indices",
+        )?,
+        terrain_source_indices: pair(
+            runtime.staged_terrain_source_index_addresses,
+            "terrain source indices",
+        )?,
         observed_dialogue_selector,
         projected_dialogue_selector,
         selector_62_predicate_matched,

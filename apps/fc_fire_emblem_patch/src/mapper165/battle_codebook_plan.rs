@@ -18,8 +18,6 @@ use crate::{
     text_inventory::{FixedTextPlan, plan_fixed_text},
 };
 
-use super::battle_combination_probe::GAMEPLAY_BATTLE_PRESERVED_ACTIVE_CODES;
-
 mod background_ownership;
 mod background_payloads;
 mod composition;
@@ -28,7 +26,6 @@ mod consumer_census;
 mod enemy_domain;
 mod item_domain;
 pub(super) mod phase_cooccurrence;
-mod physical_assignment;
 mod protected_color_placement;
 mod remap_storage;
 mod runtime_demand;
@@ -40,6 +37,19 @@ pub(crate) mod surface_constraints;
 mod text_consumer_topology;
 mod workset_pages;
 
+// Observed on the chapter-one battle surface. This fixture is only a conservative
+// capacity constraint; it is not the runtime composition architecture.
+const CHAPTER_ONE_OBSERVED_PRESERVED_ACTIVE_CODES: [u8; 119] = [
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0B, 0x0C, 0x0E, 0x10, 0x11, 0x12,
+    0x13, 0x15, 0x16, 0x19, 0x1A, 0x1C, 0x1D, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,
+    0x29, 0x2D, 0x2E, 0x2F, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x3B, 0x3D, 0x3E,
+    0x3F, 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x4D, 0x4E, 0x4F, 0x50, 0x51, 0x52, 0x53,
+    0x54, 0x5A, 0x5D, 0x5E, 0x5F, 0x8C, 0x8E, 0x8F, 0x9C, 0x9E, 0x9F, 0xAC, 0xAD, 0xAE, 0xAF, 0xBC,
+    0xBD, 0xBE, 0xBF, 0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xCB, 0xCD, 0xCE, 0xD0, 0xD1,
+    0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0xDA, 0xDB, 0xE0, 0xE2, 0xE3, 0xE4, 0xF3, 0xF5,
+    0xF6, 0xF7, 0xF8, 0xF9, 0xFA, 0xFB, 0xFC,
+];
+
 pub(in crate::mapper165) use composition::{
     BattleCacheCompositionMaterial, BattleRuntimeRecipeInput, compose_runtime_font_page,
     inspect_runtime_recipe_input,
@@ -49,8 +59,6 @@ use conflict_graph::{BattleGlyphFamilies, BattleParticipantMode, plan_stable_col
 pub(crate) use consumer_census::inspect_known_terrain_name_translation_routes;
 use enemy_domain::{EnemyBattleDomain, EnemyBattleDomainBinding, bind_enemy_battle_domain};
 use item_domain::{BattleItemDomain, BattleItemDomainBinding, bind_battle_item_domain};
-pub(super) use physical_assignment::ScreenCodeConstraint;
-use physical_assignment::assign_physical_codes;
 pub(in crate::mapper165) use remap_storage::{
     IndirectWriteDestinationBounds, bind_indirect_write_destination_bounds,
 };
@@ -63,13 +71,18 @@ pub(crate) use workset_pages::{
     GlyphWorksetPagePlan, plan_glyph_workset_page_upper_bound, verify_glyph_workset_font_page_pack,
 };
 
+#[derive(Clone)]
+pub(in crate::mapper165) struct ScreenCodeConstraint {
+    pub(in crate::mapper165) glyphs: BTreeSet<char>,
+}
+
 pub(crate) fn build_glyph_workset_font_page_pack(
     source_page: &[u8],
     plan: &GlyphWorksetPagePlan,
 ) -> Result<Vec<u8>> {
     let mut page_pack = Vec::new();
     for assignments in &plan.page_assignments {
-        page_pack.extend_from_slice(&super::dialogue_probe_font::build_font_page(
+        page_pack.extend_from_slice(&super::dialogue_font_page::build_font_page(
             source_page,
             assignments,
         )?);
@@ -94,15 +107,6 @@ struct BattleCodebookModel {
     item_domain: BattleItemDomainBinding,
     enemy_domain: EnemyBattleDomainBinding,
     sound_test_domain: SoundTestBattleDomainBinding,
-}
-
-pub(super) struct ConstrainedBattleCodebook {
-    pub(super) glyph_codes: BTreeMap<char, u8>,
-    pub(super) abstract_assignment_sha1: String,
-    pub(super) physical_assignment_sha1: String,
-    pub(super) stable_color_count: usize,
-    pub(super) constrained_screen_count: usize,
-    pub(super) constrained_color_count: usize,
 }
 
 pub(super) struct CanonicalBattleCodebook {
@@ -220,7 +224,7 @@ pub(crate) fn analyze_battle_codebook_plan(
         enemy_domain,
         sound_test_domain,
     } = model;
-    let protected = GAMEPLAY_BATTLE_PRESERVED_ACTIVE_CODES
+    let protected = CHAPTER_ONE_OBSERVED_PRESERVED_ACTIVE_CODES
         .into_iter()
         .collect::<BTreeSet<_>>();
     let active = active_hangul_codes().into_iter().collect::<BTreeSet<_>>();
@@ -304,24 +308,6 @@ pub(crate) fn analyze_battle_codebook_plan(
         constructed_clique_glyph_count: coloring.constructed_clique_glyph_count,
         stable_color_count: coloring.color_count,
         chapter_one_safe_code_count,
-    })
-}
-
-pub(super) fn plan_constrained_battle_codebook(
-    rom: &Rom,
-    fixed: &FixedTextPlan,
-    dialogue: &BattleDialogueReinsertionPlan,
-    constraints: &[ScreenCodeConstraint],
-) -> Result<ConstrainedBattleCodebook> {
-    let model = plan_battle_codebook_model(rom, fixed, dialogue)?;
-    let physical = assign_physical_codes(&model.coloring, constraints)?;
-    Ok(ConstrainedBattleCodebook {
-        glyph_codes: physical.glyph_codes,
-        abstract_assignment_sha1: model.coloring.assignment_sha1,
-        physical_assignment_sha1: physical.assignment_sha1,
-        stable_color_count: model.coloring.color_count,
-        constrained_screen_count: physical.constrained_screen_count,
-        constrained_color_count: physical.constrained_color_count,
     })
 }
 

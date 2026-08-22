@@ -11,8 +11,8 @@ use crate::{
 
 use super::super::{
     OUTPUT_MAPPER,
-    battle_composition_loader_probe::{
-        BattleCompositionLoaderBuild, CUMULATIVE_RUNTIME_LAYOUT, build_battle_composition_loader,
+    battle_composition_runtime::{
+        BattleCompositionBuild, CUMULATIVE_RUNTIME_LAYOUT, build_battle_composition_runtime,
     },
     battle_text_runtime_base::build_battle_text_runtime_base_on_parity,
 };
@@ -178,7 +178,7 @@ pub(super) fn install_battle_stage(inputs: BattleStageInputs<'_>) -> Result<Batt
 
     let output_path = inputs.stage_directory.join(BATTLE_STAGE_ROM_NAME);
     let report_path = inputs.stage_directory.join(BATTLE_STAGE_REPORT_NAME);
-    let loader = build_battle_composition_loader(BattleCompositionLoaderBuild {
+    let loader = build_battle_composition_runtime(BattleCompositionBuild {
         source_path: inputs.source_path,
         temporal_manifest_path: inputs.temporal_manifest_path,
         base_path: &cumulative_base_path,

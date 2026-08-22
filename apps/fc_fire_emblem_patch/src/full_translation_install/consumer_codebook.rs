@@ -19,7 +19,7 @@ use crate::{
     font_slots::{ACTIVE_HANGUL_SLOT_COUNT, FONT_PAGE_SIZE, active_hangul_codes},
     map_menu::MapMenuPlan,
     mapper165::{
-        MAXIMUM_CHR_PAGE_COUNT, dialogue_probe_font::build_font_page_by_code,
+        MAXIMUM_CHR_PAGE_COUNT, dialogue_font_page::build_font_page_by_code,
         encode_chr_page_register, font_pair_projection::RightFontPageProjection,
     },
     semantic_translation::SemanticTranslationPlan,

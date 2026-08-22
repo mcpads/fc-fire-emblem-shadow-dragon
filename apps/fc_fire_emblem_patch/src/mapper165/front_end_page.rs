@@ -17,7 +17,7 @@ use crate::{
 };
 
 use super::{
-    dialogue_probe_font::{assign_glyph_codes_excluding, build_font_page},
+    dialogue_font_page::{assign_glyph_codes_excluding, build_font_page},
     encode_chr_page_register,
     font_pair_projection::{
         RightFontPageProjection, TranslatedFePageSelection, WRITE_TRANSLATED_CHR_PAGE_ADDRESS,

@@ -1,5 +1,6 @@
 use super::*;
 use crate::{
+    dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE,
     front_end_menu::{
         RECORD_ACTION_COMPOSITE_STATE, RECORD_LIST_COMPOSITE_STATE,
         SAVE_SLOT_SELECTION_COMPOSITE_STATE, START_MENU_COMPOSITE_STATE,
@@ -37,7 +38,7 @@ fn pages() -> ScreenFontPageRoutes {
 
 fn storage_item_list_route() -> StorageItemListRuntimeRoute {
     StorageItemListRuntimeRoute {
-        caller_state_address: 0x05DB,
+        caller_state_address: MAIN_DIALOGUE_RUNTIME_STATE.map_dialogue_outer_state_address,
         deposit: StorageItemListRuntimeContext {
             composite_state: UNIT_ITEM_LIST_COMPOSITE_STATE,
             caller_state: 0x06,

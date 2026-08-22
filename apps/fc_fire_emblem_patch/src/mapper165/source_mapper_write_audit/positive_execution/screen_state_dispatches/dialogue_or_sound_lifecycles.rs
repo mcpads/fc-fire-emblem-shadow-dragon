@@ -8,6 +8,7 @@ use retro_rp2a03::{AddressingMode, Mnemonic, Operand};
 
 use crate::{
     dialogue_inventory::CallerHandoffStateDispatchSource,
+    dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE,
     mapper165::{
         banked_call_dispatch::{BankedCallTransfer, bind_banked_call_dispatch},
         battle_codebook_plan::IndirectWriteDestinationBounds,
@@ -24,7 +25,7 @@ use super::state_transition_evidence::{
 
 const FIXED_PRG_BANK: u8 = 0x0F;
 const DIALOGUE_BANK: u8 = 0x0B;
-const DIALOGUE_OR_SOUND_STATE: u16 = 0x05EE;
+const DIALOGUE_OR_SOUND_STATE: u16 = MAIN_DIALOGUE_RUNTIME_STATE.dialogue_or_sound_state_address;
 
 const RESET_ZERO_FILL_START: u16 = 0xC08B;
 const RESET_ZERO_FILL_END: u16 = 0xC0A7;

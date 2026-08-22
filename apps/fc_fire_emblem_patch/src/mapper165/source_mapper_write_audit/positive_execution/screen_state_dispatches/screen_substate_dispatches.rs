@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use anyhow::{Context, Result, ensure};
 
 use crate::{
+    dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE,
     mapper165::{
         battle_codebook_plan::IndirectWriteDestinationBounds,
         inline_pointer_dispatch::bind_inline_pointer_dispatch,
@@ -25,7 +26,8 @@ use map_preparation::bind_map_preparation_dispatches;
 
 const SOURCE_PRG_BANK_BYTE_COUNT: usize = 16 * 1024;
 const OUTER_SCREEN_BANK: u8 = 0x06;
-const MAP_DIALOGUE_STATE_ADDRESS: u16 = 0x05DB;
+const MAP_DIALOGUE_STATE_ADDRESS: u16 =
+    MAIN_DIALOGUE_RUNTIME_STATE.map_dialogue_outer_state_address;
 
 const MAIN_STATE_TWO_TARGETS: [u16; 3] = [0x8A76, 0x8A8A, 0x8A92];
 const MAIN_STATE_FORTY_TWO_TARGETS: [u16; 4] = [0xA733, 0xA725, 0x9F1C, 0xA746];

@@ -554,10 +554,10 @@ pub(super) fn source_bytes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rom::HEADER_SIZE;
+    use crate::{dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE, rom::HEADER_SIZE};
 
     const TEST_BANK: u8 = 0;
-    const TEST_STATE_ADDRESS: u16 = 0x05DB;
+    const TEST_STATE_ADDRESS: u16 = MAIN_DIALOGUE_RUNTIME_STATE.map_dialogue_outer_state_address;
 
     fn synthetic_source(programs: &[(u16, &[u8])]) -> Rom {
         let mut bytes = vec![0x60; HEADER_SIZE + 16 * SOURCE_PRG_BANK_BYTE_COUNT];

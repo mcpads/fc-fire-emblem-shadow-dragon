@@ -4,6 +4,7 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    battle_runtime_state::BATTLE_RUNTIME_STATE,
     font_slots::{FONT_PAGE_SIZE, FONT_TILE_SIZE},
     rom::Rom,
     runtime_storage_layout::{BATTLE_REMAP_PAIR_TABLE_START, BATTLE_REMAP_STATE_ADDRESS},
@@ -15,12 +16,12 @@ use super::{
     battle_codebook_plan::{
         BattleRuntimeRecipeInput, compose_runtime_font_page, inspect_runtime_recipe_input,
     },
-    battle_composition_loader_probe::{
+    battle_composition_runtime::{
         BattleCompositionRuntimeLayout, CUMULATIVE_RUNTIME_LAYOUT, InstalledDialogueCacheRefresh,
         PROBE_RUNTIME_LAYOUT, composition_dispatch_for_layout,
         match_installed_final_dialogue_cache_refresh,
     },
-    battle_text_cache_probe::{
+    battle_text_material::{
         GLYPH_ATLAS_PRG_OFFSET, PHYSICAL_CODE_TABLE_PRG_OFFSET, PROTECTED_ABSTRACT_COLOR_COUNT,
         PROTECTED_ABSTRACT_COLORS_PRG_OFFSET, RECIPE_BLOB_PRG_OFFSET, SOURCE_PAGE_PRG_OFFSET,
     },
@@ -31,12 +32,6 @@ const FIXED_CPU_WINDOW_BYTE_COUNT: usize = 0x4000;
 const JSR_BYTE_COUNT: u16 = 3;
 const SUPPORTED_RUNTIME_LAYOUTS: [BattleCompositionRuntimeLayout; 2] =
     [PROBE_RUNTIME_LAYOUT, CUMULATIVE_RUNTIME_LAYOUT];
-const INTERNAL_BATTLE_FIELD_START: usize = 0x0304;
-const INTERNAL_BATTLE_FIELD_END_EXCLUSIVE: usize = 0x0324;
-const OBSERVED_DIALOGUE_SELECTOR_ADDRESS: usize = 0x7936;
-const SELECTOR_62_REQUIRED_NONZERO_ADDRESSES: [usize; 3] = [0x0334, 0x0479, 0x0335];
-const SELECTOR_62_REQUIRED_ZERO_ADDRESS: usize = 0x05DF;
-const SELECTOR_62_VALUE: u8 = 0x3E;
 const REMAP_STATE_ADDRESS: usize = BATTLE_REMAP_STATE_ADDRESS as usize;
 const CACHE_UPLOADED_MARKER: u8 = 0x80;
 const REMAP_PAIR_COUNT_MASK: u8 = 0x1E;
@@ -138,6 +133,8 @@ pub(crate) fn verify_battle_composition_runtime(
     let event_file: DebugEventFile = serde_json::from_slice(&event_bytes)
         .with_context(|| format!("parse battle composition event {}", event_path.display()))?;
     let installed = bind_installed_battle_composition_paths(&rom)?;
+    let runtime = BATTLE_RUNTIME_STATE;
+    let selector = runtime.dialogue_selector_projection;
     let selected = select_composition_event(&event_file, installed)?;
     let event = selected.event;
     let internal = snapshot_bytes(event, "nesInternalRam")?;
@@ -146,27 +143,26 @@ pub(crate) fn verify_battle_composition_runtime(
         actual_page.bytes.len() == FONT_PAGE_SIZE,
         "composition return snapshot does not contain 4 KiB of CHR RAM"
     );
-    let observed_dialogue_selector =
-        event_snapshot_byte(event, "nesMemory", OBSERVED_DIALOGUE_SELECTOR_ADDRESS)?;
-    let (projected_dialogue_selector, selector_62_predicate_matched) =
-        project_dialogue_selector(&internal, observed_dialogue_selector)?;
+    let observed_dialogue_selector = event_snapshot_byte(
+        event,
+        "nesMemory",
+        usize::from(selector.observed_selector_address),
+    )?;
+    let (projected_dialogue_selector, selector_62_predicate_matched) = selector
+        .project(observed_dialogue_selector, |address| {
+            snapshot_byte(&internal, usize::from(address))
+        })?;
     let input = BattleRuntimeRecipeInput {
-        staged_participant_identities: [
-            snapshot_byte(&internal, INTERNAL_BATTLE_FIELD_START)?,
-            snapshot_byte(&internal, INTERNAL_BATTLE_FIELD_START + 1)?,
-        ],
-        class_record_identities: [
-            snapshot_byte(&internal, INTERNAL_BATTLE_FIELD_START + 2)?,
-            snapshot_byte(&internal, INTERNAL_BATTLE_FIELD_START + 3)?,
-        ],
-        item_source_indices: [
-            snapshot_byte(&internal, INTERNAL_BATTLE_FIELD_END_EXCLUSIVE - 4)?,
-            snapshot_byte(&internal, INTERNAL_BATTLE_FIELD_END_EXCLUSIVE - 3)?,
-        ],
-        terrain_source_indices: [
-            snapshot_byte(&internal, INTERNAL_BATTLE_FIELD_END_EXCLUSIVE - 2)?,
-            snapshot_byte(&internal, INTERNAL_BATTLE_FIELD_END_EXCLUSIVE - 1)?,
-        ],
+        staged_participant_identities: snapshot_pair(
+            &internal,
+            runtime.staged_participant_identity_addresses,
+        )?,
+        class_record_identities: snapshot_pair(&internal, runtime.staged_class_identity_addresses)?,
+        item_source_indices: snapshot_pair(&internal, runtime.staged_item_source_index_addresses)?,
+        terrain_source_indices: snapshot_pair(
+            &internal,
+            runtime.staged_terrain_source_index_addresses,
+        )?,
         dialogue_selector: projected_dialogue_selector,
     };
     let remap_state = snapshot_byte(&internal, REMAP_STATE_ADDRESS)?;
@@ -560,25 +556,11 @@ fn event_snapshot_byte(event: &DebugEvent, memory_type: &str, address: usize) ->
     anyhow::bail!("composition return event has no {memory_type} byte at 0x{address:04X}")
 }
 
-fn project_dialogue_selector(
-    internal: &DecodedSnapshot,
-    observed_selector: u8,
-) -> Result<(u8, bool)> {
-    let predicate_matched = SELECTOR_62_REQUIRED_NONZERO_ADDRESSES
-        .into_iter()
-        .map(|address| snapshot_byte(internal, address))
-        .collect::<Result<Vec<_>>>()?
-        .into_iter()
-        .all(|value| value != 0)
-        && snapshot_byte(internal, SELECTOR_62_REQUIRED_ZERO_ADDRESS)? == 0;
-    Ok((
-        if predicate_matched {
-            SELECTOR_62_VALUE
-        } else {
-            observed_selector
-        },
-        predicate_matched,
-    ))
+fn snapshot_pair(snapshot: &DecodedSnapshot, addresses: [u16; 2]) -> Result<[u8; 2]> {
+    Ok([
+        snapshot_byte(snapshot, usize::from(addresses[0]))?,
+        snapshot_byte(snapshot, usize::from(addresses[1]))?,
+    ])
 }
 
 fn decode_hex(encoded: &str) -> Result<Vec<u8>> {
@@ -674,21 +656,29 @@ mod tests {
 
     #[test]
     fn dialogue_selector_projection_matches_the_source_predicate() {
+        let selector = BATTLE_RUNTIME_STATE.dialogue_selector_projection;
         let mut internal = DecodedSnapshot {
             start: 0,
             bytes: vec![0; 0x0800],
         };
-        for address in SELECTOR_62_REQUIRED_NONZERO_ADDRESSES {
-            internal.bytes[address] = 1;
+        for address in selector.required_nonzero_addresses {
+            internal.bytes[usize::from(address)] = 1;
         }
 
         assert_eq!(
-            project_dialogue_selector(&internal, 0).unwrap(),
-            (SELECTOR_62_VALUE, true)
+            selector
+                .project(0, |address| snapshot_byte(&internal, usize::from(address)))
+                .unwrap(),
+            (selector.forced_selector, true)
         );
 
-        internal.bytes[SELECTOR_62_REQUIRED_ZERO_ADDRESS] = 1;
-        assert_eq!(project_dialogue_selector(&internal, 7).unwrap(), (7, false));
+        internal.bytes[usize::from(selector.required_zero_addresses[0])] = 1;
+        assert_eq!(
+            selector
+                .project(7, |address| snapshot_byte(&internal, usize::from(address)))
+                .unwrap(),
+            (7, false)
+        );
     }
 
     #[test]

@@ -1,6 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::chapter_transition::ENDING_RECORD_PHASE_ADDRESS;
+use crate::{
+    chapter_transition::ENDING_RECORD_PHASE_ADDRESS,
+    dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct PositiveControlState {
@@ -20,11 +23,14 @@ pub(super) const MAP_EVENT_STATE: u16 = 0x0542;
 pub(super) const TITLE_STATE: u16 = 0x057A;
 pub(super) const TITLE_ANIMATION_STATE: u16 = 0x0587;
 pub(super) const PENDING_SHARED_MENU_REQUEST_STATE: u16 = 0x05CC;
-pub(super) const MAP_DIALOGUE_OUTER_STATE: u16 = 0x05DB;
-pub(super) const MAP_DIALOGUE_RESUME_STATE: u16 = 0x05DC;
+pub(super) const MAP_DIALOGUE_OUTER_STATE: u16 =
+    MAIN_DIALOGUE_RUNTIME_STATE.map_dialogue_outer_state_address;
+pub(super) const MAP_DIALOGUE_RESUME_STATE: u16 =
+    MAIN_DIALOGUE_RUNTIME_STATE.map_dialogue_resume_state_address;
 pub(super) const SHARED_MENU_STATE: u16 = 0x05DE;
 pub(super) const COMPOSITE_SCREEN_STATE: u16 = 0x05E8;
-pub(super) const DIALOGUE_OR_SOUND_STATE: u16 = 0x05EE;
+pub(super) const DIALOGUE_OR_SOUND_STATE: u16 =
+    MAIN_DIALOGUE_RUNTIME_STATE.dialogue_or_sound_state_address;
 // This is a phase selector only inside the sound-test battle route. Gameplay also uses the same
 // address as a unit-row buffer cursor, so it must remain outside the global control-state catalog.
 pub(super) const BATTLE_ANIMATION_TEST_PHASE: u16 = 0x7730;

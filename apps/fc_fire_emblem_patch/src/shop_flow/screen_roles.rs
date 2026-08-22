@@ -1,4 +1,5 @@
 use super::*;
+use crate::dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE;
 
 pub(super) fn purchase_question_handoff_observation() -> RuntimeE7HandoffObservation {
     RuntimeE7HandoffObservation {
@@ -7,8 +8,11 @@ pub(super) fn purchase_question_handoff_observation() -> RuntimeE7HandoffObserva
         source_outer_state: 4,
         handoff_outer_state: 5,
         settled_outer_state: 7,
-        caller_flag_address: 0x7809,
-        caller_flag_address_hex: "0x7809",
+        caller_flag_address: MAIN_DIALOGUE_RUNTIME_STATE.caller_handoff_flag_address,
+        caller_flag_address_hex: format!(
+            "0x{:04X}",
+            MAIN_DIALOGUE_RUNTIME_STATE.caller_handoff_flag_address
+        ),
         caller_flag_value: 1,
         observer_prg_bank: 0x06,
         observer_prg_bank_hex: "0x06",

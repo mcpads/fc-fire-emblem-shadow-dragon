@@ -4,6 +4,7 @@ use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
+    battle_runtime_state::BATTLE_RUNTIME_STATE,
     dialogue_inventory::{
         TranslationSurfaceDialogueTableBinding,
         aggregate_translation_surface_dialogue_literal_inventory,
@@ -26,10 +27,10 @@ pub(super) struct BattleAnimationTranslationSurface {
     shared_engine_outer_phase_hex: &'static str,
     shared_engine_entry: CodeLocation,
     shared_phase_address: u16,
-    shared_phase_address_hex: &'static str,
+    shared_phase_address_hex: String,
     shared_phase_count: usize,
     terminal_shared_phase: u8,
-    terminal_shared_phase_hex: &'static str,
+    terminal_shared_phase_hex: String,
     repeated_outer_phase: u8,
     repeated_outer_phase_hex: &'static str,
     fixed_text_tables: Vec<BattleTextTableBinding>,
@@ -37,9 +38,9 @@ pub(super) struct BattleAnimationTranslationSurface {
     dialogue_table_id: &'static str,
     dialogue_literal_inventory: TranslationSurfaceLiteralInventory,
     dialogue_selector_address: u16,
-    dialogue_selector_address_hex: &'static str,
+    dialogue_selector_address_hex: String,
     dialogue_table_set_address: u16,
-    dialogue_table_set_address_hex: &'static str,
+    dialogue_table_set_address_hex: String,
     message_template_pointer_count: usize,
     message_template_data_byte_count: usize,
     message_template_loader: CodeLocation,
@@ -78,6 +79,8 @@ pub(super) fn bind_battle_animation_translation_surface(
     rom: &Rom,
     dialogue_tables: &[TranslationSurfaceDialogueTableBinding],
 ) -> Result<BattleAnimationTranslationSurface> {
+    let runtime = BATTLE_RUNTIME_STATE;
+    let selector = runtime.dialogue_selector_projection;
     let battle_dialogue = dialogue_tables
         .iter()
         .find(|table| table.table_id == "battle-dialogue")
@@ -148,21 +151,21 @@ pub(super) fn bind_battle_animation_translation_surface(
         shared_engine_outer_phase: 0x05,
         shared_engine_outer_phase_hex: "0x05",
         shared_engine_entry: location(0x05, 0x8161),
-        shared_phase_address: 0x047C,
-        shared_phase_address_hex: "0x047C",
-        shared_phase_count: 32,
-        terminal_shared_phase: 0x1F,
-        terminal_shared_phase_hex: "0x1F",
+        shared_phase_address: runtime.shared_phase_address,
+        shared_phase_address_hex: format!("0x{:04X}", runtime.shared_phase_address),
+        shared_phase_count: usize::from(runtime.shared_phase_count),
+        terminal_shared_phase: runtime.shared_phase_count - 1,
+        terminal_shared_phase_hex: format!("0x{:02X}", runtime.shared_phase_count - 1),
         repeated_outer_phase: 0x03,
         repeated_outer_phase_hex: "0x03",
         fixed_text_tables,
         fixed_text_code_union: partition_source_codes(fixed_text_code_union),
         dialogue_table_id: "battle-dialogue",
         dialogue_literal_inventory,
-        dialogue_selector_address: 0x7936,
-        dialogue_selector_address_hex: "0x7936",
-        dialogue_table_set_address: 0x7935,
-        dialogue_table_set_address_hex: "0x7935",
+        dialogue_selector_address: selector.observed_selector_address,
+        dialogue_selector_address_hex: format!("0x{:04X}", selector.observed_selector_address),
+        dialogue_table_set_address: runtime.dialogue_table_set_address,
+        dialogue_table_set_address_hex: format!("0x{:04X}", runtime.dialogue_table_set_address),
         message_template_pointer_count: 22,
         message_template_data_byte_count: 0x10B,
         message_template_loader: location(0x07, 0x82DC),

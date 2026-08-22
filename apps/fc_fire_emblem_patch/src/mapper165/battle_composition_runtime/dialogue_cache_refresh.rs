@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, ensure};
 
 use crate::{
+    battle_runtime_state::BATTLE_RUNTIME_STATE,
     mmc5_chr::switchable_bank_file_offset,
     mmc5_prg::count_direct_transfers_to_range,
     rom::Rom,
@@ -18,7 +19,6 @@ const FINAL_LOADER_BANK: u8 = 0x04;
 const FINAL_LOADER_ADDRESS: u16 = 0x800F;
 const OVERRIDE_READER_BANK: u8 = 0x05;
 const OVERRIDE_READER_ADDRESS: u16 = 0x85A5;
-const DIALOGUE_SELECTOR_ADDRESS: u16 = 0x7936;
 
 // Bank 04 has one source-bound FF run at $BD82..$BFA0. Use a smaller interior span whose
 // whole-PRG raw JSR/JMP-target backstop is also empty, leaving both boundaries untouched.
@@ -180,7 +180,11 @@ fn build_final_dialogue_cache_refresh(
     let return_selector = next_address(CACHE_REFRESH_ADDRESS, &instructions)?;
     instructions[matching_key_placeholder] = Instruction::BeqAbsolute(return_selector);
     instructions.extend([
-        Instruction::LdaAbsolute(DIALOGUE_SELECTOR_ADDRESS),
+        Instruction::LdaAbsolute(
+            BATTLE_RUNTIME_STATE
+                .dialogue_selector_projection
+                .observed_selector_address,
+        ),
         Instruction::Rts,
     ]);
     Ok(BuiltDialogueCacheRefresh {
@@ -199,7 +203,11 @@ fn redirect_final_dialogue_loader(image: &mut TrackedImage, refresh_entry: u16) 
         switchable_bank_file_offset(FINAL_LOADER_BANK, FINAL_LOADER_ADDRESS)?,
         &assemble_at(
             FINAL_LOADER_ADDRESS,
-            &[Instruction::LdaAbsolute(DIALOGUE_SELECTOR_ADDRESS)],
+            &[Instruction::LdaAbsolute(
+                BATTLE_RUNTIME_STATE
+                    .dialogue_selector_projection
+                    .observed_selector_address,
+            )],
         )?,
         &assemble_at(
             FINAL_LOADER_ADDRESS,
@@ -285,7 +293,7 @@ fn next_address(origin: u16, instructions: &[Instruction]) -> Result<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mapper165::battle_composition_loader_probe::PROBE_RUNTIME_LAYOUT;
+    use crate::mapper165::battle_composition_runtime::PROBE_RUNTIME_LAYOUT;
 
     #[test]
     fn final_loader_hook_replaces_only_the_last_selector_read() {

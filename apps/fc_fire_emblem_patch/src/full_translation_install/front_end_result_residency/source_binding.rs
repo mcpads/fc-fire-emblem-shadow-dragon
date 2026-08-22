@@ -3,14 +3,15 @@ use std::collections::BTreeSet;
 use anyhow::{Context, Result, ensure};
 
 use crate::{
-    mmc5_chr::switchable_bank_file_offset, rom::Rom, sha1_hex, typed_source::decode_rp2a03_sequence,
+    dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE, mmc5_chr::switchable_bank_file_offset,
+    rom::Rom, sha1_hex, typed_source::decode_rp2a03_sequence,
 };
 
 const SOURCE_PRG_BANK: u8 = 0x02;
 const SAVE_SUMMARY_PRG_BANK: u8 = 0x0B;
 const SAVE_SUMMARY_COMPOSER_ADDRESS: u16 = 0x8D4B;
-const RESULT_INDEX_ADDRESS: u16 = 0x77F1;
-const RESULT_DIRECTORY_ADDRESS: u16 = 0x77F4;
+const RESULT_INDEX_ADDRESS: u16 = MAIN_DIALOGUE_RUNTIME_STATE.entry_index_address;
+const RESULT_DIRECTORY_ADDRESS: u16 = MAIN_DIALOGUE_RUNTIME_STATE.directory_selector_address;
 const RESULT_DIRECTORY: u8 = 0xB1;
 
 /// 선택한 기록의 5바이트 유닛 레코드를 `$76F4..=$76F8`로 복사한 뒤 공용 유닛

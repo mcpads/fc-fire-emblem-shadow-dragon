@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 use anyhow::{Context, Result, ensure};
 
 use crate::{
+    dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE,
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
     sha1_hex,
@@ -98,7 +99,7 @@ fn selector_routine() -> Result<Vec<u8>> {
             Instruction::LdaZeroPage(0x61),
             Instruction::BneAbsolute(0xA0B4),
             Instruction::LdaImmediate(LATE_CHAPTER_RECORD),
-            Instruction::StaAbsolute(0x05EE),
+            Instruction::StaAbsolute(MAIN_DIALOGUE_RUNTIME_STATE.dialogue_or_sound_state_address),
             Instruction::LdaImmediate(NO_SAVE_RECORD),
             Instruction::BneAbsolute(0xA0EB),
             Instruction::JsrAbsolute(0xF111),
@@ -126,14 +127,14 @@ fn selector_routine() -> Result<Vec<u8>> {
             Instruction::CpyImmediate(0x05),
             Instruction::BccAbsolute(0xA0EB),
             Instruction::LdaImmediate(LATE_CHAPTER_RECORD),
-            Instruction::StaAbsolute(0x77F1),
+            Instruction::StaAbsolute(MAIN_DIALOGUE_RUNTIME_STATE.entry_index_address),
             Instruction::LdaImmediate(0x00),
             Instruction::StaAbsolute(0x77F0),
             Instruction::LdaImmediate(GAME_OVER_DIALOGUE_DIRECTORY_SELECTOR),
-            Instruction::StaAbsolute(0x77F4),
+            Instruction::StaAbsolute(MAIN_DIALOGUE_RUNTIME_STATE.directory_selector_address),
             Instruction::LdaImmediate(0x01),
-            Instruction::StaAbsolute(0x77F7),
-            Instruction::IncAbsolute(0x05EE),
+            Instruction::StaAbsolute(MAIN_DIALOGUE_RUNTIME_STATE.state_address),
+            Instruction::IncAbsolute(MAIN_DIALOGUE_RUNTIME_STATE.dialogue_or_sound_state_address),
             Instruction::Rts,
         ],
     )

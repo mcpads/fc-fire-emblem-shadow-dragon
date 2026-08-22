@@ -8,15 +8,15 @@ use crate::{
 
 use super::super::super::{
     BoundFontPageFallbackGraph, FontPageFallbackNodeRole,
+    dialogue_font_page::assignment_sha1,
     dialogue_lifetime_page::{DialogueLifetimePagePlan, SCREEN_ROLE},
-    dialogue_probe_font::assignment_sha1,
-    hangul_page_probe::HangulPageProbeSummary,
     maximum_dialogue_page::{
         COMPLETED_PAGE_COUNT as MAXIMUM_DIALOGUE_PAGE_COUNT,
         DISPLAY_LINES_PER_PAGE as MAXIMUM_DIALOGUE_LINES_PER_PAGE,
         SCREEN_ROLE as MAXIMUM_DIALOGUE_SCREEN_ROLE,
     },
     shop_dialogue_page::{SCREEN_ROLE as SHOP_DIALOGUE_SCREEN_ROLE, ShopDialoguePagePlan},
+    ui_page_install::UiPageInstallSummary,
     weapon_shop_shared_text::SCREEN_ROLE as WEAPON_SHOP_SHARED_TEXT_SCREEN_ROLE,
 };
 use super::super::{
@@ -53,7 +53,7 @@ pub(in crate::mapper165::cumulative_patch) struct CumulativeReportInputs<'a> {
     pub(in crate::mapper165::cumulative_patch) input_plan: &'a CumulativeInputPlan,
     pub(in crate::mapper165::cumulative_patch) output_sha1: String,
     pub(in crate::mapper165::cumulative_patch) output_rom: &'a Rom,
-    pub(in crate::mapper165::cumulative_patch) ui_stage: &'a HangulPageProbeSummary,
+    pub(in crate::mapper165::cumulative_patch) ui_stage: &'a UiPageInstallSummary,
     pub(in crate::mapper165::cumulative_patch) chapter_one_output_sha1: String,
     pub(in crate::mapper165::cumulative_patch) chapter_two_output_sha1: String,
     pub(in crate::mapper165::cumulative_patch) chapter_one_plans: &'a [MainDialogueSlicePlan],

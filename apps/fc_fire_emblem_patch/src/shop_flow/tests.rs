@@ -1,5 +1,8 @@
 use super::*;
-use crate::rom::{CHR_SIZE, EXPECTED_HEADER, PRG_SIZE};
+use crate::{
+    dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE,
+    rom::{CHR_SIZE, EXPECTED_HEADER, PRG_SIZE},
+};
 
 fn source_fixture() -> Vec<u8> {
     let mut source = vec![0; HEADER_SIZE + PRG_SIZE + CHR_SIZE];
@@ -78,7 +81,10 @@ fn e7_purchase_question_handoff_keeps_the_item_list_in_the_font_page_lifetime() 
     assert_eq!(observation.source_outer_state, 4);
     assert_eq!(observation.handoff_outer_state, 5);
     assert_eq!(observation.settled_outer_state, 7);
-    assert_eq!(observation.caller_flag_address, 0x7809);
+    assert_eq!(
+        observation.caller_flag_address,
+        MAIN_DIALOGUE_RUNTIME_STATE.caller_handoff_flag_address
+    );
     assert_eq!(observation.observer_read_cpu_address, 0xA144);
     assert!(
         observation

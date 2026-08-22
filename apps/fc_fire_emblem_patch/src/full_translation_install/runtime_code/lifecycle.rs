@@ -21,6 +21,7 @@ use super::{RuntimeRoutine, next_address};
 use crate::{
     chapter_transition::{ENDING_CHARACTER_EPILOGUE_SELECTOR_PHASE, ENDING_RECORD_PHASE_ADDRESS},
     dialogue_inventory::switchable_cpu_to_file_offset,
+    dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE,
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
     sha1_hex,
@@ -41,7 +42,7 @@ pub(super) const E6_TRANSITION_SITE: u16 = 0x865F;
 pub(super) const E7_RESUME_SITE: u16 = 0x871C;
 
 const MAIN_DIALOGUE_BANK: u8 = 0x0A;
-const DIALOGUE_STATE: u16 = 0x77F7;
+const DIALOGUE_STATE: u16 = MAIN_DIALOGUE_RUNTIME_STATE.state_address;
 pub(super) const TERMINAL_STATE: u8 = 0x0F;
 pub(super) const IDLE_STATE: u8 = 0x10;
 const CONTINUE_STATE: u8 = 0x09;
@@ -51,7 +52,8 @@ const PAGE_ADVANCE_CLEAR: u16 = 0x7804;
 const E7_DECODER_FLAG: u16 = 0x7808;
 /// E7 외부 호출자가 복귀를 요청할 때 올리고, `$871C`의 resolver 직후 지우는
 /// 원본 플래그다. E4/E6 lookahead에서는 0, caller resume에서는 1이다.
-pub(in crate::full_translation_install) const E7_CALLER_RESUME_FLAG: u16 = 0x7809;
+pub(in crate::full_translation_install) const E7_CALLER_RESUME_FLAG: u16 =
+    MAIN_DIALOGUE_RUNTIME_STATE.caller_handoff_flag_address;
 
 const BANK_VALUE_REGISTER: u16 = 0x8001;
 const PAIRED_BANK_HELPER: u16 = 0xFA20;

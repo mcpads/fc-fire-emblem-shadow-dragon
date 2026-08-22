@@ -1,14 +1,20 @@
+use crate::{
+    battle_runtime_state::BATTLE_RUNTIME_STATE, dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE,
+};
+
 pub(super) const PRG_BANK_SIZE: usize = 16 * 1024;
 pub(super) const SWITCHABLE_CPU_START: u16 = 0x8000;
 pub(super) const SWITCHABLE_CPU_END_EXCLUSIVE: u16 = 0xC000;
 pub(super) const FIXED_CPU_START: u16 = 0xC000;
 pub(super) const DIALOGUE_DIRECTORY_CPU_ADDRESS: u16 = 0xBFE0;
 pub(super) const MAIN_DIALOGUE_PRG_BANK: u8 = 0x0A;
-pub(super) const MAIN_DIALOGUE_STATE_ADDRESS: u16 = 0x77F7;
+pub(super) const MAIN_DIALOGUE_STATE_ADDRESS: u16 = MAIN_DIALOGUE_RUNTIME_STATE.state_address;
 pub(super) const MAIN_DIALOGUE_DISPATCHER_CPU_ADDRESS: u16 = 0x8000;
 pub(super) const MAIN_DIALOGUE_HANDLER_TABLE_CPU_ADDRESS: u16 = 0x8006;
-pub(crate) const MAIN_DIALOGUE_COMPLETION_FLAG_ADDRESS: u16 = 0x7803;
-pub(crate) const MAIN_DIALOGUE_CALLER_HANDOFF_FLAG_ADDRESS: u16 = 0x7809;
+pub(crate) const MAIN_DIALOGUE_COMPLETION_FLAG_ADDRESS: u16 =
+    MAIN_DIALOGUE_RUNTIME_STATE.completion_flag_address;
+pub(crate) const MAIN_DIALOGUE_CALLER_HANDOFF_FLAG_ADDRESS: u16 =
+    MAIN_DIALOGUE_RUNTIME_STATE.caller_handoff_flag_address;
 pub(super) const OPTIONAL_E5_PREFIX_CODE: u8 = 0xE5;
 pub(super) const OPTIONAL_E8_PREFIX_CODE: u8 = 0xE8;
 pub(super) const OPTIONAL_PREFIX_BYTE_COUNT: usize = 6;
@@ -207,7 +213,7 @@ pub(super) struct CallerHandoffDispatchSpec {
 pub(super) const CALLER_HANDOFF_DISPATCH_SPECS: [CallerHandoffDispatchSpec; 11] = [
     CallerHandoffDispatchSpec {
         prg_bank: 0x02,
-        state_address: 0x05DB,
+        state_address: MAIN_DIALOGUE_RUNTIME_STATE.map_dialogue_outer_state_address,
         dispatcher_cpu_address: 0xA780,
         handler_table_cpu_address: 0xA786,
         handler_cpu_address: 0xA975,
@@ -229,7 +235,7 @@ pub(super) const CALLER_HANDOFF_DISPATCH_SPECS: [CallerHandoffDispatchSpec; 11] 
     },
     CallerHandoffDispatchSpec {
         prg_bank: 0x06,
-        state_address: 0x05DB,
+        state_address: MAIN_DIALOGUE_RUNTIME_STATE.map_dialogue_outer_state_address,
         dispatcher_cpu_address: 0x9595,
         handler_table_cpu_address: 0x959B,
         handler_cpu_address: 0xA13E,
@@ -238,7 +244,7 @@ pub(super) const CALLER_HANDOFF_DISPATCH_SPECS: [CallerHandoffDispatchSpec; 11] 
     },
     CallerHandoffDispatchSpec {
         prg_bank: 0x06,
-        state_address: 0x05DB,
+        state_address: MAIN_DIALOGUE_RUNTIME_STATE.map_dialogue_outer_state_address,
         dispatcher_cpu_address: 0x99AC,
         handler_table_cpu_address: 0x99B2,
         handler_cpu_address: 0xA13E,
@@ -250,7 +256,7 @@ pub(super) const CALLER_HANDOFF_DISPATCH_SPECS: [CallerHandoffDispatchSpec; 11] 
     },
     CallerHandoffDispatchSpec {
         prg_bank: 0x06,
-        state_address: 0x05DB,
+        state_address: MAIN_DIALOGUE_RUNTIME_STATE.map_dialogue_outer_state_address,
         dispatcher_cpu_address: 0x9C63,
         handler_table_cpu_address: 0x9C69,
         handler_cpu_address: 0xA13E,
@@ -262,7 +268,7 @@ pub(super) const CALLER_HANDOFF_DISPATCH_SPECS: [CallerHandoffDispatchSpec; 11] 
     },
     CallerHandoffDispatchSpec {
         prg_bank: 0x06,
-        state_address: 0x05DB,
+        state_address: MAIN_DIALOGUE_RUNTIME_STATE.map_dialogue_outer_state_address,
         dispatcher_cpu_address: 0x9DBE,
         handler_table_cpu_address: 0x9DC4,
         handler_cpu_address: 0xA13E,
@@ -274,7 +280,7 @@ pub(super) const CALLER_HANDOFF_DISPATCH_SPECS: [CallerHandoffDispatchSpec; 11] 
     },
     CallerHandoffDispatchSpec {
         prg_bank: 0x06,
-        state_address: 0x05DB,
+        state_address: MAIN_DIALOGUE_RUNTIME_STATE.map_dialogue_outer_state_address,
         dispatcher_cpu_address: 0xB10D,
         handler_table_cpu_address: 0xB113,
         handler_cpu_address: 0xA13E,
@@ -285,7 +291,7 @@ pub(super) const CALLER_HANDOFF_DISPATCH_SPECS: [CallerHandoffDispatchSpec; 11] 
     },
     CallerHandoffDispatchSpec {
         prg_bank: 0x06,
-        state_address: 0x05DB,
+        state_address: MAIN_DIALOGUE_RUNTIME_STATE.map_dialogue_outer_state_address,
         dispatcher_cpu_address: 0xB7F1,
         handler_table_cpu_address: 0xB7F7,
         handler_cpu_address: 0xA13E,
@@ -294,7 +300,7 @@ pub(super) const CALLER_HANDOFF_DISPATCH_SPECS: [CallerHandoffDispatchSpec; 11] 
     },
     CallerHandoffDispatchSpec {
         prg_bank: 0x0B,
-        state_address: 0x05EE,
+        state_address: MAIN_DIALOGUE_RUNTIME_STATE.dialogue_or_sound_state_address,
         dispatcher_cpu_address: 0x995F,
         handler_table_cpu_address: 0x9965,
         handler_cpu_address: 0x9B14,
@@ -306,7 +312,7 @@ pub(super) const CALLER_HANDOFF_DISPATCH_SPECS: [CallerHandoffDispatchSpec; 11] 
     },
     CallerHandoffDispatchSpec {
         prg_bank: 0x0B,
-        state_address: 0x05EE,
+        state_address: MAIN_DIALOGUE_RUNTIME_STATE.dialogue_or_sound_state_address,
         dispatcher_cpu_address: 0xA01C,
         handler_table_cpu_address: 0xA022,
         handler_cpu_address: 0x9B14,
@@ -318,7 +324,7 @@ pub(super) const CALLER_HANDOFF_DISPATCH_SPECS: [CallerHandoffDispatchSpec; 11] 
     },
     CallerHandoffDispatchSpec {
         prg_bank: 0x0B,
-        state_address: 0x05EE,
+        state_address: MAIN_DIALOGUE_RUNTIME_STATE.dialogue_or_sound_state_address,
         dispatcher_cpu_address: 0xB369,
         handler_table_cpu_address: 0xB36F,
         handler_cpu_address: 0x9B14,
@@ -351,14 +357,31 @@ pub(super) struct DirectorySelectorUseSpec {
 }
 
 #[derive(Clone, Copy)]
+pub(super) enum ConsumerSelectorSpec {
+    MemoryAddress(u16),
+    #[cfg(test)]
+    Description(&'static str),
+}
+
+impl ConsumerSelectorSpec {
+    pub(super) fn label(self) -> String {
+        match self {
+            Self::MemoryAddress(address) => format!("0x{address:04X}"),
+            #[cfg(test)]
+            Self::Description(description) => description.to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
 pub(super) struct SeparateConsumerSpec {
     pub(super) prg_bank: u8,
     pub(super) loader_cpu_address: u16,
     pub(super) loader_code: &'static [u8],
     pub(super) table_set_index: u8,
     pub(super) table_root_cell_cpu_address: u16,
-    pub(super) table_set_selector: &'static str,
-    pub(super) entry_index_selector: &'static str,
+    pub(super) table_set_selector: ConsumerSelectorSpec,
+    pub(super) entry_index_selector: ConsumerSelectorSpec,
     pub(super) destination_pointer: &'static str,
 }
 
@@ -408,14 +431,19 @@ pub(super) const BATTLE_DIALOGUE_CONSUMER: SeparateConsumerSpec = SeparateConsum
     ],
     table_set_index: 0,
     table_root_cell_cpu_address: 0x802D,
-    table_set_selector: "0x7935",
-    entry_index_selector: "0x7936",
+    table_set_selector: ConsumerSelectorSpec::MemoryAddress(
+        BATTLE_RUNTIME_STATE.dialogue_table_set_address,
+    ),
+    entry_index_selector: ConsumerSelectorSpec::MemoryAddress(
+        BATTLE_RUNTIME_STATE
+            .dialogue_selector_projection
+            .observed_selector_address,
+    ),
     destination_pointer: "0x76/0x77",
 };
 
 pub(super) const BATTLE_DIALOGUE_TABLE_ID: &str = "battle-dialogue";
 pub(super) const BATTLE_DIALOGUE_PRG_BANK: u8 = 0x04;
-pub(super) const BATTLE_DIALOGUE_STATE_ADDRESS: u16 = 0x7937;
 pub(super) const BATTLE_DIALOGUE_DISPATCHER_CPU_ADDRESS: u16 = 0x8031;
 pub(super) const BATTLE_DIALOGUE_HANDLER_TABLE_CPU_ADDRESS: u16 = 0x8037;
 pub(super) const BATTLE_DIALOGUE_STATE_HANDLERS: [u16; 9] = [

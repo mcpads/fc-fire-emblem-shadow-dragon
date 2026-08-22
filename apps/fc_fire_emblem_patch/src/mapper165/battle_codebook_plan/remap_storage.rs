@@ -2,6 +2,7 @@ use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
+    battle_runtime_state::BATTLE_RUNTIME_STATE,
     rom::Rom,
     runtime_storage_layout::{
         BATTLE_REMAP_PAIR_TABLE_END, BATTLE_REMAP_PAIR_TABLE_START, BATTLE_REMAP_STATE_ADDRESS,
@@ -22,7 +23,6 @@ pub(in crate::mapper165) use source_contract::{
 
 const PAIR_TABLE_BYTE_COUNT: usize = 16;
 const MAXIMUM_REMAP_PAIR_COUNT: usize = 8;
-const BATTLE_ACTIVE_FLAG: u16 = 0x047D;
 const REMAP_COUNT_MASK: u8 = 0x1E;
 const REMAP_COUNT_SHIFT: u8 = 1;
 const CACHE_READY_MASK: u8 = 0x80;
@@ -122,7 +122,7 @@ pub(super) fn bind_battle_remap_storage(
         pair_table_end_hex: format!("0x{pair_table_end:04X}"),
         pair_table_byte_count: PAIR_TABLE_BYTE_COUNT,
         remap_state_address_hex: format!("0x{BATTLE_REMAP_STATE_ADDRESS:04X}"),
-        original_active_address_hex: format!("0x{BATTLE_ACTIVE_FLAG:04X}"),
+        original_active_address_hex: format!("0x{:04X}", BATTLE_RUNTIME_STATE.active_flag_address),
         remap_count_mask_hex: format!("0x{REMAP_COUNT_MASK:02X}"),
         remap_count_shift: REMAP_COUNT_SHIFT,
         cache_ready_mask_hex: format!("0x{CACHE_READY_MASK:02X}"),
@@ -154,7 +154,7 @@ pub(super) fn test_model() -> BattleRemapStorageContract {
         pair_table_end_hex: "0x07EF".to_owned(),
         pair_table_byte_count: 16,
         remap_state_address_hex: "0x07FE".to_owned(),
-        original_active_address_hex: "0x047D".to_owned(),
+        original_active_address_hex: format!("0x{:04X}", BATTLE_RUNTIME_STATE.active_flag_address),
         remap_count_mask_hex: "0x1E".to_owned(),
         remap_count_shift: 1,
         cache_ready_mask_hex: "0x80".to_owned(),

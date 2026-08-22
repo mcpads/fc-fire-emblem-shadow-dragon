@@ -17,7 +17,7 @@ use crate::{
 
 use super::{
     OUTPUT_MAPPER, battle_codebook_plan::plan_battle_cache_composition_material,
-    dialogue_probe_font::SOURCE_FONT_PHYSICAL_PAGE, install_mapper165_parity_bytes,
+    dialogue_font_page::SOURCE_FONT_PHYSICAL_PAGE, install_mapper165_parity_bytes,
 };
 
 const EXPANDED_PRG_SIZE: usize = 512 * 1024;

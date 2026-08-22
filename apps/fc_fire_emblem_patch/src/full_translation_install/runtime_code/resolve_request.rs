@@ -36,7 +36,10 @@ use super::transport::{
     PHASE_RESTORE, RESTORE_CHUNK_COUNT, STATE_COMPLETED_PAGE_SUSPENDED, STATE_READY,
 };
 use super::{RuntimeRoutine, next_address};
-use crate::rp2a03::{Instruction, assemble_at};
+use crate::{
+    dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE,
+    rp2a03::{Instruction, assemble_at},
+};
 
 pub(in crate::full_translation_install) const INITIAL_PAGE_REQUEST_RESOLVER_ROLE: &str =
     "dialogue initial-page request resolver";
@@ -44,9 +47,10 @@ pub(in crate::full_translation_install) const NEXT_PAGE_REQUEST_RESOLVER_ROLE: &
     "dialogue next-page request resolver";
 
 /// 원본이 디렉터리 선택자를 담아 두는 자리다.
-pub(super) const SOURCE_DIRECTORY_SELECTOR: u16 = 0x77F4;
+pub(super) const SOURCE_DIRECTORY_SELECTOR: u16 =
+    MAIN_DIALOGUE_RUNTIME_STATE.directory_selector_address;
 /// 원본이 엔트리 색인을 담아 두는 자리다.
-pub(super) const SOURCE_ENTRY_INDEX: u16 = 0x77F1;
+pub(super) const SOURCE_ENTRY_INDEX: u16 = MAIN_DIALOGUE_RUNTIME_STATE.entry_index_address;
 /// 식별표에서 «없는 선택자»를 뜻하는 값이다.
 const MISSING_TABLE: u8 = 0xFF;
 /// 새 대사 수명에서 살아 있는 원본 selector/index를 현재 레코드로 해석한다.

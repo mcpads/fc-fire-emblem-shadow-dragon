@@ -16,7 +16,7 @@ use crate::{
 };
 
 use super::{
-    dialogue_probe_font::{assign_glyph_codes_excluding, build_font_page},
+    dialogue_font_page::{assign_glyph_codes_excluding, build_font_page},
     encode_chr_page_register,
 };
 use evidence::load_unit_name_screen_evidence;

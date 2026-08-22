@@ -21,7 +21,7 @@ use crate::{
     font_slots::{ACTIVE_HANGUL_SLOT_COUNT, FONT_PAGE_SIZE, FONT_TILE_SIZE, active_hangul_codes},
     mapper165::{
         FinalRosterFontPage, FinalRosterFontProjection,
-        dialogue_probe_font::build_font_page_by_code, encode_chr_page_register,
+        dialogue_font_page::build_font_page_by_code, encode_chr_page_register,
         font_pair_projection::RightFontPageProjection,
     },
     roster_localization::ValidatedRosterLocalization,

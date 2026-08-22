@@ -29,7 +29,7 @@ pub(super) struct RuntimeE7HandoffObservation {
     pub(super) handoff_outer_state: u8,
     pub(super) settled_outer_state: u8,
     pub(super) caller_flag_address: u16,
-    pub(super) caller_flag_address_hex: &'static str,
+    pub(super) caller_flag_address_hex: String,
     pub(super) caller_flag_value: u8,
     pub(super) observer_prg_bank: u8,
     pub(super) observer_prg_bank_hex: &'static str,

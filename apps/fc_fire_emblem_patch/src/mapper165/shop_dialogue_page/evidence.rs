@@ -8,7 +8,8 @@ use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 
 use crate::{
-    rom::EXPECTED_SOURCE_SHA1, sha1_hex, shop_flow::WEAPON_SHOP_DIALOGUE_LIFETIME_RECORD_IDS,
+    dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE, rom::EXPECTED_SOURCE_SHA1, sha1_hex,
+    shop_flow::WEAPON_SHOP_DIALOGUE_LIFETIME_RECORD_IDS,
 };
 
 use super::SCREEN_ROLE;
@@ -23,10 +24,12 @@ const DIALOGUE_INTERIOR_ROW_START: usize = 15;
 const DIALOGUE_INTERIOR_ROW_END_EXCLUSIVE: usize = 25;
 const DIALOGUE_INTERIOR_COLUMN_START: usize = 7;
 const DIALOGUE_INTERIOR_COLUMN_END_EXCLUSIVE: usize = 25;
-const SHOP_OUTER_STATE_ADDRESS: usize = 0x05DB;
+const SHOP_OUTER_STATE_ADDRESS: usize =
+    MAIN_DIALOGUE_RUNTIME_STATE.map_dialogue_outer_state_address as usize;
 const SELECTED_FACILITY_PRG_RAM_OFFSET: usize = 0x77D0 - 0x6000;
 const DIALOGUE_BANK_PRG_RAM_OFFSET: usize = 0x77F2 - 0x6000;
-const DIALOGUE_DIRECTORY_PRG_RAM_OFFSET: usize = 0x77F4 - 0x6000;
+const DIALOGUE_DIRECTORY_PRG_RAM_OFFSET: usize =
+    MAIN_DIALOGUE_RUNTIME_STATE.directory_selector_address as usize - 0x6000;
 
 #[derive(Debug, Deserialize)]
 struct ShopScreenEvidenceManifest {

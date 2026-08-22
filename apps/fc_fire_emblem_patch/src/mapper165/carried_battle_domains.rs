@@ -16,6 +16,10 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    battle_runtime_state::{
+        BATTLE_COMPOSITION_LIFETIME_START_WRITES, SAME_BATTLE_ROUND_ACTIVATION_WRITE,
+        SOUND_TEST_BATTLE_COMPOSITION_LIFETIME_START_WRITE,
+    },
     battle_text_workset::{
         FORECAST_LABEL_FILE_OFFSET, FORECAST_LABEL_GLYPHS, FORECAST_LABEL_SOURCE,
     },
@@ -28,16 +32,14 @@ use crate::{
 };
 
 use super::{
-    BATTLE_COMPOSITION_LIFETIME_START_WRITES, SAME_BATTLE_ROUND_ACTIVATION_WRITE,
-    SOUND_TEST_BATTLE_COMPOSITION_LIFETIME_START_WRITE,
     battle_codebook_plan::{
         bind_known_battle_text_consumer_topology, plan_battle_cache_composition_material,
         plan_canonical_battle_codebook,
     },
-    battle_composition_loader_probe::{
+    battle_composition_runtime::{
         CUMULATIVE_RUNTIME_LAYOUT, cumulative_battle_central_right_fd_selector,
     },
-    battle_text_cache_probe::{
+    battle_text_material::{
         COLOR_BIT_MASKS, COLOR_BIT_MASKS_PRG_OFFSET, DYNAMIC_ASSIGNMENT_CODE_PRG_OFFSET,
         GLYPH_ATLAS_PRG_OFFSET, PHYSICAL_CODE_TABLE_PRG_OFFSET,
         PROTECTED_ABSTRACT_COLORS_PRG_OFFSET, RECIPE_BLOB_PRG_OFFSET,
@@ -316,7 +318,8 @@ pub(crate) fn inspect_carried_battle_domains(
     let shared_consumer_regions = bind_shared_consumer_route(&inputs)?;
     let shared_sprite_chr_supply =
         bind_battle_chr_supply(inputs.source, inputs.cumulative, inputs.integrated)?;
-    let (round_bank, round_address) = SAME_BATTLE_ROUND_ACTIVATION_WRITE;
+    let round_bank = SAME_BATTLE_ROUND_ACTIVATION_WRITE.prg_bank;
+    let round_address = SAME_BATTLE_ROUND_ACTIVATION_WRITE.cpu_address;
     let [main_start, arena_start, sound_start] = BATTLE_COMPOSITION_LIFETIME_START_WRITES;
     let shared_consumer_route_binding_ids = vec![
         "04:800F:guard_final_battle_dialogue_cache".to_owned(),
@@ -325,15 +328,15 @@ pub(crate) fn inspect_carried_battle_domains(
         format!("{round_bank:02X}:{round_address:04X}:preserve_same_battle_round_activation"),
         format!(
             "{:02X}:{:04X}:initialize_battle_remap",
-            main_start.0, main_start.1
+            main_start.prg_bank, main_start.cpu_address
         ),
         format!(
             "{:02X}:{:04X}:initialize_battle_remap",
-            arena_start.0, arena_start.1
+            arena_start.prg_bank, arena_start.cpu_address
         ),
         format!(
             "{:02X}:{:04X}:initialize_battle_remap",
-            sound_start.0, sound_start.1
+            sound_start.prg_bank, sound_start.cpu_address
         ),
         "0F:C191:dispatch_battle_composition".to_owned(),
         "0F:E57F:project_shared_battle_text_code".to_owned(),
@@ -689,8 +692,10 @@ fn bind_shared_consumer_route(
             inputs.integrated,
         )?);
     }
-    let (round_bank, round_address) = SAME_BATTLE_ROUND_ACTIVATION_WRITE;
-    let (sound_bank, sound_address) = SOUND_TEST_BATTLE_COMPOSITION_LIFETIME_START_WRITE;
+    let round_bank = SAME_BATTLE_ROUND_ACTIVATION_WRITE.prg_bank;
+    let round_address = SAME_BATTLE_ROUND_ACTIVATION_WRITE.cpu_address;
+    let sound_bank = SOUND_TEST_BATTLE_COMPOSITION_LIFETIME_START_WRITE.prg_bank;
+    let sound_address = SOUND_TEST_BATTLE_COMPOSITION_LIFETIME_START_WRITE.cpu_address;
     for (role, bank, address, byte_count) in [
         ("battle_dialogue_final_loader", 0x04, 0x8000, 29),
         ("battle_dialogue_cache_refresh", 0x04, 0xBF40, 0x40),

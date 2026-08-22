@@ -3,7 +3,9 @@ use std::collections::BTreeSet;
 use anyhow::{Result, ensure};
 use serde::Serialize;
 
-use crate::{rom::Rom, typed_source::decode_rp2a03_sequence};
+use crate::{
+    battle_runtime_state::BATTLE_RUNTIME_STATE, rom::Rom, typed_source::decode_rp2a03_sequence,
+};
 
 use super::super::{CodeLocation, location, source_contract::source_slice};
 
@@ -33,7 +35,6 @@ const BATTLE_DIALOGUE_INPUT_HANDLER_LENGTH: usize = 0x34;
 const SHARED_BATTLE_COMPLETION_ADDRESS: u16 = 0xB956;
 const SHARED_BATTLE_COMPLETION_LENGTH: usize = 13;
 const CONTROLLER_INPUT_ADDRESS: u16 = 0x0018;
-const BATTLE_DIALOGUE_STATE_ADDRESS: u16 = 0x7937;
 const CLASS_CHANGE_DIALOGUE_STATE: u8 = 0x04;
 const DECODE_ACTIVITY_ADDRESS: u16 = 0x76ED;
 const PUBLISHED_ROW_PENDING_ADDRESS: u16 = 0x794A;
@@ -102,6 +103,7 @@ struct NestedBattleDialogueInput {
 }
 
 pub(super) fn inspect(rom: &Rom) -> Result<ClassChangeContract> {
+    let dialogue_state_address = BATTLE_RUNTIME_STATE.dialogue_state_address;
     let primary = fixed_array::<ITEM_COUNT>(rom, PRIMARY_CLASS_TABLE_ADDRESS)?;
     let alternate = fixed_array::<ITEM_COUNT>(rom, ALTERNATE_CLASS_TABLE_ADDRESS)?;
     let target = fixed_array::<ITEM_COUNT>(rom, TARGET_CLASS_TABLE_ADDRESS)?;
@@ -216,8 +218,8 @@ pub(super) fn inspect(rom: &Rom) -> Result<ClassChangeContract> {
             handler: location(BATTLE_DIALOGUE_BANK, BATTLE_DIALOGUE_INPUT_HANDLER_ADDRESS),
             controller_input_address: CONTROLLER_INPUT_ADDRESS,
             controller_input_address_hex: format!("0x{CONTROLLER_INPUT_ADDRESS:04X}"),
-            dialogue_state_address: BATTLE_DIALOGUE_STATE_ADDRESS,
-            dialogue_state_address_hex: format!("0x{BATTLE_DIALOGUE_STATE_ADDRESS:04X}"),
+            dialogue_state_address,
+            dialogue_state_address_hex: format!("0x{dialogue_state_address:04X}"),
             acknowledgement_state: CLASS_CHANGE_DIALOGUE_STATE,
             acknowledgement_state_hex: format!("0x{CLASS_CHANGE_DIALOGUE_STATE:02X}"),
             decode_activity_address: DECODE_ACTIVITY_ADDRESS,

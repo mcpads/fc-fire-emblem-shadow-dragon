@@ -23,7 +23,7 @@ use crate::{
 
 use super::{
     FIRST_EXTENSION_CHR_PAGE,
-    battle_composition_loader_probe::{
+    battle_composition_runtime::{
         CUMULATIVE_RUNTIME_LAYOUT, cumulative_battle_central_right_fd_selector,
     },
     bind_front_end_font_page_selector, bind_unit_name_font_page_selector,
@@ -32,7 +32,7 @@ use super::{
         PROFILE_PAGE_SELECTOR_ADDRESS, TITLE_COMPOSER_HOOK_ADDRESS, build_profile_page_selector,
         build_title_composer_hook,
     },
-    dialogue_probe_font::assignment_sha1,
+    dialogue_font_page::assignment_sha1,
     encode_chr_page_register,
     font_pair_projection::{WRITE_TRANSLATED_CHR_PAGE_ADDRESS, build_translated_chr_page_writer},
     front_end_page::PAGE_ROUTINE_ADDRESS as FRONT_END_PAGE_ROUTINE_ADDRESS,

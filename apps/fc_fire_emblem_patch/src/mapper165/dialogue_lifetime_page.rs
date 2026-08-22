@@ -8,6 +8,7 @@ use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 
 use crate::{
+    dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE,
     font_slots::{FONT_PAGE_SIZE, active_hangul_codes},
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     rp2a03::{Instruction, assemble_at},
@@ -16,7 +17,7 @@ use crate::{
 
 use super::{
     FIRST_EXTENSION_CHR_PAGE, SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
-    dialogue_probe_font::{assign_glyph_codes_excluding, build_font_page},
+    dialogue_font_page::{assign_glyph_codes_excluding, build_font_page},
     encode_chr_page_register,
 };
 
@@ -300,7 +301,7 @@ pub(super) fn build_page_routine_at(
             Instruction::LdaZeroPage(0x5C),
             Instruction::CmpImmediate(0x18),
             Instruction::BneAbsolute(fallback_address),
-            Instruction::LdaAbsolute(0x77F7),
+            Instruction::LdaAbsolute(MAIN_DIALOGUE_RUNTIME_STATE.state_address),
             Instruction::CmpImmediate(0x03),
             Instruction::BneAbsolute(fallback_address),
             Instruction::LdaAbsolute(0x781D),

@@ -14,7 +14,7 @@ use crate::{
 
 use super::super::{
     OUTPUT_MAPPER,
-    battle_composition_loader_probe::CUMULATIVE_RUNTIME_LAYOUT,
+    battle_composition_runtime::CUMULATIVE_RUNTIME_LAYOUT,
     maximum_dialogue_page::{MaximumDialoguePagePlan, plan_maximum_dialogue_pages},
     maximum_dialogue_runtime::{
         COMPLETED_PAGE_CONTINUE_ADDRESS, COMPLETED_PAGE_CONTINUE_SOURCE,

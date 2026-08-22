@@ -9,6 +9,7 @@ use std::collections::BTreeSet;
 use anyhow::{Context, Result, ensure};
 
 use crate::{
+    dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE,
     mapper165::inline_pointer_dispatch::bind_inline_pointer_dispatch,
     rom::Rom,
     sha1_hex,
@@ -19,7 +20,8 @@ use crate::{
 const SOURCE_PRG_BANK_BYTE_COUNT: usize = 16 * 1024;
 const FIXED_PRG_BANK: u8 = 0x0F;
 const OUTER_SCREEN_BANK: u8 = 0x06;
-const MAP_DIALOGUE_STATE_ADDRESS: u16 = 0x05DB;
+const MAP_DIALOGUE_STATE_ADDRESS: u16 =
+    MAIN_DIALOGUE_RUNTIME_STATE.map_dialogue_outer_state_address;
 const DISPATCH_CALL: u16 = 0x85F7;
 const DISPATCH_TARGETS: [u16; 3] = [0x8600, 0x8608, 0xA122];
 const LIFECYCLE_START: u16 = 0x85F4;

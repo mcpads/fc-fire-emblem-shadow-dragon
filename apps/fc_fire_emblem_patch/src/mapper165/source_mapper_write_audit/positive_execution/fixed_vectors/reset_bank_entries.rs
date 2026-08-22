@@ -2814,6 +2814,7 @@ mod tests {
     use crate::{
         chapter_transition::ENDING_RECORD_PHASE_ADDRESS,
         dialogue_inventory::MAIN_DIALOGUE_COMPLETION_FLAG_ADDRESS,
+        dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE,
         mapper165::inline_pointer_dispatch::INLINE_POINTER_DISPATCH_CODE, rom::HEADER_SIZE,
     };
 
@@ -2896,7 +2897,10 @@ mod tests {
             InlineDispatchSelectorBounds::from_handler_table(BTreeSet::from([0x00, 0x01]))
                 .with_selector_memory_address(0x7731);
         let error = moved
-            .merge_handler_table_owner(&BTreeSet::from([0x00, 0x01]), Some(0x05DB))
+            .merge_handler_table_owner(
+                &BTreeSet::from([0x00, 0x01]),
+                Some(MAP_DIALOGUE_OUTER_STATE),
+            )
             .unwrap_err();
         assert!(error.to_string().contains("selector memory address"));
     }
@@ -2977,10 +2981,13 @@ mod tests {
     fn source_producer_owner_refines_a_handler_domain_without_hiding_handlers() {
         let mut bounds =
             InlineDispatchSelectorBounds::from_handler_table(BTreeSet::from([0x00, 0x01, 0x02]))
-                .with_selector_memory_address(0x05DB);
+                .with_selector_memory_address(MAP_DIALOGUE_OUTER_STATE);
 
         bounds
-            .merge_source_producer_owner(&BTreeSet::from([0x00, 0x01]), Some(0x05DB))
+            .merge_source_producer_owner(
+                &BTreeSet::from([0x00, 0x01]),
+                Some(MAP_DIALOGUE_OUTER_STATE),
+            )
             .unwrap();
 
         assert_eq!(
@@ -2993,7 +3000,7 @@ mod tests {
         );
         assert_eq!(
             bounds.selector_memory_addresses(),
-            &BTreeSet::from([0x05DB])
+            &BTreeSet::from([MAP_DIALOGUE_OUTER_STATE])
         );
 
         let mut escaped =
@@ -3005,7 +3012,7 @@ mod tests {
 
         let mut moved =
             InlineDispatchSelectorBounds::from_handler_table(BTreeSet::from([0x00, 0x01]))
-                .with_selector_memory_address(0x05DB);
+                .with_selector_memory_address(MAP_DIALOGUE_OUTER_STATE);
         let error = moved
             .merge_source_producer_owner(&BTreeSet::from([0x00]), Some(0x7731))
             .unwrap_err();
@@ -3112,7 +3119,10 @@ mod tests {
         state.write_memory(0x0084, Some(0x0F));
         state.write_memory(0x057A, Some(0x08));
         state.write_memory(0x05E8, Some(0x0A));
-        state.write_memory(0x05EE, Some(0x09));
+        state.write_memory(
+            MAIN_DIALOGUE_RUNTIME_STATE.dialogue_or_sound_state_address,
+            Some(0x09),
+        );
         state.mapped_prg_bank = Some(0x06);
         let bounds =
             synthetic_destination_bounds((FIXED_PRG_BANK, 0xC100, 0x02), vec![0x0025..=0x0025]);
@@ -3137,7 +3147,10 @@ mod tests {
         assert_eq!(state.read_memory(0x0084), Some(0x0F));
         assert_eq!(state.read_memory(0x057A), Some(0x08));
         assert_eq!(state.read_memory(0x05E8), Some(0x0A));
-        assert_eq!(state.read_memory(0x05EE), Some(0x09));
+        assert_eq!(
+            state.read_memory(MAIN_DIALOGUE_RUNTIME_STATE.dialogue_or_sound_state_address),
+            Some(0x09)
+        );
         assert_eq!(state.mapped_prg_bank, Some(0x06));
         assert!(open_facts.is_empty());
         assert_eq!(

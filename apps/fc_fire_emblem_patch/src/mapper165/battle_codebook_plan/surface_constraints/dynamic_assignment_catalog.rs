@@ -156,7 +156,7 @@ mod tests {
     #[test]
     fn every_observed_sample_uses_the_runtime_dynamic_assignment() {
         let glyphs = (0..u32::try_from(
-            crate::mapper165::battle_text_cache_probe::CANONICAL_ABSTRACT_COLOR_COUNT,
+            crate::mapper165::battle_text_material::CANONICAL_ABSTRACT_COLOR_COUNT,
         )
         .unwrap())
             .map(|offset| char::from_u32(0xAC00 + offset).unwrap())
@@ -183,14 +183,12 @@ mod tests {
                 "favorable".to_owned(),
                 ScreenCodeConstraint {
                     glyphs: BTreeSet::from([glyph_by_color[&0], glyph_by_color[&210]]),
-                    preserved_active_codes: BTreeSet::new(),
                 },
             ),
             (
                 "unfavorable".to_owned(),
                 ScreenCodeConstraint {
                     glyphs: BTreeSet::from([glyph_by_color[&1], glyph_by_color[&211]]),
-                    preserved_active_codes: BTreeSet::new(),
                 },
             ),
         ];

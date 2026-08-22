@@ -2,6 +2,7 @@ use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
+    battle_runtime_state::BATTLE_RUNTIME_STATE,
     rom::{HEADER_SIZE, Rom},
     sha1_hex,
     typed_source::decode_rp2a03_sequence,
@@ -14,7 +15,6 @@ use field_producers::{BattleFieldProducerBinding, bind_battle_field_producers};
 const PRG_BANK_SIZE: usize = 16 * 1024;
 const SWITCHABLE_CPU_START: u16 = 0x8000;
 const SWITCHABLE_CPU_END_EXCLUSIVE: u16 = 0xC000;
-const BATTLE_RECORD_BYTE_COUNT: usize = 0x1B;
 
 #[derive(Debug, Serialize)]
 pub(super) struct BattleRuntimeInputBinding {
@@ -58,7 +58,7 @@ struct DialogueSelectorBinding {
     required_nonzero_addresses: [u16; 3],
     required_zero_addresses: [u16; 1],
     dynamic_record_index_address: u16,
-    dynamic_record_index_transform: &'static str,
+    dynamic_record_index_transform: String,
     terminator_address: u16,
     terminator_value: u8,
     natural_runtime_observed: bool,
@@ -125,12 +125,41 @@ const FIRST_TO_SECOND_COPY_BYTES: [u8; 14] = [
 const SECOND_TO_FIRST_COPY_BYTES: [u8; 14] = [
     0xA0, 0x00, 0xB9, 0x15, 0x77, 0x99, 0xF4, 0x76, 0xC8, 0xC0, 0x1B, 0x90, 0xF5, 0x60,
 ];
-const SELECTOR_62_FRAGMENT: [u8; 22] = [
-    0xAD, 0x35, 0x03, 0xF0, 0x32, 0xAD, 0x79, 0x04, 0x09, 0x60, 0x8D, 0x4B, 0x7A, 0xA9, 0xEF, 0x8D,
-    0x4C, 0x7A, 0xA9, 0x3E, 0xD0, 0x21,
-];
+fn selector_62_fragment() -> Vec<u8> {
+    let selector = BATTLE_RUNTIME_STATE.dialogue_selector_projection;
+    let [condition_low, condition_high] = selector.required_nonzero_addresses[2].to_le_bytes();
+    let [source_low, source_high] = selector.dynamic_record_index_source_address.to_le_bytes();
+    let [index_low, index_high] = selector.dynamic_record_index_address.to_le_bytes();
+    let [terminator_low, terminator_high] = selector.terminator_address.to_le_bytes();
+    vec![
+        0xAD,
+        condition_low,
+        condition_high,
+        0xF0,
+        0x32,
+        0xAD,
+        source_low,
+        source_high,
+        0x09,
+        selector.dynamic_record_index_or_mask,
+        0x8D,
+        index_low,
+        index_high,
+        0xA9,
+        selector.terminator_value,
+        0x8D,
+        terminator_low,
+        terminator_high,
+        0xA9,
+        selector.forced_selector,
+        0xD0,
+        0x21,
+    ]
+}
 
 pub(super) fn bind_battle_runtime_inputs(rom: &Rom) -> Result<BattleRuntimeInputBinding> {
+    let runtime = BATTLE_RUNTIME_STATE;
+    let selector = runtime.dialogue_selector_projection;
     let live_record_copy = bind_routine(rom, LIVE_RECORD_COPY)?;
     let first_record_to_second_slot_copy = bind_routine(rom, FIRST_TO_SECOND_COPY)?;
     let second_slot_to_first_record_copy = bind_routine(rom, SECOND_TO_FIRST_COPY)?;
@@ -138,10 +167,11 @@ pub(super) fn bind_battle_runtime_inputs(rom: &Rom) -> Result<BattleRuntimeInput
     let reinforcement_record_builder = bind_routine(rom, REINFORCEMENT_RECORD_BUILDER)?;
     let field_producers = bind_battle_field_producers(rom)?;
     let selector_source = source_slice(rom, DIALOGUE_SELECTOR_ROUTINE)?;
+    let selector_fragment = selector_62_fragment();
     ensure!(
         selector_source
-            .windows(SELECTOR_62_FRAGMENT.len())
-            .any(|window| window == SELECTOR_62_FRAGMENT),
+            .windows(selector_fragment.len())
+            .any(|window| window == selector_fragment),
         "battle-dialogue selector 62 source path changed"
     );
     let source_routine = bind_routine(rom, DIALOGUE_SELECTOR_ROUTINE)?;
@@ -160,14 +190,14 @@ pub(super) fn bind_battle_runtime_inputs(rom: &Rom) -> Result<BattleRuntimeInput
     );
 
     Ok(BattleRuntimeInputBinding {
-        first_battle_record_address: 0x76F4,
-        second_battle_record_address: 0x7715,
-        battle_record_byte_count: BATTLE_RECORD_BYTE_COUNT,
-        identity_offset: 0x00,
-        class_offset: 0x01,
-        equipped_item_offset: 0x13,
-        first_terrain_address: 0x0322,
-        second_terrain_address: 0x0323,
+        first_battle_record_address: runtime.battle_record_addresses[0],
+        second_battle_record_address: runtime.battle_record_addresses[1],
+        battle_record_byte_count: runtime.battle_record_byte_count,
+        identity_offset: runtime.live_record_identity_offset,
+        class_offset: runtime.live_record_class_offset,
+        equipped_item_offset: runtime.live_record_equipped_item_offset,
+        first_terrain_address: runtime.staged_terrain_source_index_addresses[0],
+        second_terrain_address: runtime.staged_terrain_source_index_addresses[1],
         live_record_pointer: "zero-page 0x9F/0xA0",
         live_record_copy,
         first_record_to_second_slot_copy,
@@ -177,15 +207,18 @@ pub(super) fn bind_battle_runtime_inputs(rom: &Rom) -> Result<BattleRuntimeInput
         field_producers,
         reinforcement_builder_is_gameplay_producer: true,
         dialogue_selector_62: DialogueSelectorBinding {
-            selector_address: 0x7936,
-            selector_value: 0x3E,
+            selector_address: selector.observed_selector_address,
+            selector_value: selector.forced_selector,
             source_routine,
-            required_nonzero_addresses: [0x0334, 0x0479, 0x0335],
-            required_zero_addresses: [0x05DF],
-            dynamic_record_index_address: 0x7A4B,
-            dynamic_record_index_transform: "0x0479 OR 0x60",
-            terminator_address: 0x7A4C,
-            terminator_value: 0xEF,
+            required_nonzero_addresses: selector.required_nonzero_addresses,
+            required_zero_addresses: selector.required_zero_addresses,
+            dynamic_record_index_address: selector.dynamic_record_index_address,
+            dynamic_record_index_transform: format!(
+                "0x{:04X} OR 0x{:02X}",
+                selector.dynamic_record_index_source_address, selector.dynamic_record_index_or_mask,
+            ),
+            terminator_address: selector.terminator_address,
+            terminator_value: selector.terminator_value,
             natural_runtime_observed: false,
         },
         static_chapter_table_catalog_sufficient: false,
@@ -237,6 +270,8 @@ fn source_slice(rom: &Rom, spec: RoutineSpec) -> Result<&[u8]> {
 
 #[cfg(test)]
 pub(super) fn test_binding() -> BattleRuntimeInputBinding {
+    let runtime = BATTLE_RUNTIME_STATE;
+    let selector = runtime.dialogue_selector_projection;
     fn routine(role: &'static str) -> SourceRoutineBinding {
         SourceRoutineBinding {
             role,
@@ -249,14 +284,14 @@ pub(super) fn test_binding() -> BattleRuntimeInputBinding {
     }
 
     BattleRuntimeInputBinding {
-        first_battle_record_address: 0x76F4,
-        second_battle_record_address: 0x7715,
-        battle_record_byte_count: BATTLE_RECORD_BYTE_COUNT,
-        identity_offset: 0,
-        class_offset: 1,
-        equipped_item_offset: 0x13,
-        first_terrain_address: 0x0322,
-        second_terrain_address: 0x0323,
+        first_battle_record_address: runtime.battle_record_addresses[0],
+        second_battle_record_address: runtime.battle_record_addresses[1],
+        battle_record_byte_count: runtime.battle_record_byte_count,
+        identity_offset: runtime.live_record_identity_offset,
+        class_offset: runtime.live_record_class_offset,
+        equipped_item_offset: runtime.live_record_equipped_item_offset,
+        first_terrain_address: runtime.staged_terrain_source_index_addresses[0],
+        second_terrain_address: runtime.staged_terrain_source_index_addresses[1],
         live_record_pointer: "zero-page",
         live_record_copy: routine("live copy"),
         first_record_to_second_slot_copy: routine("first to second"),
@@ -266,15 +301,15 @@ pub(super) fn test_binding() -> BattleRuntimeInputBinding {
         field_producers: field_producers::test_binding(),
         reinforcement_builder_is_gameplay_producer: true,
         dialogue_selector_62: DialogueSelectorBinding {
-            selector_address: 0x7936,
-            selector_value: 0x3E,
+            selector_address: selector.observed_selector_address,
+            selector_value: selector.forced_selector,
             source_routine: routine("selector"),
-            required_nonzero_addresses: [0x0334, 0x0479, 0x0335],
-            required_zero_addresses: [0x05DF],
-            dynamic_record_index_address: 0x7A4B,
-            dynamic_record_index_transform: "OR",
-            terminator_address: 0x7A4C,
-            terminator_value: 0xEF,
+            required_nonzero_addresses: selector.required_nonzero_addresses,
+            required_zero_addresses: selector.required_zero_addresses,
+            dynamic_record_index_address: selector.dynamic_record_index_address,
+            dynamic_record_index_transform: "OR".to_owned(),
+            terminator_address: selector.terminator_address,
+            terminator_value: selector.terminator_value,
             natural_runtime_observed: false,
         },
         static_chapter_table_catalog_sufficient: false,
@@ -293,8 +328,16 @@ mod tests {
 
         assert!(binding.reinforcement_builder_is_gameplay_producer);
         assert!(!binding.static_chapter_table_catalog_sufficient);
-        assert_eq!(binding.battle_record_byte_count, 0x1B);
-        assert_eq!(binding.dialogue_selector_62.selector_value, 0x3E);
+        assert_eq!(
+            binding.battle_record_byte_count,
+            BATTLE_RUNTIME_STATE.battle_record_byte_count
+        );
+        assert_eq!(
+            binding.dialogue_selector_62.selector_value,
+            BATTLE_RUNTIME_STATE
+                .dialogue_selector_projection
+                .forced_selector
+        );
         assert!(!binding.dialogue_selector_62.natural_runtime_observed);
         assert!(binding.actual_combination_graph_bound);
     }

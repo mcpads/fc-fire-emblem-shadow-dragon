@@ -456,6 +456,7 @@ fn raw_direct_transfer_candidates_to_range(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE;
     use crate::rom::{HEADER_SIZE, Rom};
 
     const SUPPORT_ORIGIN: u16 = 0xF351;
@@ -745,7 +746,7 @@ mod tests {
         memory[usize::from(address)..usize::from(address) + character_exit.bytes.len()]
             .copy_from_slice(&character_exit.bytes);
         memory[usize::from(ENDING_RECORD_PHASE_ADDRESS)] = 0x10;
-        memory[0x7809] = 1;
+        memory[usize::from(MAIN_DIALOGUE_RUNTIME_STATE.caller_handoff_flag_address)] = 1;
         memory[usize::from(CONSUMER_FONT_PAGE)] = ENDING_ROUTE;
         memory[usize::from(REQUEST_STATE)] = 3;
         memory[usize::from(CURRENT_PAGE_RESIDENCY)] = 0x11;

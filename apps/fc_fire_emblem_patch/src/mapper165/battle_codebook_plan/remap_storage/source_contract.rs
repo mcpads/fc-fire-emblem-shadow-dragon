@@ -5,9 +5,8 @@ use retro_rp2a03::{AddressingMode, Mnemonic, Operand, decode_bytes};
 use serde::Serialize;
 
 use crate::{
-    mapper165::{
-        BATTLE_ACTIVE_ONE_WRITES, inline_pointer_dispatch::INLINE_POINTER_DISPATCH_ADDRESS,
-    },
+    battle_runtime_state::{BATTLE_ACTIVE_ONE_WRITES, BATTLE_RUNTIME_STATE, BattleSourceWrite},
+    mapper165::inline_pointer_dispatch::INLINE_POINTER_DISPATCH_ADDRESS,
     rom::Rom,
     runtime_storage_layout::{BATTLE_DIALOGUE_CACHE_KEY_ADDRESS, BATTLE_REMAP_PAIR_TABLE_START},
     sha1_hex,
@@ -42,7 +41,6 @@ const QUEUE_READY_ZERO_PAGE_ADDRESS: u8 = 0x21;
 // conservative through the battle metadata at $07FF, including the intervening dialogue state.
 const REMAP_STORAGE_START: u16 = BATTLE_REMAP_PAIR_TABLE_START;
 const REMAP_STORAGE_END: u16 = BATTLE_DIALOGUE_CACHE_KEY_ADDRESS;
-const BATTLE_ACTIVE_FLAG: u16 = 0x047D;
 
 #[derive(Clone, Debug, Serialize)]
 pub(super) struct BattleStorageSourceContract {
@@ -175,10 +173,13 @@ pub(super) fn bind_battle_storage_source_contract(
         battle_active_direct_read_count: 1,
         battle_active_direct_write_count: BATTLE_ACTIVE_ONE_WRITES.len() + 1,
         battle_active_nonzero_reader_address_hex: "0x05:0x8000".to_owned(),
-        battle_active_full_byte_writer_addresses_hex: std::iter::once((0x05, 0x8100))
-            .chain(BATTLE_ACTIVE_ONE_WRITES)
-            .map(|(bank, address)| format!("0x{bank:02X}:0x{address:04X}"))
-            .collect(),
+        battle_active_full_byte_writer_addresses_hex: std::iter::once(BattleSourceWrite {
+            prg_bank: 0x05,
+            cpu_address: 0x8100,
+        })
+        .chain(BATTLE_ACTIVE_ONE_WRITES)
+        .map(|writer| format!("0x{:02X}:0x{:04X}", writer.prg_bank, writer.cpu_address))
+        .collect(),
         every_battle_queue_publisher_reached: true,
         every_indexed_remap_storage_overlap_is_a_bounded_queue_access: true,
         every_indirect_store_classified: true,
@@ -339,8 +340,9 @@ fn trace_battle_lifetime(rom: &Rom, roots: &[(u8, u16)]) -> Result<BattleLifetim
 }
 
 fn bind_battle_active_flag(rom: &Rom) -> Result<()> {
-    let read_pattern = [0xAD, 0x7D, 0x04];
-    let write_pattern = [0x8D, 0x7D, 0x04];
+    let [active_low, active_high] = BATTLE_RUNTIME_STATE.active_flag_address.to_le_bytes();
+    let read_pattern = [0xAD, active_low, active_high];
+    let write_pattern = [0x8D, active_low, active_high];
     ensure!(
         rom.prg()
             .windows(read_pattern.len())
@@ -359,39 +361,77 @@ fn bind_battle_active_flag(rom: &Rom) -> Result<()> {
     );
     let reader = source_bytes(rom, 0x05, 0x8000, 6)?;
     ensure!(
-        reader == [0xAD, 0x7D, 0x04, 0xD0, 0x01, 0x60],
+        reader == [0xAD, active_low, active_high, 0xD0, 0x01, 0x60],
         "battle-active nonzero reader changed"
     );
     decode_rp2a03_sequence(reader, 0x8000, "battle-active nonzero reader")?;
     let zero_writer = source_bytes(rom, 0x05, 0x80DE, 37)?;
+    let [phase_low, phase_high] = BATTLE_RUNTIME_STATE.shared_phase_address.to_le_bytes();
+    let expected_zero_writer = vec![
+        0xA9,
+        0x00,
+        0xA2,
+        0x02,
+        0x9D,
+        0xAD,
+        0x03,
+        0x9D,
+        0x89,
+        0x03,
+        0x9D,
+        0xA7,
+        0x03,
+        0x9D,
+        0xAA,
+        0x03,
+        0xCA,
+        0x10,
+        0xF1,
+        0x8D,
+        0x78,
+        0x04,
+        0x8D,
+        0xCF,
+        0x03,
+        0x8D,
+        0xD0,
+        0x03,
+        0x8D,
+        phase_low,
+        phase_high,
+        0x8D,
+        0xBF,
+        0x03,
+        0x8D,
+        active_low,
+        active_high,
+    ];
     ensure!(
-        zero_writer
-            == [
-                0xA9, 0x00, 0xA2, 0x02, 0x9D, 0xAD, 0x03, 0x9D, 0x89, 0x03, 0x9D, 0xA7, 0x03, 0x9D,
-                0xAA, 0x03, 0xCA, 0x10, 0xF1, 0x8D, 0x78, 0x04, 0x8D, 0xCF, 0x03, 0x8D, 0xD0, 0x03,
-                0x8D, 0x7C, 0x04, 0x8D, 0xBF, 0x03, 0x8D, 0x7D, 0x04,
-            ],
+        zero_writer == expected_zero_writer,
         "battle-active zeroing writer changed"
     );
     decode_rp2a03_sequence(zero_writer, 0x80DE, "battle-active zeroing writer")?;
-    for &(bank, write) in &BATTLE_ACTIVE_ONE_WRITES[..3] {
+    for writer_site in &BATTLE_ACTIVE_ONE_WRITES[..3] {
+        let bank = writer_site.prg_bank;
+        let write = writer_site.cpu_address;
         let start = write
             .checked_sub(2)
             .context("battle-active literal-one writer start underflow")?;
         let writer = source_bytes(rom, bank, start, 5)?;
         ensure!(
-            writer == [0xA9, 0x01, 0x8D, 0x7D, 0x04],
+            writer == [0xA9, 0x01, 0x8D, active_low, active_high],
             "battle-active literal-one writer changed at {bank:02X}:${start:04X}"
         );
         decode_rp2a03_sequence(writer, start, "battle-active literal-one writer")?;
     }
-    let (sound_bank, sound_write) = BATTLE_ACTIVE_ONE_WRITES[3];
+    let sound_bank = BATTLE_ACTIVE_ONE_WRITES[3].prg_bank;
+    let sound_write = BATTLE_ACTIVE_ONE_WRITES[3].cpu_address;
     let sound_start = sound_write
         .checked_sub(5)
         .context("sound-test battle-active literal-one writer start underflow")?;
     let sound_writer = source_bytes(rom, sound_bank, sound_start, 8)?;
     ensure!(
-        sound_writer == [0xA9, 0x01, 0x8D, 0xED, 0x05, 0x8D, 0x7D, 0x04],
+        sound_writer == [0xA9, 0x01, 0x8D, 0xED, 0x05, 0x8D, active_low, active_high,],
         "sound-test battle-active literal-one writer changed"
     );
     decode_rp2a03_sequence(
@@ -399,10 +439,6 @@ fn bind_battle_active_flag(rom: &Rom) -> Result<()> {
         sound_start,
         "sound-test battle-active literal-one writer",
     )?;
-    ensure!(
-        BATTLE_ACTIVE_FLAG == 0x047D,
-        "battle-active address changed"
-    );
     Ok(())
 }
 

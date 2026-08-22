@@ -4,7 +4,8 @@ use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::{
-    mmc5_prg::fixed_bank_file_offset, rom::Rom, sha1_hex, typed_source::decode_rp2a03_sequence,
+    battle_runtime_state::BATTLE_RUNTIME_STATE, mmc5_prg::fixed_bank_file_offset, rom::Rom,
+    sha1_hex, typed_source::decode_rp2a03_sequence,
 };
 
 use super::{RoutineSpec, SourceRoutineBinding, bind_routine};
@@ -121,6 +122,7 @@ struct FixedTableBinding {
 }
 
 pub(super) fn bind_battle_field_producers(rom: &Rom) -> Result<BattleFieldProducerBinding> {
+    let runtime = BATTLE_RUNTIME_STATE;
     let normal_battle_input_caller = bind_routine(rom, NORMAL_BATTLE_INPUT_CALLER)?;
     let battle_field_composer = bind_routine(rom, BATTLE_FIELD_COMPOSER)?;
     let battle_core_caller = bind_routine(rom, BATTLE_CORE_CALLER)?;
@@ -241,13 +243,13 @@ pub(super) fn bind_battle_field_producers(rom: &Rom) -> Result<BattleFieldProduc
         dragon_bonus_remover_call,
         special_terrain_override,
         special_terrain_reapply,
-        live_record_identity_offset: 0x00,
-        live_record_class_offset: 0x01,
-        live_record_equipped_item_offset: 0x13,
-        battle_identity_addresses: [0x0304, 0x0305],
-        battle_class_addresses: [0x0306, 0x0307],
-        battle_item_source_index_addresses: [0x0320, 0x0321],
-        battle_terrain_source_index_addresses: [0x0322, 0x0323],
+        live_record_identity_offset: runtime.live_record_identity_offset,
+        live_record_class_offset: runtime.live_record_class_offset,
+        live_record_equipped_item_offset: runtime.live_record_equipped_item_offset,
+        battle_identity_addresses: runtime.staged_participant_identity_addresses,
+        battle_class_addresses: runtime.staged_class_identity_addresses,
+        battle_item_source_index_addresses: runtime.staged_item_source_index_addresses,
+        battle_terrain_source_index_addresses: runtime.staged_terrain_source_index_addresses,
         equipped_item_to_name_source_index: "item_id == 0 is unreachable for combat; item_id < 0x40 maps to item_id - 1; item_id >= 0x40 maps to 0x44",
         transformed_class_ids: [0x17, 0x18],
         transformed_class_name_source_indices: [0x16, 0x17],
@@ -332,6 +334,7 @@ fn fixed_table_bytes<'a>(
 
 #[cfg(test)]
 pub(super) fn test_binding() -> BattleFieldProducerBinding {
+    let runtime = BATTLE_RUNTIME_STATE;
     fn routine(role: &'static str) -> SourceRoutineBinding {
         SourceRoutineBinding {
             role,
@@ -351,13 +354,13 @@ pub(super) fn test_binding() -> BattleFieldProducerBinding {
         dragon_bonus_remover_call: routine("bonus remover call"),
         special_terrain_override: routine("terrain override"),
         special_terrain_reapply: routine("terrain reapply"),
-        live_record_identity_offset: 0,
-        live_record_class_offset: 1,
-        live_record_equipped_item_offset: 0x13,
-        battle_identity_addresses: [0x0304, 0x0305],
-        battle_class_addresses: [0x0306, 0x0307],
-        battle_item_source_index_addresses: [0x0320, 0x0321],
-        battle_terrain_source_index_addresses: [0x0322, 0x0323],
+        live_record_identity_offset: runtime.live_record_identity_offset,
+        live_record_class_offset: runtime.live_record_class_offset,
+        live_record_equipped_item_offset: runtime.live_record_equipped_item_offset,
+        battle_identity_addresses: runtime.staged_participant_identity_addresses,
+        battle_class_addresses: runtime.staged_class_identity_addresses,
+        battle_item_source_index_addresses: runtime.staged_item_source_index_addresses,
+        battle_terrain_source_index_addresses: runtime.staged_terrain_source_index_addresses,
         equipped_item_to_name_source_index: "projection",
         transformed_class_ids: [0x17, 0x18],
         transformed_class_name_source_indices: [0x16, 0x17],

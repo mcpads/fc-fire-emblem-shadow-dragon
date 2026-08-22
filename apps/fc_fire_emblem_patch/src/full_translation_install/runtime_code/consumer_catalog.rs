@@ -29,6 +29,7 @@ use crate::{
 };
 
 use super::consumer_font_page::COMPOSITE_STATE;
+use crate::battle_runtime_state::BATTLE_RUNTIME_STATE;
 
 mod item_appender_routes;
 mod shop_item_list;
@@ -54,7 +55,7 @@ const PAIRED_BANK_HELPER: u16 = 0xFA20;
 
 const CURRENT_RECORD_POINTER: u8 = 0x74;
 const CURRENT_ITEM_OFFSET: u8 = 0x12;
-const CURRENT_UNIT_RECORD: u16 = 0x76F4;
+const CURRENT_UNIT_RECORD: u16 = BATTLE_RUNTIME_STATE.battle_record_addresses[0];
 const ENEMY_RECORD_FLAG: u8 = 0x80;
 const COMPOSITE_BUFFER: u16 = 0x0451;
 const STRING_TERMINATOR: u8 = 0xEF;

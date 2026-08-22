@@ -15,7 +15,7 @@ use crate::{
 
 use super::{
     MAXIMUM_CHR_PAGE_COUNT,
-    cumulative_patch::DIALOGUE_SELECTOR_ADDRESS,
+    cumulative_patch::DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS,
     front_end_page::{
         PAGE_ROUTINE_ADDRESS as FRONT_END_SELECTOR_ADDRESS,
         PAGE_ROUTINE_END as FRONT_END_SELECTOR_END, build_page_selector,
@@ -67,7 +67,7 @@ pub(crate) fn bind_front_end_font_page_selector(candidate: &Rom) -> Result<Bound
         usize::from(FRONT_END_SELECTOR_END - FRONT_END_SELECTOR_ADDRESS),
     )?;
     let mapper_register = bind_generated_selector_register(selector, |register| {
-        build_page_selector(register, DIALOGUE_SELECTOR_ADDRESS)
+        build_page_selector(register, DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS)
     })?;
     ensure!(
         usize::from(mapper_register / 4)
@@ -109,7 +109,7 @@ pub(crate) fn bind_front_end_font_page_selector(candidate: &Rom) -> Result<Bound
     Ok(BoundFontPageSelector {
         cpu_address: FRONT_END_SELECTOR_ADDRESS,
         cpu_end_exclusive: FRONT_END_SELECTOR_END,
-        fallback_target: DIALOGUE_SELECTOR_ADDRESS,
+        fallback_target: DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS,
         mapper_register,
         direct_predecessor_address: SHOP_FALLBACK_JUMP_ADDRESS,
         expected_bytes: selector.to_vec(),
@@ -285,7 +285,7 @@ mod tests {
             bytes.len() + usize::from(SYNTHETIC_CHR_BANK_COUNT) * 8 * 1024,
             0,
         );
-        let front_end = build_page_selector(0xA8, DIALOGUE_SELECTOR_ADDRESS).unwrap();
+        let front_end = build_page_selector(0xA8, DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS).unwrap();
         let front_end_offset =
             crate::test_support::synthetic_fixed_bank_file_offset(FRONT_END_SELECTOR_ADDRESS);
         bytes[front_end_offset..front_end_offset + front_end.len()].copy_from_slice(&front_end);
@@ -315,7 +315,7 @@ mod tests {
 
         assert_eq!(binding.cpu_address, FRONT_END_SELECTOR_ADDRESS);
         assert_eq!(binding.cpu_end_exclusive, FRONT_END_SELECTOR_END);
-        assert_eq!(binding.fallback_target, DIALOGUE_SELECTOR_ADDRESS);
+        assert_eq!(binding.fallback_target, DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS);
         assert_eq!(binding.mapper_register, 0xA8);
         assert_eq!(
             binding.direct_predecessor_address,

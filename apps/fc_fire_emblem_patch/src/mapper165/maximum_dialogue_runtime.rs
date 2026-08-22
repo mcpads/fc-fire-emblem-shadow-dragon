@@ -2,6 +2,7 @@ use anyhow::{Context, Result, ensure};
 use retro_rp2a03::{AddressingMode, Mnemonic, Operand, decode_bytes};
 
 use crate::{
+    dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE,
     rp2a03::{Instruction, assemble_at},
     typed_source::decode_rp2a03_sequence,
 };
@@ -22,13 +23,13 @@ pub(super) const COMPLETED_PAGE_CONTINUE_SOURCE: [u8; 29] = [
 
 const CURRENT_POINTER_LOW: u16 = 0x7812;
 const CURRENT_POINTER_HIGH: u16 = 0x7814;
-const DIALOGUE_STATE: u16 = 0x77F7;
+const DIALOGUE_STATE: u16 = MAIN_DIALOGUE_RUNTIME_STATE.state_address;
 const CONTINUE_DECODE_STATE: u8 = 0x09;
 const MAXIMUM_DIALOGUE_RUNTIME_IDENTITY: [(u16, u8); 4] = [
     (0x7674, 0x07),
-    (0x77F1, 0x18),
+    (MAIN_DIALOGUE_RUNTIME_STATE.entry_index_address, 0x18),
     (0x77F2, 0x0C),
-    (0x77F4, 0xC0),
+    (MAIN_DIALOGUE_RUNTIME_STATE.directory_selector_address, 0xC0),
 ];
 
 pub(super) fn build_font_group_selector(
@@ -215,7 +216,7 @@ pub(super) fn build_initial_page_selector(
         mismatch_branches.push(instructions.len() - 1);
     }
     for (address, expected) in MAXIMUM_DIALOGUE_RUNTIME_IDENTITY.into_iter().chain([
-        (0x77F7, 0x05),
+        (MAIN_DIALOGUE_RUNTIME_STATE.state_address, 0x05),
         (CURRENT_POINTER_LOW, initial_supply_pointer as u8),
         (CURRENT_POINTER_HIGH, (initial_supply_pointer >> 8) as u8),
     ]) {
@@ -542,9 +543,9 @@ mod tests {
         let result = TestCpu::run_completed_page(
             [
                 (0x7674, 0x01),
-                (0x77F1, 0x03),
+                (MAIN_DIALOGUE_RUNTIME_STATE.entry_index_address, 0x03),
                 (0x77F2, 0x08),
-                (0x77F4, 0x80),
+                (MAIN_DIALOGUE_RUNTIME_STATE.directory_selector_address, 0x80),
             ],
             0xE3A0,
             0,

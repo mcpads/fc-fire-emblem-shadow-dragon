@@ -1,6 +1,9 @@
 use anyhow::{Context, Result, ensure};
 
-use crate::rp2a03::{Instruction, assemble_at};
+use crate::{
+    dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE,
+    rp2a03::{Instruction, assemble_at},
+};
 
 const MAPPER_REGISTER_STRIDE: u8 = 8;
 const MISMATCH_OFFSET: u16 = 0x47;
@@ -59,7 +62,7 @@ pub(super) fn build_chapter_page_selector(
             Instruction::LdaZeroPage(0x5C),
             Instruction::CmpImmediate(0x18),
             Instruction::BneAbsolute(mismatch_address),
-            Instruction::LdaAbsolute(0x77F7),
+            Instruction::LdaAbsolute(MAIN_DIALOGUE_RUNTIME_STATE.state_address),
             Instruction::CmpImmediate(0x03),
             Instruction::BneAbsolute(mismatch_address),
             Instruction::LdaAbsolute(0x781D),

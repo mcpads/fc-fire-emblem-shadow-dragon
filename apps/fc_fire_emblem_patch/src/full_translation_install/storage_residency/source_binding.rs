@@ -6,6 +6,7 @@ use crate::{
     dialogue_inventory::{
         bind_caller_handoff_state_dispatch_sources, switchable_cpu_to_file_offset,
     },
+    dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE,
     rom::Rom,
     sha1_hex,
     source_direct_memory_writers::scan_direct_memory_writers,
@@ -14,8 +15,8 @@ use crate::{
 };
 
 const SOURCE_BANK: u8 = 0x06;
-const DIALOGUE_RECORD_ADDRESS: u16 = 0x77F1;
-const CALLER_STATE_ADDRESS: u16 = 0x05DB;
+const DIALOGUE_RECORD_ADDRESS: u16 = MAIN_DIALOGUE_RUNTIME_STATE.entry_index_address;
+const CALLER_STATE_ADDRESS: u16 = MAIN_DIALOGUE_RUNTIME_STATE.map_dialogue_outer_state_address;
 const STORAGE_FACILITY_INDEX: u8 = 0x04;
 
 const FACILITY_DISPATCH_CALL: u16 = 0x9DC1;
@@ -724,7 +725,12 @@ mod tests {
         region[2..7].copy_from_slice(&[0xA9, 0x29, 0x8D, 0xF1, 0x77]);
         region[9..14].copy_from_slice(&[0xA9, 0x2A, 0x8D, 0xF1, 0x77]);
 
-        let writes = scan_immediate_record_writes(&region, 0x9000, 0x77F1).unwrap();
+        let writes = scan_immediate_record_writes(
+            &region,
+            0x9000,
+            MAIN_DIALOGUE_RUNTIME_STATE.entry_index_address,
+        )
+        .unwrap();
 
         assert_eq!(writes, BTreeMap::from([(0x9002, 0x29), (0x9009, 0x2A)]));
         assert_ne!(writes, BTreeMap::from([(0x9002, 0x29)]));

@@ -4,15 +4,18 @@ pub(super) const SWITCHABLE_CPU_END_EXCLUSIVE: u16 = 0xC000;
 pub(super) const FIXED_CPU_START: u16 = 0xC000;
 pub(super) const FIXED_PRG_BANK: usize = 0x0F;
 
-pub(super) const SHOP_OUTER_STATE_ADDRESS: u16 = 0x05DB;
+pub(super) const SHOP_OUTER_STATE_ADDRESS: u16 =
+    MAIN_DIALOGUE_RUNTIME_STATE.map_dialogue_outer_state_address;
 pub(super) const MENU_CONTROLLER_INDEX_ADDRESS: u16 = 0x05CE;
 pub(super) const MENU_CONTROLLER_STATE_ADDRESS: u16 = 0x05DE;
 pub(super) const MENU_CHOICE_MASK_ADDRESS: u16 = 0x7FEE;
 pub(super) const MENU_SELECTION_BASE_ADDRESS: u16 = 0x7FF3;
 pub(super) const MENU_RESULT_ADDRESS: u16 = 0x05EB;
 pub(super) const SELECTED_FACILITY_ADDRESS: u16 = 0x77D0;
-pub(super) const DIALOGUE_ENTRY_INDEX_ADDRESS: u16 = 0x77F1;
-pub(super) const DIALOGUE_DIRECTORY_SELECTOR_ADDRESS: u16 = 0x77F4;
+pub(super) const DIALOGUE_ENTRY_INDEX_ADDRESS: u16 =
+    MAIN_DIALOGUE_RUNTIME_STATE.entry_index_address;
+pub(super) const DIALOGUE_DIRECTORY_SELECTOR_ADDRESS: u16 =
+    MAIN_DIALOGUE_RUNTIME_STATE.directory_selector_address;
 pub(super) const STORED_FUNDS_ADDRESS: u16 = 0x7678;
 
 pub(super) const SHOP_STATE_HANDLERS: [u16; 13] = [
@@ -124,3 +127,4 @@ pub(super) const SOURCE_REGIONS: [SourceRegionSpec; 13] = [
         expected_sha1: "3630b571e27d741cf416f146c822c9ff09dcc2a1",
     },
 ];
+use crate::dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE;

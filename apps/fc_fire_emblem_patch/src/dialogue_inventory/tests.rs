@@ -851,8 +851,8 @@ fn rejects_a_changed_separate_pointer_loader() {
         loader_code: CONSUMER_CODE,
         table_set_index: 0,
         table_root_cell_cpu_address: 0x8010,
-        table_set_selector: "synthetic_table_set",
-        entry_index_selector: "synthetic_entry_index",
+        table_set_selector: ConsumerSelectorSpec::Description("synthetic_table_set"),
+        entry_index_selector: ConsumerSelectorSpec::Description("synthetic_entry_index"),
         destination_pointer: "synthetic_destination",
     });
     let loader_file_offset = switchable_bank_file_start(SYNTHETIC_BANK);

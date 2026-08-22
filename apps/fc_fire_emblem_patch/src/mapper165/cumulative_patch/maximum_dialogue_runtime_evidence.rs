@@ -4,7 +4,9 @@ use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::{rom::EXPECTED_SOURCE_SHA1, sha1_hex};
+use crate::{
+    dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE, rom::EXPECTED_SOURCE_SHA1, sha1_hex,
+};
 
 use super::super::maximum_dialogue_page::{COMPLETED_PAGE_COUNT, SCREEN_ROLE, TARGET_RECORD_ID};
 
@@ -31,7 +33,7 @@ const PRG_RAM_SIZE: usize = 0x2000;
 const INTERNAL_RAM_SIZE: usize = 0x0800;
 const NAMETABLE_SIZE: usize = 0x0800;
 const PRG_RAM_CPU_BASE: usize = 0x6000;
-const DIALOGUE_STATE_ADDRESS: usize = 0x77F7;
+const DIALOGUE_STATE_ADDRESS: usize = MAIN_DIALOGUE_RUNTIME_STATE.state_address as usize;
 const COMPLETED_LINE_COUNT_ADDRESS: usize = 0x77F8;
 const CURRENT_POINTER_LOW_ADDRESS: usize = 0x7812;
 const CURRENT_POINTER_HIGH_ADDRESS: usize = 0x7814;
@@ -420,10 +422,16 @@ fn verify_initial_selector_evidence(
     let target_cpu_memory = event_snapshot(&events[1], "nesMemory", 0x7670)?;
     for (address, expected) in [
         (0x7674, 0x07),
-        (0x77F1, 0x18),
+        (
+            usize::from(MAIN_DIALOGUE_RUNTIME_STATE.entry_index_address),
+            0x18,
+        ),
         (0x77F2, 0x0C),
-        (0x77F4, 0xC0),
-        (0x77F7, 0x05),
+        (
+            usize::from(MAIN_DIALOGUE_RUNTIME_STATE.directory_selector_address),
+            0xC0,
+        ),
+        (usize::from(MAIN_DIALOGUE_RUNTIME_STATE.state_address), 0x05),
         (0x7812, 0xF1),
         (0x7814, 0x8F),
     ] {
@@ -578,7 +586,10 @@ mod tests {
 
     #[test]
     fn runtime_addresses_are_projected_from_cpu_to_prg_ram() {
-        assert_eq!(prg_ram_offset(0x77F7).unwrap(), 0x17F7);
+        assert_eq!(
+            prg_ram_offset(usize::from(MAIN_DIALOGUE_RUNTIME_STATE.state_address)).unwrap(),
+            0x17F7
+        );
         assert_eq!(prg_ram_offset(0x7814).unwrap(), 0x1814);
         assert!(prg_ram_offset(0x5FFF).is_err());
         assert!(prg_ram_offset(0x8000).is_err());

@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use super::super::{
-    battle_composition_loader_probe::CUMULATIVE_RUNTIME_LAYOUT,
+    battle_composition_runtime::CUMULATIVE_RUNTIME_LAYOUT,
     maximum_dialogue_runtime::build_initial_page_selector,
     options_page::{ROW_OWNER_GATE_ADDRESS, build_row_owner_gate},
     roster_page::{
@@ -55,11 +55,14 @@ fn installed_candidate() -> Rom {
     install_fixed(&mut bytes, UNIT_SELECTOR_ADDRESS, &unit);
     let shop = build_shop_selector(0xC0, FRONT_END_SELECTOR_ADDRESS).unwrap();
     install_fixed(&mut bytes, SHOP_SELECTOR_ADDRESS, &shop);
-    let front =
-        super::super::front_end_page::build_page_selector(0xA8, DIALOGUE_SELECTOR_ADDRESS).unwrap();
+    let front = super::super::front_end_page::build_page_selector(
+        0xA8,
+        DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS,
+    )
+    .unwrap();
     install_fixed(&mut bytes, FRONT_END_SELECTOR_ADDRESS, &front);
     let dialogue = build_chapter_page_selector(
-        DIALOGUE_SELECTOR_ADDRESS,
+        DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS,
         ChapterPageSequence {
             admitted_chapter_count: CUMULATIVE_DIALOGUE_CHAPTER_COUNT,
             first_mapper_register: 0x98,
@@ -67,7 +70,7 @@ fn installed_candidate() -> Rom {
         SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
     )
     .unwrap();
-    install_fixed(&mut bytes, DIALOGUE_SELECTOR_ADDRESS, &dialogue);
+    install_fixed(&mut bytes, DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS, &dialogue);
     install_fixed(
         &mut bytes,
         CENTRAL_RIGHT_FD_SELECTOR_CALL_ADDRESS,

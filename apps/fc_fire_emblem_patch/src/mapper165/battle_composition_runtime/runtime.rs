@@ -4,6 +4,7 @@ use super::{
     },
     *,
 };
+use crate::battle_runtime_state::BATTLE_RUNTIME_STATE;
 
 pub(super) struct RuntimeRoutine {
     pub(super) role: &'static str,
@@ -173,7 +174,7 @@ pub(crate) fn composition_dispatch_for_layout(
     let battle_placeholder = instructions.len();
     instructions.push(Instruction::BneAbsolute(layout.dispatch));
     instructions.extend([
-        Instruction::LdaAbsolute(SHARED_BATTLE_PHASE_ADDRESS),
+        Instruction::LdaAbsolute(BATTLE_RUNTIME_STATE.shared_phase_address),
         Instruction::JsrAbsolute(layout.clear_remap_state_outside_shared_battle),
         Instruction::JmpAbsolute(layout.dispatch),
     ]);
@@ -186,7 +187,9 @@ pub(crate) fn composition_dispatch_for_layout(
     ]);
     let uploaded_placeholder = instructions.len();
     instructions.push(Instruction::BneAbsolute(layout.dispatch));
-    instructions.push(Instruction::LdaAbsolute(SHARED_BATTLE_PHASE_ADDRESS));
+    instructions.push(Instruction::LdaAbsolute(
+        BATTLE_RUNTIME_STATE.shared_phase_address,
+    ));
     let inactive_phase_placeholder = instructions.len();
     instructions.push(Instruction::BmiAbsolute(layout.dispatch));
     instructions.extend([
@@ -386,7 +389,7 @@ fn clear_remap_state_outside_shared_battle_for_layout(
     layout: BattleCompositionRuntimeLayout,
 ) -> Result<Vec<u8>> {
     let mut instructions = vec![
-        Instruction::CmpImmediate(SHARED_BATTLE_PHASE_COUNT),
+        Instruction::CmpImmediate(BATTLE_RUNTIME_STATE.shared_phase_count),
         Instruction::BccAbsolute(layout.clear_remap_state_outside_shared_battle),
         Instruction::LdaImmediate(0),
         Instruction::StaAbsolute(REMAP_STATE_ADDRESS),
@@ -582,21 +585,22 @@ pub(super) fn enemy_participant_name_entry() -> Result<u16> {
 }
 
 fn project_dialogue_selector_for_layout(layout: BattleCompositionRuntimeLayout) -> Result<Vec<u8>> {
+    let selector = BATTLE_RUNTIME_STATE.dialogue_selector_projection;
     let observed = layout.project_dialogue_selector + 23;
     assemble_at(
         layout.project_dialogue_selector,
         &[
-            Instruction::LdaAbsolute(0x0334),
+            Instruction::LdaAbsolute(selector.required_nonzero_addresses[0]),
             Instruction::BeqAbsolute(observed),
-            Instruction::LdaAbsolute(0x0479),
+            Instruction::LdaAbsolute(selector.required_nonzero_addresses[1]),
             Instruction::BeqAbsolute(observed),
-            Instruction::LdaAbsolute(0x0335),
+            Instruction::LdaAbsolute(selector.required_nonzero_addresses[2]),
             Instruction::BeqAbsolute(observed),
-            Instruction::LdaAbsolute(0x05DF),
+            Instruction::LdaAbsolute(selector.required_zero_addresses[0]),
             Instruction::BneAbsolute(observed),
-            Instruction::LdaImmediate(0x3E),
+            Instruction::LdaImmediate(selector.forced_selector),
             Instruction::Rts,
-            Instruction::LdaAbsolute(0x7936),
+            Instruction::LdaAbsolute(selector.observed_selector_address),
             Instruction::Rts,
         ],
     )
@@ -611,8 +615,8 @@ pub(super) fn shared_battle_phase_active_for_layout(
     layout: BattleCompositionRuntimeLayout,
 ) -> Result<Vec<u8>> {
     let mut instructions = vec![
-        Instruction::LdaAbsolute(SHARED_BATTLE_PHASE_ADDRESS),
-        Instruction::CmpImmediate(SHARED_BATTLE_PHASE_COUNT),
+        Instruction::LdaAbsolute(BATTLE_RUNTIME_STATE.shared_phase_address),
+        Instruction::CmpImmediate(BATTLE_RUNTIME_STATE.shared_phase_count),
     ];
     let active_placeholder = instructions.len();
     instructions.push(Instruction::BccAbsolute(layout.shared_battle_phase_active));
@@ -632,7 +636,7 @@ fn initialize_battle_remap_for_layout(layout: BattleCompositionRuntimeLayout) ->
     assemble_at(
         layout.initialize_battle_remap,
         &[
-            Instruction::StaAbsolute(BATTLE_ACTIVE_FLAG),
+            Instruction::StaAbsolute(BATTLE_RUNTIME_STATE.active_flag_address),
             Instruction::Php,
             Instruction::Pha,
             Instruction::LdaImmediate(0),

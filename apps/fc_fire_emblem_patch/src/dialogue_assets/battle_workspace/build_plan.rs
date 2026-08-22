@@ -21,8 +21,6 @@ pub(crate) struct BattleDialoguePlannedRecord {
     pub(crate) pointer_file_offsets: Vec<usize>,
     pub(crate) planned_pointer_cpu_address: u16,
     pub(crate) planned_file_offset: usize,
-    pub(crate) source_file_offset: usize,
-    pub(crate) source_storage_byte_count: usize,
     logical_bytes: Vec<LogicalDialogueByte>,
 }
 
@@ -197,9 +195,6 @@ pub(crate) fn plan_battle_dialogue_records(
                     planned_file_offset,
                 )?,
                 planned_file_offset,
-                source_file_offset: source_record.file_offset,
-                source_storage_byte_count: source_record.end_file_offset_exclusive
-                    - source_record.file_offset,
                 logical_bytes,
             })
         })

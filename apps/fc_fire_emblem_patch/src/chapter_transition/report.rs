@@ -167,7 +167,7 @@ pub(super) struct SaveCompleteNoBranchContract {
     pub(super) main_state: u8,
     pub(super) main_state_hex: &'static str,
     pub(super) dialogue_substate_address: u16,
-    pub(super) dialogue_substate_address_hex: &'static str,
+    pub(super) dialogue_substate_address_hex: String,
     pub(super) owned_dialogue_substate_sequence: [u8; 4],
     pub(super) owned_dialogue_substate_sequence_hex: [&'static str; 4],
     pub(super) menu_depth_address: u16,

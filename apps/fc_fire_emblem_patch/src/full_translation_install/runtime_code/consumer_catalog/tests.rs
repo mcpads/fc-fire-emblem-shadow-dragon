@@ -2,6 +2,7 @@ use super::shop_item_route::{
     ItemMaterialRoute, StorageItemConsumer, select_shop_item_material, select_storage_item_material,
 };
 use super::*;
+use crate::dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE;
 
 fn execute_until_kind_validation(
     routine: &RuntimeRoutine,
@@ -74,13 +75,13 @@ fn layout() -> ConsumerCatalogRuntimeLayout {
 
 fn shop_item_residency() -> ShopItemResidencyRuntimeContract {
     ShopItemResidencyRuntimeContract {
-        outer_state_address: 0x05DB,
+        outer_state_address: MAIN_DIALOGUE_RUNTIME_STATE.map_dialogue_outer_state_address,
         composition_state: 0x03,
         composite_state: 0x15,
         selected_facility_address: 0x77D0,
-        dialogue_directory_address: 0x77F4,
+        dialogue_directory_address: MAIN_DIALOGUE_RUNTIME_STATE.directory_selector_address,
         dialogue_directory_selector: 0xB1,
-        e7_caller_resume_flag_address: 0x7809,
+        e7_caller_resume_flag_address: MAIN_DIALOGUE_RUNTIME_STATE.caller_handoff_flag_address,
         selling_facilities: [0x01, 0x02, 0x05],
         non_selling_facilities: [0x03, 0x04],
         dialogue_material_page: 0x31,
@@ -96,7 +97,7 @@ fn storage_item_list() -> StorageItemListRuntimeRoute {
     use crate::full_translation_install::storage_residency::StorageItemListRuntimeContext;
 
     StorageItemListRuntimeRoute {
-        caller_state_address: 0x05DB,
+        caller_state_address: MAIN_DIALOGUE_RUNTIME_STATE.map_dialogue_outer_state_address,
         deposit: StorageItemListRuntimeContext {
             composite_state:
                 crate::full_translation_install::screen_font_residency::UNIT_ITEM_LIST_COMPOSITE_STATE,

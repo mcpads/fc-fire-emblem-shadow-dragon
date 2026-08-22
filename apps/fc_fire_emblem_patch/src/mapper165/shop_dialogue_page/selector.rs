@@ -1,6 +1,9 @@
 use anyhow::{Result, ensure};
 
-use crate::rp2a03::{Instruction, assemble_at};
+use crate::{
+    dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE,
+    rp2a03::{Instruction, assemble_at},
+};
 
 pub(crate) const PAGE_ROUTINE_ADDRESS: u16 = 0xF748;
 pub(crate) const PAGE_ROUTINE_END: u16 = 0xF79A;
@@ -19,7 +22,7 @@ pub(crate) fn build_page_selector(mapper_register: u8, fallback_target: u16) -> 
         &[
             Instruction::Php,
             Instruction::Pha,
-            Instruction::LdaAbsolute(0x05DB),
+            Instruction::LdaAbsolute(MAIN_DIALOGUE_RUNTIME_STATE.map_dialogue_outer_state_address),
             Instruction::BeqAbsolute(FALLBACK_ADDRESS),
             Instruction::CmpImmediate(0x0D),
             Instruction::BcsAbsolute(FALLBACK_ADDRESS),
@@ -29,7 +32,7 @@ pub(crate) fn build_page_selector(mapper_register: u8, fallback_target: u16) -> 
             Instruction::LdaAbsolute(0x77F2),
             Instruction::CmpImmediate(0x0B),
             Instruction::BneAbsolute(FALLBACK_ADDRESS),
-            Instruction::LdaAbsolute(0x77F4),
+            Instruction::LdaAbsolute(MAIN_DIALOGUE_RUNTIME_STATE.directory_selector_address),
             Instruction::CmpImmediate(0xB1),
             Instruction::BneAbsolute(FALLBACK_ADDRESS),
             Instruction::LdaZeroPage(0x59),

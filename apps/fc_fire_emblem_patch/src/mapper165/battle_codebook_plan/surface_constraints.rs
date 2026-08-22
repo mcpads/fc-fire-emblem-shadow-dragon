@@ -218,7 +218,6 @@ pub(in crate::mapper165) fn select_observed_battle_surfaces(
             sample.route_role.clone(),
             ScreenCodeConstraint {
                 glyphs: selection.glyphs,
-                preserved_active_codes: background.preserved_non_japanese_codes,
             },
         ));
     }

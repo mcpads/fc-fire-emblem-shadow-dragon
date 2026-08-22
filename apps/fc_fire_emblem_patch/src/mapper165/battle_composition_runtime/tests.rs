@@ -1,5 +1,8 @@
 use super::{dynamic_assignment::build_dynamic_assignment_routines, runtime::*, *};
-use crate::mapper165::SAME_BATTLE_ROUND_ACTIVATION_WRITE;
+use crate::battle_runtime_state::{
+    BATTLE_COMPOSITION_LIFETIME_START_WRITES, BATTLE_RUNTIME_STATE,
+    SAME_BATTLE_ROUND_ACTIVATION_WRITE,
+};
 
 fn test_recipe_directories() -> RecipeDirectoryAddresses {
     RecipeDirectoryAddresses {
@@ -331,7 +334,7 @@ fn remap_cleanup_preserves_active_phases_and_clears_inactive_phases() {
         clear_remap_state_outside_shared_battle().unwrap(),
         [
             0xC9,
-            SHARED_BATTLE_PHASE_COUNT,
+            BATTLE_RUNTIME_STATE.shared_phase_count,
             0x90,
             0x05,
             0xA9,
@@ -350,10 +353,10 @@ fn shared_battle_phase_predicate_covers_the_complete_engine_lifetime() {
         shared_battle_phase_active().unwrap(),
         [
             0xAD,
-            SHARED_BATTLE_PHASE_ADDRESS as u8,
-            (SHARED_BATTLE_PHASE_ADDRESS >> 8) as u8,
+            BATTLE_RUNTIME_STATE.shared_phase_address as u8,
+            (BATTLE_RUNTIME_STATE.shared_phase_address >> 8) as u8,
             0xC9,
-            SHARED_BATTLE_PHASE_COUNT,
+            BATTLE_RUNTIME_STATE.shared_phase_count,
             0x90,
             0x03,
             0xA9,
@@ -371,8 +374,8 @@ fn battle_initializer_preserves_source_effect_and_reopens_composition() {
     let initializer = initialize_battle_remap().unwrap();
     assert!(initializer.starts_with(&[
         0x8D,
-        BATTLE_ACTIVE_FLAG as u8,
-        (BATTLE_ACTIVE_FLAG >> 8) as u8,
+        BATTLE_RUNTIME_STATE.active_flag_address as u8,
+        (BATTLE_RUNTIME_STATE.active_flag_address >> 8) as u8,
         0x08,
         0x48,
     ]));
@@ -392,18 +395,29 @@ fn battle_initializer_preserves_source_effect_and_reopens_composition() {
 #[test]
 fn battle_lifetime_starts_reopen_composition_without_clearing_same_battle_rounds() {
     let mut bytes = crate::test_support::synthetic_mapper165_rom_bytes(0xFF);
-    for (bank, address) in BATTLE_COMPOSITION_LIFETIME_START_WRITES {
+    for writer in BATTLE_COMPOSITION_LIFETIME_START_WRITES {
+        let bank = writer.prg_bank;
+        let address = writer.cpu_address;
         let offset = switchable_bank_file_offset(bank, address).unwrap();
         bytes[offset..offset + 3].copy_from_slice(
-            &assemble_at(address, &[Instruction::StaAbsolute(BATTLE_ACTIVE_FLAG)]).unwrap(),
+            &assemble_at(
+                address,
+                &[Instruction::StaAbsolute(
+                    BATTLE_RUNTIME_STATE.active_flag_address,
+                )],
+            )
+            .unwrap(),
         );
     }
-    let (round_bank, round_address) = SAME_BATTLE_ROUND_ACTIVATION_WRITE;
+    let round_bank = SAME_BATTLE_ROUND_ACTIVATION_WRITE.prg_bank;
+    let round_address = SAME_BATTLE_ROUND_ACTIVATION_WRITE.cpu_address;
     let round_offset = switchable_bank_file_offset(round_bank, round_address).unwrap();
     bytes[round_offset..round_offset + 3].copy_from_slice(
         &assemble_at(
             round_address,
-            &[Instruction::StaAbsolute(BATTLE_ACTIVE_FLAG)],
+            &[Instruction::StaAbsolute(
+                BATTLE_RUNTIME_STATE.active_flag_address,
+            )],
         )
         .unwrap(),
     );
@@ -416,7 +430,9 @@ fn battle_lifetime_starts_reopen_composition_without_clearing_same_battle_rounds
         BATTLE_COMPOSITION_LIFETIME_START_WRITES.len()
     );
     let output = image.into_data();
-    for (bank, address) in BATTLE_COMPOSITION_LIFETIME_START_WRITES {
+    for writer in BATTLE_COMPOSITION_LIFETIME_START_WRITES {
+        let bank = writer.prg_bank;
+        let address = writer.cpu_address;
         let offset = switchable_bank_file_offset(bank, address).unwrap();
         assert_eq!(
             &output[offset..offset + 3],
@@ -433,7 +449,9 @@ fn battle_lifetime_starts_reopen_composition_without_clearing_same_battle_rounds
         &output[round_offset..round_offset + 3],
         assemble_at(
             round_address,
-            &[Instruction::StaAbsolute(BATTLE_ACTIVE_FLAG)]
+            &[Instruction::StaAbsolute(
+                BATTLE_RUNTIME_STATE.active_flag_address,
+            )]
         )
         .unwrap()
         .as_slice()
@@ -530,7 +548,7 @@ fn zero_right_page_selects_its_mapper_register_before_writing_chr_ram() {
 
 #[test]
 fn composition_report_omits_translation_content_and_private_paths() {
-    let report = BattleCompositionLoaderProbeReport {
+    let report = BattleCompositionRuntimeReport {
         schema: 4,
         source_sha1: EXPECTED_SOURCE_SHA1,
         base_report_sha1: "base-report".to_owned(),

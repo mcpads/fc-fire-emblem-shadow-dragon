@@ -1,3 +1,4 @@
+mod battle_runtime_state;
 mod battle_text_workset;
 mod chapter_map_source;
 mod chapter_transition;
@@ -8,6 +9,7 @@ mod class_profile;
 mod command_line;
 mod dialogue_assets;
 mod dialogue_inventory;
+mod dialogue_runtime_state;
 mod epilogue_variant_evidence;
 mod fixed_menu_labels;
 mod fixed_string_consumers;
@@ -226,30 +228,6 @@ enum Command {
             long,
             default_value = "out/battle-composition-runtime-verification.json"
         )]
-        report: PathBuf,
-    },
-    /// Build one proven battle combination with fixed text and dialogue sharing a codebook.
-    BuildBattleCombinationProbe {
-        source: PathBuf,
-        #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
-        fixed_workspace: PathBuf,
-        #[arg(long, default_value = "private/dialogue/battle-workspace.json")]
-        dialogue_workspace: PathBuf,
-        #[arg(long, default_value = "out/battle-combination-probe.nes")]
-        output: PathBuf,
-        #[arg(long, default_value = "out/battle-combination-probe.json")]
-        report: PathBuf,
-    },
-    /// Upload one proven battle codebook into mapper 165 CHR RAM at the battle transition.
-    BuildBattleCacheUploadProbe {
-        source: PathBuf,
-        #[arg(long, default_value = "private/fixed-text/battle-workspace.json")]
-        fixed_workspace: PathBuf,
-        #[arg(long, default_value = "private/dialogue/battle-workspace.json")]
-        dialogue_workspace: PathBuf,
-        #[arg(long, default_value = "out/battle-cache-upload-probe.nes")]
-        output: PathBuf,
-        #[arg(long, default_value = "out/battle-cache-upload-probe.json")]
         report: PathBuf,
     },
     /// Inventory dialogue entry tables without emitting source dialogue bytes.

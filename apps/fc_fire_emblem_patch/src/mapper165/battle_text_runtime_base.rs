@@ -22,7 +22,7 @@ use super::{
         plan_battle_cache_composition_material, plan_canonical_battle_codebook,
         surface_constraints::select_observed_battle_surfaces,
     },
-    battle_text_cache_probe::{
+    battle_text_material::{
         CANONICAL_ABSTRACT_COLOR_COUNT, COLOR_BIT_MASKS, COLOR_BIT_MASKS_CPU_ADDRESS,
         COLOR_BIT_MASKS_PRG_OFFSET, DynamicAssignmentMaterial, GLYPH_ATLAS_MMC3_PAGE,
         GLYPH_ATLAS_PRG_OFFSET, PHYSICAL_CODE_TABLE_CPU_ADDRESS, PHYSICAL_CODE_TABLE_PRG_OFFSET,
@@ -31,12 +31,12 @@ use super::{
         SAFE_ABSTRACT_COLORS_PRG_OFFSET, SOURCE_PAGE_MMC3_PAGE, SOURCE_PAGE_PRG_OFFSET,
         expand_prg_with_material, rasterize_atlas,
     },
-    dialogue_probe_font::SOURCE_FONT_PHYSICAL_PAGE,
+    dialogue_font_page::SOURCE_FONT_PHYSICAL_PAGE,
     install_mapper165_parity_bytes,
 };
 
 #[cfg(test)]
-use super::battle_text_cache_probe::{PROTECTED_ABSTRACT_COLOR_COUNT, SAFE_ABSTRACT_COLOR_COUNT};
+use super::battle_text_material::{PROTECTED_ABSTRACT_COLOR_COUNT, SAFE_ABSTRACT_COLOR_COUNT};
 
 const EXPANDED_PRG_SIZE: usize = 512 * 1024;
 const FIXED_BANK_SIZE: usize = 16 * 1024;

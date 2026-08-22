@@ -2,6 +2,7 @@ use anyhow::{Result, ensure};
 
 use crate::{
     choice_labels::{CHOICE_LABEL_SOURCE_PRG_BANK, POINTER_LOAD_ADDRESS, POINTER_LOAD_BYTES},
+    dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE,
     rp2a03::{Instruction, assemble_at},
 };
 
@@ -43,7 +44,7 @@ pub(crate) fn build_weapon_shop_lifetime_identity_predicate() -> Result<Vec<u8>>
     let routine = assemble_at(
         IDENTITY_PREDICATE_ADDRESS,
         &[
-            Instruction::LdaAbsolute(0x05DB),
+            Instruction::LdaAbsolute(MAIN_DIALOGUE_RUNTIME_STATE.map_dialogue_outer_state_address),
             Instruction::BeqAbsolute(IDENTITY_FALSE_ADDRESS),
             Instruction::CmpImmediate(0x0D),
             Instruction::BcsAbsolute(IDENTITY_FALSE_ADDRESS),
@@ -53,7 +54,7 @@ pub(crate) fn build_weapon_shop_lifetime_identity_predicate() -> Result<Vec<u8>>
             Instruction::LdaAbsolute(0x77F2),
             Instruction::CmpImmediate(0x0B),
             Instruction::BneAbsolute(IDENTITY_FALSE_ADDRESS),
-            Instruction::LdaAbsolute(0x77F4),
+            Instruction::LdaAbsolute(MAIN_DIALOGUE_RUNTIME_STATE.directory_selector_address),
             Instruction::CmpImmediate(0xB1),
             Instruction::BneAbsolute(IDENTITY_FALSE_ADDRESS),
             Instruction::LdaZeroPage(0x59),
@@ -88,13 +89,13 @@ pub(crate) fn build_item_list_pointer_selector() -> Result<Vec<u8>> {
     let routine = assemble_at(
         ITEM_LIST_SELECTOR_ADDRESS,
         &[
-            Instruction::LdaAbsolute(0x05DB),
+            Instruction::LdaAbsolute(MAIN_DIALOGUE_RUNTIME_STATE.map_dialogue_outer_state_address),
             Instruction::CmpImmediate(0x03),
             Instruction::BneAbsolute(ITEM_LIST_ORIGINAL_POINTER_ADDRESS),
             Instruction::LdaAbsolute(0x77D0),
             Instruction::CmpImmediate(0x01),
             Instruction::BneAbsolute(ITEM_LIST_ORIGINAL_POINTER_ADDRESS),
-            Instruction::LdaAbsolute(0x77F4),
+            Instruction::LdaAbsolute(MAIN_DIALOGUE_RUNTIME_STATE.directory_selector_address),
             Instruction::CmpImmediate(0xB1),
             Instruction::BneAbsolute(ITEM_LIST_ORIGINAL_POINTER_ADDRESS),
             Instruction::Tya,

@@ -16,13 +16,13 @@ use super::{
     OUTPUT_MAPPER, SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
     bind_cumulative_font_page_fallback_graph,
     dialogue_lifetime_page::{SCREEN_ROLE, build_page_routine_at, plan_dialogue_lifetime_page},
-    hangul_page_probe::build_mapper165_hangul_page_probe_from_parity,
     install_mapper165_parity_bytes,
     roster_page::{
         PAGE_REGISTERS as ROSTER_PAGE_REGISTERS, PAGE_ROUTINE_ADDRESS as ROSTER_SELECTOR_ADDRESS,
         build_page_routine as build_roster_selector,
         build_page_routine_with_fallback as build_chained_roster_selector,
     },
+    ui_page_install::install_mapper165_ui_pages_from_parity,
     weapon_shop_shared_text::ITEM_NAME_SOURCE_INDICES as WEAPON_SHOP_ITEM_NAME_SOURCE_INDICES,
 };
 
@@ -70,9 +70,9 @@ const SHOP_SHARED_TEXT_STAGE_ROM_NAME: &str = "weapon-shop-shared-text.nes";
 const MAXIMUM_DIALOGUE_STAGE_ROM_NAME: &str = "maximum-dialogue.nes";
 const TITLE_LOGO_STAGE_ROM_NAME: &str = "title-logo.nes";
 pub(crate) const REPORT_SCHEMA: u8 = 4;
-pub(super) const DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFBD4;
-pub(super) const DIALOGUE_SELECTOR_CAVE_END: u16 = 0xFC20;
-const CHAPTER_ONE_DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFBD8;
+pub(super) const DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS: u16 = 0xFBD4;
+pub(super) const DIALOGUE_FONT_PAGE_SELECTOR_CAVE_END: u16 = 0xFC20;
+const CHAPTER_ONE_DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS: u16 = 0xFBD8;
 const CHAPTER_ONE_INDEX: u8 = 0;
 const CHAPTER_TWO_INDEX: u8 = 1;
 const CHAPTER_TWO_SCREEN_ROLE: &str = "chapter_2_intro_dialogue";
@@ -161,7 +161,7 @@ pub(crate) fn build_cumulative_patch(
     let parity = install_mapper165_parity_bytes(source_rom)?;
     let ui_stage_rom_path = inputs.stage_directory.join(UI_STAGE_ROM_NAME);
     let ui_stage_report_path = inputs.stage_directory.join(UI_STAGE_REPORT_NAME);
-    let ui_stage = build_mapper165_hangul_page_probe_from_parity(
+    let ui_stage = install_mapper165_ui_pages_from_parity(
         source_rom,
         &parity,
         inputs.options_localization_path,
@@ -240,16 +240,16 @@ pub(crate) fn build_cumulative_patch(
         chapter_one_title.encoded_storage_bytes(&chapter_one_page.assignments)?;
 
     let chapter_one_selector = build_page_routine_at(
-        CHAPTER_ONE_DIALOGUE_SELECTOR_ADDRESS,
+        CHAPTER_ONE_DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS,
         chapter_one_page.mapper_register,
         SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
     )?;
-    let dialogue_selector_offset = fixed_bank_file_offset(DIALOGUE_SELECTOR_ADDRESS)?;
+    let dialogue_selector_offset = fixed_bank_file_offset(DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS)?;
     let chapter_one_dialogue_selector_offset =
-        fixed_bank_file_offset(CHAPTER_ONE_DIALOGUE_SELECTOR_ADDRESS)?;
+        fixed_bank_file_offset(CHAPTER_ONE_DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS)?;
     let selector_cave_byte_count = usize::from(
-        DIALOGUE_SELECTOR_CAVE_END
-            .checked_sub(DIALOGUE_SELECTOR_ADDRESS)
+        DIALOGUE_FONT_PAGE_SELECTOR_CAVE_END
+            .checked_sub(DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS)
             .context("cumulative dialogue selector cave range underflow")?,
     );
     ensure!(
@@ -262,8 +262,8 @@ pub(crate) fn build_cumulative_patch(
     ensure!(
         count_direct_transfers_to_range(
             source_rom.prg(),
-            DIALOGUE_SELECTOR_ADDRESS,
-            DIALOGUE_SELECTOR_CAVE_END,
+            DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS,
+            DIALOGUE_FONT_PAGE_SELECTOR_CAVE_END,
         )? == 0,
         "cumulative dialogue selector cave has pre-existing direct transfers"
     );
@@ -273,7 +273,7 @@ pub(crate) fn build_cumulative_patch(
     let chapter_one_roster_selector = build_chained_roster_selector(
         ROSTER_PAGE_REGISTERS[0],
         ROSTER_PAGE_REGISTERS[1],
-        CHAPTER_ONE_DIALOGUE_SELECTOR_ADDRESS,
+        CHAPTER_ONE_DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS,
     )?;
     ensure!(
         source_roster_selector.len() == chapter_one_roster_selector.len(),
@@ -282,7 +282,7 @@ pub(crate) fn build_cumulative_patch(
     let cumulative_roster_selector = build_chained_roster_selector(
         ROSTER_PAGE_REGISTERS[0],
         ROSTER_PAGE_REGISTERS[1],
-        DIALOGUE_SELECTOR_ADDRESS,
+        DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS,
     )?;
 
     let mut chapter_one_expanded_base = ui_stage_bytes.clone();
@@ -337,7 +337,7 @@ pub(crate) fn build_cumulative_patch(
         &[(&chapter_one_plans[..], &chapter_one_encoded_records[..])],
         &[(&chapter_one_title, &chapter_one_encoded_title)],
         &chapter_one_roster_selector,
-        CHAPTER_ONE_DIALOGUE_SELECTOR_ADDRESS,
+        CHAPTER_ONE_DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS,
         &chapter_one_selector,
     )?;
     write_file(
@@ -391,7 +391,7 @@ pub(crate) fn build_cumulative_patch(
     let chapter_two_encoded_title =
         chapter_two_title.encoded_storage_bytes(&chapter_two_page.assignments)?;
     let dialogue_selector = build_chapter_page_selector(
-        DIALOGUE_SELECTOR_ADDRESS,
+        DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS,
         ChapterPageSequence {
             admitted_chapter_count: 2,
             first_mapper_register: chapter_one_page.mapper_register,
@@ -439,8 +439,9 @@ pub(crate) fn build_cumulative_patch(
         &cumulative_roster_selector,
     )?;
     let mut expected_selector = vec![0xFF; dialogue_selector.len()];
-    let chapter_one_selector_start =
-        usize::from(CHAPTER_ONE_DIALOGUE_SELECTOR_ADDRESS - DIALOGUE_SELECTOR_ADDRESS);
+    let chapter_one_selector_start = usize::from(
+        CHAPTER_ONE_DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS - DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS,
+    );
     expected_selector[chapter_one_selector_start..].copy_from_slice(&chapter_one_selector);
     image.write_expected(
         "extend cumulative chapter intro selector through Chapter 2",
@@ -468,7 +469,7 @@ pub(crate) fn build_cumulative_patch(
             (&chapter_two_title, &chapter_two_encoded_title),
         ],
         &cumulative_roster_selector,
-        DIALOGUE_SELECTOR_ADDRESS,
+        DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS,
         &dialogue_selector,
     )?;
 
@@ -800,7 +801,7 @@ mod tests {
         let roster_selector =
             build_roster_selector(ROSTER_PAGE_REGISTERS[0], ROSTER_PAGE_REGISTERS[1]).unwrap();
         let dialogue_selector = build_chapter_page_selector(
-            DIALOGUE_SELECTOR_ADDRESS,
+            DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS,
             ChapterPageSequence {
                 admitted_chapter_count: 2,
                 first_mapper_register: 0x98,
@@ -811,11 +812,11 @@ mod tests {
 
         assert!(
             usize::from(ROSTER_SELECTOR_ADDRESS) + roster_selector.len()
-                <= usize::from(DIALOGUE_SELECTOR_ADDRESS)
+                <= usize::from(DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS)
         );
         assert!(
-            usize::from(DIALOGUE_SELECTOR_ADDRESS) + dialogue_selector.len()
-                <= usize::from(DIALOGUE_SELECTOR_CAVE_END)
+            usize::from(DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS) + dialogue_selector.len()
+                <= usize::from(DIALOGUE_FONT_PAGE_SELECTOR_CAVE_END)
         );
     }
 

@@ -5,6 +5,7 @@ use serde::Serialize;
 
 use crate::{
     dialogue_inventory::{ShopDialogueTableBinding, inspect_shop_dialogue_table},
+    dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE,
     rom::{EXPECTED_SOURCE_SHA1, HEADER_SIZE, Rom},
     sha1_hex,
     typed_source::decode_rp2a03_sequence,
@@ -224,8 +225,11 @@ fn build_report(rom: &Rom) -> Result<ShopFlowReport> {
             exit_screenshot_sha256: "15d1d0adf1fd2a56863bc87a56df7aeff10c022948128de9ef3cb045ea403b6f",
             exit_temporal_observation: "CHR 1E/1E + 00/15 and the complete screenshot stayed stable across 152 regular and 168 irregularly spaced input-free frames",
             advance_input: "A",
-            completion_flag_address: 0x7803,
-            completion_flag_address_hex: "0x7803".to_owned(),
+            completion_flag_address: MAIN_DIALOGUE_RUNTIME_STATE.completion_flag_address,
+            completion_flag_address_hex: format!(
+                "0x{:04X}",
+                MAIN_DIALOGUE_RUNTIME_STATE.completion_flag_address
+            ),
             completion_flag_value: 1,
             outer_state_after_completion: 0,
             returned_screen_role: "map_idle",

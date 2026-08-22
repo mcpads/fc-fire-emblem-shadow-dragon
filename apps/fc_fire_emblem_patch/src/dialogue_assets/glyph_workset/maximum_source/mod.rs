@@ -1,7 +1,10 @@
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
-use crate::chapter_victory::validate_chapter_clear_command_route;
+use crate::{
+    chapter_victory::validate_chapter_clear_command_route,
+    dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE,
+};
 
 use super::report::MaximumTransitionChainReport;
 
@@ -128,9 +131,9 @@ pub(super) struct DialogueProducerBinding {
     selected_outer_screen_state_hex: String,
     pub(super) selected_stage: u8,
     dialogue_entry_address: u16,
-    dialogue_entry_address_hex: &'static str,
+    dialogue_entry_address_hex: String,
     dialogue_selector_address: u16,
-    dialogue_selector_address_hex: &'static str,
+    dialogue_selector_address_hex: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -293,9 +296,15 @@ fn producer_binding(
         selected_outer_screen_state: CHAPTER_CLEAR_OUTER_SCREEN_STATE,
         selected_outer_screen_state_hex: format!("0x{CHAPTER_CLEAR_OUTER_SCREEN_STATE:02X}"),
         selected_stage: CHAPTER_CLEAR_DIALOGUE_STAGE,
-        dialogue_entry_address: 0x77F1,
-        dialogue_entry_address_hex: "0x77F1",
-        dialogue_selector_address: 0x77F4,
-        dialogue_selector_address_hex: "0x77F4",
+        dialogue_entry_address: MAIN_DIALOGUE_RUNTIME_STATE.entry_index_address,
+        dialogue_entry_address_hex: format!(
+            "0x{:04X}",
+            MAIN_DIALOGUE_RUNTIME_STATE.entry_index_address
+        ),
+        dialogue_selector_address: MAIN_DIALOGUE_RUNTIME_STATE.directory_selector_address,
+        dialogue_selector_address_hex: format!(
+            "0x{:04X}",
+            MAIN_DIALOGUE_RUNTIME_STATE.directory_selector_address
+        ),
     }
 }

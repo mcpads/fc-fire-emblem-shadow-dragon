@@ -7,6 +7,8 @@ use anyhow::{Context, Result, ensure};
 use retro_rp2a03::{AddressingMode, Mnemonic, Operand, decode_bytes};
 
 use crate::{
+    battle_runtime_state::BATTLE_RUNTIME_STATE,
+    dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE,
     mapper165::battle_codebook_plan::IndirectWriteDestinationBounds, rom::Rom, sha1_hex,
     typed_source::decode_rp2a03_sequence,
 };
@@ -106,15 +108,27 @@ const BATTLE_REWARD_HANDOFF_INSTRUCTIONS: &[ExpectedInstruction] = &[
     ExpectedInstruction::zero_page(0x937C, Mnemonic::Inc, 0x84),
     ExpectedInstruction::zero_page(0x938D, Mnemonic::Inc, 0x84),
     ExpectedInstruction::absolute(0xB10A, Mnemonic::Jsr, 0xE65C),
-    ExpectedInstruction::absolute(0xB10D, Mnemonic::Lda, 0x05DB),
+    ExpectedInstruction::absolute(
+        0xB10D,
+        Mnemonic::Lda,
+        MAIN_DIALOGUE_RUNTIME_STATE.map_dialogue_outer_state_address,
+    ),
     ExpectedInstruction::absolute(0xB110, Mnemonic::Jsr, 0xC34C),
     ExpectedInstruction::absolute(0xB125, Mnemonic::Jsr, 0xB29F),
     ExpectedInstruction::absolute(0xB128, Mnemonic::Sty, 0x77B1),
     ExpectedInstruction::relative(0xB12B, Mnemonic::Bcc, 0x27),
     ExpectedInstruction::absolute(0xB132, Mnemonic::Lda, 0x77B0),
     ExpectedInstruction::immediate(0xB140, Mnemonic::Lda, 0x40),
-    ExpectedInstruction::absolute(0xB142, Mnemonic::Sta, 0x77F1),
-    ExpectedInstruction::absolute(0xB14F, Mnemonic::Inc, 0x05DB),
+    ExpectedInstruction::absolute(
+        0xB142,
+        Mnemonic::Sta,
+        MAIN_DIALOGUE_RUNTIME_STATE.entry_index_address,
+    ),
+    ExpectedInstruction::absolute(
+        0xB14F,
+        Mnemonic::Inc,
+        MAIN_DIALOGUE_RUNTIME_STATE.map_dialogue_outer_state_address,
+    ),
     ExpectedInstruction::absolute(0xB15C, Mnemonic::Ldy, 0x77B1),
     ExpectedInstruction::absolute(0xB15F, Mnemonic::Lda, 0x77B0),
     ExpectedInstruction::indirect_indexed_y(0xB162, Mnemonic::Sta, 0x00),
@@ -326,9 +340,9 @@ pub(super) fn bind_battle_runtime_write_destinations(
         ensure_indirect_store(source, bank, address, pointer)?;
     }
 
-    let participant_records = vec![0x76F4..=0x770E, 0x7715..=0x772F];
+    let participant_records = BATTLE_RUNTIME_STATE.battle_record_ranges().to_vec();
     let message_buffer = vec![0x78F2..=0x79F1];
-    let staging_fields = vec![0x0304..=0x0327];
+    let staging_fields = vec![BATTLE_RUNTIME_STATE.staging_write_range()];
     let animation_reset = vec![0x03D6..=0x03D9];
     let mut destinations = BTreeMap::new();
     for &site in PARTICIPANT_WRITERS {
@@ -564,9 +578,9 @@ mod tests {
     #[test]
     fn battle_runtime_destination_families_are_disjoint_from_mapper_space() {
         for ranges in [
-            vec![0x76F4..=0x770E, 0x7715..=0x772F],
+            BATTLE_RUNTIME_STATE.battle_record_ranges().to_vec(),
             vec![0x78F2..=0x79F1],
-            vec![0x0304..=0x0327],
+            vec![BATTLE_RUNTIME_STATE.staging_write_range()],
             vec![0x03D6..=0x03D9],
         ] {
             let bounds =

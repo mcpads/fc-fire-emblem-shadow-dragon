@@ -1,8 +1,10 @@
 use super::*;
+use crate::battle_runtime_state::BATTLE_RUNTIME_STATE;
 
 pub(super) fn build_battle_dialogue_state_machine(
     source: &[u8],
 ) -> Result<BattleDialogueStateMachineReport> {
+    let dialogue_state_address = BATTLE_RUNTIME_STATE.dialogue_state_address;
     let dispatcher_file_offset = switchable_cpu_to_file_offset(
         BATTLE_DIALOGUE_PRG_BANK,
         BATTLE_DIALOGUE_DISPATCHER_CPU_ADDRESS,
@@ -109,8 +111,8 @@ pub(super) fn build_battle_dialogue_state_machine(
     Ok(BattleDialogueStateMachineReport {
         prg_bank: BATTLE_DIALOGUE_PRG_BANK,
         prg_bank_hex: format!("0x{BATTLE_DIALOGUE_PRG_BANK:02X}"),
-        state_address: BATTLE_DIALOGUE_STATE_ADDRESS,
-        state_address_hex: format!("0x{BATTLE_DIALOGUE_STATE_ADDRESS:04X}"),
+        state_address: dialogue_state_address,
+        state_address_hex: format!("0x{dialogue_state_address:04X}"),
         dispatcher_cpu_address: BATTLE_DIALOGUE_DISPATCHER_CPU_ADDRESS,
         dispatcher_cpu_address_hex: format!("0x{BATTLE_DIALOGUE_DISPATCHER_CPU_ADDRESS:04X}"),
         handler_table_cpu_address: BATTLE_DIALOGUE_HANDLER_TABLE_CPU_ADDRESS,

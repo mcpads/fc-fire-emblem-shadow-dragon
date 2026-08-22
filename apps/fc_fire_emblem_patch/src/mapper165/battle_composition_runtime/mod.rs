@@ -4,6 +4,10 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    battle_runtime_state::{
+        BATTLE_COMPOSITION_LIFETIME_START_WRITES,
+        SOUND_TEST_BATTLE_COMPOSITION_LIFETIME_START_WRITE,
+    },
     font_slots::FONT_PAGE_SIZE,
     mmc5_chr::switchable_bank_file_offset,
     mmc5_prg::count_direct_transfers_to_range,
@@ -19,10 +23,9 @@ use crate::{
 };
 
 use super::{
-    BATTLE_COMPOSITION_LIFETIME_START_WRITES, OUTPUT_MAPPER,
-    SOUND_TEST_BATTLE_COMPOSITION_LIFETIME_START_WRITE,
+    OUTPUT_MAPPER,
     battle_codebook_plan::{BattleRuntimeRecipeInput, inspect_runtime_recipe_input},
-    battle_text_cache_probe::{
+    battle_text_material::{
         COLOR_BIT_MASKS_CPU_ADDRESS, DYNAMIC_ASSIGNMENT_CODE_CPU_ADDRESS,
         DYNAMIC_ASSIGNMENT_CODE_PRG_OFFSET, GLYPH_ATLAS_MMC3_PAGE, PHYSICAL_CODE_TABLE_CPU_ADDRESS,
         PROTECTED_ABSTRACT_COLOR_COUNT, PROTECTED_ABSTRACT_COLORS_CPU_ADDRESS,
@@ -160,9 +163,6 @@ const PPU_CONTROL_SHADOW: u16 = 0x00CD;
 const PRG_BANK_SHADOW: u8 = 0x29;
 const RIGHT_FE_SHADOW: u8 = 0x5C;
 const CHR_HIGH_BITS_SHADOW: u8 = 0x52;
-pub(crate) const SHARED_BATTLE_PHASE_ADDRESS: u16 = 0x047C;
-pub(crate) const SHARED_BATTLE_PHASE_COUNT: u8 = 0x20;
-pub(crate) const BATTLE_ACTIVE_FLAG: u16 = 0x047D;
 const CACHE_UPLOADED_MARKER: u8 = 0x80;
 const UPLOAD_RENDER_MASK: u8 = 0x06;
 const SELECTED_COLOR_BITMAP_ADDRESS: u16 = 0x07C4;
@@ -214,7 +214,7 @@ struct BattleTextRuntimeBaseContract {
 }
 
 #[derive(Debug, Serialize)]
-struct BattleCompositionLoaderProbeReport {
+struct BattleCompositionRuntimeReport {
     schema: u8,
     source_sha1: &'static str,
     base_report_sha1: String,
@@ -286,7 +286,7 @@ struct BattleCompositionLoaderProbeReport {
     next_gate: &'static str,
 }
 
-pub(crate) struct BattleCompositionLoaderProbeSummary {
+pub(crate) struct BattleCompositionBuildSummary {
     pub(crate) output_sha1: String,
     pub(crate) report_sha1: String,
     pub(crate) observed_runtime_tuple_count: usize,
@@ -295,7 +295,7 @@ pub(crate) struct BattleCompositionLoaderProbeSummary {
     pub(crate) runtime_tracked_write_count: usize,
 }
 
-pub(crate) struct BattleCompositionLoaderBuild<'a> {
+pub(crate) struct BattleCompositionBuild<'a> {
     pub(crate) source_path: &'a Path,
     pub(crate) temporal_manifest_path: &'a Path,
     pub(crate) base_path: &'a Path,
@@ -313,8 +313,8 @@ pub(crate) fn build_battle_composition_loader_probe(
     base_report_path: &Path,
     output_path: &Path,
     report_path: &Path,
-) -> Result<BattleCompositionLoaderProbeSummary> {
-    build_battle_composition_loader(BattleCompositionLoaderBuild {
+) -> Result<BattleCompositionBuildSummary> {
+    build_battle_composition_runtime(BattleCompositionBuild {
         source_path,
         temporal_manifest_path,
         base_path,
@@ -326,10 +326,10 @@ pub(crate) fn build_battle_composition_loader_probe(
     })
 }
 
-pub(crate) fn build_battle_composition_loader(
-    build: BattleCompositionLoaderBuild<'_>,
-) -> Result<BattleCompositionLoaderProbeSummary> {
-    let BattleCompositionLoaderBuild {
+pub(crate) fn build_battle_composition_runtime(
+    build: BattleCompositionBuild<'_>,
+) -> Result<BattleCompositionBuildSummary> {
+    let BattleCompositionBuild {
         source_path,
         temporal_manifest_path,
         base_path,
@@ -529,7 +529,7 @@ pub(crate) fn build_battle_composition_loader(
     let runtime_routine_byte_count =
         fixed_runtime_routine_byte_count + material_runtime_routine_byte_count;
     let output_sha1 = sha1_hex(&output);
-    let report = BattleCompositionLoaderProbeReport {
+    let report = BattleCompositionRuntimeReport {
         schema: 4,
         source_sha1: EXPECTED_SOURCE_SHA1,
         base_report_sha1: sha1_hex(&base_report_bytes),
@@ -599,8 +599,8 @@ pub(crate) fn build_battle_composition_loader(
         battle_initializers_reopen_composition: true,
         sound_test_battle_initializer_hook_address_hex: format!(
             "0x{:02X}:0x{:04X}",
-            SOUND_TEST_BATTLE_COMPOSITION_LIFETIME_START_WRITE.0,
-            SOUND_TEST_BATTLE_COMPOSITION_LIFETIME_START_WRITE.1
+            SOUND_TEST_BATTLE_COMPOSITION_LIFETIME_START_WRITE.prg_bank,
+            SOUND_TEST_BATTLE_COMPOSITION_LIFETIME_START_WRITE.cpu_address
         ),
         sound_test_shared_battle_activation_installed: true,
         sound_test_battle_recomposition_boundary_installed: true,
@@ -619,7 +619,7 @@ pub(crate) fn build_battle_composition_loader(
     report_bytes.push(b'\n');
     write_file(output_path, &output)?;
     write_file(report_path, &report_bytes)?;
-    Ok(BattleCompositionLoaderProbeSummary {
+    Ok(BattleCompositionBuildSummary {
         output_sha1,
         report_sha1: sha1_hex(&report_bytes),
         observed_runtime_tuple_count: runtime_inputs.len(),
@@ -734,11 +734,18 @@ fn install_battle_lifetime_remap_initializers(
     image: &mut TrackedImage,
     layout: BattleCompositionRuntimeLayout,
 ) -> Result<()> {
-    for (bank, address) in BATTLE_COMPOSITION_LIFETIME_START_WRITES {
+    for writer in BATTLE_COMPOSITION_LIFETIME_START_WRITES {
+        let bank = writer.prg_bank;
+        let address = writer.cpu_address;
         image.write_expected(
             format!("battle remap-state initializer at {bank:02X}:${address:04X}"),
             switchable_bank_file_offset(bank, address)?,
-            &assemble_at(address, &[Instruction::StaAbsolute(BATTLE_ACTIVE_FLAG)])?,
+            &assemble_at(
+                address,
+                &[Instruction::StaAbsolute(
+                    crate::battle_runtime_state::BATTLE_RUNTIME_STATE.active_flag_address,
+                )],
+            )?,
             &assemble_at(
                 address,
                 &[Instruction::JsrAbsolute(layout.initialize_battle_remap)],

@@ -14,12 +14,12 @@ use crate::{
 
 use super::{
     OUTPUT_MAPPER, SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
+    dialogue_font_page::assignment_sha1,
     dialogue_lifetime_page::{
         CENTRAL_RIGHT_FD_SELECTOR_CALL_ADDRESS, OUTPUT_CHR_BANK_COUNT, PAGE_ROUTINE_ADDRESS,
         PAGE_ROUTINE_END, PHYSICAL_CHR_PAGE, SCREEN_ROLE, build_page_routine,
         central_right_fd_selector_call, plan_dialogue_lifetime_page,
     },
-    dialogue_probe_font::assignment_sha1,
     install_mapper165_parity_bytes,
 };
 

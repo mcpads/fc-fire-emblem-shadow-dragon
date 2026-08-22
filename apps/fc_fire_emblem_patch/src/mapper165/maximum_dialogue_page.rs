@@ -16,7 +16,7 @@ use crate::{
 };
 
 use super::{
-    dialogue_probe_font::{assign_glyph_codes_excluding, build_font_page},
+    dialogue_font_page::{assign_glyph_codes_excluding, build_font_page},
     encode_chr_page_register,
     maximum_dialogue_boundary::load_observed_page_boundaries,
 };

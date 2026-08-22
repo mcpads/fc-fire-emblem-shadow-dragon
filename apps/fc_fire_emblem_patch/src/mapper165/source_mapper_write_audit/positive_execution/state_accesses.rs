@@ -107,6 +107,7 @@ fn source_instruction_bytes(source: &Rom, bank: u8, address: u16) -> Result<&[u8
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE;
     use crate::rom::HEADER_SIZE;
 
     fn source_with_fixed_program(program: &[u8]) -> Rom {
@@ -149,8 +150,22 @@ mod tests {
                 (FIXED_PRG_BANK, 0xC004, 0x0024),
                 Some(BTreeSet::from([0x03])),
             ),
-            ((FIXED_PRG_BANK, 0xC006, 0x05DB), None),
-            ((FIXED_PRG_BANK, 0xC009, 0x05EE), None),
+            (
+                (
+                    FIXED_PRG_BANK,
+                    0xC006,
+                    MAIN_DIALOGUE_RUNTIME_STATE.map_dialogue_outer_state_address,
+                ),
+                None,
+            ),
+            (
+                (
+                    FIXED_PRG_BANK,
+                    0xC009,
+                    MAIN_DIALOGUE_RUNTIME_STATE.dialogue_or_sound_state_address,
+                ),
+                None,
+            ),
         ]);
         let accesses = bind_positive_state_accesses(&source, &roles, &observed_writes).unwrap();
 

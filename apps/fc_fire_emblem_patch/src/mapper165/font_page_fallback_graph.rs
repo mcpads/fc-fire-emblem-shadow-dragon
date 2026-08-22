@@ -21,11 +21,11 @@ use source_binding::{
 
 use super::{
     SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
-    battle_composition_loader_probe::{
+    battle_composition_runtime::{
         CUMULATIVE_RUNTIME_LAYOUT, cumulative_battle_central_right_fd_selector,
     },
     chapter_page_selector::{ChapterPageSequence, build_chapter_page_selector},
-    cumulative_patch::{DIALOGUE_SELECTOR_ADDRESS, DIALOGUE_SELECTOR_CAVE_END},
+    cumulative_patch::{DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS, DIALOGUE_FONT_PAGE_SELECTOR_CAVE_END},
     final_font_page_forwarders::{
         BoundFontPageSelector, bind_front_end_font_page_selector, bind_unit_name_font_page_selector,
     },
@@ -234,12 +234,12 @@ pub(crate) fn bind_cumulative_font_page_fallback_graph(
 
     let dialogue_actual = fixed_slice(
         fixed,
-        DIALOGUE_SELECTOR_ADDRESS,
-        usize::from(DIALOGUE_SELECTOR_CAVE_END - DIALOGUE_SELECTOR_ADDRESS),
+        DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS,
+        usize::from(DIALOGUE_FONT_PAGE_SELECTOR_CAVE_END - DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS),
     )?;
     let dialogue_first_register = bind_generated_register(dialogue_actual, |register| {
         build_chapter_page_selector(
-            DIALOGUE_SELECTOR_ADDRESS,
+            DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS,
             ChapterPageSequence {
                 admitted_chapter_count: CUMULATIVE_DIALOGUE_CHAPTER_COUNT,
                 first_mapper_register: register,
@@ -250,8 +250,8 @@ pub(crate) fn bind_cumulative_font_page_fallback_graph(
     let dialogue = bind_exact_node(
         fixed,
         FontPageFallbackNodeRole::ChapterIntroDialogue,
-        DIALOGUE_SELECTOR_ADDRESS,
-        DIALOGUE_SELECTOR_CAVE_END,
+        DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS,
+        DIALOGUE_FONT_PAGE_SELECTOR_CAVE_END,
         SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS,
         (0..CUMULATIVE_DIALOGUE_CHAPTER_COUNT)
             .map(|index| dialogue_first_register + index * 8)

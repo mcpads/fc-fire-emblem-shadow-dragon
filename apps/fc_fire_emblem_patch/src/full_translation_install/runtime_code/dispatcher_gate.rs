@@ -20,6 +20,7 @@ use anyhow::{Context, Result, ensure};
 use super::{RuntimeRoutine, next_address};
 use crate::{
     dialogue_inventory::switchable_cpu_to_file_offset,
+    dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE,
     mapper165::font_pair_projection::{
         WRITE_TRANSLATED_CHR_PAGE_ADDRESS, WRITE_TRANSLATED_CHR_PAGE_END,
         build_translated_chr_page_writer,
@@ -33,7 +34,8 @@ use crate::{
 /// 대사 디스패처 입구다. 게이트가 이 세 바이트를 가져간다.
 pub(in crate::full_translation_install) const DISPATCHER_ENTRY: u16 = 0x8000;
 /// 원본이 입구에서 읽는 상태 바이트다.
-pub(in crate::full_translation_install) const DISPATCHER_STATE: u16 = 0x77F7;
+pub(in crate::full_translation_install) const DISPATCHER_STATE: u16 =
+    MAIN_DIALOGUE_RUNTIME_STATE.state_address;
 /// 표 분기 호출이다. 게이트는 통과할 때 이 자리로 되돌린다.
 pub(in crate::full_translation_install) const DISPATCHER_TABLE_CALL: u16 = 0x8003;
 /// 대사 초기 진입이다. 요청 발행기가 이 세 바이트를 가져간다.

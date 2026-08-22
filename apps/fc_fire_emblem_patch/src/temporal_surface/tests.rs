@@ -69,7 +69,7 @@ fn memory_expectations_use_cpu_addresses_for_each_dump_region() {
         oam: vec![0xFF; OAM_BYTE_COUNT],
         palette: vec![0; PALETTE_BYTE_COUNT],
     };
-    files.internal_ram[0x47C] = 0x1F;
+    files.internal_ram[usize::from(BATTLE_RUNTIME_STATE.shared_phase_address)] = 0x1F;
     files.prg_ram[0x1730] = 0x05;
     let sample = SampleInput {
         frame_offset: 19,
@@ -78,7 +78,7 @@ fn memory_expectations_use_cpu_addresses_for_each_dump_region() {
         expected_memory: vec![
             MemoryExpectation {
                 region: MemoryRegion::InternalRam,
-                address: 0x047C,
+                address: usize::from(BATTLE_RUNTIME_STATE.shared_phase_address),
                 bytes_hex: "1F".to_owned(),
                 reason: "shared engine terminal phase".to_owned(),
             },
@@ -141,6 +141,8 @@ fn producer_frame_deltas_must_match_declared_exact_steps() {
 
 #[test]
 fn battle_runtime_input_projects_selector_62_before_the_late_write() {
+    let runtime = crate::battle_runtime_state::BATTLE_RUNTIME_STATE;
+    let selector = runtime.dialogue_selector_projection;
     let mut files = CaptureFiles {
         screenshot: b"\x89PNG\r\n\x1A\n".to_vec(),
         state: Vec::new(),
@@ -150,19 +152,27 @@ fn battle_runtime_input_projects_selector_62_before_the_late_write() {
         oam: vec![0xFF; OAM_BYTE_COUNT],
         palette: vec![0; PALETTE_BYTE_COUNT],
     };
-    files.internal_ram[0x0304..0x0308].copy_from_slice(&[0x04, 0x85, 0x01, 0x08]);
-    files.internal_ram[0x0320..0x0324].copy_from_slice(&[0x0B, 0x1A, 0x00, 0x0B]);
-    for address in [0x0334, 0x0479, 0x0335] {
-        files.internal_ram[address] = 1;
+    for (addresses, values) in [
+        (runtime.staged_participant_identity_addresses, [0x04, 0x85]),
+        (runtime.staged_class_identity_addresses, [0x01, 0x08]),
+        (runtime.staged_item_source_index_addresses, [0x0B, 0x1A]),
+        (runtime.staged_terrain_source_index_addresses, [0x00, 0x0B]),
+    ] {
+        for (address, value) in addresses.into_iter().zip(values) {
+            files.internal_ram[usize::from(address)] = value;
+        }
+    }
+    for address in selector.required_nonzero_addresses {
+        files.internal_ram[usize::from(address)] = 1;
     }
 
     let input = observed_battle_runtime_input(&files).unwrap();
 
     assert_eq!(input.observed_dialogue_selector, 0);
-    assert_eq!(input.projected_dialogue_selector, 0x3E);
+    assert_eq!(input.projected_dialogue_selector, selector.forced_selector);
     assert!(input.selector_62_predicate_matched);
 
-    files.internal_ram[0x05DF] = 1;
+    files.internal_ram[usize::from(selector.required_zero_addresses[0])] = 1;
     let input = observed_battle_runtime_input(&files).unwrap();
     assert_eq!(input.projected_dialogue_selector, 0);
     assert!(!input.selector_62_predicate_matched);

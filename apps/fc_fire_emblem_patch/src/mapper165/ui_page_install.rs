@@ -55,7 +55,7 @@ const EXTENSION_PAGE_COUNT: usize = 4;
 const OUTPUT_CHR_BANK_COUNT: u8 = 19;
 
 #[derive(Debug, Serialize)]
-struct HangulPageProbeReport {
+struct UiPageInstallReport {
     schema: u32,
     source_sha1: &'static str,
     parity_base_sha1: String,
@@ -176,7 +176,7 @@ struct TrackedWriteReport {
     len: usize,
 }
 
-pub(crate) struct HangulPageProbeSummary {
+pub(crate) struct UiPageInstallSummary {
     pub(crate) output_sha1: String,
     pub(crate) report_sha1: String,
     pub(crate) page_pack_sha1: String,
@@ -199,10 +199,10 @@ pub(crate) fn build_mapper165_hangul_page_probe(
     options_screen_evidence_path: &Path,
     output_path: &Path,
     report_path: &Path,
-) -> Result<HangulPageProbeSummary> {
+) -> Result<UiPageInstallSummary> {
     let source_rom = Rom::from_path(source_path)?;
     let parity_base = install_mapper165_parity_bytes(&source_rom)?;
-    build_mapper165_hangul_page_probe_from_parity(
+    install_mapper165_ui_pages_from_parity(
         &source_rom,
         &parity_base,
         localization_path,
@@ -213,7 +213,7 @@ pub(crate) fn build_mapper165_hangul_page_probe(
     )
 }
 
-pub(crate) fn build_mapper165_hangul_page_probe_from_parity(
+pub(crate) fn install_mapper165_ui_pages_from_parity(
     source_rom: &Rom,
     parity_base: &[u8],
     localization_path: &Path,
@@ -221,7 +221,7 @@ pub(crate) fn build_mapper165_hangul_page_probe_from_parity(
     options_screen_evidence_path: &Path,
     output_path: &Path,
     report_path: &Path,
-) -> Result<HangulPageProbeSummary> {
+) -> Result<UiPageInstallSummary> {
     source_rom.verify_supported_japanese()?;
     bind_roster_header_composite_route(source_rom)?;
     let roster_owner_constructor_offset = switchable_bank_file_offset(
@@ -259,7 +259,7 @@ pub(crate) fn build_mapper165_hangul_page_probe_from_parity(
     let page_pack = assemble_hangul_page_pack(&source_rom, &localization)?;
     ensure!(
         page_pack.len() == OPTIONS_PAGE_COUNT * CHR_PAGE_SIZE,
-        "Hangul page probe needs exactly two 4 KiB pages"
+        "UI page installation needs exactly two 4 KiB pages"
     );
     let roster_localization = RosterLocalization::from_path(roster_localization_path)?;
     let validated_roster_localization = roster_localization.validate()?;
@@ -450,7 +450,7 @@ pub(crate) fn build_mapper165_hangul_page_probe_from_parity(
         })
         .collect::<Vec<_>>();
     let output = image.into_data();
-    let output_rom = Rom::parse(output.clone()).context("parse mapper 165 Hangul page probe")?;
+    let output_rom = Rom::parse(output.clone()).context("parse mapper 165 UI page installation")?;
     verify_output(
         &parity_rom,
         &output_rom,
@@ -463,7 +463,7 @@ pub(crate) fn build_mapper165_hangul_page_probe_from_parity(
     let output_sha1 = sha1_hex(&output);
     let page_pack_sha1 = sha1_hex(&page_pack);
     let roster_page_pack_sha1 = sha1_hex(&roster_pages.page_pack);
-    let report = HangulPageProbeReport {
+    let report = UiPageInstallReport {
         schema: 1,
         source_sha1: EXPECTED_SOURCE_SHA1,
         parity_base_sha1,
@@ -603,13 +603,13 @@ pub(crate) fn build_mapper165_hangul_page_probe_from_parity(
         release_eligible: false,
     };
     let report_bytes = serde_json::to_vec_pretty(&report)
-        .context("serialize mapper 165 Hangul page probe report")?;
+        .context("serialize mapper 165 UI page installation report")?;
     let report_sha1 = sha1_hex(&report_bytes);
     let tracked_write_count = report.tracked_writes.len();
 
     write_file(output_path, &output)?;
     write_file(report_path, &report_bytes)?;
-    Ok(HangulPageProbeSummary {
+    Ok(UiPageInstallSummary {
         output_sha1,
         report_sha1,
         page_pack_sha1,
@@ -648,22 +648,22 @@ fn verify_output(
     );
     ensure!(
         output_rom.chr()[..parity_rom.chr().len()] == *parity_rom.chr(),
-        "Hangul page probe changed the mapper 165 parity CHR base"
+        "UI page installation changed the mapper 165 parity CHR base"
     );
     ensure!(
         output_rom.chr()[parity_rom.chr().len()..parity_rom.chr().len() + page_pack.len()]
             == *page_pack,
-        "Hangul page probe appended different options page bytes"
+        "UI page installation appended different options page bytes"
     );
     let roster_page_pack_start = parity_rom.chr().len() + page_pack.len();
     ensure!(
         output_rom.chr()[roster_page_pack_start..] == *roster_page_pack,
-        "Hangul page probe appended different roster page-pair bytes"
+        "UI page installation appended different roster page-pair bytes"
     );
     ensure!(
         output_rom.data()[OPTIONS_TABLE_OFFSET..OPTIONS_TABLE_OFFSET + replacement_table.len()]
             == *replacement_table,
-        "Hangul page probe options table changed"
+        "UI page installation changed the options table"
     );
     let roster_header_offset =
         switchable_bank_file_offset(ROSTER_TEXT_PRG_BANK, ROSTER_HEADER_CPU_ADDRESS)?;
@@ -671,11 +671,11 @@ fn verify_output(
         output_rom.data()
             [roster_header_offset..roster_header_offset + replacement_roster_header.len()]
             == *replacement_roster_header,
-        "Hangul page probe roster header changed"
+        "UI page installation changed the roster header"
     );
     ensure!(
         output_rom.data()[6] & 0x02 == parity_rom.data()[6] & 0x02,
-        "Hangul page probe changed the battery flag"
+        "UI page installation changed the battery flag"
     );
     Ok(())
 }

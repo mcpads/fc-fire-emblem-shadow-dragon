@@ -1,11 +1,14 @@
 use super::*;
 
+use crate::dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE;
 use crate::game_over_dialogue::{
     is_source_selected_game_over_dialogue, source_selected_game_over_dialogue_family_hex,
 };
 
-pub(super) const GAME_OVER_DIALOGUE_DIRECTORY_SELECTOR_ADDRESS: usize = 0x77F4;
-pub(super) const GAME_OVER_DIALOGUE_ENTRY_SELECTOR_ADDRESS: usize = 0x77F1;
+pub(super) const GAME_OVER_DIALOGUE_DIRECTORY_SELECTOR_ADDRESS: usize =
+    MAIN_DIALOGUE_RUNTIME_STATE.directory_selector_address as usize;
+pub(super) const GAME_OVER_DIALOGUE_ENTRY_SELECTOR_ADDRESS: usize =
+    MAIN_DIALOGUE_RUNTIME_STATE.entry_index_address as usize;
 
 pub(super) fn validate_route_contract(route: &RouteInput) -> Result<()> {
     ensure!(!route.route_role.is_empty(), "temporal route role is empty");

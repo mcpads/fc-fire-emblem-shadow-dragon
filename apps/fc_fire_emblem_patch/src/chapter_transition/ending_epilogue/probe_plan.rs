@@ -1,13 +1,19 @@
 use serde::Serialize;
 
 use super::{CodeLocation, location};
+use crate::dialogue_runtime_state::MAIN_DIALOGUE_RUNTIME_STATE;
 
 const CANDIDATE_COUNT: usize = 53;
 const ROSTER_RECORD_CAPACITY: usize = 54;
 const ROSTER_RECORD_STRIDE: usize = 0x1B;
 const ROSTER_SPAN_BYTES: usize = ROSTER_RECORD_CAPACITY * ROSTER_RECORD_STRIDE;
 const IRREGULAR_SAMPLE_OFFSETS: [u16; 5] = [7, 19, 43, 82, 171];
-const PROTECTED_FLOW_ADDRESSES: [u16; 4] = [0x7731, 0x773B, 0x77F1, 0x77F4];
+const PROTECTED_FLOW_ADDRESSES: [u16; 4] = [
+    0x7731,
+    0x773B,
+    MAIN_DIALOGUE_RUNTIME_STATE.entry_index_address,
+    MAIN_DIALOGUE_RUNTIME_STATE.directory_selector_address,
+];
 
 #[derive(Debug, Serialize)]
 pub(super) struct EndingEpilogueVariantObservationPlan {
@@ -26,12 +32,12 @@ pub(super) struct EndingEpilogueVariantObservationPlan {
     candidate_record_count: usize,
     sentinel_record_index: usize,
     protected_flow_addresses: [u16; 4],
-    protected_flow_address_hex: [&'static str; 4],
+    protected_flow_address_hex: [String; 4],
     runs: [EpilogueVariantObservationRun; 3],
     irregular_sample_offsets_frames: [u16; 5],
     capture_surfaces: &'static [&'static str],
     branch_observation_addresses: [u16; 4],
-    branch_observation_address_hex: [&'static str; 4],
+    branch_observation_address_hex: [String; 4],
     proof_boundary: &'static str,
 }
 
@@ -62,7 +68,8 @@ pub(super) fn ending_epilogue_variant_observation_plan() -> EndingEpilogueVarian
         candidate_record_count: CANDIDATE_COUNT,
         sentinel_record_index: CANDIDATE_COUNT,
         protected_flow_addresses: PROTECTED_FLOW_ADDRESSES,
-        protected_flow_address_hex: ["0x7731", "0x773B", "0x77F1", "0x77F4"],
+        protected_flow_address_hex: PROTECTED_FLOW_ADDRESSES
+            .map(|address| format!("0x{address:04X}")),
         runs: [
             EpilogueVariantObservationRun {
                 run_role: "natural_baseline",
@@ -97,8 +104,9 @@ pub(super) fn ending_epilogue_variant_observation_plan() -> EndingEpilogueVarian
             "palette",
             "CPU and mapper state",
         ],
-        branch_observation_addresses: [0x7731, 0x773B, 0x77F1, 0x77F4],
-        branch_observation_address_hex: ["0x7731", "0x773B", "0x77F1", "0x77F4"],
+        branch_observation_addresses: PROTECTED_FLOW_ADDRESSES,
+        branch_observation_address_hex: PROTECTED_FLOW_ADDRESSES
+            .map(|address| format!("0x{address:04X}")),
         proof_boundary: "roster-only runs enumerate rendering and control-flow surfaces; they do not prove a natural gameplay outcome, difficulty, character fate, or completion route, and they must not write phase, cursor, entry, or table selectors",
     }
 }
@@ -139,11 +147,19 @@ mod tests {
         assert_eq!(plan.protected_flow_addresses, PROTECTED_FLOW_ADDRESSES);
         assert_eq!(plan.runs[1].expected_visible_entry_count, Some(53));
         assert_eq!(plan.runs[2].expected_visible_entry_count, Some(52));
+        let protected_dialogue_addresses = [
+            format!("0x{:04X}", MAIN_DIALOGUE_RUNTIME_STATE.entry_index_address),
+            format!(
+                "0x{:04X}",
+                MAIN_DIALOGUE_RUNTIME_STATE.directory_selector_address
+            ),
+        ];
         assert!(plan.runs.iter().all(|run| {
             !run.roster_intervention.contains("0x7731")
                 && !run.roster_intervention.contains("0x773B")
-                && !run.roster_intervention.contains("0x77F1")
-                && !run.roster_intervention.contains("0x77F4")
+                && protected_dialogue_addresses
+                    .iter()
+                    .all(|address| !run.roster_intervention.contains(address))
         }));
     }
 }

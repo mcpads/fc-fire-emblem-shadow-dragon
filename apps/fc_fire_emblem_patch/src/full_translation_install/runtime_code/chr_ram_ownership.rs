@@ -10,9 +10,9 @@ use anyhow::{Context, Result, ensure};
 use super::super::runtime_state_storage::REQUEST_STATE;
 use super::{RuntimeRoutine, next_address};
 use crate::{
-    mapper165::battle_composition_loader_probe::{
-        CUMULATIVE_RUNTIME_LAYOUT, SHARED_BATTLE_PHASE_ADDRESS,
-        cumulative_shared_battle_phase_active_bytes,
+    battle_runtime_state::BATTLE_RUNTIME_STATE,
+    mapper165::battle_composition_runtime::{
+        CUMULATIVE_RUNTIME_LAYOUT, cumulative_shared_battle_phase_active_bytes,
     },
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
@@ -91,7 +91,7 @@ fn battle_composition_gate() -> Result<Vec<u8>> {
     assemble_at(
         BATTLE_COMPOSITION_GATE,
         &[
-            Instruction::LdaAbsolute(SHARED_BATTLE_PHASE_ADDRESS),
+            Instruction::LdaAbsolute(BATTLE_RUNTIME_STATE.shared_phase_address),
             Instruction::BmiAbsolute(BATTLE_COMPOSITION_SKIP),
             Instruction::LdaZeroPage(PPU_MASK_SHADOW),
             Instruction::CmpImmediate(UPLOAD_RENDER_MASK),

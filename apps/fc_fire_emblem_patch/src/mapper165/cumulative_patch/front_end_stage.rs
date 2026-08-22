@@ -12,8 +12,8 @@ use crate::{
 };
 
 use super::{
-    DIALOGUE_SELECTOR_ADDRESS, OUTPUT_MAPPER, ROSTER_PAGE_REGISTERS, ROSTER_SELECTOR_ADDRESS,
-    build_chained_roster_selector,
+    DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS, OUTPUT_MAPPER, ROSTER_PAGE_REGISTERS,
+    ROSTER_SELECTOR_ADDRESS, build_chained_roster_selector,
 };
 use crate::mapper165::SELECT_RIGHT_FD_CHR_BANK_FOR_PAIR_ADDRESS;
 use crate::mapper165::font_pair_projection::{
@@ -66,7 +66,7 @@ pub(super) fn install_front_end_stage(
         .iter()
         .map(|entry| entry.encoded_storage_bytes(&page.assignments))
         .collect::<Result<Vec<_>>>()?;
-    let selector = build_page_selector(page.mapper_register, DIALOGUE_SELECTOR_ADDRESS)?;
+    let selector = build_page_selector(page.mapper_register, DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS)?;
     let translated_page_writer = build_translated_chr_page_writer()?;
     let roster_selector = build_chained_roster_selector(
         ROSTER_PAGE_REGISTERS[0],
@@ -195,7 +195,7 @@ pub(super) fn install_front_end_stage(
             == *translated_page_writer,
         "front-end output changed the shared translated CHR page writer"
     );
-    let dialogue_offset = fixed_bank_file_offset(DIALOGUE_SELECTOR_ADDRESS)?;
+    let dialogue_offset = fixed_bank_file_offset(DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS)?;
     ensure!(
         output[dialogue_offset..dialogue_offset + dialogue_selector.len()] == *dialogue_selector,
         "front-end stage changed the chapter dialogue selector"

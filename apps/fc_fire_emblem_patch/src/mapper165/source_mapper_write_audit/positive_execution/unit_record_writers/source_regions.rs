@@ -1,7 +1,10 @@
 use anyhow::{Context, Result, ensure};
 use retro_rp2a03::{AddressingMode, Mnemonic, Operand, decode_bytes};
 
-use crate::{rom::Rom, sha1_hex, typed_source::decode_rp2a03_sequence};
+use crate::{
+    battle_runtime_state::BATTLE_RUNTIME_STATE, rom::Rom, sha1_hex,
+    typed_source::decode_rp2a03_sequence,
+};
 
 const SOURCE_PRG_BANK_BYTE_COUNT: usize = 16 * 1024;
 const FIXED_PRG_BANK: u8 = 0x0F;
@@ -379,7 +382,12 @@ const SOURCE_INSTRUCTIONS: &[SourceInstruction] = &[
     SourceInstruction::immediate(0x08, 0xBB1C, Mnemonic::Ldx, 0x00),
     SourceInstruction::immediate(0x08, 0xBB21, Mnemonic::Cpx, 0x36),
     SourceInstruction::immediate(0x08, 0xBB44, Mnemonic::Ldy, 0x00),
-    SourceInstruction::absolute_indexed_y(0x08, 0xBB46, Mnemonic::Lda, 0x76F4),
+    SourceInstruction::absolute_indexed_y(
+        0x08,
+        0xBB46,
+        Mnemonic::Lda,
+        BATTLE_RUNTIME_STATE.battle_record_addresses[0],
+    ),
     SourceInstruction::indirect_indexed_y(0x08, 0xBB49, Mnemonic::Sta, 0x74),
     SourceInstruction::immediate(0x08, 0xBB4C, Mnemonic::Cpy, 0x1B),
     SourceInstruction::indirect_indexed_y(0x08, 0xBB58, Mnemonic::Lda, 0x74),
