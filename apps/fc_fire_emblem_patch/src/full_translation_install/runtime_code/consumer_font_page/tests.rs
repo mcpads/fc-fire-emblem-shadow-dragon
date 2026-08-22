@@ -5,11 +5,13 @@ use crate::{
         SAVE_SLOT_SELECTION_COMPOSITE_STATE, START_MENU_COMPOSITE_STATE,
     },
     full_translation_install::screen_font_residency::{
-        ITEM_ACTION_COMPOSITE_STATE, STORAGE_ITEM_DETAIL_COMPOSITE_STATE,
-        UNIT_STATUS_COMPOSITE_STATE, UNIT_SUMMARY_COMPOSITE_STATE,
+        ITEM_ACTION_COMPOSITE_STATE, ITEM_USE_RESULT_COMPOSITE_STATE,
+        STORAGE_ITEM_DETAIL_COMPOSITE_STATE, UNIT_STATUS_COMPOSITE_STATE,
+        UNIT_SUMMARY_COMPOSITE_STATE,
     },
     full_translation_install::storage_residency::{
         STORAGE_ACTION_MENU_COMPOSITE_STATE, STORAGE_OVERFLOW_ACTION_COMPOSITE_STATE,
+        StorageItemListRuntimeContext,
     },
     shop_flow::SHOP_ITEM_COMPOSITE_STATE,
 };
@@ -36,9 +38,18 @@ fn pages() -> ScreenFontPageRoutes {
 fn storage_item_list_route() -> StorageItemListRuntimeRoute {
     StorageItemListRuntimeRoute {
         caller_state_address: 0x05DB,
-        composition_state: 0x06,
-        facility_composite_state: UNIT_ITEM_LIST_COMPOSITE_STATE,
-        overflow_composite_state: STORAGE_ITEM_DETAIL_COMPOSITE_STATE,
+        deposit: StorageItemListRuntimeContext {
+            composite_state: UNIT_ITEM_LIST_COMPOSITE_STATE,
+            caller_state: 0x06,
+        },
+        withdraw: StorageItemListRuntimeContext {
+            composite_state: ITEM_USE_RESULT_COMPOSITE_STATE,
+            caller_state: 0x0A,
+        },
+        overflow: StorageItemListRuntimeContext {
+            composite_state: STORAGE_ITEM_DETAIL_COMPOSITE_STATE,
+            caller_state: 0x06,
+        },
     }
 }
 
@@ -354,7 +365,7 @@ fn unit_selection_help_selects_the_same_page_as_the_unit_command_family() {
 }
 
 #[test]
-fn reused_item_list_state_retains_storage_dialogue_only_for_its_source_composer() {
+fn reused_deposit_list_state_retains_storage_dialogue_only_for_its_source_composer() {
     let pages = pages();
     let route = storage_item_list_route();
     let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
@@ -367,12 +378,12 @@ fn reused_item_list_state_retains_storage_dialogue_only_for_its_source_composer(
     let mut storage_memory: Box<[u8; 0x10000]> =
         vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
     storage_memory[usize::from(CONSUMER_FONT_PAGE)] = pages.unit_command;
-    storage_memory[usize::from(route.caller_state_address)] = route.composition_state;
+    storage_memory[usize::from(route.caller_state_address)] = route.deposit.caller_state;
     let (storage_memory, storage) = run_routines(
         storage_memory,
         &[&activation, &publisher],
         publisher.address,
-        route.facility_composite_state,
+        route.deposit.composite_state,
         0xA5,
     );
     assert_eq!(storage_memory[usize::from(CONSUMER_FONT_PAGE)], 0);
@@ -380,8 +391,8 @@ fn reused_item_list_state_retains_storage_dialogue_only_for_its_source_composer(
     assert_eq!(storage.applied_route, None);
 
     for caller_state in [
-        route.composition_state.wrapping_sub(1),
-        route.composition_state.wrapping_add(1),
+        route.deposit.caller_state.wrapping_sub(1),
+        route.deposit.caller_state.wrapping_add(1),
     ] {
         let mut ordinary_memory: Box<[u8; 0x10000]> =
             vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
@@ -390,7 +401,7 @@ fn reused_item_list_state_retains_storage_dialogue_only_for_its_source_composer(
             ordinary_memory,
             &[&activation, &publisher],
             publisher.address,
-            route.facility_composite_state,
+            route.deposit.composite_state,
             0x24,
         );
         assert_eq!(

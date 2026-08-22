@@ -1,7 +1,8 @@
 //! 저장소 화면군의 대사와 그 위에 남는 고정 선택 라벨을 한 코드 배정으로 묶는다.
 //!
 //! 상태 1D와 23은 주 대사 페이지가 화면에 남아 있는 동안 bank 0B 고정 문자열을
-//! 덧붙인다. 상태 07과 24는 그 대사 위에 품목 이름 목록을 합성한다. 따라서 별도
+//! 덧붙인다. 보관소의 맡기기는 상태 07, 찾기는 상태 1E, 초과 목록은 상태 24에서
+//! 그 대사 위에 품목 이름을 합성한다. 따라서 별도
 //! 정적·카탈로그 페이지를 다시 고르면 대사 타일이 깨지고, 반대로 대사 페이지에
 //! 겹쳐 보이는 라벨이나 품목 이름의 코드가 없으면 합성된 글자가 깨진다.
 //!
@@ -52,20 +53,18 @@ pub(in crate::full_translation_install) const STORAGE_DIALOGUE_OVERLAY_COMPOSITE
     STORAGE_OVERFLOW_ACTION_COMPOSITE_STATE,
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::full_translation_install) struct StorageItemListRuntimeRoute {
-    pub(in crate::full_translation_install) caller_state_address: u16,
-    pub(in crate::full_translation_install) composition_state: u8,
-    pub(in crate::full_translation_install) facility_composite_state: u8,
-    pub(in crate::full_translation_install) overflow_composite_state: u8,
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub(in crate::full_translation_install) struct StorageItemListRuntimeContext {
+    pub(in crate::full_translation_install) composite_state: u8,
+    pub(in crate::full_translation_install) caller_state: u8,
 }
 
-impl StorageItemListRuntimeRoute {
-    pub(in crate::full_translation_install) const fn dialogue_material_composite_states(
-        self,
-    ) -> [u8; 2] {
-        [self.facility_composite_state, self.overflow_composite_state]
-    }
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub(in crate::full_translation_install) struct StorageItemListRuntimeRoute {
+    pub(in crate::full_translation_install) caller_state_address: u16,
+    pub(in crate::full_translation_install) deposit: StorageItemListRuntimeContext,
+    pub(in crate::full_translation_install) withdraw: StorageItemListRuntimeContext,
+    pub(in crate::full_translation_install) overflow: StorageItemListRuntimeContext,
 }
 
 #[derive(Serialize)]
@@ -86,9 +85,7 @@ pub(super) struct StorageDialogueResidencyPlan {
     facility_item_list_record_ids: Vec<String>,
     overflow_item_list_record_ids: Vec<String>,
     item_list_record_ids: Vec<String>,
-    item_list_composition_state: u8,
-    item_list_settled_state: u8,
-    item_list_composite_states: [u8; 2],
+    item_list_runtime_route: StorageItemListRuntimeRoute,
     item_list_workset_count: usize,
     item_list_glyph_count: usize,
     preserved_item_code_count: usize,
@@ -334,11 +331,7 @@ pub(super) fn plan_storage_dialogue_residency(
         facility_item_list_record_ids: facility_item_list_record_ids.into_iter().collect(),
         overflow_item_list_record_ids: overflow_item_list_record_ids.into_iter().collect(),
         item_list_record_ids: item_list_record_ids.into_iter().collect(),
-        item_list_composition_state: source_binding.item_list_route.composition_state,
-        item_list_settled_state: source_binding.item_list_settled_state,
-        item_list_composite_states: source_binding
-            .item_list_route
-            .dialogue_material_composite_states(),
+        item_list_runtime_route: source_binding.item_list_route,
         item_list_workset_count: item_augmentation.target_workset_count,
         item_list_glyph_count: item_augmentation.item_glyph_count,
         preserved_item_code_count: item_augmentation.preserved_item_code_count,

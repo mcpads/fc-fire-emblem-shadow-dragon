@@ -1,5 +1,5 @@
 use super::shop_item_route::{
-    ItemMaterialRoute, select_shop_item_material, select_storage_item_material,
+    ItemMaterialRoute, StorageItemConsumer, select_shop_item_material, select_storage_item_material,
 };
 use super::*;
 
@@ -93,13 +93,25 @@ fn shop_item_residency() -> ShopItemResidencyRuntimeContract {
 }
 
 fn storage_item_list() -> StorageItemListRuntimeRoute {
+    use crate::full_translation_install::storage_residency::StorageItemListRuntimeContext;
+
     StorageItemListRuntimeRoute {
         caller_state_address: 0x05DB,
-        composition_state: 0x06,
-        facility_composite_state:
-            crate::full_translation_install::screen_font_residency::UNIT_ITEM_LIST_COMPOSITE_STATE,
-        overflow_composite_state:
-            crate::full_translation_install::screen_font_residency::STORAGE_ITEM_DETAIL_COMPOSITE_STATE,
+        deposit: StorageItemListRuntimeContext {
+            composite_state:
+                crate::full_translation_install::screen_font_residency::UNIT_ITEM_LIST_COMPOSITE_STATE,
+            caller_state: 0x06,
+        },
+        withdraw: StorageItemListRuntimeContext {
+            composite_state:
+                crate::full_translation_install::screen_font_residency::ITEM_USE_RESULT_COMPOSITE_STATE,
+            caller_state: 0x0A,
+        },
+        overflow: StorageItemListRuntimeContext {
+            composite_state:
+                crate::full_translation_install::screen_font_residency::STORAGE_ITEM_DETAIL_COMPOSITE_STATE,
+            caller_state: 0x06,
+        },
     }
 }
 
@@ -254,7 +266,7 @@ fn all_three_item_selling_facilities_use_the_dialogue_item_encoding() {
 }
 
 #[test]
-fn storage_item_list_uses_dialogue_material_only_during_its_source_composition_state() {
+fn every_storage_item_list_context_uses_dialogue_material() {
     let runtime = build_consumer_catalog_runtime(
         0xA600,
         0x30,
@@ -274,35 +286,70 @@ fn storage_item_list_uses_dialogue_material_only_during_its_source_composition_s
     )
     .unwrap();
 
-    assert_eq!(
-        select_storage_item_material(
-            &runtime.code_routine,
-            shop_item_residency(),
-            storage_item_list(),
-            storage_item_list().facility_composite_state,
-            storage_item_list().composition_state,
-        )
-        .unwrap(),
-        ItemMaterialRoute {
-            directory: shop_item_residency().dialogue_item_directory,
-            material_page: shop_item_residency().dialogue_material_page,
-            material_base: shop_item_residency().dialogue_material_base,
-        }
-    );
+    let expected = ItemMaterialRoute {
+        directory: shop_item_residency().dialogue_item_directory,
+        material_page: shop_item_residency().dialogue_material_page,
+        material_base: shop_item_residency().dialogue_material_base,
+    };
+    for (consumer, context) in [
+        (
+            StorageItemConsumer::RecordAppender,
+            storage_item_list().deposit,
+        ),
+        (
+            StorageItemConsumer::DirectOrListAppender,
+            storage_item_list().withdraw,
+        ),
+        (
+            StorageItemConsumer::DirectOrListAppender,
+            storage_item_list().overflow,
+        ),
+    ] {
+        assert_eq!(
+            select_storage_item_material(
+                &runtime.code_routine,
+                shop_item_residency(),
+                storage_item_list(),
+                consumer,
+                context.composite_state,
+                context.caller_state,
+            )
+            .unwrap(),
+            expected
+        );
+    }
+}
+
+#[test]
+fn ordinary_item_use_result_does_not_inherit_storage_dialogue_material() {
+    let runtime = build_consumer_catalog_runtime(
+        0xA600,
+        0x30,
+        0xF7F8,
+        0xF620,
+        0xDC,
+        0xDD,
+        layout(),
+        shop_item_residency(),
+        storage_item_list(),
+    )
+    .unwrap();
+    let storage = storage_item_list();
 
     assert_eq!(
         select_storage_item_material(
             &runtime.code_routine,
             shop_item_residency(),
-            storage_item_list(),
-            storage_item_list().overflow_composite_state,
-            storage_item_list().composition_state,
+            storage,
+            StorageItemConsumer::DirectOrListAppender,
+            storage.withdraw.composite_state,
+            0x03,
         )
         .unwrap(),
         ItemMaterialRoute {
-            directory: shop_item_residency().dialogue_item_directory,
-            material_page: shop_item_residency().dialogue_material_page,
-            material_base: shop_item_residency().dialogue_material_base,
+            directory: layout().item_directory,
+            material_page: layout().material_page,
+            material_base: layout().material_base,
         }
     );
 }

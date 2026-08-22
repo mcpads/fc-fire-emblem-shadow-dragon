@@ -73,6 +73,11 @@ const KIND_COUNT: u8 = 4;
 const MATERIAL_ROUTE_CATALOG: u8 = 0;
 const MATERIAL_ROUTE_DIALOGUE: u8 = 1;
 
+struct StorageItemMaterialDispatch {
+    dialogue_jump_indices: [usize; 2],
+    fallback_jump_indices: [usize; 3],
+}
+
 #[derive(Clone, Copy)]
 enum HookTransfer {
     CallStub,
@@ -364,11 +369,15 @@ fn build_catalog_append_runtime(
         "consumer catalog runtime no longer uses the shop residency fallback material"
     );
     ensure!(
-        storage_item_list.facility_composite_state
+        storage_item_list.deposit.composite_state
             == crate::full_translation_install::screen_font_residency::UNIT_ITEM_LIST_COMPOSITE_STATE
-            && storage_item_list.overflow_composite_state
-                == crate::full_translation_install::screen_font_residency::STORAGE_ITEM_DETAIL_COMPOSITE_STATE,
-        "storage item material routes no longer refine the facility and overflow item-list states"
+            && storage_item_list.withdraw.composite_state
+                == crate::full_translation_install::screen_font_residency::ITEM_USE_RESULT_COMPOSITE_STATE
+            && storage_item_list.overflow.composite_state
+                == crate::full_translation_install::screen_font_residency::STORAGE_ITEM_DETAIL_COMPOSITE_STATE
+            && storage_item_list.deposit.caller_state == storage_item_list.overflow.caller_state
+            && storage_item_list.deposit.caller_state != storage_item_list.withdraw.caller_state,
+        "storage item material routes no longer distinguish deposit, withdraw, and overflow item-list contexts"
     );
     // The appender's caller owns X as the next composite-buffer position.  TSX is
     // needed only to inspect this temporary call frame, so save the incoming X
@@ -428,25 +437,14 @@ fn build_catalog_append_runtime(
         Instruction::Sec,
         Instruction::SbcImmediate(1),
         Instruction::StaZeroPage(0x04),
-        Instruction::LdaAbsolute(COMPOSITE_STATE),
-        Instruction::CmpImmediate(storage_item_list.facility_composite_state),
     ]);
-    let facility_item_composite = append_jump_if_equal(origin, &mut instructions)?;
-    instructions.push(Instruction::CmpImmediate(
-        storage_item_list.overflow_composite_state,
-    ));
-    let catalog_item_composite = append_jump_if_not_equal(origin, &mut instructions)?;
-    let storage_item_composite = next_address(origin, &instructions)?;
-    patch_jump(
-        &mut instructions,
-        facility_item_composite,
-        storage_item_composite,
-    );
-    instructions.extend([
-        Instruction::LdaAbsolute(storage_item_list.caller_state_address),
-        Instruction::CmpImmediate(storage_item_list.composition_state),
-    ]);
-    let catalog_item_state = append_jump_if_not_equal(origin, &mut instructions)?;
+    let record_item_storage_dispatch =
+        append_storage_item_material_dispatch(origin, &mut instructions, storage_item_list)?;
+
+    let dialogue_storage_item = next_address(origin, &instructions)?;
+    for jump in record_item_storage_dispatch.dialogue_jump_indices {
+        patch_jump(&mut instructions, jump, dialogue_storage_item);
+    }
     set_pointer(
         &mut instructions,
         shop_item_residency.dialogue_item_directory,
@@ -459,8 +457,9 @@ fn build_catalog_append_runtime(
     let directory_ready_from_storage_item = push_jump(&mut instructions, origin);
 
     let catalog_item = next_address(origin, &instructions)?;
-    patch_jump(&mut instructions, catalog_item_composite, catalog_item);
-    patch_jump(&mut instructions, catalog_item_state, catalog_item);
+    for jump in record_item_storage_dispatch.fallback_jump_indices {
+        patch_jump(&mut instructions, jump, catalog_item);
+    }
     set_pointer(&mut instructions, layout.item_directory);
     set_material_route(
         &mut instructions,
@@ -528,6 +527,18 @@ fn build_catalog_append_runtime(
         Instruction::Tya,
         Instruction::LsrAccumulator,
         Instruction::StaZeroPage(0x04),
+    ]);
+    let direct_item_storage_dispatch =
+        append_storage_item_material_dispatch(origin, &mut instructions, storage_item_list)?;
+    for jump in direct_item_storage_dispatch.dialogue_jump_indices {
+        patch_jump(&mut instructions, jump, dialogue_storage_item);
+    }
+
+    let ordinary_shop_item_context = next_address(origin, &instructions)?;
+    for jump in direct_item_storage_dispatch.fallback_jump_indices {
+        patch_jump(&mut instructions, jump, ordinary_shop_item_context);
+    }
+    instructions.extend([
         Instruction::LdaAbsolute(shop_item_residency.outer_state_address),
         Instruction::CmpImmediate(shop_item_residency.composition_state),
     ]);
@@ -843,6 +854,49 @@ fn build_catalog_append_runtime(
         role: "consumer catalog indexed string appender",
         address: origin,
         bytes: assemble_at(origin, &instructions)?,
+    })
+}
+
+fn append_storage_item_material_dispatch(
+    origin: u16,
+    instructions: &mut Vec<Instruction>,
+    storage: StorageItemListRuntimeRoute,
+) -> Result<StorageItemMaterialDispatch> {
+    instructions.extend([
+        Instruction::LdaAbsolute(COMPOSITE_STATE),
+        Instruction::CmpImmediate(storage.deposit.composite_state),
+    ]);
+    let deposit_composite = append_jump_if_equal(origin, instructions)?;
+    instructions.push(Instruction::CmpImmediate(storage.overflow.composite_state));
+    let overflow_composite = append_jump_if_equal(origin, instructions)?;
+    instructions.push(Instruction::CmpImmediate(storage.withdraw.composite_state));
+    let unrelated_composite = append_jump_if_not_equal(origin, instructions)?;
+
+    instructions.extend([
+        Instruction::LdaAbsolute(storage.caller_state_address),
+        Instruction::CmpImmediate(storage.withdraw.caller_state),
+    ]);
+    let withdraw_dialogue = append_jump_if_equal(origin, instructions)?;
+    let wrong_withdraw_caller = push_jump(instructions, origin);
+
+    let deposit_or_overflow_context = next_address(origin, instructions)?;
+    for jump in [deposit_composite, overflow_composite] {
+        patch_jump(instructions, jump, deposit_or_overflow_context);
+    }
+    instructions.extend([
+        Instruction::LdaAbsolute(storage.caller_state_address),
+        Instruction::CmpImmediate(storage.deposit.caller_state),
+    ]);
+    let deposit_or_overflow_dialogue = append_jump_if_equal(origin, instructions)?;
+    let wrong_deposit_or_overflow_caller = push_jump(instructions, origin);
+
+    Ok(StorageItemMaterialDispatch {
+        dialogue_jump_indices: [withdraw_dialogue, deposit_or_overflow_dialogue],
+        fallback_jump_indices: [
+            unrelated_composite,
+            wrong_withdraw_caller,
+            wrong_deposit_or_overflow_caller,
+        ],
     })
 }
 

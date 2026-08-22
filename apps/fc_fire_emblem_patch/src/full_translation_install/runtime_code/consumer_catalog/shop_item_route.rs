@@ -18,6 +18,12 @@ pub(super) struct ItemMaterialRoute {
     pub(super) material_base: u16,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(super) enum StorageItemConsumer {
+    RecordAppender,
+    DirectOrListAppender,
+}
+
 pub(super) fn select_shop_item_material(
     routine: &RuntimeRoutine,
     material: ShopItemResidencyRuntimeContract,
@@ -45,6 +51,7 @@ pub(super) fn select_storage_item_material(
     routine: &RuntimeRoutine,
     material: ShopItemResidencyRuntimeContract,
     storage: StorageItemListRuntimeRoute,
+    consumer: StorageItemConsumer,
     composite_state: u8,
     caller_state: u8,
 ) -> Result<ItemMaterialRoute> {
@@ -53,18 +60,42 @@ pub(super) fn select_storage_item_material(
         COMPOSITE_STATE as u8,
         (COMPOSITE_STATE >> 8) as u8,
         0xC9,
-        storage.facility_composite_state,
+        storage.deposit.composite_state,
     ];
     let mut memory = Box::new([0_u8; 0x10000]);
     memory[usize::from(COMPOSITE_STATE)] = composite_state;
     memory[usize::from(storage.caller_state_address)] = caller_state;
-    select_material_from_predicate(routine, material, &predicate, memory, "storage")
+    let predicate_index = match consumer {
+        StorageItemConsumer::RecordAppender => 0,
+        StorageItemConsumer::DirectOrListAppender => 1,
+    };
+    select_material_from_predicate_at(
+        routine,
+        material,
+        &predicate,
+        predicate_index,
+        2,
+        memory,
+        "storage",
+    )
 }
 
 fn select_material_from_predicate(
     routine: &RuntimeRoutine,
     material: ShopItemResidencyRuntimeContract,
     predicate: &[u8],
+    memory: Box<[u8; 0x10000]>,
+    role: &str,
+) -> Result<ItemMaterialRoute> {
+    select_material_from_predicate_at(routine, material, predicate, 0, 1, memory, role)
+}
+
+fn select_material_from_predicate_at(
+    routine: &RuntimeRoutine,
+    material: ShopItemResidencyRuntimeContract,
+    predicate: &[u8],
+    predicate_index: usize,
+    expected_predicate_count: usize,
     mut memory: Box<[u8; 0x10000]>,
     role: &str,
 ) -> Result<ItemMaterialRoute> {
@@ -75,7 +106,7 @@ fn select_material_from_predicate(
         .filter_map(|(offset, window)| (window == predicate).then_some(offset))
         .collect::<Vec<_>>();
     ensure!(
-        predicate_offsets.len() == 1,
+        predicate_offsets.len() == expected_predicate_count,
         "consumer catalog emitted {} {role} item selectors",
         predicate_offsets.len()
     );
@@ -90,7 +121,8 @@ fn select_material_from_predicate(
     memory[start..end].copy_from_slice(&routine.bytes);
 
     let mut pc = routine.address
-        + u16::try_from(predicate_offsets[0]).context("item selector offset exceeds u16")?;
+        + u16::try_from(predicate_offsets[predicate_index])
+            .context("item selector offset exceeds u16")?;
     let mut a = 0_u8;
     let mut zero = false;
     for _ in 0..64 {
@@ -244,30 +276,52 @@ pub(in crate::full_translation_install::runtime_code) fn verify_storage_item_res
     material: ShopItemResidencyRuntimeContract,
     storage: StorageItemListRuntimeRoute,
 ) -> Result<()> {
-    for composite_state in storage.dialogue_material_composite_states() {
+    for (consumer, context) in [
+        (StorageItemConsumer::RecordAppender, storage.deposit),
+        (StorageItemConsumer::DirectOrListAppender, storage.withdraw),
+        (StorageItemConsumer::DirectOrListAppender, storage.overflow),
+    ] {
         ensure!(
             select_storage_item_material(
                 routine,
                 material,
                 storage,
-                composite_state,
-                storage.composition_state,
+                consumer,
+                context.composite_state,
+                context.caller_state,
             )? == dialogue_material(material),
-            "storage item-list composer state {composite_state:02X} does not use dialogue-encoded item material"
+            "storage item-list context {:02X}/{:02X} does not use dialogue-encoded item material",
+            context.composite_state,
+            context.caller_state,
         );
     }
-    for (composite_state, caller_state) in [
+    for (consumer, composite_state, caller_state) in [
         (
-            storage.facility_composite_state.wrapping_add(1),
-            storage.composition_state,
+            StorageItemConsumer::RecordAppender,
+            storage.deposit.composite_state,
+            storage.withdraw.caller_state,
         ),
         (
-            storage.facility_composite_state,
-            storage.composition_state.wrapping_sub(1),
+            StorageItemConsumer::DirectOrListAppender,
+            storage.overflow.composite_state,
+            storage.withdraw.caller_state,
         ),
         (
-            storage.overflow_composite_state,
-            storage.composition_state.wrapping_add(1),
+            StorageItemConsumer::DirectOrListAppender,
+            storage.withdraw.composite_state,
+            storage.deposit.caller_state,
+        ),
+        // Composite state 0x1E is shared with ordinary item-use results. Only the source-bound
+        // storage caller may retain dialogue material.
+        (
+            StorageItemConsumer::DirectOrListAppender,
+            storage.withdraw.composite_state,
+            0x03,
+        ),
+        (
+            StorageItemConsumer::RecordAppender,
+            storage.deposit.composite_state.wrapping_add(1),
+            storage.deposit.caller_state,
         ),
     ] {
         ensure!(
@@ -275,6 +329,7 @@ pub(in crate::full_translation_install::runtime_code) fn verify_storage_item_res
                 routine,
                 material,
                 storage,
+                consumer,
                 composite_state,
                 caller_state,
             )? == catalog_material(material),

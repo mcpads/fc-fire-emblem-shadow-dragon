@@ -8,6 +8,7 @@ use crate::{
     },
     rom::Rom,
     sha1_hex,
+    source_direct_memory_writers::scan_direct_memory_writers,
     typed_source::decode_rp2a03_sequence,
     unit_ui_text::bind_map_facility_dispatch_source,
 };
@@ -67,15 +68,17 @@ const FACILITY_EXIT: [u8; 27] = [
 const FACILITY_EXIT_RECORDS: [u8; 6] = [0x06, 0x06, 0x0D, 0x06, 0x06, 0x4D];
 const FACILITY_EXIT_STATES: [u8; 6] = [0x00, 0x08, 0x08, 0x00, 0x10, 0x08];
 const FACILITY_ACTION_MENU_ENTRY_STATE: u8 = 0x03;
-const FACILITY_ITEM_LIST_COMPOSITION_STATE: u8 = 0x06;
-const FACILITY_ITEM_LIST_SETTLED_STATE: u8 = 0x07;
+const FACILITY_DEPOSIT_LIST_COMPOSITION_STATE: u8 = 0x06;
+const FACILITY_DEPOSIT_LIST_SETTLED_STATE: u8 = 0x07;
 const FACILITY_RESULT_DIALOGUE_STATE: u8 = 0x0C;
 const FACILITY_CHOICE_COMPOSITION_STATE: u8 = 0x0E;
 const FACILITY_CHOICE_INPUT_STATE: u8 = 0x0F;
-/// Both branches of the storage action menu feed the same item-list composer.
-/// The store branch publishes record 0x2A, while the withdraw branch publishes
-/// record 0x2C before entering the shared composition state.
-const FACILITY_ITEM_LIST_DIALOGUE_RECORD_WRITES: [(u16, u8); 2] = [(0x9E75, 0x2A), (0x9E90, 0x2C)];
+const FACILITY_DEPOSIT_LIST_DIALOGUE_RECORD_WRITE: (u16, u8) = (0x9E75, 0x2A);
+const FACILITY_WITHDRAW_LIST_DIALOGUE_RECORD_WRITE: (u16, u8) = (0x9E90, 0x2C);
+const FACILITY_ITEM_LIST_DIALOGUE_RECORD_WRITES: [(u16, u8); 2] = [
+    FACILITY_DEPOSIT_LIST_DIALOGUE_RECORD_WRITE,
+    FACILITY_WITHDRAW_LIST_DIALOGUE_RECORD_WRITE,
+];
 const FACILITY_CHOICE_DIALOGUE_RECORD: u8 = 0x2D;
 const FACILITY_CHOICE_COMPOSER: u16 = 0x9B7A;
 const FACILITY_CHOICE_COMPOSER_BYTES: [u8; 12] = [
@@ -119,9 +122,9 @@ const FACILITY_CHOICE_INPUT_BYTES: [u8; 24] = [
     0x95,
     0xA0,
 ];
-const FACILITY_ITEM_LIST_COMPOSITE_STATE: u8 = 0x07;
-const FACILITY_ITEM_LIST_COMPOSER: u16 = 0x9EAC;
-const FACILITY_ITEM_LIST_COMPOSER_BYTES: [u8; 21] = [
+const FACILITY_DEPOSIT_LIST_COMPOSITE_STATE: u8 = 0x07;
+const FACILITY_DEPOSIT_LIST_COMPOSER: u16 = 0x9EAC;
+const FACILITY_DEPOSIT_LIST_COMPOSER_BYTES: [u8; 21] = [
     0x20,
     0x5A,
     0x9C,
@@ -129,7 +132,7 @@ const FACILITY_ITEM_LIST_COMPOSER_BYTES: [u8; 21] = [
     0x5C,
     0xE6,
     0xA9,
-    FACILITY_ITEM_LIST_COMPOSITE_STATE,
+    FACILITY_DEPOSIT_LIST_COMPOSITE_STATE,
     0x20,
     0x90,
     0xE6,
@@ -144,6 +147,32 @@ const FACILITY_ITEM_LIST_COMPOSER_BYTES: [u8; 21] = [
     0x05,
     0x60,
 ];
+const FACILITY_WITHDRAW_PREPARATION_STATE: u8 = 0x09;
+const FACILITY_WITHDRAW_LIST_STATE: u8 = 0x0A;
+const FACILITY_WITHDRAW_PREPARER: u16 = 0x9DE6;
+const FACILITY_WITHDRAW_PREPARER_BYTES: [u8; 33] = [
+    0x20, 0x5A, 0x9C, 0x20, 0x5C, 0xE6, 0xEE, 0xDB, 0x05, 0xA9, 0x17, 0x20, 0x90, 0xE6, 0xA9, 0x12,
+    0x8D, 0xD0, 0x05, 0xA9, 0x0E, 0x8D, 0xCF, 0x05, 0xA9, 0x10, 0x85, 0x70, 0xA9, 0x20, 0x85, 0x71,
+    0x60,
+];
+const FACILITY_WITHDRAW_ENTRY: u16 = 0x9E90;
+const FACILITY_WITHDRAW_ENTRY_BYTES: [u8; 27] = [
+    0xA9, 0x2C, 0x8D, 0xF1, 0x77, 0xA9, 0x08, 0x8D, 0xDB, 0x05, 0xAD, 0x81, 0x76, 0x8D, 0x6C, 0x77,
+    0xA9, 0x00, 0x8D, 0x30, 0x77, 0x8D, 0x6F, 0x77, 0x4C, 0x6E, 0xE6,
+];
+const FACILITY_WITHDRAW_LIST_COMPOSER: u16 = 0x9F16;
+const FACILITY_WITHDRAW_ITEM_PUBLISHER: u16 = 0x9F63;
+const FACILITY_WITHDRAW_ITEM_COMPOSITE_STATE: u8 =
+    crate::full_translation_install::screen_font_residency::ITEM_USE_RESULT_COMPOSITE_STATE;
+const FACILITY_WITHDRAW_ITEM_PUBLISHER_BYTES: [u8; 5] = [
+    0xA9,
+    FACILITY_WITHDRAW_ITEM_COMPOSITE_STATE,
+    0x20,
+    0x90,
+    0xE6,
+];
+const FACILITY_WITHDRAW_LIST_END: u16 = 0x9F99;
+const FACILITY_WITHDRAW_CALLER_STATE_COMPLETION: (u16, u8) = (0x9F95, 0xEE);
 const OVERFLOW_ITEM_LIST_DIALOGUE_RECORD: u8 = 0x44;
 const OVERFLOW_ITEM_LIST_COMPOSITE_STATE: u8 = 0x24;
 const OVERFLOW_ITEM_LIST_COMPOSER: u16 = 0xB1F7;
@@ -209,7 +238,6 @@ pub(super) struct StorageSourceBinding {
     pub(super) facility_action_menu_return_root_record_indices: BTreeSet<usize>,
     pub(super) facility_choice_record_index: usize,
     pub(super) overflow_item_list_overlay_root_record_index: usize,
-    pub(super) item_list_settled_state: u8,
     pub(super) item_list_route: super::StorageItemListRuntimeRoute,
     pub(super) source_dispatch_count: usize,
     pub(super) source_direct_record_store_count: usize,
@@ -285,9 +313,27 @@ pub(super) fn bind_storage_dialogue_sources(source: &Rom) -> Result<StorageSourc
     )?;
     bind_exact_code(
         source,
-        FACILITY_ITEM_LIST_COMPOSER,
-        &FACILITY_ITEM_LIST_COMPOSER_BYTES,
-        "storage facility dialogue-retaining item-list composer",
+        FACILITY_DEPOSIT_LIST_COMPOSER,
+        &FACILITY_DEPOSIT_LIST_COMPOSER_BYTES,
+        "storage facility deposit dialogue-retaining item-list composer",
+    )?;
+    bind_exact_code(
+        source,
+        FACILITY_WITHDRAW_PREPARER,
+        &FACILITY_WITHDRAW_PREPARER_BYTES,
+        "storage facility withdraw-list preparation",
+    )?;
+    bind_exact_code(
+        source,
+        FACILITY_WITHDRAW_ENTRY,
+        &FACILITY_WITHDRAW_ENTRY_BYTES,
+        "storage facility withdraw dialogue entry",
+    )?;
+    bind_exact_code(
+        source,
+        FACILITY_WITHDRAW_ITEM_PUBLISHER,
+        &FACILITY_WITHDRAW_ITEM_PUBLISHER_BYTES,
+        "storage facility withdraw item-row publisher",
     )?;
     bind_exact_code(
         source,
@@ -314,14 +360,22 @@ pub(super) fn bind_storage_dialogue_sources(source: &Rom) -> Result<StorageSourc
         "storage facility index no longer selects its entry dialogue and return state"
     );
     ensure!(
-        FACILITY_HANDLER_TARGETS[usize::from(FACILITY_ITEM_LIST_COMPOSITION_STATE)]
-            == FACILITY_ITEM_LIST_COMPOSER
-            && FACILITY_ITEM_LIST_DIALOGUE_RECORD_WRITES
-                .iter()
-                .all(|write| FACILITY_IMMEDIATE_RECORD_WRITES.contains(write))
-            && FACILITY_ITEM_LIST_SETTLED_STATE
-                == FACILITY_ITEM_LIST_COMPOSITION_STATE.wrapping_add(1),
-        "storage item-list state no longer follows both store record 0x2A and withdraw record 0x2C before advancing into state 0x07"
+        FACILITY_HANDLER_TARGETS[usize::from(FACILITY_DEPOSIT_LIST_COMPOSITION_STATE)]
+            == FACILITY_DEPOSIT_LIST_COMPOSER
+            && FACILITY_IMMEDIATE_RECORD_WRITES
+                .contains(&FACILITY_DEPOSIT_LIST_DIALOGUE_RECORD_WRITE)
+            && FACILITY_DEPOSIT_LIST_SETTLED_STATE
+                == FACILITY_DEPOSIT_LIST_COMPOSITION_STATE.wrapping_add(1),
+        "storage deposit list no longer advances record 0x2A through its dialogue-retaining composer"
+    );
+    ensure!(
+        FACILITY_HANDLER_TARGETS[usize::from(FACILITY_WITHDRAW_PREPARATION_STATE)]
+            == FACILITY_WITHDRAW_PREPARER
+            && FACILITY_HANDLER_TARGETS[usize::from(FACILITY_WITHDRAW_LIST_STATE)]
+                == FACILITY_WITHDRAW_LIST_COMPOSER
+            && FACILITY_IMMEDIATE_RECORD_WRITES
+                .contains(&FACILITY_WITHDRAW_LIST_DIALOGUE_RECORD_WRITE),
+        "storage withdraw list no longer advances record 0x2C through its independent item-row composer"
     );
     ensure!(
         FACILITY_HANDLER_TARGETS[usize::from(FACILITY_ACTION_MENU_ENTRY_STATE)] == 0x9E07
@@ -339,7 +393,7 @@ pub(super) fn bind_storage_dialogue_sources(source: &Rom) -> Result<StorageSourc
         "storage result dialogue no longer reaches the shared yes-no choice and action-menu return"
     );
     ensure!(
-        OVERFLOW_HANDLER_TARGETS[usize::from(FACILITY_ITEM_LIST_COMPOSITION_STATE)]
+        OVERFLOW_HANDLER_TARGETS[usize::from(FACILITY_DEPOSIT_LIST_COMPOSITION_STATE)]
             == OVERFLOW_ITEM_LIST_COMPOSER
             && OVERFLOW_IMMEDIATE_RECORD_WRITES.contains(&(0xB1BE, 0x42)),
         "storage overflow item-list state no longer follows the full-storage dialogue into state 0x24"
@@ -370,6 +424,21 @@ pub(super) fn bind_storage_dialogue_sources(source: &Rom) -> Result<StorageSourc
             .values()
             .all(|state| usize::from(*state) < FACILITY_HANDLER_TARGETS.len()),
         "storage facility writes a caller state outside its dispatch domain"
+    );
+    let withdraw_caller_state_writers =
+        scan_direct_memory_writers(source.prg(), &[CALLER_STATE_ADDRESS])?
+            .into_iter()
+            .filter(|writer| {
+                writer.physical_prg_bank == SOURCE_BANK
+                    && (FACILITY_WITHDRAW_LIST_COMPOSER..FACILITY_WITHDRAW_LIST_END)
+                        .contains(&writer.cpu_address)
+            })
+            .map(|writer| (writer.cpu_address, writer.opcode))
+            .collect::<BTreeSet<_>>();
+    ensure!(
+        withdraw_caller_state_writers
+            == BTreeSet::from([FACILITY_WITHDRAW_CALLER_STATE_COMPLETION]),
+        "storage withdraw item rows no longer retain caller state 0x{FACILITY_WITHDRAW_LIST_STATE:02X} until their final completion"
     );
     let facility_action_menu_return_root_record_indices = records_immediately_entering_state(
         &facility_immediate,
@@ -481,12 +550,20 @@ pub(super) fn bind_storage_dialogue_sources(source: &Rom) -> Result<StorageSourc
         overflow_item_list_overlay_root_record_index: usize::from(
             OVERFLOW_ITEM_LIST_DIALOGUE_RECORD,
         ),
-        item_list_settled_state: FACILITY_ITEM_LIST_SETTLED_STATE,
         item_list_route: super::StorageItemListRuntimeRoute {
             caller_state_address: CALLER_STATE_ADDRESS,
-            composition_state: FACILITY_ITEM_LIST_COMPOSITION_STATE,
-            facility_composite_state: FACILITY_ITEM_LIST_COMPOSITE_STATE,
-            overflow_composite_state: OVERFLOW_ITEM_LIST_COMPOSITE_STATE,
+            deposit: super::StorageItemListRuntimeContext {
+                composite_state: FACILITY_DEPOSIT_LIST_COMPOSITE_STATE,
+                caller_state: FACILITY_DEPOSIT_LIST_COMPOSITION_STATE,
+            },
+            withdraw: super::StorageItemListRuntimeContext {
+                composite_state: FACILITY_WITHDRAW_ITEM_COMPOSITE_STATE,
+                caller_state: FACILITY_WITHDRAW_LIST_STATE,
+            },
+            overflow: super::StorageItemListRuntimeContext {
+                composite_state: OVERFLOW_ITEM_LIST_COMPOSITE_STATE,
+                caller_state: FACILITY_DEPOSIT_LIST_COMPOSITION_STATE,
+            },
         },
         source_dispatch_count: 2,
         source_direct_record_store_count: FACILITY_IMMEDIATE_RECORD_WRITES.len()
@@ -693,7 +770,7 @@ mod tests {
     }
 
     #[test]
-    fn store_and_withdraw_records_feed_the_shared_item_list_consumer() {
+    fn deposit_and_withdraw_records_feed_independent_item_list_consumers() {
         let records = FACILITY_ITEM_LIST_DIALOGUE_RECORD_WRITES
             .iter()
             .map(|(_, record)| *record)
@@ -706,8 +783,16 @@ mod tests {
                 .all(|write| FACILITY_IMMEDIATE_RECORD_WRITES.contains(write))
         );
         assert_eq!(
-            FACILITY_HANDLER_TARGETS[usize::from(FACILITY_ITEM_LIST_COMPOSITION_STATE)],
-            FACILITY_ITEM_LIST_COMPOSER
+            FACILITY_HANDLER_TARGETS[usize::from(FACILITY_DEPOSIT_LIST_COMPOSITION_STATE)],
+            FACILITY_DEPOSIT_LIST_COMPOSER
+        );
+        assert_eq!(
+            FACILITY_HANDLER_TARGETS[usize::from(FACILITY_WITHDRAW_LIST_STATE)],
+            FACILITY_WITHDRAW_LIST_COMPOSER
+        );
+        assert_ne!(
+            FACILITY_DEPOSIT_LIST_COMPOSITE_STATE,
+            FACILITY_WITHDRAW_ITEM_COMPOSITE_STATE
         );
     }
 }
