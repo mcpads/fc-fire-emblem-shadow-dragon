@@ -112,6 +112,8 @@ pub(crate) const OBSERVED_CHR_PAIRS: &[ObservedChrPair] = &[
     pair("game_speed_selection", PatternWindow::Right, 0x00, 0x19),
     pair("storage_action_menu", PatternWindow::Left, 0x07, 0x07),
     pair("storage_action_menu", PatternWindow::Right, 0x00, 0x15),
+    pair("storage_overflow_action", PatternWindow::Left, 0x1A, 0x1A),
+    pair("storage_overflow_action", PatternWindow::Right, 0x00, 0x18),
     pair("storage_follow_up_choice", PatternWindow::Left, 0x07, 0x07),
     pair("storage_follow_up_choice", PatternWindow::Right, 0x00, 0x18),
     pair("storage_capacity_notice", PatternWindow::Left, 0x07, 0x07),

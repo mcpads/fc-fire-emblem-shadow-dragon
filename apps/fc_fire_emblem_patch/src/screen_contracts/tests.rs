@@ -7,7 +7,7 @@ fn registry_keeps_runtime_observation_and_chr_pair_evidence_distinct() {
     assert_eq!(report.screen_count, 53);
     assert_eq!(report.unpartitioned_surface_family_count, 0);
     assert_eq!(report.runtime_observed_screen_count, report.screen_count);
-    assert_eq!(report.chr_pair_observed_screen_count, 52);
+    assert_eq!(report.chr_pair_observed_screen_count, report.screen_count);
     assert_eq!(report.mixed_original_latin_screen_count, 21);
     assert_eq!(report.preserved_original_only_screen_count, 5);
     assert_eq!(report.page_switch_verified_screen_count, 1);
@@ -27,15 +27,7 @@ fn registry_keeps_runtime_observation_and_chr_pair_evidence_distinct() {
             && screen.runtime_observed
             && screen.input_behavior == InputBehavior::Automatic
     }));
-    assert_eq!(
-        report
-            .screens
-            .iter()
-            .filter(|screen| !screen.chr_pair_observed)
-            .map(|screen| screen.screen_role.as_str())
-            .collect::<Vec<_>>(),
-        ["storage_overflow_action"]
-    );
+    assert!(report.screens.iter().all(|screen| screen.chr_pair_observed));
 }
 
 #[test]
@@ -55,6 +47,7 @@ fn current_ui_and_storage_bundle_keeps_observed_chr_supply_attached_to_roles() {
         ("suspend_message", 0x1C, 0x1C, 0x00, 0x19),
         ("game_speed_selection", 0x1A, 0x1A, 0x00, 0x19),
         ("storage_action_menu", 0x07, 0x07, 0x00, 0x15),
+        ("storage_overflow_action", 0x1A, 0x1A, 0x00, 0x18),
         ("storage_follow_up_choice", 0x07, 0x07, 0x00, 0x18),
         ("storage_capacity_notice", 0x07, 0x07, 0x00, 0x18),
     ] {

@@ -965,9 +965,10 @@
         "bank 0B handler 8D98 appends fixed-string indices 35 and 46",
         "bank 06:B17F directly produces composite state 23",
         "exact ROM 6E7604E23F506B87C8C800B4DDF86A4B6E441489 naturally produced reward item 03 and entered the Korean deposit-or-discard screen after both runtime inventory representations were conditioned full",
-        "deposit, discard cancellation, discarding the new item, discarding an existing item, and the forty-item storage fallback all preserved their documented inventory and return-state effects"
+        "deposit, discard cancellation, discarding the new item, discarding an existing item, and the forty-item storage fallback all preserved their documented inventory and return-state effects",
+        "after a different-ROM state was used only to identify fields and then superseded, exact ROM C50BC2E15EB51CB482DB906DB3BFF1FFC24C5F67 executed its own 06:B10D state machine from a same-ROM map checkpoint and produced state 23 with left 1A/1A and right 00/18 CHR pairs; the readable Korean action-menu screenshot SHA-256 is C012F5692AE1EE837F0868E4B22F4647A3A5AD5167CCBBB48DD5D300D26C2B41"
       ],
-      "unresolved_focus": ["exact left and right CHR pair", "natural history for collecting four carried items and forty stored items", "current final-artifact runtime-manifest binding"],
+      "unresolved_focus": ["natural history for collecting four carried items and forty stored items", "current final-artifact runtime-manifest binding"],
       "next_gate": "do not replay synthetic inventory histories solely for screen coverage; retain this role in future natural reward regression",
       "contract_state": "observed_partial"
     },
