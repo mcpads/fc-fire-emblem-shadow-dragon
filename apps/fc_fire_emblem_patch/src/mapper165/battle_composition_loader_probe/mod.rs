@@ -19,7 +19,7 @@ use crate::{
 };
 
 use super::{
-    OUTPUT_MAPPER,
+    BATTLE_ACTIVE_START_WRITES, OUTPUT_MAPPER,
     battle_codebook_plan::{BattleRuntimeRecipeInput, inspect_runtime_recipe_input},
     battle_text_cache_probe::{
         COLOR_BIT_MASKS_CPU_ADDRESS, DYNAMIC_ASSIGNMENT_CODE_CPU_ADDRESS,
@@ -75,9 +75,6 @@ const SOURCE_CENTRAL_RIGHT_FD_CALL: u16 = 0xC9C2;
 const SOURCE_CENTRAL_FE_FD_REFRESH_CALL: u16 = 0xFABB;
 const SOURCE_PRG_BANK_SELECTOR: u16 = 0xFA20;
 const SOURCE_COMMON_GLYPH_READ: u16 = 0xE57F;
-const SOURCE_SOUND_TEST_BATTLE_ACTIVE_WRITE_BANK: u8 = 0x07;
-const SOURCE_SOUND_TEST_BATTLE_ACTIVE_WRITE: u16 = 0xAC17;
-
 const DISPATCH_ADDRESS: u16 = 0xFAF3;
 const COMPOSE_PAGE_ADDRESS: u16 = 0xFB30;
 const APPLY_RECIPE_ADDRESS: u16 = 0xFC60;
@@ -85,7 +82,7 @@ const APPLY_DIRECTORY_ADDRESS: u16 = 0xFCE0;
 const APPLY_PARTICIPANT_ADDRESS: u16 = 0xFD00;
 const PROJECT_DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFD30;
 const SHARED_BATTLE_PHASE_ACTIVE_ADDRESS: u16 = 0xFD50;
-const INITIALIZE_SOUND_TEST_BATTLE_REMAP_ADDRESS: u16 = 0xFD80;
+const INITIALIZE_BATTLE_REMAP_ADDRESS: u16 = 0xFD80;
 const CLEAR_REMAP_STATE_OUTSIDE_SHARED_BATTLE_ADDRESS: u16 = 0xFE50;
 const BATTLE_RIGHT_FD_SELECTOR_ADDRESS: u16 = 0xFEA0;
 const BATTLE_CENTRAL_RIGHT_FD_SELECTOR_ADDRESS: u16 = 0xFEE0;
@@ -103,7 +100,7 @@ pub(crate) struct BattleCompositionRuntimeLayout {
     pub(crate) apply_participant: u16,
     pub(crate) project_dialogue_selector: u16,
     pub(crate) shared_battle_phase_active: u16,
-    pub(crate) initialize_sound_test_battle_remap: u16,
+    pub(crate) initialize_battle_remap: u16,
     pub(crate) clear_remap_state_outside_shared_battle: u16,
     pub(crate) text_projection_wrapper: u16,
     pub(crate) battle_right_fd_selector: u16,
@@ -122,7 +119,7 @@ pub(crate) const PROBE_RUNTIME_LAYOUT: BattleCompositionRuntimeLayout =
         apply_participant: APPLY_PARTICIPANT_ADDRESS,
         project_dialogue_selector: PROJECT_DIALOGUE_SELECTOR_ADDRESS,
         shared_battle_phase_active: SHARED_BATTLE_PHASE_ACTIVE_ADDRESS,
-        initialize_sound_test_battle_remap: INITIALIZE_SOUND_TEST_BATTLE_REMAP_ADDRESS,
+        initialize_battle_remap: INITIALIZE_BATTLE_REMAP_ADDRESS,
         clear_remap_state_outside_shared_battle: CLEAR_REMAP_STATE_OUTSIDE_SHARED_BATTLE_ADDRESS,
         text_projection_wrapper: TEXT_PROJECTION_WRAPPER_ADDRESS,
         battle_right_fd_selector: BATTLE_RIGHT_FD_SELECTOR_ADDRESS,
@@ -141,7 +138,7 @@ pub(crate) const CUMULATIVE_RUNTIME_LAYOUT: BattleCompositionRuntimeLayout =
         apply_participant: 0xFE4C,
         project_dialogue_selector: 0xFE75,
         shared_battle_phase_active: 0xFE90,
-        initialize_sound_test_battle_remap: 0xFEB3,
+        initialize_battle_remap: 0xFEB3,
         clear_remap_state_outside_shared_battle: 0xFEC0,
         text_projection_wrapper: 0xFECE,
         battle_right_fd_selector: 0xFEEE,
@@ -270,6 +267,8 @@ struct BattleCompositionLoaderProbeReport {
     remap_overflow_aborts_composition: bool,
     shared_text_projection_hook_address_hex: String,
     shared_text_projection_installed: bool,
+    battle_initializer_hook_count: usize,
+    battle_initializers_reopen_composition: bool,
     sound_test_battle_initializer_hook_address_hex: String,
     sound_test_shared_battle_activation_installed: bool,
     sound_test_battle_recomposition_boundary_installed: bool,
@@ -499,23 +498,7 @@ pub(crate) fn build_battle_composition_loader(
         central_fallback_target,
         layout.battle_central_right_fd_selector,
     )?;
-    image.write_expected(
-        "battle composition sound-test battle initializer",
-        switchable_bank_file_offset(
-            SOURCE_SOUND_TEST_BATTLE_ACTIVE_WRITE_BANK,
-            SOURCE_SOUND_TEST_BATTLE_ACTIVE_WRITE,
-        )?,
-        &assemble_at(
-            SOURCE_SOUND_TEST_BATTLE_ACTIVE_WRITE,
-            &[Instruction::StaAbsolute(BATTLE_ACTIVE_FLAG)],
-        )?,
-        &assemble_at(
-            SOURCE_SOUND_TEST_BATTLE_ACTIVE_WRITE,
-            &[Instruction::JsrAbsolute(
-                layout.initialize_sound_test_battle_remap,
-            )],
-        )?,
-    )?;
+    install_battle_remap_initializers(&mut image, layout)?;
     install_final_dialogue_cache_refresh(&mut image, layout)?;
     image.verify_all_changes_tracked(&base)?;
     let runtime_tracked_write_count = image.writes().len();
@@ -609,8 +592,11 @@ pub(crate) fn build_battle_composition_loader(
         remap_overflow_aborts_composition: true,
         shared_text_projection_hook_address_hex: format!("0x{SOURCE_COMMON_GLYPH_READ:04X}"),
         shared_text_projection_installed: true,
+        battle_initializer_hook_count: BATTLE_ACTIVE_START_WRITES.len(),
+        battle_initializers_reopen_composition: true,
         sound_test_battle_initializer_hook_address_hex: format!(
-            "0x{SOURCE_SOUND_TEST_BATTLE_ACTIVE_WRITE_BANK:02X}:0x{SOURCE_SOUND_TEST_BATTLE_ACTIVE_WRITE:04X}"
+            "0x{:02X}:0x{:04X}",
+            BATTLE_ACTIVE_START_WRITES[3].0, BATTLE_ACTIVE_START_WRITES[3].1
         ),
         sound_test_shared_battle_activation_installed: true,
         sound_test_battle_recomposition_boundary_installed: true,
@@ -736,6 +722,24 @@ fn verify_material_runtime_region(
             "battle composition {} material region is no longer all FF",
             routine.role
         );
+    }
+    Ok(())
+}
+
+fn install_battle_remap_initializers(
+    image: &mut TrackedImage,
+    layout: BattleCompositionRuntimeLayout,
+) -> Result<()> {
+    for (bank, address) in BATTLE_ACTIVE_START_WRITES {
+        image.write_expected(
+            format!("battle remap-state initializer at {bank:02X}:${address:04X}"),
+            switchable_bank_file_offset(bank, address)?,
+            &assemble_at(address, &[Instruction::StaAbsolute(BATTLE_ACTIVE_FLAG)])?,
+            &assemble_at(
+                address,
+                &[Instruction::JsrAbsolute(layout.initialize_battle_remap)],
+            )?,
+        )?;
     }
     Ok(())
 }

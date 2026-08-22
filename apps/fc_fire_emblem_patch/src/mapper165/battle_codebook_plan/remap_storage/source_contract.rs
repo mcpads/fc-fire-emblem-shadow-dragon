@@ -5,7 +5,9 @@ use retro_rp2a03::{AddressingMode, Mnemonic, Operand, decode_bytes};
 use serde::Serialize;
 
 use crate::{
-    mapper165::inline_pointer_dispatch::INLINE_POINTER_DISPATCH_ADDRESS,
+    mapper165::{
+        BATTLE_ACTIVE_START_WRITES, inline_pointer_dispatch::INLINE_POINTER_DISPATCH_ADDRESS,
+    },
     rom::Rom,
     runtime_storage_layout::{BATTLE_DIALOGUE_CACHE_KEY_ADDRESS, BATTLE_REMAP_PAIR_TABLE_START},
     sha1_hex,
@@ -358,7 +360,7 @@ fn bind_battle_active_flag(rom: &Rom) -> Result<()> {
             .windows(write_pattern.len())
             .filter(|bytes| *bytes == write_pattern)
             .count()
-            == 5,
+            == BATTLE_ACTIVE_START_WRITES.len() + 1,
         "battle-active direct write count changed"
     );
     let reader = source_bytes(rom, 0x05, 0x8000, 6)?;
@@ -378,7 +380,10 @@ fn bind_battle_active_flag(rom: &Rom) -> Result<()> {
         "battle-active zeroing writer changed"
     );
     decode_rp2a03_sequence(zero_writer, 0x80DE, "battle-active zeroing writer")?;
-    for (bank, start) in [(0x05, 0x82B9), (0x06, 0x92FE), (0x06, 0x9D50)] {
+    for &(bank, write) in &BATTLE_ACTIVE_START_WRITES[..3] {
+        let start = write
+            .checked_sub(2)
+            .context("battle-active initializer start underflow")?;
         let writer = source_bytes(rom, bank, start, 5)?;
         ensure!(
             writer == [0xA9, 0x01, 0x8D, 0x7D, 0x04],
@@ -386,12 +391,20 @@ fn bind_battle_active_flag(rom: &Rom) -> Result<()> {
         );
         decode_rp2a03_sequence(writer, start, "battle-active initializer")?;
     }
-    let sound_writer = source_bytes(rom, 0x07, 0xAC12, 8)?;
+    let (sound_bank, sound_write) = BATTLE_ACTIVE_START_WRITES[3];
+    let sound_start = sound_write
+        .checked_sub(5)
+        .context("sound-test battle-active initializer start underflow")?;
+    let sound_writer = source_bytes(rom, sound_bank, sound_start, 8)?;
     ensure!(
         sound_writer == [0xA9, 0x01, 0x8D, 0xED, 0x05, 0x8D, 0x7D, 0x04],
         "sound-test battle-active initializer changed"
     );
-    decode_rp2a03_sequence(sound_writer, 0xAC12, "sound-test battle-active initializer")?;
+    decode_rp2a03_sequence(
+        sound_writer,
+        sound_start,
+        "sound-test battle-active initializer",
+    )?;
     ensure!(
         BATTLE_ACTIVE_FLAG == 0x047D,
         "battle-active address changed"

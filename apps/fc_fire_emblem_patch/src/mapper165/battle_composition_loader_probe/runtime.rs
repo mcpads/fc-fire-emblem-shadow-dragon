@@ -92,9 +92,9 @@ pub(crate) fn build_runtime_routines_for_layout(
             bytes: shared_battle_phase_active_for_layout(layout)?,
         },
         RuntimeRoutine {
-            role: "sound-test battle remap-state initializer",
-            address: layout.initialize_sound_test_battle_remap,
-            bytes: initialize_sound_test_battle_remap_for_layout(layout)?,
+            role: "battle remap-state initializer",
+            address: layout.initialize_battle_remap,
+            bytes: initialize_battle_remap_for_layout(layout)?,
         },
         RuntimeRoutine {
             role: "inactive shared-battle remap-state clear",
@@ -568,15 +568,13 @@ pub(super) fn shared_battle_phase_active_for_layout(
 }
 
 #[cfg(test)]
-pub(super) fn initialize_sound_test_battle_remap() -> Result<Vec<u8>> {
-    initialize_sound_test_battle_remap_for_layout(PROBE_RUNTIME_LAYOUT)
+pub(super) fn initialize_battle_remap() -> Result<Vec<u8>> {
+    initialize_battle_remap_for_layout(PROBE_RUNTIME_LAYOUT)
 }
 
-fn initialize_sound_test_battle_remap_for_layout(
-    layout: BattleCompositionRuntimeLayout,
-) -> Result<Vec<u8>> {
+fn initialize_battle_remap_for_layout(layout: BattleCompositionRuntimeLayout) -> Result<Vec<u8>> {
     assemble_at(
-        layout.initialize_sound_test_battle_remap,
+        layout.initialize_battle_remap,
         &[
             Instruction::StaAbsolute(BATTLE_ACTIVE_FLAG),
             Instruction::Php,

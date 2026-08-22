@@ -77,6 +77,18 @@ mod weapon_shop_shared_text;
 mod writer_census;
 mod writer_sites;
 
+/// Every source write that starts a new shared battle-engine lifetime.
+///
+/// The original program stores `1` in `$047D` at these sites. The mapper-165
+/// runtime redirects the stores through one initializer so the independent
+/// remap cache at `$07FE` is reopened for the new participant/class/item tuple.
+pub(crate) const BATTLE_ACTIVE_START_WRITES: [(u8, u16); 4] = [
+    (0x05, 0x82BB),
+    (0x06, 0x9300),
+    (0x06, 0x9D52),
+    (0x07, 0xAC17),
+];
+
 pub(crate) use weapon_shop_shared_text::{
     ITEM_LIST_POINTER_LOAD_ADDRESS, ITEM_LIST_POINTER_LOAD_BYTES, ITEM_LIST_POINTER_LOAD_PRG_BANK,
     build_item_list_pointer_load_call,

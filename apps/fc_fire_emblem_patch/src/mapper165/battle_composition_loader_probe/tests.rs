@@ -274,8 +274,8 @@ fn shared_battle_phase_predicate_covers_the_complete_engine_lifetime() {
 }
 
 #[test]
-fn sound_test_initializer_preserves_source_effect_and_reopens_composition() {
-    let initializer = initialize_sound_test_battle_remap().unwrap();
+fn battle_initializer_preserves_source_effect_and_reopens_composition() {
+    let initializer = initialize_battle_remap().unwrap();
     assert!(initializer.starts_with(&[
         0x8D,
         BATTLE_ACTIVE_FLAG as u8,
@@ -294,6 +294,36 @@ fn sound_test_initializer_preserves_source_effect_and_reopens_composition() {
             ]
     }));
     assert!(initializer.ends_with(&[0x68, 0x28, 0x60]));
+}
+
+#[test]
+fn every_battle_start_redirects_through_the_remap_initializer() {
+    let mut bytes = crate::test_support::synthetic_mapper165_rom_bytes(0xFF);
+    for (bank, address) in BATTLE_ACTIVE_START_WRITES {
+        let offset = switchable_bank_file_offset(bank, address).unwrap();
+        bytes[offset..offset + 3].copy_from_slice(
+            &assemble_at(address, &[Instruction::StaAbsolute(BATTLE_ACTIVE_FLAG)]).unwrap(),
+        );
+    }
+    let mut image = TrackedImage::new(bytes);
+
+    install_battle_remap_initializers(&mut image, PROBE_RUNTIME_LAYOUT).unwrap();
+
+    assert_eq!(image.writes().len(), BATTLE_ACTIVE_START_WRITES.len());
+    let output = image.into_data();
+    for (bank, address) in BATTLE_ACTIVE_START_WRITES {
+        let offset = switchable_bank_file_offset(bank, address).unwrap();
+        assert_eq!(
+            &output[offset..offset + 3],
+            assemble_at(
+                address,
+                &[Instruction::JsrAbsolute(
+                    PROBE_RUNTIME_LAYOUT.initialize_battle_remap,
+                )],
+            )
+            .unwrap()
+        );
+    }
 }
 
 #[test]
@@ -442,6 +472,8 @@ fn composition_report_omits_translation_content_and_private_paths() {
         remap_overflow_aborts_composition: true,
         shared_text_projection_hook_address_hex: "0xE57F".to_owned(),
         shared_text_projection_installed: true,
+        battle_initializer_hook_count: BATTLE_ACTIVE_START_WRITES.len(),
+        battle_initializers_reopen_composition: true,
         sound_test_battle_initializer_hook_address_hex: "0x07:0xAC17".to_owned(),
         sound_test_shared_battle_activation_installed: true,
         sound_test_battle_recomposition_boundary_installed: true,
