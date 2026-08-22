@@ -46,7 +46,7 @@ cargo run -p fc-fire-emblem-patch -- plan-full-translation-installation "$ROM" \
 
 `build-kr-patch --defer-runtime-evidence`는 exact 출력이 바뀌는 개발 중에 과거 ROM용 실행 manifest를 현재 성공으로 잘못 승계하지 않는다. 클래스·상점·최대 대사·제목의 exact 누적 실행 manifest를 현재 산출물에 결속할 때는 이 플래그를 빼고 해당 `--*-runtime-evidence` 경로를 넘긴다.
 
-`plan-full-translation-installation`은 `--output`이 없으면 보고서만 만든다. ROM을 방출할 때는 `--output`을 명시한다. `--transport-probe`는 과거 호환 별칭일 뿐 새 자동화에서는 쓰지 않는다.
+`plan-full-translation-installation`은 `--output`이 없으면 보고서만 만든다. ROM을 방출할 때는 `--output`을 명시한다.
 
 ## 실행 증거를 결속한 최종 후보
 
@@ -90,14 +90,12 @@ cargo run -p fc-fire-emblem-patch -- analyze-temporal-surfaces "$ROM" \
 
 프로브는 조사·회귀 진단 산출물이며 제품 빌드의 선행 단계가 아니다. 채택된 구현은 역할 기반 제품 모듈에 있어야 하고, 프로브 CLI는 그 API를 호출하는 얇은 어댑터만 둔다.
 
-현재 남긴 대표 진단은 다음과 같다.
+제품 API를 재사용하는 대표 진단은 다음과 같다.
 
 - mapper 165 무번역 패리티
 - 전투 조합 런타임의 독립 CHR-RAM 재합성 비교
-- 주·전투 대사의 제한된 end-to-end slice
-- MMC4/MMC5 대안 조사
 
-한 전투 조합을 고정하던 `build-battle-combination-probe`와 옛 고정 캐시 업로드 `build-battle-cache-upload-probe`는 현재 제품 구조와 겹쳐 제거했다.
+한 전투 조합을 고정하던 `build-battle-combination-probe`, 옛 고정 캐시 업로드 `build-battle-cache-upload-probe`, 주·전투 대사의 부분 ROM builder와 채택되지 않은 MMC5 변환 프로브는 현재 제품 구조와 겹치거나 제품 결정에서 폐기되어 제거했다. 조사 당시 구현은 Git 이력에만 남긴다.
 
 ## Rust와 Python
 

@@ -26,7 +26,7 @@ cargo run -p fc-fire-emblem-patch -- plan-full-translation-installation \
 
 `build-kr-patch`는 채택된 에셋과 런타임을 설치하는 반복 제품 빌드다. 원본 매퍼 전수 분석과 과거 조사 프로브를 매번 다시 실행하지 않는다. 원본 ABI·매퍼 코드·소유 계약이 바뀌거나 반례가 생겼을 때만 [빌드 파이프라인](docs/build-pipeline.md)의 해당 분석을 다시 연다.
 
-`plan-full-translation-installation`은 기본적으로 보고서만 만들며, ROM 파일을 쓰려면 `--output`을 지정한다. 과거 호환 별칭 `--transport-probe`도 같은 인자지만 새 문서와 자동화는 `--output`을 사용한다.
+`plan-full-translation-installation`은 기본적으로 보고서만 만들며, ROM 파일을 쓰려면 `--output`을 지정한다.
 
 ## 구조
 
@@ -35,8 +35,10 @@ cargo run -p fc-fire-emblem-patch -- plan-full-translation-installation \
 - [소유권 구조](docs/refactoring.md): 모듈과 도구의 단일 책임
 - [로드맵](docs/roadmap.md): G1~G8 통과 관문
 - [플레이테스트](docs/playtesting.md): 실행 원칙과 exact-ROM 계보
-- [결정 기록](docs/decisions.md): 원인과 채택 판단의 이력
+- [채택한 설계 판단](docs/decisions.md): 제품 구조를 정한 이유와 폐기 기준
 - [AI 협업](docs/ai-collaboration.md): 작업·검증·커밋 협업 규칙
+
+지원 원본의 조사 근거는 [초기 조사](docs/initial-survey.md), [텍스트 표](docs/text-tables.md), [렌더 경로](docs/render-paths.md), [장 전환](docs/chapter-transitions.md)에 있다. 대사를 고칠 때 적용할 번역 규칙은 [대사 작성 규약](docs/dialogue-drafting.md)을 따른다. 이 문서들은 현재 작업 목록이나 exact 산출물 상태를 소유하지 않는다.
 
 ## 공개 자료 경계
 

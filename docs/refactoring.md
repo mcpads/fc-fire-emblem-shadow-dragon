@@ -1,6 +1,6 @@
 # 한글 표시 경로 소유권
 
-이 문서는 리팩터링의 현재 진행 기록이 아니라 코드가 지켜야 하는 구조 계약이다. 현재 위치는 `status.md`, 남은 제품 문제는 `open-problems.md`, 판단 이력은 `decisions.md`를 따른다.
+이 문서는 리팩터링의 현재 진행 기록이 아니라 코드가 지켜야 하는 구조 계약이다. 현재 위치는 `status.md`, 남은 제품 문제는 `open-problems.md`, 채택 근거는 `decisions.md`를 따른다.
 
 ## 의존 방향
 
@@ -23,12 +23,16 @@
 | --- | --- | --- |
 | 전투 원본 ABI와 합성 수명 | `battle_runtime_state.rs` | 전투 분석, 합성 코드, 설치 감사, 시간축 검증 |
 | 주 대사 원본 상태와 정체성 | `dialogue_runtime_state.rs` | 대사 인벤토리, 시설·엔딩 생산자, 전역 대사 런타임, 실행 증거 |
+| 지원 원본 PRG 주소 투영과 직접 전이 검사 | `source_prg.rs` | 원본 분석, mapper 165 설치, 최종 이미지 감사 |
 | 전투 recipe field 순서와 변환 | `BattleRuntimeStateLayout::recipe_fields` | 선택 색 수집기와 실제 타일 적용기 |
 | 전투 합성 실행 코드 | `mapper165/battle_composition_runtime/` | 누적 설치와 독립 런타임 검증 |
 | 전투 재료 배치 | `mapper165/battle_text_material.rs` | 전투 base, 합성기, 최종 carried-domain 감사 |
 | 공용 글꼴 페이지 생성 | `mapper165/dialogue_font_page.rs` | 대사·유닛·시설·최종 소비자 코드북 |
 | 설정·명단 UI 페이지 설치 | `mapper165/ui_page_install.rs` | 누적 빌드와 해당 진단 CLI |
 | 최종 화면 상주 정책 | `full_translation_install/screen_font_residency/` | 런타임 방출, 설치 검증, 보고서 |
+| 누적 글꼴 fallback 그래프의 최종 소유권 | `full_translation_install/screen_font_residency/selector_forwarders.rs` | 설정·명단 보존, 최종 공용 선택기로 이관할 화면 |
+| 최종 상점 선택지·품목 소비 경로 | `full_translation_install/shop_text_consumers.rs` | 공용 선택지 거주 계획, 정규 품목 생산자, Expected Write 설치 |
+| 대사 진입 방식별 이전 행 처리 | `full_translation_install/caller_handoff_residency.rs` | 직접 진입, 호출자 인계, 게시 전이와 런타임 resolver |
 | CLI와 파일 출력 | `command_line/` | 사용자 명령 진입점 |
 
 화면별 모듈은 역할명 alias를 둘 수 있지만 숫자 주소와 변환 규칙을 다시 선언할 수 없다. 원본 바이트 digest나 합성 시험의 예상값은 증거이므로 허용하지만 제품 정책의 두 번째 소유자가 되어서는 안 된다.
@@ -53,6 +57,7 @@
 - 같은 숫자가 서로 다른 의미면 이름도 분리한다. 예: 전투 대사 엔트리 선택자와 대사 글꼴 페이지 선택 루틴.
 - 코드 생성과 검증은 같은 주소 목록을 각각 복사하지 않고 동일 계약을 읽는다.
 - 제품용 실행 바이트는 typed ISA와 checked assembler에서 만든다. 원본 바이트 배열은 읽기 전용 source contract로만 쓴다.
+- 누적 후보가 보고한 소비 역할과 최종 이미지가 전역 계획으로 교체한 역할은 동시에 `carried`로 세지 않는다. 최종 계획과 겹치면 `replaced`, 겹치지 않고 최종 의미가 다시 결속된 경우만 `carried`다.
 
 ## 테스트 경계
 
