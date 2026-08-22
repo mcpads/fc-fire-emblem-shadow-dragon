@@ -16,13 +16,14 @@
       "visible lifetimes, not source phase counts or single-frame captures, define the screen roles",
       "all five required temporal route roles now pass over 62 irregular frozen-frame samples: shared sound-test battle, favorable gameplay battle, unfavorable gameplay battle, gameplay defeat, and the automatic ending",
       "the no-cheat favorable route and the separate unfavorable and defeat routes close ordinary battle polarity without treating the accelerated chapter-transition route as difficulty evidence",
-      "the character-epilogue union now covers 112 visible entries over 560 irregular samples and 13 CHR pairs; selector event writes additionally expose transient direct entry 3F"
+      "the character-epilogue union now covers 112 visible entries over 560 irregular samples and 13 CHR pairs; selector event writes additionally expose transient direct entry 3F",
+      "all 53 registered screen roles now have at least one runtime observation; remaining execution work is variant coverage rather than first sight of a registered role"
     ],
     "unresolved_focus": [
       "chapter-specific retained-map epilogue and portrait variants beyond the observed chapter-eleven completion",
-      "the remaining twenty-two chapter-intro title, portrait, and CHR lifetimes beyond chapters two, eleven, and twelve"
+      "chapter-intro title, portrait, and CHR lifetimes outside the observed chapter variants"
     ],
-    "next_action": "compute the reviewed Korean glyph working set now that the character-epilogue union is closed, while retaining later chapter-variant runtime checks"
+    "next_action": "run one bundled current-exact-ROM sample across representative unobserved chapter intro, facility, and ending variants; add a new role only when a distinct producer or visible lifetime is found"
   },
   "unpartitioned_surface_families": [],
   "screens": [
@@ -881,38 +882,54 @@
     {
       "screen_role": "unit_selection",
       "surface_family": "fixed_menu",
-      "runtime_observed": false,
+      "runtime_observed": true,
       "input_behavior": "input_wait",
       "translation_scope": "japanese_only",
-      "temporal_behavior": "source-bound composite state 18; exact final-artifact timing is not yet observed",
-      "known_focus": ["bank 0B handler 8A25 appends fixed-string index 2C", "bank 06:86B8 directly produces composite state 18"],
-      "unresolved_focus": ["right-window CHR pair", "cancel and approval exits", "font-page re-entry lifetime"],
-      "next_gate": "observe the translated unit-selection screen through approval and cancel in the cumulative integrated ROM",
-      "contract_state": "unobserved"
+      "temporal_behavior": "source-bound composite state 18; the final placement-limit producer, help dialogue, dismissal, and return to the selection wait were observed in one exact-ROM branch",
+      "known_focus": [
+        "bank 0B handler 8A25 appends fixed-string index 2C",
+        "bank 06:86B8 directly produces composite state 18",
+        "after bank 08:BA8F produced the chapter placement limit, a source-bound 14-over-13 candidate condition entered the Korean help branch and returned to global state 02",
+        "the returned selection screen PNG SHA-256 is B72EB2D2383164F7CE24F25D2BF8FD6EF55E2DF0AAF8B56969B1F9F341D1BF26"
+      ],
+      "unresolved_focus": ["exact left and right CHR pair", "natural recruitment and save history that yields fourteen eligible units", "approval and cancel exits outside the help branch", "current final-artifact runtime-manifest binding"],
+      "next_gate": "retain the role as observed and cover natural over-limit history only if a later chapter-route campaign reaches it without state conditioning",
+      "contract_state": "observed_partial"
     },
     {
       "screen_role": "game_speed_selection",
       "surface_family": "fixed_menu",
-      "runtime_observed": false,
+      "runtime_observed": true,
       "input_behavior": "input_wait",
       "translation_scope": "japanese_only",
-      "temporal_behavior": "source-bound composite state 1A; exact final-artifact timing is not yet observed",
-      "known_focus": ["bank 0B handler 8A47 appends fixed-string indices 30 and 31", "bank 06:B3BC directly produces composite state 1A"],
-      "unresolved_focus": ["right-window CHR pair", "both selection branches", "font-page exit lifetime"],
-      "next_gate": "observe both translated speed choices and their return path in the cumulative integrated ROM",
-      "contract_state": "unobserved"
+      "temporal_behavior": "source-bound composite state 1A; the exact current ROM displayed the five-step selector and returned to the map after selection or cancellation",
+      "known_focus": [
+        "bank 0B handler 8A47 appends fixed-string indices 30 and 31",
+        "bank 06:B3BC directly produces composite state 1A",
+        "exact ROM DFE31A6807DCCFADE6EF7D20F2060E45A95308CF showed readable Korean fast and slow endpoint labels with intact window and cursor graphics",
+        "the fastest and slowest branches stored 00 and 04 at 767C and both returned to map state 00; B preserved the initial value 02 and also returned to the map",
+        "emucap run 01M0KBSDR2Q15RJJ9411DM8VPH records the shared branch point, screenshots, setting writes, and return states"
+      ],
+      "unresolved_focus": ["exact left and right CHR pair", "intermediate values one through three were not separately replayed", "current build report has no formal runtime manifest"],
+      "next_gate": "do not schedule another standalone speed-screen run; retain it in bundled fixed-menu regression when its shared producer or codebook changes",
+      "contract_state": "observed_partial"
     },
     {
       "screen_role": "storage_action_menu",
       "surface_family": "fixed_menu",
-      "runtime_observed": false,
+      "runtime_observed": true,
       "input_behavior": "input_wait",
       "translation_scope": "japanese_only",
-      "temporal_behavior": "source-bound composite state 1D; exact final-artifact timing is not yet observed",
-      "known_focus": ["bank 0B handler 8B08 appends fixed-string indices 35 and 36", "bank 06:9E12 directly produces composite state 1D"],
-      "unresolved_focus": ["right-window CHR pair", "deposit, withdraw, and cancel branches", "font-page re-entry lifetime"],
-      "next_gate": "observe translated deposit, withdraw, and cancel branches in one bundled storage route",
-      "contract_state": "unobserved"
+      "temporal_behavior": "source-bound composite state 1D; one exact-ROM facility branch covered the input wait, both successful directions, cancellation, follow-up dialogue, and caller return",
+      "known_focus": [
+        "bank 0B handler 8B08 appends fixed-string indices 35 and 36",
+        "bank 06:9E12 directly produces composite state 1D",
+        "exact ROM 70158F8086886A996249A1DA188CA8E31B6E9291 displayed readable Korean deposit and withdraw labels after a normal chapter-eight facility entry",
+        "deposit stored item 03 and durability 26, withdrawal removed them, and B cancellation preserved the 81-byte storage array before returning through caller state 0F"
+      ],
+      "unresolved_focus": ["exact left and right CHR pair", "other chapter facility variants", "current final-artifact runtime-manifest binding"],
+      "next_gate": "cover this role only as part of a bundled other-chapter facility regression unless its shared fixed-menu producer changes",
+      "contract_state": "observed_partial"
     },
     {
       "screen_role": "storage_follow_up_choice",
@@ -933,26 +950,36 @@
     {
       "screen_role": "storage_overflow_action",
       "surface_family": "fixed_menu",
-      "runtime_observed": false,
+      "runtime_observed": true,
       "input_behavior": "input_wait",
       "translation_scope": "japanese_only",
-      "temporal_behavior": "source-bound composite state 23; exact final-artifact timing is not yet observed",
-      "known_focus": ["bank 0B handler 8D98 appends fixed-string indices 35 and 46", "bank 06:B17F directly produces composite state 23"],
-      "unresolved_focus": ["right-window CHR pair", "deposit and discard results", "cancel behavior"],
-      "next_gate": "fill storage and observe translated deposit, discard, and cancel outcomes in one bundled route",
-      "contract_state": "unobserved"
+      "temporal_behavior": "source-bound composite state 23; the natural battle-reward handoff was observed through deposit, discard-list cancellation, new-item discard, existing-item discard, and full-storage fallback branches",
+      "known_focus": [
+        "bank 0B handler 8D98 appends fixed-string indices 35 and 46",
+        "bank 06:B17F directly produces composite state 23",
+        "exact ROM 6E7604E23F506B87C8C800B4DDF86A4B6E441489 naturally produced reward item 03 and entered the Korean deposit-or-discard screen after both runtime inventory representations were conditioned full",
+        "deposit, discard cancellation, discarding the new item, discarding an existing item, and the forty-item storage fallback all preserved their documented inventory and return-state effects"
+      ],
+      "unresolved_focus": ["exact left and right CHR pair", "natural history for collecting four carried items and forty stored items", "current final-artifact runtime-manifest binding"],
+      "next_gate": "do not replay synthetic inventory histories solely for screen coverage; retain this role in future natural reward regression",
+      "contract_state": "observed_partial"
     },
     {
       "screen_role": "storage_capacity_notice",
       "surface_family": "fixed_menu",
-      "runtime_observed": false,
-      "input_behavior": "unresolved",
+      "runtime_observed": true,
+      "input_behavior": "input_wait",
       "translation_scope": "japanese_only",
-      "temporal_behavior": "source-bound composite state 26 with a dynamic count prefix; exact final-artifact timing is not yet observed",
-      "known_focus": ["bank 0B handler 8E0F appends fixed-string index 47 after the dynamic count", "bank 06:A743 directly produces composite state 26"],
-      "unresolved_focus": ["automatic versus input-wait boundary", "dynamic count variants", "font-page exit lifetime"],
-      "next_gate": "observe more than one capacity count and bind the dismissal boundary in the cumulative integrated ROM",
-      "contract_state": "unobserved"
+      "temporal_behavior": "source-bound composite state 26 with a dynamic count prefix; stable completed notices were observed at the 39-to-40 and already-full boundaries before user item selection or dismissal",
+      "known_focus": [
+        "bank 0B handler 8E0F appends fixed-string index 47 after the dynamic count",
+        "bank 06:A743 directly produces composite state 26",
+        "exact ROM 70158F8086886A996249A1DA188CA8E31B6E9291 displayed the Korean one-slot-remaining notice before a successful 39-to-40 deposit and the full notice before a no-mutation cancellation return",
+        "the completed 39-item and 40-item screen PNG SHA-256 values are AFBA5B3CA90CF8FC5E415C465894B7068CCCA398B747BFF98F3A02FCA8460818 and FD92501AE750AE234E8D54D3FA60E5348858F3835181353BF1B869C3643CD90D"
+      ],
+      "unresolved_focus": ["exact left and right CHR pair", "intermediate remaining-capacity numbers were not separately replayed", "current final-artifact runtime-manifest binding"],
+      "next_gate": "treat intermediate counts as one source-bound dynamic prefix and replay only if its formatter changes or a contradictory runtime value appears",
+      "contract_state": "observed_partial"
     }
   ]
 }
