@@ -568,10 +568,11 @@
       "known_focus": [
         "natural suspend, SRAM, power-cycle, and one-shot resume path reached",
         "map-message state 08 at bank 0B:9B8A selects main-dialogue directory B0 entry 01",
-        "the visible instruction belongs to the victory-and-defeat main-dialogue table rather than a separate text population"
+        "the visible instruction belongs to the victory-and-defeat main-dialogue table rather than a separate text population",
+        "exact ROM C50BC2E15EB51CB482DB906DB3BFF1FFC24C5F67 reached the Korean instruction through SELECT and the natural suspend menu with left 1C/1C and right 00/19 CHR pairs; the completed screenshot SHA-256 is 64243B17DA03383696AC6A5792E4A1ED523E56FF7CBF072E96638B758149A109"
       ],
-      "unresolved_focus": ["CHR pairs", "installed Korean re-entry boundary after resume"],
-      "next_gate": "install main-dialogue B0:01 and repeat the existing save, power-cycle, and one-shot resume contract",
+      "unresolved_focus": ["installed Korean re-entry boundary after resume on the current exact ROM"],
+      "next_gate": "repeat the one-shot power-cycle resume only as part of the bundled save and reload regression",
       "contract_state": "observed_partial"
     },
     {
@@ -857,10 +858,11 @@
       "known_focus": [
         "dialogue index 1B used return state 1A because the source inventory remained nonempty",
         "bank 06:952A moved item 02 and durability 2A to the approved target empty slot and cleared the source first slot",
-        "bank 06:955A compacted source item 0F and durability 16 into the first slot"
+        "bank 06:955A compacted source item 0F and durability 16 into the first slot",
+        "exact ROM C50BC2E15EB51CB482DB906DB3BFF1FFC24C5F67 used left 1C/1C and right 00/18 CHR pairs; A dismissal completed the delayed source-slot clear while retaining the target item, and the result screenshot SHA-256 is 56816CCF18AB0FE99C88AFBB89EFA9C92AB18E3E8C9D9A08056470B079BF4388"
       ],
-      "unresolved_focus": ["exact CHR pair", "dialogue dismissal inputs", "empty-source return state 19", "font-page exit and re-entry lifetime"],
-      "next_gate": "bind dialogue dismissal and compare the empty-source and full-recipient branches",
+      "unresolved_focus": ["empty-source return state 19", "full-recipient capacity feedback", "font-page re-entry after the empty-source variant"],
+      "next_gate": "compare the empty-source and full-recipient branches when the shared item-flow producer changes or a natural route reaches them",
       "contract_state": "observed_partial"
     },
     {
@@ -873,10 +875,11 @@
       "known_focus": [
         "main state 1D cleared the selected first item and durability before compacting the source inventory",
         "dialogue index 1C used return state 1A because item 0F and durability 16 remained",
-        "the source record changed from item pairs 02/2A,0F/16 to one compacted 0F/16 pair"
+        "the source record changed from item pairs 02/2A,0F/16 to one compacted 0F/16 pair",
+        "exact ROM C50BC2E15EB51CB482DB906DB3BFF1FFC24C5F67 used left 1C/1C and right 00/19 CHR pairs; A dismissal committed the pending item and durability clear, and the result screenshot SHA-256 is 9C4497556F97E930AA6F4EB1B51422A5A3DB788F1360923A4C6FD1F4939861CE"
       ],
-      "unresolved_focus": ["exact CHR pair", "dialogue dismissal inputs", "empty-after-discard return state 19", "font-page exit and re-entry lifetime"],
-      "next_gate": "bind dialogue dismissal and observe the empty-after-discard return-state variant",
+      "unresolved_focus": ["empty-after-discard return state 19", "font-page re-entry after the empty-inventory variant"],
+      "next_gate": "observe the empty-after-discard return-state variant when it is reached in the bundled item-flow regression",
       "contract_state": "observed_partial"
     },
     {
@@ -890,9 +893,10 @@
         "bank 0B handler 8A25 appends fixed-string index 2C",
         "bank 06:86B8 directly produces composite state 18",
         "after bank 08:BA8F produced the chapter placement limit, a source-bound 14-over-13 candidate condition entered the Korean help branch and returned to global state 02",
-        "the returned selection screen PNG SHA-256 is B72EB2D2383164F7CE24F25D2BF8FD6EF55E2DF0AAF8B56969B1F9F341D1BF26"
+        "the returned selection screen PNG SHA-256 is B72EB2D2383164F7CE24F25D2BF8FD6EF55E2DF0AAF8B56969B1F9F341D1BF26",
+        "exact ROM C50BC2E15EB51CB482DB906DB3BFF1FFC24C5F67 retained the help overlay at left 1A/1A plus right 00/19 and returned to the selection wait at left 18/18 plus right 00/19; current screenshots SHA-256 are 0A85CB6BA2F300D89B20A0CCA809A336376B9BFA564BA8ED423785868C363F1B and D913FF9EFC99895A2C94FF025259345453131DCCD017C747DE5A26680B722834"
       ],
-      "unresolved_focus": ["exact left and right CHR pair", "natural recruitment and save history that yields fourteen eligible units", "approval and cancel exits outside the help branch", "current final-artifact runtime-manifest binding"],
+      "unresolved_focus": ["natural recruitment and save history that yields fourteen eligible units", "approval and cancel exits outside the help branch", "current final-artifact runtime-manifest binding"],
       "next_gate": "retain the role as observed and cover natural over-limit history only if a later chapter-route campaign reaches it without state conditioning",
       "contract_state": "observed_partial"
     },
@@ -908,9 +912,10 @@
         "bank 06:B3BC directly produces composite state 1A",
         "exact ROM DFE31A6807DCCFADE6EF7D20F2060E45A95308CF showed readable Korean fast and slow endpoint labels with intact window and cursor graphics",
         "the fastest and slowest branches stored 00 and 04 at 767C and both returned to map state 00; B preserved the initial value 02 and also returned to the map",
-        "emucap run 01M0KBSDR2Q15RJJ9411DM8VPH records the shared branch point, screenshots, setting writes, and return states"
+        "emucap run 01M0KBSDR2Q15RJJ9411DM8VPH records the shared branch point, screenshots, setting writes, and return states",
+        "exact ROM C50BC2E15EB51CB482DB906DB3BFF1FFC24C5F67 used left 1A/1A and right 00/19 CHR pairs; B preserved setting 02 and returned to the map, with selector and return screenshot SHA-256 values 5A5E5B200B0DEEF0336E736CFDA285E7F32FCC4C3D18B6CE29CC01A150BBAE24 and FF1E36723DE5D19B557B05953503C054F384D112BC286A16CF74B3C60064DB15"
       ],
-      "unresolved_focus": ["exact left and right CHR pair", "intermediate values one through three were not separately replayed", "current build report has no formal runtime manifest"],
+      "unresolved_focus": ["intermediate values one through three were not separately replayed", "current build report has no formal runtime manifest"],
       "next_gate": "do not schedule another standalone speed-screen run; retain it in bundled fixed-menu regression when its shared producer or codebook changes",
       "contract_state": "observed_partial"
     },
@@ -925,9 +930,10 @@
         "bank 0B handler 8B08 appends fixed-string indices 35 and 36",
         "bank 06:9E12 directly produces composite state 1D",
         "exact ROM 70158F8086886A996249A1DA188CA8E31B6E9291 displayed readable Korean deposit and withdraw labels after a normal chapter-eight facility entry",
-        "deposit stored item 03 and durability 26, withdrawal removed them, and B cancellation preserved the 81-byte storage array before returning through caller state 0F"
+        "deposit stored item 03 and durability 26, withdrawal removed them, and B cancellation preserved the 81-byte storage array before returning through caller state 0F",
+        "exact ROM C50BC2E15EB51CB482DB906DB3BFF1FFC24C5F67 used left 07/07 and right 00/15 CHR pairs while the deposit and withdraw labels, preceding dialogue, funds, portrait, map, and borders were readable"
       ],
-      "unresolved_focus": ["exact left and right CHR pair", "other chapter facility variants", "current final-artifact runtime-manifest binding"],
+      "unresolved_focus": ["other chapter facility variants", "current final-artifact runtime-manifest binding"],
       "next_gate": "cover this role only as part of a bundled other-chapter facility regression unless its shared fixed-menu producer changes",
       "contract_state": "observed_partial"
     },
@@ -941,10 +947,11 @@
       "known_focus": [
         "bank 06:9B7A appends shared composite state 0C over storage dialogue record 2D",
         "both bank 06:9ECC and 9FB4 select record 2D before the same follow-up choice composer",
-        "the exact integrated artifact displayed readable Korean dialogue and 예/아니오 while preserving the original funds digits and G"
+        "the exact integrated artifact displayed readable Korean dialogue and 예/아니오 while preserving the original funds digits and G",
+        "exact ROM C50BC2E15EB51CB482DB906DB3BFF1FFC24C5F67 used left 07/07 and right 00/18 CHR pairs; the yes branch returned to storage actions, the withdraw path consumed the stored item, and the full-capacity follow-up screenshot SHA-256 is 5D07E4C7185B31A2B688D50AE3816C1B574AA6D6582D6F899A814FE5706D2F57"
       ],
-      "unresolved_focus": ["yes branch return to the storage action menu", "withdraw-result variant", "exact CHR pair and font-page exit lifetime"],
-      "next_gate": "bind this observation to the exact final-artifact manifest and cover the yes and withdraw variants in the bundled storage route",
+      "unresolved_focus": ["font-page exit lifetime on other chapter facility variants", "current final-artifact runtime-manifest binding"],
+      "next_gate": "retain this role in the bundled other-chapter facility regression and bind it to the final runtime manifest",
       "contract_state": "observed_partial"
     },
     {
@@ -975,9 +982,10 @@
         "bank 0B handler 8E0F appends fixed-string index 47 after the dynamic count",
         "bank 06:A743 directly produces composite state 26",
         "exact ROM 70158F8086886A996249A1DA188CA8E31B6E9291 displayed the Korean one-slot-remaining notice before a successful 39-to-40 deposit and the full notice before a no-mutation cancellation return",
-        "the completed 39-item and 40-item screen PNG SHA-256 values are AFBA5B3CA90CF8FC5E415C465894B7068CCCA398B747BFF98F3A02FCA8460818 and FD92501AE750AE234E8D54D3FA60E5348858F3835181353BF1B869C3643CD90D"
+        "the completed 39-item and 40-item screen PNG SHA-256 values are AFBA5B3CA90CF8FC5E415C465894B7068CCCA398B747BFF98F3A02FCA8460818 and FD92501AE750AE234E8D54D3FA60E5348858F3835181353BF1B869C3643CD90D",
+        "exact ROM C50BC2E15EB51CB482DB906DB3BFF1FFC24C5F67 used left 07/07 and right 00/18 CHR pairs at the full-capacity notice; the 81-byte 40-item fixture remained byte-identical and the current screenshot SHA-256 is 20E60DC86F2E7A298A6EC9DDCABBC1B0756A49F4352F56628CBB8DEB17714CEC"
       ],
-      "unresolved_focus": ["exact left and right CHR pair", "intermediate remaining-capacity numbers were not separately replayed", "current final-artifact runtime-manifest binding"],
+      "unresolved_focus": ["intermediate remaining-capacity numbers were not separately replayed", "current final-artifact runtime-manifest binding"],
       "next_gate": "treat intermediate counts as one source-bound dynamic prefix and replay only if its formatter changes or a contradictory runtime value appears",
       "contract_state": "observed_partial"
     }

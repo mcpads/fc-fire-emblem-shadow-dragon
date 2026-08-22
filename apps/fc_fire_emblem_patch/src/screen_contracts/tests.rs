@@ -7,7 +7,7 @@ fn registry_keeps_runtime_observation_and_chr_pair_evidence_distinct() {
     assert_eq!(report.screen_count, 53);
     assert_eq!(report.unpartitioned_surface_family_count, 0);
     assert_eq!(report.runtime_observed_screen_count, report.screen_count);
-    assert_eq!(report.chr_pair_observed_screen_count, 44);
+    assert_eq!(report.chr_pair_observed_screen_count, 52);
     assert_eq!(report.mixed_original_latin_screen_count, 21);
     assert_eq!(report.preserved_original_only_screen_count, 5);
     assert_eq!(report.page_switch_verified_screen_count, 1);
@@ -27,6 +27,49 @@ fn registry_keeps_runtime_observation_and_chr_pair_evidence_distinct() {
             && screen.runtime_observed
             && screen.input_behavior == InputBehavior::Automatic
     }));
+    assert_eq!(
+        report
+            .screens
+            .iter()
+            .filter(|screen| !screen.chr_pair_observed)
+            .map(|screen| screen.screen_role.as_str())
+            .collect::<Vec<_>>(),
+        ["storage_overflow_action"]
+    );
+}
+
+#[test]
+fn current_ui_and_storage_bundle_keeps_observed_chr_supply_attached_to_roles() {
+    let has_pair = |screen_role, pattern_window, fd_source_page, fe_source_page| {
+        OBSERVED_CHR_PAIRS.iter().any(|pair| {
+            pair.screen_role == screen_role
+                && pair.pattern_window == pattern_window
+                && pair.fd_source_page == fd_source_page
+                && pair.fe_source_page == fe_source_page
+        })
+    };
+
+    for (screen_role, left_fd, left_fe, right_fd, right_fe) in [
+        ("item_transfer_result", 0x1C, 0x1C, 0x00, 0x18),
+        ("item_discard_result", 0x1C, 0x1C, 0x00, 0x19),
+        ("suspend_message", 0x1C, 0x1C, 0x00, 0x19),
+        ("game_speed_selection", 0x1A, 0x1A, 0x00, 0x19),
+        ("storage_action_menu", 0x07, 0x07, 0x00, 0x15),
+        ("storage_follow_up_choice", 0x07, 0x07, 0x00, 0x18),
+        ("storage_capacity_notice", 0x07, 0x07, 0x00, 0x18),
+    ] {
+        assert!(has_pair(screen_role, PatternWindow::Left, left_fd, left_fe));
+        assert!(has_pair(
+            screen_role,
+            PatternWindow::Right,
+            right_fd,
+            right_fe
+        ));
+    }
+
+    assert!(has_pair("unit_selection", PatternWindow::Left, 0x1A, 0x1A));
+    assert!(has_pair("unit_selection", PatternWindow::Left, 0x18, 0x18));
+    assert!(has_pair("unit_selection", PatternWindow::Right, 0x00, 0x19));
 }
 
 #[test]
