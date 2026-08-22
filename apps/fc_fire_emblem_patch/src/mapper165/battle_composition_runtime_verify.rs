@@ -65,7 +65,7 @@ struct MemorySnapshot {
 
 #[derive(Debug, Serialize)]
 struct RuntimeInputReport {
-    participant_record_identities: [u8; 2],
+    staged_participant_identities: [u8; 2],
     class_record_identities: [u8; 2],
     item_source_indices: [u8; 2],
     terrain_source_indices: [u8; 2],
@@ -148,7 +148,7 @@ pub(crate) fn verify_battle_composition_runtime(
     let (projected_dialogue_selector, selector_62_predicate_matched) =
         project_dialogue_selector(&internal, observed_dialogue_selector)?;
     let input = BattleRuntimeRecipeInput {
-        participant_record_identities: [
+        staged_participant_identities: [
             snapshot_byte(&internal, INTERNAL_BATTLE_FIELD_START)?,
             snapshot_byte(&internal, INTERNAL_BATTLE_FIELD_START + 1)?,
         ],
@@ -262,7 +262,7 @@ pub(crate) fn verify_battle_composition_runtime(
         compose_return_cpu_address_hex: format!("0x{compose_return_address:04X}"),
         compose_return_frame: event.frame,
         runtime_input: RuntimeInputReport {
-            participant_record_identities: input.participant_record_identities,
+            staged_participant_identities: input.staged_participant_identities,
             class_record_identities: input.class_record_identities,
             item_source_indices: input.item_source_indices,
             terrain_source_indices: input.terrain_source_indices,

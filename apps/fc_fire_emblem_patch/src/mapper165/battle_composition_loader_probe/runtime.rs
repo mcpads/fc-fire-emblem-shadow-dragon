@@ -220,6 +220,7 @@ fn compose_page_for_layout(
     directories: RecipeDirectoryAddresses,
     layout: BattleCompositionRuntimeLayout,
 ) -> Result<Vec<u8>> {
+    let enemy_name_entry = enemy_participant_name_entry_for_layout(layout)?;
     let mut instructions = vec![
         Instruction::Php,
         Instruction::Pha,
@@ -292,7 +293,7 @@ fn compose_page_for_layout(
         Instruction::LdaAbsolute(0x0304),
         Instruction::JsrAbsolute(layout.apply_participant),
         Instruction::LdaAbsolute(0x0305),
-        Instruction::JsrAbsolute(layout.apply_participant),
+        Instruction::JsrAbsolute(enemy_name_entry),
     ]);
     set_directory(&mut instructions, directories.class);
     instructions.extend([
@@ -495,34 +496,42 @@ fn apply_participant_for_layout(
     directories: RecipeDirectoryAddresses,
     layout: BattleCompositionRuntimeLayout,
 ) -> Result<Vec<u8>> {
-    let unit = layout.apply_participant + 24;
-    let mut instructions = vec![
-        Instruction::Pha,
-        Instruction::CmpImmediate(0x80),
-        Instruction::BccAbsolute(unit),
-        Instruction::Pla,
-        Instruction::AndImmediate(0x7F),
-        Instruction::Sec,
-        Instruction::SbcImmediate(1),
-        Instruction::Tax,
-    ];
-    set_directory(&mut instructions, directories.enemy);
-    instructions.extend([
-        Instruction::Txa,
-        Instruction::JmpAbsolute(layout.apply_directory),
-    ]);
-    instructions.extend([
-        Instruction::Pla,
-        Instruction::Sec,
-        Instruction::SbcImmediate(1),
-        Instruction::Tax,
-    ]);
-    set_directory(&mut instructions, directories.unit);
-    instructions.extend([
-        Instruction::Txa,
-        Instruction::JmpAbsolute(layout.apply_directory),
-    ]);
+    let mut instructions = Vec::new();
+    append_participant_name_entry(&mut instructions, directories.unit, false, layout);
+    append_participant_name_entry(&mut instructions, directories.enemy, true, layout);
     assemble_at(layout.apply_participant, &instructions)
+}
+
+fn append_participant_name_entry(
+    instructions: &mut Vec<Instruction>,
+    directory: u16,
+    strips_enemy_faction_bit: bool,
+    layout: BattleCompositionRuntimeLayout,
+) {
+    if strips_enemy_faction_bit {
+        instructions.push(Instruction::AndImmediate(0x7F));
+    }
+    instructions.extend([
+        Instruction::Sec,
+        Instruction::SbcImmediate(1),
+        Instruction::Tax,
+    ]);
+    set_directory(instructions, directory);
+    instructions.extend([
+        Instruction::Txa,
+        Instruction::JmpAbsolute(layout.apply_directory),
+    ]);
+}
+
+fn enemy_participant_name_entry_for_layout(layout: BattleCompositionRuntimeLayout) -> Result<u16> {
+    let mut unit_entry = Vec::new();
+    append_participant_name_entry(&mut unit_entry, 0, false, layout);
+    next_address(layout.apply_participant, &unit_entry)
+}
+
+#[cfg(test)]
+pub(super) fn enemy_participant_name_entry() -> Result<u16> {
+    enemy_participant_name_entry_for_layout(PROBE_RUNTIME_LAYOUT)
 }
 
 fn project_dialogue_selector_for_layout(layout: BattleCompositionRuntimeLayout) -> Result<Vec<u8>> {

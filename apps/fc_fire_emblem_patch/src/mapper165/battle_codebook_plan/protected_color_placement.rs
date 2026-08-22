@@ -119,24 +119,31 @@ pub(super) fn plan_protected_color_placement(
         .collect::<BTreeSet<_>>();
 
     let common = glyph_mask(&families.base, coloring)?;
-    let choice_families = vec![
-        ChoiceFamily {
-            role: "player_participant",
-            choices: choice_masks(&families.player_participants, coloring, common)?,
-        },
-        ChoiceFamily {
-            role: "enemy_participant",
-            choices: choice_masks(&families.enemy_participants, coloring, common)?,
-        },
-        ChoiceFamily {
-            role: "two_terrains",
-            choices: terrain_pair_masks(&families.terrains, coloring, common)?,
-        },
-        ChoiceFamily {
-            role: "dialogue_record",
-            choices: choice_masks(&families.dialogue_records, coloring, common)?,
-        },
-    ];
+    let mut choice_families = Vec::new();
+    let mut participant_family_pairs = Vec::new();
+    for mode in &families.participant_modes {
+        let player_index = choice_families.len();
+        choice_families.push(ChoiceFamily {
+            role: mode.role,
+            choices: choice_masks(&mode.player_participants, coloring, common)?,
+        });
+        let enemy_index = choice_families.len();
+        choice_families.push(ChoiceFamily {
+            role: mode.role,
+            choices: choice_masks(&mode.enemy_participants, coloring, common)?,
+        });
+        participant_family_pairs.push((player_index, enemy_index));
+    }
+    let terrain_family_index = choice_families.len();
+    choice_families.push(ChoiceFamily {
+        role: "two_terrains",
+        choices: terrain_pair_masks(&families.terrains, coloring, common)?,
+    });
+    let dialogue_family_index = choice_families.len();
+    choice_families.push(ChoiceFamily {
+        role: "dialogue_record",
+        choices: choice_masks(&families.dialogue_records, coloring, common)?,
+    });
     for family in &choice_families {
         ensure!(
             !family.choices.is_empty(),
@@ -151,13 +158,29 @@ pub(super) fn plan_protected_color_placement(
             protected_source_codes.len(),
             common,
             &choice_families,
+            &participant_family_pairs,
+            &[terrain_family_index, dialogue_family_index],
         )?;
 
-    let maximum_additional_collisions_by_family = choice_families
+    let maximum_participant_pair_collision_count = participant_family_pairs
         .iter()
-        .zip(&family_collision_counts)
-        .map(|(family, counts)| (family.role, counts.iter().copied().max().unwrap_or(0)))
-        .collect::<BTreeMap<_, _>>();
+        .map(|(player, enemy)| {
+            maximum_collision_count(&family_collision_counts[*player])
+                + maximum_collision_count(&family_collision_counts[*enemy])
+        })
+        .max()
+        .unwrap_or(0);
+    let maximum_additional_collisions_by_family = BTreeMap::from([
+        ("participant_pair", maximum_participant_pair_collision_count),
+        (
+            "two_terrains",
+            maximum_collision_count(&family_collision_counts[terrain_family_index]),
+        ),
+        (
+            "dialogue_record",
+            maximum_collision_count(&family_collision_counts[dialogue_family_index]),
+        ),
+    ]);
     let conservative_collision_count = common_collision_count
         + maximum_additional_collisions_by_family
             .values()
@@ -221,6 +244,8 @@ fn select_protected_colors(
     protected_color_count: usize,
     common: ColorMask,
     choice_families: &[ChoiceFamily],
+    participant_family_pairs: &[(usize, usize)],
+    independent_family_indices: &[usize],
 ) -> Result<(BTreeSet<usize>, usize, Vec<Vec<usize>>)> {
     ensure!(
         color_count <= COLOR_MASK_WORD_COUNT * u64::BITS as usize,
@@ -259,6 +284,8 @@ fn select_protected_colors(
                     common_collision_count,
                     choice_families,
                     &family_collision_counts,
+                    participant_family_pairs,
+                    independent_family_indices,
                     color_occurrences[color],
                 )
             })
@@ -287,6 +314,8 @@ fn score_candidate(
     common_collision_count: usize,
     families: &[ChoiceFamily],
     family_collision_counts: &[Vec<usize>],
+    participant_family_pairs: &[(usize, usize)],
+    independent_family_indices: &[usize],
     occurrence_count: usize,
 ) -> CandidateScore {
     let common_collision_count = common_collision_count + usize::from(common.contains(color));
@@ -303,14 +332,28 @@ fn score_candidate(
                 .unwrap_or(0)
         })
         .collect::<Vec<_>>();
+    let participant_collision_count = participant_family_pairs
+        .iter()
+        .map(|(player, enemy)| family_maxima[*player] + family_maxima[*enemy])
+        .max()
+        .unwrap_or(0);
+    let independent_collision_count = independent_family_indices
+        .iter()
+        .map(|index| family_maxima[*index])
+        .sum::<usize>();
     CandidateScore {
         conservative_collision_count: common_collision_count
-            + family_maxima.iter().copied().sum::<usize>(),
+            + participant_collision_count
+            + independent_collision_count,
         maximum_family_collision_count: family_maxima.iter().copied().max().unwrap_or(0),
         common_collision_count,
         occurrence_count,
         color,
     }
+}
+
+fn maximum_collision_count(counts: &[usize]) -> usize {
+    counts.iter().copied().max().unwrap_or(0)
 }
 
 fn choice_masks(
@@ -481,7 +524,7 @@ mod tests {
         }];
 
         let (selected, common_count, family_counts) =
-            select_protected_colors(5, 2, common, &families).unwrap();
+            select_protected_colors(5, 2, common, &families, &[], &[0]).unwrap();
 
         assert_eq!(selected.len(), 2);
         assert!(!selected.contains(&0));

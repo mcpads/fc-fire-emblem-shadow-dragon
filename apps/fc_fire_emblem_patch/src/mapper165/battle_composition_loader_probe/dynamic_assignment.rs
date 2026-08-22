@@ -2,7 +2,7 @@ use super::{runtime::RecipeDirectoryAddresses, *};
 
 const COLLECT_RECIPE_ADDRESS: u16 = 0x9700;
 const COLLECT_DIRECTORY_ADDRESS: u16 = 0x9740;
-const COLLECT_PARTICIPANT_ADDRESS: u16 = 0x9760;
+const COLLECT_PARTICIPANT_NAME_ADDRESS: u16 = 0x9760;
 const MARK_SELECTED_COLOR_ADDRESS: u16 = 0x97A0;
 const ALLOCATE_REMAP_PAIRS_ADDRESS: u16 = 0x97D0;
 const TEST_SELECTED_COLOR_ADDRESS: u16 = 0x9850;
@@ -41,9 +41,9 @@ pub(crate) fn build_dynamic_assignment_routines_for_layout(
             bytes: collect_directory_colors()?,
         },
         MaterialRuntimeRoutine {
-            role: "participant selected-color collection",
-            address: COLLECT_PARTICIPANT_ADDRESS,
-            bytes: collect_participant_colors(directories)?,
+            role: "participant-name selected-color collection",
+            address: COLLECT_PARTICIPANT_NAME_ADDRESS,
+            bytes: collect_participant_name_colors()?,
         },
         MaterialRuntimeRoutine {
             role: "selected-color bitmap insertion",
@@ -99,10 +99,17 @@ fn prepare_dynamic_assignment(
         Instruction::OraImmediate(0xB0),
         Instruction::StaZeroPage(RECIPE_POINTER_HIGH),
         Instruction::JsrAbsolute(COLLECT_RECIPE_ADDRESS),
+    ]);
+    set_directory(&mut instructions, directories.unit);
+    instructions.extend([
         Instruction::LdaAbsolute(0x0304),
-        Instruction::JsrAbsolute(COLLECT_PARTICIPANT_ADDRESS),
+        Instruction::JsrAbsolute(COLLECT_PARTICIPANT_NAME_ADDRESS),
+    ]);
+    set_directory(&mut instructions, directories.enemy);
+    instructions.extend([
         Instruction::LdaAbsolute(0x0305),
-        Instruction::JsrAbsolute(COLLECT_PARTICIPANT_ADDRESS),
+        Instruction::AndImmediate(0x7F),
+        Instruction::JsrAbsolute(COLLECT_PARTICIPANT_NAME_ADDRESS),
     ]);
     set_directory(&mut instructions, directories.class);
     instructions.extend([
@@ -193,33 +200,15 @@ fn collect_directory_colors() -> Result<Vec<u8>> {
     )
 }
 
-fn collect_participant_colors(directories: RecipeDirectoryAddresses) -> Result<Vec<u8>> {
-    let unit = COLLECT_PARTICIPANT_ADDRESS + 24;
-    let mut instructions = vec![
-        Instruction::Pha,
-        Instruction::CmpImmediate(0x80),
-        Instruction::BccAbsolute(unit),
-        Instruction::Pla,
-        Instruction::AndImmediate(0x7F),
-        Instruction::Sec,
-        Instruction::SbcImmediate(1),
-        Instruction::Tax,
-    ];
-    set_directory(&mut instructions, directories.enemy);
-    instructions.extend([
-        Instruction::Txa,
-        Instruction::JmpAbsolute(COLLECT_DIRECTORY_ADDRESS),
-        Instruction::Pla,
-        Instruction::Sec,
-        Instruction::SbcImmediate(1),
-        Instruction::Tax,
-    ]);
-    set_directory(&mut instructions, directories.unit);
-    instructions.extend([
-        Instruction::Txa,
-        Instruction::JmpAbsolute(COLLECT_DIRECTORY_ADDRESS),
-    ]);
-    assemble_at(COLLECT_PARTICIPANT_ADDRESS, &instructions)
+fn collect_participant_name_colors() -> Result<Vec<u8>> {
+    assemble_at(
+        COLLECT_PARTICIPANT_NAME_ADDRESS,
+        &[
+            Instruction::Sec,
+            Instruction::SbcImmediate(1),
+            Instruction::JmpAbsolute(COLLECT_DIRECTORY_ADDRESS),
+        ],
+    )
 }
 
 fn mark_selected_color() -> Result<Vec<u8>> {

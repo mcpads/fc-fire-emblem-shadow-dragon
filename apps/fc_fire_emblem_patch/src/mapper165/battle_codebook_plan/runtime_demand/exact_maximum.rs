@@ -10,6 +10,7 @@ use super::ColorMask;
 #[derive(Debug, Serialize)]
 pub(super) struct ExactModeledMaximum {
     search_strategy: &'static str,
+    pub(super) participant_mode_index: usize,
     pub(super) player_choice_index: usize,
     pub(super) enemy_choice_index: usize,
     pub(super) terrain_left_index: usize,
@@ -36,6 +37,7 @@ struct ContextChoice {
 }
 
 pub(super) fn find_exact_modeled_maximum(
+    participant_mode_index: usize,
     base: ColorMask,
     player_choices: &[ColorMask],
     enemy_choices: &[ColorMask],
@@ -106,6 +108,7 @@ pub(super) fn find_exact_modeled_maximum(
                     best = Some((context, player, *enemy, union));
                     if union.count() == conservative_upper_bound {
                         return Ok(witness(
+                            participant_mode_index,
                             context,
                             player,
                             *enemy,
@@ -120,6 +123,7 @@ pub(super) fn find_exact_modeled_maximum(
 
     let (context, player, enemy, union) = best.expect("nonempty choice families have a witness");
     Ok(witness(
+        participant_mode_index,
         context,
         player,
         enemy,
@@ -172,6 +176,7 @@ fn distinct_contexts(
 }
 
 fn witness(
+    participant_mode_index: usize,
     context: ContextChoice,
     player: IndexedChoice,
     enemy: IndexedChoice,
@@ -184,6 +189,7 @@ fn witness(
     }
     ExactModeledMaximum {
         search_strategy: "distinct dialogue-terrain contexts with exact participant branch-and-bound",
+        participant_mode_index,
         player_choice_index: player.source_index,
         enemy_choice_index: enemy.source_index,
         terrain_left_index: context.terrain_pair_index / terrain_entry_count,
@@ -201,6 +207,7 @@ impl ExactModeledMaximum {
     pub(super) fn test_witness(overlay_glyph_count: usize) -> Self {
         Self {
             search_strategy: "test witness",
+            participant_mode_index: 0,
             player_choice_index: 0,
             enemy_choice_index: 0,
             terrain_left_index: 0,

@@ -231,7 +231,7 @@ pub struct TemporalSurfaceSummary {
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct ObservedBattleRuntimeInput {
-    pub(crate) participant_record_identities: [u8; 2],
+    pub(crate) staged_participant_identities: [u8; 2],
     pub(crate) class_record_identities: [u8; 2],
     pub(crate) item_source_indices: [u8; 2],
     pub(crate) terrain_source_indices: [u8; 2],
@@ -389,7 +389,7 @@ fn observed_battle_runtime_input(files: &CaptureFiles) -> Result<ObservedBattleR
         observed_dialogue_selector
     };
     Ok(ObservedBattleRuntimeInput {
-        participant_record_identities: pair(0x0304, "participant identities")?,
+        staged_participant_identities: pair(0x0304, "staged participant identities")?,
         class_record_identities: pair(0x0306, "class identities")?,
         item_source_indices: pair(0x0320, "item source indices")?,
         terrain_source_indices: pair(0x0322, "terrain source indices")?,

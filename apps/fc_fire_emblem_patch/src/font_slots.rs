@@ -17,6 +17,10 @@ pub(crate) const ACTIVE_HANGUL_SLOT_COUNT: usize = FONT_CODE_COUNT
     - TEXT_CONTROL_CODES.len()
     - LATCH_TRIGGER_CODES.len()
     - LAYOUT_RESERVED_CODES.len();
+/// Stable logical width reserved by the battle material page. Logical colors
+/// above the active CHR width borrow source-safe codes and are remapped only
+/// when selected for one battle.
+pub(crate) const BATTLE_RUNTIME_ABSTRACT_COLOR_COUNT: usize = 220;
 
 pub(crate) fn protected_original_codes() -> BTreeSet<u8> {
     PRESERVED_DISPLAY_CODES
@@ -54,6 +58,7 @@ mod tests {
         assert_eq!(reserved.len(), 46);
         assert_eq!(active.len(), ACTIVE_HANGUL_SLOT_COUNT);
         assert_eq!(ACTIVE_HANGUL_SLOT_COUNT, 210);
+        assert_eq!(BATTLE_RUNTIME_ABSTRACT_COLOR_COUNT, 220);
         assert!(active.iter().all(|code| !reserved.contains(code)));
         assert_eq!(reserved.len() + active.len(), FONT_CODE_COUNT);
     }

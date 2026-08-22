@@ -19,9 +19,8 @@ use eligibility_tables::{
     bank_six_slice, eligible_player_loadouts, equip_candidate_source_indices,
     item_family_class_lists,
 };
-use participant_glyphs::{
-    BattleItemGlyphSets, PlayerParticipantInput, plan_battle_item_glyph_sets,
-};
+pub(super) use participant_glyphs::PlayerParticipantInput;
+use participant_glyphs::{BattleItemGlyphSets, plan_battle_item_glyph_sets};
 
 const PRG_BANK_SIZE: usize = 16 * 1024;
 const SWITCHABLE_CPU_START: u16 = 0x8000;

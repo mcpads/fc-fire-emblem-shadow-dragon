@@ -8,8 +8,11 @@ fn set(glyphs: &str) -> BTreeSet<char> {
 fn alternatives_can_share_a_color_but_one_cache_family_cannot() {
     let families = BattleGlyphFamilies {
         base: set("가"),
-        player_participants: vec![set("나마사"), set("다바사")],
-        enemy_participants: vec![set("라")],
+        participant_modes: vec![BattleParticipantMode {
+            role: "test",
+            player_participants: vec![set("나마사"), set("다바사")],
+            enemy_participants: vec![set("라")],
+        }],
         terrains: vec![set("아")],
         dialogue_records: vec![set("자"), set("차")],
     };
@@ -29,8 +32,11 @@ fn alternatives_can_share_a_color_but_one_cache_family_cannot() {
 fn deterministic_plan_reports_no_glyph_content() {
     let families = BattleGlyphFamilies {
         base: set("가"),
-        player_participants: vec![set("나라마")],
-        enemy_participants: vec![set("다")],
+        participant_modes: vec![BattleParticipantMode {
+            role: "test",
+            player_participants: vec![set("나라마")],
+            enemy_participants: vec![set("다")],
+        }],
         terrains: vec![set("바")],
         dialogue_records: vec![set("사")],
     };
@@ -41,8 +47,8 @@ fn deterministic_plan_reports_no_glyph_content() {
     assert_eq!(first.color_count, second.color_count);
     assert_eq!(first.glyph_count, 7);
     assert!(first.constructed_clique_glyph_count <= first.color_count);
-    assert!(first.active_ceiling_assignment_found);
-    assert!(!first.active_ceiling_search_limit_reached);
+    assert!(first.bounded_assignment_found);
+    assert!(!first.bounded_search_limit_reached);
     assert!(first.model_chromatic_number_proven);
 }
 
@@ -50,8 +56,11 @@ fn deterministic_plan_reports_no_glyph_content() {
 fn clique_extension_adds_only_vertices_adjacent_to_every_member() {
     let families = BattleGlyphFamilies {
         base: set("가"),
-        player_participants: vec![set("나다마바")],
-        enemy_participants: vec![set("라")],
+        participant_modes: vec![BattleParticipantMode {
+            role: "test",
+            player_participants: vec![set("나다마바")],
+            enemy_participants: vec![set("라")],
+        }],
         terrains: vec![set("사")],
         dialogue_records: vec![set("아")],
     };
@@ -70,8 +79,11 @@ fn clique_extension_adds_only_vertices_adjacent_to_every_member() {
 fn color_classes_can_expand_to_a_fixed_runtime_codebook_width() {
     let families = BattleGlyphFamilies {
         base: set("가"),
-        player_participants: vec![set("나"), set("다")],
-        enemy_participants: vec![],
+        participant_modes: vec![BattleParticipantMode {
+            role: "test",
+            player_participants: vec![set("나"), set("다")],
+            enemy_participants: vec![],
+        }],
         terrains: vec![],
         dialogue_records: vec![],
     };
@@ -94,4 +106,32 @@ fn color_classes_can_expand_to_a_fixed_runtime_codebook_width() {
         3
     );
     assert!(!first.model_chromatic_number_proven);
+}
+
+#[test]
+fn participant_modes_do_not_create_impossible_cross_mode_conflicts() {
+    let families = BattleGlyphFamilies {
+        base: BTreeSet::new(),
+        participant_modes: vec![
+            BattleParticipantMode {
+                role: "first",
+                player_participants: vec![set("가")],
+                enemy_participants: vec![set("나")],
+            },
+            BattleParticipantMode {
+                role: "second",
+                player_participants: vec![set("다")],
+                enemy_participants: vec![set("라")],
+            },
+        ],
+        terrains: vec![],
+        dialogue_records: vec![],
+    };
+    let graph = ConflictGraph::from_families(&families);
+    let colors = graph.color_deterministically();
+    graph.verify_coloring(&colors).unwrap();
+
+    assert_ne!(colors[graph.indices[&'가']], colors[graph.indices[&'나']]);
+    assert_ne!(colors[graph.indices[&'다']], colors[graph.indices[&'라']]);
+    assert!(!graph.neighbors[graph.indices[&'가']].contains(&graph.indices[&'라']));
 }

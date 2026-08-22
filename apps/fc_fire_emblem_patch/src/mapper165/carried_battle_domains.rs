@@ -1,12 +1,12 @@
 //! Rebinds the cumulative battle translation to the exact integrated image.
 //!
-//! The four battle-only translation domains share one codebook, glyph atlas,
-//! CHR-RAM compositor, and common text renderer.  Treating them as four
-//! unrelated carried byte ranges would miss exactly the kind of cross-patch
-//! conflict that the integrated build is meant to reject.  This inspector
-//! therefore recomputes every translated payload, binds the shared material
-//! once, and verifies the cumulative runtime outside explicitly owned
-//! cross-domain replacement spans.
+//! The battle-only translation domains and the shared name catalogs use one
+//! codebook, glyph atlas, CHR-RAM compositor, and common text renderer.
+//! Treating only the visible battle-only payloads as carried byte ranges would
+//! leave unit, enemy, class, and item storage unprotected from later
+//! integration writes. This inspector therefore recomputes every translated
+//! payload, binds the shared material once, and verifies the cumulative runtime
+//! outside explicitly owned cross-domain replacement spans.
 
 mod chr_supply;
 
@@ -87,6 +87,7 @@ pub(crate) struct CarriedBattleDomainPreservation {
     domain_count: usize,
     domains: Vec<CarriedBattleDomain>,
     shared_screen_roles: Vec<&'static str>,
+    shared_fixed_text_regions: Vec<FinalRegionBinding>,
     shared_font_regions: Vec<FinalRegionBinding>,
     shared_consumer_regions: Vec<FinalRegionBinding>,
     shared_consumer_route_binding_ids: Vec<String>,
@@ -257,6 +258,54 @@ pub(crate) fn inspect_carried_battle_domains(
         inputs.integrated,
     )?];
 
+    let shared_fixed_text_regions = [
+        (
+            "unit-names",
+            "unit_name_storage",
+            report.battle_text.installed_unit_name_count,
+        ),
+        (
+            "enemy-names",
+            "enemy_name_storage",
+            report.battle_text.installed_enemy_name_count,
+        ),
+        (
+            "class-names",
+            "class_name_storage",
+            report.battle_text.installed_class_name_count,
+        ),
+        (
+            "item-names",
+            "item_name_storage",
+            report.battle_text.installed_item_name_count,
+        ),
+    ]
+    .into_iter()
+    .map(|(table_id, role, expected_entry_count)| {
+        bind_fixed_storage(
+            table_id,
+            role,
+            expected_entry_count,
+            &fixed,
+            &material,
+            &codebook.glyph_codes,
+            inputs.cumulative,
+            inputs.integrated,
+        )
+    })
+    .collect::<Result<Vec<_>>>()?
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    ensure!(
+        shared_fixed_text_regions.len()
+            == report.battle_text.installed_unit_name_count
+                + report.battle_text.installed_enemy_name_count
+                + report.battle_text.installed_class_name_count
+                + report.battle_text.installed_item_name_count,
+        "carried battle shared fixed-text storage inventory changed"
+    );
+
     let shared_font_regions = bind_shared_font_material(
         inputs.source,
         inputs.cumulative,
@@ -339,6 +388,7 @@ pub(crate) fn inspect_carried_battle_domains(
             && domains
                 .iter()
                 .all(|domain| domain.complete_for_declared_domain_plan)
+            && !shared_fixed_text_regions.is_empty()
             && !shared_font_regions.is_empty()
             && !shared_consumer_regions.is_empty()
             && !shared_consumer_route_binding_ids.is_empty(),
@@ -347,13 +397,14 @@ pub(crate) fn inspect_carried_battle_domains(
 
     let human_review_complete = domains.iter().all(|domain| domain.review_complete);
     Ok(CarriedBattleDomainPreservation {
-        strategy: "recompute all four battle payloads, then bind their one shared codebook, font material, compositor, and renderer route on the exact integrated artifact",
+        strategy: "recompute every battle payload and shared name catalog, then bind their one codebook, font material, compositor, and renderer route on the exact integrated artifact",
         cumulative_candidate_sha1: report.output_sha1,
         cumulative_report_sha1: sha1_hex(&report_bytes),
         integrated_image_sha1: sha1_hex(inputs.integrated.data()),
         domain_count: domains.len(),
         domains,
         shared_screen_roles: vec!["battle_animation"],
+        shared_fixed_text_regions,
         shared_font_regions,
         shared_consumer_regions,
         shared_consumer_route_binding_ids,
@@ -383,11 +434,9 @@ fn bind_fixed_storage(
         .iter()
         .filter(|entry| entry.table_id == table_id)
     {
-        ensure!(
-            material.includes_fixed_entry(&entry.table_id, entry.source_index)?,
-            "carried battle material no longer includes {}",
-            entry.id
-        );
+        if !material.includes_fixed_entry(&entry.table_id, entry.source_index)? {
+            continue;
+        }
         let mut expected = entry.encoded_bytes(assignments)?;
         ensure!(
             expected.len() <= entry.source_storage_byte_count,

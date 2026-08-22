@@ -164,8 +164,7 @@ mod tests {
         let coloring = plan_stable_coloring(
             &BattleGlyphFamilies {
                 base: glyphs,
-                player_participants: vec![],
-                enemy_participants: vec![],
+                participant_modes: vec![],
                 terrains: vec![],
                 dialogue_records: vec![],
             },

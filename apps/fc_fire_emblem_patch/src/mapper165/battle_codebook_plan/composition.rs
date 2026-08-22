@@ -72,7 +72,7 @@ pub(in crate::mapper165) struct BattleCacheCompositionMaterial {
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(in crate::mapper165) struct BattleRuntimeRecipeInput {
-    pub(in crate::mapper165) participant_record_identities: [u8; 2],
+    pub(in crate::mapper165) staged_participant_identities: [u8; 2],
     pub(in crate::mapper165) class_record_identities: [u8; 2],
     pub(in crate::mapper165) item_source_indices: [u8; 2],
     pub(in crate::mapper165) terrain_source_indices: [u8; 2],
@@ -274,8 +274,7 @@ pub(super) fn plan_cache_composition(
     coloring: &StableColoringPlan,
     candidate_item_source_indices: &BTreeSet<usize>,
     enemy_name_source_indices: &BTreeSet<usize>,
-    player_participant_candidate_count: usize,
-    enemy_participant_candidate_count: usize,
+    modeled_participant_pair_count: u64,
     terrain_entry_count: usize,
     maximum_runtime_overlay_glyph_count: usize,
 ) -> Result<BattleCacheCompositionMaterial> {
@@ -382,9 +381,6 @@ pub(super) fn plan_cache_composition(
     );
     let encoded_recipes = recipes.encode(coloring.color_count, coloring.glyph_count)?;
 
-    let modeled_participant_pair_count = u64::try_from(player_participant_candidate_count)?
-        .checked_mul(u64::try_from(enemy_participant_candidate_count)?)
-        .context("battle participant tuple count overflow")?;
     let modeled_terrain_pair_count = u64::try_from(terrain_entry_count)?
         .checked_pow(2)
         .context("battle terrain tuple count overflow")?;
@@ -599,8 +595,7 @@ mod tests {
         let coloring = plan_stable_coloring(
             &BattleGlyphFamilies {
                 base: "가나".chars().collect(),
-                player_participants: vec![],
-                enemy_participants: vec![],
+                participant_modes: vec![],
                 terrains: vec![],
                 dialogue_records: vec![],
             },
@@ -655,8 +650,7 @@ mod tests {
         let coloring = plan_stable_coloring(
             &BattleGlyphFamilies {
                 base: glyphs.clone(),
-                player_participants: vec![],
-                enemy_participants: vec![],
+                participant_modes: vec![],
                 terrains: vec![],
                 dialogue_records: vec![],
             },
@@ -723,7 +717,7 @@ mod tests {
             &[0],
             &encoded,
             BattleRuntimeRecipeInput {
-                participant_record_identities: [1, 0x81],
+                staged_participant_identities: [1, 1],
                 class_record_identities: [1, 1],
                 item_source_indices: [0, 0],
                 terrain_source_indices: [0, 0],

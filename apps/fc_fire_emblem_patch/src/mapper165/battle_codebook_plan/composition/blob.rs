@@ -244,17 +244,21 @@ pub(super) fn select_runtime_recipes(
     let layout = validate_blob(bytes)?;
     let mut recipe_offsets = Vec::with_capacity(10);
     recipe_offsets.push(read_u16(bytes, 14));
-    for identity in input.participant_record_identities {
-        let source_index = usize::from(
-            (identity & 0x7F)
-                .checked_sub(1)
-                .context("battle participant recipe identity is zero")?,
-        );
-        let role = if identity & 0x80 == 0 {
-            RecipeRole::UnitName
-        } else {
-            RecipeRole::EnemyName
+    for (identity, role) in input
+        .staged_participant_identities
+        .into_iter()
+        .zip([RecipeRole::UnitName, RecipeRole::EnemyName])
+    {
+        let identity = match role {
+            RecipeRole::EnemyName => identity & 0x7F,
+            RecipeRole::UnitName => identity,
+            _ => unreachable!("participant name selector has a non-name recipe role"),
         };
+        let source_index = usize::from(
+            identity
+                .checked_sub(1)
+                .context("battle participant name identity is zero")?,
+        );
         recipe_offsets.push(layout.read_recipe_offset(bytes, role, source_index)?);
     }
     for identity in input.class_record_identities {
@@ -619,7 +623,7 @@ mod tests {
         let selection = select_runtime_recipes(
             &encoded.bytes,
             BattleRuntimeRecipeInput {
-                participant_record_identities: [1, 0x81],
+                staged_participant_identities: [1, 1],
                 class_record_identities: [1, 1],
                 item_source_indices: [0, 0],
                 terrain_source_indices: [0, 0],
@@ -638,5 +642,58 @@ mod tests {
                 .collect::<Vec<_>>(),
             (0..7).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn runtime_selection_uses_side_owned_unit_and_enemy_name_families() {
+        let mut catalog = RecipeCatalog::default();
+        for (role, source_index, color) in [
+            (RecipeRole::Common, 0, 0),
+            (RecipeRole::UnitName, 2, 1),
+            (RecipeRole::EnemyName, 1, 2),
+            (RecipeRole::Class, 0, 3),
+            (RecipeRole::Item, 0, 4),
+            (RecipeRole::Terrain, 0, 5),
+            (RecipeRole::Dialogue, 0, 6),
+        ] {
+            catalog
+                .add(
+                    role,
+                    source_index,
+                    vec![RecipePair {
+                        color,
+                        atlas_index: u16::from(color),
+                    }],
+                )
+                .unwrap();
+        }
+        for selector in 0..DIALOGUE_DIRECTORY_COUNT {
+            catalog.add_dialogue_alias(selector, 0).unwrap();
+        }
+        let encoded = catalog.encode(7, 7).unwrap();
+
+        for staged_participant_identities in [[3, 2], [3, 0x82]] {
+            let selection = select_runtime_recipes(
+                &encoded.bytes,
+                BattleRuntimeRecipeInput {
+                    staged_participant_identities,
+                    class_record_identities: [1, 1],
+                    item_source_indices: [0, 0],
+                    terrain_source_indices: [0, 0],
+                    dialogue_selector: 0,
+                },
+            )
+            .unwrap();
+
+            assert_eq!(selection.recipe_offsets.len(), 10);
+            assert_eq!(
+                selection
+                    .overlays
+                    .iter()
+                    .map(|pair| pair.color)
+                    .collect::<Vec<_>>(),
+                (0..7).collect::<Vec<_>>()
+            );
+        }
     }
 }

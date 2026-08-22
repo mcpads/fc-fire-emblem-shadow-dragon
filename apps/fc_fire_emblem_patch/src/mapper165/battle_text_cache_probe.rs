@@ -6,7 +6,10 @@ use serde::Serialize;
 use crate::{
     dialogue_assets::plan_battle_dialogue_records,
     font::{load_dalmoori, rasterize_glyph},
-    font_slots::FONT_PAGE_SIZE,
+    font_slots::{
+        ACTIVE_HANGUL_SLOT_COUNT, BATTLE_RUNTIME_ABSTRACT_COLOR_COUNT, FONT_PAGE_SIZE,
+        PRESERVED_DISPLAY_CODES,
+    },
     rom::{EXPECTED_SOURCE_SHA1, HEADER_SIZE, Rom},
     sha1_hex,
     text_inventory::plan_fixed_text,
@@ -25,17 +28,19 @@ pub(super) const GLYPH_ATLAS_MMC3_PAGE: u8 = 0x20;
 const MATERIAL_MMC3_PAGE_SIZE: usize = 8 * 1024;
 pub(super) const PHYSICAL_CODE_TABLE_PRG_OFFSET: usize = GLYPH_ATLAS_PRG_OFFSET + 0x1400;
 pub(super) const PHYSICAL_CODE_TABLE_CPU_ADDRESS: u16 = 0x9400;
-pub(super) const CANONICAL_ABSTRACT_COLOR_COUNT: usize = 213;
+pub(super) const CANONICAL_ABSTRACT_COLOR_COUNT: usize = BATTLE_RUNTIME_ABSTRACT_COLOR_COUNT;
 pub(super) const PROTECTED_ABSTRACT_COLORS_PRG_OFFSET: usize =
     PHYSICAL_CODE_TABLE_PRG_OFFSET + CANONICAL_ABSTRACT_COLOR_COUNT;
 pub(super) const PROTECTED_ABSTRACT_COLORS_CPU_ADDRESS: u16 =
     PHYSICAL_CODE_TABLE_CPU_ADDRESS + CANONICAL_ABSTRACT_COLOR_COUNT as u16;
-pub(super) const PROTECTED_ABSTRACT_COLOR_COUNT: usize = 42;
+pub(super) const PROTECTED_ABSTRACT_COLOR_COUNT: usize =
+    PRESERVED_DISPLAY_CODES.len() + BATTLE_RUNTIME_ABSTRACT_COLOR_COUNT - ACTIVE_HANGUL_SLOT_COUNT;
 pub(super) const SAFE_ABSTRACT_COLORS_PRG_OFFSET: usize =
     PROTECTED_ABSTRACT_COLORS_PRG_OFFSET + PROTECTED_ABSTRACT_COLOR_COUNT;
 pub(super) const SAFE_ABSTRACT_COLORS_CPU_ADDRESS: u16 =
     PROTECTED_ABSTRACT_COLORS_CPU_ADDRESS + PROTECTED_ABSTRACT_COLOR_COUNT as u16;
-pub(super) const SAFE_ABSTRACT_COLOR_COUNT: usize = 171;
+pub(super) const SAFE_ABSTRACT_COLOR_COUNT: usize =
+    ACTIVE_HANGUL_SLOT_COUNT - PRESERVED_DISPLAY_CODES.len();
 pub(super) const COLOR_BIT_MASKS_PRG_OFFSET: usize =
     SAFE_ABSTRACT_COLORS_PRG_OFFSET + SAFE_ABSTRACT_COLOR_COUNT;
 pub(super) const COLOR_BIT_MASKS_CPU_ADDRESS: u16 =
@@ -264,8 +269,8 @@ pub(super) fn expand_prg_with_material(
             .copy_from_slice(dynamic.safe_abstract_colors);
         let mask_end = COLOR_BIT_MASKS_PRG_OFFSET + COLOR_BIT_MASKS.len();
         ensure!(
-            mask_end <= DYNAMIC_ASSIGNMENT_CODE_PRG_OFFSET,
-            "battle dynamic-assignment tables overlap runtime code"
+            mask_end == DYNAMIC_ASSIGNMENT_CODE_PRG_OFFSET,
+            "battle dynamic-assignment tables no longer end at runtime code"
         );
         expanded_prg[COLOR_BIT_MASKS_PRG_OFFSET..mask_end].copy_from_slice(&COLOR_BIT_MASKS);
     }
@@ -354,6 +359,10 @@ mod tests {
         assert_eq!(
             &expanded.prg()[COLOR_BIT_MASKS_PRG_OFFSET..COLOR_BIT_MASKS_PRG_OFFSET + 8],
             COLOR_BIT_MASKS
+        );
+        assert_eq!(
+            COLOR_BIT_MASKS_PRG_OFFSET + COLOR_BIT_MASKS.len(),
+            DYNAMIC_ASSIGNMENT_CODE_PRG_OFFSET
         );
         assert_eq!(
             &expanded.prg()[SOURCE_PAGE_PRG_OFFSET..SOURCE_PAGE_PRG_OFFSET + FONT_PAGE_SIZE],

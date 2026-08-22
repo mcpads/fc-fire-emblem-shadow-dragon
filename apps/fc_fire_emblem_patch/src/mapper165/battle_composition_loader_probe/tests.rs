@@ -1,6 +1,17 @@
 use super::{dynamic_assignment::build_dynamic_assignment_routines, runtime::*, *};
 use crate::mapper165::SAME_BATTLE_ROUND_ACTIVATION_WRITE;
 
+fn test_recipe_directories() -> RecipeDirectoryAddresses {
+    RecipeDirectoryAddresses {
+        unit: 0xB020,
+        enemy: 0xB088,
+        class: 0xB112,
+        item: 0xB142,
+        terrain: 0xB1F8,
+        dialogue: 0xB218,
+    }
+}
+
 #[test]
 fn runtime_routines_fit_the_fixed_cave_without_overlap() {
     let routines = build_runtime_routines(RecipeDirectoryAddresses {
@@ -74,16 +85,15 @@ fn dynamic_assignment_routines_fit_the_material_page_without_overlap() {
 
 #[test]
 fn dynamic_assignment_collects_every_runtime_field_and_projected_dialogue() {
-    let bytes = &build_dynamic_assignment_routines(RecipeDirectoryAddresses {
+    let directories = RecipeDirectoryAddresses {
         unit: 0xB020,
         enemy: 0xB088,
         class: 0xB112,
         item: 0xB142,
         terrain: 0xB1F8,
         dialogue: 0xB218,
-    })
-    .unwrap()[0]
-        .bytes;
+    };
+    let bytes = &build_dynamic_assignment_routines(directories).unwrap()[0].bytes;
     for address in RUNTIME_FIELD_ADDRESSES {
         assert!(
             bytes
@@ -99,6 +109,53 @@ fn dynamic_assignment_collects_every_runtime_field_and_projected_dialogue() {
                 (PROJECT_DIALOGUE_SELECTOR_ADDRESS >> 8) as u8,
             ]
     }));
+
+    let participant_name_call = [0x20, 0x60, 0x97];
+    let unit_name_collection = [
+        0xA9,
+        directories.unit as u8,
+        0x85,
+        DIRECTORY_POINTER_LOW,
+        0xA9,
+        (directories.unit >> 8) as u8,
+        0x85,
+        DIRECTORY_POINTER_HIGH,
+        0xAD,
+        0x04,
+        0x03,
+        participant_name_call[0],
+        participant_name_call[1],
+        participant_name_call[2],
+    ];
+    let enemy_name_collection = [
+        0xA9,
+        directories.enemy as u8,
+        0x85,
+        DIRECTORY_POINTER_LOW,
+        0xA9,
+        (directories.enemy >> 8) as u8,
+        0x85,
+        DIRECTORY_POINTER_HIGH,
+        0xAD,
+        0x05,
+        0x03,
+        0x29,
+        0x7F,
+        participant_name_call[0],
+        participant_name_call[1],
+        participant_name_call[2],
+    ];
+    assert!(
+        bytes
+            .windows(unit_name_collection.len())
+            .any(|window| window == unit_name_collection)
+    );
+    assert!(
+        bytes
+            .windows(enemy_name_collection.len())
+            .any(|window| window == enemy_name_collection)
+    );
+    assert!(!bytes.windows(2).any(|window| window == [0xC9, 0x80]));
 }
 
 #[test]
@@ -137,7 +194,7 @@ fn successful_allocation_records_the_projected_dialogue_cache_key() {
 }
 
 #[test]
-fn participant_recipe_dispatch_preserves_the_computed_source_index() {
+fn participant_recipe_dispatch_uses_side_owned_directories_and_normalizes_enemy_identity() {
     let directories = RecipeDirectoryAddresses {
         unit: 0xB020,
         enemy: 0xB088,
@@ -147,6 +204,15 @@ fn participant_recipe_dispatch_preserves_the_computed_source_index() {
         dialogue: 0xB218,
     };
     let bytes = apply_participant(directories).unwrap();
+
+    assert!(!bytes.windows(2).any(|window| window == [0xC9, 0x80]));
+    assert_eq!(
+        bytes
+            .windows(2)
+            .filter(|window| *window == [0x29, 0x7F])
+            .count(),
+        1
+    );
 
     for directory in [directories.enemy, directories.unit] {
         let preserved_dispatch = [
@@ -170,6 +236,29 @@ fn participant_recipe_dispatch_preserves_the_computed_source_index() {
                 .any(|window| window == preserved_dispatch)
         );
     }
+}
+
+#[test]
+fn participant_name_call_sites_select_source_owned_unit_and_enemy_directories() {
+    let bytes = compose_page(test_recipe_directories()).unwrap();
+    let unit_call = [
+        0x20,
+        APPLY_PARTICIPANT_ADDRESS as u8,
+        (APPLY_PARTICIPANT_ADDRESS >> 8) as u8,
+    ];
+    let enemy_entry = enemy_participant_name_entry().unwrap();
+    let enemy_call = [0x20, enemy_entry as u8, (enemy_entry >> 8) as u8];
+
+    assert!(
+        bytes
+            .windows(6)
+            .any(|window| window[..3] == [0xAD, 0x04, 0x03] && window[3..] == unit_call)
+    );
+    assert!(
+        bytes
+            .windows(6)
+            .any(|window| window[..3] == [0xAD, 0x05, 0x03] && window[3..] == enemy_call)
+    );
 }
 
 #[test]

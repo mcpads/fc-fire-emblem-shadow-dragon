@@ -219,6 +219,7 @@ struct CarriedBattleDomainPreservation {
     domain_count: usize,
     domains: Vec<CarriedBattleDomain>,
     shared_screen_roles: Vec<String>,
+    shared_fixed_text_regions: Vec<CarriedUiRegion>,
     shared_font_regions: Vec<CarriedUiRegion>,
     shared_consumer_regions: Vec<CarriedUiRegion>,
     shared_consumer_route_binding_ids: Vec<String>,
@@ -1001,6 +1002,11 @@ fn bind_carried_battle_domains(
         "carried battle domains no longer share the battle-animation lifetime"
     );
     bind_carried_regions(
+        &carried.shared_fixed_text_regions,
+        "carried battle fixed-text storage",
+        &["cumulative_bytes_preserved"],
+    )?;
+    bind_carried_regions(
         &carried.shared_font_regions,
         "carried battle font supply",
         &["cumulative_bytes_preserved"],
@@ -1304,6 +1310,7 @@ mod tests {
                 "domain_count": 4,
                 "domains": carried_battle_domains,
                 "shared_screen_roles": ["battle_animation"],
+                "shared_fixed_text_regions": [region("battle-fixed-text", "0x004800", "cumulative_bytes_preserved")],
                 "shared_font_regions": [region("battle-font", "0x005000", "cumulative_bytes_preserved")],
                 "shared_consumer_regions": [region("battle-consumer", "0x006000", "integrated_route_replacement")],
                 "shared_consumer_route_binding_ids": ["battle:route"],

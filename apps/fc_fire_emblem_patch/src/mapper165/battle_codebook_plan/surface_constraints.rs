@@ -500,7 +500,7 @@ pub(crate) fn analyze_battle_surface_constraints(
 
 fn runtime_recipe_input(input: &ObservedBattleRuntimeInput) -> BattleRuntimeRecipeInput {
     BattleRuntimeRecipeInput {
-        participant_record_identities: input.participant_record_identities,
+        staged_participant_identities: input.staged_participant_identities,
         class_record_identities: input.class_record_identities,
         item_source_indices: input.item_source_indices,
         terrain_source_indices: input.terrain_source_indices,

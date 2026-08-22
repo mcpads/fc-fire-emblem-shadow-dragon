@@ -10,7 +10,9 @@ use serde::Serialize;
 use crate::{
     battle_text_workset::FORECAST_LABEL_GLYPHS,
     dialogue_assets::{BattleDialogueReinsertionPlan, plan_battle_dialogue_records},
-    font_slots::{ACTIVE_HANGUL_SLOT_COUNT, active_hangul_codes},
+    font_slots::{
+        ACTIVE_HANGUL_SLOT_COUNT, BATTLE_RUNTIME_ABSTRACT_COLOR_COUNT, active_hangul_codes,
+    },
     rom::{EXPECTED_SOURCE_SHA1, Rom},
     sha1_hex,
     text_inventory::{FixedTextPlan, plan_fixed_text},
@@ -32,6 +34,7 @@ mod remap_storage;
 mod runtime_demand;
 mod runtime_inputs;
 mod selected_physical_assignment;
+mod sound_test_battle_domain;
 mod source_window;
 pub(crate) mod surface_constraints;
 mod text_consumer_topology;
@@ -42,7 +45,7 @@ pub(in crate::mapper165) use composition::{
     inspect_runtime_recipe_input,
 };
 use composition::{BattleCacheCompositionPlan, plan_cache_composition};
-use conflict_graph::{BattleGlyphFamilies, plan_stable_coloring};
+use conflict_graph::{BattleGlyphFamilies, BattleParticipantMode, plan_stable_coloring};
 pub(crate) use consumer_census::inspect_known_terrain_name_translation_routes;
 use enemy_domain::{EnemyBattleDomain, EnemyBattleDomainBinding, bind_enemy_battle_domain};
 use item_domain::{BattleItemDomain, BattleItemDomainBinding, bind_battle_item_domain};
@@ -53,6 +56,9 @@ pub(in crate::mapper165) use remap_storage::{
 };
 use runtime_demand::{BattleRuntimeDemandPlan, ExactModeledRuntimeInput, plan_runtime_demand};
 use runtime_inputs::{BattleRuntimeInputBinding, bind_battle_runtime_inputs};
+use sound_test_battle_domain::{
+    SoundTestBattleDomain, SoundTestBattleDomainBinding, bind_sound_test_battle_domain,
+};
 pub(crate) use workset_pages::{
     GlyphWorksetPagePlan, plan_glyph_workset_page_upper_bound, verify_glyph_workset_font_page_pack,
 };
@@ -87,6 +93,7 @@ struct BattleCodebookModel {
     composition: BattleCacheCompositionMaterial,
     item_domain: BattleItemDomainBinding,
     enemy_domain: EnemyBattleDomainBinding,
+    sound_test_domain: SoundTestBattleDomainBinding,
 }
 
 pub(super) struct ConstrainedBattleCodebook {
@@ -149,15 +156,17 @@ struct BattleCodebookPlanReport {
     stable_color_count: usize,
     stable_assignment_sha1: String,
     coloring_strategy: &'static str,
-    active_ceiling_search_node_count: usize,
-    active_ceiling_search_limit_reached: bool,
-    active_ceiling_assignment_found: bool,
+    bounded_search_color_ceiling: usize,
+    bounded_search_node_count: usize,
+    bounded_search_limit_reached: bool,
+    bounded_assignment_found: bool,
     model_chromatic_number_proven: bool,
     active_slot_count: usize,
     chapter_one_preserved_active_code_count: usize,
     chapter_one_safe_target_code_count: usize,
     item_domain: BattleItemDomainBinding,
     enemy_domain: EnemyBattleDomainBinding,
+    sound_test_domain: SoundTestBattleDomainBinding,
     runtime_inputs: BattleRuntimeInputBinding,
     runtime_demand: BattleRuntimeDemandPlan,
     composition: BattleCacheCompositionPlan,
@@ -209,6 +218,7 @@ pub(crate) fn analyze_battle_codebook_plan(
         composition,
         item_domain,
         enemy_domain,
+        sound_test_domain,
     } = model;
     let protected = GAMEPLAY_BATTLE_PRESERVED_ACTIVE_CODES
         .into_iter()
@@ -223,11 +233,11 @@ pub(crate) fn analyze_battle_codebook_plan(
     let fixed_workspace_sha1 = sha1_hex(&fs::read(fixed_workspace_path)?);
     let dialogue_workspace_sha1 = sha1_hex(&fs::read(dialogue_workspace_path)?);
     let report = BattleCodebookPlanReport {
-        schema: 4,
+        schema: 5,
         source_sha1: EXPECTED_SOURCE_SHA1,
         fixed_workspace_sha1,
         dialogue_workspace_sha1,
-        cooccurrence_model: "side-aware gameplay battle upper bound with source-bound item eligibility, enemy identities and items, plus every renderer-defined enemy class",
+        cooccurrence_model: "side-aware gameplay and sound-test battle upper bound with source-bound participant, class, item and terrain producers",
         message_template_entry_count,
         unit_name_entry_count,
         enemy_name_entry_count,
@@ -251,15 +261,17 @@ pub(crate) fn analyze_battle_codebook_plan(
         stable_color_count: coloring.color_count,
         stable_assignment_sha1: coloring.assignment_sha1.clone(),
         coloring_strategy: coloring.coloring_strategy,
-        active_ceiling_search_node_count: coloring.active_ceiling_search_node_count,
-        active_ceiling_search_limit_reached: coloring.active_ceiling_search_limit_reached,
-        active_ceiling_assignment_found: coloring.active_ceiling_assignment_found,
+        bounded_search_color_ceiling: coloring.bounded_search_color_ceiling,
+        bounded_search_node_count: coloring.bounded_search_node_count,
+        bounded_search_limit_reached: coloring.bounded_search_limit_reached,
+        bounded_assignment_found: coloring.bounded_assignment_found,
         model_chromatic_number_proven: coloring.model_chromatic_number_proven,
         active_slot_count: ACTIVE_HANGUL_SLOT_COUNT,
         chapter_one_preserved_active_code_count: protected.len(),
         chapter_one_safe_target_code_count: chapter_one_safe_code_count,
         item_domain,
         enemy_domain,
+        sound_test_domain,
         runtime_inputs,
         runtime_demand,
         composition: composition.plan,
@@ -367,7 +379,8 @@ pub(super) fn plan_canonical_battle_codebook(
     );
     ensure!(
         placement.conservative_collision_count <= 8,
-        "canonical battle placement exceeds the proven eight remap pairs"
+        "canonical battle placement needs {} remap pairs but the runtime proves capacity for eight",
+        placement.conservative_collision_count
     );
 
     Ok(CanonicalBattleCodebook {
@@ -424,20 +437,66 @@ fn plan_battle_codebook_model(
         equip_candidate_item_glyph_sets: player_items,
         equip_candidate_item_source_indices,
         enemy_class_item_pairs,
-        player_participant_glyph_sets: player_participants,
-        player_participant_inputs,
+        player_participant_glyph_sets: gameplay_player_participants,
+        player_participant_inputs: gameplay_player_inputs,
         binding: item_domain,
     } = bind_battle_item_domain(rom, fixed)?;
     let EnemyBattleDomain {
-        participant_glyph_sets: enemy_participants,
-        participant_inputs: enemy_participant_inputs,
-        enemy_name_source_indices,
+        participant_glyph_sets: gameplay_enemy_participants,
+        participant_inputs: gameplay_enemy_inputs,
+        enemy_name_source_indices: gameplay_enemy_name_source_indices,
         item_source_indices: enemy_item_source_indices,
         binding: enemy_domain,
     } = bind_enemy_battle_domain(rom, fixed, &enemy_class_item_pairs)?;
+    let SoundTestBattleDomain {
+        player_participant_glyph_sets: sound_test_player_participants,
+        player_participant_inputs: sound_test_player_inputs,
+        enemy_participant_glyph_sets: sound_test_enemy_participants,
+        enemy_participant_inputs: sound_test_enemy_inputs,
+        enemy_name_source_indices: sound_test_enemy_name_source_indices,
+        item_source_indices: sound_test_item_source_indices,
+        binding: sound_test_domain,
+    } = bind_sound_test_battle_domain(rom, fixed)?;
+    let participant_input_modes = [
+        (gameplay_player_inputs, gameplay_enemy_inputs),
+        (sound_test_player_inputs, sound_test_enemy_inputs),
+    ];
+    let participant_modes = vec![
+        BattleParticipantMode {
+            role: "gameplay",
+            player_participants: gameplay_player_participants,
+            enemy_participants: gameplay_enemy_participants,
+        },
+        BattleParticipantMode {
+            role: "sound_test",
+            player_participants: sound_test_player_participants,
+            enemy_participants: sound_test_enemy_participants,
+        },
+    ];
+    let player_participant_candidate_count = participant_modes
+        .iter()
+        .map(|mode| mode.player_participants.len())
+        .sum::<usize>();
+    let enemy_participant_candidate_count = participant_modes
+        .iter()
+        .map(|mode| mode.enemy_participants.len())
+        .sum::<usize>();
+    let modeled_participant_pair_count =
+        participant_modes.iter().try_fold(0_u64, |sum, mode| {
+            let mode_pair_count = u64::try_from(mode.player_participants.len())?
+                .checked_mul(u64::try_from(mode.enemy_participants.len())?)
+                .context("battle participant mode tuple count overflow")?;
+            sum.checked_add(mode_pair_count)
+                .context("battle participant tuple count overflow")
+        })?;
+    let enemy_name_source_indices = gameplay_enemy_name_source_indices
+        .union(&sound_test_enemy_name_source_indices)
+        .copied()
+        .collect::<BTreeSet<_>>();
     let runtime_item_source_indices = equip_candidate_item_source_indices
         .union(&enemy_item_source_indices)
         .copied()
+        .chain(sound_test_item_source_indices)
         .collect::<BTreeSet<_>>();
     let terrains = entry_glyph_sets(fixed, "terrain-names");
     for (role, entries) in [
@@ -446,10 +505,16 @@ fn plan_battle_codebook_model(
         ("enemy name", &enemy_names),
         ("class", &player_classes),
         ("item", &player_items),
-        ("enemy participant", &enemy_participants),
         ("terrain", &terrains),
     ] {
         ensure!(!entries.is_empty(), "battle codebook has no {role} entries");
+    }
+    for mode in &participant_modes {
+        ensure!(
+            !mode.player_participants.is_empty() && !mode.enemy_participants.is_empty(),
+            "battle codebook has an empty {} participant mode",
+            mode.role
+        );
     }
     let base = always_selected_battle_glyphs(fixed);
     let dialogue_records = dialogue
@@ -464,25 +529,34 @@ fn plan_battle_codebook_model(
     let terrain_entry_count = terrains.len();
     let families = BattleGlyphFamilies {
         base,
-        player_participants: player_participants.clone(),
-        enemy_participants: enemy_participants.clone(),
+        participant_modes,
         terrains,
         dialogue_records,
     };
     let mut coloring = plan_stable_coloring(&families, ACTIVE_HANGUL_SLOT_COUNT)?;
-    coloring.expand_to_color_count(ACTIVE_HANGUL_SLOT_COUNT.max(coloring.color_count))?;
+    ensure!(
+        coloring.color_count <= BATTLE_RUNTIME_ABSTRACT_COLOR_COUNT,
+        "battle coloring needs {} abstract colors but the runtime reserves {}",
+        coloring.color_count,
+        BATTLE_RUNTIME_ABSTRACT_COLOR_COUNT
+    );
+    coloring.expand_to_color_count(BATTLE_RUNTIME_ABSTRACT_COLOR_COUNT)?;
     let mut runtime_demand = plan_runtime_demand(&families, &coloring)?;
     let [
+        participant_mode_index,
         player_index,
         enemy_index,
         terrain_left,
         terrain_right,
         dialogue_index,
     ] = runtime_demand.exact_witness_indices();
-    let player_input = player_participant_inputs
+    let (player_inputs, enemy_inputs) = participant_input_modes
+        .get(participant_mode_index)
+        .context("exact demand witness selects an unknown participant mode")?;
+    let player_input = player_inputs
         .get(player_index)
         .context("exact demand player witness is outside the participant domain")?;
-    let enemy_input = enemy_participant_inputs
+    let enemy_input = enemy_inputs
         .get(enemy_index)
         .context("exact demand enemy witness is outside the participant domain")?;
     let dialogue_selector = u8::try_from(
@@ -494,7 +568,7 @@ fn plan_battle_codebook_model(
     )
     .context("exact demand dialogue selector exceeds one byte")?;
     let exact_runtime_input = ExactModeledRuntimeInput {
-        participant_record_identities: [player_input.identity, enemy_input.identity],
+        staged_participant_identities: [player_input.identity, enemy_input.identity],
         class_record_identities: [player_input.class_id, enemy_input.class_id],
         item_source_indices: [
             player_input.item_source_index,
@@ -512,13 +586,12 @@ fn plan_battle_codebook_model(
         &coloring,
         &runtime_item_source_indices,
         &enemy_name_source_indices,
-        player_participants.len(),
-        enemy_participants.len(),
+        modeled_participant_pair_count,
         terrain_entry_count,
         runtime_demand.maximum_overlay_glyph_count(),
     )?;
     let exact_selection = composition.select_runtime_recipes(BattleRuntimeRecipeInput {
-        participant_record_identities: exact_runtime_input.participant_record_identities,
+        staged_participant_identities: exact_runtime_input.staged_participant_identities,
         class_record_identities: exact_runtime_input.class_record_identities,
         item_source_indices: exact_runtime_input.item_source_indices,
         terrain_source_indices: exact_runtime_input.terrain_source_indices,
@@ -539,14 +612,15 @@ fn plan_battle_codebook_model(
         item_entry_count: player_items.len(),
         terrain_entry_count,
         dialogue_record_count: dialogue.records.len(),
-        player_participant_candidate_count: player_participants.len(),
-        enemy_participant_candidate_count: enemy_participants.len(),
+        player_participant_candidate_count,
+        enemy_participant_candidate_count,
         coloring,
         glyph_families: families,
         runtime_demand,
         composition,
         item_domain,
         enemy_domain,
+        sound_test_domain,
     })
 }
 
@@ -576,7 +650,7 @@ mod tests {
     #[test]
     fn report_does_not_emit_translation_content_or_private_paths() {
         let report = BattleCodebookPlanReport {
-            schema: 4,
+            schema: 5,
             source_sha1: EXPECTED_SOURCE_SHA1,
             fixed_workspace_sha1: "fixed".to_owned(),
             dialogue_workspace_sha1: "dialogue".to_owned(),
@@ -604,15 +678,17 @@ mod tests {
             stable_color_count: 1,
             stable_assignment_sha1: "assignment".to_owned(),
             coloring_strategy: "test",
-            active_ceiling_search_node_count: 1,
-            active_ceiling_search_limit_reached: false,
-            active_ceiling_assignment_found: true,
+            bounded_search_color_ceiling: 1,
+            bounded_search_node_count: 1,
+            bounded_search_limit_reached: false,
+            bounded_assignment_found: true,
             model_chromatic_number_proven: true,
             active_slot_count: ACTIVE_HANGUL_SLOT_COUNT,
             chapter_one_preserved_active_code_count: 119,
             chapter_one_safe_target_code_count: 91,
             item_domain: item_domain::test_binding(),
             enemy_domain: enemy_domain::test_binding(),
+            sound_test_domain: sound_test_battle_domain::test_binding(),
             runtime_inputs: runtime_inputs::test_binding(),
             runtime_demand: runtime_demand::test_plan(),
             composition: composition::test_plan(),

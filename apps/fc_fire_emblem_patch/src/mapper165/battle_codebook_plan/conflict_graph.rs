@@ -12,10 +12,15 @@ const ACTIVE_CEILING_SEARCH_NODE_LIMIT: usize = 5_000_000;
 
 pub(super) struct BattleGlyphFamilies {
     pub(super) base: BTreeSet<char>,
-    pub(super) player_participants: Vec<BTreeSet<char>>,
-    pub(super) enemy_participants: Vec<BTreeSet<char>>,
+    pub(super) participant_modes: Vec<BattleParticipantMode>,
     pub(super) terrains: Vec<BTreeSet<char>>,
     pub(super) dialogue_records: Vec<BTreeSet<char>>,
+}
+
+pub(super) struct BattleParticipantMode {
+    pub(super) role: &'static str,
+    pub(super) player_participants: Vec<BTreeSet<char>>,
+    pub(super) enemy_participants: Vec<BTreeSet<char>>,
 }
 
 pub(super) struct StableColoringPlan {
@@ -25,9 +30,10 @@ pub(super) struct StableColoringPlan {
     pub(super) color_count: usize,
     pub(super) assignment_sha1: String,
     pub(super) coloring_strategy: &'static str,
-    pub(super) active_ceiling_search_node_count: usize,
-    pub(super) active_ceiling_search_limit_reached: bool,
-    pub(super) active_ceiling_assignment_found: bool,
+    pub(super) bounded_search_color_ceiling: usize,
+    pub(super) bounded_search_node_count: usize,
+    pub(super) bounded_search_limit_reached: bool,
+    pub(super) bounded_assignment_found: bool,
     pub(super) model_chromatic_number_proven: bool,
     glyph_colors: BTreeMap<char, usize>,
 }
@@ -40,12 +46,13 @@ impl StableColoringPlan {
     pub(super) fn expand_to_color_count(&mut self, target_color_count: usize) -> Result<()> {
         ensure!(
             target_color_count >= self.color_count,
-            "battle coloring cannot contract from {} to {target_color_count} colors (constructed clique: {}, active-ceiling assignment found: {}, search nodes: {}, limit reached: {})",
+            "battle coloring cannot contract from {} to {target_color_count} colors (constructed clique: {}, bounded assignment found: {}, search ceiling: {}, search nodes: {}, limit reached: {})",
             self.color_count,
             self.constructed_clique_glyph_count,
-            self.active_ceiling_assignment_found,
-            self.active_ceiling_search_node_count,
-            self.active_ceiling_search_limit_reached,
+            self.bounded_assignment_found,
+            self.bounded_search_color_ceiling,
+            self.bounded_search_node_count,
+            self.bounded_search_limit_reached,
         );
         ensure!(
             target_color_count <= self.glyph_count,
@@ -86,15 +93,23 @@ pub(super) fn plan_stable_coloring(
     let graph = ConflictGraph::from_families(families);
     let greedy_colors = graph.color_deterministically();
     graph.verify_coloring(&greedy_colors)?;
+    let greedy_color_count = greedy_colors
+        .iter()
+        .copied()
+        .max()
+        .map_or(0, |maximum| maximum + 1);
     let constructed_clique = graph.extend_clique(&constructed_clique(families));
     graph.verify_clique(&constructed_clique)?;
+    let bounded_search_color_ceiling = active_color_ceiling
+        .max(constructed_clique.len())
+        .min(greedy_color_count);
     let ceiling_search = search_coloring(
         &graph,
         &constructed_clique,
-        active_color_ceiling,
+        bounded_search_color_ceiling,
         ACTIVE_CEILING_SEARCH_NODE_LIMIT,
     );
-    let active_ceiling_assignment_found = ceiling_search.colors.is_some();
+    let bounded_assignment_found = ceiling_search.colors.is_some();
     let (colors, initial_strategy) = if let Some(colors) = ceiling_search.colors {
         graph.verify_coloring(&colors)?;
         (colors, "clique-seeded bounded ceiling search")
@@ -128,9 +143,10 @@ pub(super) fn plan_stable_coloring(
         color_count,
         assignment_sha1,
         coloring_strategy,
-        active_ceiling_search_node_count: ceiling_search.visited_node_count,
-        active_ceiling_search_limit_reached: ceiling_search.node_limit_reached,
-        active_ceiling_assignment_found,
+        bounded_search_color_ceiling,
+        bounded_search_node_count: ceiling_search.visited_node_count,
+        bounded_search_limit_reached: ceiling_search.node_limit_reached,
+        bounded_assignment_found,
         model_chromatic_number_proven,
         glyph_colors,
     })
@@ -143,25 +159,64 @@ fn constructed_clique(families: &BattleGlyphFamilies) -> BTreeSet<char> {
         .copied()
         .chain(union(&families.terrains))
         .collect::<BTreeSet<_>>();
-    for entries in [
-        &families.player_participants,
-        &families.enemy_participants,
-        &families.dialogue_records,
-    ] {
-        if let Some(entry) = entries
-            .iter()
-            .max_by_key(|entry| entry.difference(&clique).count())
-        {
-            clique.extend(entry);
-        }
+    if let Some(entry) = families
+        .dialogue_records
+        .iter()
+        .max_by_key(|entry| entry.difference(&clique).count())
+    {
+        clique.extend(entry);
+    }
+    if let Some(participants) = families
+        .participant_modes
+        .iter()
+        .filter_map(|mode| {
+            let player = mode
+                .player_participants
+                .iter()
+                .max_by_key(|entry| entry.difference(&clique).count())?;
+            let mut participants = player.clone();
+            if let Some(enemy) = mode.enemy_participants.iter().max_by_key(|entry| {
+                entry
+                    .iter()
+                    .filter(|glyph| !clique.contains(glyph) && !participants.contains(glyph))
+                    .count()
+            }) {
+                participants.extend(enemy);
+            }
+            Some(participants)
+        })
+        .max_by_key(|participants| participants.difference(&clique).count())
+    {
+        clique.extend(participants);
     }
     clique
 }
 
-struct ConflictGraph {
-    glyphs: Vec<char>,
-    indices: BTreeMap<char, usize>,
-    neighbors: Vec<BTreeSet<usize>>,
+fn add_participant_choice_cliques(graph: &mut ConflictGraph, mode: &BattleParticipantMode) {
+    for entries in [&mode.player_participants, &mode.enemy_participants] {
+        for entry in entries {
+            graph.add_clique(entry);
+        }
+    }
+}
+
+fn visible_participant_glyphs(families: &BattleGlyphFamilies) -> BTreeSet<char> {
+    families
+        .participant_modes
+        .iter()
+        .flat_map(|mode| {
+            [&mode.player_participants, &mode.enemy_participants]
+                .into_iter()
+                .flat_map(|entries| entries.iter().flat_map(BTreeSet::iter).copied())
+        })
+        .collect()
+}
+
+fn participant_mode_glyphs(mode: &BattleParticipantMode) -> (BTreeSet<char>, BTreeSet<char>) {
+    (
+        union(&mode.player_participants),
+        union(&mode.enemy_participants),
+    )
 }
 
 impl ConflictGraph {
@@ -179,26 +234,20 @@ impl ConflictGraph {
             indices,
         };
         graph.add_clique(&families.base);
-        for entries in [
-            &families.player_participants,
-            &families.enemy_participants,
-            &families.dialogue_records,
-        ] {
-            for entry in entries {
-                graph.add_clique(entry);
-            }
+        for mode in &families.participant_modes {
+            add_participant_choice_cliques(&mut graph, mode);
         }
-        let player_participants = union(&families.player_participants);
-        let enemy_participants = union(&families.enemy_participants);
+        for entry in &families.dialogue_records {
+            graph.add_clique(entry);
+        }
+        for mode in &families.participant_modes {
+            let (player_participants, enemy_participants) = participant_mode_glyphs(mode);
+            graph.add_cross(&player_participants, &enemy_participants);
+        }
         let terrains = union(&families.terrains);
         let dialogue = union(&families.dialogue_records);
         graph.add_clique(&terrains);
-        graph.add_cross(&player_participants, &enemy_participants);
-        let visible_participants = player_participants
-            .iter()
-            .chain(&enemy_participants)
-            .copied()
-            .collect::<BTreeSet<_>>();
+        let visible_participants = visible_participant_glyphs(families);
         graph.add_cross(&terrains, &visible_participants);
         let non_base = visible_participants
             .iter()
@@ -334,20 +383,31 @@ impl ConflictGraph {
     }
 }
 
+struct ConflictGraph {
+    glyphs: Vec<char>,
+    indices: BTreeMap<char, usize>,
+    neighbors: Vec<BTreeSet<usize>>,
+}
+
 fn all_glyphs(families: &BattleGlyphFamilies) -> BTreeSet<char> {
     families
         .base
         .iter()
         .copied()
         .chain(
-            [
-                &families.player_participants,
-                &families.enemy_participants,
-                &families.terrains,
-                &families.dialogue_records,
-            ]
-            .into_iter()
-            .flat_map(|entries| entries.iter().flat_map(BTreeSet::iter).copied()),
+            families
+                .participant_modes
+                .iter()
+                .flat_map(|mode| {
+                    [&mode.player_participants, &mode.enemy_participants]
+                        .into_iter()
+                        .flat_map(|entries| entries.iter().flat_map(BTreeSet::iter).copied())
+                })
+                .chain(
+                    [&families.terrains, &families.dialogue_records]
+                        .into_iter()
+                        .flat_map(|entries| entries.iter().flat_map(BTreeSet::iter).copied()),
+                ),
         )
         .collect()
 }

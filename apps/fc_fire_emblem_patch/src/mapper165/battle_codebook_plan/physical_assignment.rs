@@ -144,7 +144,7 @@ fn glyph_assignment_sha1(assignments: &BTreeMap<char, u8>) -> String {
 mod tests {
     use super::*;
     use crate::mapper165::battle_codebook_plan::conflict_graph::{
-        BattleGlyphFamilies, plan_stable_coloring,
+        BattleGlyphFamilies, BattleParticipantMode, plan_stable_coloring,
     };
 
     fn set(glyphs: &str) -> BTreeSet<char> {
@@ -156,8 +156,7 @@ mod tests {
         let coloring = plan_stable_coloring(
             &BattleGlyphFamilies {
                 base: set("가나"),
-                player_participants: vec![],
-                enemy_participants: vec![],
+                participant_modes: vec![],
                 terrains: vec![],
                 dialogue_records: vec![],
             },
@@ -195,8 +194,11 @@ mod tests {
         let coloring = plan_stable_coloring(
             &BattleGlyphFamilies {
                 base: BTreeSet::new(),
-                player_participants: vec![set("가"), set("나")],
-                enemy_participants: vec![],
+                participant_modes: vec![BattleParticipantMode {
+                    role: "test",
+                    player_participants: vec![set("가"), set("나")],
+                    enemy_participants: vec![],
+                }],
                 terrains: vec![],
                 dialogue_records: vec![],
             },
@@ -221,8 +223,7 @@ mod tests {
         let coloring = plan_stable_coloring(
             &BattleGlyphFamilies {
                 base: set("가나"),
-                player_participants: vec![],
-                enemy_participants: vec![],
+                participant_modes: vec![],
                 terrains: vec![],
                 dialogue_records: vec![],
             },

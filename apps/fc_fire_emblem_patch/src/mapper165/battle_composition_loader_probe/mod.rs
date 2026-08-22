@@ -372,7 +372,7 @@ pub(crate) fn build_battle_composition_loader(
         .samples
         .iter()
         .map(|sample| BattleRuntimeRecipeInput {
-            participant_record_identities: sample.runtime_input.participant_record_identities,
+            staged_participant_identities: sample.runtime_input.staged_participant_identities,
             class_record_identities: sample.runtime_input.class_record_identities,
             item_source_indices: sample.runtime_input.item_source_indices,
             terrain_source_indices: sample.runtime_input.terrain_source_indices,
