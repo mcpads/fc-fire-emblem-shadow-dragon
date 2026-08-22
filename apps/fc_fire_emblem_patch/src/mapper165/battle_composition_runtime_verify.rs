@@ -15,13 +15,21 @@ use super::{
     battle_codebook_plan::{
         BattleRuntimeRecipeInput, compose_runtime_font_page, inspect_runtime_recipe_input,
     },
+    battle_composition_loader_probe::{
+        BattleCompositionRuntimeLayout, CUMULATIVE_RUNTIME_LAYOUT, PROBE_RUNTIME_LAYOUT,
+        composition_dispatch_for_layout,
+    },
     battle_text_cache_probe::{
         GLYPH_ATLAS_PRG_OFFSET, PHYSICAL_CODE_TABLE_PRG_OFFSET, PROTECTED_ABSTRACT_COLOR_COUNT,
         PROTECTED_ABSTRACT_COLORS_PRG_OFFSET, RECIPE_BLOB_PRG_OFFSET, SOURCE_PAGE_PRG_OFFSET,
     },
 };
 
-const COMPOSE_RETURN_ADDRESS: u16 = 0xFB26;
+const FIXED_CPU_WINDOW_START: u16 = 0xC000;
+const FIXED_CPU_WINDOW_BYTE_COUNT: usize = 0x4000;
+const JSR_BYTE_COUNT: u16 = 3;
+const SUPPORTED_RUNTIME_LAYOUTS: [BattleCompositionRuntimeLayout; 2] =
+    [PROBE_RUNTIME_LAYOUT, CUMULATIVE_RUNTIME_LAYOUT];
 const INTERNAL_BATTLE_FIELD_START: usize = 0x0304;
 const INTERNAL_BATTLE_FIELD_END_EXCLUSIVE: usize = 0x0324;
 const OBSERVED_DIALOGUE_SELECTOR_ADDRESS: usize = 0x7936;
@@ -127,11 +135,8 @@ pub(crate) fn verify_battle_composition_runtime(
         .with_context(|| format!("read battle composition event {}", event_path.display()))?;
     let event_file: DebugEventFile = serde_json::from_slice(&event_bytes)
         .with_context(|| format!("parse battle composition event {}", event_path.display()))?;
-    let event = event_file
-        .events
-        .iter()
-        .find(|event| event.kind == "exec" && event.pc == COMPOSE_RETURN_ADDRESS)
-        .context("debug event has no battle composition return hit at 0xFB26")?;
+    let compose_return_address = bind_installed_battle_composition_return(&rom)?;
+    let event = select_composition_return_event(&event_file, compose_return_address)?;
     let internal = snapshot_bytes(event, "nesInternalRam")?;
     let actual_page = snapshot_bytes(event, "nesChrRam")?;
     ensure!(
@@ -254,7 +259,7 @@ pub(crate) fn verify_battle_composition_runtime(
     let report = BattleCompositionRuntimeVerificationReport {
         schema: 5,
         rom_sha1: sha1_hex(rom.data()),
-        compose_return_cpu_address_hex: format!("0x{COMPOSE_RETURN_ADDRESS:04X}"),
+        compose_return_cpu_address_hex: format!("0x{compose_return_address:04X}"),
         compose_return_frame: event.frame,
         runtime_input: RuntimeInputReport {
             participant_record_identities: input.participant_record_identities,
@@ -311,6 +316,102 @@ pub(crate) fn verify_battle_composition_runtime(
         "runtime CHR RAM differs from the independently composed page in {differing_byte_count} bytes across {differing_tile_count} tiles"
     );
     Ok(summary)
+}
+
+fn bind_installed_battle_composition_return(rom: &Rom) -> Result<u16> {
+    let matches = SUPPORTED_RUNTIME_LAYOUTS
+        .into_iter()
+        .map(|layout| match_battle_composition_return(rom.prg(), layout))
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    ensure!(
+        matches.len() == 1,
+        "ROM binds {} supported battle composition dispatches; expected exactly one",
+        matches.len()
+    );
+    Ok(matches[0])
+}
+
+fn select_composition_return_event(
+    event_file: &DebugEventFile,
+    compose_return_address: u16,
+) -> Result<&DebugEvent> {
+    let matches = event_file
+        .events
+        .iter()
+        .filter(|event| event.kind == "exec" && event.pc == compose_return_address)
+        .collect::<Vec<_>>();
+    ensure!(
+        matches.len() == 1,
+        "debug event has {} installed battle composition return hits at 0x{compose_return_address:04X}; expected exactly one",
+        matches.len()
+    );
+    Ok(matches[0])
+}
+
+fn match_battle_composition_return(
+    prg: &[u8],
+    layout: BattleCompositionRuntimeLayout,
+) -> Result<Option<u16>> {
+    ensure!(
+        prg.len() >= FIXED_CPU_WINDOW_BYTE_COUNT,
+        "ROM PRG is smaller than the fixed CPU window"
+    );
+    let expected = composition_dispatch_for_layout(layout)?;
+    let composer_call_offset = find_composer_call_offset(&expected, layout.compose_page)?;
+    let fixed_window_start = prg.len() - FIXED_CPU_WINDOW_BYTE_COUNT;
+    let dispatch_offset = fixed_window_start
+        + usize::from(
+            layout
+                .dispatch
+                .checked_sub(FIXED_CPU_WINDOW_START)
+                .context("battle composition dispatch is outside the fixed CPU window")?,
+        );
+    let actual = prg
+        .get(dispatch_offset..dispatch_offset + expected.len())
+        .context("battle composition dispatch is outside PRG")?;
+    let call_operand = composer_call_offset + 1..composer_call_offset + 3;
+    let dispatch_matches = actual
+        .iter()
+        .zip(expected.iter())
+        .enumerate()
+        .all(|(index, (actual, expected))| call_operand.contains(&index) || actual == expected);
+    if !dispatch_matches {
+        return Ok(None);
+    }
+    let rebound_target = u16::from_le_bytes([
+        actual[composer_call_offset + 1],
+        actual[composer_call_offset + 2],
+    ]);
+    if rebound_target < FIXED_CPU_WINDOW_START {
+        return Ok(None);
+    }
+    Ok(Some(
+        layout
+            .dispatch
+            .checked_add(
+                u16::try_from(composer_call_offset).context("composer call offset overflow")?,
+            )
+            .and_then(|address| address.checked_add(JSR_BYTE_COUNT))
+            .context("battle composition return address overflow")?,
+    ))
+}
+
+fn find_composer_call_offset(dispatch: &[u8], composer: u16) -> Result<usize> {
+    let [low, high] = composer.to_le_bytes();
+    let matches = dispatch
+        .windows(3)
+        .enumerate()
+        .filter_map(|(offset, bytes)| (bytes == [0x20, low, high]).then_some(offset))
+        .collect::<Vec<_>>();
+    ensure!(
+        matches.len() == 1,
+        "battle composition dispatch contains {} composer calls; expected exactly one",
+        matches.len()
+    );
+    Ok(matches[0])
 }
 
 struct DecodedSnapshot {
@@ -426,6 +527,28 @@ fn write_file(path: &Path, bytes: &[u8]) -> Result<()> {
 mod tests {
     use super::*;
 
+    fn debug_event(frame: u64, pc: u16) -> DebugEvent {
+        DebugEvent {
+            frame,
+            kind: "exec".to_owned(),
+            pc,
+            snapshot: Vec::new(),
+        }
+    }
+
+    fn prg_with_dispatch(layout: BattleCompositionRuntimeLayout, rebound_composer: u16) -> Vec<u8> {
+        let mut prg = vec![0xFF; 512 * 1024];
+        let mut dispatch = composition_dispatch_for_layout(layout).unwrap();
+        let call_offset = find_composer_call_offset(&dispatch, layout.compose_page).unwrap();
+        let [low, high] = rebound_composer.to_le_bytes();
+        dispatch[call_offset + 1] = low;
+        dispatch[call_offset + 2] = high;
+        let fixed_window_start = prg.len() - FIXED_CPU_WINDOW_BYTE_COUNT;
+        let offset = fixed_window_start + usize::from(layout.dispatch - FIXED_CPU_WINDOW_START);
+        prg[offset..offset + dispatch.len()].copy_from_slice(&dispatch);
+        prg
+    }
+
     #[test]
     fn snapshot_addressing_uses_the_declared_capture_origin() {
         let snapshot = DecodedSnapshot {
@@ -459,5 +582,76 @@ mod tests {
 
         internal.bytes[SELECTOR_62_REQUIRED_ZERO_ADDRESS] = 1;
         assert_eq!(project_dialogue_selector(&internal, 7).unwrap(), (7, false));
+    }
+
+    #[test]
+    fn installed_probe_dispatch_binds_its_composition_return() {
+        let prg = prg_with_dispatch(PROBE_RUNTIME_LAYOUT, PROBE_RUNTIME_LAYOUT.compose_page);
+        let dispatch = composition_dispatch_for_layout(PROBE_RUNTIME_LAYOUT).unwrap();
+        let call_offset =
+            find_composer_call_offset(&dispatch, PROBE_RUNTIME_LAYOUT.compose_page).unwrap();
+        let expected_return =
+            PROBE_RUNTIME_LAYOUT.dispatch + u16::try_from(call_offset).unwrap() + JSR_BYTE_COUNT;
+
+        assert_eq!(
+            match_battle_composition_return(&prg, PROBE_RUNTIME_LAYOUT).unwrap(),
+            Some(expected_return)
+        );
+        assert_eq!(
+            match_battle_composition_return(&prg, CUMULATIVE_RUNTIME_LAYOUT).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn integrated_dispatch_binds_relocated_composer_by_its_call_role() {
+        let prg = prg_with_dispatch(CUMULATIVE_RUNTIME_LAYOUT, 0xF622);
+
+        assert_eq!(
+            match_battle_composition_return(&prg, CUMULATIVE_RUNTIME_LAYOUT).unwrap(),
+            Some(0xFC4C)
+        );
+    }
+
+    #[test]
+    fn dispatch_binding_rejects_mutations_outside_the_composer_operand() {
+        let mut prg = prg_with_dispatch(CUMULATIVE_RUNTIME_LAYOUT, 0xF622);
+        let fixed_window_start = prg.len() - FIXED_CPU_WINDOW_BYTE_COUNT;
+        let offset = fixed_window_start
+            + usize::from(CUMULATIVE_RUNTIME_LAYOUT.dispatch - FIXED_CPU_WINDOW_START);
+        prg[offset] ^= 1;
+
+        assert_eq!(
+            match_battle_composition_return(&prg, CUMULATIVE_RUNTIME_LAYOUT).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn runtime_verification_selects_one_composition_return() {
+        let event_file = DebugEventFile {
+            events: vec![debug_event(27, 0xFC4C)],
+        };
+
+        assert_eq!(
+            select_composition_return_event(&event_file, 0xFC4C)
+                .unwrap()
+                .frame,
+            27
+        );
+    }
+
+    #[test]
+    fn runtime_verification_rejects_ambiguous_composition_returns() {
+        let event_file = DebugEventFile {
+            events: vec![debug_event(27, 0xFC4C), debug_event(32, 0xFC4C)],
+        };
+
+        assert!(
+            select_composition_return_event(&event_file, 0xFC4C)
+                .unwrap_err()
+                .to_string()
+                .contains("expected exactly one")
+        );
     }
 }

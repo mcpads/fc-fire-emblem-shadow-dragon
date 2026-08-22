@@ -152,7 +152,7 @@ pub(super) fn composition_dispatch() -> Result<Vec<u8>> {
     composition_dispatch_for_layout(PROBE_RUNTIME_LAYOUT)
 }
 
-pub(super) fn composition_dispatch_for_layout(
+pub(crate) fn composition_dispatch_for_layout(
     layout: BattleCompositionRuntimeLayout,
 ) -> Result<Vec<u8>> {
     let mut instructions = vec![

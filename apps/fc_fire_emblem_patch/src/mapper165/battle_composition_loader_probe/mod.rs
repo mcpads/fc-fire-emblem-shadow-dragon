@@ -42,9 +42,10 @@ use dialogue_cache_refresh::{
 use dynamic_assignment::{
     build_dynamic_assignment_routines, build_dynamic_assignment_routines_for_layout,
 };
+pub(crate) use runtime::composition_dispatch_for_layout;
 use runtime::{
     RuntimeRoutine, battle_central_right_fd_selector_for_layout, build_runtime_routines,
-    build_runtime_routines_for_layout, composition_dispatch_for_layout, parse_recipe_directories,
+    build_runtime_routines_for_layout, parse_recipe_directories,
     shared_battle_phase_active_for_layout,
 };
 
