@@ -94,7 +94,10 @@ fn dynamic_assignment_collects_every_runtime_field_and_projected_dialogue() {
         dialogue: 0xB218,
     };
     let bytes = &build_dynamic_assignment_routines(directories).unwrap()[0].bytes;
-    for address in RUNTIME_FIELD_ADDRESSES {
+    for address in runtime_recipe_fields(directories)
+        .into_iter()
+        .filter_map(|field| field.index_source.staging_address())
+    {
         assert!(
             bytes
                 .windows(3)

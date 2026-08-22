@@ -1,4 +1,8 @@
-use super::{runtime::RecipeDirectoryAddresses, *};
+use super::{
+    runtime::RecipeDirectoryAddresses,
+    runtime_recipe_fields::{RecipeIndexSource, runtime_recipe_fields, select_recipe_directory},
+    *,
+};
 
 const COLLECT_RECIPE_ADDRESS: u16 = 0x9700;
 const COLLECT_DIRECTORY_ADDRESS: u16 = 0x9740;
@@ -100,48 +104,36 @@ fn prepare_dynamic_assignment(
         Instruction::StaZeroPage(RECIPE_POINTER_HIGH),
         Instruction::JsrAbsolute(COLLECT_RECIPE_ADDRESS),
     ]);
-    set_directory(&mut instructions, directories.unit);
-    instructions.extend([
-        Instruction::LdaAbsolute(0x0304),
-        Instruction::JsrAbsolute(COLLECT_PARTICIPANT_NAME_ADDRESS),
-    ]);
-    set_directory(&mut instructions, directories.enemy);
-    instructions.extend([
-        Instruction::LdaAbsolute(0x0305),
-        Instruction::AndImmediate(0x7F),
-        Instruction::JsrAbsolute(COLLECT_PARTICIPANT_NAME_ADDRESS),
-    ]);
-    set_directory(&mut instructions, directories.class);
-    instructions.extend([
-        Instruction::LdaAbsolute(0x0306),
-        Instruction::Sec,
-        Instruction::SbcImmediate(1),
-        Instruction::JsrAbsolute(COLLECT_DIRECTORY_ADDRESS),
-        Instruction::LdaAbsolute(0x0307),
-        Instruction::Sec,
-        Instruction::SbcImmediate(1),
-        Instruction::JsrAbsolute(COLLECT_DIRECTORY_ADDRESS),
-    ]);
-    set_directory(&mut instructions, directories.item);
-    instructions.extend([
-        Instruction::LdaAbsolute(0x0320),
-        Instruction::JsrAbsolute(COLLECT_DIRECTORY_ADDRESS),
-        Instruction::LdaAbsolute(0x0321),
-        Instruction::JsrAbsolute(COLLECT_DIRECTORY_ADDRESS),
-    ]);
-    set_directory(&mut instructions, directories.terrain);
-    instructions.extend([
-        Instruction::LdaAbsolute(0x0322),
-        Instruction::JsrAbsolute(COLLECT_DIRECTORY_ADDRESS),
-        Instruction::LdaAbsolute(0x0323),
-        Instruction::JsrAbsolute(COLLECT_DIRECTORY_ADDRESS),
-    ]);
-    set_directory(&mut instructions, directories.dialogue);
-    instructions.extend([
-        Instruction::JsrAbsolute(project_dialogue_selector_address),
-        Instruction::JsrAbsolute(COLLECT_DIRECTORY_ADDRESS),
-        Instruction::JmpAbsolute(ALLOCATE_REMAP_PAIRS_ADDRESS),
-    ]);
+    let mut selected_directory = None;
+    for field in runtime_recipe_fields(directories) {
+        select_recipe_directory(&mut instructions, &mut selected_directory, field.directory);
+        match field.index_source {
+            RecipeIndexSource::UnitIdentity(address) => instructions.extend([
+                Instruction::LdaAbsolute(address),
+                Instruction::JsrAbsolute(COLLECT_PARTICIPANT_NAME_ADDRESS),
+            ]),
+            RecipeIndexSource::EnemyIdentity(address) => instructions.extend([
+                Instruction::LdaAbsolute(address),
+                Instruction::AndImmediate(0x7F),
+                Instruction::JsrAbsolute(COLLECT_PARTICIPANT_NAME_ADDRESS),
+            ]),
+            RecipeIndexSource::OneBasedIdentity(address) => instructions.extend([
+                Instruction::LdaAbsolute(address),
+                Instruction::Sec,
+                Instruction::SbcImmediate(1),
+                Instruction::JsrAbsolute(COLLECT_DIRECTORY_ADDRESS),
+            ]),
+            RecipeIndexSource::DirectIndex(address) => instructions.extend([
+                Instruction::LdaAbsolute(address),
+                Instruction::JsrAbsolute(COLLECT_DIRECTORY_ADDRESS),
+            ]),
+            RecipeIndexSource::ProjectedDialogue => instructions.extend([
+                Instruction::JsrAbsolute(project_dialogue_selector_address),
+                Instruction::JsrAbsolute(COLLECT_DIRECTORY_ADDRESS),
+            ]),
+        }
+    }
+    instructions.push(Instruction::JmpAbsolute(ALLOCATE_REMAP_PAIRS_ADDRESS));
     assemble_at(DYNAMIC_ASSIGNMENT_CODE_CPU_ADDRESS, &instructions)
 }
 
@@ -323,15 +315,6 @@ fn test_selected_color() -> Result<Vec<u8>> {
             Instruction::Rts,
         ],
     )
-}
-
-fn set_directory(instructions: &mut Vec<Instruction>, address: u16) {
-    instructions.extend([
-        Instruction::LdaImmediate(address as u8),
-        Instruction::StaZeroPage(DIRECTORY_POINTER_LOW),
-        Instruction::LdaImmediate((address >> 8) as u8),
-        Instruction::StaZeroPage(DIRECTORY_POINTER_HIGH),
-    ]);
 }
 
 fn next_address(origin: u16, instructions: &[Instruction]) -> Result<u16> {

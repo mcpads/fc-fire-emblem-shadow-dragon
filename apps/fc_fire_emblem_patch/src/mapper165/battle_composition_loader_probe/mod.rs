@@ -34,6 +34,7 @@ use super::{
 mod dialogue_cache_refresh;
 mod dynamic_assignment;
 mod runtime;
+mod runtime_recipe_fields;
 
 use dialogue_cache_refresh::{
     bind_final_dialogue_cache_refresh_base, bind_final_dialogue_cache_refresh_source,
@@ -48,6 +49,7 @@ use runtime::{
     build_runtime_routines_for_layout, parse_recipe_directories,
     shared_battle_phase_active_for_layout,
 };
+use runtime_recipe_fields::runtime_recipe_fields;
 
 pub(crate) fn cumulative_battle_composition_dispatch_bytes() -> Result<Vec<u8>> {
     composition_dispatch_for_layout(CUMULATIVE_RUNTIME_LAYOUT)
@@ -177,10 +179,6 @@ const ATLAS_POINTER_HIGH: u8 = 0x05;
 const RECIPE_PAIR_COUNT: u16 = 0x0006;
 const PHYSICAL_TILE_CODE: u8 = 0x07;
 const BORROWED_SCRATCH: [u8; 8] = [0, 1, 2, 3, 4, 5, 6, 7];
-
-const RUNTIME_FIELD_ADDRESSES: [u16; 8] = [
-    0x0304, 0x0305, 0x0306, 0x0307, 0x0320, 0x0321, 0x0322, 0x0323,
-];
 
 #[derive(Debug, Deserialize)]
 struct BattleTextRuntimeBaseContract {
@@ -539,7 +537,7 @@ pub(crate) fn build_battle_composition_loader(
         prg_size: output_rom.prg().len(),
         chr_size: output_rom.chr().len(),
         observed_runtime_tuple_count: runtime_inputs.len(),
-        runtime_field_count: RUNTIME_FIELD_ADDRESSES.len() + 1,
+        runtime_field_count: runtime_recipe_fields(directories).len(),
         maximum_observed_unique_overlay_count,
         maximum_observed_raw_glyph_reference_count,
         source_page_ppu_write_count,

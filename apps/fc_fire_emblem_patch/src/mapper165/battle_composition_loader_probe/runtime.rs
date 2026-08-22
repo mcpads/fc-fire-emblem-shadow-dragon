@@ -1,4 +1,9 @@
-use super::*;
+use super::{
+    runtime_recipe_fields::{
+        RecipeIndexSource, RuntimeRecipeField, runtime_recipe_fields, select_recipe_directory,
+    },
+    *,
+};
 
 pub(super) struct RuntimeRoutine {
     pub(super) role: &'static str,
@@ -220,7 +225,7 @@ fn compose_page_for_layout(
     directories: RecipeDirectoryAddresses,
     layout: BattleCompositionRuntimeLayout,
 ) -> Result<Vec<u8>> {
-    let enemy_name_entry = enemy_participant_name_entry_for_layout(layout)?;
+    let enemy_name_entry = enemy_participant_name_entry_for_layout(directories, layout)?;
     let mut instructions = vec![
         Instruction::Php,
         Instruction::Pha,
@@ -290,40 +295,56 @@ fn compose_page_for_layout(
         Instruction::OraImmediate(0xB0),
         Instruction::StaZeroPage(RECIPE_POINTER_HIGH),
         Instruction::JsrAbsolute(layout.apply_recipe),
-        Instruction::LdaAbsolute(0x0304),
-        Instruction::JsrAbsolute(layout.apply_participant),
-        Instruction::LdaAbsolute(0x0305),
-        Instruction::JsrAbsolute(enemy_name_entry),
     ]);
-    set_directory(&mut instructions, directories.class);
+    let mut selected_directory = None;
+    for field in runtime_recipe_fields(directories) {
+        match field.index_source {
+            RecipeIndexSource::UnitIdentity(address) => instructions.extend([
+                Instruction::LdaAbsolute(address),
+                Instruction::JsrAbsolute(layout.apply_participant),
+            ]),
+            RecipeIndexSource::EnemyIdentity(address) => instructions.extend([
+                Instruction::LdaAbsolute(address),
+                Instruction::JsrAbsolute(enemy_name_entry),
+            ]),
+            RecipeIndexSource::OneBasedIdentity(address) => {
+                select_recipe_directory(
+                    &mut instructions,
+                    &mut selected_directory,
+                    field.directory,
+                );
+                instructions.extend([
+                    Instruction::LdaAbsolute(address),
+                    Instruction::Sec,
+                    Instruction::SbcImmediate(1),
+                    Instruction::JsrAbsolute(layout.apply_directory),
+                ]);
+            }
+            RecipeIndexSource::DirectIndex(address) => {
+                select_recipe_directory(
+                    &mut instructions,
+                    &mut selected_directory,
+                    field.directory,
+                );
+                instructions.extend([
+                    Instruction::LdaAbsolute(address),
+                    Instruction::JsrAbsolute(layout.apply_directory),
+                ]);
+            }
+            RecipeIndexSource::ProjectedDialogue => {
+                select_recipe_directory(
+                    &mut instructions,
+                    &mut selected_directory,
+                    field.directory,
+                );
+                instructions.extend([
+                    Instruction::JsrAbsolute(layout.project_dialogue_selector),
+                    Instruction::JsrAbsolute(layout.apply_directory),
+                ]);
+            }
+        }
+    }
     instructions.extend([
-        Instruction::LdaAbsolute(0x0306),
-        Instruction::Sec,
-        Instruction::SbcImmediate(1),
-        Instruction::JsrAbsolute(layout.apply_directory),
-        Instruction::LdaAbsolute(0x0307),
-        Instruction::Sec,
-        Instruction::SbcImmediate(1),
-        Instruction::JsrAbsolute(layout.apply_directory),
-    ]);
-    set_directory(&mut instructions, directories.item);
-    instructions.extend([
-        Instruction::LdaAbsolute(0x0320),
-        Instruction::JsrAbsolute(layout.apply_directory),
-        Instruction::LdaAbsolute(0x0321),
-        Instruction::JsrAbsolute(layout.apply_directory),
-    ]);
-    set_directory(&mut instructions, directories.terrain);
-    instructions.extend([
-        Instruction::LdaAbsolute(0x0322),
-        Instruction::JsrAbsolute(layout.apply_directory),
-        Instruction::LdaAbsolute(0x0323),
-        Instruction::JsrAbsolute(layout.apply_directory),
-    ]);
-    set_directory(&mut instructions, directories.dialogue);
-    instructions.extend([
-        Instruction::JsrAbsolute(layout.project_dialogue_selector),
-        Instruction::JsrAbsolute(layout.apply_directory),
         Instruction::LdaAbsolute(REMAP_STATE_ADDRESS),
         Instruction::OraImmediate(CACHE_UPLOADED_MARKER),
         Instruction::StaAbsolute(REMAP_STATE_ADDRESS),
@@ -497,14 +518,23 @@ fn apply_participant_for_layout(
     layout: BattleCompositionRuntimeLayout,
 ) -> Result<Vec<u8>> {
     let mut instructions = Vec::new();
-    append_participant_name_entry(&mut instructions, directories.unit, false, layout);
-    append_participant_name_entry(&mut instructions, directories.enemy, true, layout);
+    for field in runtime_recipe_fields(directories) {
+        match field.index_source {
+            RecipeIndexSource::UnitIdentity(_) => {
+                append_participant_name_entry(&mut instructions, field, false, layout)
+            }
+            RecipeIndexSource::EnemyIdentity(_) => {
+                append_participant_name_entry(&mut instructions, field, true, layout)
+            }
+            _ => {}
+        }
+    }
     assemble_at(layout.apply_participant, &instructions)
 }
 
 fn append_participant_name_entry(
     instructions: &mut Vec<Instruction>,
-    directory: u16,
+    field: RuntimeRecipeField,
     strips_enemy_faction_bit: bool,
     layout: BattleCompositionRuntimeLayout,
 ) {
@@ -516,22 +546,39 @@ fn append_participant_name_entry(
         Instruction::SbcImmediate(1),
         Instruction::Tax,
     ]);
-    set_directory(instructions, directory);
+    set_directory(instructions, field.directory);
     instructions.extend([
         Instruction::Txa,
         Instruction::JmpAbsolute(layout.apply_directory),
     ]);
 }
 
-fn enemy_participant_name_entry_for_layout(layout: BattleCompositionRuntimeLayout) -> Result<u16> {
+fn enemy_participant_name_entry_for_layout(
+    directories: RecipeDirectoryAddresses,
+    layout: BattleCompositionRuntimeLayout,
+) -> Result<u16> {
     let mut unit_entry = Vec::new();
-    append_participant_name_entry(&mut unit_entry, 0, false, layout);
+    let unit_field = runtime_recipe_fields(directories)
+        .into_iter()
+        .find(|field| matches!(field.index_source, RecipeIndexSource::UnitIdentity(_)))
+        .context("battle runtime recipe fields have no unit identity")?;
+    append_participant_name_entry(&mut unit_entry, unit_field, false, layout);
     next_address(layout.apply_participant, &unit_entry)
 }
 
 #[cfg(test)]
 pub(super) fn enemy_participant_name_entry() -> Result<u16> {
-    enemy_participant_name_entry_for_layout(PROBE_RUNTIME_LAYOUT)
+    enemy_participant_name_entry_for_layout(
+        RecipeDirectoryAddresses {
+            unit: 0,
+            enemy: 0,
+            class: 0,
+            item: 0,
+            terrain: 0,
+            dialogue: 0,
+        },
+        PROBE_RUNTIME_LAYOUT,
+    )
 }
 
 fn project_dialogue_selector_for_layout(layout: BattleCompositionRuntimeLayout) -> Result<Vec<u8>> {
