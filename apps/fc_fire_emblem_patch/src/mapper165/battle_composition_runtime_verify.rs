@@ -16,8 +16,9 @@ use super::{
         BattleRuntimeRecipeInput, compose_runtime_font_page, inspect_runtime_recipe_input,
     },
     battle_composition_loader_probe::{
-        BattleCompositionRuntimeLayout, CUMULATIVE_RUNTIME_LAYOUT, PROBE_RUNTIME_LAYOUT,
-        composition_dispatch_for_layout,
+        BattleCompositionRuntimeLayout, CUMULATIVE_RUNTIME_LAYOUT, InstalledDialogueCacheRefresh,
+        PROBE_RUNTIME_LAYOUT, composition_dispatch_for_layout,
+        match_installed_final_dialogue_cache_refresh,
     },
     battle_text_cache_probe::{
         GLYPH_ATLAS_PRG_OFFSET, PHYSICAL_CODE_TABLE_PRG_OFFSET, PROTECTED_ABSTRACT_COLOR_COUNT,
@@ -89,6 +90,7 @@ struct DifferingTileReport {
 struct BattleCompositionRuntimeVerificationReport {
     schema: u8,
     rom_sha1: String,
+    composition_path: &'static str,
     compose_return_cpu_address_hex: String,
     compose_return_frame: u64,
     runtime_input: RuntimeInputReport,
@@ -135,8 +137,9 @@ pub(crate) fn verify_battle_composition_runtime(
         .with_context(|| format!("read battle composition event {}", event_path.display()))?;
     let event_file: DebugEventFile = serde_json::from_slice(&event_bytes)
         .with_context(|| format!("parse battle composition event {}", event_path.display()))?;
-    let compose_return_address = bind_installed_battle_composition_return(&rom)?;
-    let event = select_composition_return_event(&event_file, compose_return_address)?;
+    let installed = bind_installed_battle_composition_paths(&rom)?;
+    let selected = select_composition_event(&event_file, installed)?;
+    let event = selected.event;
     let internal = snapshot_bytes(event, "nesInternalRam")?;
     let actual_page = snapshot_bytes(event, "nesChrRam")?;
     ensure!(
@@ -257,9 +260,10 @@ pub(crate) fn verify_battle_composition_runtime(
         .map(|offset| format!("0x{:04X}", 0x1000 + offset));
     let exact_composition_match = differing_byte_count == 0;
     let report = BattleCompositionRuntimeVerificationReport {
-        schema: 5,
+        schema: 6,
         rom_sha1: sha1_hex(rom.data()),
-        compose_return_cpu_address_hex: format!("0x{compose_return_address:04X}"),
+        composition_path: selected.path.name(),
+        compose_return_cpu_address_hex: format!("0x{:04X}", selected.return_address),
         compose_return_frame: event.frame,
         runtime_input: RuntimeInputReport {
             staged_participant_identities: input.staged_participant_identities,
@@ -318,10 +322,41 @@ pub(crate) fn verify_battle_composition_runtime(
     Ok(summary)
 }
 
-fn bind_installed_battle_composition_return(rom: &Rom) -> Result<u16> {
+#[derive(Debug, Clone, Copy)]
+struct InstalledCompositionPaths {
+    dispatch_return: u16,
+    dialogue_cache_refresh: Option<InstalledDialogueCacheRefresh>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompositionPath {
+    BattleLifetimeDispatch,
+    DialogueCacheRefresh,
+}
+
+impl CompositionPath {
+    fn name(self) -> &'static str {
+        match self {
+            Self::BattleLifetimeDispatch => "battle_lifetime_dispatch",
+            Self::DialogueCacheRefresh => "dialogue_cache_refresh",
+        }
+    }
+}
+
+#[derive(Debug)]
+struct SelectedCompositionEvent<'a> {
+    event: &'a DebugEvent,
+    path: CompositionPath,
+    return_address: u16,
+}
+
+fn bind_installed_battle_composition_paths(rom: &Rom) -> Result<InstalledCompositionPaths> {
     let matches = SUPPORTED_RUNTIME_LAYOUTS
         .into_iter()
-        .map(|layout| match_battle_composition_return(rom.prg(), layout))
+        .map(|layout| {
+            Ok(match_battle_composition_return(rom.prg(), layout)?
+                .map(|dispatch_return| (layout, dispatch_return)))
+        })
         .collect::<Result<Vec<_>>>()?
         .into_iter()
         .flatten()
@@ -331,24 +366,87 @@ fn bind_installed_battle_composition_return(rom: &Rom) -> Result<u16> {
         "ROM binds {} supported battle composition dispatches; expected exactly one",
         matches.len()
     );
-    Ok(matches[0])
+    let (layout, dispatch_return) = matches[0];
+    Ok(InstalledCompositionPaths {
+        dispatch_return,
+        dialogue_cache_refresh: match_installed_final_dialogue_cache_refresh(rom, layout)?,
+    })
 }
 
-fn select_composition_return_event(
+fn select_composition_event(
     event_file: &DebugEventFile,
-    compose_return_address: u16,
-) -> Result<&DebugEvent> {
-    let matches = event_file
+    installed: InstalledCompositionPaths,
+) -> Result<SelectedCompositionEvent<'_>> {
+    let dispatch_matches = event_file
         .events
         .iter()
-        .filter(|event| event.kind == "exec" && event.pc == compose_return_address)
+        .filter(|event| event.kind == "exec" && event.pc == installed.dispatch_return)
         .collect::<Vec<_>>();
     ensure!(
-        matches.len() == 1,
-        "debug event has {} installed battle composition return hits at 0x{compose_return_address:04X}; expected exactly one",
-        matches.len()
+        dispatch_matches.len() <= 1,
+        "debug event has {} battle-lifetime composition return hits at 0x{:04X}; expected at most one",
+        dispatch_matches.len(),
+        installed.dispatch_return,
     );
-    Ok(matches[0])
+
+    let refresh_match = installed
+        .dialogue_cache_refresh
+        .map(|refresh| select_dialogue_cache_refresh_event(event_file, refresh))
+        .transpose()?
+        .flatten();
+    let candidate_count =
+        usize::from(!dispatch_matches.is_empty()) + usize::from(refresh_match.is_some());
+    ensure!(
+        candidate_count == 1,
+        "debug event contains {candidate_count} complete battle composition paths; expected exactly one"
+    );
+    if let Some(event) = dispatch_matches.first() {
+        return Ok(SelectedCompositionEvent {
+            event,
+            path: CompositionPath::BattleLifetimeDispatch,
+            return_address: installed.dispatch_return,
+        });
+    }
+    let (event, return_address) = refresh_match.context("dialogue cache refresh disappeared")?;
+    Ok(SelectedCompositionEvent {
+        event,
+        path: CompositionPath::DialogueCacheRefresh,
+        return_address,
+    })
+}
+
+fn select_dialogue_cache_refresh_event(
+    event_file: &DebugEventFile,
+    refresh: InstalledDialogueCacheRefresh,
+) -> Result<Option<(&DebugEvent, u16)>> {
+    let positions_for = |address| {
+        event_file
+            .events
+            .iter()
+            .enumerate()
+            .filter_map(|(index, event)| {
+                (event.kind == "exec" && event.pc == address).then_some((index, event))
+            })
+            .collect::<Vec<_>>()
+    };
+    let refresh_entries = positions_for(refresh.refresh_path_entry);
+    let compose_entries = positions_for(refresh.compose_entry);
+    let compose_returns = positions_for(refresh.compose_return);
+    if refresh_entries.is_empty() && compose_entries.is_empty() && compose_returns.is_empty() {
+        return Ok(None);
+    }
+    ensure!(
+        refresh_entries.len() == 1 && compose_entries.len() == 1 && compose_returns.len() == 1,
+        "debug event has incomplete dialogue-cache composition sequence: refresh entries {}, compose entries {}, returns {}",
+        refresh_entries.len(),
+        compose_entries.len(),
+        compose_returns.len(),
+    );
+    ensure!(
+        refresh_entries[0].0 < compose_entries[0].0 && compose_entries[0].0 < compose_returns[0].0,
+        "dialogue-cache composition events are out of order"
+    );
+    Ok(Some((compose_returns[0].1, refresh.compose_return)))
 }
 
 fn match_battle_composition_return(
@@ -536,6 +634,15 @@ mod tests {
         }
     }
 
+    fn installed_paths(
+        dialogue_cache_refresh: Option<InstalledDialogueCacheRefresh>,
+    ) -> InstalledCompositionPaths {
+        InstalledCompositionPaths {
+            dispatch_return: 0xFC4C,
+            dialogue_cache_refresh,
+        }
+    }
+
     fn prg_with_dispatch(layout: BattleCompositionRuntimeLayout, rebound_composer: u16) -> Vec<u8> {
         let mut prg = vec![0xFF; 512 * 1024];
         let mut dispatch = composition_dispatch_for_layout(layout).unwrap();
@@ -628,30 +735,72 @@ mod tests {
     }
 
     #[test]
-    fn runtime_verification_selects_one_composition_return() {
+    fn runtime_verification_selects_one_lifetime_dispatch_return() {
         let event_file = DebugEventFile {
             events: vec![debug_event(27, 0xFC4C)],
         };
 
-        assert_eq!(
-            select_composition_return_event(&event_file, 0xFC4C)
-                .unwrap()
-                .frame,
-            27
+        let selected = select_composition_event(&event_file, installed_paths(None)).unwrap();
+
+        assert_eq!(selected.event.frame, 27);
+        assert_eq!(selected.path, CompositionPath::BattleLifetimeDispatch);
+    }
+
+    #[test]
+    fn runtime_verification_selects_a_complete_dialogue_refresh_sequence() {
+        let refresh = InstalledDialogueCacheRefresh {
+            refresh_path_entry: 0xBF4F,
+            compose_entry: 0xFC99,
+            compose_return: 0xBF57,
+        };
+        let event_file = DebugEventFile {
+            events: vec![
+                debug_event(27, refresh.refresh_path_entry),
+                debug_event(27, refresh.compose_entry),
+                debug_event(28, refresh.compose_return),
+            ],
+        };
+
+        let selected =
+            select_composition_event(&event_file, installed_paths(Some(refresh))).unwrap();
+
+        assert_eq!(selected.event.frame, 28);
+        assert_eq!(selected.path, CompositionPath::DialogueCacheRefresh);
+    }
+
+    #[test]
+    fn runtime_verification_rejects_a_refresh_return_without_its_compose_entry() {
+        let refresh = InstalledDialogueCacheRefresh {
+            refresh_path_entry: 0xBF4F,
+            compose_entry: 0xFC99,
+            compose_return: 0xBF57,
+        };
+        let event_file = DebugEventFile {
+            events: vec![
+                debug_event(27, refresh.refresh_path_entry),
+                debug_event(28, refresh.compose_return),
+            ],
+        };
+
+        assert!(
+            select_composition_event(&event_file, installed_paths(Some(refresh)))
+                .unwrap_err()
+                .to_string()
+                .contains("incomplete dialogue-cache composition sequence")
         );
     }
 
     #[test]
-    fn runtime_verification_rejects_ambiguous_composition_returns() {
+    fn runtime_verification_rejects_ambiguous_lifetime_dispatch_returns() {
         let event_file = DebugEventFile {
             events: vec![debug_event(27, 0xFC4C), debug_event(32, 0xFC4C)],
         };
 
         assert!(
-            select_composition_return_event(&event_file, 0xFC4C)
+            select_composition_event(&event_file, installed_paths(None))
                 .unwrap_err()
                 .to_string()
-                .contains("expected exactly one")
+                .contains("expected at most one")
         );
     }
 }

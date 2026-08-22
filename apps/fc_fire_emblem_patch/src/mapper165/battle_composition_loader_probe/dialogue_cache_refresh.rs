@@ -25,6 +25,18 @@ const DIALOGUE_SELECTOR_ADDRESS: u16 = 0x7936;
 const CACHE_REFRESH_ADDRESS: u16 = 0xBF40;
 const CACHE_REFRESH_CAVE_END: u16 = 0xBF80;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct InstalledDialogueCacheRefresh {
+    pub(crate) refresh_path_entry: u16,
+    pub(crate) compose_entry: u16,
+    pub(crate) compose_return: u16,
+}
+
+struct BuiltDialogueCacheRefresh {
+    bytes: Vec<u8>,
+    installed: InstalledDialogueCacheRefresh,
+}
+
 const FINAL_LOADER_REGION_ADDRESS: u16 = 0x8000;
 const FINAL_LOADER_REGION: [u8; 29] = [
     0xAD, 0x35, 0x79, 0x0A, 0xA8, 0xB9, 0x2D, 0x80, 0x85, 0x00, 0xB9, 0x2E, 0x80, 0x85, 0x01, 0xAD,
@@ -116,19 +128,36 @@ pub(super) fn install_final_dialogue_cache_refresh(
 ) -> Result<()> {
     let refresh = build_final_dialogue_cache_refresh(layout)?;
     ensure!(
-        usize::from(CACHE_REFRESH_ADDRESS) + refresh.len() <= usize::from(CACHE_REFRESH_CAVE_END),
+        usize::from(CACHE_REFRESH_ADDRESS) + refresh.bytes.len()
+            <= usize::from(CACHE_REFRESH_CAVE_END),
         "final dialogue cache refresh exceeds its bank-04 cave"
     );
     image.write_expected(
         "guarded final battle-dialogue cache refresh",
         switchable_bank_file_offset(FINAL_LOADER_BANK, CACHE_REFRESH_ADDRESS)?,
-        &vec![0xFF; refresh.len()],
-        &refresh,
+        &vec![0xFF; refresh.bytes.len()],
+        &refresh.bytes,
     )?;
     redirect_final_dialogue_loader(image, CACHE_REFRESH_ADDRESS)
 }
 
-fn build_final_dialogue_cache_refresh(layout: BattleCompositionRuntimeLayout) -> Result<Vec<u8>> {
+pub(crate) fn match_installed_final_dialogue_cache_refresh(
+    rom: &Rom,
+    layout: BattleCompositionRuntimeLayout,
+) -> Result<Option<InstalledDialogueCacheRefresh>> {
+    let refresh = build_final_dialogue_cache_refresh(layout)?;
+    let actual = switchable_bytes(
+        rom,
+        FINAL_LOADER_BANK,
+        CACHE_REFRESH_ADDRESS,
+        refresh.bytes.len(),
+    )?;
+    Ok((actual == refresh.bytes).then_some(refresh.installed))
+}
+
+fn build_final_dialogue_cache_refresh(
+    layout: BattleCompositionRuntimeLayout,
+) -> Result<BuiltDialogueCacheRefresh> {
     let mut instructions = vec![
         Instruction::LdaAbsolute(REMAP_STATE_ADDRESS),
         Instruction::AndImmediate(CACHE_UPLOADED_MARKER),
@@ -154,7 +183,14 @@ fn build_final_dialogue_cache_refresh(layout: BattleCompositionRuntimeLayout) ->
         Instruction::LdaAbsolute(DIALOGUE_SELECTOR_ADDRESS),
         Instruction::Rts,
     ]);
-    assemble_at(CACHE_REFRESH_ADDRESS, &instructions)
+    Ok(BuiltDialogueCacheRefresh {
+        bytes: assemble_at(CACHE_REFRESH_ADDRESS, &instructions)?,
+        installed: InstalledDialogueCacheRefresh {
+            refresh_path_entry: refresh,
+            compose_entry: layout.compose_page,
+            compose_return: return_selector,
+        },
+    })
 }
 
 fn redirect_final_dialogue_loader(image: &mut TrackedImage, refresh_entry: u16) -> Result<()> {
@@ -267,10 +303,10 @@ mod tests {
 
     #[test]
     fn matching_projected_key_skips_the_ppu_refresh() {
-        let bytes = build_final_dialogue_cache_refresh(PROBE_RUNTIME_LAYOUT).unwrap();
+        let refresh = build_final_dialogue_cache_refresh(PROBE_RUNTIME_LAYOUT).unwrap();
 
         assert_eq!(
-            bytes,
+            refresh.bytes,
             [
                 0xAD, 0xFE, 0x07, // LDA $07FE: cache validity
                 0x29, 0x80, // AND #$80
@@ -283,6 +319,35 @@ mod tests {
                 0xAD, 0x36, 0x79, // reproduce the displaced raw-selector read
                 0x60,
             ]
+        );
+        assert_eq!(
+            refresh.installed,
+            InstalledDialogueCacheRefresh {
+                refresh_path_entry: 0xBF4F,
+                compose_entry: PROBE_RUNTIME_LAYOUT.compose_page,
+                compose_return: 0xBF57,
+            }
+        );
+    }
+
+    #[test]
+    fn installed_refresh_binding_comes_from_the_typed_runtime_body() {
+        let refresh = build_final_dialogue_cache_refresh(PROBE_RUNTIME_LAYOUT).unwrap();
+        let mut bytes = crate::test_support::synthetic_mapper165_rom_bytes(0xFF);
+        let offset = switchable_bank_file_offset(FINAL_LOADER_BANK, CACHE_REFRESH_ADDRESS).unwrap();
+        bytes[offset..offset + refresh.bytes.len()].copy_from_slice(&refresh.bytes);
+
+        let rom = Rom::parse(bytes.clone()).unwrap();
+        assert_eq!(
+            match_installed_final_dialogue_cache_refresh(&rom, PROBE_RUNTIME_LAYOUT).unwrap(),
+            Some(refresh.installed)
+        );
+
+        bytes[offset] ^= 1;
+        let changed = Rom::parse(bytes).unwrap();
+        assert_eq!(
+            match_installed_final_dialogue_cache_refresh(&changed, PROBE_RUNTIME_LAYOUT).unwrap(),
+            None
         );
     }
 

@@ -36,6 +36,9 @@ mod dynamic_assignment;
 mod runtime;
 mod runtime_recipe_fields;
 
+pub(crate) use dialogue_cache_refresh::{
+    InstalledDialogueCacheRefresh, match_installed_final_dialogue_cache_refresh,
+};
 use dialogue_cache_refresh::{
     bind_final_dialogue_cache_refresh_base, bind_final_dialogue_cache_refresh_source,
     install_final_dialogue_cache_refresh,
