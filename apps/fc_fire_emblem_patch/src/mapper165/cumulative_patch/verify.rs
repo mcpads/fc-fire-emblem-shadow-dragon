@@ -56,16 +56,30 @@ pub(super) fn install_chapter_title(
     )
 }
 
+pub(super) struct CumulativeOutputVerificationInputs<'a> {
+    pub(super) ui_stage_rom: &'a Rom,
+    pub(super) output_rom: &'a Rom,
+    pub(super) page_pack: &'a [u8],
+    pub(super) record_groups: &'a [(&'a [MainDialogueSlicePlan], &'a [Vec<u8>])],
+    pub(super) chapter_titles: &'a [(&'a ChapterTitlePlannedEntry, &'a [u8])],
+    pub(super) roster_selector: &'a [u8],
+    pub(super) dialogue_selector_address: u16,
+    pub(super) dialogue_selector: &'a [u8],
+}
+
 pub(super) fn verify_cumulative_output(
-    ui_stage_rom: &Rom,
-    output_rom: &Rom,
-    page_pack: &[u8],
-    record_groups: &[(&[MainDialogueSlicePlan], &[Vec<u8>])],
-    chapter_titles: &[(&ChapterTitlePlannedEntry, &[u8])],
-    roster_selector: &[u8],
-    dialogue_selector_address: u16,
-    dialogue_selector: &[u8],
+    inputs: CumulativeOutputVerificationInputs<'_>,
 ) -> Result<()> {
+    let CumulativeOutputVerificationInputs {
+        ui_stage_rom,
+        output_rom,
+        page_pack,
+        record_groups,
+        chapter_titles,
+        roster_selector,
+        dialogue_selector_address,
+        dialogue_selector,
+    } = inputs;
     ensure!(
         output_rom.mapper() == OUTPUT_MAPPER,
         "cumulative output mapper changed"

@@ -8,9 +8,9 @@ use crate::dialogue_assets::{
 
 use super::DISPLAY_LINES_PER_PAGE;
 
-pub(super) fn page_glyph_sets(
-    record: &WorkspaceRecord,
-) -> Result<(Vec<BTreeSet<char>>, Vec<BTreeSet<char>>)> {
+type PageGlyphSets = (Vec<BTreeSet<char>>, Vec<BTreeSet<char>>);
+
+pub(super) fn page_glyph_sets(record: &WorkspaceRecord) -> Result<PageGlyphSets> {
     let mut filled_pages = Vec::new();
     let mut approved_pages = Vec::new();
     for page_lines in record.lines.chunks(DISPLAY_LINES_PER_PAGE) {

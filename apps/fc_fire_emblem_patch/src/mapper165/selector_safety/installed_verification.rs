@@ -162,7 +162,7 @@ fn nonindexed_absolute_mapper_select_store_offsets(bytes: &[u8]) -> Vec<usize> {
     bytes
         .windows(3)
         .enumerate()
-        .filter(|(_, bytes)| matches!(bytes[0], 0x8C | 0x8D | 0x8E) && bytes[1..] == [0x00, 0x80])
+        .filter(|(_, bytes)| matches!(bytes[0], 0x8C..=0x8E) && bytes[1..] == [0x00, 0x80])
         .map(|(offset, _)| offset)
         .collect()
 }

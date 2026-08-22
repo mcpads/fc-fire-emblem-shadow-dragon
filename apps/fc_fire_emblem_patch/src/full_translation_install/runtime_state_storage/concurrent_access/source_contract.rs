@@ -530,26 +530,6 @@ fn role(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn computed_access_role_reports_write_direction() {
-        let role = role(
-            "audio_apu_register_writes",
-            "bank 0E audio",
-            "0xF2/0xF3",
-            "test",
-            &AUDIO_APU_REGISTER_WRITE_SITES,
-            &["0x4000..0x400F"],
-            true,
-        );
-
-        assert_eq!(role.sites, vec!["0E:87F6:write"]);
-    }
-}
-
 fn bind_source_region(
     source: &Rom,
     bank: u8,
@@ -589,4 +569,24 @@ fn source_bytes(source: &Rom, bank: u8, address: u16, byte_count: usize) -> Resu
         .data()
         .get(offset..offset + byte_count)
         .context("concurrent computed-access source region is outside the source ROM")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn computed_access_role_reports_write_direction() {
+        let role = role(
+            "audio_apu_register_writes",
+            "bank 0E audio",
+            "0xF2/0xF3",
+            "test",
+            &AUDIO_APU_REGISTER_WRITE_SITES,
+            &["0x4000..0x400F"],
+            true,
+        );
+
+        assert_eq!(role.sites, vec!["0E:87F6:write"]);
+    }
 }

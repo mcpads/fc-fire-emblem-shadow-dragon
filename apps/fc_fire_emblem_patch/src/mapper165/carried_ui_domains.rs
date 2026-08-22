@@ -412,21 +412,21 @@ fn inspect_options(
             inputs.integrated,
         )?,
     ];
-    Ok(complete_domain(
-        "options_labels",
-        3,
-        vec!["options"],
-        validated.review_complete,
-        FinalSemanticBinding::PreservedStorageAndVisualMaterial,
+    Ok(complete_domain(CompletedUiDomain {
+        id: "options_labels",
+        target_unit_count: 3,
+        screen_roles: vec!["options"],
+        review_complete: validated.review_complete,
+        final_semantic_binding: FinalSemanticBinding::PreservedStorageAndVisualMaterial,
         storage_regions,
         font_regions,
         consumer_regions,
-        vec![
+        consumer_route_binding_ids: vec![
             "0B:93B7:options_row_hook",
             "0F:FB68:options_row_owner_gate",
             "0F:FB20:options_page_selector",
         ],
-    ))
+    }))
 }
 
 fn inspect_roster(
@@ -590,16 +590,16 @@ fn inspect_roster(
             inputs.integrated,
         )?);
     }
-    Ok(complete_domain(
-        "roster_header",
-        1,
-        vec!["unit_roster"],
-        localization.review_complete,
-        FinalSemanticBinding::ReencodedStorageAndVisualMaterial,
+    Ok(complete_domain(CompletedUiDomain {
+        id: "roster_header",
+        target_unit_count: 1,
+        screen_roles: vec!["unit_roster"],
+        review_complete: localization.review_complete,
+        final_semantic_binding: FinalSemanticBinding::ReencodedStorageAndVisualMaterial,
         storage_regions,
         font_regions,
         consumer_regions,
-        vec![
+        consumer_route_binding_ids: vec![
             "0B:89DB:roster_owner_constructor",
             "0B:89F2:roster_header_resource_call",
             "0F:C9C2:roster_page_selector_entry",
@@ -609,7 +609,7 @@ fn inspect_roster(
             "0F:F5A3:integrated_dialogue_chr_selector",
             "0F:FB80:roster_page_selector",
         ],
-    ))
+    }))
 }
 
 fn inspect_front_end(
@@ -732,22 +732,22 @@ fn inspect_front_end(
             inputs.integrated,
         )?,
     ];
-    Ok(complete_domain(
-        "front_end_menu_labels",
-        7,
-        vec!["new_game_choice", "save_slot_selection"],
-        plan.review_complete,
-        FinalSemanticBinding::PreservedStorageAndVisualMaterial,
+    Ok(complete_domain(CompletedUiDomain {
+        id: "front_end_menu_labels",
+        target_unit_count: 7,
+        screen_roles: vec!["new_game_choice", "save_slot_selection"],
+        review_complete: plan.review_complete,
+        final_semantic_binding: FinalSemanticBinding::PreservedStorageAndVisualMaterial,
         storage_regions,
         font_regions,
         consumer_regions,
-        vec![
+        consumer_route_binding_ids: vec![
             "0F:F700:unit_name_page_forwarder_to_shop_dialogue",
             "0F:F748:shop_dialogue_page_fallback_to_front_end",
             "0F:FC60:front_end_page_forwarder",
             "0F:F386:translated_chr_page_writer",
         ],
-    ))
+    }))
 }
 
 fn inspect_class_profiles(
@@ -878,17 +878,17 @@ fn inspect_class_profiles(
             inputs.integrated,
         )?,
     ];
-    Ok(complete_domain(
-        "class_profiles",
-        22,
-        vec!["class_profile"],
-        plan.review_complete,
-        FinalSemanticBinding::PreservedStorageAndVisualMaterial,
+    Ok(complete_domain(CompletedUiDomain {
+        id: "class_profiles",
+        target_unit_count: 22,
+        screen_roles: vec!["class_profile"],
+        review_complete: plan.review_complete,
+        final_semantic_binding: FinalSemanticBinding::PreservedStorageAndVisualMaterial,
         storage_regions,
         font_regions,
         consumer_regions,
-        route_ids,
-    ))
+        consumer_route_binding_ids: route_ids,
+    }))
 }
 
 fn inspect_title(
@@ -961,20 +961,20 @@ fn inspect_title(
             )
         })
         .collect::<Result<Vec<_>>>()?;
-    Ok(complete_domain(
-        "title_graphics",
-        1,
-        vec!["title"],
-        plan.review_complete,
-        FinalSemanticBinding::PreservedStorageAndVisualMaterial,
+    Ok(complete_domain(CompletedUiDomain {
+        id: "title_graphics",
+        target_unit_count: 1,
+        screen_roles: vec!["title"],
+        review_complete: plan.review_complete,
+        final_semantic_binding: FinalSemanticBinding::PreservedStorageAndVisualMaterial,
         storage_regions,
         font_regions,
         consumer_regions,
-        route_ids,
-    ))
+        consumer_route_binding_ids: route_ids,
+    }))
 }
 
-fn complete_domain(
+struct CompletedUiDomain {
     id: &'static str,
     target_unit_count: usize,
     screen_roles: Vec<&'static str>,
@@ -984,7 +984,20 @@ fn complete_domain(
     font_regions: Vec<FinalRegionBinding>,
     consumer_regions: Vec<FinalRegionBinding>,
     consumer_route_binding_ids: Vec<&'static str>,
-) -> CarriedUiDomain {
+}
+
+fn complete_domain(domain: CompletedUiDomain) -> CarriedUiDomain {
+    let CompletedUiDomain {
+        id,
+        target_unit_count,
+        screen_roles,
+        review_complete,
+        final_semantic_binding,
+        storage_regions,
+        font_regions,
+        consumer_regions,
+        consumer_route_binding_ids,
+    } = domain;
     CarriedUiDomain {
         id,
         target_unit_count,

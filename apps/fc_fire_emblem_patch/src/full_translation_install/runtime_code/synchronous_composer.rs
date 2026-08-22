@@ -182,9 +182,7 @@ mod tests {
             1
         );
         assert!(
-            !listing
-                .iter()
-                .any(|instruction| *instruction == Instruction::LdaZeroPage(0xCC)),
+            !listing.contains(&Instruction::LdaZeroPage(0xCC)),
             "the composer must not restore PPUMASK itself before scroll is restored"
         );
     }

@@ -436,20 +436,38 @@ pub(in crate::full_translation_install) fn verify_installed_chr_ram_ownership_ga
 ///
 /// 고정 뱅크 동굴의 배치는 여기서 한 번에 정한다. 조각마다 시작 주소를 따로 두면
 /// 하나가 커졌을 때 다음 조각을 덮는다.
+pub(super) struct DialogueRuntimeCodeInputs<'a> {
+    pub(super) source: &'a Rom,
+    pub(super) candidate: &'a Rom,
+    pub(super) maximum_dialogue_font_group_selector_range_sha1: &'a str,
+    pub(super) runtime_code_cpu_start: u16,
+    pub(super) atlas_page: u8,
+    pub(super) code_page: u8,
+    pub(super) layout: resolve_request::MaterialLayout,
+    pub(super) consumer_catalog_layout: ConsumerCatalogRuntimeLayout,
+    pub(super) shop_item_residency: ShopItemResidencyRuntimeContract,
+    pub(super) storage_item_list: StorageItemListRuntimeRoute,
+    pub(super) cold_request_mapper_register: u8,
+    pub(super) consumer_font_pages: ScreenFontPageRoutes,
+}
+
 pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
-    source: &Rom,
-    candidate: &Rom,
-    maximum_dialogue_font_group_selector_range_sha1: &str,
-    runtime_code_cpu_start: u16,
-    atlas_page: u8,
-    code_page: u8,
-    layout: resolve_request::MaterialLayout,
-    consumer_catalog_layout: ConsumerCatalogRuntimeLayout,
-    shop_item_residency: ShopItemResidencyRuntimeContract,
-    storage_item_list: StorageItemListRuntimeRoute,
-    cold_request_mapper_register: u8,
-    consumer_font_pages: ScreenFontPageRoutes,
+    inputs: DialogueRuntimeCodeInputs<'_>,
 ) -> Result<DialogueRuntimeCodePlan> {
+    let DialogueRuntimeCodeInputs {
+        source,
+        candidate,
+        maximum_dialogue_font_group_selector_range_sha1,
+        runtime_code_cpu_start,
+        atlas_page,
+        code_page,
+        layout,
+        consumer_catalog_layout,
+        shop_item_residency,
+        storage_item_list,
+        cold_request_mapper_register,
+        consumer_font_pages,
+    } = inputs;
     let bank_restore = bind_bank_restore_contract(candidate)?;
     bind_synchronous_composer_resume(source, candidate)?;
     dispatcher_gate::bind_dispatcher_entry(source, candidate)?;
@@ -623,15 +641,17 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
     let catalog_stub_origin = u16::try_from(catalog_stub_origin)
         .context("consumer catalog stub origin exceeds the CPU address space")?;
     let consumer_catalog = consumer_catalog::build_consumer_catalog_runtime(
-        catalog_code_origin,
-        code_page,
-        catalog_stub_origin,
-        consumer_font_page_activation.address,
-        consumer_font_pages.catalog[0],
-        consumer_font_pages.front_end_record_action,
-        consumer_catalog_layout,
-        shop_item_residency,
-        storage_item_list,
+        consumer_catalog::ConsumerCatalogRuntimeInputs {
+            code_origin: catalog_code_origin,
+            code_page,
+            entry_stub_origin: catalog_stub_origin,
+            font_page_activation: consumer_font_page_activation.address,
+            catalog_default_font_route: consumer_font_pages.catalog[0],
+            front_end_record_action_route: consumer_font_pages.front_end_record_action,
+            layout: consumer_catalog_layout,
+            shop_item_residency,
+            storage_item_list,
+        },
     )?;
     ensure_routines_fit_cave(
         &[

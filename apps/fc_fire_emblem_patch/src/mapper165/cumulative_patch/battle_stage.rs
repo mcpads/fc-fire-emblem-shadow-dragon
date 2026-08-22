@@ -14,7 +14,9 @@ use super::super::{
     battle_composition_runtime::{
         BattleCompositionBuild, CUMULATIVE_RUNTIME_LAYOUT, build_battle_composition_runtime,
     },
-    battle_text_runtime_base::build_battle_text_runtime_base_on_parity,
+    battle_text_runtime_base::{
+        BattleTextRuntimeBaseInputs, build_battle_text_runtime_base_on_parity,
+    },
 };
 use super::{ROSTER_SELECTOR_ADDRESS, write_file};
 
@@ -82,16 +84,16 @@ pub(super) struct BattleStageInputs<'a> {
 pub(super) fn install_battle_stage(inputs: BattleStageInputs<'_>) -> Result<BattleStageOutput> {
     let runtime_base_path = inputs.stage_directory.join(BATTLE_RUNTIME_BASE_ROM_NAME);
     let runtime_base_report_path = inputs.stage_directory.join(BATTLE_RUNTIME_BASE_REPORT_NAME);
-    let runtime_base = build_battle_text_runtime_base_on_parity(
-        inputs.source_rom,
-        inputs.source_path,
-        inputs.parity,
-        inputs.fixed_workspace_path,
-        inputs.dialogue_workspace_path,
-        inputs.temporal_manifest_path,
-        &runtime_base_path,
-        &runtime_base_report_path,
-    )?;
+    let runtime_base = build_battle_text_runtime_base_on_parity(BattleTextRuntimeBaseInputs {
+        source_rom: inputs.source_rom,
+        source_path: inputs.source_path,
+        parity: inputs.parity,
+        fixed_workspace_path: inputs.fixed_workspace_path,
+        dialogue_workspace_path: inputs.dialogue_workspace_path,
+        temporal_manifest_path: inputs.temporal_manifest_path,
+        output_path: &runtime_base_path,
+        report_path: &runtime_base_report_path,
+    })?;
     let runtime_base_bytes = fs::read(&runtime_base_path)
         .with_context(|| format!("read {}", runtime_base_path.display()))?;
     ensure!(

@@ -268,16 +268,30 @@ impl BattleCacheCompositionMaterial {
     }
 }
 
+pub(super) struct BattleCacheCompositionInputs<'a> {
+    pub(super) fixed: &'a FixedTextPlan,
+    pub(super) dialogue: &'a BattleDialogueReinsertionPlan,
+    pub(super) coloring: &'a StableColoringPlan,
+    pub(super) candidate_item_source_indices: &'a BTreeSet<usize>,
+    pub(super) enemy_name_source_indices: &'a BTreeSet<usize>,
+    pub(super) modeled_participant_pair_count: u64,
+    pub(super) terrain_entry_count: usize,
+    pub(super) maximum_runtime_overlay_glyph_count: usize,
+}
+
 pub(super) fn plan_cache_composition(
-    fixed: &FixedTextPlan,
-    dialogue: &BattleDialogueReinsertionPlan,
-    coloring: &StableColoringPlan,
-    candidate_item_source_indices: &BTreeSet<usize>,
-    enemy_name_source_indices: &BTreeSet<usize>,
-    modeled_participant_pair_count: u64,
-    terrain_entry_count: usize,
-    maximum_runtime_overlay_glyph_count: usize,
+    inputs: BattleCacheCompositionInputs<'_>,
 ) -> Result<BattleCacheCompositionMaterial> {
+    let BattleCacheCompositionInputs {
+        fixed,
+        dialogue,
+        coloring,
+        candidate_item_source_indices,
+        enemy_name_source_indices,
+        modeled_participant_pair_count,
+        terrain_entry_count,
+        maximum_runtime_overlay_glyph_count,
+    } = inputs;
     ensure!(
         coloring.color_count <= u8::MAX.into(),
         "battle abstract color exceeds one-byte recipe encoding"

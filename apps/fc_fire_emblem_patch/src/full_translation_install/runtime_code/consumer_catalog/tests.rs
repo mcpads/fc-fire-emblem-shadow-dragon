@@ -116,20 +116,24 @@ fn storage_item_list() -> StorageItemListRuntimeRoute {
     }
 }
 
+fn build_test_runtime() -> ConsumerCatalogRuntime {
+    build_consumer_catalog_runtime(ConsumerCatalogRuntimeInputs {
+        code_origin: 0xA600,
+        code_page: 0x30,
+        entry_stub_origin: 0xF7F8,
+        font_page_activation: 0xF620,
+        catalog_default_font_route: 0xDC,
+        front_end_record_action_route: 0xDD,
+        layout: layout(),
+        shop_item_residency: shop_item_residency(),
+        storage_item_list: storage_item_list(),
+    })
+    .unwrap()
+}
+
 #[test]
 fn three_five_byte_stubs_fill_the_remaining_producer_cave() {
-    let runtime = build_consumer_catalog_runtime(
-        0xA600,
-        0x30,
-        0xF7F8,
-        0xF620,
-        0xDC,
-        0xDD,
-        layout(),
-        shop_item_residency(),
-        storage_item_list(),
-    )
-    .unwrap();
+    let runtime = build_test_runtime();
 
     assert_eq!(runtime.fixed_routines.len(), 4);
     assert!(
@@ -170,18 +174,7 @@ fn fixed_bridge_restores_output_x_original_y_and_catalog_kind_in_order() {
 
 #[test]
 fn appender_uses_the_callers_output_position_after_reading_its_stack_frame() {
-    let runtime = build_consumer_catalog_runtime(
-        0xA600,
-        0x30,
-        0xF7F8,
-        0xF620,
-        0xDC,
-        0xDD,
-        layout(),
-        shop_item_residency(),
-        storage_item_list(),
-    )
-    .unwrap();
+    let runtime = build_test_runtime();
 
     for (kind, original_y, output_x, initial_sp) in [(0, 0x7E, 0x00, 0xF1), (3, 0x54, 0x6F, 0xB7)] {
         assert_eq!(
@@ -200,18 +193,7 @@ fn appender_uses_the_callers_output_position_after_reading_its_stack_frame() {
 
 #[test]
 fn catalog_calls_and_shop_consumer_hook_have_distinct_owned_extents() {
-    let runtime = build_consumer_catalog_runtime(
-        0xA600,
-        0x30,
-        0xF7F8,
-        0xF620,
-        0xDC,
-        0xDD,
-        layout(),
-        shop_item_residency(),
-        storage_item_list(),
-    )
-    .unwrap();
+    let runtime = build_test_runtime();
 
     assert_eq!(runtime.hooks.len(), HOOK_SITES.len() + 3);
     assert!(
@@ -250,36 +232,14 @@ fn catalog_calls_and_shop_consumer_hook_have_distinct_owned_extents() {
 
 #[test]
 fn all_three_item_selling_facilities_use_the_dialogue_item_encoding() {
-    let runtime = build_consumer_catalog_runtime(
-        0xA600,
-        0x30,
-        0xF7F8,
-        0xF620,
-        0xDC,
-        0xDD,
-        layout(),
-        shop_item_residency(),
-        storage_item_list(),
-    )
-    .unwrap();
+    let runtime = build_test_runtime();
 
     verify_shop_item_residency_route(&runtime.code_routine, shop_item_residency()).unwrap();
 }
 
 #[test]
 fn every_storage_item_list_context_uses_dialogue_material() {
-    let runtime = build_consumer_catalog_runtime(
-        0xA600,
-        0x30,
-        0xF7F8,
-        0xF620,
-        0xDC,
-        0xDD,
-        layout(),
-        shop_item_residency(),
-        storage_item_list(),
-    )
-    .unwrap();
+    let runtime = build_test_runtime();
     verify_storage_item_residency_route(
         &runtime.code_routine,
         shop_item_residency(),
@@ -323,18 +283,7 @@ fn every_storage_item_list_context_uses_dialogue_material() {
 
 #[test]
 fn ordinary_item_use_result_does_not_inherit_storage_dialogue_material() {
-    let runtime = build_consumer_catalog_runtime(
-        0xA600,
-        0x30,
-        0xF7F8,
-        0xF620,
-        0xDC,
-        0xDD,
-        layout(),
-        shop_item_residency(),
-        storage_item_list(),
-    )
-    .unwrap();
+    let runtime = build_test_runtime();
     let storage = storage_item_list();
 
     assert_eq!(
@@ -357,18 +306,7 @@ fn ordinary_item_use_result_does_not_inherit_storage_dialogue_material() {
 
 #[test]
 fn nonshop_or_inactive_e7_lifetimes_keep_the_catalog_item_encoding() {
-    let runtime = build_consumer_catalog_runtime(
-        0xA600,
-        0x30,
-        0xF7F8,
-        0xF620,
-        0xDC,
-        0xDD,
-        layout(),
-        shop_item_residency(),
-        storage_item_list(),
-    )
-    .unwrap();
+    let runtime = build_test_runtime();
     let expected = ItemMaterialRoute {
         directory: layout().item_directory,
         material_page: layout().material_page,
@@ -428,17 +366,17 @@ fn record_action_name_uses_the_planned_screen_route_before_shared_activation() {
     let activation = 0xF620;
     let origin = 0xA600;
     let record_action_route = 0xDD;
-    let runtime = build_consumer_catalog_runtime(
-        origin,
-        0x30,
-        0xF7F8,
-        activation,
-        0xDC,
-        record_action_route,
-        layout(),
-        shop_item_residency(),
-        storage_item_list(),
-    )
+    let runtime = build_consumer_catalog_runtime(ConsumerCatalogRuntimeInputs {
+        code_origin: origin,
+        code_page: 0x30,
+        entry_stub_origin: 0xF7F8,
+        font_page_activation: activation,
+        catalog_default_font_route: 0xDC,
+        front_end_record_action_route: record_action_route,
+        layout: layout(),
+        shop_item_residency: shop_item_residency(),
+        storage_item_list: storage_item_list(),
+    })
     .unwrap();
     let prefix = [
         0xB1,

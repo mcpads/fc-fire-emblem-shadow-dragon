@@ -231,7 +231,7 @@ where
             })
             .collect::<Result<Vec<_>>>()?;
         ensure!(
-            encoded.len() + 1 <= MAXIMUM_DISPLAY_STRING_BYTE_COUNT,
+            encoded.len() < MAXIMUM_DISPLAY_STRING_BYTE_COUNT,
             "consumer catalog entry {} needs {} bytes including EF but the bounded display contract allows only {MAXIMUM_DISPLAY_STRING_BYTE_COUNT}",
             entry.id,
             encoded.len() + 1

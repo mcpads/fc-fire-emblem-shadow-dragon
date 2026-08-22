@@ -276,6 +276,14 @@ fn hex_indices(indices: &BTreeSet<u8>) -> Vec<String> {
 mod tests {
     use super::*;
 
+    type OwnershipFixture = (
+        Vec<FixedStringRecord>,
+        Vec<FixedStringCallSite>,
+        BTreeSet<u8>,
+        Vec<TranslatedOwnerGroup>,
+        BTreeSet<u8>,
+    );
+
     fn record(index: u8, source_bytes: &[u8]) -> FixedStringRecord {
         FixedStringRecord {
             index,
@@ -292,13 +300,7 @@ mod tests {
         }
     }
 
-    fn fixture() -> (
-        Vec<FixedStringRecord>,
-        Vec<FixedStringCallSite>,
-        BTreeSet<u8>,
-        Vec<TranslatedOwnerGroup>,
-        BTreeSet<u8>,
-    ) {
+    fn fixture() -> OwnershipFixture {
         (
             vec![
                 record(0x10, &[0x10, 0xED]),

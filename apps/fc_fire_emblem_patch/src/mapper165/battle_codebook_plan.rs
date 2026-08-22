@@ -50,11 +50,13 @@ const CHAPTER_ONE_OBSERVED_PRESERVED_ACTIVE_CODES: [u8; 119] = [
     0xF6, 0xF7, 0xF8, 0xF9, 0xFA, 0xFB, 0xFC,
 ];
 
+use composition::{
+    BattleCacheCompositionInputs, BattleCacheCompositionPlan, plan_cache_composition,
+};
 pub(in crate::mapper165) use composition::{
     BattleCacheCompositionMaterial, BattleRuntimeRecipeInput, compose_runtime_font_page,
     inspect_runtime_recipe_input,
 };
-use composition::{BattleCacheCompositionPlan, plan_cache_composition};
 use conflict_graph::{BattleGlyphFamilies, BattleParticipantMode, plan_stable_coloring};
 pub(crate) use consumer_census::inspect_known_terrain_name_translation_routes;
 use enemy_domain::{EnemyBattleDomain, EnemyBattleDomainBinding, bind_enemy_battle_domain};
@@ -566,16 +568,16 @@ fn plan_battle_codebook_model(
         ],
         dialogue_selector,
     };
-    let composition = plan_cache_composition(
+    let composition = plan_cache_composition(BattleCacheCompositionInputs {
         fixed,
         dialogue,
-        &coloring,
-        &runtime_item_source_indices,
-        &enemy_name_source_indices,
+        coloring: &coloring,
+        candidate_item_source_indices: &runtime_item_source_indices,
+        enemy_name_source_indices: &enemy_name_source_indices,
         modeled_participant_pair_count,
         terrain_entry_count,
-        runtime_demand.maximum_overlay_glyph_count(),
-    )?;
+        maximum_runtime_overlay_glyph_count: runtime_demand.maximum_overlay_glyph_count(),
+    })?;
     let exact_selection = composition.select_runtime_recipes(BattleRuntimeRecipeInput {
         staged_participant_identities: exact_runtime_input.staged_participant_identities,
         class_record_identities: exact_runtime_input.class_record_identities,

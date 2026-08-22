@@ -99,8 +99,7 @@ impl SearchState<'_> {
             }
             let saturation = self.neighbor_color_count(vertex, colors);
             let degree = self.graph.neighbors[vertex].len();
-            let should_select = selected.as_ref().map_or(
-                true,
+            let should_select = selected.as_ref().is_none_or(
                 |(selected_vertex, selected_candidates, selected_saturation, selected_degree)| {
                     candidates.len() < selected_candidates.len()
                         || (candidates.len() == selected_candidates.len()

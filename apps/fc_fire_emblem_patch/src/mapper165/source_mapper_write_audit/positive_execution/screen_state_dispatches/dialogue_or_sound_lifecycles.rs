@@ -19,8 +19,8 @@ use crate::{
 };
 
 use super::state_transition_evidence::{
-    StateWriteStep, TransitionPath, bind_constant_store, bind_state_transition_closure,
-    ensure_instruction, source_bytes,
+    StateWriteStep, StateWriterSource, TransitionPath, bind_constant_store,
+    bind_state_transition_closure, ensure_instruction, source_bytes,
 };
 
 const FIXED_PRG_BANK: u8 = 0x0F;
@@ -228,9 +228,11 @@ pub(super) fn bind_dialogue_or_sound_state_lifecycles(
             "enter dialogue-or-sound state one",
         )?;
         let domain = bind_state_transition_closure(
-            source,
-            DIALOGUE_BANK,
-            DIALOGUE_OR_SOUND_STATE,
+            StateWriterSource {
+                source,
+                bank: DIALOGUE_BANK,
+                state_address: DIALOGUE_OR_SOUND_STATE,
+            },
             dispatch.selector_domain(),
             |selector| dispatch.handler_target(selector),
             [0, 1],

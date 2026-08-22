@@ -211,17 +211,32 @@ pub(super) fn bind_consumer_catalog_sites(source: &Rom, candidate: &Rom) -> Resu
     Ok(())
 }
 
+pub(super) struct ConsumerCatalogRuntimeInputs {
+    pub(super) code_origin: u16,
+    pub(super) code_page: u8,
+    pub(super) entry_stub_origin: u16,
+    pub(super) font_page_activation: u16,
+    pub(super) catalog_default_font_route: u8,
+    pub(super) front_end_record_action_route: u8,
+    pub(super) layout: ConsumerCatalogRuntimeLayout,
+    pub(super) shop_item_residency: ShopItemResidencyRuntimeContract,
+    pub(super) storage_item_list: StorageItemListRuntimeRoute,
+}
+
 pub(super) fn build_consumer_catalog_runtime(
-    code_origin: u16,
-    code_page: u8,
-    entry_stub_origin: u16,
-    font_page_activation: u16,
-    catalog_default_font_route: u8,
-    front_end_record_action_route: u8,
-    layout: ConsumerCatalogRuntimeLayout,
-    shop_item_residency: ShopItemResidencyRuntimeContract,
-    storage_item_list: StorageItemListRuntimeRoute,
+    inputs: ConsumerCatalogRuntimeInputs,
 ) -> Result<ConsumerCatalogRuntime> {
+    let ConsumerCatalogRuntimeInputs {
+        code_origin,
+        code_page,
+        entry_stub_origin,
+        font_page_activation,
+        catalog_default_font_route,
+        front_end_record_action_route,
+        layout,
+        shop_item_residency,
+        storage_item_list,
+    } = inputs;
     let code_routine = build_catalog_append_runtime(
         code_origin,
         font_page_activation,

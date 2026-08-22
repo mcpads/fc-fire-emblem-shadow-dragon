@@ -180,7 +180,7 @@ pub(crate) fn bind_ending_sequence_phase_dispatch_source(
     }
 
     ensure!(
-        ENDING_SEQUENCE_PHASE_POINTERS_BYTES.len() % 2 == 0,
+        ENDING_SEQUENCE_PHASE_POINTERS_BYTES.len().is_multiple_of(2),
         "ending phase pointer table has a partial pointer"
     );
     let phase_count = u8::try_from(ENDING_SEQUENCE_PHASE_POINTERS_BYTES.len() / 2)?;

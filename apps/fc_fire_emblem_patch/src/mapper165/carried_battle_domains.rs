@@ -228,25 +228,20 @@ pub(crate) fn inspect_carried_battle_domains(
         "cumulative battle report no longer matches its source-bound inputs"
     );
 
-    let terrain_storage = bind_fixed_storage(
-        "terrain-names",
-        "terrain_name_storage",
-        16,
-        &fixed,
-        &material,
-        &codebook.glyph_codes,
-        inputs.cumulative,
-        inputs.integrated,
-    )?;
+    let fixed_storage = FixedStorageBinding {
+        fixed: &fixed,
+        material: &material,
+        assignments: &codebook.glyph_codes,
+        cumulative: inputs.cumulative,
+        integrated: inputs.integrated,
+    };
+    let terrain_storage =
+        bind_fixed_storage("terrain-names", "terrain_name_storage", 16, &fixed_storage)?;
     let template_storage = bind_fixed_storage(
         "battle-message-templates",
         "battle_message_template_storage",
         22,
-        &fixed,
-        &material,
-        &codebook.glyph_codes,
-        inputs.cumulative,
-        inputs.integrated,
+        &fixed_storage,
     )?;
     let dialogue_storage = bind_dialogue_storage(
         &dialogue,
@@ -284,16 +279,7 @@ pub(crate) fn inspect_carried_battle_domains(
     ]
     .into_iter()
     .map(|(table_id, role, expected_entry_count)| {
-        bind_fixed_storage(
-            table_id,
-            role,
-            expected_entry_count,
-            &fixed,
-            &material,
-            &codebook.glyph_codes,
-            inputs.cumulative,
-            inputs.integrated,
-        )
+        bind_fixed_storage(table_id, role, expected_entry_count, &fixed_storage)
     })
     .collect::<Result<Vec<_>>>()?
     .into_iter()
@@ -421,26 +407,34 @@ pub(crate) fn inspect_carried_battle_domains(
     })
 }
 
+struct FixedStorageBinding<'a> {
+    fixed: &'a crate::text_inventory::FixedTextPlan,
+    material: &'a super::battle_codebook_plan::BattleCacheCompositionMaterial,
+    assignments: &'a std::collections::BTreeMap<char, u8>,
+    cumulative: &'a Rom,
+    integrated: &'a Rom,
+}
+
 fn bind_fixed_storage(
     table_id: &str,
     role: &'static str,
     expected_entry_count: usize,
-    fixed: &crate::text_inventory::FixedTextPlan,
-    material: &super::battle_codebook_plan::BattleCacheCompositionMaterial,
-    assignments: &std::collections::BTreeMap<char, u8>,
-    cumulative: &Rom,
-    integrated: &Rom,
+    binding: &FixedStorageBinding<'_>,
 ) -> Result<Vec<FinalRegionBinding>> {
     let mut regions = Vec::new();
-    for entry in fixed
+    for entry in binding
+        .fixed
         .entries
         .iter()
         .filter(|entry| entry.table_id == table_id)
     {
-        if !material.includes_fixed_entry(&entry.table_id, entry.source_index)? {
+        if !binding
+            .material
+            .includes_fixed_entry(&entry.table_id, entry.source_index)?
+        {
             continue;
         }
-        let mut expected = entry.encoded_bytes(assignments)?;
+        let mut expected = entry.encoded_bytes(binding.assignments)?;
         ensure!(
             expected.len() <= entry.source_storage_byte_count,
             "carried battle entry {} exceeds its source storage",
@@ -451,8 +445,8 @@ fn bind_fixed_storage(
             role,
             entry.file_offset,
             &expected,
-            cumulative,
-            integrated,
+            binding.cumulative,
+            binding.integrated,
         )?);
     }
     ensure!(

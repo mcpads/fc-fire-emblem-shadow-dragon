@@ -9,8 +9,8 @@ use crate::{
 
 use super::super::control_state::BATTLE_ANIMATION_TEST_PHASE;
 use super::state_transition_evidence::{
-    StateWriteStep, TransitionPath, bind_constant_store, bind_state_transition_closure,
-    source_bytes,
+    StateWriteStep, StateWriterSource, TransitionPath, bind_constant_store,
+    bind_state_transition_closure, source_bytes,
 };
 
 const PHASE_BANK: u8 = 0x07;
@@ -147,9 +147,11 @@ pub(super) fn bind_battle_animation_test_phase_lifecycle(
     )?;
 
     let produced_selectors = bind_state_transition_closure(
-        source,
-        PHASE_BANK,
-        BATTLE_ANIMATION_TEST_PHASE,
+        StateWriterSource {
+            source,
+            bank: PHASE_BANK,
+            state_address: BATTLE_ANIMATION_TEST_PHASE,
+        },
         &handler_domain,
         |selector| HANDLERS.get(usize::from(selector)).copied(),
         [0],

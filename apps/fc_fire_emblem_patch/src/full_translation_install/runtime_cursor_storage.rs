@@ -66,7 +66,7 @@ mod tests {
             CURSOR_ENTRY_LOW,
             CANDIDATE_START + SHARED_CONTRACT_BYTE_COUNT
         );
-        assert!(CURSOR_OVERLAY_TILES < CONSUMER_FONT_PAGE);
+        const { assert!(CURSOR_OVERLAY_TILES < CONSUMER_FONT_PAGE) };
         assert_eq!(REQUEST_SOURCE_ENTRY_INDEX + 1, CONSUMER_FONT_PAGE);
         assert_eq!(CONSUMER_FONT_PAGE + 2, CANDIDATE_END);
     }

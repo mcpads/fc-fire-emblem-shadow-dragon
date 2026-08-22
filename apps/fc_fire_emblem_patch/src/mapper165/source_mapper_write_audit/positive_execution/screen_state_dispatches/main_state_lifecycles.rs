@@ -281,7 +281,7 @@ fn scan_raw_direct_state_operands(
 ) -> Result<BTreeSet<(u16, u16, u8)>> {
     let bytes = source_bytes(source, bank, start, usize::from(end - start))?;
     let direct_write_opcodes = [0x06, 0x26, 0x46, 0x66, 0x84, 0x85, 0x86, 0xC6, 0xE6];
-    Ok(bytes
+    bytes
         .windows(2)
         .enumerate()
         .filter_map(|(offset, window)| {
@@ -298,7 +298,7 @@ fn scan_raw_direct_state_operands(
                 ))
             })
         })
-        .collect::<Result<_>>()?)
+        .collect::<Result<_>>()
 }
 
 fn bind_exact_code(

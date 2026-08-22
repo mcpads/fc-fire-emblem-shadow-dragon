@@ -533,12 +533,7 @@ mod tests {
                             cpu.memory[usize::from(CONSUMER_FONT_PAGE)] = cpu.a;
                         } else if [RIGHT_FD_HELPER, RIGHT_FE_HELPER].contains(&target) {
                             cpu.restored_pages.push((target, cpu.a));
-                        } else if target == cpu.local_restore {
-                            let return_address = cpu.pc.wrapping_sub(1);
-                            cpu.push((return_address >> 8) as u8);
-                            cpu.push(return_address as u8);
-                            cpu.pc = target;
-                        } else if target == cpu.local_exit_head {
+                        } else if [cpu.local_restore, cpu.local_exit_head].contains(&target) {
                             let return_address = cpu.pc.wrapping_sub(1);
                             cpu.push((return_address >> 8) as u8);
                             cpu.push(return_address as u8);

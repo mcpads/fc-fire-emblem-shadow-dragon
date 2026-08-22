@@ -131,6 +131,17 @@ pub(crate) struct BattleTextRuntimeBaseSummary {
     pub(crate) tracked_write_count: usize,
 }
 
+pub(crate) struct BattleTextRuntimeBaseInputs<'a> {
+    pub(crate) source_rom: &'a Rom,
+    pub(crate) source_path: &'a Path,
+    pub(crate) parity: &'a [u8],
+    pub(crate) fixed_workspace_path: &'a Path,
+    pub(crate) dialogue_workspace_path: &'a Path,
+    pub(crate) temporal_manifest_path: &'a Path,
+    pub(crate) output_path: &'a Path,
+    pub(crate) report_path: &'a Path,
+}
+
 pub(crate) fn build_battle_text_runtime_base(
     source_path: &Path,
     fixed_workspace_path: &Path,
@@ -141,28 +152,31 @@ pub(crate) fn build_battle_text_runtime_base(
 ) -> Result<BattleTextRuntimeBaseSummary> {
     let source_rom = Rom::from_path(source_path)?;
     let parity = install_mapper165_parity_bytes(&source_rom)?;
-    build_battle_text_runtime_base_on_parity(
-        &source_rom,
+    build_battle_text_runtime_base_on_parity(BattleTextRuntimeBaseInputs {
+        source_rom: &source_rom,
         source_path,
-        &parity,
+        parity: &parity,
         fixed_workspace_path,
         dialogue_workspace_path,
         temporal_manifest_path,
         output_path,
         report_path,
-    )
+    })
 }
 
 pub(crate) fn build_battle_text_runtime_base_on_parity(
-    source_rom: &Rom,
-    source_path: &Path,
-    parity: &[u8],
-    fixed_workspace_path: &Path,
-    dialogue_workspace_path: &Path,
-    temporal_manifest_path: &Path,
-    output_path: &Path,
-    report_path: &Path,
+    inputs: BattleTextRuntimeBaseInputs<'_>,
 ) -> Result<BattleTextRuntimeBaseSummary> {
+    let BattleTextRuntimeBaseInputs {
+        source_rom,
+        source_path,
+        parity,
+        fixed_workspace_path,
+        dialogue_workspace_path,
+        temporal_manifest_path,
+        output_path,
+        report_path,
+    } = inputs;
     source_rom.verify_supported_japanese()?;
     let fixed = plan_fixed_text(source_rom, fixed_workspace_path)?;
     let dialogue = plan_battle_dialogue_records(source_rom, dialogue_workspace_path)?;

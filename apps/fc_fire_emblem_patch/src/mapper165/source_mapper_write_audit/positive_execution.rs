@@ -30,7 +30,7 @@ use control_state::{
     merge_observed_control_state_writes,
 };
 use ending_sequence::bind_ending_sequence_positive_execution;
-use fixed_scheduler::bind_fixed_scheduler_execution;
+use fixed_scheduler::{FixedSchedulerExecutionInputs, bind_fixed_scheduler_execution};
 use fixed_vectors::bind_fixed_vector_execution;
 use front_end_record_storage::bind_front_end_record_storage_destinations;
 use indexed_write_destinations::bind_pending_request_disjoint_indexed_writes;
@@ -316,21 +316,23 @@ pub(super) fn bind_source_positive_execution_graph(
         fixed_vectors.reset_control_state_write_values(),
         OUTER_SCREEN_STATE,
     );
-    let fixed_scheduler = bind_fixed_scheduler_execution(
+    let fixed_scheduler = bind_fixed_scheduler_execution(FixedSchedulerExecutionInputs {
         source,
-        &title_state,
-        &shared_menu,
-        screen_state_dispatches.selector_domains(),
-        screen_state_dispatches.source_producer_domains(),
-        screen_state_dispatches.selector_memory_addresses(),
-        &outer_screen_state_seed_selectors,
-        screen_state_dispatches.gameplay_main_state_seed_selectors(),
-        screen_state_dispatches.gameplay_deferred_main_state_selectors(),
-        ending_sequence.produced_selectors(),
-        &fixed_scheduler_entry_contexts,
-        &source_bound_indirect_destinations,
-        &absolute_indexed_write_bounds,
-    )?;
+        title_state: &title_state,
+        shared_menu: &shared_menu,
+        screen_state_selector_domains: screen_state_dispatches.selector_domains(),
+        screen_state_source_producer_domains: screen_state_dispatches.source_producer_domains(),
+        screen_state_selector_memory_addresses: screen_state_dispatches.selector_memory_addresses(),
+        outer_screen_state_seed_selectors: &outer_screen_state_seed_selectors,
+        gameplay_main_state_seed_selectors: screen_state_dispatches
+            .gameplay_main_state_seed_selectors(),
+        gameplay_deferred_main_state_selectors: screen_state_dispatches
+            .gameplay_deferred_main_state_selectors(),
+        ending_sequence_produced_selectors: ending_sequence.produced_selectors(),
+        entry_contexts: &fixed_scheduler_entry_contexts,
+        indirect_write_destination_bounds: &source_bound_indirect_destinations,
+        absolute_indexed_write_bounds: &absolute_indexed_write_bounds,
+    })?;
     ensure!(
         fixed_vectors
             .bound_switchable_roots()

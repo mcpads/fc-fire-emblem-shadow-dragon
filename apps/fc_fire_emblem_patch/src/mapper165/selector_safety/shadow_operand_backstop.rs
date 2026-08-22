@@ -115,7 +115,7 @@ pub(super) fn bind_source_contract(source: &Rom) -> Result<()> {
 fn scan_raw_shadow_operand_candidates(prg: &[u8]) -> Result<BTreeSet<RawShadowOperandCandidate>> {
     const BANK_LEN: usize = 0x4000;
     const FIXED_BANK: u8 = 0x0F;
-    ensure!(prg.len() % BANK_LEN == 0, "PRG bank size changed");
+    ensure!(prg.len().is_multiple_of(BANK_LEN), "PRG bank size changed");
     let mut candidates = BTreeSet::new();
     for (bank, bytes) in prg.chunks_exact(BANK_LEN).enumerate() {
         let bank = u8::try_from(bank).context("PRG bank index overflow")?;

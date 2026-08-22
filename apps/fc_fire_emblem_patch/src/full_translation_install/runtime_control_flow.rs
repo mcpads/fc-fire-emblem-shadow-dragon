@@ -695,7 +695,7 @@ mod tests {
         for offset in [page_offset, page_offset + 2_945, capacity - 1_888] {
             let cpu = RUNTIME_CODE_WINDOW_START + u16::try_from(offset - page_offset).unwrap();
 
-            assert!(cpu >= RUNTIME_CODE_WINDOW_START && cpu < 0xC000);
+            assert!((RUNTIME_CODE_WINDOW_START..0xC000).contains(&cpu));
             assert_eq!(usize::from(0xC000 - cpu), capacity - offset);
         }
     }

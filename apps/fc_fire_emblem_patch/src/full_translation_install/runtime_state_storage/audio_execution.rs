@@ -138,7 +138,7 @@ fn parse_audio_handler_targets(table: &[u8]) -> Result<BTreeSet<u16>> {
 
 fn source_bytes(source: &Rom, bank: u8, address: u16, byte_count: usize) -> Result<&[u8]> {
     ensure!(
-        address >= 0x8000 && address < 0xC000,
+        (0x8000..0xC000).contains(&address),
         "source audio binding escaped its switchable PRG window"
     );
     let offset = HEADER_SIZE + usize::from(bank) * PRG_BANK_SIZE + usize::from(address - 0x8000);

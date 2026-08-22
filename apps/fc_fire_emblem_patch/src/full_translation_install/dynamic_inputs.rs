@@ -489,9 +489,7 @@ fn epilogue_unit_name_source_index(record_id: &str, selector: u8) -> Option<usiz
     if selector != 0 {
         return None;
     }
-    let Some((table, entry)) = record_id.rsplit_once(':') else {
-        return None;
-    };
+    let (table, entry) = record_id.rsplit_once(':')?;
     let entry = entry.parse::<usize>().unwrap_or(usize::MAX);
     let names_a_unit = match table {
         // 0번은 인물이 아니라 전사 장소를 넣는다. 그쪽은 지명으로 따로 결속돼 있다.
@@ -918,7 +916,7 @@ mod tests {
             &BTreeSet::from(['요']),
             &BTreeSet::from([0xAD]),
             &worksets,
-            &[dynamic_glyphs.clone()],
+            std::slice::from_ref(&dynamic_glyphs),
             &[TransitionLifetimeWorksets {
                 record_indices: vec![0],
                 workset_indices: vec![0],

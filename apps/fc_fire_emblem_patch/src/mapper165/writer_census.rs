@@ -240,7 +240,7 @@ fn insert_candidate(
     cpu_address: u16,
     bytes: &[u8],
 ) {
-    if !matches!(bytes[0], 0x8C | 0x8D | 0x8E) {
+    if !matches!(bytes[0], 0x8C..=0x8E) {
         return;
     }
     let register = u16::from_le_bytes([bytes[1], bytes[2]]);

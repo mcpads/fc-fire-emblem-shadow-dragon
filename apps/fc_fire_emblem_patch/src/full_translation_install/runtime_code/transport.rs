@@ -73,7 +73,6 @@ const PAGE_RECIPE_ENTRY_BYTE_COUNT: u8 = 3;
 /// atlas가 타일 하나에 쓰는 바이트다. 1bpp 8×8.
 pub(super) const ATLAS_TILE_BYTE_COUNT: u8 = 8;
 /// 타일 하나가 CHR에서 차지하는 바이트다. 2bpp 8×8.
-
 /// 요청 상태 바이트다. 생산자가 쓰고 소비자가 지운다.
 pub(in crate::full_translation_install) use super::super::runtime_state_storage::REQUEST_STATE;
 /// 합성이 끝나 출력해도 되는 상태다.

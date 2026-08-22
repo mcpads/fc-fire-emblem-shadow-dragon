@@ -62,16 +62,16 @@ fn global_dialogue_plan_advances_only_proven_cross_domain_consumers() {
     ]);
     let additional_global_roles = BTreeMap::new();
 
-    let domains = assemble_domain_consumers(
-        &required,
-        &target_unit_counts,
-        &targets,
-        &current,
-        true,
-        true,
-        true,
-        &additional_global_roles,
-    )
+    let domains = assemble_domain_consumers(DomainConsumerAssemblyInputs {
+        required_domains: &required,
+        target_unit_counts: &target_unit_counts,
+        targets: &targets,
+        current: &current,
+        all_chapter_titles_encoded: true,
+        global_dialogue_runtime_planned: true,
+        dynamic_dialogue_producers_bound: true,
+        additional_globally_planned_roles: &additional_global_roles,
+    })
     .unwrap();
     let by_id = domains
         .iter()
@@ -144,16 +144,16 @@ fn exact_additional_consumer_roles_close_only_the_named_domain_screens() {
         BTreeSet::from(["map_funds_summary".to_owned(), "map_menu".to_owned()]),
     )]);
 
-    let domains = assemble_domain_consumers(
-        &required,
-        &target_unit_counts,
-        &targets,
-        &current,
-        false,
-        false,
-        false,
-        &additional,
-    )
+    let domains = assemble_domain_consumers(DomainConsumerAssemblyInputs {
+        required_domains: &required,
+        target_unit_counts: &target_unit_counts,
+        targets: &targets,
+        current: &current,
+        all_chapter_titles_encoded: false,
+        global_dialogue_runtime_planned: false,
+        dynamic_dialogue_producers_bound: false,
+        additional_globally_planned_roles: &additional,
+    })
     .unwrap();
 
     assert_eq!(domains[0].globally_planned_target_unit_count, 8);

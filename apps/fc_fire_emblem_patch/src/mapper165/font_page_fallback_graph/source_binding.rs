@@ -106,14 +106,13 @@ pub(super) fn bind_options_owner_gate(fixed: &[u8]) -> Result<u16> {
     let branches = gate
         .windows(2)
         .enumerate()
-        .filter_map(|(offset, bytes)| {
-            (bytes[0] == BRANCH_IF_EQUAL).then(|| {
-                let address = ROW_OWNER_GATE_ADDRESS
-                    + u16::try_from(offset).expect("options gate offset fits u16");
-                let next = address + 2;
-                let target = next.wrapping_add_signed(i16::from(bytes[1] as i8));
-                (address, target)
-            })
+        .filter(|(_, bytes)| bytes[0] == BRANCH_IF_EQUAL)
+        .map(|(offset, bytes)| {
+            let address = ROW_OWNER_GATE_ADDRESS
+                + u16::try_from(offset).expect("options gate offset fits u16");
+            let next = address + 2;
+            let target = next.wrapping_add_signed(i16::from(bytes[1] as i8));
+            (address, target)
         })
         .collect::<Vec<_>>();
     ensure!(

@@ -489,7 +489,7 @@ impl ResetTraceState {
 
     pub(super) fn refine_zero_flag(&mut self, expected_zero: bool) -> bool {
         self.zero = Some(expected_zero);
-        let Some(source) = self.zero_source.clone() else {
+        let Some(source) = self.zero_source else {
             return true;
         };
         let matching_value = source.matching_value;
@@ -537,7 +537,7 @@ impl ResetTraceState {
         ResetTraceIdentity {
             address: self.address,
             mapped_prg_bank: self.mapped_prg_bank,
-            activation: self.activation.clone(),
+            activation: self.activation,
         }
     }
 
@@ -551,7 +551,7 @@ impl ResetTraceState {
         joined.negative = join_value(self.negative, other.negative);
         joined.carry = join_value(self.carry, other.carry);
         joined.zero_source = (self.zero_source == other.zero_source)
-            .then(|| self.zero_source.clone())
+            .then_some(self.zero_source)
             .flatten();
         joined.memory = self.memory.union(&other.memory);
         joined

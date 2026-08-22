@@ -342,7 +342,7 @@ pub(crate) fn plan_map_menu(rom: &Rom, workspace_path: &Path) -> Result<MapMenuP
                 .transpose()?;
             if let Some(source_display_cell_count) = source_display_cell_count {
                 ensure!(
-                    logical_bytes.len() + 1 <= source_display_cell_count,
+                    logical_bytes.len() < source_display_cell_count,
                     "map funds-summary translation exceeds its source display span for {}",
                     spec.id
                 );

@@ -317,8 +317,14 @@ mod tests {
         let logical = vec![LogicalDialogueByte::TargetGlyph('가')];
         let assignments = [BTreeMap::from([('가', 0xE0)])];
 
-        let error =
-            encode_page_bound_record("record", &logical, &[0..1], &[0], &assignments).unwrap_err();
+        let error = encode_page_bound_record(
+            "record",
+            &logical,
+            std::slice::from_ref(&(0..1)),
+            &[0],
+            &assignments,
+        )
+        .unwrap_err();
 
         assert!(error.to_string().contains("dialogue control E0"));
     }

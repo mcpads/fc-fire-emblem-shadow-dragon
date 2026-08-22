@@ -157,18 +157,17 @@ pub(super) fn describe_control_state_writes(
 ) -> Vec<String> {
     observations
         .iter()
-        .filter_map(|(&(bank, instruction, target), values)| {
-            (target == address).then(|| match values {
-                Some(values) => format!(
-                    "{bank:02X}:${instruction:04X}=[{}]",
-                    values
-                        .iter()
-                        .map(|value| format!("{value:02X}"))
-                        .collect::<Vec<_>>()
-                        .join(",")
-                ),
-                None => format!("{bank:02X}:${instruction:04X}=unknown"),
-            })
+        .filter(|&(&(_, _, target), _)| target == address)
+        .map(|(&(bank, instruction, _), values)| match values {
+            Some(values) => format!(
+                "{bank:02X}:${instruction:04X}=[{}]",
+                values
+                    .iter()
+                    .map(|value| format!("{value:02X}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+            None => format!("{bank:02X}:${instruction:04X}=unknown"),
         })
         .collect()
 }

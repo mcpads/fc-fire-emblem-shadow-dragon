@@ -646,7 +646,7 @@ mod tests {
                 LogicalDialogueByte::TargetGlyph('가'),
                 LogicalDialogueByte::Encoded(0xED),
             ],
-            vec![0..2],
+            std::iter::once(0..2).collect(),
         );
         let second = boundary_digest_plan(
             "workspace-b",
@@ -654,7 +654,7 @@ mod tests {
                 LogicalDialogueByte::TargetGlyph('가'),
                 LogicalDialogueByte::Encoded(0xED),
             ],
-            vec![0..2],
+            std::iter::once(0..2).collect(),
         );
 
         assert_eq!(
@@ -667,7 +667,7 @@ mod tests {
                 LogicalDialogueByte::TargetGlyph('나'),
                 LogicalDialogueByte::Encoded(0xED),
             ],
-            vec![0..2],
+            std::iter::once(0..2).collect(),
         );
         assert_eq!(
             first.page_boundary_topology_sha1(),
@@ -683,7 +683,7 @@ mod tests {
                 LogicalDialogueByte::TargetGlyph('가'),
                 LogicalDialogueByte::Encoded(0xED),
             ],
-            vec![0..2],
+            std::iter::once(0..2).collect(),
         );
         let changed_kind = boundary_digest_plan(
             "workspace",
@@ -691,7 +691,7 @@ mod tests {
                 LogicalDialogueByte::Encoded(0x00),
                 LogicalDialogueByte::Encoded(0xED),
             ],
-            vec![0..2],
+            std::iter::once(0..2).collect(),
         );
         let changed_lines = boundary_digest_plan(
             "workspace",

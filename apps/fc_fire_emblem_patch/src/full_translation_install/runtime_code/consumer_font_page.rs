@@ -78,12 +78,14 @@ const GAMEPLAY_PHASE_HIGH: u8 = 0x24;
 /// distinguishes a standalone fixed-label screen from a label drawn over live main dialogue.
 /// Storage action and overflow labels must retain the dialogue route selected for the underlying
 /// record, while the storage-capacity notice is a standalone fixed-label screen.
-const FIXED_MENU_FONT_PAGE_CALLS: [(
+type FixedMenuFontPageCall = (
     u16,
     u8,
     Option<(DialogueRuntimeHookRole, DelegatedFontPageOwner)>,
-    &str,
-); 6] = [
+    &'static str,
+);
+
+const FIXED_MENU_FONT_PAGE_CALLS: [FixedMenuFontPageCall; 6] = [
     (
         0x8A3C,
         0x2C,

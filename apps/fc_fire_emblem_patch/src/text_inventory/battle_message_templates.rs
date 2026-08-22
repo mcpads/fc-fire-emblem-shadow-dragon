@@ -64,12 +64,11 @@ pub(super) fn extract_battle_message_templates(
             )?))
             .context("battle message file offset overflow")?;
         ensure!(
-            file_offset >= DATA_FILE_OFFSET && file_offset < DATA_END_FILE_OFFSET,
+            (DATA_FILE_OFFSET..DATA_END_FILE_OFFSET).contains(&file_offset),
             "battle message pointer {pointer:#06X} is outside the proven data interval"
         );
         let search_end = file_offset
-            .checked_add(MAX_ENTRY_BYTES)
-            .unwrap_or(usize::MAX)
+            .saturating_add(MAX_ENTRY_BYTES)
             .min(DATA_END_FILE_OFFSET);
         let terminator_offset = source[file_offset..search_end]
             .iter()

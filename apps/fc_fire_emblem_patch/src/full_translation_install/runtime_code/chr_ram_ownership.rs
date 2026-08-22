@@ -69,13 +69,12 @@ pub(super) fn bind_shared_chr_ram_ownership_boundary(candidate: &Rom) -> Result<
         .prg()
         .windows(direct_chr_ram_selection.len())
         .enumerate()
-        .filter_map(|(offset, bytes)| {
-            (bytes == direct_chr_ram_selection).then(|| {
-                offset
-                    .checked_sub(fixed_start)
-                    .and_then(|relative| u16::try_from(relative).ok())
-                    .and_then(|relative| 0xC000_u16.checked_add(relative))
-            })
+        .filter(|(_, bytes)| *bytes == direct_chr_ram_selection)
+        .map(|(offset, _)| {
+            offset
+                .checked_sub(fixed_start)
+                .and_then(|relative| u16::try_from(relative).ok())
+                .and_then(|relative| 0xC000_u16.checked_add(relative))
         })
         .collect::<Option<Vec<_>>>();
     ensure!(

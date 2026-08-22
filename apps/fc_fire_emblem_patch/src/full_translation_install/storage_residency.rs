@@ -106,8 +106,6 @@ pub(super) struct StorageDialogueResidencyPlan {
     pub(super) augmented_worksets: Vec<GlyphWorkset>,
     #[serde(skip)]
     fixed_glyph_codes: BTreeMap<char, u8>,
-    #[serde(skip)]
-    item_list_route: StorageItemListRuntimeRoute,
 }
 
 impl StorageDialogueResidencyPlan {
@@ -138,7 +136,7 @@ impl StorageDialogueResidencyPlan {
     }
 
     pub(super) fn item_list_runtime_route(&self) -> StorageItemListRuntimeRoute {
-        self.item_list_route
+        self.item_list_runtime_route
     }
 }
 
@@ -155,16 +153,30 @@ pub(super) fn bind_storage_choice_dialogue_record_id(source: &Rom) -> Result<Str
     Ok(record_id)
 }
 
+pub(super) struct StorageDialogueResidencyInputs<'a> {
+    pub(super) source: &'a Rom,
+    pub(super) graph: &'a MainDialogueGraphReport,
+    pub(super) display: &'a MainDialogueDisplayPlan,
+    pub(super) fixed: &'a FixedTextPlan,
+    pub(super) fixed_menu_labels: &'a SemanticTranslationPlan,
+    pub(super) dialogue_worksets: &'a [GlyphWorkset],
+    pub(super) canonical_item_codes: &'a BTreeMap<char, u8>,
+    pub(super) item_name_appender_display_codes: &'a BTreeSet<u8>,
+}
+
 pub(super) fn plan_storage_dialogue_residency(
-    source: &Rom,
-    graph: &MainDialogueGraphReport,
-    display: &MainDialogueDisplayPlan,
-    fixed: &FixedTextPlan,
-    fixed_menu_labels: &SemanticTranslationPlan,
-    dialogue_worksets: &[GlyphWorkset],
-    canonical_item_codes: &BTreeMap<char, u8>,
-    item_name_appender_display_codes: &BTreeSet<u8>,
+    inputs: StorageDialogueResidencyInputs<'_>,
 ) -> Result<StorageDialogueResidencyPlan> {
+    let StorageDialogueResidencyInputs {
+        source,
+        graph,
+        display,
+        fixed,
+        fixed_menu_labels,
+        dialogue_worksets,
+        canonical_item_codes,
+        item_name_appender_display_codes,
+    } = inputs;
     ensure!(
         display.page_worksets.len() == dialogue_worksets.len(),
         "storage dialogue residency lost visible dialogue worksets"
@@ -352,7 +364,6 @@ pub(super) fn plan_storage_dialogue_residency(
         item_list_dialogue_pages_use_canonical_item_codes: true,
         augmented_worksets: item_augmentation.augmented_worksets,
         fixed_glyph_codes,
-        item_list_route: source_binding.item_list_route,
     })
 }
 

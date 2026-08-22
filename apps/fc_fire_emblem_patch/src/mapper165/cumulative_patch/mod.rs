@@ -55,7 +55,10 @@ use shop_dialogue_runtime::verify_shop_dialogue_runtime_evidence;
 use shop_dialogue_stage::install_shop_dialogue_stage;
 use title_logo_runtime::load_title_logo_runtime_evidence;
 use unit_name_stage::install_unit_name_stage;
-use verify::{install_chapter_title, install_dialogue_record, verify_cumulative_output};
+use verify::{
+    CumulativeOutputVerificationInputs, install_chapter_title, install_dialogue_record,
+    verify_cumulative_output,
+};
 use weapon_shop_shared_text_runtime::verify_weapon_shop_shared_text_runtime_evidence;
 use weapon_shop_shared_text_stage::install_weapon_shop_shared_text_stage;
 
@@ -190,7 +193,7 @@ pub(crate) fn build_cumulative_patch(
     let chapter_one_plans = CHAPTER_ONE_INTRO_RECORD_IDS
         .iter()
         .map(|record_id| {
-            plan_main_dialogue_slice(&source_rom, inputs.main_dialogue_workspace_path, record_id)
+            plan_main_dialogue_slice(source_rom, inputs.main_dialogue_workspace_path, record_id)
         })
         .collect::<Result<Vec<_>>>()?;
     ensure!(
@@ -330,23 +333,23 @@ pub(crate) fn build_cumulative_patch(
     let chapter_one_output_sha1 = sha1_hex(&chapter_one_output);
     let chapter_one_output_rom =
         Rom::parse(chapter_one_output.clone()).context("parse Chapter 1 cumulative stage")?;
-    verify_cumulative_output(
-        &ui_stage_rom,
-        &chapter_one_output_rom,
-        &chapter_one_page.page_pack,
-        &[(&chapter_one_plans[..], &chapter_one_encoded_records[..])],
-        &[(&chapter_one_title, &chapter_one_encoded_title)],
-        &chapter_one_roster_selector,
-        CHAPTER_ONE_DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS,
-        &chapter_one_selector,
-    )?;
+    verify_cumulative_output(CumulativeOutputVerificationInputs {
+        ui_stage_rom: &ui_stage_rom,
+        output_rom: &chapter_one_output_rom,
+        page_pack: &chapter_one_page.page_pack,
+        record_groups: &[(&chapter_one_plans[..], &chapter_one_encoded_records[..])],
+        chapter_titles: &[(&chapter_one_title, &chapter_one_encoded_title)],
+        roster_selector: &chapter_one_roster_selector,
+        dialogue_selector_address: CHAPTER_ONE_DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS,
+        dialogue_selector: &chapter_one_selector,
+    })?;
     write_file(
         &inputs.stage_directory.join(CHAPTER_ONE_STAGE_ROM_NAME),
         &chapter_one_output,
     )?;
 
     let chapter_two_plans = vec![plan_main_dialogue_slice(
-        &source_rom,
+        source_rom,
         inputs.main_dialogue_workspace_path,
         CHAPTER_TWO_INTRO_RECORD_ID,
     )?];
@@ -456,28 +459,28 @@ pub(crate) fn build_cumulative_patch(
         Rom::parse(chapter_two_output.clone()).context("parse Chapter 2 cumulative stage")?;
     let mut appended_page_packs = chapter_one_page.page_pack.clone();
     appended_page_packs.extend_from_slice(&chapter_two_page.page_pack);
-    verify_cumulative_output(
-        &ui_stage_rom,
-        &chapter_two_output_rom,
-        &appended_page_packs,
-        &[
+    verify_cumulative_output(CumulativeOutputVerificationInputs {
+        ui_stage_rom: &ui_stage_rom,
+        output_rom: &chapter_two_output_rom,
+        page_pack: &appended_page_packs,
+        record_groups: &[
             (&chapter_one_plans[..], &chapter_one_encoded_records[..]),
             (&chapter_two_plans[..], &chapter_two_encoded_records[..]),
         ],
-        &[
+        chapter_titles: &[
             (&chapter_one_title, &chapter_one_encoded_title),
             (&chapter_two_title, &chapter_two_encoded_title),
         ],
-        &cumulative_roster_selector,
-        DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS,
-        &dialogue_selector,
-    )?;
+        roster_selector: &cumulative_roster_selector,
+        dialogue_selector_address: DIALOGUE_FONT_PAGE_SELECTOR_ADDRESS,
+        dialogue_selector: &dialogue_selector,
+    })?;
 
     let front_end_stage = install_front_end_stage(
         &chapter_two_output,
-        &source_rom,
-        &front_end_menu_plan,
-        &front_end_result_preserved_codes,
+        source_rom,
+        front_end_menu_plan,
+        front_end_result_preserved_codes,
         inputs.front_end_menu_evidence_path,
         &cumulative_roster_selector,
         &dialogue_selector,
@@ -488,8 +491,8 @@ pub(crate) fn build_cumulative_patch(
     )?;
     let unit_name_stage = install_unit_name_stage(
         &front_end_stage.output,
-        &source_rom,
-        &unit_name_plan,
+        source_rom,
+        unit_name_plan,
         inputs.roster_localization_path,
         inputs.unit_name_evidence_path,
     )?;
@@ -499,8 +502,8 @@ pub(crate) fn build_cumulative_patch(
     )?;
     let class_profile_stage = install_class_profile_stage(
         &unit_name_stage.output,
-        &source_rom,
-        &class_profile_plan,
+        source_rom,
+        class_profile_plan,
         inputs.class_profile_evidence_path,
     )?;
     write_file(
@@ -509,8 +512,8 @@ pub(crate) fn build_cumulative_patch(
     )?;
     let shop_dialogue_stage = install_shop_dialogue_stage(
         &class_profile_stage.output,
-        &source_rom,
-        &shop_dialogue_plan,
+        source_rom,
+        shop_dialogue_plan,
         unit_name_stage.page.unit_ui_mapper_register,
         inputs.shop_dialogue_evidence_path,
     )?;
@@ -520,10 +523,10 @@ pub(crate) fn build_cumulative_patch(
     )?;
     let weapon_shop_shared_text_stage = install_weapon_shop_shared_text_stage(
         &shop_dialogue_stage.output,
-        &source_rom,
+        source_rom,
         &shop_dialogue_stage.page,
-        &fixed_text_plan,
-        &choice_label_plan,
+        fixed_text_plan,
+        choice_label_plan,
     )?;
     write_file(
         &inputs.stage_directory.join(SHOP_SHARED_TEXT_STAGE_ROM_NAME),
@@ -549,8 +552,8 @@ pub(crate) fn build_cumulative_patch(
     );
     let maximum_dialogue_stage = install_maximum_dialogue_stage(MaximumDialogueStageInputs {
         prior_output: &battle_stage.output,
-        source_rom: &source_rom,
-        record: &maximum_dialogue_plan,
+        source_rom,
+        record: maximum_dialogue_plan,
         evidence_path: inputs.maximum_dialogue_evidence_path,
         page_boundary_path: inputs.maximum_dialogue_page_boundary_path,
     })?;
@@ -564,7 +567,7 @@ pub(crate) fn build_cumulative_patch(
             verify_maximum_dialogue_runtime_evidence(
                 path,
                 &maximum_dialogue_stage.output_sha1,
-                &maximum_dialogue_plan.workspace_sha1,
+                maximum_dialogue_plan.workspace_sha1.as_str(),
                 &maximum_dialogue_stage.page.completed_page_pointers,
                 &maximum_dialogue_stage.page.page_groups,
                 &maximum_dialogue_stage.page.mapper_registers,
@@ -573,7 +576,7 @@ pub(crate) fn build_cumulative_patch(
         .transpose()?;
     let title_logo_stage = install_title_logo_asset(
         &maximum_dialogue_stage.output,
-        &source_rom,
+        source_rom,
         inputs.title_logo_asset_path,
     )?;
     write_file(

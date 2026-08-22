@@ -22,8 +22,9 @@ use super::{
         known_control_state_write_values,
     },
     fixed_vectors::{
-        InlineDispatchSelectorBounds, TrackedStateCallSummaries, trace_fixed_scheduler_contexts,
-        trace_fixed_scheduler_inline_state_handler, trace_source_bound_inline_state_handler_batch,
+        FixedSchedulerTraceInputs, InlineDispatchSelectorBounds, TrackedStateCallSummaries,
+        trace_fixed_scheduler_contexts, trace_fixed_scheduler_inline_state_handler,
+        trace_source_bound_inline_state_handler_batch,
     },
     indexed_write_destinations::AbsoluteIndexedWriteDestinationBounds,
     screen_state_dispatches::GAMEPLAY_MAIN_STATE_DISPATCH_CALL,
@@ -179,21 +180,42 @@ impl FixedSchedulerExecution {
     }
 }
 
+pub(super) struct FixedSchedulerExecutionInputs<'a> {
+    pub(super) source: &'a Rom,
+    pub(super) title_state: &'a TitleStateExecution,
+    pub(super) shared_menu: &'a SharedMenuExecutionSource,
+    pub(super) screen_state_selector_domains: &'a BTreeMap<(u8, u16), BTreeSet<u8>>,
+    pub(super) screen_state_source_producer_domains: &'a BTreeMap<(u8, u16), BTreeSet<u8>>,
+    pub(super) screen_state_selector_memory_addresses: &'a BTreeMap<(u8, u16), u16>,
+    pub(super) outer_screen_state_seed_selectors: &'a BTreeSet<u8>,
+    pub(super) gameplay_main_state_seed_selectors: &'a BTreeSet<u8>,
+    pub(super) gameplay_deferred_main_state_selectors: &'a BTreeSet<u8>,
+    pub(super) ending_sequence_produced_selectors: &'a BTreeSet<u8>,
+    pub(super) entry_contexts: &'a BTreeSet<(u8, u8)>,
+    pub(super) indirect_write_destination_bounds:
+        &'a BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
+    pub(super) absolute_indexed_write_bounds:
+        &'a BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds>,
+}
+
 pub(super) fn bind_fixed_scheduler_execution(
-    source: &Rom,
-    title_state: &TitleStateExecution,
-    shared_menu: &SharedMenuExecutionSource,
-    screen_state_selector_domains: &BTreeMap<(u8, u16), BTreeSet<u8>>,
-    screen_state_source_producer_domains: &BTreeMap<(u8, u16), BTreeSet<u8>>,
-    screen_state_selector_memory_addresses: &BTreeMap<(u8, u16), u16>,
-    outer_screen_state_seed_selectors: &BTreeSet<u8>,
-    gameplay_main_state_seed_selectors: &BTreeSet<u8>,
-    gameplay_deferred_main_state_selectors: &BTreeSet<u8>,
-    ending_sequence_produced_selectors: &BTreeSet<u8>,
-    entry_contexts: &BTreeSet<(u8, u8)>,
-    indirect_write_destination_bounds: &BTreeMap<(u8, u16, u8), IndirectWriteDestinationBounds>,
-    absolute_indexed_write_bounds: &BTreeMap<(u8, u16), AbsoluteIndexedWriteDestinationBounds>,
+    inputs: FixedSchedulerExecutionInputs<'_>,
 ) -> Result<FixedSchedulerExecution> {
+    let FixedSchedulerExecutionInputs {
+        source,
+        title_state,
+        shared_menu,
+        screen_state_selector_domains,
+        screen_state_source_producer_domains,
+        screen_state_selector_memory_addresses,
+        outer_screen_state_seed_selectors,
+        gameplay_main_state_seed_selectors,
+        gameplay_deferred_main_state_selectors,
+        ending_sequence_produced_selectors,
+        entry_contexts,
+        indirect_write_destination_bounds,
+        absolute_indexed_write_bounds,
+    } = inputs;
     source.verify_supported_japanese()?;
     let table_selector_domain = (0..FIXED_SCHEDULER_STATE_COUNT).collect::<BTreeSet<_>>();
     let dispatch = bind_inline_pointer_dispatch(
@@ -443,16 +465,18 @@ pub(super) fn bind_fixed_scheduler_execution(
     );
     let mut tracked_state_call_summaries = TrackedStateCallSummaries::default();
     let non_outer_discovery_trace = trace_fixed_scheduler_contexts(
-        source,
-        FIXED_SCHEDULER_STATE_LOAD,
-        FIXED_SCHEDULER_DISPATCH_CALL,
-        FIXED_SCHEDULER_RETURN_ADDRESS,
-        non_outer_entry_contexts,
-        &BTreeMap::new(),
-        &downstream_terminal_inline_dispatches,
-        &owned_inline_dispatch_selector_bounds,
-        indirect_write_destination_bounds,
-        absolute_indexed_write_bounds,
+        FixedSchedulerTraceInputs {
+            source,
+            state_load_address: FIXED_SCHEDULER_STATE_LOAD,
+            dispatch_call_address: FIXED_SCHEDULER_DISPATCH_CALL,
+            return_address: FIXED_SCHEDULER_RETURN_ADDRESS,
+            entry_contexts: non_outer_entry_contexts,
+            initial_memory_values: &BTreeMap::new(),
+            terminal_inline_dispatches: &downstream_terminal_inline_dispatches,
+            inline_dispatch_selector_bounds: &owned_inline_dispatch_selector_bounds,
+            indirect_write_destination_bounds,
+            absolute_indexed_write_bounds,
+        },
         &mut tracked_state_call_summaries,
     )?;
 
@@ -642,9 +666,8 @@ pub(super) fn bind_fixed_scheduler_execution(
     let gameplay_deferred_main_state_writers = discovered_outer_traces
         .iter()
         .flat_map(|trace| trace.control_state_write_values())
-        .filter_map(|(&site @ (_, _, target), values)| {
-            (target == DEFERRED_MAIN_STATE).then(|| (site, values.clone()))
-        })
+        .filter(|&(&(_, _, target), _)| target == DEFERRED_MAIN_STATE)
+        .map(|(&site, values)| (site, values.clone()))
         .collect::<BTreeMap<_, _>>();
     ensure!(
         gameplay_deferred_main_state_selectors.is_subset(&observed_deferred_main_state_domain),
@@ -675,16 +698,18 @@ pub(super) fn bind_fixed_scheduler_execution(
         .chain([outer_screen_site])
         .collect::<BTreeSet<_>>();
     let outer_route_trace = trace_fixed_scheduler_contexts(
-        source,
-        FIXED_SCHEDULER_STATE_LOAD,
-        FIXED_SCHEDULER_DISPATCH_CALL,
-        FIXED_SCHEDULER_RETURN_ADDRESS,
-        [outer_entry_context],
-        &BTreeMap::from([(OUTER_SCREEN_STATE, outer_route_seed)]),
-        &outer_route_terminals,
-        &owned_inline_dispatch_selector_bounds,
-        indirect_write_destination_bounds,
-        absolute_indexed_write_bounds,
+        FixedSchedulerTraceInputs {
+            source,
+            state_load_address: FIXED_SCHEDULER_STATE_LOAD,
+            dispatch_call_address: FIXED_SCHEDULER_DISPATCH_CALL,
+            return_address: FIXED_SCHEDULER_RETURN_ADDRESS,
+            entry_contexts: BTreeSet::from([outer_entry_context]),
+            initial_memory_values: &BTreeMap::from([(OUTER_SCREEN_STATE, outer_route_seed)]),
+            terminal_inline_dispatches: &outer_route_terminals,
+            inline_dispatch_selector_bounds: &owned_inline_dispatch_selector_bounds,
+            indirect_write_destination_bounds,
+            absolute_indexed_write_bounds,
+        },
         &mut tracked_state_call_summaries,
     )?;
     let outer_route_observed = known_control_state_write_values(

@@ -232,7 +232,7 @@ fn bind_cache_refresh_cave(rom: &Rom) -> Result<()> {
 
 fn direct_selector_readers(source: &Rom) -> Result<Vec<(u8, u16)>> {
     ensure!(
-        source.prg().len() % 0x4000 == 0,
+        source.prg().len().is_multiple_of(0x4000),
         "source PRG is not a whole number of 16 KiB banks"
     );
     let mut readers = Vec::new();

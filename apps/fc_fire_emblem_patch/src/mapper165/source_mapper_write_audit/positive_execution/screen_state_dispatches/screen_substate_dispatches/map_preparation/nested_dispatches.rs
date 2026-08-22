@@ -205,10 +205,8 @@ fn bind_complete_inline_dispatch_call_set(source: &Rom) -> Result<()> {
     let mut calls = bank
         .windows(INLINE_POINTER_DISPATCH_CALL.len())
         .enumerate()
-        .filter_map(|(offset, bytes)| {
-            (bytes == INLINE_POINTER_DISPATCH_CALL)
-                .then(|| 0x8000 + u16::try_from(offset).expect("bank offset fits u16"))
-        })
+        .filter(|(_, bytes)| *bytes == INLINE_POINTER_DISPATCH_CALL)
+        .map(|(offset, _)| 0x8000 + u16::try_from(offset).expect("bank offset fits u16"))
         .collect::<BTreeSet<_>>();
     for (address, bytes) in [
         (0xBFFE, [bank[0x3FFE], bank[0x3FFF], fixed[0]]),

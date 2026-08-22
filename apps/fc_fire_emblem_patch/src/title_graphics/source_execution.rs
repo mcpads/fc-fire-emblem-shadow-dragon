@@ -237,7 +237,7 @@ pub(crate) fn bind_title_state_execution(source: &Rom) -> Result<TitleStateExecu
         "title exit no longer selects the map-initialization scheduler state"
     );
     decode_rp2a03_sequence(
-        &exit_writer,
+        exit_writer,
         TITLE_EXIT_SCHEDULER_WRITER - 2,
         "title exit scheduler writer",
     )?;

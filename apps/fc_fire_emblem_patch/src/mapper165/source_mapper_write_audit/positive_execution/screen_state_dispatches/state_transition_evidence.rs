@@ -138,16 +138,25 @@ impl TransitionPath {
     }
 }
 
+pub(super) struct StateWriterSource<'a> {
+    pub(super) source: &'a Rom,
+    pub(super) bank: u8,
+    pub(super) state_address: u16,
+}
+
 pub(super) fn bind_state_transition_closure(
-    source: &Rom,
-    bank: u8,
-    state_address: u16,
+    source_binding: StateWriterSource<'_>,
     handler_domain: &BTreeSet<u8>,
     handler_target: impl Fn(u8) -> Option<u16>,
     initial: impl IntoIterator<Item = u8>,
     paths: &[TransitionPath],
     role: &str,
 ) -> Result<BTreeSet<u8>> {
+    let StateWriterSource {
+        source,
+        bank,
+        state_address,
+    } = source_binding;
     ensure!(!role.is_empty(), "state-transition evidence role is empty");
     let writer_sites = raw_state_writer_sites(source, bank, state_address)?;
     let mut paths_by_selector = BTreeMap::<u8, Vec<&TransitionPath>>::new();
@@ -588,9 +597,11 @@ mod tests {
         )]);
 
         let produced = bind_state_transition_closure(
-            &source,
-            TEST_BANK,
-            TEST_STATE_ADDRESS,
+            StateWriterSource {
+                source: &source,
+                bank: TEST_BANK,
+                state_address: TEST_STATE_ADDRESS,
+            },
             &BTreeSet::from([0]),
             |selector| (selector == 0).then_some(0x8000),
             [0],
@@ -618,9 +629,11 @@ mod tests {
         )]);
 
         let error = bind_state_transition_closure(
-            &source,
-            TEST_BANK,
-            TEST_STATE_ADDRESS,
+            StateWriterSource {
+                source: &source,
+                bank: TEST_BANK,
+                state_address: TEST_STATE_ADDRESS,
+            },
             &BTreeSet::from([0]),
             |selector| (selector == 0).then_some(0x8000),
             [0],

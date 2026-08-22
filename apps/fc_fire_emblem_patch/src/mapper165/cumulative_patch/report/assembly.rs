@@ -123,7 +123,7 @@ pub(in crate::mapper165::cumulative_patch) fn assemble_cumulative_report(
     let choice_label_plan = &input_plan.choice_label_plan;
 
     let stages = stage_reports(&report_inputs);
-    let report = CumulativePatchReport {
+    CumulativePatchReport {
         schema: REPORT_SCHEMA,
         source_sha1: EXPECTED_SOURCE_SHA1,
         output_sha1: output_sha1.clone(),
@@ -193,6 +193,5 @@ pub(in crate::mapper165::cumulative_patch) fn assemble_cumulative_report(
             "Human translation review is incomplete, so this output is a development build rather than a release candidate.",
         ],
         release_eligible: false,
-    };
-    report
+    }
 }

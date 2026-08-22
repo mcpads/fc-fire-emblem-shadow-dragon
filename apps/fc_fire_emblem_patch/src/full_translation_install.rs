@@ -94,7 +94,7 @@ use consumer_installation::{
 use cross_domain_material::{CrossDomainMaterialInputs, plan_cross_domain_material};
 use current_candidate::{CurrentCandidateInputs, inspect_dialogue_page_pool_capacity};
 use dialogue_line_layout::audit_main_dialogue_line_layout;
-use dynamic_composition::plan_dialogue_runtime_composition;
+use dynamic_composition::{DialogueRuntimeCompositionInputs, plan_dialogue_runtime_composition};
 use dynamic_input_producers::{DynamicInputProducerPlan, inspect_dynamic_input_producers};
 use dynamic_inputs::{
     DynamicProducerEncodingPlan, bind_dynamic_producer_encoding, bind_dynamic_string_page_codes,
@@ -125,7 +125,9 @@ use report::{
     project_chapter_intro_residency, project_dialogue_codebook, project_dialogue_page_pool,
     project_dialogue_runtime_composition, project_dialogue_storage, project_installation_gates,
 };
-use runtime_code::{plan_dialogue_runtime_code, resolve_request::MaterialLayout};
+use runtime_code::{
+    DialogueRuntimeCodeInputs, plan_dialogue_runtime_code, resolve_request::MaterialLayout,
+};
 use runtime_control_flow::{
     DialogueRuntimeControlFlowPlan, RuntimeControlFlowInputs, plan_dialogue_runtime_control_flow,
 };
@@ -143,7 +145,9 @@ use shop_item_residency::{
     ShopItemResidencyInputs, ShopItemWorksetResidencyInputs, plan_shop_item_residency,
     plan_shop_item_workset_residency,
 };
-use storage_residency::{StorageDialogueResidencyPlan, plan_storage_dialogue_residency};
+use storage_residency::{
+    StorageDialogueResidencyInputs, StorageDialogueResidencyPlan, plan_storage_dialogue_residency,
+};
 use transition_residency::{bind_transition_lifetime_worksets, plan_transition_residency};
 use unit_selection_help_residency::{
     UnitSelectionHelpResidencyPlan, finalize_unit_selection_help_residency,
@@ -431,16 +435,17 @@ pub(crate) fn plan_full_translation_installation(
         &choice_residency.augmented_worksets,
         installed_help_glyph_codes,
     )?;
-    let storage_dialogue_residency = plan_storage_dialogue_residency(
-        &rom,
-        &dialogue_graph,
-        &display,
-        &fixed,
-        &fixed_menu_labels,
-        &unit_selection_help_residency.augmented_worksets,
-        dynamic_inputs.canonical_dynamic_codes(),
-        &item_name_appender_display_codes,
-    )?;
+    let storage_dialogue_residency =
+        plan_storage_dialogue_residency(StorageDialogueResidencyInputs {
+            source: &rom,
+            graph: &dialogue_graph,
+            display: &display,
+            fixed: &fixed,
+            fixed_menu_labels: &fixed_menu_labels,
+            dialogue_worksets: &unit_selection_help_residency.augmented_worksets,
+            canonical_item_codes: dynamic_inputs.canonical_dynamic_codes(),
+            item_name_appender_display_codes: &item_name_appender_display_codes,
+        })?;
     let chapter_save_projection = plan_chapter_save_projection(ChapterSaveProjectionInputs {
         candidate: &current_candidate,
         choices: &choices,
@@ -561,16 +566,16 @@ pub(crate) fn plan_full_translation_installation(
     cross_domain_target_glyphs.extend(transitions.save_offer.target_glyphs.iter().copied());
     cross_domain_target_glyphs.extend(transitions.ending_record.target_glyphs.iter().copied());
     cross_domain_target_glyphs.extend(locations.unique_glyphs());
-    let composition = plan_dialogue_runtime_composition(
-        &display,
-        &dialogue_graph,
-        &transition_residency.augmented_worksets,
-        &codebook,
-        &dynamic_page_codes,
+    let composition = plan_dialogue_runtime_composition(DialogueRuntimeCompositionInputs {
+        dialogue: &display,
+        transition_graph: &dialogue_graph,
+        runtime_worksets: &transition_residency.augmented_worksets,
+        codebook: &codebook,
+        dynamic_page_codes: &dynamic_page_codes,
         source_font_page,
-        &font_page_pack,
-        &cross_domain_target_glyphs,
-    )?;
+        static_page_pack: &font_page_pack,
+        additional_target_glyphs: &cross_domain_target_glyphs,
+    })?;
     ensure!(
         cross_domain_target_glyphs.iter().all(|glyph| composition
             .glyph_atlas_characters
@@ -695,20 +700,21 @@ pub(crate) fn plan_full_translation_installation(
         consumer_catalog_layout: consumer_catalog_runtime_layout,
         e7_caller_resume_flag_address: runtime_code::lifecycle::E7_CALLER_RESUME_FLAG,
     })?;
-    let dialogue_runtime_code = plan_dialogue_runtime_code(
-        &rom,
-        &current_candidate,
-        &page_capacity.maximum_dialogue_font_group_selector_range_sha1,
-        runtime_material.runtime_code_cpu_start()?,
-        page(atlas_offset)?,
-        runtime_material.runtime_code_mmc3_page(),
+    let dialogue_runtime_code = plan_dialogue_runtime_code(DialogueRuntimeCodeInputs {
+        source: &rom,
+        candidate: &current_candidate,
+        maximum_dialogue_font_group_selector_range_sha1: &page_capacity
+            .maximum_dialogue_font_group_selector_range_sha1,
+        runtime_code_cpu_start: runtime_material.runtime_code_cpu_start()?,
+        atlas_page: page(atlas_offset)?,
+        code_page: runtime_material.runtime_code_mmc3_page(),
         layout,
-        consumer_catalog_runtime_layout,
-        shop_item_residency.runtime_contract(),
-        storage_dialogue_residency.item_list_runtime_route(),
-        cold_request_presentation.mapper_register,
-        screen_font_residency.routes(),
-    )?;
+        consumer_catalog_layout: consumer_catalog_runtime_layout,
+        shop_item_residency: shop_item_residency.runtime_contract(),
+        storage_item_list: storage_dialogue_residency.item_list_runtime_route(),
+        cold_request_mapper_register: cold_request_presentation.mapper_register,
+        consumer_font_pages: screen_font_residency.routes(),
+    })?;
     let assembled_hook_roles = dialogue_runtime_code.hook_roles();
     let new_record_line_buffer_reset_routes_bound =
         dialogue_runtime_code.new_record_line_buffer_reset_routes_bound()?;

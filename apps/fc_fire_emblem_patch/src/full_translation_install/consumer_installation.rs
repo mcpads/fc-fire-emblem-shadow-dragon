@@ -151,19 +151,21 @@ pub(super) fn plan_consumer_installation(
         inputs.current_candidate_path,
     )?;
     let targets = inspect_domain_screen_targets()?;
-    let domains = assemble_domain_consumers(
-        inputs.required_domains,
-        inputs.target_unit_counts,
-        &targets
-            .into_iter()
-            .map(|domain| (domain.id, domain.screen_roles))
-            .collect(),
-        &current.domains,
-        inputs.all_chapter_titles_encoded,
-        inputs.all_dialogue_records_encoded && inputs.all_dialogue_runtime_hook_roles_assembled,
-        inputs.dynamic_dialogue_producers_bound,
-        inputs.globally_planned_consumer_roles,
-    )?;
+    let domain_targets = targets
+        .into_iter()
+        .map(|domain| (domain.id, domain.screen_roles))
+        .collect();
+    let domains = assemble_domain_consumers(DomainConsumerAssemblyInputs {
+        required_domains: inputs.required_domains,
+        target_unit_counts: inputs.target_unit_counts,
+        targets: &domain_targets,
+        current: &current.domains,
+        all_chapter_titles_encoded: inputs.all_chapter_titles_encoded,
+        global_dialogue_runtime_planned: inputs.all_dialogue_records_encoded
+            && inputs.all_dialogue_runtime_hook_roles_assembled,
+        dynamic_dialogue_producers_bound: inputs.dynamic_dialogue_producers_bound,
+        additional_globally_planned_roles: inputs.globally_planned_consumer_roles,
+    })?;
 
     let declared_domain_with_carried_consumers_count = domains
         .iter()
@@ -216,16 +218,30 @@ pub(super) fn plan_consumer_installation(
     })
 }
 
-fn assemble_domain_consumers(
-    required_domains: &[&'static str],
-    target_unit_counts: &BTreeMap<&'static str, usize>,
-    targets: &BTreeMap<&'static str, Vec<String>>,
-    current: &BTreeMap<&'static str, DomainInstallation>,
+struct DomainConsumerAssemblyInputs<'a> {
+    required_domains: &'a [&'static str],
+    target_unit_counts: &'a BTreeMap<&'static str, usize>,
+    targets: &'a BTreeMap<&'static str, Vec<String>>,
+    current: &'a BTreeMap<&'static str, DomainInstallation>,
     all_chapter_titles_encoded: bool,
     global_dialogue_runtime_planned: bool,
     dynamic_dialogue_producers_bound: bool,
-    additional_globally_planned_roles: &BTreeMap<&'static str, BTreeSet<String>>,
+    additional_globally_planned_roles: &'a BTreeMap<&'static str, BTreeSet<String>>,
+}
+
+fn assemble_domain_consumers(
+    inputs: DomainConsumerAssemblyInputs<'_>,
 ) -> Result<Vec<DomainConsumerInstallation>> {
+    let DomainConsumerAssemblyInputs {
+        required_domains,
+        target_unit_counts,
+        targets,
+        current,
+        all_chapter_titles_encoded,
+        global_dialogue_runtime_planned,
+        dynamic_dialogue_producers_bound,
+        additional_globally_planned_roles,
+    } = inputs;
     ensure!(
         required_domains
             .iter()

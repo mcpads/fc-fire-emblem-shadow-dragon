@@ -17,7 +17,7 @@ use super::super::{
     unit_record_writers::BoundUnitRecordAddressDomain,
 };
 use super::state_transition_evidence::{
-    StateWriteStep, TransitionPath, bind_state_transition_closure,
+    StateWriteStep, StateWriterSource, TransitionPath, bind_state_transition_closure,
 };
 
 mod map_preparation;
@@ -220,9 +220,11 @@ pub(super) fn bind_screen_substate_dispatches(
             .transitions
             .map(|transitions| {
                 bind_state_transition_closure(
-                    source,
-                    OUTER_SCREEN_BANK,
-                    MAP_DIALOGUE_STATE_ADDRESS,
+                    StateWriterSource {
+                        source,
+                        bank: OUTER_SCREEN_BANK,
+                        state_address: MAP_DIALOGUE_STATE_ADDRESS,
+                    },
                     &handler_domain,
                     |selector| spec.targets.get(usize::from(selector)).copied(),
                     [0],

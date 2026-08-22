@@ -275,20 +275,17 @@ fn select_protected_colors(
         .collect::<Vec<_>>();
     let mut common_collision_count = 0usize;
     while selected_colors.len() < protected_color_count {
+        let scoring = CandidateScoringContext {
+            common,
+            common_collision_count,
+            families: choice_families,
+            family_collision_counts: &family_collision_counts,
+            participant_family_pairs,
+            independent_family_indices,
+        };
         let candidate = (0..color_count)
             .filter(|color| !selected.contains(*color) && !common.contains(*color))
-            .map(|color| {
-                score_candidate(
-                    color,
-                    common,
-                    common_collision_count,
-                    choice_families,
-                    &family_collision_counts,
-                    participant_family_pairs,
-                    independent_family_indices,
-                    color_occurrences[color],
-                )
-            })
+            .map(|color| score_candidate(color, color_occurrences[color], &scoring))
             .min()
             .context("protected battle color placement has no remaining color")?;
         let color = candidate.color;
@@ -308,20 +305,32 @@ fn select_protected_colors(
     ))
 }
 
-fn score_candidate(
-    color: usize,
+struct CandidateScoringContext<'a> {
     common: ColorMask,
     common_collision_count: usize,
-    families: &[ChoiceFamily],
-    family_collision_counts: &[Vec<usize>],
-    participant_family_pairs: &[(usize, usize)],
-    independent_family_indices: &[usize],
+    families: &'a [ChoiceFamily],
+    family_collision_counts: &'a [Vec<usize>],
+    participant_family_pairs: &'a [(usize, usize)],
+    independent_family_indices: &'a [usize],
+}
+
+fn score_candidate(
+    color: usize,
     occurrence_count: usize,
+    context: &CandidateScoringContext<'_>,
 ) -> CandidateScore {
-    let common_collision_count = common_collision_count + usize::from(common.contains(color));
+    let CandidateScoringContext {
+        common,
+        common_collision_count,
+        families,
+        family_collision_counts,
+        participant_family_pairs,
+        independent_family_indices,
+    } = context;
+    let common_collision_count = *common_collision_count + usize::from(common.contains(color));
     let family_maxima = families
         .iter()
-        .zip(family_collision_counts)
+        .zip(family_collision_counts.iter())
         .map(|(family, counts)| {
             family
                 .choices

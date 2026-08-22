@@ -131,7 +131,9 @@ use cross_domain_material_installation::{
     install_cross_domain_material, verify_installed_cross_domain_material,
 };
 use dialogue_storage::{install_encoded_dialogue, verify_installed_dialogue};
-use domain_contributions::{DomainWriteContribution, domain_contributions};
+use domain_contributions::{
+    DomainContributionInputs, DomainWriteContribution, domain_contributions,
+};
 use fixed_projections::{
     fixed_file_offset, install_chapter_save_projection, install_ending_record_projection,
     install_fixed_ui_projection, install_font_page_selector_forwarders,
@@ -366,17 +368,18 @@ pub(super) fn plan_integrated_write_set(
         + output.len()
         - inputs.candidate.data().len();
 
-    let domains = domain_contributions(
-        inputs.required_domains,
-        expected_write_count_before_cross_domain - chapter_title_storage_write_count,
-        chapter_title_storage_write_count,
-        inputs.cross_domain_material,
-        inputs.fixed_ui_projection,
-        inputs.chapter_save_projection,
-        inputs.ending_record_projection,
-        inputs.font_page_selector_forwarders,
-        inputs.consumer_installation,
-    )?;
+    let domains = domain_contributions(DomainContributionInputs {
+        required_domains: inputs.required_domains,
+        expected_dialogue_write_count: expected_write_count_before_cross_domain
+            - chapter_title_storage_write_count,
+        expected_chapter_title_write_count: chapter_title_storage_write_count,
+        cross_domain_material: inputs.cross_domain_material,
+        fixed_ui_projection: inputs.fixed_ui_projection,
+        chapter_save_projection: inputs.chapter_save_projection,
+        ending_record_projection: inputs.ending_record_projection,
+        font_page_selector_forwarders: inputs.font_page_selector_forwarders,
+        consumer_installation: inputs.consumer_installation,
+    })?;
     let declared_domain_with_expected_writes_count = domains
         .iter()
         .filter(|domain| domain.expected_write_count != 0)

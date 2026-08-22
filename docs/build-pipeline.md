@@ -27,6 +27,7 @@ cargo run -p fc-fire-emblem-patch -- verify-source "$ROM"
 ```sh
 cargo fmt --all -- --check
 cargo check -p fc-fire-emblem-patch
+cargo clippy -p fc-fire-emblem-patch --all-targets -- -D warnings
 cargo test -p fc-fire-emblem-patch --no-fail-fast
 
 cargo run -p fc-fire-emblem-patch -- build-kr-patch "$ROM" \
@@ -35,8 +36,6 @@ cargo run -p fc-fire-emblem-patch -- build-kr-patch "$ROM" \
 cargo run -p fc-fire-emblem-patch -- plan-full-translation-installation "$ROM" \
   --output out/fire-emblem-fe1-korean-integrated.nes
 ```
-
-저장소 전역 `cargo clippy -p fc-fire-emblem-patch --all-targets -- -D warnings`는 현재 별도 lint 부채 때문에 녹색 관문이 아니다. 제품 빌드 성공으로 기록하지 않으며, 구조나 ROM 의미 변경과 섞지 않은 전용 정리에서 닫는다.
 
 기본 산출물은 다음과 같다.
 

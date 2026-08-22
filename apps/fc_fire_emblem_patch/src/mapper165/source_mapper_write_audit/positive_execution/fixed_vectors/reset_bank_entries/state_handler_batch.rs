@@ -137,12 +137,14 @@ pub(in super::super::super) fn trace_source_bound_inline_state_handler_batch(
         pending,
         activations,
         return_flow,
-        &BTreeSet::from([(return_bank, return_address)]),
-        &BTreeSet::from([(dispatch_bank, dispatch_call_address)]),
-        None,
-        inline_dispatch_selector_bounds,
-        indirect_write_destination_bounds,
-        absolute_indexed_write_bounds,
+        BankTraceBoundaries {
+            terminal_entries: &BTreeSet::from([(return_bank, return_address)]),
+            terminal_inline_dispatches: &BTreeSet::from([(dispatch_bank, dispatch_call_address)]),
+            scheduler_reentry_inline_dispatch: None,
+            inline_dispatch_selector_bounds,
+            indirect_write_destination_bounds,
+            absolute_indexed_write_bounds,
+        },
         &mut state_transition_call_summaries,
     )
     .context("trace source-bound inline state-handler batch")?;

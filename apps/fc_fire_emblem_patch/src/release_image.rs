@@ -123,7 +123,7 @@ pub(crate) fn build_release_image(cumulative: &Rom) -> Result<(Vec<u8>, ReleaseI
         chr.len()
     );
     ensure!(
-        chr.len() % CHR_PAGE_SIZE == 0,
+        chr.len().is_multiple_of(CHR_PAGE_SIZE),
         "cumulative CHR is not a whole number of 4 KiB pages"
     );
 

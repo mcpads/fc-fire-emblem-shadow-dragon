@@ -315,15 +315,11 @@ pub(in crate::full_translation_install::integrated_write_set) fn materialize_mut
         if identity.expected.len() != identity.replacement.len() {
             return None;
         }
-        let Some(end) = identity.offset.checked_add(identity.expected.len()) else {
-            return None;
-        };
+        let end = identity.offset.checked_add(identity.expected.len())?;
         if baseline.get(identity.offset..end) != Some(identity.expected.as_slice()) {
             return None;
         }
-        let Some(range) = covered.get_mut(identity.offset..end) else {
-            return None;
-        };
+        let range = covered.get_mut(identity.offset..end)?;
         if range.iter().any(|covered| *covered) {
             return None;
         }

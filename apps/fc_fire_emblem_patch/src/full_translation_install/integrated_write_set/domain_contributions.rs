@@ -25,17 +25,32 @@ pub(super) struct DomainWriteContribution {
     pub(super) complete_for_declared_domain_plan: bool,
 }
 
+pub(super) struct DomainContributionInputs<'a> {
+    pub(super) required_domains: &'a [&'static str],
+    pub(super) expected_dialogue_write_count: usize,
+    pub(super) expected_chapter_title_write_count: usize,
+    pub(super) cross_domain_material: &'a CrossDomainMaterialPlan,
+    pub(super) fixed_ui_projection: &'a FixedUiProjectionPlan,
+    pub(super) chapter_save_projection: &'a ChapterSaveProjectionPlan,
+    pub(super) ending_record_projection: &'a EndingRecordProjectionPlan,
+    pub(super) font_page_selector_forwarders: &'a FontPageSelectorForwarderPlan,
+    pub(super) consumer_installation: &'a ConsumerInstallationPlan,
+}
+
 pub(super) fn domain_contributions(
-    required_domains: &[&'static str],
-    expected_dialogue_write_count: usize,
-    expected_chapter_title_write_count: usize,
-    cross_domain_material: &CrossDomainMaterialPlan,
-    fixed_ui_projection: &FixedUiProjectionPlan,
-    chapter_save_projection: &ChapterSaveProjectionPlan,
-    ending_record_projection: &EndingRecordProjectionPlan,
-    font_page_selector_forwarders: &FontPageSelectorForwarderPlan,
-    consumer_installation: &ConsumerInstallationPlan,
+    inputs: DomainContributionInputs<'_>,
 ) -> Result<Vec<DomainWriteContribution>> {
+    let DomainContributionInputs {
+        required_domains,
+        expected_dialogue_write_count,
+        expected_chapter_title_write_count,
+        cross_domain_material,
+        fixed_ui_projection,
+        chapter_save_projection,
+        ending_record_projection,
+        font_page_selector_forwarders,
+        consumer_installation,
+    } = inputs;
     ensure!(
         required_domains.len() == 14
             && required_domains.contains(&"main_dialogue")

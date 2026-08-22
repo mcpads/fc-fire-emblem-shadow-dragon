@@ -84,16 +84,30 @@ struct VisiblePageRecipe {
     target_glyphs: Vec<char>,
 }
 
+pub(super) struct DialogueRuntimeCompositionInputs<'a> {
+    pub(super) dialogue: &'a MainDialogueDisplayPlan,
+    pub(super) transition_graph: &'a MainDialogueGraphReport,
+    pub(super) runtime_worksets: &'a [GlyphWorkset],
+    pub(super) codebook: &'a GlyphWorksetPagePlan,
+    pub(super) dynamic_page_codes: &'a DynamicStringPageCodePlan,
+    pub(super) source_font_page: &'a [u8],
+    pub(super) static_page_pack: &'a [u8],
+    pub(super) additional_target_glyphs: &'a BTreeSet<char>,
+}
+
 pub(super) fn plan_dialogue_runtime_composition(
-    dialogue: &MainDialogueDisplayPlan,
-    transition_graph: &MainDialogueGraphReport,
-    runtime_worksets: &[GlyphWorkset],
-    codebook: &GlyphWorksetPagePlan,
-    dynamic_page_codes: &DynamicStringPageCodePlan,
-    source_font_page: &[u8],
-    static_page_pack: &[u8],
-    additional_target_glyphs: &BTreeSet<char>,
+    inputs: DialogueRuntimeCompositionInputs<'_>,
 ) -> Result<DialogueRuntimeCompositionPlan> {
+    let DialogueRuntimeCompositionInputs {
+        dialogue,
+        transition_graph,
+        runtime_worksets,
+        codebook,
+        dynamic_page_codes,
+        source_font_page,
+        static_page_pack,
+        additional_target_glyphs,
+    } = inputs;
     ensure!(
         source_font_page.len() == FONT_PAGE_SIZE,
         "dialogue runtime composition source page length changed"
@@ -297,10 +311,12 @@ pub(super) fn plan_dialogue_runtime_composition(
         dialogue,
         codebook,
         dynamic_page_codes,
-        &glyph_atlas_indices,
         &record_worksets,
-        &workset_recipe_indices,
-        &unique_recipes.iter().cloned().collect::<Vec<_>>(),
+        ScanRecipeCatalog {
+            glyph_atlas_indices: &glyph_atlas_indices,
+            workset_recipe_indices: &workset_recipe_indices,
+            unique_recipes: &unique_recipes.iter().cloned().collect::<Vec<_>>(),
+        },
         atlas_cpu_base,
         scan_section_container_offset,
     )?;
@@ -600,17 +616,26 @@ struct EncodedScanMaterial {
     record_recipe_directory_offset: usize,
 }
 
+struct ScanRecipeCatalog<'a> {
+    glyph_atlas_indices: &'a BTreeMap<char, usize>,
+    workset_recipe_indices: &'a [usize],
+    unique_recipes: &'a [VisiblePageRecipe],
+}
+
 fn encode_scan_material(
     dialogue: &MainDialogueDisplayPlan,
     codebook: &GlyphWorksetPagePlan,
     dynamic_page_codes: &DynamicStringPageCodePlan,
-    glyph_atlas_indices: &BTreeMap<char, usize>,
     record_worksets: &BTreeMap<&str, Vec<usize>>,
-    workset_recipe_indices: &[usize],
-    unique_recipes: &[VisiblePageRecipe],
+    recipes: ScanRecipeCatalog<'_>,
     atlas_cpu_base: u16,
     section_container_offset: usize,
 ) -> Result<EncodedScanMaterial> {
+    let ScanRecipeCatalog {
+        glyph_atlas_indices,
+        workset_recipe_indices,
+        unique_recipes,
+    } = recipes;
     let mut encoded = Vec::new();
     let reference_byte_count = dialogue.page_worksets.len() * 2;
     let directory_byte_count = (dialogue.record_ids.len() + 1) * 2;

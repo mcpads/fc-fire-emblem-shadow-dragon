@@ -17,8 +17,8 @@ pub(super) fn page_with(writes: &[(usize, &[u8])]) -> Vec<u8> {
     page
 }
 
-pub(super) fn source_scan<'a>(
-    pages: &'a [Vec<u8>],
+pub(super) fn source_scan(
+    pages: &[Vec<u8>],
     projections: &[MappedPrgProjection],
     completeness: ProjectionLedgerCompleteness,
 ) -> AllByteMapperWriteScan<SourceMmc4Register> {

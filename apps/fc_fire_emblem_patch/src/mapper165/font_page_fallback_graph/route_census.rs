@@ -81,23 +81,23 @@ pub(super) fn bind_routes(
     for target in nodes {
         let expected = routes
             .iter()
-            .filter_map(|route| {
-                (route.target_cpu_address == target.cpu_address
+            .filter(|route| {
+                route.target_cpu_address == target.cpu_address
                     && matches!(
                         route.transfer_kind,
                         FontPageFallbackTransferKind::Call | FontPageFallbackTransferKind::Jump
-                    ))
-                .then(|| {
-                    (
-                        route.source_cpu_address,
-                        match route.transfer_kind {
-                            FontPageFallbackTransferKind::Call => JSR_ABSOLUTE,
-                            FontPageFallbackTransferKind::Jump => JMP_ABSOLUTE,
-                            FontPageFallbackTransferKind::ConditionalBranch => unreachable!(),
-                        },
-                        route.target_cpu_address,
                     )
-                })
+            })
+            .map(|route| {
+                (
+                    route.source_cpu_address,
+                    match route.transfer_kind {
+                        FontPageFallbackTransferKind::Call => JSR_ABSOLUTE,
+                        FontPageFallbackTransferKind::Jump => JMP_ABSOLUTE,
+                        FontPageFallbackTransferKind::ConditionalBranch => unreachable!(),
+                    },
+                    route.target_cpu_address,
+                )
             })
             .collect::<Vec<_>>();
         let actual = external_direct_transfer_candidates(

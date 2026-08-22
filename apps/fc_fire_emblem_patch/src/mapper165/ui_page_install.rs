@@ -256,7 +256,7 @@ pub(crate) fn install_mapper165_ui_pages_from_parity(
     );
     let options_lifetime =
         inspect_options_lifetime(options_screen_evidence_path, &option_target_codes)?;
-    let page_pack = assemble_hangul_page_pack(&source_rom, &localization)?;
+    let page_pack = assemble_hangul_page_pack(source_rom, &localization)?;
     ensure!(
         page_pack.len() == OPTIONS_PAGE_COUNT * CHR_PAGE_SIZE,
         "UI page installation needs exactly two 4 KiB pages"
