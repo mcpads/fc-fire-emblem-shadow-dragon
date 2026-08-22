@@ -19,7 +19,8 @@ use crate::{
 };
 
 use super::{
-    BATTLE_ACTIVE_START_WRITES, OUTPUT_MAPPER,
+    BATTLE_COMPOSITION_LIFETIME_START_WRITES, OUTPUT_MAPPER,
+    SOUND_TEST_BATTLE_COMPOSITION_LIFETIME_START_WRITE,
     battle_codebook_plan::{BattleRuntimeRecipeInput, inspect_runtime_recipe_input},
     battle_text_cache_probe::{
         COLOR_BIT_MASKS_CPU_ADDRESS, DYNAMIC_ASSIGNMENT_CODE_CPU_ADDRESS,
@@ -498,7 +499,7 @@ pub(crate) fn build_battle_composition_loader(
         central_fallback_target,
         layout.battle_central_right_fd_selector,
     )?;
-    install_battle_remap_initializers(&mut image, layout)?;
+    install_battle_lifetime_remap_initializers(&mut image, layout)?;
     install_final_dialogue_cache_refresh(&mut image, layout)?;
     image.verify_all_changes_tracked(&base)?;
     let runtime_tracked_write_count = image.writes().len();
@@ -592,11 +593,12 @@ pub(crate) fn build_battle_composition_loader(
         remap_overflow_aborts_composition: true,
         shared_text_projection_hook_address_hex: format!("0x{SOURCE_COMMON_GLYPH_READ:04X}"),
         shared_text_projection_installed: true,
-        battle_initializer_hook_count: BATTLE_ACTIVE_START_WRITES.len(),
+        battle_initializer_hook_count: BATTLE_COMPOSITION_LIFETIME_START_WRITES.len(),
         battle_initializers_reopen_composition: true,
         sound_test_battle_initializer_hook_address_hex: format!(
             "0x{:02X}:0x{:04X}",
-            BATTLE_ACTIVE_START_WRITES[3].0, BATTLE_ACTIVE_START_WRITES[3].1
+            SOUND_TEST_BATTLE_COMPOSITION_LIFETIME_START_WRITE.0,
+            SOUND_TEST_BATTLE_COMPOSITION_LIFETIME_START_WRITE.1
         ),
         sound_test_shared_battle_activation_installed: true,
         sound_test_battle_recomposition_boundary_installed: true,
@@ -726,11 +728,11 @@ fn verify_material_runtime_region(
     Ok(())
 }
 
-fn install_battle_remap_initializers(
+fn install_battle_lifetime_remap_initializers(
     image: &mut TrackedImage,
     layout: BattleCompositionRuntimeLayout,
 ) -> Result<()> {
-    for (bank, address) in BATTLE_ACTIVE_START_WRITES {
+    for (bank, address) in BATTLE_COMPOSITION_LIFETIME_START_WRITES {
         image.write_expected(
             format!("battle remap-state initializer at {bank:02X}:${address:04X}"),
             switchable_bank_file_offset(bank, address)?,

@@ -1,4 +1,5 @@
 use super::{dynamic_assignment::build_dynamic_assignment_routines, runtime::*, *};
+use crate::mapper165::SAME_BATTLE_ROUND_ACTIVATION_WRITE;
 
 #[test]
 fn runtime_routines_fit_the_fixed_cave_without_overlap() {
@@ -297,21 +298,33 @@ fn battle_initializer_preserves_source_effect_and_reopens_composition() {
 }
 
 #[test]
-fn every_battle_start_redirects_through_the_remap_initializer() {
+fn battle_lifetime_starts_reopen_composition_without_clearing_same_battle_rounds() {
     let mut bytes = crate::test_support::synthetic_mapper165_rom_bytes(0xFF);
-    for (bank, address) in BATTLE_ACTIVE_START_WRITES {
+    for (bank, address) in BATTLE_COMPOSITION_LIFETIME_START_WRITES {
         let offset = switchable_bank_file_offset(bank, address).unwrap();
         bytes[offset..offset + 3].copy_from_slice(
             &assemble_at(address, &[Instruction::StaAbsolute(BATTLE_ACTIVE_FLAG)]).unwrap(),
         );
     }
+    let (round_bank, round_address) = SAME_BATTLE_ROUND_ACTIVATION_WRITE;
+    let round_offset = switchable_bank_file_offset(round_bank, round_address).unwrap();
+    bytes[round_offset..round_offset + 3].copy_from_slice(
+        &assemble_at(
+            round_address,
+            &[Instruction::StaAbsolute(BATTLE_ACTIVE_FLAG)],
+        )
+        .unwrap(),
+    );
     let mut image = TrackedImage::new(bytes);
 
-    install_battle_remap_initializers(&mut image, PROBE_RUNTIME_LAYOUT).unwrap();
+    install_battle_lifetime_remap_initializers(&mut image, PROBE_RUNTIME_LAYOUT).unwrap();
 
-    assert_eq!(image.writes().len(), BATTLE_ACTIVE_START_WRITES.len());
+    assert_eq!(
+        image.writes().len(),
+        BATTLE_COMPOSITION_LIFETIME_START_WRITES.len()
+    );
     let output = image.into_data();
-    for (bank, address) in BATTLE_ACTIVE_START_WRITES {
+    for (bank, address) in BATTLE_COMPOSITION_LIFETIME_START_WRITES {
         let offset = switchable_bank_file_offset(bank, address).unwrap();
         assert_eq!(
             &output[offset..offset + 3],
@@ -324,6 +337,15 @@ fn every_battle_start_redirects_through_the_remap_initializer() {
             .unwrap()
         );
     }
+    assert_eq!(
+        &output[round_offset..round_offset + 3],
+        assemble_at(
+            round_address,
+            &[Instruction::StaAbsolute(BATTLE_ACTIVE_FLAG)]
+        )
+        .unwrap()
+        .as_slice()
+    );
 }
 
 #[test]
@@ -472,7 +494,7 @@ fn composition_report_omits_translation_content_and_private_paths() {
         remap_overflow_aborts_composition: true,
         shared_text_projection_hook_address_hex: "0xE57F".to_owned(),
         shared_text_projection_installed: true,
-        battle_initializer_hook_count: BATTLE_ACTIVE_START_WRITES.len(),
+        battle_initializer_hook_count: BATTLE_COMPOSITION_LIFETIME_START_WRITES.len(),
         battle_initializers_reopen_composition: true,
         sound_test_battle_initializer_hook_address_hex: "0x07:0xAC17".to_owned(),
         sound_test_shared_battle_activation_installed: true,

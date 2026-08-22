@@ -28,6 +28,8 @@ use crate::{
 };
 
 use super::{
+    BATTLE_COMPOSITION_LIFETIME_START_WRITES, SAME_BATTLE_ROUND_ACTIVATION_WRITE,
+    SOUND_TEST_BATTLE_COMPOSITION_LIFETIME_START_WRITE,
     battle_codebook_plan::{
         bind_known_battle_text_consumer_topology, plan_battle_cache_composition_material,
         plan_canonical_battle_codebook,
@@ -87,7 +89,7 @@ pub(crate) struct CarriedBattleDomainPreservation {
     shared_screen_roles: Vec<&'static str>,
     shared_font_regions: Vec<FinalRegionBinding>,
     shared_consumer_regions: Vec<FinalRegionBinding>,
-    shared_consumer_route_binding_ids: Vec<&'static str>,
+    shared_consumer_route_binding_ids: Vec<String>,
     shared_sprite_chr_supply: BattleChrSupplyPlan,
     all_translation_inputs_rebound: bool,
     all_storage_regions_rebound: bool,
@@ -265,21 +267,32 @@ pub(crate) fn inspect_carried_battle_domains(
     let shared_consumer_regions = bind_shared_consumer_route(&inputs)?;
     let shared_sprite_chr_supply =
         bind_battle_chr_supply(inputs.source, inputs.cumulative, inputs.integrated)?;
+    let (round_bank, round_address) = SAME_BATTLE_ROUND_ACTIVATION_WRITE;
+    let [main_start, arena_start, sound_start] = BATTLE_COMPOSITION_LIFETIME_START_WRITES;
     let shared_consumer_route_binding_ids = vec![
-        "04:800F:guard_final_battle_dialogue_cache",
-        "04:BF40:refresh_battle_dialogue_cache",
-        "05:85A5:read_battle_dialogue_override",
-        "05:82BB:initialize_battle_remap",
-        "06:9300:initialize_battle_remap",
-        "06:9D52:initialize_battle_remap",
-        "07:AC17:initialize_battle_remap",
-        "0F:C191:dispatch_battle_composition",
-        "0F:E57F:project_shared_battle_text_code",
-        "0F:FA80:select_battle_right_fd_page",
-        "0F:FAA0:select_battle_right_fe_page",
-        "0F:FC20:compose_shared_battle_page",
-        "0F:FF1D:select_battle_or_integrated_fallback_page",
-        "integrated:battle_composer_invalidates_dialogue_residency",
+        "04:800F:guard_final_battle_dialogue_cache".to_owned(),
+        "04:BF40:refresh_battle_dialogue_cache".to_owned(),
+        "05:85A5:read_battle_dialogue_override".to_owned(),
+        format!("{round_bank:02X}:{round_address:04X}:preserve_same_battle_round_activation"),
+        format!(
+            "{:02X}:{:04X}:initialize_battle_remap",
+            main_start.0, main_start.1
+        ),
+        format!(
+            "{:02X}:{:04X}:initialize_battle_remap",
+            arena_start.0, arena_start.1
+        ),
+        format!(
+            "{:02X}:{:04X}:initialize_battle_remap",
+            sound_start.0, sound_start.1
+        ),
+        "0F:C191:dispatch_battle_composition".to_owned(),
+        "0F:E57F:project_shared_battle_text_code".to_owned(),
+        "0F:FA80:select_battle_right_fd_page".to_owned(),
+        "0F:FAA0:select_battle_right_fe_page".to_owned(),
+        "0F:FC20:compose_shared_battle_page".to_owned(),
+        "0F:FF1D:select_battle_or_integrated_fallback_page".to_owned(),
+        "integrated:battle_composer_invalidates_dialogue_residency".to_owned(),
     ];
 
     let domains = vec![
@@ -627,11 +640,19 @@ fn bind_shared_consumer_route(
             inputs.integrated,
         )?);
     }
+    let (round_bank, round_address) = SAME_BATTLE_ROUND_ACTIVATION_WRITE;
+    let (sound_bank, sound_address) = SOUND_TEST_BATTLE_COMPOSITION_LIFETIME_START_WRITE;
     for (role, bank, address, byte_count) in [
         ("battle_dialogue_final_loader", 0x04, 0x8000, 29),
         ("battle_dialogue_cache_refresh", 0x04, 0xBF40, 0x40),
         ("battle_dialogue_override_reader", 0x05, 0x85A5, 9),
-        ("sound_test_battle_remap_initializer", 0x07, 0xAC17, 3),
+        ("same_battle_round_activation", round_bank, round_address, 3),
+        (
+            "sound_test_battle_remap_initializer",
+            sound_bank,
+            sound_address,
+            3,
+        ),
     ] {
         regions.push(bind_preserved_region(
             role,

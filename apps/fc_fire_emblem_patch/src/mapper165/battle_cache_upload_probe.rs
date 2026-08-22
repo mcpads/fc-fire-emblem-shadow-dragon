@@ -14,7 +14,7 @@ use crate::{
 };
 
 use super::{
-    OUTPUT_MAPPER,
+    BATTLE_ACTIVE_ONE_WRITES, OUTPUT_MAPPER,
     battle_cache_coverage::{
         ENEMY_INITIATED_STATE, FIELD_PREDICATE_ADDRESS, PLAYER_INITIATED_STATE, PREDICATE_ADDRESS,
         build_field_predicate, build_participant_predicate,
@@ -384,7 +384,7 @@ fn verify_battle_active_flag_contract(parity: &[u8]) -> Result<()> {
         prg.windows(write_pattern.len())
             .filter(|bytes| *bytes == write_pattern)
             .count()
-            == 5,
+            == BATTLE_ACTIVE_ONE_WRITES.len() + 1,
         "battle-active flag direct write count changed"
     );
 
@@ -406,29 +406,29 @@ fn verify_battle_active_flag_contract(parity: &[u8]) -> Result<()> {
         ],
         "battle-active zeroing writer",
     )?;
-    for (bank, address) in [(0x05, 0x82B9), (0x06, 0x92FE), (0x06, 0x9D50)] {
+    for &(bank, write_address) in &BATTLE_ACTIVE_ONE_WRITES[..3] {
+        let address = write_address
+            .checked_sub(2)
+            .context("battle-active literal-one writer start underflow")?;
         verify_switchable_bytes(
             parity,
             bank,
             address,
             &[0xA9, 0x01, 0x8D, 0x7D, 0x04],
-            "battle-active initializer",
+            "battle-active literal-one writer",
         )?;
     }
+    let (sound_bank, sound_write_address) = BATTLE_ACTIVE_ONE_WRITES[3];
     verify_switchable_bytes(
         parity,
-        0x07,
-        0xAC12,
+        sound_bank,
+        sound_write_address
+            .checked_sub(5)
+            .context("sound-test battle-active writer start underflow")?,
         &[0xA9, 0x01, 0x8D, 0xED, 0x05, 0x8D, 0x7D, 0x04],
-        "sound-test battle-active initializer",
+        "sound-test battle-active literal-one writer",
     )?;
-    for (bank, address) in [
-        (0x05, 0x8100),
-        (0x05, 0x82BB),
-        (0x06, 0x9300),
-        (0x06, 0x9D52),
-        (0x07, 0xAC17),
-    ] {
+    for (bank, address) in std::iter::once((0x05, 0x8100)).chain(BATTLE_ACTIVE_ONE_WRITES) {
         verify_switchable_bytes(
             parity,
             bank,
