@@ -58,7 +58,7 @@ pub(crate) use hp_bar_queue_publication::{
 };
 pub(crate) use runtime::composition_dispatch_for_layout;
 use runtime::{
-    RuntimeRoutine, battle_central_right_fd_selector_for_layout, battle_surface_active_for_layout,
+    RuntimeRoutine, battle_central_right_fd_selector_for_layout, battle_surface_visible_for_layout,
     build_runtime_routines, build_runtime_routines_for_layout,
     central_right_fe_resupply_natural_tail_for_layout,
     central_right_fe_resupply_selector_for_layout, parse_recipe_directories,
@@ -69,8 +69,8 @@ pub(crate) fn cumulative_battle_composition_dispatch_bytes() -> Result<Vec<u8>> 
     composition_dispatch_for_layout(CUMULATIVE_RUNTIME_LAYOUT)
 }
 
-pub(crate) fn cumulative_battle_surface_active_bytes() -> Result<Vec<u8>> {
-    battle_surface_active_for_layout(CUMULATIVE_RUNTIME_LAYOUT)
+pub(crate) fn cumulative_battle_surface_visibility_bytes() -> Result<Vec<u8>> {
+    battle_surface_visible_for_layout(CUMULATIVE_RUNTIME_LAYOUT)
 }
 
 pub(crate) fn cumulative_battle_central_right_fd_selector(fallback_target: u16) -> Result<Vec<u8>> {
@@ -107,9 +107,8 @@ const APPLY_RECIPE_ADDRESS: u16 = 0xFC60;
 const APPLY_DIRECTORY_ADDRESS: u16 = 0xFCE0;
 const APPLY_PARTICIPANT_ADDRESS: u16 = 0xFD00;
 const PROJECT_DIALOGUE_SELECTOR_ADDRESS: u16 = 0xFD30;
-const BATTLE_SURFACE_ACTIVE_ADDRESS: u16 = 0xFD50;
+const BATTLE_SURFACE_VISIBLE_ADDRESS: u16 = 0xFD50;
 const INITIALIZE_BATTLE_REMAP_ADDRESS: u16 = 0xFD80;
-const CLEAR_REMAP_STATE_OUTSIDE_SHARED_BATTLE_ADDRESS: u16 = 0xFE50;
 const BATTLE_RIGHT_FD_SELECTOR_ADDRESS: u16 = 0xFEA0;
 const BATTLE_CENTRAL_RIGHT_FD_SELECTOR_ADDRESS: u16 = 0xFEE0;
 const BATTLE_RIGHT_FE_SELECTOR_ADDRESS: u16 = 0xFF20;
@@ -124,14 +123,15 @@ const POST_DATA_CAVE_END_ADDRESS: u16 = 0xFFC0;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct BattleCompositionRuntimeLayout {
     pub(crate) dispatch: u16,
+    pub(crate) composition_gate: u16,
+    pub(crate) composition_call_site: u16,
     pub(crate) compose_page: u16,
     pub(crate) apply_recipe: u16,
     pub(crate) apply_directory: u16,
     pub(crate) apply_participant: u16,
     pub(crate) project_dialogue_selector: u16,
-    pub(crate) battle_surface_active: u16,
+    pub(crate) battle_surface_visible: u16,
     pub(crate) initialize_battle_remap: u16,
-    pub(crate) clear_remap_state_outside_shared_battle: u16,
     pub(crate) text_projection_wrapper: u16,
     pub(crate) battle_right_fd_selector: u16,
     pub(crate) battle_central_right_fd_selector: u16,
@@ -143,17 +143,24 @@ pub(crate) struct BattleCompositionRuntimeLayout {
     pub(crate) post_data_cave_end: u16,
 }
 
+impl BattleCompositionRuntimeLayout {
+    pub(crate) const fn composition_return_site(self) -> u16 {
+        self.composition_call_site + 3
+    }
+}
+
 pub(crate) const PROBE_RUNTIME_LAYOUT: BattleCompositionRuntimeLayout =
     BattleCompositionRuntimeLayout {
         dispatch: DISPATCH_ADDRESS,
+        composition_gate: 0xFB11,
+        composition_call_site: 0xFB1C,
         compose_page: COMPOSE_PAGE_ADDRESS,
         apply_recipe: APPLY_RECIPE_ADDRESS,
         apply_directory: APPLY_DIRECTORY_ADDRESS,
         apply_participant: APPLY_PARTICIPANT_ADDRESS,
         project_dialogue_selector: PROJECT_DIALOGUE_SELECTOR_ADDRESS,
-        battle_surface_active: BATTLE_SURFACE_ACTIVE_ADDRESS,
+        battle_surface_visible: BATTLE_SURFACE_VISIBLE_ADDRESS,
         initialize_battle_remap: INITIALIZE_BATTLE_REMAP_ADDRESS,
-        clear_remap_state_outside_shared_battle: CLEAR_REMAP_STATE_OUTSIDE_SHARED_BATTLE_ADDRESS,
         text_projection_wrapper: TEXT_PROJECTION_WRAPPER_ADDRESS,
         battle_right_fd_selector: BATTLE_RIGHT_FD_SELECTOR_ADDRESS,
         battle_central_right_fd_selector: BATTLE_CENTRAL_RIGHT_FD_SELECTOR_ADDRESS,
@@ -168,14 +175,15 @@ pub(crate) const PROBE_RUNTIME_LAYOUT: BattleCompositionRuntimeLayout =
 pub(crate) const CUMULATIVE_RUNTIME_LAYOUT: BattleCompositionRuntimeLayout =
     BattleCompositionRuntimeLayout {
         dispatch: 0xFC20,
+        composition_gate: 0xFC3E,
+        composition_call_site: 0xFC49,
         compose_page: 0xFC99,
         apply_recipe: 0xFDC2,
         apply_directory: 0xFE3C,
         apply_participant: 0xFE4C,
         project_dialogue_selector: 0xFE75,
-        battle_surface_active: 0xFE90,
-        initialize_battle_remap: 0xFEB3,
-        clear_remap_state_outside_shared_battle: 0xFEC0,
+        battle_surface_visible: 0xFE90,
+        initialize_battle_remap: 0xFEBD,
         text_projection_wrapper: 0xFECE,
         battle_right_fd_selector: 0xFEEE,
         battle_central_right_fd_selector: 0xFF1D,

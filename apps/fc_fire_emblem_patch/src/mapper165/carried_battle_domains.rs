@@ -58,7 +58,6 @@ use chr_supply::{BattleChrSupplyPlan, bind_battle_chr_supply};
 const FIXED_BANK_BYTE_COUNT: usize = 0x4000;
 const MATERIAL_RUNTIME_END_CPU_ADDRESS: u16 = 0x98A0;
 const MATERIAL_RUNTIME_START_CPU_ADDRESS: u16 = 0x95C0;
-const BATTLE_COMPOSITION_CALL_SITE: u16 = 0xFC49;
 
 pub(crate) struct CarriedBattleDomainInputs<'a> {
     pub(crate) source: &'a Rom,
@@ -597,7 +596,7 @@ fn bind_shared_consumer_route(
 ) -> Result<Vec<FinalRegionBinding>> {
     let route = inputs.final_consumer_route;
     ensure!(
-        route.composition_call_address == BATTLE_COMPOSITION_CALL_SITE
+        route.composition_call_address == CUMULATIVE_RUNTIME_LAYOUT.composition_call_site
             && route.composition_call_bytes.len() == 3
             && route.composition_call_bytes[0] == 0x20,
         "integrated battle ownership call changed"
@@ -636,7 +635,7 @@ fn bind_shared_consumer_route(
         "integrated battle selector exceeds its owned cave"
     );
     let [before_front_end, after_front_end] = bind_preserved_battle_runtime_around_front_end(
-        route.composition_call_address + 3,
+        CUMULATIVE_RUNTIME_LAYOUT.composition_return_site(),
         central_start,
         inputs.cumulative,
         inputs.integrated,
@@ -928,7 +927,7 @@ mod tests {
         replaced_bytes[front_end_offset] ^= 1;
         let replaced = Rom::parse(replaced_bytes).unwrap();
         bind_preserved_battle_runtime_around_front_end(
-            0xFC4C,
+            CUMULATIVE_RUNTIME_LAYOUT.composition_return_site(),
             CUMULATIVE_RUNTIME_LAYOUT.battle_central_right_fd_selector,
             &cumulative,
             &replaced,
@@ -940,7 +939,7 @@ mod tests {
         let leaked = Rom::parse(leaked_bytes).unwrap();
         assert!(
             bind_preserved_battle_runtime_around_front_end(
-                0xFC4C,
+                CUMULATIVE_RUNTIME_LAYOUT.composition_return_site(),
                 CUMULATIVE_RUNTIME_LAYOUT.battle_central_right_fd_selector,
                 &cumulative,
                 &leaked,

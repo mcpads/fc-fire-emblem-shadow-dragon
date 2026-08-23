@@ -27,7 +27,6 @@ fn runtime_routines_fit_the_fixed_cave_without_overlap() {
     })
     .unwrap();
 
-    assert_eq!(routines.len(), 16);
     assert!(routines.windows(2).all(|pair| {
         pair[0].address as usize + pair[0].bytes.len() <= pair[1].address as usize
     }));
@@ -294,13 +293,24 @@ fn dispatch_and_composer_restore_post_scan_registers_and_borrowed_scratch() {
     let dispatch = composition_dispatch().unwrap();
     assert!(dispatch.starts_with(&[0x20, 0xD9, 0xC2, 0x08, 0x48, 0x8A, 0x48, 0x98, 0x48]));
     assert!(dispatch.ends_with(&[0x68, 0xA8, 0x68, 0xAA, 0x68, 0x28, 0x60]));
-    assert!(dispatch.windows(3).any(|window| {
+    assert!(dispatch.windows(5).any(|window| {
         window
             == [
-                0x20,
-                CLEAR_REMAP_STATE_OUTSIDE_SHARED_BATTLE_ADDRESS as u8,
-                (CLEAR_REMAP_STATE_OUTSIDE_SHARED_BATTLE_ADDRESS >> 8) as u8,
+                0xA9,
+                0x00,
+                0x8D,
+                REMAP_STATE_ADDRESS as u8,
+                (REMAP_STATE_ADDRESS >> 8) as u8,
             ]
+    }));
+    assert!(dispatch.windows(5).any(|window| {
+        window[..3]
+            == [
+                0xAD,
+                BATTLE_RUNTIME_STATE.active_flag_address as u8,
+                (BATTLE_RUNTIME_STATE.active_flag_address >> 8) as u8,
+            ]
+            && window[3] == 0xF0
     }));
 
     let compose = compose_page(RecipeDirectoryAddresses {
@@ -351,66 +361,93 @@ fn dispatch_and_composer_restore_post_scan_registers_and_borrowed_scratch() {
 }
 
 #[test]
-fn remap_cleanup_preserves_active_phases_and_clears_inactive_phases() {
-    assert_eq!(
-        clear_remap_state_outside_shared_battle().unwrap(),
-        [
-            0xC9,
-            BATTLE_RUNTIME_STATE.shared_phase_count,
-            0x90,
-            0x05,
-            0xA9,
-            0x00,
-            0x8D,
-            REMAP_STATE_ADDRESS as u8,
-            (REMAP_STATE_ADDRESS >> 8) as u8,
-            0x60,
-        ]
-    );
+fn battle_surface_visibility_covers_every_host_and_rejects_non_battle_phase_zero() {
+    let lifetime = BATTLE_RUNTIME_STATE.surface_lifetime;
+    let visible = |main_state, dialogue_substate, sound_test_phase, shared_phase| {
+        run_battle_surface_visibility_predicate(BattleSurfaceInputs {
+            main_state,
+            dialogue_substate,
+            sound_test_phase,
+            shared_phase,
+        })
+    };
+
+    assert!(!visible(0x00, 0x00, 0x00, 0x00));
+    assert!(!visible(0x00, 0x00, 0x00, 0x08));
+    assert!(visible(lifetime.player_battle_main_state, 0, 0, 0x00));
+    assert!(visible(
+        lifetime.player_battle_main_state,
+        0,
+        0,
+        BATTLE_RUNTIME_STATE.terminal_shared_phase() - 1
+    ));
+    assert!(visible(lifetime.enemy_battle_main_state, 0, 0, 0x08));
+    assert!(visible(lifetime.arena_battle_main_state, 0, 0, 0x00));
+    assert!(visible(
+        lifetime.sound_test_main_state,
+        lifetime.sound_test_battle_substate,
+        lifetime.sound_test_shared_battle_phase,
+        0x00
+    ));
+    assert!(!visible(
+        lifetime.sound_test_main_state,
+        lifetime.sound_test_battle_substate - 1,
+        lifetime.sound_test_shared_battle_phase,
+        0x00
+    ));
+    assert!(!visible(
+        lifetime.sound_test_main_state,
+        lifetime.sound_test_battle_substate,
+        lifetime.sound_test_shared_battle_phase - 1,
+        0x00
+    ));
+    for shared_phase in [
+        BATTLE_RUNTIME_STATE.terminal_shared_phase(),
+        BATTLE_RUNTIME_STATE.shared_phase_count,
+        0xFF,
+    ] {
+        assert!(!visible(
+            lifetime.player_battle_main_state,
+            0,
+            0,
+            shared_phase
+        ));
+    }
 }
 
-#[test]
-fn battle_surface_excludes_the_terminal_handoff_phase() {
-    assert_eq!(run_battle_surface_predicate(0x00), 1);
-    assert_eq!(run_battle_surface_predicate(0x08), 1);
-    assert_eq!(
-        run_battle_surface_predicate(BATTLE_RUNTIME_STATE.terminal_shared_phase() - 1),
-        1
-    );
-    assert_eq!(
-        run_battle_surface_predicate(BATTLE_RUNTIME_STATE.terminal_shared_phase()),
-        0
-    );
-    assert_eq!(
-        run_battle_surface_predicate(BATTLE_RUNTIME_STATE.shared_phase_count),
-        0
-    );
-    assert_eq!(run_battle_surface_predicate(0xFF), 0);
+#[derive(Clone, Copy)]
+struct BattleSurfaceInputs {
+    main_state: u8,
+    dialogue_substate: u8,
+    sound_test_phase: u8,
+    shared_phase: u8,
 }
 
-fn run_battle_surface_predicate(phase: u8) -> u8 {
+fn run_battle_surface_visibility_predicate(inputs: BattleSurfaceInputs) -> bool {
     const ZERO: u8 = 0x02;
     const CARRY: u8 = 0x01;
 
-    let bytes = battle_surface_active().unwrap();
-    let origin = PROBE_RUNTIME_LAYOUT.battle_surface_active;
+    let bytes = battle_surface_visible().unwrap();
+    let origin = PROBE_RUNTIME_LAYOUT.battle_surface_visible;
+    let lifetime = BATTLE_RUNTIME_STATE.surface_lifetime;
     let mut a = 0;
     let mut status = 0;
     let mut pc = origin;
 
-    for _ in 0..16 {
+    for _ in 0..32 {
         let offset = usize::from(pc - origin);
         let opcode = bytes[offset];
         pc += 1;
         match opcode {
-            0x60 => return a,
-            0x90 | 0xF0 => {
+            0x60 => return status & ZERO == 0,
+            0xB0 | 0xD0 | 0xF0 => {
                 let displacement = bytes[usize::from(pc - origin)] as i8;
                 pc += 1;
-                let taken = if opcode == 0x90 {
-                    status & CARRY == 0
-                } else {
-                    status & ZERO != 0
+                let taken = match opcode {
+                    0xB0 => status & CARRY != 0,
+                    0xD0 => status & ZERO == 0,
+                    0xF0 => status & ZERO != 0,
+                    _ => unreachable!(),
                 };
                 if taken {
                     pc = pc.wrapping_add_signed(i16::from(displacement));
@@ -421,12 +458,27 @@ fn run_battle_surface_predicate(phase: u8) -> u8 {
                 pc += 1;
                 status = (status & !ZERO) | if a == 0 { ZERO } else { 0 };
             }
+            0xA5 => {
+                let address = u16::from(bytes[usize::from(pc - origin)]);
+                pc += 1;
+                assert_eq!(address, lifetime.main_state_address);
+                a = inputs.main_state;
+                status = (status & !ZERO) | if a == 0 { ZERO } else { 0 };
+            }
             0xAD => {
                 let operand = usize::from(pc - origin);
                 let address = u16::from_le_bytes([bytes[operand], bytes[operand + 1]]);
                 pc += 2;
                 a = match address {
-                    address if address == BATTLE_RUNTIME_STATE.shared_phase_address => phase,
+                    address if address == BATTLE_RUNTIME_STATE.shared_phase_address => {
+                        inputs.shared_phase
+                    }
+                    address if address == lifetime.dialogue_substate_address => {
+                        inputs.dialogue_substate
+                    }
+                    address if address == lifetime.sound_test_phase_address => {
+                        inputs.sound_test_phase
+                    }
                     _ => panic!("unexpected predicate input ${address:04X}"),
                 };
                 status = (status & !ZERO) | if a == 0 { ZERO } else { 0 };
@@ -445,7 +497,7 @@ fn run_battle_surface_predicate(phase: u8) -> u8 {
             _ => panic!("unexpected predicate opcode ${opcode:02X}"),
         }
     }
-    panic!("battle-surface predicate did not return")
+    panic!("battle-surface visibility predicate did not return")
 }
 
 #[test]
@@ -562,7 +614,7 @@ fn recipe_upload_and_shared_text_use_the_same_remap_projection() {
 }
 
 #[test]
-fn runtime_consumers_require_a_visible_shared_battle_phase_and_persistent_remap_state() {
+fn runtime_consumers_require_a_visible_battle_surface_and_persistent_remap_state() {
     for bytes in [
         battle_right_selector(BATTLE_RIGHT_FD_SELECTOR_ADDRESS, 2).unwrap(),
         battle_right_selector(BATTLE_RIGHT_FE_SELECTOR_ADDRESS, 4).unwrap(),
@@ -574,8 +626,8 @@ fn runtime_consumers_require_a_visible_shared_battle_phase_and_persistent_remap_
             window
                 == [
                     0x20,
-                    BATTLE_SURFACE_ACTIVE_ADDRESS as u8,
-                    (BATTLE_SURFACE_ACTIVE_ADDRESS >> 8) as u8,
+                    BATTLE_SURFACE_VISIBLE_ADDRESS as u8,
+                    (BATTLE_SURFACE_VISIBLE_ADDRESS >> 8) as u8,
                 ]
         }));
         assert!(bytes.windows(3).any(|window| {

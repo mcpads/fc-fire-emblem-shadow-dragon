@@ -93,10 +93,26 @@ pub(crate) struct BattleRuntimeStateLayout {
     pub(crate) staging_write_bounds: [u16; 2],
     pub(crate) shared_phase_address: u16,
     pub(crate) shared_phase_count: u8,
+    /// Source trigger for publishing a new composition, not the full visible surface lifetime.
     pub(crate) active_flag_address: u16,
+    pub(crate) surface_lifetime: BattleSurfaceLifetime,
     pub(crate) dialogue_table_set_address: u16,
     pub(crate) dialogue_state_address: u16,
     pub(crate) dialogue_selector_projection: BattleDialogueSelectorProjection,
+}
+
+/// Source screen states that give meaning to the otherwise reusable shared-phase byte.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct BattleSurfaceLifetime {
+    pub(crate) main_state_address: u16,
+    pub(crate) player_battle_main_state: u8,
+    pub(crate) enemy_battle_main_state: u8,
+    pub(crate) arena_battle_main_state: u8,
+    pub(crate) sound_test_main_state: u8,
+    pub(crate) dialogue_substate_address: u16,
+    pub(crate) sound_test_battle_substate: u8,
+    pub(crate) sound_test_phase_address: u16,
+    pub(crate) sound_test_shared_battle_phase: u8,
 }
 
 impl BattleRuntimeStateLayout {
@@ -185,6 +201,17 @@ pub(crate) const BATTLE_RUNTIME_STATE: BattleRuntimeStateLayout = BattleRuntimeS
     shared_phase_address: 0x047C,
     shared_phase_count: 0x20,
     active_flag_address: 0x047D,
+    surface_lifetime: BattleSurfaceLifetime {
+        main_state_address: 0x0084,
+        player_battle_main_state: 0x16,
+        enemy_battle_main_state: 0x32,
+        arena_battle_main_state: 0x1F,
+        sound_test_main_state: 0x04,
+        dialogue_substate_address: 0x05EE,
+        sound_test_battle_substate: 0x0D,
+        sound_test_phase_address: 0x7730,
+        sound_test_shared_battle_phase: 0x05,
+    },
     dialogue_table_set_address: 0x7935,
     dialogue_state_address: 0x7937,
     dialogue_selector_projection: BattleDialogueSelectorProjection {

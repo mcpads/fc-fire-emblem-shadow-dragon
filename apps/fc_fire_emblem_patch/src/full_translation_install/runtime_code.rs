@@ -20,6 +20,7 @@ use crate::{
     mapper165::{
         BoundFontPageRuntimeTakeover, FinalBattleConsumerRoute, FinalBattleConsumerRouteRegion,
         FinalConsumerRouteRegion, FinalRosterConsumerRoute,
+        battle_composition_runtime::CUMULATIVE_RUNTIME_LAYOUT,
     },
     rom::Rom,
     typed_source::decode_rp2a03_sequence,
@@ -405,7 +406,7 @@ impl DialogueRuntimeCodePlan {
             })
             .context("battle composition ownership hook is missing")?;
         ensure!(
-            matches!(hook.site, DialogueRuntimeHookSite::Fixed(address) if address == chr_ram_ownership::BATTLE_COMPOSITION_CALL_SITE)
+            matches!(hook.site, DialogueRuntimeHookSite::Fixed(address) if address == CUMULATIVE_RUNTIME_LAYOUT.composition_call_site)
                 && hook.bytes.len() == 3
                 && hook.bytes[0] == 0x20,
             "battle composition ownership hook is no longer JSR absolute"
@@ -427,7 +428,7 @@ impl DialogueRuntimeCodePlan {
         )?;
         Ok(FinalBattleConsumerRoute {
             central_fallback_target: roster_route.central_fallback_target,
-            composition_call_address: chr_ram_ownership::BATTLE_COMPOSITION_CALL_SITE,
+            composition_call_address: CUMULATIVE_RUNTIME_LAYOUT.composition_call_site,
             composition_call_bytes: hook.bytes.clone(),
             regions: vec![FinalBattleConsumerRouteRegion {
                 role: ownership.role,
@@ -894,7 +895,7 @@ pub(in crate::full_translation_install) fn plan_dialogue_runtime_code(
         DialogueRuntimeHook {
             role: DialogueRuntimeHookRole::BattleComposerInvalidatesDialogueResidency,
             write_role: "battle composer dialogue-residency invalidation hook",
-            site: DialogueRuntimeHookSite::Fixed(chr_ram_ownership::BATTLE_COMPOSITION_CALL_SITE),
+            site: DialogueRuntimeHookSite::Fixed(CUMULATIVE_RUNTIME_LAYOUT.composition_call_site),
             bytes: chr_ram_ownership::ownership_transfer_hook_bytes(ownership_transfer_address)
                 .to_vec(),
         },

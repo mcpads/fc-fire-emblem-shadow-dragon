@@ -12,7 +12,9 @@ use crate::{
     font_slots::FONT_PAGE_SIZE,
     mapper165::{
         BoundFontPageRuntimeTakeover,
-        battle_composition_runtime::cumulative_battle_composition_dispatch_bytes,
+        battle_composition_runtime::{
+            CUMULATIVE_RUNTIME_LAYOUT, cumulative_battle_composition_dispatch_bytes,
+        },
     },
     rom::{HEADER_SIZE, Rom},
     sha1_hex,
@@ -24,8 +26,6 @@ const MAIN_DIALOGUE_BANK: u8 = 0x0A;
 const SOURCE_POINTER_RESOLVER: u16 = 0xE6B2;
 /// 전투 합성이 계속 쓰는 자리다. 소유자가 다르므로 그대로 둔다.
 const BATTLE_NMI_HOOK: u16 = 0xC191;
-const SHARED_NMI_DISPATCH: u16 = 0xFC20;
-const SHARED_NMI_DISPATCH_END: u16 = 0xFC56;
 const SHARED_NMI_EXPANSION_END: u16 = 0xFC60;
 const FIXED_TRAMPOLINE_START: u16 = 0xF400;
 const FIXED_TRAMPOLINE_END: u16 = 0xF4B0;
@@ -138,7 +138,7 @@ struct RuntimeProducer {
 #[derive(Serialize)]
 struct NmiConsumer {
     existing_battle_hook_cpu_address_hex: &'static str,
-    existing_dispatch_cpu_range_hex: &'static str,
+    existing_dispatch_cpu_range_hex: String,
     existing_dispatch_sha1: String,
     exact_ff_expansion_byte_count: usize,
     battle_composition_priority_preserved: bool,
@@ -354,40 +354,49 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         "sample maximum-dialogue completed-page ownership selector",
     )?;
 
+    let shared_dispatch_address = CUMULATIVE_RUNTIME_LAYOUT.dispatch;
     ensure!(
         fixed_bytes(inputs.candidate, BATTLE_NMI_HOOK, 3)?
             == [
                 0x20,
-                SHARED_NMI_DISPATCH as u8,
-                (SHARED_NMI_DISPATCH >> 8) as u8
+                shared_dispatch_address as u8,
+                (shared_dispatch_address >> 8) as u8
             ],
         "current NMI hook no longer calls the shared battle dispatch"
     );
+    let expected_shared_dispatch = cumulative_battle_composition_dispatch_bytes()?;
+    let shared_dispatch_end = shared_dispatch_address
+        .checked_add(
+            u16::try_from(expected_shared_dispatch.len())
+                .context("shared NMI battle dispatch length overflow")?,
+        )
+        .context("shared NMI battle dispatch range overflow")?;
+    ensure!(
+        shared_dispatch_end <= SHARED_NMI_EXPANSION_END,
+        "shared NMI battle dispatch exceeds its fixed expansion boundary"
+    );
     let shared_dispatch = fixed_bytes(
         inputs.candidate,
-        SHARED_NMI_DISPATCH,
-        usize::from(SHARED_NMI_DISPATCH_END - SHARED_NMI_DISPATCH),
+        shared_dispatch_address,
+        expected_shared_dispatch.len(),
     )?;
-    let expected_shared_dispatch = cumulative_battle_composition_dispatch_bytes()?;
     ensure!(
-        expected_shared_dispatch.len()
-            == usize::from(SHARED_NMI_DISPATCH_END - SHARED_NMI_DISPATCH)
-            && shared_dispatch == expected_shared_dispatch,
+        shared_dispatch == expected_shared_dispatch,
         "shared NMI battle dispatch changed"
     );
     decode_rp2a03_sequence(
         shared_dispatch,
-        SHARED_NMI_DISPATCH,
+        shared_dispatch_address,
         "shared NMI battle dispatch",
     )?;
     let nmi_expansion = fixed_bytes(
         inputs.candidate,
-        SHARED_NMI_DISPATCH_END,
-        usize::from(SHARED_NMI_EXPANSION_END - SHARED_NMI_DISPATCH_END),
+        shared_dispatch_end,
+        usize::from(SHARED_NMI_EXPANSION_END - shared_dispatch_end),
     )?;
     ensure!(
         nmi_expansion.iter().all(|byte| *byte == 0xFF),
-        "shared NMI dispatch no longer has its ten-byte expansion"
+        "shared NMI dispatch no longer has an exact FF expansion"
     );
 
     let trampoline = fixed_bytes(
@@ -541,7 +550,9 @@ pub(super) fn plan_dialogue_runtime_control_flow(
         producers,
         nmi_consumer: NmiConsumer {
             existing_battle_hook_cpu_address_hex: "0xC191",
-            existing_dispatch_cpu_range_hex: "0xFC20..0xFC56",
+            existing_dispatch_cpu_range_hex: format!(
+                "0x{shared_dispatch_address:04X}..0x{shared_dispatch_end:04X}"
+            ),
             existing_dispatch_sha1: sha1_hex(shared_dispatch),
             exact_ff_expansion_byte_count: nmi_expansion.len(),
             battle_composition_priority_preserved: true,

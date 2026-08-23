@@ -620,7 +620,7 @@ mod tests {
         dialogue_cache_refresh: Option<InstalledDialogueCacheRefresh>,
     ) -> InstalledCompositionPaths {
         InstalledCompositionPaths {
-            dispatch_return: 0xFC4C,
+            dispatch_return: CUMULATIVE_RUNTIME_LAYOUT.composition_return_site(),
             dialogue_cache_refresh,
         }
     }
@@ -706,7 +706,7 @@ mod tests {
 
         assert_eq!(
             match_battle_composition_return(&prg, CUMULATIVE_RUNTIME_LAYOUT).unwrap(),
-            Some(0xFC4C)
+            Some(CUMULATIVE_RUNTIME_LAYOUT.composition_return_site())
         );
     }
 
@@ -726,8 +726,9 @@ mod tests {
 
     #[test]
     fn runtime_verification_selects_one_lifetime_dispatch_return() {
+        let dispatch_return = CUMULATIVE_RUNTIME_LAYOUT.composition_return_site();
         let event_file = DebugEventFile {
-            events: vec![debug_event(27, 0xFC4C)],
+            events: vec![debug_event(27, dispatch_return)],
         };
 
         let selected = select_composition_event(&event_file, installed_paths(None)).unwrap();
@@ -782,8 +783,12 @@ mod tests {
 
     #[test]
     fn runtime_verification_rejects_ambiguous_lifetime_dispatch_returns() {
+        let dispatch_return = CUMULATIVE_RUNTIME_LAYOUT.composition_return_site();
         let event_file = DebugEventFile {
-            events: vec![debug_event(27, 0xFC4C), debug_event(32, 0xFC4C)],
+            events: vec![
+                debug_event(27, dispatch_return),
+                debug_event(32, dispatch_return),
+            ],
         };
 
         assert!(

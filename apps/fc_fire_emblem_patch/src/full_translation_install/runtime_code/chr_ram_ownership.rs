@@ -10,9 +10,9 @@ use anyhow::{Context, Result, ensure};
 use super::super::runtime_state_storage::REQUEST_STATE;
 use super::{RuntimeRoutine, next_address};
 use crate::{
-    battle_runtime_state::BATTLE_RUNTIME_STATE,
     mapper165::battle_composition_runtime::{
-        CUMULATIVE_RUNTIME_LAYOUT, cumulative_battle_surface_active_bytes,
+        CUMULATIVE_RUNTIME_LAYOUT, cumulative_battle_composition_dispatch_bytes,
+        cumulative_battle_surface_visibility_bytes,
     },
     rom::Rom,
     rp2a03::{Instruction, assemble_at},
@@ -23,35 +23,31 @@ const FIXED_BANK_SIZE: usize = 16 * 1024;
 /// 전투 NMI 디스패처가 활성 플래그와 렌더 상태를 확인하고 4 KiB 합성기를 부르는
 /// 구간이다. 대사 NMI는 이 구간 앞의 전투 화면 predicate와 같은 화면 집합을 먼저
 /// 확인해 이 합성기와 한 프레임을 공유하지 않는다.
-const BATTLE_COMPOSITION_GATE: u16 = 0xFC3E;
-const BATTLE_COMPOSITION_SKIP: u16 = 0xFC4F;
-pub(super) const BATTLE_COMPOSITION_CALL_SITE: u16 = 0xFC49;
-const PPU_MASK_SHADOW: u8 = 0xCC;
-const UPLOAD_RENDER_MASK: u8 = 0x06;
 /// 전투 합성 진입과 후보의 직접 CHR-RAM 선택자 전수를 현재 누적 롬에 결속한다.
 pub(super) fn bind_shared_chr_ram_ownership_boundary(candidate: &Rom) -> Result<()> {
     let expected_gate = battle_composition_gate()?;
     ensure!(
-        fixed_bytes(candidate, BATTLE_COMPOSITION_GATE, expected_gate.len())? == expected_gate,
+        fixed_bytes(candidate, expected_gate.address, expected_gate.bytes.len())?
+            == expected_gate.bytes,
         "battle composition arbitration gate changed"
     );
     decode_rp2a03_sequence(
-        &expected_gate,
-        BATTLE_COMPOSITION_GATE,
+        &expected_gate.bytes,
+        expected_gate.address,
         "battle composition arbitration gate",
     )?;
-    let surface_predicate = cumulative_battle_surface_active_bytes()?;
+    let surface_predicate = cumulative_battle_surface_visibility_bytes()?;
     ensure!(
         fixed_bytes(
             candidate,
-            CUMULATIVE_RUNTIME_LAYOUT.battle_surface_active,
+            CUMULATIVE_RUNTIME_LAYOUT.battle_surface_visible,
             surface_predicate.len(),
         )? == surface_predicate,
         "battle composition surface predicate changed"
     );
     decode_rp2a03_sequence(
         &surface_predicate,
-        CUMULATIVE_RUNTIME_LAYOUT.battle_surface_active,
+        CUMULATIVE_RUNTIME_LAYOUT.battle_surface_visible,
         "battle composition surface predicate",
     )?;
 
@@ -109,18 +105,50 @@ pub(super) fn bind_shared_chr_ram_ownership_boundary(candidate: &Rom) -> Result<
     Ok(())
 }
 
-fn battle_composition_gate() -> Result<Vec<u8>> {
-    assemble_at(
-        BATTLE_COMPOSITION_GATE,
-        &[
-            Instruction::LdaAbsolute(BATTLE_RUNTIME_STATE.shared_phase_address),
-            Instruction::BmiAbsolute(BATTLE_COMPOSITION_SKIP),
-            Instruction::LdaZeroPage(PPU_MASK_SHADOW),
-            Instruction::CmpImmediate(UPLOAD_RENDER_MASK),
-            Instruction::BneAbsolute(BATTLE_COMPOSITION_SKIP),
-            Instruction::JsrAbsolute(CUMULATIVE_RUNTIME_LAYOUT.compose_page),
-        ],
-    )
+struct BattleCompositionGate {
+    address: u16,
+    call_site: u16,
+    bytes: Vec<u8>,
+}
+
+fn battle_composition_gate() -> Result<BattleCompositionGate> {
+    let layout = CUMULATIVE_RUNTIME_LAYOUT;
+    let dispatch = cumulative_battle_composition_dispatch_bytes()?;
+    let gate_offset = usize::from(
+        layout
+            .composition_gate
+            .checked_sub(layout.dispatch)
+            .context("battle composition gate precedes its dispatcher")?,
+    );
+    let call_offset = usize::from(
+        layout
+            .composition_call_site
+            .checked_sub(layout.dispatch)
+            .context("battle composition call precedes its dispatcher")?,
+    );
+    let call_end = call_offset
+        .checked_add(3)
+        .context("battle composition call range overflow")?;
+    let bytes = dispatch
+        .get(gate_offset..call_end)
+        .context("battle composition gate is outside its generated dispatcher")?
+        .to_vec();
+    ensure!(
+        dispatch.get(call_offset..call_end)
+            == Some(
+                &[
+                    0x20,
+                    layout.compose_page as u8,
+                    (layout.compose_page >> 8) as u8,
+                ][..]
+            ),
+        "battle composition call site is not the generated compositor call"
+    );
+    Ok(BattleCompositionGate {
+        address: layout.composition_gate,
+        call_site: layout.composition_call_site,
+        bytes,
+    })
 }
 
 fn direct_chr_ram_selection() -> Result<Vec<u8>> {
@@ -164,13 +192,10 @@ pub(super) fn ownership_transfer_hook_bytes(entry: u16) -> [u8; 3] {
 /// must clear the pending dialogue request before tail-calling the compositor.
 pub(super) fn verify_installed_ownership_gate(installed: &Rom) -> Result<()> {
     let source_gate = battle_composition_gate()?;
-    let call_offset = source_gate
-        .len()
-        .checked_sub(3)
-        .context("battle composition gate has no call instruction")?;
-    let installed_gate = fixed_bytes(installed, BATTLE_COMPOSITION_GATE, source_gate.len())?;
+    let call_offset = usize::from(source_gate.call_site - source_gate.address);
+    let installed_gate = fixed_bytes(installed, source_gate.address, source_gate.bytes.len())?;
     ensure!(
-        installed_gate[..call_offset] == source_gate[..call_offset],
+        installed_gate[..call_offset] == source_gate.bytes[..call_offset],
         "installed battle composition gate no longer dominates the ownership transfer"
     );
     ensure!(
@@ -233,8 +258,9 @@ mod tests {
     fn a_changed_battle_composition_gate_refuses_installation() {
         let release = chr_ram_ownership_rom();
         let mut bytes = release.data().to_vec();
-        let offset =
-            crate::test_support::synthetic_fixed_bank_file_offset(BATTLE_COMPOSITION_CALL_SITE);
+        let offset = crate::test_support::synthetic_fixed_bank_file_offset(
+            CUMULATIVE_RUNTIME_LAYOUT.composition_call_site,
+        );
         bytes[offset] ^= 0x01;
         let mutated = Rom::parse(bytes).unwrap();
 
@@ -247,7 +273,7 @@ mod tests {
         let release = chr_ram_ownership_rom();
         let mut bytes = release.data().to_vec();
         let offset = crate::test_support::synthetic_fixed_bank_file_offset(
-            CUMULATIVE_RUNTIME_LAYOUT.battle_surface_active,
+            CUMULATIVE_RUNTIME_LAYOUT.battle_surface_visible,
         );
         bytes[offset] ^= 0x01;
         let mutated = Rom::parse(bytes).unwrap();
@@ -280,8 +306,9 @@ mod tests {
         verify_installed_ownership_gate(&installed).unwrap();
 
         let mut gate_mutation = installed.data().to_vec();
-        let gate_offset =
-            crate::test_support::synthetic_fixed_bank_file_offset(BATTLE_COMPOSITION_GATE);
+        let gate_offset = crate::test_support::synthetic_fixed_bank_file_offset(
+            CUMULATIVE_RUNTIME_LAYOUT.composition_gate,
+        );
         gate_mutation[gate_offset + 4] ^= 0x01;
         let error =
             verify_installed_ownership_gate(&Rom::parse(gate_mutation).unwrap()).unwrap_err();
@@ -299,12 +326,12 @@ mod tests {
         let mut bytes = crate::test_support::synthetic_mapper165_rom_bytes(0xFF);
         let composition_gate = battle_composition_gate().unwrap();
         let composition_offset =
-            crate::test_support::synthetic_fixed_bank_file_offset(BATTLE_COMPOSITION_GATE);
-        bytes[composition_offset..composition_offset + composition_gate.len()]
-            .copy_from_slice(&composition_gate);
-        let surface_predicate = cumulative_battle_surface_active_bytes().unwrap();
+            crate::test_support::synthetic_fixed_bank_file_offset(composition_gate.address);
+        bytes[composition_offset..composition_offset + composition_gate.bytes.len()]
+            .copy_from_slice(&composition_gate.bytes);
+        let surface_predicate = cumulative_battle_surface_visibility_bytes().unwrap();
         let surface_offset = crate::test_support::synthetic_fixed_bank_file_offset(
-            CUMULATIVE_RUNTIME_LAYOUT.battle_surface_active,
+            CUMULATIVE_RUNTIME_LAYOUT.battle_surface_visible,
         );
         bytes[surface_offset..surface_offset + surface_predicate.len()]
             .copy_from_slice(&surface_predicate);
@@ -324,8 +351,9 @@ mod tests {
     fn installed_ownership_rom() -> Rom {
         let candidate = chr_ram_ownership_rom();
         let mut bytes = candidate.data().to_vec();
-        let gate_offset =
-            crate::test_support::synthetic_fixed_bank_file_offset(BATTLE_COMPOSITION_CALL_SITE);
+        let gate_offset = crate::test_support::synthetic_fixed_bank_file_offset(
+            CUMULATIVE_RUNTIME_LAYOUT.composition_call_site,
+        );
         bytes[gate_offset..gate_offset + 3].copy_from_slice(&ownership_transfer_hook_bytes(0xF594));
         let transfer = build_battle_composition_ownership_transfer(0xF594).unwrap();
         let transfer_offset =
