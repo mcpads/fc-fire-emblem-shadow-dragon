@@ -459,6 +459,35 @@ mod tests {
     }
 
     #[test]
+    fn release_patch_cli_keeps_source_target_and_artifacts_separate() {
+        let cli = Cli::try_parse_from([
+            "fc-fire-emblem-patch",
+            "build-release-patch",
+            "source.nes",
+            "release.nes",
+            "--output",
+            "release.bps",
+            "--report",
+            "release-patch.json",
+        ])
+        .unwrap();
+        let Command::BuildReleasePatch {
+            source,
+            release,
+            output,
+            report,
+        } = cli.command
+        else {
+            panic!("parsed the wrong command");
+        };
+
+        assert_eq!(source, PathBuf::from("source.nes"));
+        assert_eq!(release, PathBuf::from("release.nes"));
+        assert_eq!(output, PathBuf::from("release.bps"));
+        assert_eq!(report, PathBuf::from("release-patch.json"));
+    }
+
+    #[test]
     fn coverage_cli_keeps_post_build_inputs_separate_from_its_report() {
         let cli = Cli::try_parse_from([
             "fc-fire-emblem-patch",

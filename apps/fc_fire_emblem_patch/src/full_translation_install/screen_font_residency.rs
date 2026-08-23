@@ -56,7 +56,9 @@ pub(super) use dialogue_surfaces::DialogueSurfaceInputs;
 use dialogue_surfaces::{DialogueSurfacePlan, plan_dialogue_surfaces};
 pub(in crate::full_translation_install) use selector_forwarders::FontPageSelectorForwarderPlan;
 use selector_forwarders::plan_font_page_selector_forwarders;
-use source_page_composites::{SOURCE_PAGE_COMPOSITE_STATES, bind_source_page_composite_lifetimes};
+use source_page_composites::{
+    SOURCE_PAGE_COMPOSITE_STATES, bind_post_battle_result_and_next_story_lifetimes,
+};
 use surface_requirements::{
     ScreenFontSurfaceInputs, ScreenFontSurfacePlan, plan_screen_font_surfaces,
 };
@@ -243,13 +245,16 @@ pub(super) fn plan_screen_font_residency(
             && options_lifetime.result_producer_count() == 2,
         "options composite lifetime source ownership changed"
     );
-    let source_page_lifetimes =
-        bind_source_page_composite_lifetimes(inputs.source, inputs.fixed_string_consumers)?;
+    let post_battle_and_next_story_lifetimes = bind_post_battle_result_and_next_story_lifetimes(
+        inputs.source,
+        inputs.fixed_string_consumers,
+    )?;
     ensure!(
-        source_page_lifetimes.states() == SOURCE_PAGE_COMPOSITE_STATES
-            && source_page_lifetimes.preserved_fixed_string_indices() == [0x0B, 0x12, 0x3E]
-            && source_page_lifetimes.producer_count() == SOURCE_PAGE_COMPOSITE_STATES.len(),
-        "source-page composite lifetime ownership changed"
+        post_battle_and_next_story_lifetimes.states() == SOURCE_PAGE_COMPOSITE_STATES
+            && post_battle_and_next_story_lifetimes.preserved_fixed_string_indices()
+                == [0x0B, 0x12, 0x3E]
+            && post_battle_and_next_story_lifetimes.producer_count() == 2,
+        "post-battle result or next-story composite lifetime ownership changed"
     );
     ensure!(
         composite_font_residency_policy(inputs.choice_residency.composite_state())
@@ -672,6 +677,17 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(actual, SOURCE_PAGE_COMPOSITE_STATES);
+    }
+
+    #[test]
+    fn post_battle_result_keeps_the_page_composed_by_the_battle_lifetime() {
+        validate_composite_state_policies().unwrap();
+        assert_eq!(
+            composite_font_residency_policy(
+                source_page_composites::POST_BATTLE_RESULT_RETAINED_COMPOSITE_STATE,
+            ),
+            Some(ScreenFontResidencyPolicy::PostBattleResultRetainsComposedPage)
+        );
     }
 
     #[test]

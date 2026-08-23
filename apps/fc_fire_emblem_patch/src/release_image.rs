@@ -134,11 +134,7 @@ pub(crate) fn build_release_image(cumulative: &Rom) -> Result<(Vec<u8>, ReleaseI
     output.extend_from_slice(chr);
     output.resize(HEADER_SIZE + prg.len() + RELEASE_CHR_SIZE, 0);
 
-    let rebuilt = Rom::parse(output.clone()).context("release image does not parse")?;
-    ensure!(
-        rebuilt.mapper() == EXPECTED_MAPPER,
-        "release header lost the mapper number"
-    );
+    let rebuilt = verify_release_image(&output)?;
     ensure!(rebuilt.prg() == prg, "release packaging changed a PRG byte");
     ensure!(
         &rebuilt.chr()[..chr.len()] == chr
@@ -165,6 +161,30 @@ pub(crate) fn build_release_image(cumulative: &Rom) -> Result<(Vec<u8>, ReleaseI
         header_declares_chr_ram: true,
     };
     Ok((output, plan))
+}
+
+/// 배포 패치가 임의의 매퍼 165 ROM을 최종 이미지로 오인하지 않도록, 이 단계가
+/// 소유하는 헤더와 주소 가능 크기를 한곳에서 다시 검사한다.
+pub(crate) fn verify_release_image(image: &[u8]) -> Result<Rom> {
+    let expected_header = release_header(RELEASE_PRG_SIZE, RELEASE_CHR_SIZE)?;
+    ensure!(
+        image.get(..HEADER_SIZE) == Some(expected_header.as_slice()),
+        "release image header differs from the verified mapper 165 package"
+    );
+    let release = Rom::parse(image.to_vec()).context("release image does not parse")?;
+    ensure!(
+        release.mapper() == EXPECTED_MAPPER,
+        "release header lost the mapper number"
+    );
+    ensure!(
+        release.prg().len() == RELEASE_PRG_SIZE,
+        "release image PRG size differs from the mapper package"
+    );
+    ensure!(
+        release.chr().len() == RELEASE_CHR_SIZE,
+        "release image CHR size differs from the mapper package"
+    );
+    Ok(release)
 }
 
 #[cfg(test)]

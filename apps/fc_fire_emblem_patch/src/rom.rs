@@ -7,9 +7,11 @@ use crate::sha1_hex;
 pub const HEADER_SIZE: usize = 16;
 pub const PRG_SIZE: usize = 256 * 1024;
 pub const CHR_SIZE: usize = 128 * 1024;
+pub const SOURCE_PAYLOAD_SIZE: usize = PRG_SIZE + CHR_SIZE;
 pub const CHR_FILE_OFFSET: usize = HEADER_SIZE + PRG_SIZE;
 
 pub const EXPECTED_SOURCE_SHA1: &str = "0179c550d424e0397496078789e7b116601d120c";
+pub const EXPECTED_SOURCE_PAYLOAD_SHA1: &str = "dd1d51ff6d57e83f2be0517f1de821c85abe86ae";
 pub const EXPECTED_PRG_SHA1: &str = "a74c0760f32f5131d4feb67694123fda6b7da24f";
 pub const EXPECTED_CHR_SHA1: &str = "98ee1568073c6c41425e4a381cf588433ac9fc97";
 pub const EXPECTED_HEADER: [u8; HEADER_SIZE] = [
@@ -97,14 +99,7 @@ impl Rom {
         );
         ensure!(self.prg().len() == PRG_SIZE, "unexpected source PRG size");
         ensure!(self.chr().len() == CHR_SIZE, "unexpected source CHR size");
-        ensure!(
-            sha1_hex(self.prg()) == EXPECTED_PRG_SHA1,
-            "source PRG SHA-1 mismatch"
-        );
-        ensure!(
-            sha1_hex(self.chr()) == EXPECTED_CHR_SHA1,
-            "source CHR SHA-1 mismatch"
-        );
+        verify_supported_japanese_payload(&self.data[HEADER_SIZE..])?;
         Ok(())
     }
 
@@ -123,6 +118,29 @@ impl Rom {
     pub fn mapper(&self) -> u16 {
         self.mapper
     }
+}
+
+/// iNES 헤더를 제외한 No-Intro식 PRG+CHR 원본을 검증한다.
+pub fn verify_supported_japanese_payload(payload: &[u8]) -> Result<()> {
+    ensure!(
+        payload.len() == SOURCE_PAYLOAD_SIZE,
+        "source payload size mismatch: expected {SOURCE_PAYLOAD_SIZE}, found {}",
+        payload.len()
+    );
+    ensure!(
+        sha1_hex(payload) == EXPECTED_SOURCE_PAYLOAD_SHA1,
+        "source payload SHA-1 mismatch: expected {EXPECTED_SOURCE_PAYLOAD_SHA1}, found {}",
+        sha1_hex(payload)
+    );
+    ensure!(
+        sha1_hex(&payload[..PRG_SIZE]) == EXPECTED_PRG_SHA1,
+        "source PRG SHA-1 mismatch"
+    );
+    ensure!(
+        sha1_hex(&payload[PRG_SIZE..]) == EXPECTED_CHR_SHA1,
+        "source CHR SHA-1 mismatch"
+    );
+    Ok(())
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -151,5 +169,15 @@ mod tests {
         image[6] |= 0x04;
 
         assert!(Rom::parse(image).is_err());
+    }
+
+    #[test]
+    fn headerless_source_verifier_rejects_an_ines_header() {
+        let mut image = vec![0; HEADER_SIZE + SOURCE_PAYLOAD_SIZE];
+        image[..HEADER_SIZE].copy_from_slice(&EXPECTED_HEADER);
+
+        let error = verify_supported_japanese_payload(&image).unwrap_err();
+
+        assert!(error.to_string().contains("source payload size mismatch"));
     }
 }

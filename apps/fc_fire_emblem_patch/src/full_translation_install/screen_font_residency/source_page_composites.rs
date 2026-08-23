@@ -1,8 +1,9 @@
-//! 원본 영문 고정 문자열만 쓰는 독립 합성 화면의 페이지 수명을 결속한다.
+//! 전투 후 결과와 원본 영문 독립 합성 화면의 페이지 수명을 결속한다.
 //!
 //! 상태 `08`은 전투 후 EXP/LEVEL UP 결과이고, 상태 `10`은 `NEXT STORY` 전환이다.
-//! 둘 다 이전 한글 화면의 CHR route를 상속하는 보조 합성이 아니라 독립 화면이며,
-//! 직접 쓰는 문자열은 고정 문자열 소유권 장부에서 원본 보존 대상으로 분류된다.
+//! 둘 다 직접 쓰는 문자열은 고정 문자열 소유권 장부에서 원본 보존 대상으로 분류되지만,
+//! 상태 `08`은 직전 전투가 합성한 한글 CHR 페이지를 결과 표시까지 유지해야 한다. 상태
+//! `10`만 독립 원본 화면으로서 페이지 0을 선택한다.
 
 use anyhow::{Result, ensure};
 
@@ -22,10 +23,11 @@ use crate::{
 const GAMEPLAY_PRG_BANK: u8 = 0x06;
 const FIXED_STRING_PRG_BANK: u8 = 0x0B;
 
-pub(super) const POST_BATTLE_RESULT_COMPOSITE_STATE: u8 = 0x08;
+pub(super) const POST_BATTLE_RESULT_RETAINED_COMPOSITE_STATE: u8 = 0x08;
 pub(super) const NEXT_STORY_COMPOSITE_STATE: u8 = 0x10;
-pub(super) const SOURCE_PAGE_COMPOSITE_STATES: [u8; 2] = [
-    POST_BATTLE_RESULT_COMPOSITE_STATE,
+pub(super) const SOURCE_PAGE_COMPOSITE_STATES: [u8; 1] = [NEXT_STORY_COMPOSITE_STATE];
+const BOUND_SOURCE_COMPOSITE_STATES: [u8; 2] = [
+    POST_BATTLE_RESULT_RETAINED_COMPOSITE_STATE,
     NEXT_STORY_COMPOSITE_STATE,
 ];
 
@@ -51,7 +53,7 @@ const EXPECTED_PRODUCERS: [CompositeStateProducer; 2] = [
         prg_bank: GAMEPLAY_PRG_BANK,
         cpu_address: 0xA180,
         transfer_opcode: 0x20,
-        state: POST_BATTLE_RESULT_COMPOSITE_STATE,
+        state: POST_BATTLE_RESULT_RETAINED_COMPOSITE_STATE,
     },
     CompositeStateProducer {
         prg_bank: GAMEPLAY_PRG_BANK,
@@ -62,14 +64,14 @@ const EXPECTED_PRODUCERS: [CompositeStateProducer; 2] = [
 ];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct BoundSourcePageCompositeLifetimes {
-    states: [u8; 2],
+pub(super) struct BoundPostBattleResultAndNextStoryLifetimes {
+    states: [u8; 1],
     preserved_fixed_string_indices: [u8; 3],
     producer_count: usize,
 }
 
-impl BoundSourcePageCompositeLifetimes {
-    pub(super) const fn states(&self) -> [u8; 2] {
+impl BoundPostBattleResultAndNextStoryLifetimes {
+    pub(super) const fn states(&self) -> [u8; 1] {
         self.states
     }
 
@@ -82,10 +84,10 @@ impl BoundSourcePageCompositeLifetimes {
     }
 }
 
-pub(super) fn bind_source_page_composite_lifetimes(
+pub(super) fn bind_post_battle_result_and_next_story_lifetimes(
     source: &Rom,
     fixed_strings: &FixedStringConsumerInspection,
-) -> Result<BoundSourcePageCompositeLifetimes> {
+) -> Result<BoundPostBattleResultAndNextStoryLifetimes> {
     source.verify_supported_japanese()?;
 
     let post_battle_dispatch = bind_inline_pointer_dispatch(
@@ -129,9 +131,10 @@ pub(super) fn bind_source_page_composite_lifetimes(
     )?;
 
     ensure!(
-        fixed_strings.composite_handler_target(POST_BATTLE_RESULT_COMPOSITE_STATE)
+        fixed_strings.composite_handler_target(POST_BATTLE_RESULT_RETAINED_COMPOSITE_STATE)
             == Some(POST_BATTLE_COMPOSER)
-            && fixed_strings.composite_handler_target(POST_BATTLE_RESULT_COMPOSITE_STATE + 1)
+            && fixed_strings
+                .composite_handler_target(POST_BATTLE_RESULT_RETAINED_COMPOSITE_STATE + 1,)
                 == Some(POST_BATTLE_COMPOSER_END),
         "post-battle result composite handler range changed"
     );
@@ -163,7 +166,7 @@ pub(super) fn bind_source_page_composite_lifetimes(
         .composite_state_producers
         .iter()
         .copied()
-        .filter(|producer| SOURCE_PAGE_COMPOSITE_STATES.contains(&producer.state))
+        .filter(|producer| BOUND_SOURCE_COMPOSITE_STATES.contains(&producer.state))
         .collect::<Vec<_>>();
     ensure!(
         producers == EXPECTED_PRODUCERS,
@@ -172,9 +175,9 @@ pub(super) fn bind_source_page_composite_lifetimes(
     let calls = fixed_strings
         .call_sites
         .iter()
-        .filter(|call| SOURCE_PAGE_COMPOSITE_STATES.contains(&call.composite_state))
+        .filter(|call| BOUND_SOURCE_COMPOSITE_STATES.contains(&call.composite_state))
         .collect::<Vec<_>>();
-    ensure_source_page_calls(&calls)?;
+    ensure_bound_composite_calls(&calls)?;
 
     let preserved_fixed_string_indices = [0x0B, 0x12, 0x3E];
     for index in preserved_fixed_string_indices {
@@ -197,14 +200,14 @@ pub(super) fn bind_source_page_composite_lifetimes(
         );
     }
 
-    Ok(BoundSourcePageCompositeLifetimes {
+    Ok(BoundPostBattleResultAndNextStoryLifetimes {
         states: SOURCE_PAGE_COMPOSITE_STATES,
         preserved_fixed_string_indices,
         producer_count: producers.len(),
     })
 }
 
-fn ensure_source_page_calls(calls: &[&FixedStringCallSite]) -> Result<()> {
+fn ensure_bound_composite_calls(calls: &[&FixedStringCallSite]) -> Result<()> {
     let identity = calls
         .iter()
         .map(|call| {
@@ -218,8 +221,16 @@ fn ensure_source_page_calls(calls: &[&FixedStringCallSite]) -> Result<()> {
     ensure!(
         identity
             == [
-                (0x8601, POST_BATTLE_RESULT_COMPOSITE_STATE, &[0x0B][..]),
-                (0x8608, POST_BATTLE_RESULT_COMPOSITE_STATE, &[0x12][..]),
+                (
+                    0x8601,
+                    POST_BATTLE_RESULT_RETAINED_COMPOSITE_STATE,
+                    &[0x0B][..],
+                ),
+                (
+                    0x8608,
+                    POST_BATTLE_RESULT_RETAINED_COMPOSITE_STATE,
+                    &[0x12][..],
+                ),
                 (0x8886, NEXT_STORY_COMPOSITE_STATE, &[0x3E][..]),
             ],
         "source-page composite fixed-string consumers changed: {identity:?}"

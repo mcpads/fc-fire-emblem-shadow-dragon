@@ -40,6 +40,25 @@ pub(super) fn execute(command: Command) -> Result<()> {
                 plan.battery_work_ram_byte_count
             );
         }
+        Command::BuildReleasePatch {
+            source,
+            release,
+            output,
+            report,
+        } => {
+            let patch_report =
+                release_patch::build_release_patch(&source, &release, &output, &report)?;
+            println!("wrote {}", output.display());
+            println!("patch SHA-1: {}", patch_report.patch_sha1);
+            println!("wrote {}", report.display());
+            println!(
+                "release patch: {} source bytes -> {} target bytes, {} patch bytes, application verified: {}",
+                patch_report.source_size,
+                patch_report.target_size,
+                patch_report.patch_size,
+                patch_report.apply_verified
+            );
+        }
         Command::AnalyzeFontSupply {
             source,
             report,

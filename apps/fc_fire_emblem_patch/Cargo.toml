@@ -8,6 +8,7 @@ description = "Fire Emblem: Shadow Dragon and the Blade of Light Korean patch pi
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+crc32fast.workspace = true
 fontdue.workspace = true
 png.workspace = true
 retro-rp2a03.workspace = true

@@ -240,8 +240,11 @@ pub(in crate::full_translation_install::runtime_code) fn build_composite_font_pa
     // cross-state handoff together with source-only and default retained states so it cannot drift
     // into a second state table.
     // States $13 and $14 are adjacent and share the map-menu page.  The following
-    // state $15 is the source-bound shop item composer: it must discard the prior
-    // unit-command route so the active E7 caller can restore its dialogue page.
+    // state $15 is the source-bound shop item composer. A live request at initial
+    // entry must discard the prior unit-command route and re-enter the dialogue
+    // selector. An inactive request during the later insufficient-funds handoff
+    // already has the complete shop dialogue page mapped, so reselecting there
+    // exposes the source page underneath the retained item list and dialogue.
     // One subtraction therefore owns all three states without another full CMP route.
     instructions.extend([
         Instruction::Sec,
@@ -253,20 +256,22 @@ pub(in crate::full_translation_install::runtime_code) fn build_composite_font_pa
     let shop_dialogue_restore_jump = instructions.len();
     instructions.push(Instruction::BeqAbsolute(origin));
     ensure!(
-        source_page_states == [0x08, 0x10],
+        source_page_states == [0x10],
         "source-page composite state family changed"
     );
-    // A now holds `state - $13`. Clearing bit 3 maps source-only states $08/$10 to $F5,
-    // delegated state $1B to zero, and the two completed-storage states $1D/$23 to $02/$10.
-    // After the source and zero-retain exits, mask $ED maps exactly those storage values to zero
-    // across the remaining direct-state domain. The zero can be stored directly, avoiding a
-    // second mapper write and a second hand-maintained state table.
+    // A now holds `state - $13`. Only NEXT STORY state $10 becomes $FD and selects the source
+    // page. Post-battle result state $08 becomes $F5 and falls through both masks without a mapper
+    // write, preserving the CHR page composed by the battle lifetime. Clearing bit 3 then maps
+    // delegated state $1B to zero and the two completed-storage states $1D/$23 to $02/$10. After
+    // the source and zero-retain exits, mask $ED maps exactly those storage values to zero across
+    // the remaining direct-state domain.
+    instructions.push(Instruction::CmpImmediate(0xFD));
+    let source_page_state_jump = instructions.len();
+    instructions.push(Instruction::BeqAbsolute(origin));
     instructions.push(Instruction::AndImmediate(0xF7));
     let retain_zero_state_jump = instructions.len();
     instructions.push(Instruction::BeqAbsolute(origin));
-    instructions.push(Instruction::CmpImmediate(0xF5));
-    let source_page_pair_jump = instructions.len();
-    instructions.push(Instruction::BeqAbsolute(origin));
+    let storage_request_classifier = next_address(origin, &instructions)?;
     instructions.push(Instruction::AndImmediate(0xED));
     let retain_non_storage_state_jump = instructions.len();
     instructions.push(Instruction::BneAbsolute(origin));
@@ -284,8 +289,12 @@ pub(in crate::full_translation_install::runtime_code) fn build_composite_font_pa
     instructions[reselect_live_storage_dialogue_jump] =
         Instruction::BneAbsolute(cleared_source_page_selection);
     instructions.push(Instruction::Rts);
-    instructions[shop_dialogue_restore_jump] = Instruction::BeqAbsolute(source_page_selection);
-    instructions[source_page_pair_jump] = Instruction::BeqAbsolute(source_page_selection);
+    // state $15 reaches this mask with A=$02. `$02 & $ED` is zero, so it can
+    // share the completed-storage request classifier: inactive handoffs clear
+    // stale static residency and keep the mapped dialogue page, while live
+    // requests re-enter the central selector.
+    instructions[shop_dialogue_restore_jump] = Instruction::BeqAbsolute(storage_request_classifier);
+    instructions[source_page_state_jump] = Instruction::BeqAbsolute(source_page_selection);
     for page in [
         ScreenFontPageRole::FrontEndMenu,
         ScreenFontPageRole::FrontEndRecordAction,

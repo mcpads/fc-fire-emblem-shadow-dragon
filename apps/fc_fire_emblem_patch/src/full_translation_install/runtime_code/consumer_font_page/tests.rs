@@ -578,7 +578,7 @@ fn unit_status_retains_the_page_published_by_unit_summary() {
 }
 
 #[test]
-fn shop_item_composite_reenters_the_central_fd_selector_after_clearing_static_residency() {
+fn shop_item_composite_reselects_live_requests_but_retains_the_inactive_handoff_page() {
     let pages = pages();
     let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
     let publisher_origin = ORIGIN + u16::try_from(activation.bytes.len()).unwrap();
@@ -591,7 +591,13 @@ fn shop_item_composite_reenters_the_central_fd_selector_after_clearing_static_re
     .unwrap()
     .routine;
 
-    for request_state in [0, super::super::transport::STATE_COMPLETED_PAGE_SUSPENDED] {
+    for request_state in [
+        0,
+        super::super::dispatcher_gate::STATE_COLD_REQUESTED,
+        super::super::dispatcher_gate::STATE_RESIDENT_PAGE_OVERLAY_REQUESTED,
+        super::super::transport::STATE_READY,
+        super::super::transport::STATE_COMPLETED_PAGE_SUSPENDED,
+    ] {
         let mut memory: Box<[u8; 0x10000]> =
             vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
         memory[usize::from(CONSUMER_FONT_PAGE)] = pages.unit_command;
@@ -615,7 +621,11 @@ fn shop_item_composite_reenters_the_central_fd_selector_after_clearing_static_re
             request_state
         );
         assert_eq!(result.applied_route, None);
-        assert_eq!(result.central_writer_value, Some(0));
+        assert_eq!(
+            result.central_writer_value,
+            (request_state != 0).then_some(0),
+            "shop state 15 must retain the already mapped page only for an inactive handoff"
+        );
     }
 }
 
@@ -853,6 +863,12 @@ fn every_direct_composite_state_follows_its_declared_page_action() {
         let mut memory: Box<[u8; 0x10000]> =
             vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
         memory[usize::from(CONSUMER_FONT_PAGE)] = retained_route;
+        if state == SHOP_ITEM_COMPOSITE_STATE {
+            // The declared source-page action is the live initial-entry case.
+            // The inactive caller-handoff refinement is exercised separately.
+            memory[usize::from(super::super::transport::REQUEST_STATE)] =
+                super::super::transport::STATE_READY;
+        }
         let (memory, result) = run_routines(
             memory,
             &[&activation, &publisher],
@@ -907,24 +923,56 @@ fn source_only_composites_clear_a_stale_translation_route_and_select_page_zero()
     .unwrap()
     .routine;
 
-    for state in [0x08, 0x10] {
-        let mut memory: Box<[u8; 0x10000]> =
-            vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
-        memory[usize::from(CONSUMER_FONT_PAGE)] = pages.catalog[1];
+    let state = 0x10;
+    let mut memory: Box<[u8; 0x10000]> = vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
+    memory[usize::from(CONSUMER_FONT_PAGE)] = pages.catalog[1];
 
-        let (memory, result) = run_routines(
-            memory,
-            &[&activation, &publisher],
-            publisher.address,
-            state,
-            0,
-        );
+    let (memory, result) = run_routines(
+        memory,
+        &[&activation, &publisher],
+        publisher.address,
+        state,
+        0,
+    );
 
-        assert_eq!(memory[usize::from(COMPOSITE_STATE)], state);
-        assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], 0);
-        assert_eq!(result.applied_route, None);
-        assert_eq!(result.central_writer_value, Some(0));
-    }
+    assert_eq!(memory[usize::from(COMPOSITE_STATE)], state);
+    assert_eq!(memory[usize::from(CONSUMER_FONT_PAGE)], 0);
+    assert_eq!(result.applied_route, None);
+    assert_eq!(result.central_writer_value, Some(0));
+}
+
+#[test]
+fn post_battle_result_does_not_replace_the_composed_battle_page() {
+    let pages = pages();
+    let activation = build_consumer_font_page_activation(ORIGIN, APPLY_ROUTE, pages).unwrap();
+    let publisher_origin = ORIGIN + u16::try_from(activation.bytes.len()).unwrap();
+    let publisher = build_composite_font_page_publisher(
+        publisher_origin,
+        activation.address,
+        pages,
+        storage_item_list_route(),
+    )
+    .unwrap()
+    .routine;
+    let composed_page_marker = 0xB4;
+    let mut memory: Box<[u8; 0x10000]> = vec![0; 0x10000].into_boxed_slice().try_into().unwrap();
+    memory[usize::from(CONSUMER_FONT_PAGE)] = composed_page_marker;
+
+    let (memory, result) = run_routines(
+        memory,
+        &[&activation, &publisher],
+        publisher.address,
+        0x08,
+        0,
+    );
+
+    assert_eq!(memory[usize::from(COMPOSITE_STATE)], 0x08);
+    assert_eq!(
+        memory[usize::from(CONSUMER_FONT_PAGE)],
+        composed_page_marker
+    );
+    assert_eq!(result.applied_route, None);
+    assert_eq!(result.central_writer_value, None);
 }
 
 #[test]

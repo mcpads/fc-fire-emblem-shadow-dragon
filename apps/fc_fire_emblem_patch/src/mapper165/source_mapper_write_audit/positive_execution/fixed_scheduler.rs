@@ -285,16 +285,18 @@ pub(super) fn bind_fixed_scheduler_execution(
         known_produced_states.is_subset(&table_selector_domain),
         "a fixed scheduler producer selects beyond the six-entry handler table"
     );
+    // Title production defers state five while the dispatch gate is zero. The stateful scheduler
+    // worklist still observes and executes its restored-bank successor epoch before this domain is
+    // reported, so it belongs with the other source-produced positive states.
     let positive_selector_domain = title_state
         .scheduler_dispatch_entry_values()
         .iter()
         .copied()
-        .chain([0x02, 0x04])
+        .chain([0x02, 0x04, 0x05])
         .collect::<BTreeSet<_>>();
     ensure!(
-        positive_selector_domain.is_subset(&known_produced_states)
-            && positive_selector_domain.contains(&0x04),
-        "positive fixed-scheduler states no longer include the source-produced outer-screen route"
+        positive_selector_domain == known_produced_states,
+        "positive fixed-scheduler states no longer cover every source-produced scheduler state"
     );
     let positive_entry_contexts = positive_selector_domain
         .iter()

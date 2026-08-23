@@ -4,11 +4,12 @@ members = ["apps/fc_fire_emblem_patch"]
 
 [workspace.package]
 edition = "2024"
-license = "GPL-2.0-or-later"
+license = "MIT"
 
 [workspace.dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+crc32fast = "1"
 fontdue = "0.9"
 png = "0.18"
 retro-rp2a03 = { package = "rp2a03", git = "https://github.com/mcpads/retro-typed-isa.git", rev = "7afd6a33df7b91198f9bdd3bd1c992d1a211d5de" }

@@ -29,6 +29,7 @@ mod map_menu;
 mod mapper165;
 mod options;
 mod release_image;
+mod release_patch;
 mod rom;
 mod roster_localization;
 mod rp2a03;
@@ -83,6 +84,15 @@ enum Command {
         #[arg(long, default_value = "out/fire-emblem-fe1-korean-release.nes")]
         output: PathBuf,
         #[arg(long, default_value = "out/release-image.json")]
+        report: PathBuf,
+    },
+    /// Create a BPS1 patch from the supported Japanese source to a verified release image.
+    BuildReleasePatch {
+        source: PathBuf,
+        release: PathBuf,
+        #[arg(long, default_value = "out/fire-emblem-fe1-korean-release.bps")]
+        output: PathBuf,
+        #[arg(long, default_value = "out/release-patch.json")]
         report: PathBuf,
     },
     /// Analyze the supported source font page without declaring free slots.

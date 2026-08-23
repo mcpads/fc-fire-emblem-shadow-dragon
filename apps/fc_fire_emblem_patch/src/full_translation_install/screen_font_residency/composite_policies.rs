@@ -27,7 +27,9 @@ use crate::{
 
 use super::STORAGE_DIALOGUE_OVERLAY_COMPOSITE_STATES;
 use super::control_only_composites::CONTROL_ONLY_RETAINED_COMPOSITE_STATES;
-use super::source_page_composites::SOURCE_PAGE_COMPOSITE_STATES;
+use super::source_page_composites::{
+    POST_BATTLE_RESULT_RETAINED_COMPOSITE_STATE, SOURCE_PAGE_COMPOSITE_STATES,
+};
 
 pub(in crate::full_translation_install) const UNIT_NAME_DETAIL_COMPOSITE_STATE: u8 = 0x02;
 pub(in crate::full_translation_install) const MAP_MENU_COMPOSITE_STATE: u8 = 0x03;
@@ -108,6 +110,9 @@ pub(in crate::full_translation_install) enum ScreenFontResidencyPolicy {
     /// The complete source handler emits only `ED` row controls and `EF`, so it
     /// cannot reinterpret a glyph through the page retained by its parent.
     ControlOnlyRetainsCurrentPage,
+    /// The EXP/LEVEL UP result reuses glyphs composed by the battle lifetime.
+    /// Publishing page zero here would replace those glyphs before the result closes.
+    PostBattleResultRetainsComposedPage,
     /// This standalone screen uses only source-preserved Latin/digits and
     /// explicitly returns both the residency state and the mapper to page zero.
     SourcePageSelected,
@@ -203,11 +208,11 @@ const NON_DELEGATED_POLICIES: &[(u8, ScreenFontResidencyPolicy)] = &[
         ScreenFontResidencyPolicy::ControlOnlyRetainsCurrentPage,
     ),
     (
-        SOURCE_PAGE_COMPOSITE_STATES[0],
-        ScreenFontResidencyPolicy::SourcePageSelected,
+        POST_BATTLE_RESULT_RETAINED_COMPOSITE_STATE,
+        ScreenFontResidencyPolicy::PostBattleResultRetainsComposedPage,
     ),
     (
-        SOURCE_PAGE_COMPOSITE_STATES[1],
+        SOURCE_PAGE_COMPOSITE_STATES[0],
         ScreenFontResidencyPolicy::SourcePageSelected,
     ),
     (
@@ -346,6 +351,7 @@ impl ScreenFontResidencyPolicy {
             | Self::CompletedDialoguePageRetained
             | Self::ActiveDialogueCallerRestored
             | Self::ControlOnlyRetainsCurrentPage
+            | Self::PostBattleResultRetainsComposedPage
             | Self::SourcePageSelected
             | Self::Delegated(_) => None,
         }
@@ -447,6 +453,11 @@ pub(super) fn validate_composite_state_policies() -> Result<()> {
                     == Some(ScreenFontResidencyPolicy::ControlOnlyRetainsCurrentPage)
             }),
         "control-only composite residency changed"
+    );
+    ensure!(
+        composite_font_residency_policy(POST_BATTLE_RESULT_RETAINED_COMPOSITE_STATE)
+            == Some(ScreenFontResidencyPolicy::PostBattleResultRetainsComposedPage),
+        "post-battle result no longer retains the composed battle page"
     );
     ensure!(
         composite_font_residency_policy(UNIT_SELECTION_HELP_COMPOSITE_STATE)
