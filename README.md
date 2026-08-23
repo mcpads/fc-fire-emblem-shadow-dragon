@@ -7,38 +7,25 @@
 - 지원 원본은 SHA-1 `0179c550d424e0397496078789e7b116601d120c`인 일본판이다.
 - 일본어만 한국어로 번역한다. 원본 영어, 숫자와 로마자 약어는 보존한다.
 - 영문 패치는 주소와 자료 구조를 교차 확인하는 조사 자료일 뿐 번역 원문이나 제품 입력이 아니다.
-- 현재 산출물은 개발 ROM이다. 정적 설치 성공이나 일부 화면 성공을 배포 완료로 세지 않는다.
+- 현재 산출물은 개발 ROM이다. 정적 설치나 일부 화면의 성공은 배포 완료가 아니다.
 
-현재 exact 기준선과 바로 다음 관문은 [현재 상태](docs/status.md), 남은 제품 블로커는 [열려 있는 문제](docs/open-problems.md)를 따른다.
+## 작업 시작점
 
-## 기본 검증과 빌드
+새 세션은 명령을 실행하기 전에 [현재 상태](docs/status.md)를 읽는다. 이 문서만 현재 exact ROM, 진행 단계, 블로커와 다음 행동을 소유한다.
 
-```sh
-cargo test -p fc-fire-emblem-patch --no-fail-fast
-cargo run -p fc-fire-emblem-patch -- verify-source "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes"
-cargo run -p fc-fire-emblem-patch -- build-kr-patch \
-  "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes" \
-  --defer-runtime-evidence
-cargo run -p fc-fire-emblem-patch -- plan-full-translation-installation \
-  "roms/Fire Emblem - Ankoku Ryuu to Hikari no Tsurugi (Japan).nes" \
-  --output out/fire-emblem-fe1-korean-integrated.nes
-```
+현재 상태가 실행 관측 캠페인을 `동결`로 표시하면 제품 코드·번역 에셋을 바꾸거나 ROM을 다시 만들지 않는다. 같은 ROM에서 독립적인 성공·실패·차단 결과를 네 목적 묶음 전체에 먼저 채운다. 반복 빌드와 조사 명령은 [빌드 파이프라인](docs/build-pipeline.md), 관측 형식은 [플레이와 런타임 검증](docs/playtesting.md)을 따른다.
 
-`build-kr-patch`는 채택된 에셋과 런타임을 설치하는 반복 제품 빌드다. 원본 매퍼 전수 분석과 과거 조사 프로브를 매번 다시 실행하지 않는다. 원본 ABI·매퍼 코드·소유 계약이 바뀌거나 반례가 생겼을 때만 [빌드 파이프라인](docs/build-pipeline.md)의 해당 분석을 다시 연다.
+## 문서 지도
 
-`plan-full-translation-installation`은 기본적으로 보고서만 만들며, ROM 파일을 쓰려면 `--output`을 지정한다.
+- [현재 상태](docs/status.md): 현재 exact 산출물, 진행 단계, 블로커, 다음 행동
+- [완료 관문](docs/roadmap.md): 최종 제품이 만족해야 하는 증거 범주
+- [채택한 설계 판단](docs/decisions.md): 반복 적용하는 제품·작업 원칙
+- [플레이와 런타임 검증](docs/playtesting.md): exact-ROM 관측 캠페인 규약
+- [한글 표시 경로 소유권](docs/refactoring.md): 코드와 도구의 단일 책임
+- [빌드 파이프라인](docs/build-pipeline.md): 반복 빌드와 재조사의 구분
+- [대사 초벌 작업 지시서](docs/dialogue-drafting.md): 대사를 다시 고칠 때 적용할 규약
 
-## 구조
-
-제품 경로는 지원 원본 결속 → 번역 재료 → 화면·수명 계획 → typed RP2A03 런타임 → Expected Write 설치 → 최종 이미지 검증의 한 방향으로 흐른다. emucap 실행 증거는 exact ROM·SaveRAM·입력 계보에 별도로 묶는다.
-
-- [소유권 구조](docs/refactoring.md): 모듈과 도구의 단일 책임
-- [로드맵](docs/roadmap.md): G1~G8 통과 관문
-- [플레이테스트](docs/playtesting.md): 실행 원칙과 exact-ROM 계보
-- [채택한 설계 판단](docs/decisions.md): 제품 구조를 정한 이유와 폐기 기준
-- [AI 협업](docs/ai-collaboration.md): 작업·검증·커밋 협업 규칙
-
-지원 원본의 조사 근거는 [초기 조사](docs/initial-survey.md), [텍스트 표](docs/text-tables.md), [렌더 경로](docs/render-paths.md), [장 전환](docs/chapter-transitions.md)에 있다. 대사를 고칠 때 적용할 번역 규칙은 [대사 작성 규약](docs/dialogue-drafting.md)을 따른다. 이 문서들은 현재 작업 목록이나 exact 산출물 상태를 소유하지 않는다.
+과거 조사 과정과 폐기된 설계 문서는 현재 지침이 아니다. 채택된 원본 구조는 코드의 source binding과 최종 보고서가 검사하고, 실행 주장은 비공개 exact-ROM manifest에만 귀속한다. 결속되지 않은 과거 캡처나 관측값은 현재 근거로 쓰지 않는다.
 
 ## 공개 자료 경계
 

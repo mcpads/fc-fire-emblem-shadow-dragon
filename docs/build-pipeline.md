@@ -2,6 +2,8 @@
 
 이 문서는 반복 제품 빌드와 필요할 때만 다시 여는 조사 명령을 구분한다. 현재 산출물 해시는 `status.md`, 구조 소유권은 `refactoring.md`를 따른다.
 
+`status.md`가 exact-ROM 관측 캠페인을 동결로 표시하는 동안에는 아래 제품 빌드를 실행하지 않는다. 먼저 같은 ROM의 목적별 통과·실패·차단 분모를 채운다. 빌드는 관측 캠페인이 닫히고 공통 수정 배치가 정해진 뒤 다시 연다.
+
 ## 전제
 
 지원 원본은 SHA-1 `0179c550d424e0397496078789e7b116601d120c`인 일본판이다.
@@ -45,6 +47,8 @@ cargo run -p fc-fire-emblem-patch -- plan-full-translation-installation "$ROM" \
 - `out/full-translation-installation.json`
 
 `build-kr-patch --defer-runtime-evidence`는 exact 출력이 바뀌는 개발 중에 과거 ROM용 실행 manifest를 현재 성공으로 잘못 승계하지 않는다. 클래스·상점·최대 대사·제목의 exact 누적 실행 manifest를 현재 산출물에 결속할 때는 이 플래그를 빼고 해당 `--*-runtime-evidence` 경로를 넘긴다.
+
+이 플래그는 런타임 검증을 통과시킨다는 뜻이 아니다. 실행 증거 없는 개발 ROM과 보고서를 만들 뿐이며, 현재 캠페인 중 ROM을 자주 교체하는 용도로 쓰지 않는다.
 
 `plan-full-translation-installation`은 `--output`이 없으면 보고서만 만든다. ROM을 방출할 때는 `--output`을 명시한다.
 
