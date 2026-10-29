@@ -100,6 +100,7 @@
 - 한글 글꼴: [Dalmoori](https://github.com/RanolP/dalmoori-font), Apache-2.0
 - 패치 제작: mcpads
 - 개발 보조: Codex
+- RetroDB: RDB-Y8PU-E2K3
 
 ## 라이선스
 
